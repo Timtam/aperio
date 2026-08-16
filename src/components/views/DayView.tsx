@@ -62,6 +62,9 @@ import {
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { getDayLog } from '../../api/client';
+import { useDayMarkers } from '../../state/useDayMarkers';
+import { DayLogDialog } from '../DayLogDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import { GroupSuggestionNotice } from '../GroupSuggestionNotice';
 import {
@@ -89,6 +92,9 @@ import {
   type PositionedSpan,
   type PriorityScale,
   type TimedSpan,
+  compactDaySummary,
+  spokenDaySummary,
+  type DayLog,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -610,6 +616,34 @@ export function DayView() {
     null,
   );
   const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+  const [dayLogOpen, setDayLogOpen] = useState(false);
+
+  // What this day was marked with. Read here rather than inside the dialog so
+  // the heading can carry the summary while the dialog is shut — the whole
+  // ask was an overview without opening anything.
+  const { markers: dayMarkerVocabulary } = useDayMarkers();
+  const [dayLog, setDayLogState] = useState<DayLog | null>(null);
+  const refreshDayLog = useCallback(async () => {
+    try {
+      setDayLogState(await getDayLog(dayKey));
+    } catch {
+      // A day that cannot be read simply says nothing — this is an
+      // annotation, and a failed read must not take the view with it.
+      setDayLogState(null);
+    }
+  }, [dayKey]);
+  useEffect(() => {
+    void refreshDayLog();
+  }, [refreshDayLog]);
+  const daySymbols = useMemo(
+    () => compactDaySummary(dayLog, dayMarkerVocabulary),
+    [dayLog, dayMarkerVocabulary],
+  );
+  const daySpoken = useMemo(
+    () =>
+      spokenDaySummary(dayLog, dayMarkerVocabulary, t('dialogs.dayLog.summaryLead')),
+    [dayLog, dayMarkerVocabulary, t],
+  );
 
   // Drag-to-time: a task chip dropped onto the hour-grid canvas gets the
   // drop position's wall-clock time (snapped to 15 min) as its scheduled
@@ -917,9 +951,31 @@ export function DayView() {
           proactive surface of event groups is one dismissible row. */}
       <GroupSuggestionNotice events={eventsToday} groups={groups} />
       <header className="view__header">
-        <h2 aria-current={isToday ? 'date' : undefined}>
+        {/* The summary rides the heading's own accessible name rather than
+            standing as its own element. The ask was an overview from every
+            view; paying a swipe per day for it would be the opposite of
+            that. Sighted readers get the symbols beside the date. */}
+        <h2
+          aria-current={isToday ? 'date' : undefined}
+          aria-label={
+            daySpoken ? `${fmt.format(anchor, 'PPPP')}. ${daySpoken}` : undefined
+          }
+        >
           {fmt.format(anchor, 'PPPP')}
+          {daySymbols && (
+            <span className="view__day-markers" aria-hidden="true">
+              {' '}
+              {daySymbols}
+            </span>
+          )}
         </h2>
+        <button
+          type="button"
+          className="form__action"
+          onClick={() => setDayLogOpen(true)}
+        >
+          {t('dialogs.dayLog.openButton')}
+        </button>
       </header>
 
       {showLoading && (
@@ -1431,6 +1487,16 @@ export function DayView() {
         message={t('dialogs.confirm.deleteEventMessage', {
           title: confirmTarget?.title ?? '',
         })}
+      />
+
+      <DayLogDialog
+        isOpen={dayLogOpen}
+        onClose={() => {
+          setDayLogOpen(false);
+          void refreshDayLog();
+        }}
+        day={dayKey}
+        dayLabel={fmt.format(anchor, 'PPPP')}
       />
 
       <DeleteEventScopeDialog

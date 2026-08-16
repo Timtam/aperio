@@ -18,6 +18,7 @@ import {
 import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
+import { DayMarkersPanel } from './DayMarkersPanel';
 import { ContactsPanel } from './ContactsPanel';
 import { GeneralPanel } from './GeneralPanel';
 import { LogsPanel } from './LogsPanel';
@@ -53,6 +54,7 @@ export type SettingsTabId =
   | 'accounts'
   | 'calendars'
   | 'colorLabels'
+  | 'dayMarkers'
   | 'tasks'
   | 'contacts'
   | 'sync'
@@ -64,6 +66,7 @@ const TAB_ORDER: SettingsTabId[] = [
   'accounts',
   'calendars',
   'colorLabels',
+  'dayMarkers',
   'tasks',
   'contacts',
   'sync',
@@ -123,6 +126,7 @@ export function SettingsDialog({
     accounts: null,
     calendars: null,
     colorLabels: null,
+    dayMarkers: null,
     tasks: null,
     contacts: null,
     sync: null,
@@ -205,6 +209,7 @@ export function SettingsDialog({
         accounts: t('dialogs.settings.tabs.accounts'),
         calendars: t('dialogs.settings.tabs.calendars'),
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
+        dayMarkers: t('dialogs.settings.tabs.dayMarkers'),
         tasks: t('dialogs.settings.tabs.tasks'),
         contacts: t('dialogs.settings.tabs.contacts'),
         sync: t('dialogs.settings.tabs.sync'),
@@ -298,6 +303,7 @@ export function SettingsDialog({
             {activeTab === 'accounts' && <AccountsPanel />}
             {activeTab === 'calendars' && <CalendarsPanel />}
             {activeTab === 'colorLabels' && <ColorLabelsPanel />}
+            {activeTab === 'dayMarkers' && <DayMarkersPanel />}
             {activeTab === 'tasks' && <TasksPanel />}
             {activeTab === 'contacts' && <ContactsPanel />}
             {activeTab === 'sync' && <SyncPanel />}

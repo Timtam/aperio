@@ -526,7 +526,8 @@
         "contacts": "Kontakte",
         "sync": "Synchronisation",
         "plugins": "Plugins",
-        "logs": "Protokolle"
+        "logs": "Protokolle",
+        "dayMarkers": "Tagesmarkierungen"
       },
       "logs": {
         "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
@@ -957,6 +958,34 @@
         "adoptRemoteE2eAction": "Entsperren und fortfahren",
         "adoptRemoteE2eRunning": "Wird entsperrt …",
         "adoptRemoteE2eOk": "Verschlüsselung entsperrt. Synchronisation wird fortgesetzt."
+      },
+      "dayMarkers": {
+        "heading": "Tagesmarkierungen",
+        "intro": "Halte fest, wie ein Tag war. Du entscheidest, was markiert werden soll und wie ausführlich — ein Wort, ein Satz, ein Emoji. Aperio bringt keine Vorauswahl mit; eine geratene wären die Gewohnheiten von jemand anderem.",
+        "listLabel": "Deine Tagesmarkierungen",
+        "listHint": "Pfeiltasten bewegen durch die Liste, Eingabe öffnet die Markierung zum Bearbeiten.",
+        "rowLabel": "{{name}}, {{position}} von {{count}}",
+        "loading": "Tagesmarkierungen werden geladen …",
+        "empty": "Noch keine Tagesmarkierungen. Lege unten die erste an.",
+        "addHeading": "Markierung hinzufügen",
+        "add": "Markierung hinzufügen",
+        "nameLabel": "Name",
+        "nameRequired": "Bitte gib einen Namen ein.",
+        "symbolLabel": "Kurzzeichen",
+        "symbolHint": "Optional — meist ein Emoji. Erscheint in den kompakten Tagesübersichten; vorgelesen wird der Name.",
+        "colorLabel": "Farbe",
+        "colorNone": "Ohne Farbe",
+        "editHeading": "„{{name}}“ bearbeiten",
+        "save": "Speichern",
+        "cancel": "Abbrechen",
+        "delete": "Markierung löschen",
+        "deleteHint": "Eine Markierung zu löschen lässt deine festgehaltenen Tage unberührt — sie taucht dort einfach nicht mehr auf.",
+        "moveUp": "Nach oben",
+        "moveDown": "Nach unten",
+        "added": "Tagesmarkierung {{name}} hinzugefügt.",
+        "saved": "Tagesmarkierung {{name}} gespeichert.",
+        "deleted": "Tagesmarkierung {{name}} gelöscht. Deine festgehaltenen Tage bleiben unberührt.",
+        "moved": "{{name}} ist jetzt {{position}} von {{count}}."
       }
     },
     "syncConflicts": {
@@ -1900,6 +1929,17 @@
         "all_day": "Ganztägig"
       },
       "taskStatusLabel": "Aufgabenstatus"
+    },
+    "dayLog": {
+      "title": "{{day}} festhalten",
+      "intro": "Hake ab, was zutraf. Jedes Häkchen speichert sofort — das Abwählen ist die Rücknahme.",
+      "loading": "Deine Markierungen werden geladen …",
+      "noMarkers": "Noch keine Tagesmarkierungen. Lege welche unter Einstellungen, Tagesmarkierungen an.",
+      "close": "Schließen",
+      "writeFailed": "{{name}} konnte nicht gespeichert werden.",
+      "openButton": "Diesen Tag festhalten",
+      "openButtonMarked": "Diesen Tag festhalten. {{summary}}",
+      "summaryLead": "Festgehalten"
     }
   },
   "sidebar": {

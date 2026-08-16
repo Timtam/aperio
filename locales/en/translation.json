@@ -529,7 +529,8 @@
         "contacts": "Contacts",
         "sync": "Sync",
         "plugins": "Plugins",
-        "logs": "Logs"
+        "logs": "Logs",
+        "dayMarkers": "Day markers"
       },
       "logs": {
         "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
@@ -960,6 +961,34 @@
         "adoptRemoteE2eAction": "Unlock and continue",
         "adoptRemoteE2eRunning": "Unlocking …",
         "adoptRemoteE2eOk": "Encryption unlocked. Resuming sync."
+      },
+      "dayMarkers": {
+        "heading": "Day markers",
+        "intro": "Note what a day was like. You decide what is worth marking and how much to say — a word, a sentence, an emoji. Aperio ships no starter set, because a guessed one would be somebody else's habits.",
+        "listLabel": "Your day markers",
+        "listHint": "Arrow keys move through the list, Enter opens the marker for editing.",
+        "rowLabel": "{{name}}, {{position}} of {{count}}",
+        "loading": "Loading day markers …",
+        "empty": "No day markers yet. Add the first one below.",
+        "addHeading": "Add a marker",
+        "add": "Add marker",
+        "nameLabel": "Name",
+        "nameRequired": "Please enter a name.",
+        "symbolLabel": "Short symbol",
+        "symbolHint": "Optional — usually one emoji. Shown in the compact day summaries; the name is what gets read aloud.",
+        "colorLabel": "Colour",
+        "colorNone": "No colour",
+        "editHeading": "Edit “{{name}}”",
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete marker",
+        "deleteHint": "Deleting a marker leaves your logged days untouched — it simply stops appearing in them.",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "added": "Day marker {{name}} added.",
+        "saved": "Day marker {{name}} saved.",
+        "deleted": "Day marker {{name}} deleted. Your logged days are untouched.",
+        "moved": "{{name}} is now {{position}} of {{count}}."
       }
     },
     "syncConflicts": {
@@ -1900,6 +1929,17 @@
         "all_day": "All-day"
       },
       "taskStatusLabel": "Task status"
+    },
+    "dayLog": {
+      "title": "Log {{day}}",
+      "intro": "Tick what applied. Each tick saves straight away — unticking is the undo.",
+      "loading": "Loading your markers …",
+      "noMarkers": "No day markers yet. Add some under Settings, Day markers.",
+      "close": "Close",
+      "writeFailed": "Could not save {{name}}.",
+      "openButton": "Log this day",
+      "openButtonMarked": "Log this day. {{summary}}",
+      "summaryLead": "Logged"
     }
   },
   "sidebar": {
