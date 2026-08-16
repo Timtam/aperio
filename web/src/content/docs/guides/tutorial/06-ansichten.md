@@ -105,6 +105,59 @@ visual.
 > 2026"). Within a view you move purely with the arrow keys; switching to
 > browse mode is not necessary.
 
+## Day markers: what a day was like
+
+Beside the appointments and the tasks, a day can carry a note about
+**itself** — the things you want to keep track of rather than tick off. A
+habit, a mood, a fact worth remembering later.
+
+### Your own vocabulary
+
+Under **Settings → Day markers** you build the list. Aperio ships none: a
+guessed set would be somebody else's habits. You decide both what is worth
+marking and how much to say — a word, a whole sentence, or just an emoji.
+
+Each marker has:
+
+- a **name**, which is what gets read aloud,
+- an optional **short symbol** (usually one emoji) for the compact views,
+- an optional **colour** from your existing palette,
+- a **position**, so the list reads back in the order you built it.
+
+Deleting a marker leaves your logged days untouched. It simply stops appearing
+in them — nothing rewrites your history, and re-creating it brings it back.
+
+### Marking a day
+
+In the **day view**, the button **Log this day** opens a checkbox per marker.
+Every tick **saves immediately** — there is no Save button, because recording a
+day has to cost almost nothing. That also means unticking is the undo: there is
+nothing to cancel.
+
+On the phone the same thing rides the day heading: **Log this day** sits
+alongside *New event* and *New task* in the heading's actions, so it costs no
+extra swipe.
+
+### The overview
+
+A day that says something says so in **its own heading**: "Monday, 17 August
+2026. Logged: Sport, Read." In the week and month grids the day cell announces
+the same after its date and count. Sighted readers see the symbols beside the
+date.
+
+Nothing here is a separate stop to swipe past — the summary is part of the
+name the day already had.
+
+> **What is not a task.** Markers deliberately live outside your task lists.
+> They are not work to be finished, so they never appear in the planner, never
+> carry deadlines or reminders, and never turn up in the day-start review.
+
+> **Privacy and sync.** Day markers are stored **only on your devices** and
+> travel over your own device sync, never to Google, Microsoft or any CalDAV
+> server — none of them models "how was Tuesday", and this is the most private
+> thing in the app. Two devices editing the *same* day between two sync rounds
+> keep the later edit rather than merging them.
+
 ## Summary
 
 You now know the views and how to switch between and navigate within them.

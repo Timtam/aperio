@@ -110,6 +110,65 @@ Hinweis zusammengefasst. Markierst du einen Termin, bekommst du immer den
 > 2026"). Innerhalb einer Ansicht bewegst du dich rein mit den Pfeiltasten;
 > ein Wechsel in den Lesemodus ist nicht nötig.
 
+## Tagesmarkierungen: wie ein Tag war
+
+Neben den Terminen und Aufgaben kann ein Tag auch eine Notiz über **sich
+selbst** tragen — die Dinge, die du verfolgen und nicht abarbeiten willst. Eine
+Gewohnheit, eine Stimmung, eine Tatsache, an die du dich später erinnern
+möchtest.
+
+### Dein eigenes Vokabular
+
+Unter **Einstellungen → Tagesmarkierungen** baust du die Liste. Aperio bringt
+keine mit: Eine geratene Auswahl wären die Gewohnheiten von jemand anderem. Du
+entscheidest, was markiert werden soll und wie ausführlich — ein Wort, ein
+ganzer Satz oder nur ein Emoji.
+
+Jede Markierung hat:
+
+- einen **Namen**, und der wird vorgelesen,
+- ein optionales **Kurzzeichen** (meist ein Emoji) für die kompakten Ansichten,
+- optional eine **Farbe** aus deiner vorhandenen Palette,
+- eine **Position**, damit die Liste so zurückliest, wie du sie gebaut hast.
+
+Eine Markierung zu löschen lässt deine festgehaltenen Tage unberührt. Sie
+taucht dort einfach nicht mehr auf — nichts schreibt deine Historie um, und
+legst du sie neu an, ist sie wieder da.
+
+### Einen Tag festhalten
+
+In der **Tagesansicht** öffnet der Knopf **Diesen Tag festhalten** ein
+Kontrollkästchen je Markierung. Jedes Häkchen **speichert sofort** — es gibt
+keinen Speichern-Knopf, weil das Festhalten eines Tages fast nichts kosten
+darf. Das heißt zugleich: Das Abwählen ist die Rücknahme, es gibt nichts
+abzubrechen.
+
+Am Telefon hängt dasselbe an der Tagesüberschrift: **Diesen Tag festhalten**
+steht dort neben *Neuer Termin* und *Neue Aufgabe* in den Aktionen der
+Überschrift und kostet damit keinen zusätzlichen Wisch.
+
+### Die Übersicht
+
+Ein Tag, der etwas sagt, sagt es **in seiner eigenen Überschrift**: „Montag,
+17. August 2026. Festgehalten: Sport, Gelesen." Im Wochen- und Monatsraster
+sagt die Tageszelle dasselbe nach Datum und Anzahl. Sehende sehen die Symbole
+neben dem Datum.
+
+Nichts davon ist ein eigener Stopp zum Vorbeiwischen — die Zusammenfassung ist
+Teil des Namens, den der Tag ohnehin schon hatte.
+
+> **Was hier keine Aufgabe ist.** Markierungen liegen bewusst außerhalb deiner
+> Aufgabenlisten. Sie sind keine Arbeit, die erledigt werden muss, tauchen also
+> nie im Planer auf, tragen weder Fristen noch Erinnerungen und erscheinen
+> nicht im Tagesrückblick.
+
+> **Datenschutz und Sync.** Tagesmarkierungen liegen **nur auf deinen Geräten**
+> und reisen über deine eigene Geräte-Synchronisation — nie zu Google,
+> Microsoft oder einem CalDAV-Server. Keiner davon kennt „wie war Dienstag", und
+> das hier ist das Privateste in der App. Bearbeiten zwei Geräte denselben Tag
+> zwischen zwei Sync-Runden, gewinnt die spätere Fassung, statt zusammengeführt
+> zu werden.
+
 ## Zusammenfassung
 
 Du kennst nun die Ansichten und weißt, wie du zwischen ihnen wechselst und
