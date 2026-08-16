@@ -1,17 +1,26 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
+import { localDateKey } from '@aperio/shared';
 import type { RootStackParamList } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
+import { DayLogDialog } from './DayLogDialog';
 import { useNewEventOnDay } from './useNewEventOnDay';
 
 // The shared calendar action bar — Calendars (toggle which calendars show),
-// Search, and New Event. These three are cross-cutting (they apply to every
-// calendar view), but historically only the Day view (EventsScreen) rendered
-// them, so on Week/Month/Agenda/Year a sighted user saw nothing where they
-// should be. This component renders them visibly AND accessibly for any screen.
+// Search, New Event, and the day's Check-in. These are cross-cutting (they
+// apply to every calendar view), but historically only the Day view
+// (EventsScreen) rendered them, so on Week/Month/Agenda/Year a sighted user saw
+// nothing where they should be. This component renders them visibly AND
+// accessibly for any screen.
+//
+// Check-in rides here rather than on each day row: a button per day would cost
+// a swipe per day to get past, and the day-header actions it also lives in are
+// skipped entirely by the single-day screen. One button, on the day the view is
+// focused on, is reachable from every view including that one.
 //
 // It self-loads the first calendar id so a screen needn't wire the calendar
 // list just to enable "New Event"; the button seeds the editor on `anchorDay`
@@ -25,11 +34,19 @@ interface Props {
 }
 
 export function CalendarActions({ navigation, anchorDay }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   // The shared "new event on this day" flow — the same hook feeds the host
   // screens' VoiceOver magic tap, so both entry points seed identically.
   const { addEvent, enabled } = useNewEventOnDay(navigation, anchorDay);
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const dayKey = localDateKey(anchorDay);
+  const dayLabel = anchorDay.toLocaleDateString(i18n.language, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 
   // A Fragment (not a wrapping View) so the buttons flow with the host
   // screen's action bar (which already lays out + wraps Today / Jump-to-date).
@@ -53,6 +70,24 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
       >
         <Text style={styles.ghostButtonText}>{t('toolbar.search')}</Text>
       </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        // The date is in the NAME, not in the visible text: which day this
+        // acts on is obvious to somebody who can see the focused cell and
+        // invisible to somebody who cannot.
+        accessibilityLabel={t('dialogs.dayLog.openButtonOnDay', { day: dayLabel })}
+        onPress={() => setCheckInOpen(true)}
+        hitSlop={8}
+        style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.ghostButtonText}>{t('dialogs.dayLog.openButton')}</Text>
+      </Pressable>
+      <DayLogDialog
+        visible={checkInOpen}
+        onClose={() => setCheckInOpen(false)}
+        day={dayKey}
+        dayLabel={dayLabel}
+      />
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ disabled: !enabled }}

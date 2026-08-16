@@ -105,58 +105,64 @@ visual.
 > 2026"). Within a view you move purely with the arrow keys; switching to
 > browse mode is not necessary.
 
-## Day markers: what a day was like
+## Check-in: what a day was like
 
 Beside the appointments and the tasks, a day can carry a note about
 **itself** — the things you want to keep track of rather than tick off. A
 habit, a mood, a fact worth remembering later.
 
-### Your own vocabulary
+### Your own list
 
-Under **Settings → Day markers** you build the list. Aperio ships none: a
-guessed set would be somebody else's habits. You decide both what is worth
-marking and how much to say — a word, a whole sentence, or just an emoji.
+Under **Settings → Check-in** you build the list. Aperio ships none: a guessed
+set would be somebody else's habits. You decide both what is worth a check-in
+and how much to say — a word, a whole sentence, or just an emoji.
 
-Each marker has:
+Each item has:
 
 - a **name**, which is what gets read aloud,
 - an optional **short symbol** (usually one emoji) for the compact views,
 - an optional **colour** from your existing palette,
 - a **position**, so the list reads back in the order you built it.
 
-Deleting a marker leaves your logged days untouched. It simply stops appearing
-in them — nothing rewrites your history, and re-creating it brings it back.
+Deleting an item leaves your past check-ins untouched. It simply stops
+appearing in them — nothing rewrites your history, and re-creating it brings
+it back.
 
-### Marking a day
+### Checking in
 
-In the **day view**, the button **Log this day** opens a checkbox per marker.
-Every tick **saves immediately** — there is no Save button, because recording a
-day has to cost almost nothing. That also means unticking is the undo: there is
-nothing to cancel.
+Every calendar view has a **Check-in** button, and it acts on the day the view
+is standing on: in the week and month grids that is the day cell you have
+focused, in the day view it is that day, and in the agenda it is the day the
+list starts on. There is deliberately no button per day — seven or thirty-one
+of them would cost more to get past than they are worth. The button's spoken
+name always names its day, so it is never ambiguous which one you are about to
+open.
 
-On the phone the same thing rides the day heading: **Log this day** sits
-alongside *New event* and *New task* in the heading's actions, so it costs no
-extra swipe.
+It opens a checkbox per item. Every tick **saves immediately** — there is no
+Save button, because recording a day has to cost almost nothing. That also
+means unticking is the undo: there is nothing to cancel.
 
 ### The overview
 
 A day that says something says so in **its own heading**: "Monday, 17 August
-2026. Logged: Sport, Read." In the week and month grids the day cell announces
-the same after its date and count. Sighted readers see the symbols beside the
-date.
+2026. Check-in: Sport, Read." In the week and month grids the day cell
+announces the same after its date and count. Sighted readers see the symbols
+beside the date.
 
 Nothing here is a separate stop to swipe past — the summary is part of the
 name the day already had.
 
-> **What is not a task.** Markers deliberately live outside your task lists.
-> They are not work to be finished, so they never appear in the planner, never
-> carry deadlines or reminders, and never turn up in the day-start review.
+> **What is not a task.** Check-in items deliberately live outside your task
+> lists. They are not work to be finished, so they never appear in the planner,
+> never carry deadlines or reminders, and never turn up in the day-start
+> review.
 
-> **Privacy and sync.** Day markers are stored **only on your devices** and
+> **Privacy and sync.** Check-ins are stored **only on your devices** and
 > travel over your own device sync, never to Google, Microsoft or any CalDAV
 > server — none of them models "how was Tuesday", and this is the most private
-> thing in the app. Two devices editing the *same* day between two sync rounds
-> keep the later edit rather than merging them.
+> thing in the app. A check-in made on your phone reaches your desktop with the
+> next sync round, without a restart. Two devices editing the *same* day
+> between two rounds keep the later edit rather than merging them.
 
 ## Summary
 

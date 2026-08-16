@@ -20,6 +20,7 @@ import {
   eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
+import { DayCheckInButton } from '../DayCheckInButton';
 import { useDayLogSummaries } from '../../state/useDayLogSummaries';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
@@ -1243,6 +1244,9 @@ export function WeekView() {
           {t('views.week.kw', { week: isoWeek })} ·{' '}
           {fmt.format(weekStart, 'PPP')} – {fmt.format(days[6], 'PPP')}
         </h2>
+        {/* Acts on the FOCUSED day, not on a fixed one — one button for the
+            week instead of seven tab stops to reach the day you meant. */}
+        <DayCheckInButton day={keyOf(days[focusIndex] ?? days[0])} />
       </header>
 
       {showLoading && (

@@ -30,6 +30,7 @@ import { useEvents } from '../../state/useEvents';
 import { useEventGroups } from '../../state/useEventGroups';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
+import { DayCheckInButton } from '../DayCheckInButton';
 import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -302,6 +303,11 @@ export function AgendaView() {
         <span className="view__subtitle">
           {fmt.format(range.start, 'PPP')} – {fmt.format(range.end, 'PPP')}
         </span>
+        {/* This view has no focused DAY — its rows are events, and its day
+            separators are hidden from the accessibility tree by design — so
+            the check-in aims at the day the list starts on, which is the day
+            the user navigated to. */}
+        <DayCheckInButton day={localDateKey(range.start)} />
       </header>
 
       {showLoading && (

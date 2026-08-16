@@ -527,7 +527,7 @@
         "sync": "Synchronisation",
         "plugins": "Plugins",
         "logs": "Protokolle",
-        "dayMarkers": "Tagesmarkierungen"
+        "dayMarkers": "Check-in"
       },
       "logs": {
         "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
@@ -960,31 +960,32 @@
         "adoptRemoteE2eOk": "Verschlüsselung entsperrt. Synchronisation wird fortgesetzt."
       },
       "dayMarkers": {
-        "heading": "Tagesmarkierungen",
-        "intro": "Halte fest, wie ein Tag war. Du entscheidest, was markiert werden soll und wie ausführlich — ein Wort, ein Satz, ein Emoji. Aperio bringt keine Vorauswahl mit; eine geratene wären die Gewohnheiten von jemand anderem.",
-        "listLabel": "Deine Tagesmarkierungen",
-        "listHint": "Pfeiltasten bewegen durch die Liste, Eingabe öffnet die Markierung zum Bearbeiten.",
+        "heading": "Check-in",
+        "intro": "Halte fest, wie ein Tag war — Gewohnheiten, Stimmung, alles, was bleiben soll. Du entscheidest, was einen Check-in wert ist und wie ausführlich: ein Wort, ein Satz, ein Emoji. Aperio bringt keine Vorauswahl mit; eine geratene wären die Gewohnheiten von jemand anderem.",
+        "listLabel": "Deine Check-in-Punkte",
+        "listHint": "Pfeiltasten bewegen durch die Liste, Eingabe öffnet den Punkt zum Bearbeiten.",
         "rowLabel": "{{name}}, {{position}} von {{count}}",
-        "loading": "Tagesmarkierungen werden geladen …",
-        "empty": "Noch keine Tagesmarkierungen. Lege unten die erste an.",
-        "addHeading": "Markierung hinzufügen",
-        "add": "Markierung hinzufügen",
+        "loading": "Deine Check-in-Punkte werden geladen …",
+        "empty": "Noch keine Check-in-Punkte. Lege unten den ersten an.",
+        "readFailed": "Deine Check-in-Punkte konnten nicht gelesen werden. Die Meldung oben sagt, warum.",
+        "addHeading": "Punkt hinzufügen",
+        "add": "Punkt hinzufügen",
         "nameLabel": "Name",
         "nameRequired": "Bitte gib einen Namen ein.",
         "symbolLabel": "Kurzzeichen",
         "symbolHint": "Optional — meist ein Emoji. Erscheint in den kompakten Tagesübersichten; vorgelesen wird der Name.",
         "colorLabel": "Farbe",
         "colorNone": "Ohne Farbe",
-        "editHeading": "„{{name}}“ bearbeiten",
+        "editHeading": "„{{name}}\" bearbeiten",
         "save": "Speichern",
         "cancel": "Abbrechen",
-        "delete": "Markierung löschen",
-        "deleteHint": "Eine Markierung zu löschen lässt deine festgehaltenen Tage unberührt — sie taucht dort einfach nicht mehr auf.",
+        "delete": "Punkt löschen",
+        "deleteHint": "Einen Punkt zu löschen lässt deine bisherigen Check-ins unberührt — er taucht dort einfach nicht mehr auf.",
         "moveUp": "Nach oben",
         "moveDown": "Nach unten",
-        "added": "Tagesmarkierung {{name}} hinzugefügt.",
-        "saved": "Tagesmarkierung {{name}} gespeichert.",
-        "deleted": "Tagesmarkierung {{name}} gelöscht. Deine festgehaltenen Tage bleiben unberührt.",
+        "added": "Check-in-Punkt {{name}} hinzugefügt.",
+        "saved": "Check-in-Punkt {{name}} gespeichert.",
+        "deleted": "Check-in-Punkt {{name}} gelöscht. Deine bisherigen Check-ins bleiben unberührt.",
         "moved": "{{name}} ist jetzt {{position}} von {{count}}."
       }
     },
@@ -1931,15 +1932,16 @@
       "taskStatusLabel": "Aufgabenstatus"
     },
     "dayLog": {
-      "title": "{{day}} festhalten",
+      "title": "Check-in: {{day}}",
       "intro": "Hake ab, was zutraf. Jedes Häkchen speichert sofort — das Abwählen ist die Rücknahme.",
-      "loading": "Deine Markierungen werden geladen …",
-      "noMarkers": "Noch keine Tagesmarkierungen. Lege welche unter Einstellungen, Tagesmarkierungen an.",
+      "loading": "Dein Check-in wird geladen …",
+      "noMarkers": "Noch keine Check-in-Punkte. Lege welche unter Einstellungen, Check-in an.",
+      "readFailed": "Dieser Tag konnte nicht gelesen werden. Die Meldung oben sagt, warum.",
       "close": "Schließen",
       "writeFailed": "{{name}} konnte nicht gespeichert werden.",
-      "openButton": "Diesen Tag festhalten",
-      "openButtonMarked": "Diesen Tag festhalten. {{summary}}",
-      "summaryLead": "Festgehalten"
+      "openButton": "Check-in",
+      "openButtonOnDay": "Check-in: {{day}}",
+      "summaryLead": "Check-in"
     }
   },
   "sidebar": {

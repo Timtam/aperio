@@ -530,7 +530,7 @@
         "sync": "Sync",
         "plugins": "Plugins",
         "logs": "Logs",
-        "dayMarkers": "Day markers"
+        "dayMarkers": "Check-in"
       },
       "logs": {
         "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
@@ -963,15 +963,16 @@
         "adoptRemoteE2eOk": "Encryption unlocked. Resuming sync."
       },
       "dayMarkers": {
-        "heading": "Day markers",
-        "intro": "Note what a day was like. You decide what is worth marking and how much to say — a word, a sentence, an emoji. Aperio ships no starter set, because a guessed one would be somebody else's habits.",
-        "listLabel": "Your day markers",
-        "listHint": "Arrow keys move through the list, Enter opens the marker for editing.",
+        "heading": "Check-in",
+        "intro": "Note what a day was like — habits, mood, anything worth keeping. You decide what is worth a check-in and how much to say: a word, a sentence, an emoji. Aperio ships no starter set, because a guessed one would be somebody else's habits.",
+        "listLabel": "Your check-in items",
+        "listHint": "Arrow keys move through the list, Enter opens the item for editing.",
         "rowLabel": "{{name}}, {{position}} of {{count}}",
-        "loading": "Loading day markers …",
-        "empty": "No day markers yet. Add the first one below.",
-        "addHeading": "Add a marker",
-        "add": "Add marker",
+        "loading": "Loading your check-in items …",
+        "empty": "No check-in items yet. Add the first one below.",
+        "readFailed": "Your check-in items could not be read. The message above says why.",
+        "addHeading": "Add an item",
+        "add": "Add item",
         "nameLabel": "Name",
         "nameRequired": "Please enter a name.",
         "symbolLabel": "Short symbol",
@@ -981,13 +982,13 @@
         "editHeading": "Edit “{{name}}”",
         "save": "Save",
         "cancel": "Cancel",
-        "delete": "Delete marker",
-        "deleteHint": "Deleting a marker leaves your logged days untouched — it simply stops appearing in them.",
+        "delete": "Delete item",
+        "deleteHint": "Deleting an item leaves your past check-ins untouched — it simply stops appearing in them.",
         "moveUp": "Move up",
         "moveDown": "Move down",
-        "added": "Day marker {{name}} added.",
-        "saved": "Day marker {{name}} saved.",
-        "deleted": "Day marker {{name}} deleted. Your logged days are untouched.",
+        "added": "Check-in item {{name}} added.",
+        "saved": "Check-in item {{name}} saved.",
+        "deleted": "Check-in item {{name}} deleted. Your past check-ins are untouched.",
         "moved": "{{name}} is now {{position}} of {{count}}."
       }
     },
@@ -1931,15 +1932,16 @@
       "taskStatusLabel": "Task status"
     },
     "dayLog": {
-      "title": "Log {{day}}",
+      "title": "Check-in: {{day}}",
       "intro": "Tick what applied. Each tick saves straight away — unticking is the undo.",
-      "loading": "Loading your markers …",
-      "noMarkers": "No day markers yet. Add some under Settings, Day markers.",
+      "loading": "Loading your check-in …",
+      "noMarkers": "No check-in items yet. Add some under Settings, Check-in.",
+      "readFailed": "This day could not be read. The message above says why.",
       "close": "Close",
       "writeFailed": "Could not save {{name}}.",
-      "openButton": "Log this day",
-      "openButtonMarked": "Log this day. {{summary}}",
-      "summaryLead": "Logged"
+      "openButton": "Check-in",
+      "openButtonOnDay": "Check-in: {{day}}",
+      "summaryLead": "Check-in"
     }
   },
   "sidebar": {

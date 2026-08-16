@@ -65,6 +65,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
+import { DayCheckInButton } from '../DayCheckInButton';
 import { useDayLogSummaries } from '../../state/useDayLogSummaries';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
@@ -699,6 +700,8 @@ export function MonthView() {
     <section className="view view--month" aria-label={t('views.month.title')}>
       <header className="view__header">
         <h2>{fmt.format(anchor, 'MMMM yyyy')}</h2>
+        {/* The focused cell, so one button serves all thirty-one days. */}
+        <DayCheckInButton day={keyOf(cells[focusIndex] ?? anchor)} />
       </header>
 
       {showLoading && (
