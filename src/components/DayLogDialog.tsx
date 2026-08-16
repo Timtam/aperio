@@ -8,6 +8,7 @@ import {
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { CheckList } from './CheckList';
 import { getDayLog, isCommandError, setDayLog } from '../api/client';
 import { useDayMarkersChanged } from '../state/dayMarkersChanged';
 import { useDayMarkers } from '../state/useDayMarkers';
@@ -53,10 +54,6 @@ export function DayLogDialog({
   // already held — so the checkboxes wait for it, exactly as on the phone.
   const [loadingLog, setLoadingLog] = useState(true);
   const [logFailed, setLogFailed] = useState(false);
-  // Which checkbox carries the tab stop. Real focus moves with it, so the
-  // announcement is the checkbox's own rather than a listbox's "selected".
-  const [activeIndex, setActiveIndex] = useState(0);
-  const boxes = useRef<(HTMLInputElement | null)[]>([]);
   const introId = useId();
   const introRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -128,32 +125,6 @@ export function DayLogDialog({
     })();
   });
 
-  // Clamp when the vocabulary shrinks under an open dialog — a sync round can
-  // delete a marker another device removed.
-  useEffect(() => {
-    if (activeIndex >= markers.length && markers.length > 0) {
-      setActiveIndex(markers.length - 1);
-    }
-  }, [markers.length, activeIndex]);
-
-  const onListKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (markers.length === 0) return;
-      let next: number | null = null;
-      if (e.key === 'ArrowDown') next = Math.min(activeIndex + 1, markers.length - 1);
-      else if (e.key === 'ArrowUp') next = Math.max(activeIndex - 1, 0);
-      else if (e.key === 'Home') next = 0;
-      else if (e.key === 'End') next = markers.length - 1;
-      if (next === null) return;
-      e.preventDefault();
-      setActiveIndex(next);
-      // Move the REAL focus, not just the tab stop: the whole point is that
-      // the next arrow press announces the marker it landed on.
-      boxes.current[next]?.focus();
-    },
-    [activeIndex, markers.length],
-  );
-
   return (
     <Modal
       isOpen={isOpen}
@@ -183,42 +154,15 @@ export function DayLogDialog({
       ) : markers.length === 0 ? (
         <p className="form__hint">{t('dialogs.dayLog.noMarkers')}</p>
       ) : (
-        <ul className="form__check-list" onKeyDown={onListKeyDown}>
-          {markers.map((m, i) => {
-            const ticked = log.markers.includes(m.id);
-            return (
-              <li key={m.id}>
-                {/* `--inline` rather than the column default: a checkbox, an
-                    emoji and a word on three lines each turned a short list
-                    into a scrolling one. */}
-                <label className="form__field form__field--inline">
-                  <input
-                    ref={(el) => {
-                      boxes.current[i] = el;
-                    }}
-                    type="checkbox"
-                    checked={ticked}
-                    // Roving tabindex: the list is ONE tab stop, and the
-                    // arrow keys move within it. A stop per marker meant ten
-                    // markers cost ten presses to walk past — for a dialog
-                    // whose entire promise is that recording a day is cheap.
-                    // Real checkboxes rather than a listbox of options, so
-                    // the announcement stays "checkbox, checked" and Space
-                    // keeps toggling natively.
-                    tabIndex={i === activeIndex ? 0 : -1}
-                    onFocus={() => setActiveIndex(i)}
-                    onChange={() => void onToggle(m.id, m.name)}
-                  />
-                  {/* The symbol is decoration beside the name — a screen
-                      reader announcing an emoji's own name in place of what
-                      the user called this would be worse than silence. */}
-                  {m.symbol && <span aria-hidden="true">{m.symbol}</span>}
-                  <span>{m.name}</span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
+        <CheckList
+          items={markers.map((m) => ({
+            id: m.id,
+            name: m.name,
+            symbol: m.symbol,
+            checked: log.markers.includes(m.id),
+          }))}
+          onToggle={(item) => void onToggle(item.id, item.name)}
+        />
       )}
 
       <div className="modal__actions">

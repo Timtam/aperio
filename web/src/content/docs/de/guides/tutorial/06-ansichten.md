@@ -96,6 +96,23 @@ eine geplante Aufgabe wieder auf dem Backlog ab, um Tag und Deadline zu
 > (Tag zuweisen), und die Kontextmenü-Taste (oder `Umschalt+F10`) öffnet das
 > Aufgabenmenü.
 
+### Welche Listen der Backlog zeigt
+
+Der Backlog hat einen eigenen Knopf **Listen**. Hakst du dort eine Liste ab,
+verschwindet sie nur aus dem Backlog — ihre Aufgaben bleiben an ihren
+Kalendertagen, und die Seitenleiste bleibt unberührt.
+
+Das ist bewusst ein zweiter, engerer Schalter. Der in der Seitenleiste nimmt
+eine Liste aus *allem* heraus, und das ist die falsche Größe für eine lange
+Haushaltsliste: Ihre datierten Aufgaben gehören weiter auf ihre Tage, während
+ihre hundert undatierten die Spalte zuschütten, in der du planst. Eine Liste,
+die du nie abgehakt hast, wird angezeigt — so verschwindet nichts still, was
+später dazukommt.
+
+Diese eine Einstellung merkt sich **nur dieses Gerät** und wird nicht
+synchronisiert: Ein breiter Schreibtischmonitor und ein schmales Notebook
+wollen vom selben Backlog Unterschiedliches.
+
 ## Die Monatsansicht
 
 In der Monatsansicht ist jede Tageszelle **gleich groß**, und das Raster

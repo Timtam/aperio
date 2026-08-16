@@ -2063,7 +2063,14 @@
       "deadlineChipLabel": "{{title}}, Liste {{list}}, fällig {{deadline}}{{overdue}}{{priority}}{{assignee}}",
       "overdueSuffix": ", überfällig",
       "movedToBacklog": "„{{title}}“ in den Backlog verschoben.",
-      "scheduled": "„{{title}}“ auf {{date}} geplant."
+      "scheduled": "„{{title}}“ auf {{date}} geplant.",
+      "listsButton": "Welche Listen der Backlog zeigt",
+      "listsButtonFiltered": "Welche Listen der Backlog zeigt. {{count}} ausgeblendet.",
+      "listsButtonShort": "Listen",
+      "listsTitle": "Listen im Backlog",
+      "listsIntro": "Hake eine Liste ab, um sie aus dem Backlog herauszuhalten. Ihre Aufgaben bleiben an ihren Kalendertagen, und das hier merkt sich nur dieses Gerät.",
+      "listsEmpty": "In der Seitenleiste ist keine Aufgabenliste eingeschaltet.",
+      "listsShowAll": "Wieder alle zeigen"
     },
     "week": {
       "title": "Wochenansicht",

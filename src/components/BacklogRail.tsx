@@ -26,6 +26,8 @@ import {
   subtaskParentTitle,
 } from '../intl/taskStatus';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { useBacklogLists } from '../state/useBacklogLists';
+import { BacklogListsDialog } from './BacklogListsDialog';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useDialogState } from '../state/dialogStateContext';
 import {
@@ -83,9 +85,27 @@ export function BacklogRail() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const todayKey = useCurrentDayKey();
-  const { tasks } = useTasks();
+  const { tasks: allTasks } = useTasks();
   const { invalidateData } = useDialogState();
-  const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
+  const { colorLabels, sectionsByList, loadSections, taskLists, selectedTaskListIds } =
+    useCalendarStore();
+  // The backlog's OWN list filter, on top of the sidebar's. Hiding a list in
+  // the sidebar removes it from the calendar days too, which is not what
+  // somebody with a long household list wants — they want its dated tasks on
+  // their days and its hundred undated ones out of the planning column.
+  const { shows: showsInBacklog, hidden: hiddenLists } = useBacklogLists();
+  const [listsOpen, setListsOpen] = useState(false);
+  const tasks = useMemo(
+    () => allTasks.filter((row) => showsInBacklog(row.list_id)),
+    [allTasks, showsInBacklog],
+  );
+  // Only lists the sidebar shows: one switched off globally is not fetched at
+  // all, so offering it here would promise something this filter cannot do.
+  const offeredLists = useMemo(
+    () => taskLists.filter((l) => selectedTaskListIds.has(l.id)),
+    [taskLists, selectedTaskListIds],
+  );
+  const hiddenCount = offeredLists.filter((l) => hiddenLists.has(l.id)).length;
   // Two-level priority collapses low+medium into one band, so the rail's two
   // priority sorts have to ask which system is on (see `taskOrder`).
   const { priorityScale } = useTaskCascadeEnabled();
@@ -264,9 +284,33 @@ export function BacklogRail() {
       }}
       onDrop={(e) => void dropToBacklog(e)}
     >
-      <h2 id={headingId} className="backlog-rail__heading">
-        {t('views.backlog.heading', { count: total })}
-      </h2>
+      <div className="backlog-rail__bar">
+        <h2 id={headingId} className="backlog-rail__heading">
+          {t('views.backlog.heading', { count: total })}
+        </h2>
+        {/* On the column itself rather than in the sidebar: this is the one
+            place the filter's effect is visible, and needing the sidebar open
+            to steer it is the problem, not the solution. The count is in the
+            NAME so a screen reader hears that something is filtered without
+            having to open the dialog to find out. */}
+        <button
+          type="button"
+          className="backlog-rail__lists"
+          aria-label={
+            hiddenCount > 0
+              ? t('views.backlog.listsButtonFiltered', { count: hiddenCount })
+              : t('views.backlog.listsButton')
+          }
+          onClick={() => setListsOpen(true)}
+        >
+          {t('views.backlog.listsButtonShort')}
+        </button>
+      </div>
+      <BacklogListsDialog
+        isOpen={listsOpen}
+        onClose={() => setListsOpen(false)}
+        taskLists={offeredLists}
+      />
       <div className="backlog-rail__body">
         {total === 0 ? (
           <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>

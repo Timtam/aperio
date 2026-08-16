@@ -1950,6 +1950,29 @@ button[aria-disabled='true'] {
   gap: var(--space-2);
 }
 
+/* The backlog's title bar: heading on the left, its list filter on the right. */
+.backlog-rail__bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.backlog-rail__lists {
+  flex: none;
+  padding: 2px var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.backlog-rail__lists:hover {
+  color: var(--color-fg);
+}
+
 /* ── Settings list panels (Check-in) ────────────────────────────────────── */
 /*
    These class names were referenced by the panel and never written, so the

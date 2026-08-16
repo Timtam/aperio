@@ -91,6 +91,21 @@ back onto the backlog to **clear** its day and deadline.
 > task, `Shift+D` opens the plan dialog (assign a day), and the context-menu key
 > (or `Shift+F10`) opens the task menu.
 
+### Which lists the backlog shows
+
+The backlog has a **Lists** button of its own. Untick a list there and it
+disappears from the backlog only — its tasks stay on their calendar days, and
+the sidebar is untouched.
+
+That is deliberately a second, narrower switch. The sidebar's one takes a list
+out of *everything*, which is the wrong size for a long household list: its
+dated tasks still belong on the days they fall on, while its hundred undated
+ones bury the column you plan in. A list you have never ticked off shows by
+default, so nothing added later goes quietly missing.
+
+This one setting is remembered **per device** and does not sync — a wide desk
+monitor and a narrow laptop want different things from the same backlog.
+
 ## The month view
 
 In the month view, every day cell is **the same size**, and the grid fills

@@ -2063,7 +2063,14 @@
       "deadlineChipLabel": "{{title}}, list {{list}}, due {{deadline}}{{overdue}}{{priority}}{{assignee}}",
       "overdueSuffix": ", overdue",
       "movedToBacklog": "\"{{title}}\" moved to the backlog.",
-      "scheduled": "\"{{title}}\" scheduled for {{date}}."
+      "scheduled": "\"{{title}}\" scheduled for {{date}}.",
+      "listsButton": "Which lists show in the backlog",
+      "listsButtonFiltered": "Which lists show in the backlog. {{count}} hidden.",
+      "listsButtonShort": "Lists",
+      "listsTitle": "Lists in the backlog",
+      "listsIntro": "Untick a list to keep it out of the backlog. Its tasks stay on their calendar days, and this is remembered on this device only.",
+      "listsEmpty": "No task lists are switched on in the sidebar.",
+      "listsShowAll": "Show all again"
     },
     "week": {
       "title": "Week view",
