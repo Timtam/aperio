@@ -405,8 +405,13 @@ export function CalendarDayList({
   const [dayLogTarget, setDayLogTarget] = useState<{ day: string; label: string } | null>(
     null,
   );
+  // Which read is current — paging swaps the window faster than the reads
+  // finish, and an earlier one landing last would show the previous week's
+  // marks with nothing to correct it.
+  const dayLogSeq = useRef(0);
   const refreshDayLogs = useCallback(async () => {
     if (dayKeys.length === 0) return;
+    const mine = (dayLogSeq.current += 1);
     try {
       const [vocabulary, logs] = await Promise.all([
         listDayMarkers(),
@@ -415,6 +420,7 @@ export function CalendarDayList({
           dayKeys.reduce((a, b) => (b > a ? b : a)),
         ),
       ]);
+      if (dayLogSeq.current !== mine) return;
       setDayMarkerVocabulary(sortDayMarkers(vocabulary));
       setDayLogsByKey(dayLogsByDay(logs));
     } catch {

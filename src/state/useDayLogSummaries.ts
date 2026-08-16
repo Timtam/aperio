@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   compactDaySummary,
@@ -44,10 +44,18 @@ export function useDayLogSummaries(
     [dayKeys],
   );
 
+  // Which read is the current one. Two reads are separately spawned tasks
+  // contending for the same DB lock, so they can finish in either order — and
+  // because the effect only re-fires when the RANGE moves, a stale map landing
+  // last would sit there until the view unmounts, with nothing to correct it.
+  const readSeq = useRef(0);
+
   const refresh = useCallback(async () => {
     if (!from || !to) return;
+    const mine = (readSeq.current += 1);
     try {
-      setLogs(dayLogsByDay(await getDayLogsInRange(from, to)));
+      const logs = await getDayLogsInRange(from, to);
+      if (readSeq.current === mine) setLogs(dayLogsByDay(logs));
     } catch {
       // A day that cannot be read simply says nothing. This is an annotation
       // on a calendar, and a failed read must never take the calendar with it.

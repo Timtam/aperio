@@ -27,13 +27,19 @@ export interface DayLog {
   markers: string[];
   /** Reserved for the "how was today" scale this design deferred. */
   rating?: number | null;
-  updated_at?: string;
+  /** REQUIRED, even though both write boundaries overwrite it with their own
+   *  clock: `cal_core::DayLog::updated_at` carries no serde default, so a log
+   *  without one is rejected before it ever reaches the code that would have
+   *  replaced it. Optional here once meant every construction site could mint
+   *  a payload the backend refused. */
+  updated_at: string;
 }
 
 /** An untouched day. Reads exactly like a stored day with nothing on it, so
- *  callers never branch on "was there a record". */
-export function emptyDayLog(day: string): DayLog {
-  return { day, markers: [] };
+ *  callers never branch on "was there a record" — including on the way BACK to
+ *  the store, which is why this carries a timestamp it does not need. */
+export function emptyDayLog(day: string, now = new Date()): DayLog {
+  return { day, markers: [], updated_at: now.toISOString() };
 }
 
 /** Whether a day says anything at all — the test every summary runs first. */

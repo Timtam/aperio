@@ -40,13 +40,19 @@ export function DayLogDialog({
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { markers, loading: loadingMarkers } = useDayMarkers();
+  const { markers, loading: loadingMarkers, error: markersFailed } = useDayMarkers();
   const [log, setLog] = useState<DayLog>(() => emptyDayLog(day));
   const [error, setError] = useState<string | null>(null);
   // Writes this dialog started and has not seen land yet. A tick's own write
   // raises the same signal a foreign one does, and re-reading in the middle of
   // our own burst would paint the state we just left behind.
   const writesInFlight = useRef(0);
+  const writeSeq = useRef(0);
+  // The DAY's own read, tracked apart from the vocabulary's. A tick before it
+  // lands would write a log built from nothing, erasing whatever the day
+  // already held — so the checkboxes wait for it, exactly as on the phone.
+  const [loadingLog, setLoadingLog] = useState(true);
+  const [logFailed, setLogFailed] = useState(false);
   const introId = useId();
   const introRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -57,6 +63,8 @@ export function DayLogDialog({
     let cancelled = false;
     setLog(emptyDayLog(day));
     setError(null);
+    setLoadingLog(true);
+    setLogFailed(false);
     void (async () => {
       try {
         const loaded = await getDayLog(day);
@@ -64,7 +72,10 @@ export function DayLogDialog({
       } catch (err) {
         if (!cancelled) {
           setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+          setLogFailed(true);
         }
+      } finally {
+        if (!cancelled) setLoadingLog(false);
       }
     })();
     return () => {
@@ -79,9 +90,14 @@ export function DayLogDialog({
       // failed write puts the old state back and says so.
       setLog(next);
       writesInFlight.current += 1;
+      // Two quick ticks are two independent commands racing for the DB lock.
+      // Without this, the FIRST one's response — which knows nothing about the
+      // second tick — could land last and visibly un-tick what the user just
+      // ticked, while the disk held the right thing.
+      const mine = (writeSeq.current += 1);
       try {
         const saved = await setDayLog(next);
-        setLog(saved);
+        if (writeSeq.current === mine) setLog(saved);
       } catch (err) {
         setLog(log);
         setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
@@ -127,8 +143,13 @@ export function DayLogDialog({
         </p>
       )}
 
-      {loadingMarkers ? (
+      {loadingMarkers || loadingLog ? (
         <p className="form__hint">{t('dialogs.dayLog.loading')}</p>
+      ) : logFailed || markersFailed ? (
+        // Say nothing about the vocabulary here. "You have no markers yet" is
+        // an invitation to create one, and showing it to somebody who has ten
+        // and hit a read error would be a lie — the error above is the truth.
+        <p className="form__hint">{t('dialogs.dayLog.readFailed')}</p>
       ) : markers.length === 0 ? (
         <p className="form__hint">{t('dialogs.dayLog.noMarkers')}</p>
       ) : (

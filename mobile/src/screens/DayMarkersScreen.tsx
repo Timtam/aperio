@@ -74,7 +74,13 @@ export default function DayMarkersScreen() {
 
   const onAdd = useCallback(async () => {
     const name = newName.trim();
-    if (!name) return;
+    if (!name) {
+      // Silence here means the button did nothing for no stated reason — the
+      // desktop twin says it, so this one does too.
+      setError(t('dialogs.settings.dayMarkers.nameRequired'));
+      announce(t('dialogs.settings.dayMarkers.nameRequired'));
+      return;
+    }
     try {
       focus.onAdd();
       await createDayMarker(name, newSymbol.trim() || null, null);
@@ -90,7 +96,15 @@ export default function DayMarkersScreen() {
   const onRename = useCallback(
     async (marker: DayMarker, name: string, symbol: string) => {
       const trimmed = name.trim();
-      if (!trimmed || (trimmed === marker.name && symbol.trim() === (marker.symbol ?? ''))) {
+      if (trimmed === marker.name && symbol.trim() === (marker.symbol ?? '')) {
+        return;
+      }
+      if (!trimmed) {
+        // The field still shows what was typed, so saying nothing would leave
+        // a name on screen that is not the one on disk.
+        setError(t('dialogs.settings.dayMarkers.nameRequired'));
+        announce(t('dialogs.settings.dayMarkers.nameRequired'));
+        await refresh();
         return;
       }
       try {
@@ -100,11 +114,14 @@ export default function DayMarkersScreen() {
           symbol: symbol.trim() || null,
         });
         await refresh();
+        // This screen has no Save button — the field IS the editor — so
+        // without this nothing at all confirms the edit landed.
+        announce(t('dialogs.settings.dayMarkers.saved', { name: trimmed }));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [refresh],
+    [refresh, announce, t],
   );
 
   const onDelete = useCallback(
@@ -136,10 +153,15 @@ export default function DayMarkersScreen() {
             if (before.get(m.id) !== m.position) await updateDayMarker(m);
           }
         });
+        // Moving to either end destroys the very button that was pressed —
+        // "Nach oben" disappears from row 1. RN does not move the screen
+        // reader's cursor when that happens, so park it on the row itself.
+        const landed = reordered.findIndex((m) => m.id === marker.id);
+        focus.focusRow(landed);
         announce(
           t('dialogs.settings.dayMarkers.moved', {
             name: marker.name,
-            position: reordered.findIndex((m) => m.id === marker.id) + 1,
+            position: landed + 1,
             count: reordered.length,
           }),
         );
@@ -148,7 +170,7 @@ export default function DayMarkersScreen() {
         await refresh();
       }
     },
-    [markers, refresh, announce, t],
+    [markers, refresh, announce, t, focus],
   );
 
   return (
@@ -166,6 +188,12 @@ export default function DayMarkersScreen() {
       {loading ? (
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.dayMarkers.loading')}
+        </Text>
+      ) : error != null && markers.length === 0 ? (
+        // "You have none yet" is an invitation to create one. Saying it to
+        // somebody whose read just failed would be a lie.
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.dayMarkers.readFailed')}
         </Text>
       ) : markers.length === 0 ? (
         <Text style={styles.hint} accessibilityRole="text">

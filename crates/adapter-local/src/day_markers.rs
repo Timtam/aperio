@@ -15,11 +15,11 @@ use crate::{map_sql_err, LocalAdapter};
 
 /// Parse a stored `YYYY-MM-DD`. A row whose day cannot be read is not a row
 /// anyone can act on, so the readers skip it rather than guessing a date.
-fn parse_day(raw: &str) -> Option<NaiveDate> {
+pub(crate) fn parse_day(raw: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok()
 }
 
-fn parse_stamp(raw: &str) -> DateTime<Utc> {
+pub(crate) fn parse_stamp(raw: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(raw)
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now())
@@ -28,7 +28,7 @@ fn parse_stamp(raw: &str) -> DateTime<Utc> {
 /// The marker ids stored on a row. A malformed blob reads as "nothing ticked"
 /// rather than failing the whole day — the log is an annotation, and losing
 /// the view of a month because one row is bad would be the worse outcome.
-fn decode_markers(raw: &str) -> Vec<String> {
+pub(crate) fn decode_markers(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
 }
 
@@ -286,6 +286,33 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn the_snapshot_dump_carries_every_logged_day() {
+        // This is the one read with no range, and it used to have one: MIN/MAX
+        // as a stand-in for "everything". chrono signs years outside 0..=9999,
+        // SQLite compares TEXT byte-wise, and '+' sorts below '0' — so the
+        // upper bound excluded every real date and the dump came back empty.
+        // Silently: the vocabulary still travelled, so a joining device showed
+        // all the markers and not one logged day, which reads as success.
+        let a = adapter();
+        let m = a.create_day_marker("Sport", None, None).unwrap();
+        for d in ["2019-01-01", "2026-08-16", "2031-12-31"] {
+            a.set_day_log(&DayLog {
+                day: day(d),
+                markers: vec![m.id.clone()],
+                rating: None,
+                updated_at: Utc::now(),
+            })
+            .unwrap();
+        }
+
+        let dumped = a.dump_day_logs_for_snapshot().unwrap();
+
+        let days: Vec<String> = dumped.iter().map(|l| l.day.to_string()).collect();
+        assert_eq!(days, ["2019-01-01", "2026-08-16", "2031-12-31"]);
+        assert!(dumped.iter().all(|l| l.markers == vec![m.id.clone()]));
     }
 
     #[test]

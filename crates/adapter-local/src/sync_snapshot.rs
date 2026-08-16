@@ -305,10 +305,44 @@ impl LocalAdapter {
     /// Every logged day, oldest first. A whole-history dump: the table holds
     /// one small row per day the user marked, so even years of daily use is a
     /// few thousand rows — cheap next to the events and tasks beside it.
+    /// No range, deliberately. This used to reuse `day_logs_in_range` with
+    /// `NaiveDate::MIN`/`MAX` as a stand-in for "everything", and it silently
+    /// matched NOTHING: chrono prints years outside 0..=9999 with an explicit
+    /// sign, so the upper bound bound as `"+262142-12-31"`, and SQLite compares
+    /// TEXT byte-wise — `'+'` (0x2B) sorts BELOW `'0'`. Every real `YYYY-MM-DD`
+    /// key failed `day <= ?2`, so every snapshot shipped an empty history while
+    /// the vocabulary travelled fine. A joining device showed all the markers
+    /// and not one logged day, which reads as success.
     pub fn dump_day_logs_for_snapshot(&self) -> cal_core::Result<Vec<cal_core::DayLog>> {
-        // A window wide enough to be "everything" without a second code path:
-        // the store cannot hold a day outside it.
-        self.day_logs_in_range(chrono::NaiveDate::MIN, chrono::NaiveDate::MAX)
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT day, markers, rating, updated_at FROM day_log ORDER BY day")
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    req_text(row, 0),
+                    req_text(row, 1),
+                    row.get::<_, Option<i64>>(2),
+                    req_text(row, 3),
+                ))
+            })
+            .map_err(map_sql_err)?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            let (day, markers, rating, updated) = r.map_err(map_sql_err)?;
+            let Some(day) = crate::day_markers::parse_day(&day?) else {
+                continue;
+            };
+            out.push(cal_core::DayLog {
+                day,
+                markers: crate::day_markers::decode_markers(&markers?),
+                rating: rating.map_err(map_sql_err)?,
+                updated_at: crate::day_markers::parse_stamp(&updated?),
+            });
+        }
+        Ok(out)
     }
 
     /// Read every color-label row. Mirrors the `list_color_labels`

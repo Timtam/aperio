@@ -624,13 +624,19 @@ export function DayView() {
   // ask was an overview without opening anything.
   const { markers: dayMarkerVocabulary } = useDayMarkers();
   const [dayLog, setDayLogState] = useState<DayLog | null>(null);
+  // Which read is current: paging days fires one per day, they contend for the
+  // same DB lock, and an earlier one landing last would leave yesterday's
+  // markers on today's heading with nothing to correct it.
+  const dayLogSeq = useRef(0);
   const refreshDayLog = useCallback(async () => {
+    const mine = (dayLogSeq.current += 1);
     try {
-      setDayLogState(await getDayLog(dayKey));
+      const loaded = await getDayLog(dayKey);
+      if (dayLogSeq.current === mine) setDayLogState(loaded);
     } catch {
       // A day that cannot be read simply says nothing — this is an
       // annotation, and a failed read must not take the view with it.
-      setDayLogState(null);
+      if (dayLogSeq.current === mine) setDayLogState(null);
     }
   }, [dayKey]);
   useEffect(() => {

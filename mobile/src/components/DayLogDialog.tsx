@@ -45,6 +45,7 @@ export function DayLogDialog({
   // See the desktop twin: a tick's own write raises the same signal a foreign
   // one does, and re-reading mid-burst would paint the state we just left.
   const writesInFlight = useRef(0);
+  const writeSeq = useRef(0);
 
   // Load each time it opens, not once per mount: the same dialog serves
   // whichever day the user is standing on.
@@ -81,8 +82,12 @@ export function DayLogDialog({
       // write puts the old state back and says which one did not land.
       setLog(next);
       writesInFlight.current += 1;
+      // See the desktop twin: the first tick's response must not land on top
+      // of the second tick's state.
+      const mine = (writeSeq.current += 1);
       try {
-        setLog(await setDayLog(next));
+        const saved = await setDayLog(next);
+        if (writeSeq.current === mine) setLog(saved);
       } catch (err) {
         setLog(log);
         setError(err instanceof Error ? err.message : String(err));
@@ -136,6 +141,12 @@ export function DayLogDialog({
       {loading ? (
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.dayLog.loading')}
+        </Text>
+      ) : error != null && markers.length === 0 ? (
+        // The read failed. "You have no markers yet" invites the user to go
+        // and create the ones they already have.
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.dayLog.readFailed')}
         </Text>
       ) : markers.length === 0 ? (
         <Text style={styles.hint} accessibilityRole="text">

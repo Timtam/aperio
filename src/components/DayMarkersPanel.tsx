@@ -1,4 +1,11 @@
-import { useCallback, useId, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { moveDayMarker, type DayMarker } from '@aperio/shared';
@@ -57,9 +64,32 @@ export function DayMarkersPanel() {
     focusListOnNextMountRef.current = true;
     setEditingId(null);
   }, []);
-  const listRef = useAutoFocus<HTMLUListElement>(
-    focusListOnNextMountRef.current && editingId === null,
-  );
+  const listRef = useRef<HTMLUListElement>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
+  // Not `useAutoFocus`: that hook fires at most once per MOUNT, and this hook
+  // instance lives on the panel while the list mounts and unmounts under it —
+  // so the first exit from edit mode worked and every later one stranded focus
+  // on <body>. The flag is cleared here, and the section catches the case
+  // where the deleted marker was the last one and no list renders at all.
+  useEffect(() => {
+    if (!focusListOnNextMountRef.current || editingId !== null) return;
+    focusListOnNextMountRef.current = false;
+    (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
+  }, [editingId, markers.length]);
+
+  // Clamp the active option when the list shrinks. A stale id is not just a
+  // dangling aria-activedescendant: the reorder buttons resolve `undefined`
+  // and do nothing while still rendering, and Enter opens an editor for a
+  // marker that no longer exists.
+  useEffect(() => {
+    if (markers.length === 0) {
+      if (activeId !== null) setActiveId(null);
+      return;
+    }
+    if (activeId && !markers.some((m) => m.id === activeId)) {
+      setActiveId(markers[markers.length - 1].id);
+    }
+  }, [markers, activeId]);
 
   const reportError = useCallback(
     (err: unknown) => {
@@ -198,7 +228,9 @@ export function DayMarkersPanel() {
   );
 
   return (
-    <div className="settings-panel">
+    // `tabIndex={-1}` so focus has somewhere to land when the list itself is
+    // gone — deleting the last marker leaves no listbox to return to.
+    <div className="settings-panel" ref={sectionRef} tabIndex={-1}>
       <h3>{t('dialogs.settings.dayMarkers.heading')}</h3>
       <p className="form__hint">{t('dialogs.settings.dayMarkers.intro')}</p>
 
