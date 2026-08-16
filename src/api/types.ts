@@ -269,6 +269,13 @@ export interface NewContact {
   photo: ContactPhoto | null;
 }
 
+/** One entry in the day-marker vocabulary, and one day's record.
+ *
+ *  Defined in `@aperio/shared` because both frontends resolve and summarise
+ *  them with the same helpers; re-exported here so existing `src/api/types`
+ *  imports keep working. */
+export type { DayLog, DayMarker } from '@aperio/shared';
+
 export interface SearchResults {
   events: CalendarEvent[];
   tasks: Task[];

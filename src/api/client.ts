@@ -17,6 +17,8 @@ import type {
   Contact,
   ContactList,
   ContactPhoto,
+  DayLog,
+  DayMarker,
   FailedPluginInfo,
   FreeBusy,
   MemberRight,
@@ -357,6 +359,40 @@ export interface CreateTaskRequest {
 
 export const createTask = (request: CreateTaskRequest) =>
   invoke<Task>('create_task', { request });
+
+// ── Day markers ────────────────────────────────────────────────────────────
+//
+// The vocabulary of things worth noting about a day, and one record per day
+// saying which of them applied. Local-only and always synced — no external
+// provider models "how was Tuesday".
+
+export const listDayMarkers = () => invoke<DayMarker[]>('list_day_markers');
+
+export interface CreateDayMarkerRequest {
+  name: string;
+  symbol: string | null;
+  color_label: string | null;
+}
+
+export const createDayMarker = (request: CreateDayMarkerRequest) =>
+  invoke<DayMarker>('create_day_marker', { request });
+
+/** Write a marker back whole — rename, re-symbol, recolour and reorder are
+ *  all this one call. */
+export const updateDayMarker = (marker: DayMarker) =>
+  invoke<DayMarker>('update_day_marker', { marker });
+
+export const deleteDayMarker = (id: string) =>
+  invoke<void>('delete_day_marker', { id });
+
+/** One day. An untouched day comes back as an empty log, never null. */
+export const getDayLog = (day: string) => invoke<DayLog>('day_log', { day });
+
+/** Every logged day in an inclusive range — one call per view, not per day. */
+export const getDayLogsInRange = (from: string, to: string) =>
+  invoke<DayLog[]>('day_logs_in_range', { from, to });
+
+export const setDayLog = (log: DayLog) => invoke<DayLog>('set_day_log', { log });
 
 // ── Color labels ───────────────────────────────────────────────────────────
 
