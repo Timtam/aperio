@@ -158,7 +158,10 @@ export function DayLogDialog({
             const ticked = log.markers.includes(m.id);
             return (
               <li key={m.id}>
-                <label className="form__field form__field--check">
+                {/* `--inline` rather than the column default: a checkbox, an
+                    emoji and a word on three lines each turned a short list
+                    into a scrolling one. */}
+                <label className="form__field form__field--inline">
                   <input
                     type="checkbox"
                     checked={ticked}
@@ -167,7 +170,7 @@ export function DayLogDialog({
                   {/* The symbol is decoration beside the name — a screen
                       reader announcing an emoji's own name in place of what
                       the user called this would be worse than silence. */}
-                  {m.symbol && <span aria-hidden="true">{m.symbol} </span>}
+                  {m.symbol && <span aria-hidden="true">{m.symbol}</span>}
                   <span>{m.name}</span>
                 </label>
               </li>

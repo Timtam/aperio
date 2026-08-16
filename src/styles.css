@@ -1405,6 +1405,25 @@ button[aria-disabled='true'] {
   align-items: center;
 }
 
+/* The check-in list: one line per item, no marker. It had neither rule — the
+   class was referenced and never written — so every item rendered as a bulleted
+   block with the checkbox, the emoji and the name stacked on three lines. A
+   dozen items then filled the dialog for no reason. */
+.form__check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form__check-list .form__field {
+  /* Room for a comfortable pointer target without a second line. */
+  padding: var(--space-1) 0;
+  cursor: pointer;
+}
+
 /* Attendee free/busy check (DESIGN.md §7.3). A button that queries the
  * provider's availability + a per-attendee busy/free list. */
 .availability__check {
@@ -1928,6 +1947,74 @@ button[aria-disabled='true'] {
 .color-labels__edit {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── Settings list panels (Check-in) ────────────────────────────────────── */
+/*
+   These class names were referenced by the panel and never written, so the
+   list rendered as a browser-default bulleted <ul> with each row on its own
+   several lines and NO selected-row treatment at all — which is why a sighted
+   user could not tell (or set) which row the action buttons act on.
+
+   Modelled on `.color-labels` above so the Settings dialog keeps one idiom.
+*/
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.settings-list__row {
+  /* One line per entry: symbol and name side by side, never stacked. */
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  /* The drop marker is drawn as a border so it never changes the row's
+     height — a list that reflows under a dragged pointer is unaimable. */
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.settings-list__row--active {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.settings-list__row--grabbable {
+  cursor: grab;
+}
+
+.settings-list__row--dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.settings-list__row--drop-before {
+  border-top-color: var(--color-accent);
+}
+
+.settings-list__row--drop-after {
+  border-bottom-color: var(--color-accent);
+}
+
+.settings-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 

@@ -4,6 +4,8 @@ import {
   compactDaySummary,
   dayLogIsEmpty,
   moveDayMarker,
+  reorderDayMarkers,
+  sameDayMarkerOrder,
   resolveDayMarkers,
   sortDayMarkers,
   spokenDaySummary,
@@ -95,5 +97,71 @@ describe('day markers', () => {
       'read',
       'quiet',
     ]);
+  });
+
+  describe('reorderDayMarkers (the drag-and-drop drop)', () => {
+    const ids = (list: DayMarker[]) => list.map((m) => m.id);
+
+    it('moves a marker to the index the drop names', () => {
+      expect(ids(reorderDayMarkers(vocab, 'quiet', 0))).toEqual([
+        'quiet',
+        'sport',
+        'read',
+      ]);
+      expect(ids(reorderDayMarkers(vocab, 'sport', 2))).toEqual([
+        'read',
+        'quiet',
+        'sport',
+      ]);
+    });
+
+    it('renumbers every position, not just the ones that visibly moved', () => {
+      // Positions are a total order. Patching only the pair that swapped
+      // leaves gaps a later insert lands in the middle of.
+      const moved = reorderDayMarkers(vocab, 'quiet', 0);
+      expect(moved.map((m) => m.position)).toEqual([0, 1, 2]);
+    });
+
+    it('keeps the order for a drop that changes nothing', () => {
+      // A drop back onto the row's own slot, and both ends of the range.
+      for (const [id, to] of [
+        ['read', 1],
+        ['sport', -1],
+        ['sport', 3],
+      ] as const) {
+        expect(ids(reorderDayMarkers(vocab, id, to))).toEqual([
+          'sport',
+          'read',
+          'quiet',
+        ]);
+      }
+    });
+
+    it('reports "nothing moved" by ORDER, never by identity', () => {
+      // Both helpers sort first, and sorting allocates — so `===` against the
+      // input can never be true. The guard that used to rely on it was dead:
+      // "move up" on the first row still flipped busy and announced a new
+      // position for a move that had not happened.
+      const noop = reorderDayMarkers(vocab, 'read', 1);
+      expect(noop).not.toBe(vocab);
+      expect(sameDayMarkerOrder(vocab, noop)).toBe(true);
+      expect(sameDayMarkerOrder(vocab, reorderDayMarkers(vocab, 'read', 0))).toBe(
+        false,
+      );
+    });
+
+    it('ignores an id that is not in the list', () => {
+      expect(ids(reorderDayMarkers(vocab, 'gone', 0))).toEqual([
+        'sport',
+        'read',
+        'quiet',
+      ]);
+    });
+
+    it('agrees with moveDayMarker, which is now expressed on top of it', () => {
+      expect(ids(moveDayMarker(vocab, 'quiet', -1))).toEqual(
+        ids(reorderDayMarkers(vocab, 'quiet', 1)),
+      );
+    });
   });
 });

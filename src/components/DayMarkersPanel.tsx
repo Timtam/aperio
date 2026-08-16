@@ -8,7 +8,12 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { moveDayMarker, type DayMarker } from '@aperio/shared';
+import {
+  moveDayMarker,
+  reorderDayMarkers,
+  sameDayMarkerOrder,
+  type DayMarker,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
@@ -54,6 +59,13 @@ export function DayMarkersPanel() {
 
   const listId = useId();
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Drag-and-drop is a MOUSE affordance layered on top; it adds nothing to the
+  // accessibility tree and takes nothing from it. `dragId` is the row being
+  // carried, `dropIndex` the slot it would land in — kept apart so the drop
+  // marker can sit BELOW the last row (index === length) without pretending
+  // there is a row there.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
 
   // Leaving edit mode should land focus back on the listbox — but NOT on the
   // panel's first mount, including a Settings tab switch: the tab keeps focus
@@ -99,6 +111,8 @@ export function DayMarkersPanel() {
   );
 
   const editing = markers.find((m) => m.id === editingId) ?? null;
+  /** The row the action buttons below the list act on. */
+  const active = markers.find((m) => m.id === activeId) ?? null;
 
   const onAdd = useCallback(
     async (e: FormEvent) => {
@@ -171,7 +185,7 @@ export function DayMarkersPanel() {
   const onMove = useCallback(
     async (marker: DayMarker, delta: number) => {
       const reordered = moveDayMarker(markers, marker.id, delta);
-      if (reordered === markers) return;
+      if (sameDayMarkerOrder(markers, reordered)) return;
       replace(reordered);
       setBusy(true);
       try {
@@ -189,6 +203,43 @@ export function DayMarkersPanel() {
           t('dialogs.settings.dayMarkers.moved', {
             name: marker.name,
             position: (reordered.findIndex((m) => m.id === marker.id) ?? 0) + 1,
+            count: reordered.length,
+          }),
+        );
+      } catch (err) {
+        reportError(err);
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [markers, replace, refresh, announce, t, reportError],
+  );
+
+  /** Move `marker` to `toIndex` and write back every row that shifted. The
+   *  drop half of drag-and-drop; `onMove` is the same thing by a delta. */
+  const onDropAt = useCallback(
+    async (id: string, toIndex: number) => {
+      const reordered = reorderDayMarkers(markers, id, toIndex);
+      if (sameDayMarkerOrder(markers, reordered)) return;
+      const marker = markers.find((m) => m.id === id);
+      if (!marker) return;
+      replace(reordered);
+      setBusy(true);
+      try {
+        const before = new Map(markers.map((m) => [m.id, m.position ?? 0]));
+        await duringDayMarkerBurst(async () => {
+          for (const m of reordered) {
+            if (before.get(m.id) !== m.position) await updateDayMarker(m);
+          }
+        });
+        // Announced like the button move, because a drag can end somewhere the
+        // user did not intend and this is the only confirmation of where it
+        // actually landed.
+        announce(
+          t('dialogs.settings.dayMarkers.moved', {
+            name: marker.name,
+            position: reordered.findIndex((m) => m.id === id) + 1,
             count: reordered.length,
           }),
         );
@@ -275,7 +326,69 @@ export function DayMarkersPanel() {
                   id={`${listId}-${m.id}`}
                   role="option"
                   aria-selected={m.id === activeId}
-                  className="settings-list__row"
+                  className={
+                    'settings-list__row settings-list__row--grabbable' +
+                    (m.id === activeId ? ' settings-list__row--active' : '') +
+                    (m.id === dragId ? ' settings-list__row--dragging' : '') +
+                    (dropIndex === i ? ' settings-list__row--drop-before' : '') +
+                    (dropIndex === markers.length && i === markers.length - 1
+                      ? ' settings-list__row--drop-after'
+                      : '')
+                  }
+                  // A row a mouse can select. Without this the only way to
+                  // move the selection was the arrow keys, so every button
+                  // below acted on the first marker forever and the rest of
+                  // the list was unreachable for anyone using a mouse.
+                  onClick={() => {
+                    setActiveId(m.id);
+                    // Keep the real focus on the listbox: `aria-activedescendant`
+                    // only means anything while the box itself is focused, and
+                    // the arrow keys have to keep working from wherever the
+                    // click left off.
+                    listRef.current?.focus({ preventScroll: true });
+                  }}
+                  // The mouse idiom for "open this", the same one the calendar
+                  // uses on a day.
+                  onDoubleClick={() => {
+                    setActiveId(m.id);
+                    setEditingId(m.id);
+                  }}
+                  draggable={!busy}
+                  onDragStart={(e) => {
+                    setDragId(m.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    // Some browsers refuse to start a drag without payload.
+                    e.dataTransfer.setData('text/plain', m.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragId(null);
+                    setDropIndex(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (dragId == null) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    // Past the midpoint means "after this row" — otherwise the
+                    // bottom half of the last row could never be a target and
+                    // the end of the list would be unreachable.
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const after = e.clientY > box.top + box.height / 2;
+                    setDropIndex(after ? i + 1 : i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const id = dragId;
+                    const target = dropIndex;
+                    setDragId(null);
+                    setDropIndex(null);
+                    if (id == null || target == null) return;
+                    // Removing the row first shifts every later slot down by
+                    // one, so a drop below its own position has to compensate.
+                    const from = markers.findIndex((x) => x.id === id);
+                    const to = target > from ? target - 1 : target;
+                    setActiveId(id);
+                    void onDropAt(id, to);
+                  }}
                 >
                   {/* The symbol is decoration; the row's name carries the
                       meaning, and a screen reader must not read an emoji's
@@ -294,33 +407,62 @@ export function DayMarkersPanel() {
             <p className="form__hint">{t('dialogs.settings.dayMarkers.listHint')}</p>
           )}
 
-          {/* Reorder lives outside the listbox: putting two buttons in every
-              row would triple its tab stops, and the order is something the
-              user sets once rather than while reading. */}
-          {activeId && markers.length > 1 && (
+          {/* The actions live outside the listbox rather than in every row:
+              four buttons per row would cost five tab stops per marker, and
+              these are things the user does once rather than while reading.
+              They act on the SELECTED row — which a mouse can now set — and
+              every label names it, so a screen reader never has to remember
+              which one is selected to know what a button will do. */}
+          {active && (
             <div className="settings-panel__actions">
               <button
                 type="button"
                 className="form__action"
                 aria-disabled={busy}
+                aria-label={`${t('dialogs.settings.dayMarkers.edit')}: ${active.name}`}
                 onClick={() => {
-                  const m = markers.find((x) => x.id === activeId);
-                  if (m && !busy) void onMove(m, -1);
+                  if (!busy) setEditingId(active.id);
                 }}
               >
-                {t('dialogs.settings.dayMarkers.moveUp')}
+                {t('dialogs.settings.dayMarkers.edit')}
               </button>
               <button
                 type="button"
-                className="form__action"
+                className="form__action form__action--destructive"
                 aria-disabled={busy}
+                aria-label={`${t('dialogs.settings.dayMarkers.delete')}: ${active.name}`}
                 onClick={() => {
-                  const m = markers.find((x) => x.id === activeId);
-                  if (m && !busy) void onMove(m, 1);
+                  if (!busy) void onDelete(active);
                 }}
               >
-                {t('dialogs.settings.dayMarkers.moveDown')}
+                {t('dialogs.settings.dayMarkers.delete')}
               </button>
+              {markers.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="form__action"
+                    aria-disabled={busy}
+                    aria-label={`${t('dialogs.settings.dayMarkers.moveUp')}: ${active.name}`}
+                    onClick={() => {
+                      if (!busy) void onMove(active, -1);
+                    }}
+                  >
+                    {t('dialogs.settings.dayMarkers.moveUp')}
+                  </button>
+                  <button
+                    type="button"
+                    className="form__action"
+                    aria-disabled={busy}
+                    aria-label={`${t('dialogs.settings.dayMarkers.moveDown')}: ${active.name}`}
+                    onClick={() => {
+                      if (!busy) void onMove(active, 1);
+                    }}
+                  >
+                    {t('dialogs.settings.dayMarkers.moveDown')}
+                  </button>
+                </>
+              )}
             </div>
           )}
 

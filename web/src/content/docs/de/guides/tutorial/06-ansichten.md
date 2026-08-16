@@ -131,6 +131,14 @@ Jeder Punkt hat:
 - optional eine **Farbe** aus deiner vorhandenen Palette,
 - eine **Position**, damit die Liste so zurückliest, wie du sie gebaut hast.
 
+Einen ausgewählten Punkt kannst du **bearbeiten**, **löschen** und
+**umsortieren**. Am Rechner ist die Liste ein einziger Pfeiltasten-Stopp: Die
+Pfeiltasten bewegen die Auswahl, die Eingabetaste öffnet den ausgewählten
+Punkt, und die Knöpfe unter der Liste wirken auf ihn — jeder nennt dabei den
+Punkt, den er trifft. Mit der Maus wählst du per Klick aus, öffnest per
+Doppelklick, oder **ziehst eine Zeile** einfach an ihren neuen Platz. Am
+Telefon trägt jede Zeile ihre eigenen Felder und Knöpfe.
+
 Einen Punkt zu löschen lässt deine bisherigen Check-ins unberührt. Er taucht
 dort einfach nicht mehr auf — nichts schreibt deine Historie um, und legst du
 ihn neu an, ist er wieder da.

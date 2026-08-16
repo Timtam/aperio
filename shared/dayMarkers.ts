@@ -65,6 +65,22 @@ export function resolveDayMarkers(
   return vocabulary.filter((m) => ticked.has(m.id));
 }
 
+/**
+ * Whether two vocabularies are in the same order.
+ *
+ * How a caller asks "did that move change anything" — NOT `===`, which can
+ * never be true here because both reorder helpers sort first and sorting
+ * allocates. The identity check that used to stand in for this was dead code:
+ * a "move up" on the first row still flipped the busy flag and announced a new
+ * position, for a move that had not happened.
+ */
+export function sameDayMarkerOrder(
+  a: readonly DayMarker[],
+  b: readonly DayMarker[],
+): boolean {
+  return a.length === b.length && a.every((m, i) => m.id === b[i].id);
+}
+
 /** Tick or untick one marker, returning the day as it now stands. */
 export function toggleDayMarker(log: DayLog, id: string): DayLog {
   const has = log.markers.includes(id);
@@ -143,8 +159,10 @@ export function sortDayMarkers(markers: readonly DayMarker[]): DayMarker[] {
  * Returns the whole list with `position` renumbered from zero, because that is
  * what the caller has to write back: positions are a total order, and patching
  * only the two that swapped leaves gaps that a later insert lands in the
- * middle of. Out-of-range moves return the list unchanged, so the callers can
- * offer "move up" on the first row without special-casing it.
+ * middle of. An out-of-range move comes back in the ORDER it went in, so the
+ * callers can offer "move up" on the first row without special-casing it —
+ * test that with {@link sameDayMarkerOrder}, never with `===`: this always
+ * allocates.
  */
 export function moveDayMarker(
   markers: readonly DayMarker[],
@@ -154,10 +172,28 @@ export function moveDayMarker(
   const ordered = sortDayMarkers(markers);
   const from = ordered.findIndex((m) => m.id === id);
   if (from < 0) return ordered;
-  const to = from + delta;
-  if (to < 0 || to >= ordered.length) return ordered;
+  return reorderDayMarkers(ordered, id, from + delta);
+}
+
+/**
+ * The vocabulary with one marker moved TO a given index.
+ *
+ * What a drag-and-drop drop needs, where the gesture names a destination rather
+ * than a distance. Same contract as {@link moveDayMarker} otherwise: the whole
+ * list comes back renumbered from zero, and an index outside the list (or a
+ * drop back onto the row's own slot) comes back in the order it went in.
+ */
+export function reorderDayMarkers(
+  markers: readonly DayMarker[],
+  id: string,
+  toIndex: number,
+): DayMarker[] {
+  const ordered = sortDayMarkers(markers);
+  const from = ordered.findIndex((m) => m.id === id);
+  if (from < 0) return ordered;
+  if (toIndex < 0 || toIndex >= ordered.length || toIndex === from) return ordered;
   const moved = ordered.slice();
   const [item] = moved.splice(from, 1);
-  moved.splice(to, 0, item);
+  moved.splice(toIndex, 0, item);
   return moved.map((m, i) => ({ ...m, position: i }));
 }

@@ -982,6 +982,7 @@
         "colorNone": "No colour",
         "editHeading": "Edit “{{name}}”",
         "save": "Save",
+        "edit": "Edit item",
         "cancel": "Cancel",
         "delete": "Delete item",
         "deleteHint": "Deleting an item leaves your past check-ins untouched — it simply stops appearing in them.",

@@ -9,7 +9,12 @@ import {
   View,
 } from 'react-native';
 
-import { moveDayMarker, sortDayMarkers, type DayMarker } from '@aperio/shared';
+import {
+  moveDayMarker,
+  sameDayMarkerOrder,
+  sortDayMarkers,
+  type DayMarker,
+} from '@aperio/shared';
 
 import {
   createDayMarker,
@@ -141,7 +146,7 @@ export default function DayMarkersScreen() {
   const onMove = useCallback(
     async (marker: DayMarker, delta: number) => {
       const reordered = moveDayMarker(markers, marker.id, delta);
-      if (reordered === markers) return;
+      if (sameDayMarkerOrder(markers, reordered)) return;
       setMarkers(reordered);
       try {
         // Only the rows that actually shifted — a move near the top of a long

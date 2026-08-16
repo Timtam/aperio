@@ -979,6 +979,7 @@
         "colorNone": "Ohne Farbe",
         "editHeading": "„{{name}}\" bearbeiten",
         "save": "Speichern",
+        "edit": "Punkt bearbeiten",
         "cancel": "Abbrechen",
         "delete": "Punkt löschen",
         "deleteHint": "Einen Punkt zu löschen lässt deine bisherigen Check-ins unberührt — er taucht dort einfach nicht mehr auf.",

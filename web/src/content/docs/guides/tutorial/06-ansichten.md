@@ -124,6 +124,13 @@ Each item has:
 - an optional **colour** from your existing palette,
 - a **position**, so the list reads back in the order you built it.
 
+Select an item to **edit**, **delete** or **reorder** it. On the desktop the
+list is one arrow-navigable stop: arrow keys move the selection, Enter opens
+the selected item, and the buttons under the list act on it — each of them
+names the item it will affect. With a mouse, click to select, double-click to
+edit, or simply **drag a row** to a new place. On the phone each row carries
+its own fields and buttons.
+
 Deleting an item leaves your past check-ins untouched. It simply stops
 appearing in them — nothing rewrites your history, and re-creating it brings
 it back.
