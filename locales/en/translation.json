@@ -1935,7 +1935,7 @@
     },
     "dayLog": {
       "title": "Check-in: {{day}}",
-      "intro": "Tick what applied. Each tick saves straight away — unticking is the undo.",
+      "intro": "Tick what applied. Arrow keys move through the list, Space ticks. Each tick saves straight away — unticking is the undo.",
       "loading": "Loading your check-in …",
       "noMarkers": "No check-in items yet. Add some under Settings, Check-in.",
       "readFailed": "This day could not be read. The message above says why.",

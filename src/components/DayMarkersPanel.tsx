@@ -393,12 +393,14 @@ export function DayMarkersPanel() {
                   {/* The symbol is decoration; the row's name carries the
                       meaning, and a screen reader must not read an emoji's
                       own name in place of what the user called this. */}
-                  {m.symbol && <span aria-hidden="true">{m.symbol} </span>}
-                  {t('dialogs.settings.dayMarkers.rowLabel', {
-                    name: m.name,
-                    position: i + 1,
-                    count: markers.length,
-                  })}
+                  {m.symbol && <span aria-hidden="true">{m.symbol}</span>}
+                  {/* Just the name. This used to append ", 1 of 5", which a
+                      listbox announces by itself from `role="option"` and the
+                      row count — so it was said twice, and printed on screen
+                      where it means nothing at all. The phone keeps it: a
+                      column of text fields is not a listbox and nothing there
+                      enumerates. */}
+                  {m.name}
                 </li>
               ))}
             </ul>

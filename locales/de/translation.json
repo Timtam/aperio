@@ -1935,7 +1935,7 @@
     },
     "dayLog": {
       "title": "Check-in: {{day}}",
-      "intro": "Hake ab, was zutraf. Jedes Häkchen speichert sofort — das Abwählen ist die Rücknahme.",
+      "intro": "Hake ab, was zutraf. Pfeiltasten bewegen durch die Liste, Leertaste hakt ab. Jedes Häkchen speichert sofort — das Abwählen ist die Rücknahme.",
       "loading": "Dein Check-in wird geladen …",
       "noMarkers": "Noch keine Check-in-Punkte. Lege welche unter Einstellungen, Check-in an.",
       "readFailed": "Dieser Tag konnte nicht gelesen werden. Die Meldung oben sagt, warum.",

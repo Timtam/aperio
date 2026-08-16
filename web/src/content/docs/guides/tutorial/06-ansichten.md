@@ -145,7 +145,8 @@ of them would cost more to get past than they are worth. The button's spoken
 name always names its day, so it is never ambiguous which one you are about to
 open.
 
-It opens a checkbox per item. Every tick **saves immediately** — there is no
+It opens a checkbox per item — one list, one tab stop: arrow keys move
+through it and Space ticks. Every tick **saves immediately** — there is no
 Save button, because recording a day has to cost almost nothing. That also
 means unticking is the undo: there is nothing to cancel.
 

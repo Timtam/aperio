@@ -153,7 +153,9 @@ oder einunddreißig davon kosten mehr Wege, als sie einbringen. Der gesprochene
 Name des Knopfes nennt immer seinen Tag, es ist also nie unklar, welchen du
 gerade öffnest.
 
-Er öffnet ein Kontrollkästchen je Punkt. Jedes Häkchen **speichert sofort** —
+Er öffnet ein Kontrollkästchen je Punkt — eine Liste, ein Tabstopp: Die
+Pfeiltasten wandern hindurch, die Leertaste hakt ab. Jedes Häkchen
+**speichert sofort** —
 es gibt keinen Speichern-Knopf, weil das Festhalten eines Tages fast nichts
 kosten darf. Das heißt zugleich: Das Abwählen ist die Rücknahme, es gibt nichts
 abzubrechen.
