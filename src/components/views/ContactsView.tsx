@@ -338,14 +338,20 @@ export function ContactsView() {
           {t('views.contacts.heading')}
         </h2>
         <div className="contacts-view__actions">
-          {/* Refresh button drives a manual sync pass. Disabled while
-              a pass is in flight so accidental double-clicks don't
-              queue up. The status text below the listbox renders
-              the last-synced timestamp once a pass has completed. */}
+          {/* Refresh button drives a manual sync pass. Guarded while a pass is
+              in flight so accidental double-clicks don't queue up — guarded,
+              not `disabled`: a native disabled button leaves the focus order
+              the instant it flips and the browser strands focus on <body>.
+              This button sets its own busy state on press, so it stranded the
+              very user who pressed it. Inside a dialog the Modal's focus net
+              catches that; out here in a view there is no net. The status text
+              below the listbox renders the last-synced timestamp once a pass
+              has completed. */}
           <button
             type="button"
             className="form__action"
             onClick={() => {
+              if (triggering || syncStatus?.in_flight === true) return;
               // Omit the explicit `false` — defer to the user's
               // `contacts.includeReadOnlyOnSync` pref so the
               // Refresh button matches whatever the periodic
@@ -354,7 +360,7 @@ export function ContactsView() {
               // People even when the user had opted in.
               void triggerSync();
             }}
-            disabled={triggering || syncStatus?.in_flight === true}
+            aria-disabled={triggering || syncStatus?.in_flight === true || undefined}
             aria-label={t('views.contacts.refreshAria')}
             title={t('views.contacts.refreshAria')}
           >

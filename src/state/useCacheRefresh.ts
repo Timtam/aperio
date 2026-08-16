@@ -60,7 +60,10 @@ export function useCacheRefresh() {
     };
   }, []);
 
-  const refreshNow = useCallback(async () => {
+  /** Start a warm pass. Resolves `false` when the command itself was rejected,
+   *  so the caller can say so rather than announce a success that never
+   *  happened — the spinner going out looks identical either way. */
+  const refreshNow = useCallback(async (): Promise<boolean> => {
     // Optimistic spinner flip so the button reacts immediately; the
     // backend's status event overwrites this a beat later.
     setStatus((prev) =>
@@ -75,9 +78,11 @@ export function useCacheRefresh() {
     );
     try {
       await refreshExternalCache();
+      return true;
     } catch (err) {
       console.warn('refresh_external_cache failed', err);
       setStatus((prev) => (prev ? { ...prev, refreshing: false } : prev));
+      return false;
     }
   }, []);
 

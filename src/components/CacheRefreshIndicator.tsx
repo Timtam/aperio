@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useAnnouncer } from '../a11y/announcerContext';
 import { useCacheRefresh } from '../state/useCacheRefresh';
 
 /**
@@ -14,8 +16,22 @@ import { useCacheRefresh } from '../state/useCacheRefresh';
  */
 export function CacheRefreshIndicator() {
   const { t, i18n } = useTranslation();
+  const announce = useAnnouncer();
   const { refreshing, lastRefreshedAt, fetchedTargets, totalTargets, refreshNow } =
     useCacheRefresh();
+
+  // Whether the running pass is one the USER started. Background warm passes
+  // run on their own all the time; announcing those would be chatter about
+  // something nobody asked for.
+  const mineRef = useRef(false);
+  useEffect(() => {
+    if (refreshing || !mineRef.current) return;
+    mineRef.current = false;
+    // Focus stayed on the button (see below), but a changed accessible name
+    // under a focused element is not re-read — so without this the pass ends
+    // in silence and the user has no way to know it is done.
+    announce(t('cacheRefresh.done'));
+  }, [refreshing, announce, t]);
 
   const lastLabel = lastRefreshedAt
     ? t('cacheRefresh.lastUpdated', {
@@ -43,8 +59,26 @@ export function CacheRefreshIndicator() {
     <button
       type="button"
       className={`cache-refresh${refreshing ? ' cache-refresh--spinning' : ''}`}
-      onClick={() => void refreshNow()}
-      disabled={refreshing}
+      onClick={() => {
+        // Guarded rather than `disabled`: a native disabled button is removed
+        // from the focus order THE INSTANT it flips, and the browser drops
+        // focus to <body> rather than moving it anywhere. Pressing this used
+        // to strand the screen reader in nothing for the whole pass — and the
+        // press is what sets `refreshing`, so it stranded itself.
+        if (refreshing) return;
+        void (async () => {
+          // The command only QUEUES the pass, so it resolves long before the
+          // pass ends — arming after it means the completion announcement is
+          // armed only once we know there is a pass to complete, with no race
+          // against the effect below.
+          if (await refreshNow()) mineRef.current = true;
+          // Rejected outright. The spinner going out looks exactly like
+          // success from here, so announcing "refreshed" would be a lie told
+          // in the one place the user is listening.
+          else announce(t('cacheRefresh.failed'));
+        })();
+      }}
+      aria-disabled={refreshing || undefined}
       aria-label={`${t('cacheRefresh.label')}: ${title}`}
       title={title}
     >

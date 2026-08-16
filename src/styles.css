@@ -2910,11 +2910,15 @@ button[aria-disabled='true'] {
   line-height: 1;
 }
 
-.cache-refresh:hover:not(:disabled) {
+/* `aria-disabled`, never `disabled`: the native attribute drops the button out
+   of the focus order the instant it flips, and the browser strands focus on
+   <body> rather than moving it anywhere. This button sets its own busy state
+   on press, so it stranded the very user who pressed it. */
+.cache-refresh:hover:not([aria-disabled='true']) {
   color: var(--color-fg);
 }
 
-.cache-refresh:disabled {
+.cache-refresh[aria-disabled='true'] {
   cursor: default;
 }
 

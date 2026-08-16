@@ -278,6 +278,7 @@
     "refreshing": "Refreshing external data …",
     "progress": "External data: {{fetched}} of {{total}} refreshed …",
     "done": "External data updated.",
+    "failed": "External data could not be refreshed.",
     "lastUpdated": "External data updated: {{time}}",
     "never": "External data not refreshed yet",
     "refreshNow": "Refresh external data"
