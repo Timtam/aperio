@@ -20,13 +20,18 @@ import {
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
 import {
+  EVENT_DND_TYPE,
+  moveEventToSlot,
+  readEventDrag,
   readTaskDrag,
   scheduleTaskAtTime,
   scheduleTaskOnDay,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
+  type MoveCopyScope,
 } from '../../state/moveActions';
+import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useEventGroups } from '../../state/useEventGroups';
@@ -671,7 +676,15 @@ export function DayView() {
   // travels at least a slot).
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const handleGridDragOver = (e: React.DragEvent<HTMLElement>) => {
-    if (listMode || !e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+    if (listMode) return;
+    // Events as well as tasks. The canvas used to accept only tasks, which is
+    // why an event could be dragged (the chips have always been draggable) and
+    // never dropped anywhere: a day view has only one day, so a move that
+    // cannot change the TIME cannot change anything at all.
+    const types = e.dataTransfer.types;
+    if (!types.includes(TASK_DND_TYPE) && !types.includes(EVENT_DND_TYPE)) {
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setGridDragOver(true);
@@ -686,27 +699,86 @@ export function DayView() {
     }
     setGridDragOver(false);
   };
-  const handleGridDrop = (e: React.DragEvent<HTMLElement>) => {
-    setGridDragOver(false);
-    if (listMode) return;
-    const payload = readTaskDrag(e.dataTransfer);
-    if (!payload) return;
-    e.preventDefault();
-    const origin = dragOriginRef.current;
-    if (
-      origin &&
-      Math.abs(e.clientX - origin.x) < 8 &&
-      Math.abs(e.clientY - origin.y) < 8
-    ) {
-      return; // double-click misfire, not a reposition
+  // A recurring event asks the §7.5 scope question before it moves, exactly as
+  // the week planner does — "only this occurrence" and "the whole series" mean
+  // very different things and a drag cannot express which.
+  const [pendingEventDrop, setPendingEventDrop] = useState<{
+    event: CalendarEvent;
+    minute: number;
+  } | null>(null);
+
+  // Plain functions, like the drag handlers around them: `clockAt` is rebuilt
+  // every render, so wrapping these in useCallback would memoise nothing.
+  const performEventTimeDrop = async (
+    ev: CalendarEvent,
+    minute: number,
+    scope: MoveCopyScope,
+  ) => {
+    try {
+      const moved = await moveEventToSlot(ev, dayKey, minute, scope);
+      if (!moved) return; // dropped back on its own time — nothing happened
+      announce(
+        t('views.eventMovedToTime', {
+          title: ev.title,
+          date: fmt.format(anchor, 'PPP'),
+          time: clockAt(minute),
+        }),
+      );
+      invalidateData();
+    } catch (err) {
+      announce(
+        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+      );
     }
+  };
+
+  const handleEventTimeDrop = (ev: CalendarEvent, minute: number) => {
+    if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
+      setPendingEventDrop({ event: ev, minute });
+      return;
+    }
+    void performEventTimeDrop(ev, minute, 'series');
+  };
+
+  /** Minute of day the pointer let go on, from the canvas geometry. */
+  const dropMinuteFrom = (e: React.DragEvent<HTMLElement>): number => {
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction =
       rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
-    const minute = dropMinuteInWindow(fraction, {
+    return dropMinuteInWindow(fraction, {
       startMin: dayStartMin,
       endMin: dayEndMin,
     });
+  };
+
+  /** A drag that ended within a few pixels of where it started — a
+   *  double-click misfire, not a reposition. */
+  const isMisfire = (e: React.DragEvent<HTMLElement>): boolean => {
+    const origin = dragOriginRef.current;
+    return (
+      origin != null &&
+      Math.abs(e.clientX - origin.x) < 8 &&
+      Math.abs(e.clientY - origin.y) < 8
+    );
+  };
+
+  const handleGridDrop = (e: React.DragEvent<HTMLElement>) => {
+    setGridDragOver(false);
+    if (listMode) return;
+    const droppedEvent = readEventDrag(e.dataTransfer);
+    if (droppedEvent) {
+      e.preventDefault();
+      if (isMisfire(e)) return;
+      handleEventTimeDrop(droppedEvent, dropMinuteFrom(e));
+      return;
+    }
+    const payload = readTaskDrag(e.dataTransfer);
+    if (!payload) return;
+    e.preventDefault();
+    if (isMisfire(e)) {
+      return;
+    }
+    const minute = dropMinuteFrom(e);
     const clock = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
     // Write the CURRENT row, not the dragstart snapshot — a sync refresh can
     // land mid-drag, and re-sending the stale snapshot with a fresh
@@ -1500,6 +1572,33 @@ export function DayView() {
         message={t('dialogs.confirm.deleteEventMessage', {
           title: confirmTarget?.title ?? '',
         })}
+      />
+
+      {/* Dropping a recurring event on a new time asks the same §7.5 question
+          the week planner asks — a drag cannot say whether the user meant this
+          one occurrence or every one of them. */}
+      <MoveEventScopeDialog
+        isOpen={pendingEventDrop !== null}
+        onClose={() => setPendingEventDrop(null)}
+        title={pendingEventDrop?.event.title ?? ''}
+        onOccurrence={() => {
+          if (pendingEventDrop) {
+            void performEventTimeDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.minute,
+              'occurrence',
+            );
+          }
+        }}
+        onSeries={() => {
+          if (pendingEventDrop) {
+            void performEventTimeDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.minute,
+              'series',
+            );
+          }
+        }}
       />
 
       <DayLogDialog

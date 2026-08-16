@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 import {
   EVENT_DND_TYPE,
   moveEventToDay,
+  moveEventToSlot,
   moveOrCopyEvent,
   moveTaskToBacklog,
   readEventDrag,
@@ -286,5 +287,84 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     expect(localKey(args.event.start)).toBe(target);
     // The recurrence rule travels with the master.
     expect(args.event.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+  });
+});
+
+describe('moveEventToSlot (dropping an event in the hour grid)', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+  });
+
+  const localKey = (iso: string, plusDays = 0) => {
+    const d = new Date(iso);
+    d.setDate(d.getDate() + plusDays);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  };
+
+  const eventAt = (start: string, end: string, allDay = false) =>
+    ({
+      id: 'e1',
+      calendar_id: 'c1',
+      title: 'Standup',
+      start,
+      end,
+      all_day: allDay,
+      recurrence: null,
+    }) as unknown as CalendarEvent;
+
+  const written = () => invokeMock.mock.calls[0][1].event;
+
+  it('carries the DURATION rather than recomputing it', async () => {
+    // A drop names a START. An event that grew or shrank because it was
+    // dragged would be a bug wearing a feature's clothes.
+    const ev = eventAt('2026-06-15T09:00:00.000Z', '2026-06-15T10:30:00.000Z');
+    expect(await moveEventToSlot(ev, localKey(ev.start), 14 * 60)).toBe(true);
+    const row = written();
+    expect(new Date(row.end).getTime() - new Date(row.start).getTime()).toBe(
+      90 * 60_000,
+    );
+    expect(new Date(row.start).getHours()).toBe(14);
+    expect(new Date(row.start).getMinutes()).toBe(0);
+  });
+
+  it('does nothing when neither the day nor the time changed', async () => {
+    // The "dragged three pixels" misfire. A no-op write is not free: it bumps
+    // updated_at at the provider and can lose a concurrent edit.
+    const ev = eventAt('2026-06-15T09:00:00.000Z', '2026-06-15T10:00:00.000Z');
+    const start = new Date(ev.start);
+    const same = start.getHours() * 60 + start.getMinutes();
+    expect(await moveEventToSlot(ev, localKey(ev.start), same)).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it('moves the day and the time together', async () => {
+    const ev = eventAt('2026-06-15T09:00:00.000Z', '2026-06-15T10:00:00.000Z');
+    const target = localKey(ev.start, 3);
+    expect(await moveEventToSlot(ev, target, 7 * 60 + 30)).toBe(true);
+    const row = written();
+    expect(localKey(row.start)).toBe(target);
+    expect(new Date(row.start).getHours()).toBe(7);
+    expect(new Date(row.start).getMinutes()).toBe(30);
+  });
+
+  it('ignores the minute for an all-day event', async () => {
+    // It has no time to place, and turning it into a timed event is a much
+    // bigger decision than a drag can carry.
+    const ev = eventAt('2026-06-15T00:00:00.000Z', '2026-06-16T00:00:00.000Z', true);
+    const target = localKey(ev.start, 3);
+    expect(await moveEventToSlot(ev, target, 15 * 60)).toBe(true);
+    const row = written();
+    expect(new Date(row.start).getHours()).toBe(new Date(ev.start).getHours());
+    expect(localKey(row.start)).toBe(target);
+  });
+
+  it('a same-day drop with no minute is still a no-op', async () => {
+    // `moveEventToDay` is this function with `null`, so its old contract has
+    // to survive the generalisation.
+    const ev = eventAt('2026-06-15T09:00:00.000Z', '2026-06-15T10:00:00.000Z');
+    expect(await moveEventToSlot(ev, localKey(ev.start), null)).toBe(false);
   });
 });

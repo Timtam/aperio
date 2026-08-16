@@ -26,7 +26,7 @@ import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
 import {
   EVENT_DND_TYPE,
-  moveEventToDay,
+  moveEventToSlot,
   readEventDrag,
   readTaskDrag,
   scheduleTaskAtTime,
@@ -896,17 +896,33 @@ export function WeekView() {
   const [pendingEventDrop, setPendingEventDrop] = useState<{
     event: CalendarEvent;
     dayKey: string;
+    /** Carried across the scope question so the answer lands on the time the
+     *  user actually dropped on, not on the old one. */
+    minute: number | null;
   } | null>(null);
   const performEventDrop = useCallback(
-    async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
+    async (
+      ev: CalendarEvent,
+      dayKey: string,
+      scope: MoveCopyScope,
+      /** Minute of day the drop landed on, or null for a day-only move (the
+       *  all-day lane, and the list mode that has no hour geometry). */
+      minute: number | null = null,
+    ) => {
       try {
-        const moved = await moveEventToDay(ev, dayKey, scope);
-        if (!moved) return; // same-day drop — nothing to announce
+        const moved = await moveEventToSlot(ev, dayKey, minute, scope);
+        if (!moved) return; // nothing changed — nothing to announce
         announce(
-          t('views.eventMovedToDay', {
-            title: ev.title,
-            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
-          }),
+          minute === null || ev.all_day
+            ? t('views.eventMovedToDay', {
+                title: ev.title,
+                date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
+              })
+            : t('views.eventMovedToTime', {
+                title: ev.title,
+                date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
+                time: clockAt(minute, dayKey),
+              }),
         );
         invalidateData();
       } catch (err) {
@@ -917,15 +933,15 @@ export function WeekView() {
         }
       }
     },
-    [announce, t, fmt, invalidateData],
+    [announce, t, fmt, invalidateData, clockAt],
   );
   const handleEventDayDrop = useCallback(
-    (ev: CalendarEvent, dayKey: string) => {
+    (ev: CalendarEvent, dayKey: string, minute: number | null = null) => {
       if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
-        setPendingEventDrop({ event: ev, dayKey });
+        setPendingEventDrop({ event: ev, dayKey, minute });
         return;
       }
-      void performEventDrop(ev, dayKey, 'series');
+      void performEventDrop(ev, dayKey, 'series', minute);
     },
     [performEventDrop],
   );
@@ -1563,7 +1579,24 @@ export function WeekView() {
                       return;
                     }
                     const dropped = readEventDrag(e.dataTransfer);
-                    if (dropped) handleEventDayDrop(dropped, dayKey);
+                    if (!dropped) return;
+                    // In grid mode the cell IS the hour canvas, so where the
+                    // pointer let go names a time. This was the missing half:
+                    // an event could be moved between days and never to a
+                    // different hour, which is most of what dragging one in a
+                    // week planner is for. List mode has no hour geometry, so
+                    // it stays a day-only move.
+                    let minute: number | null = null;
+                    if (!listMode) {
+                      const box = e.currentTarget.getBoundingClientRect();
+                      const fraction =
+                        box.height > 0 ? (e.clientY - box.top) / box.height : 0;
+                      minute = dropMinuteInWindow(fraction, {
+                        startMin: dayStartMin,
+                        endMin: dayEndMin,
+                      });
+                    }
+                    handleEventDayDrop(dropped, dayKey, minute);
                   }}
                 >
                   {/* Events/tasks before the window start — a compact band at
@@ -2146,6 +2179,7 @@ export function WeekView() {
               pendingEventDrop.event,
               pendingEventDrop.dayKey,
               'occurrence',
+              pendingEventDrop.minute,
             );
           }
         }}
@@ -2155,6 +2189,7 @@ export function WeekView() {
               pendingEventDrop.event,
               pendingEventDrop.dayKey,
               'series',
+              pendingEventDrop.minute,
             );
           }
         }}

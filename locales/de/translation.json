@@ -2045,6 +2045,7 @@
     "eventGroupDivergedSuffix_other": ", gruppiert mit {{count}} weiteren Terminen, die jetzt zu anderen Zeiten liegen",
     "eventCancelledSuffix": ", abgesagt",
     "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
+    "eventMovedToTime": "„{{title}}\" auf {{date}} um {{time}} verschoben.",
     "taskScheduledAtTime": "Aufgabe „{{title}}“ am {{date}} um {{time}} eingeplant.",
     "taskScheduledDayOnly": "{{title}} für {{date}} geplant. Diese Liste speichert nur ganze Tage, die Uhrzeit wurde daher nicht übernommen.",
     "timeRange": "{{start}} bis {{end}}",

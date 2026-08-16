@@ -330,18 +330,63 @@ export async function moveEventToDay(
   targetDayKey: string,
   scope: MoveCopyScope = 'series',
 ): Promise<boolean> {
+  return moveEventToSlot(event, targetDayKey, null, scope);
+}
+
+/**
+ * Move an event to a day AND, optionally, to a time of day.
+ *
+ * `minuteOfDay === null` keeps the wall clock and only shifts the date — what
+ * a drop on a month cell or a week day HEADER means. A number moves the start
+ * to that minute and carries the DURATION with it, which is what a drop inside
+ * the hour grid means: the user aimed at a time, and an event that changed
+ * length because it was dragged would be a bug, not a feature.
+ *
+ * All-day events ignore the minute. They have no time to place, their bar
+ * lives in a different lane, and turning one into a timed event because it was
+ * dropped over the grid would be a much bigger decision than a drag can carry.
+ *
+ * Returns false when nothing would change — same day, same time — so a
+ * "dragged a few pixels" misfire stays silent instead of writing a no-op to
+ * the provider.
+ */
+export async function moveEventToSlot(
+  event: CalendarEvent,
+  targetDayKey: string,
+  minuteOfDay: number | null,
+  scope: MoveCopyScope = 'series',
+): Promise<boolean> {
   const [y, m, d] = targetDayKey.split('-').map(Number);
   if (!y || !m || !d) return false;
   const delta = differenceInCalendarDays(
     new Date(y, m - 1, d),
     new Date(event.start),
   );
-  if (delta === 0) return false;
+  const start = new Date(event.start);
+  const minute = event.all_day ? null : minuteOfDay;
+  const currentMinute = start.getHours() * 60 + start.getMinutes();
+  if (delta === 0 && (minute === null || minute === currentMinute)) return false;
+  // The duration is carried, not recomputed from the drop: a drop names a
+  // START. Measured once, before anything shifts.
+  const durationMs = new Date(event.end).getTime() - start.getTime();
   const shift = (iso: string) => {
     const when = new Date(iso);
     when.setDate(when.getDate() + delta);
     return when.toISOString();
   };
+  const place = (iso: string) => {
+    if (minute === null) return shift(iso);
+    // Only the START is placed; the end follows it by the measured duration,
+    // so `place` is called for the start and the end is derived from it.
+    const when = new Date(shift(iso));
+    when.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+    return when.toISOString();
+  };
+  const newStart = place(event.start);
+  const newEnd =
+    minute === null
+      ? shift(event.end)
+      : new Date(new Date(newStart).getTime() + durationMs).toISOString();
 
   if (scope === 'occurrence' && isSeriesOccurrence(event)) {
     await apiCreateEvent({
@@ -349,8 +394,8 @@ export async function moveEventToDay(
       title: event.title,
       description: event.description,
       location: event.location,
-      start: shift(event.start),
-      end: shift(event.end),
+      start: newStart,
+      end: newEnd,
       all_day: event.all_day,
       recurrence: null,
       color_label: event.color_label,
@@ -368,8 +413,8 @@ export async function moveEventToDay(
   await apiUpdateEvent({
     ...event,
     id: seriesIdOf(event),
-    start: shift(event.start),
-    end: shift(event.end),
+    start: newStart,
+    end: newEnd,
   });
   return true;
 }
