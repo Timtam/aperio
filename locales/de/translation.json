@@ -1530,7 +1530,9 @@
         "unsupportedHint": "Vom Konto dieses Kalenders nicht unterstützt.",
         "relativeUnsupportedHint": "Dieses Konto kann nur an einem festen Tag im Monat wiederholen.",
         "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
-      }
+      },
+      "prefillCalendarReadOnly": "Der frühere Termin liegt in „{{calendar}}\", und dorthin lassen sich keine neuen Termine schreiben. Der Kalender unten bleibt, wie er ist.",
+      "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist."
     },
     "task": {
       "newTitle": "Neue Aufgabe",

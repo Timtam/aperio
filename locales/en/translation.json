@@ -1530,7 +1530,9 @@
         "unsupportedHint": "Not supported by this calendar's account.",
         "relativeUnsupportedHint": "This account can only repeat on a fixed day of the month.",
         "editsSeries": "Changes apply to the entire series."
-      }
+      },
+      "prefillCalendarReadOnly": "The earlier appointment is in \"{{calendar}}\", which cannot take new appointments. The calendar below stays as it is.",
+      "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is."
     },
     "task": {
       "newTitle": "New task",

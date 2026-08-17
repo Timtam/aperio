@@ -380,6 +380,12 @@ export function EventDialog({
   const applyEventPrefill = useCallback(
     (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}) => {
       const fill = eventPrefillFrom(source);
+      // Whether the calendar the offer came from can actually take a new
+      // appointment. Decided ONCE, out here, because the answer also has to be
+      // said out loud — see below.
+      const known = calendars.find((c) => c.id === fill.calendar_id);
+      const usable = known != null && !known.read_only;
+      const travels = !opts.keepCalendar && usable;
       setForm((prev) => {
         // The DAY stays exactly as it was — it is what makes this a new
         // appointment, and it came from wherever the user opened the editor.
@@ -403,13 +409,25 @@ export function EventDialog({
           // never pins, so there the old calendar travels; the quick-add pins
           // only when the user actually picked something there instead of
           // leaving its default.
-          calendarId:
-            !opts.keepCalendar &&
-            calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
-              ? fill.calendar_id
-              : prev.calendarId,
+          calendarId: travels ? fill.calendar_id : prev.calendarId,
         };
       });
+      // The offer named a calendar and the editor is not going to use it.
+      //
+      // This was SILENT, and silence is the actual bug: the quick-add's hint
+      // looks a calendar up by id with no writability check, so it can offer
+      // "Arbeit" for a calendar this refuses a moment later. The editor then
+      // opened on the previous one — usually the first in the list — with
+      // nothing anywhere explaining why it disagreed with what it had just
+      // shown. Refusing is right (a read-only calendar rejects the write);
+      // refusing quietly is not.
+      setPrefillCalendarNote(
+        opts.keepCalendar || usable || !fill.calendar_id
+          ? null
+          : known
+            ? t('dialogs.event.prefillCalendarReadOnly', { calendar: known.name })
+            : t('dialogs.event.prefillCalendarUnknown'),
+      );
       // Attendees came along, so the invitation toggle goes OFF. Filling a
       // form from something you wrote once is not the same as deciding to
       // email eight people about it, and that decision has to stay the user's
@@ -420,7 +438,7 @@ export function EventDialog({
       // the editor would otherwise send as an empty list.
       setKeepRemindersAsDefault(false);
     },
-    [calendars],
+    [calendars, t],
   );
 
   const acceptTitleSuggestion = useCallback(
@@ -432,6 +450,12 @@ export function EventDialog({
   );
 
   const [error, setError] = useState<string | null>(null);
+  /** Why the offer's calendar was not adopted, when it was not. Rendered
+   *  beside the picker AND announced — a sighted user sees the disagreement
+   *  and needs the reason just as much. */
+  const [prefillCalendarNote, setPrefillCalendarNote] = useState<string | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
   // Flips to `false` the moment the user touches the reminders editor.
   // While still `true` on submit, the dialog sends an empty reminders
@@ -516,6 +540,7 @@ export function EventDialog({
     setKeepRemindersAsDefault(remindersWereFromDefault);
     if (!firstHydrate) return; // form tracked; leave the independent toggles alone
     setError(null);
+    setPrefillCalendarNote(null);
     setEditScope(initialScope ?? 'occurrence');
     setNotifyAttendees(true);
     setAvailability(null);
@@ -1224,7 +1249,11 @@ export function EventDialog({
           </span>
           <select
             value={form.calendarId}
-            onChange={(e) => update('calendarId', e.target.value)}
+            onChange={(e) => {
+              // The user has answered the question the note asked.
+              setPrefillCalendarNote(null);
+              update('calendarId', e.target.value);
+            }}
             required
           >
             <option value="" disabled>
@@ -1246,6 +1275,9 @@ export function EventDialog({
               </option>
             ))}
           </select>
+          {prefillCalendarNote && (
+            <span className="form__hint">{prefillCalendarNote}</span>
+          )}
         </label>
 
         <label className="form__field form__field--inline">
