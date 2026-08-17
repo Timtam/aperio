@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
@@ -86,16 +87,22 @@ afterEach(() => {
 
 async function openWithPrefill(targetPinned: boolean, calendarId?: string) {
   const { EventDialog } = await import('./EventDialog');
+  // StrictMode, because the app runs in it (src/main.tsx) and because its
+  // double-invoked passive effects are the whole bug: without it the reset
+  // effect runs once and every one of these passed while the real dialog was
+  // dropping the prefill.
   render(
-    <EventDialog
-      isOpen
-      onClose={() => {}}
-      event={null}
-      defaultCalendarId={calendarId}
-      defaultTitle={SOURCE.title}
-      prefillFrom={SOURCE}
-      targetPinned={targetPinned}
-    />,
+    <StrictMode>
+      <EventDialog
+        isOpen
+        onClose={() => {}}
+        event={null}
+        defaultCalendarId={calendarId}
+        defaultTitle={SOURCE.title}
+        prefillFrom={SOURCE}
+        targetPinned={targetPinned}
+      />
+    </StrictMode>,
   );
   return screen.getByRole('combobox', { name: /kalender/i }) as HTMLSelectElement;
 }

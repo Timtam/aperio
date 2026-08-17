@@ -499,6 +499,10 @@ export function EventDialog({
   // re-run it on every keystroke).
   const formRef = useRef(form);
   formRef.current = form;
+  /** Which offer this opening has already applied, so a re-render does not
+   *  re-fill a form the user has since edited. Cleared by the reset effect
+   *  below, which is the only thing that can undo a prefill. */
+  const prefillApplied = useRef<string | null>(null);
   // The initialState this dialog last reset to — the pristine baseline.
   const appliedInitialRef = useRef<FormState | null>(null);
 
@@ -537,6 +541,24 @@ export function EventDialog({
     if (!pristine) return; // user touched the form → their edits win
     appliedInitialRef.current = initialState;
     setForm(initialState);
+      // Whatever the prefill put on top of the baseline is gone with it, so
+      // it has to be allowed to land again. Without this the prefill latched
+      // itself off after its first run and a SECOND reset simply won.
+      //
+      // That second reset is not hypothetical: React's StrictMode double-
+      // invokes passive effects on every mount in dev, and the two effects
+      // run in the same commit. Pass one: the reset takes its `firstHydrate`
+      // shortcut and queues `setForm(initialState)`; the prefill then queues
+      // its own updater on top. Nothing has RENDERED yet, so in pass two
+      // `formRef.current` is still the seed object — the pristine test passes
+      // by identity — and the reset queues `setForm(initialState)` a third
+      // time, now AFTER the prefill's updater. React drains the queue in
+      // order and the baseline wins. Only the title survived, because that
+      // one rides `defaultTitle` into the baseline rather than through here.
+      //
+      // Declaration order alone cannot fix that: it orders the two effects
+      // within ONE pass, and this is the same effect running twice.
+      prefillApplied.current = null;
     setKeepRemindersAsDefault(remindersWereFromDefault);
     if (!firstHydrate) return; // form tracked; leave the independent toggles alone
     setError(null);
@@ -565,7 +587,6 @@ export function EventDialog({
    * `targetPinned` is the quick-add saying it does not want its calendar
    * touched, because the user chose one there rather than leaving the default.
    */
-  const prefillApplied = useRef<string | null>(null);
   useEffect(() => {
     if (!isOpen || isEdit || !prefillFrom) {
       if (!isOpen) prefillApplied.current = null;

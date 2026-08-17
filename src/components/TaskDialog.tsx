@@ -412,6 +412,9 @@ export function TaskDialog({
   // re-run it on every keystroke).
   const formRef = useRef(form);
   formRef.current = form;
+  /** See the twin in EventDialog: cleared by the reset effect, which is the
+   *  only thing that can undo a prefill. */
+  const prefillApplied = useRef<string | null>(null);
   const draftSubtasksRef = useRef(draftSubtasks);
   draftSubtasksRef.current = draftSubtasks;
   const newSubtaskTitleRef = useRef(newSubtaskTitle);
@@ -442,6 +445,24 @@ export function TaskDialog({
     if (!pristine) return;
     appliedInitialRef.current = initialState;
     setForm(initialState);
+      // Whatever the prefill put on top of the baseline is gone with it, so
+      // it has to be allowed to land again. Without this the prefill latched
+      // itself off after its first run and a SECOND reset simply won.
+      //
+      // That second reset is not hypothetical: React's StrictMode double-
+      // invokes passive effects on every mount in dev, and the two effects
+      // run in the same commit. Pass one: the reset takes its `firstHydrate`
+      // shortcut and queues `setForm(initialState)`; the prefill then queues
+      // its own updater on top. Nothing has RENDERED yet, so in pass two
+      // `formRef.current` is still the seed object — the pristine test passes
+      // by identity — and the reset queues `setForm(initialState)` a third
+      // time, now AFTER the prefill's updater. React drains the queue in
+      // order and the baseline wins. Only the title survived, because that
+      // one rides `defaultTitle` into the baseline rather than through here.
+      //
+      // Declaration order alone cannot fix that: it orders the two effects
+      // within ONE pass, and this is the same effect running twice.
+      prefillApplied.current = null;
     statusTouched.current = false;
     setError(null);
     setDraftSubtasks([]);
@@ -459,7 +480,6 @@ export function TaskDialog({
    * `targetPinned` is the quick-add saying it does not want its list touched,
    * because the user chose one there rather than leaving the default.
    */
-  const prefillApplied = useRef<string | null>(null);
   useEffect(() => {
     if (!isOpen || isEdit || !prefillFrom) {
       if (!isOpen) prefillApplied.current = null;

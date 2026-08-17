@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -83,11 +84,16 @@ describe('quick-add → accept an offer → editor', () => {
       );
     }
 
+    // StrictMode as in src/main.tsx. The hand-off MOUNTS the editor, and a
+    // mount is exactly when React double-invokes passive effects — which is
+    // what made this test green while the real app was broken.
     render(
-      <DialogStateProvider>
-        <OpenQuickAdd />
-        <DialogHost />
-      </DialogStateProvider>,
+      <StrictMode>
+        <DialogStateProvider>
+          <OpenQuickAdd />
+          <DialogHost />
+        </DialogStateProvider>
+      </StrictMode>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
 
