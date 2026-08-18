@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Reminder } from '@aperio/shared';
 
-import { deleteUserPref, getUserPrefJson, setUserPrefJson } from '../api/prefs';
+import { getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 
 // Per-calendar default reminders — the mobile twin of the desktop
@@ -68,7 +68,12 @@ export function useCalendarDefaultReminders(
     (next: Reminder[]) => {
       const p =
         next.length === 0
-          ? deleteUserPref(prefKey(calendarId))
+          ? // An empty MARKER, not a deletion — the desktop writes the same.
+            // Since birthday calendars fall back to a built-in default when
+            // nothing was ever stored, deleting the key would read as "never
+            // configured" and bring the reminder straight back: the off
+            // switch would turn itself on again.
+            setUserPref(prefKey(calendarId), '')
           : setUserPrefJson(prefKey(calendarId), next);
       void p.then(() => refreshRemindersSoon()).catch(() => {
         // Pref write failed; the in-memory value already reflects intent and the

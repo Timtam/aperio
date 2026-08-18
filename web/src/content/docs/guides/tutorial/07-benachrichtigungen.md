@@ -40,10 +40,15 @@ All-day events have no time of day, so a reminder isn't fired "one hour before"
 your day-start reminders. A lead time counts in whole **days**: "1 week before"
 fires seven days earlier at the day-carryover time.
 
-The same applies to the automatically generated **birthday calendars**. By
-default they fire no reminder; under **Settings → Calendars** (on the phone via
-**Reminders** in the calendar list) you can give them a default reminder, e.g.
-"1 week before".
+The same applies to the automatically generated **birthday calendars** — and
+those remind you **on the day itself**, at the day-carryover time, without you
+setting anything up. A birthday calendar exists because you want to be told, so
+it starts switched on.
+
+Under **Settings → Calendars** (on the phone via **Reminders** in the calendar
+list) you can change that: give it a lead time such as "1 week before", add
+several reminders, or remove them all — an emptied list stays empty and the
+calendar goes quiet.
 
 ### Cancelled events
 

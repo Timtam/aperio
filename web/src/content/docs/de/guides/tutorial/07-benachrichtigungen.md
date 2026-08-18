@@ -41,10 +41,15 @@ Stunde vorher" (also am Vorabend) ausgelöst, sondern **zum Tageswechsel** – z
 selben Zeit wie deine Tages-Erinnerungen. Ein Vorlauf zählt dabei in ganzen
 **Tagen**: „1 Woche vorher" feuert sieben Tage früher zum Tageswechsel.
 
-Das gilt auch für die automatisch erzeugten **Geburtstagskalender**.
-Standardmäßig lösen sie keine Erinnerung aus; unter **Einstellungen → Kalender**
-(auf dem Handy über **Erinnerungen** in der Kalenderliste) kannst du ihnen eine
-Standard-Erinnerung geben, z. B. „1 Woche vorher".
+Das gilt auch für die automatisch erzeugten **Geburtstagskalender** — und die
+erinnern **am Tag selbst**, zur Tageswechsel-Zeit, ohne dass du etwas einrichten
+musst. Ein Geburtstagskalender existiert, weil du erinnert werden willst, also
+ist er von Anfang an eingeschaltet.
+
+Unter **Einstellungen → Kalender** (auf dem Handy über **Erinnerungen** in der
+Kalenderliste) änderst du das: eine Vorlaufzeit wie „1 Woche vorher", mehrere
+Erinnerungen, oder alle entfernen — eine geleerte Liste bleibt leer und der
+Kalender schweigt.
 
 ### Abgesagte Termine
 

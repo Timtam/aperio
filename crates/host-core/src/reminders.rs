@@ -411,8 +411,11 @@ pub async fn enumerate_birthday_triggers(
     for (cal, _account_id) in
         crate::birthdays::list_birthday_calendars(local, registry, cache).await
     {
-        let defaults = calendar_default_reminders(db, &cal.id);
-        // Opt-in: no configured default reminders → nothing to fire.
+        // Opt-OUT, not opt-in: a birthday calendar nobody has configured gets
+        // the built-in default rather than silence. Only a list the user
+        // deliberately emptied stays quiet.
+        let defaults = configured_calendar_default_reminders(db, &cal.id)
+            .unwrap_or_else(birthday_default_reminders);
         if defaults.is_empty() {
             continue;
         }
@@ -570,22 +573,57 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
 /// configured default can go unapplied for one scan, so the failure is logged
 /// rather than swallowed; the next pass picks the setting up again.
 pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<Reminder> {
+    configured_calendar_default_reminders(db, calendar_id).unwrap_or_default()
+}
+
+/// The same read, but able to say "the user never answered this question".
+///
+/// `None` means no stored value at all; `Some(vec![])` means the list was
+/// deliberately cleared. Collapsing those two into an empty vec is fine
+/// wherever empty simply means "no defaults to apply" — but not where a
+/// BUILT-IN default steps in, because there "never asked" must fire and
+/// "switched off" must stay silent. See [`birthday_default_reminders`].
+pub fn configured_calendar_default_reminders(
+    db: &SharedConn,
+    calendar_id: &str,
+) -> Option<Vec<Reminder>> {
     let key = format!("calendar.{}.defaultReminders", calendar_id);
     let repo = UserPrefsRepo::new(db);
     let raw = match repo.get(&key) {
         Ok(Some(raw)) => raw,
-        Ok(None) => return Vec::new(),
+        Ok(None) => return None,
         Err(err) => {
             warn!(
                 ?err,
                 calendar_id = %calendar_id,
-                "couldn't read the calendar's default reminders; \
-                 treating this pass as if none were configured",
+                "couldn't read the calendar's default reminders;                  treating this pass as if none were configured",
             );
-            return Vec::new();
+            // Deliberately `Some(empty)`, not `None`: a failed READ must not
+            // be mistaken for "never configured" and conjure a built-in
+            // reminder the user may have switched off. Silence is the safe
+            // answer to a broken read.
+            return Some(Vec::new());
         }
     };
-    serde_json::from_str::<Vec<Reminder>>(&raw).unwrap_or_default()
+    Some(serde_json::from_str::<Vec<Reminder>>(&raw).unwrap_or_default())
+}
+
+/// What a birthday calendar reminds you of when you have never said.
+///
+/// One reminder on the day itself. `minutes_before: 0` is read as whole DAYS
+/// for an all-day event (see [`all_day_trigger_time`]), so it lands at the
+/// user's own day-change time — never "two hours before", which for a date
+/// carrying no time means nothing.
+///
+/// A birthday calendar exists BECAUSE somebody wants to be told, so silence
+/// was the wrong default: it made the feature look broken to exactly the
+/// person who asked for it. The editor still overrules this, including down
+/// to nothing — a list cleared on purpose stays cleared.
+pub fn birthday_default_reminders() -> Vec<Reminder> {
+    vec![Reminder {
+        kind: ReminderKind::Relative { minutes_before: 0 },
+        sound: None,
+    }]
 }
 
 /// Translate a batch of external events into Trigger entries. Empty
@@ -1462,7 +1500,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn birthday_calendar_reminders_are_opt_in_and_fire_at_day_start() {
+    async fn birthday_calendar_reminders_default_on_and_fire_at_day_start() {
         use crate::cache::CacheStore;
         use crate::db::DbHandle;
         use crate::user_prefs::UserPrefsRepo;
@@ -1515,12 +1553,35 @@ mod tests {
 
         let cal_id = crate::birthdays::birthday_calendar_id(&list.id);
 
-        // Opt-in: with no configured default reminders the birthday calendar
-        // fires nothing (birthday events carry none of their own).
-        let none = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
+        // Nothing configured → the BUILT-IN default fires, on the day itself
+        // at the day-change time. This used to assert silence, and silence is
+        // what made the feature look broken to the people who wanted it: a
+        // birthday calendar exists because somebody wants to be told.
+        let built_in = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
+        assert_eq!(
+            built_in.len(),
+            1,
+            "an unconfigured birthday calendar reminds on the day itself"
+        );
+        assert_eq!(
+            built_in[0]
+                .trigger_at
+                .with_timezone(&chrono::Local)
+                .date_naive(),
+            target,
+            "the built-in default fires ON the birthday, not before it"
+        );
+
+        // Cleared ON PURPOSE stays silent — otherwise the built-in default
+        // would be impossible to switch off, which is a worse bug than the
+        // one it fixes.
+        UserPrefsRepo::new(&shared)
+            .set(&format!("calendar.{cal_id}.defaultReminders"), "[]")
+            .expect("set pref");
+        let silenced = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
         assert!(
-            none.is_empty(),
-            "birthdays fire nothing until a default reminder is configured"
+            silenced.is_empty(),
+            "an emptied list must stay empty, not fall back to the built-in"
         );
 
         // Configure "one week before" (10080 min) for this birthday calendar.
