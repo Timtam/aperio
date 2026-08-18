@@ -271,7 +271,8 @@ pub struct Delta<T> {
 /// reads of the same container don't stack redundant network refreshes.
 #[derive(Default)]
 pub struct RefreshCoordinator {
-    in_flight: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Key → the container's refresh generation when the claim was taken.
+    in_flight: std::sync::Mutex<std::collections::HashMap<String, u64>>,
 }
 
 impl RefreshCoordinator {
@@ -279,14 +280,33 @@ impl RefreshCoordinator {
         Self::default()
     }
 
-    /// Claim `key`. Returns `true` if the caller now owns the refresh
-    /// (and must call [`RefreshCoordinator::release`] when done), or
-    /// `false` if a refresh for this key is already running.
-    pub fn try_claim(&self, key: &str) -> bool {
-        self.in_flight
-            .lock()
-            .expect("refresh coordinator poisoned")
-            .insert(key.to_string())
+    /// Claim `key` for a refresh starting at container generation
+    /// `generation`. Returns `true` if the caller now owns a refresh (and must
+    /// call [`RefreshCoordinator::release`] when done).
+    ///
+    /// Deduplication is per GENERATION, not per key. A second refresh of a
+    /// container nothing has changed is genuinely redundant and is refused —
+    /// that is what stops two concurrent reads stacking network fetches. But a
+    /// refresh requested AFTER the container was invalidated is not redundant
+    /// at all: the running one was started before the change and its write
+    /// will be discarded by the generation guard, so refusing the new one left
+    /// the fresh data unfetched entirely.
+    ///
+    /// That is the "I created something and had to wait for it" shape: the
+    /// create invalidates, the read that follows finds a claim already held,
+    /// spawns nothing — and the change only surfaced when something unrelated
+    /// (a warm pass, a navigation) happened to refresh later.
+    pub fn try_claim(&self, key: &str, generation: u64) -> bool {
+        let mut in_flight = self.in_flight.lock().expect("refresh coordinator poisoned");
+        match in_flight.get(key) {
+            // Same generation → the running refresh will answer this too.
+            Some(running) if *running >= generation => false,
+            // Either nothing running, or what is running is already stale.
+            _ => {
+                in_flight.insert(key.to_string(), generation);
+                true
+            }
+        }
     }
 
     pub fn release(&self, key: &str) {

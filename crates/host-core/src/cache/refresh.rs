@@ -477,7 +477,12 @@ impl CacheRefresher {
                 cal_id,
             } => {
                 let key = format!("events:{account}:{cal_id}");
-                if !self.coord.try_claim(&key) {
+                // Generation-aware: a refresh started before the container
+                // changed cannot answer for the change (see `try_claim`).
+                let generation =
+                    self.cache
+                        .refresh_generation(&account, SyncScope::Events, &cal_id);
+                if !self.coord.try_claim(&key, generation) {
                     return;
                 }
                 match swr::refresh_events(&self.cache, adapter.as_ref(), &account, &cal_id, window)
@@ -508,7 +513,12 @@ impl CacheRefresher {
                 list_id,
             } => {
                 let key = format!("tasks:{account}:{list_id}");
-                if !self.coord.try_claim(&key) {
+                // Generation-aware: a refresh started before the container
+                // changed cannot answer for the change (see `try_claim`).
+                let generation =
+                    self.cache
+                        .refresh_generation(&account, SyncScope::Tasks, &list_id);
+                if !self.coord.try_claim(&key, generation) {
                     return;
                 }
                 match swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list_id).await {
@@ -535,7 +545,12 @@ impl CacheRefresher {
                 list_id,
             } => {
                 let key = format!("sections:{account}:{list_id}");
-                if !self.coord.try_claim(&key) {
+                // Generation-aware: a refresh started before the container
+                // changed cannot answer for the change (see `try_claim`).
+                let generation =
+                    self.cache
+                        .refresh_generation(&account, SyncScope::Sections, &list_id);
+                if !self.coord.try_claim(&key, generation) {
                     return;
                 }
                 match swr::refresh_sections(&self.cache, adapter.as_ref(), &account, &list_id).await
@@ -563,7 +578,12 @@ impl CacheRefresher {
                 list_id,
             } => {
                 let key = format!("contacts:{account}:{list_id}");
-                if !self.coord.try_claim(&key) {
+                // Generation-aware: a refresh started before the container
+                // changed cannot answer for the change (see `try_claim`).
+                let generation =
+                    self.cache
+                        .refresh_generation(&account, SyncScope::Contacts, &list_id);
+                if !self.coord.try_claim(&key, generation) {
                     return;
                 }
                 match swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list_id).await

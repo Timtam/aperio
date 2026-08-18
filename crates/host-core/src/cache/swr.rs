@@ -101,8 +101,11 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     Write: FnOnce(&CacheStore, &[T]) -> crate::db::DbResult<bool> + Send + 'static,
 {
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
-    if !coord.try_claim(&key) {
-        return; // a refresh for this container is already in flight
+    // Claim against the CURRENT generation: a refresh already running for an
+    // older one was started before the change and cannot answer for it.
+    let generation = cache.refresh_generation(&account, scope, &container);
+    if !coord.try_claim(&key, generation) {
+        return; // an equally fresh refresh for this container is already in flight
     }
     rt.spawn(async move {
         match fetch().await {
@@ -152,7 +155,8 @@ pub fn spawn_item_refresh<F, Fut>(
     Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
 {
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
-    if !coord.try_claim(&key) {
+    let generation = cache.refresh_generation(&account, scope, &container);
+    if !coord.try_claim(&key, generation) {
         return;
     }
     rt.spawn(async move {

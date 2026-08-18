@@ -1185,15 +1185,38 @@ fn folder_complete_window_round_trips_and_covers_any_range() {
 fn refresh_coordinator_dedups_until_released() {
     let coord = RefreshCoordinator::new();
     let key = "events:acc-1:cal-1";
-    // First claim wins; a second concurrent claim of the same key is
+    // First claim wins; a second concurrent claim at the SAME generation is
     // rejected so we never stack redundant background refreshes.
-    assert!(coord.try_claim(key));
-    assert!(!coord.try_claim(key));
+    assert!(coord.try_claim(key, 0));
+    assert!(!coord.try_claim(key, 0));
     // A different container is independent.
-    assert!(coord.try_claim("events:acc-1:cal-2"));
+    assert!(coord.try_claim("events:acc-1:cal-2", 0));
     // Once released, the key can be claimed again (next refresh cycle).
     coord.release(key);
-    assert!(coord.try_claim(key));
+    assert!(coord.try_claim(key, 0));
+}
+
+#[test]
+fn a_refresh_in_flight_does_not_shield_a_container_that_has_since_changed() {
+    // The "I created something and had to wait for it" shape. A refresh is
+    // running; the user creates an event, which invalidates the container and
+    // bumps its generation. The in-flight refresh was started BEFORE that, so
+    // its write is discarded by the generation guard — and refusing the new
+    // claim used to leave the fresh data unfetched entirely, until something
+    // unrelated happened to refresh later.
+    let coord = RefreshCoordinator::new();
+    let key = "events:acc-1:cal-1";
+    assert!(coord.try_claim(key, 0), "nothing running yet");
+    assert!(!coord.try_claim(key, 0), "same generation is redundant");
+    assert!(
+        coord.try_claim(key, 1),
+        "a newer generation must get its own refresh"
+    );
+    // And that newer one now owns the key.
+    assert!(!coord.try_claim(key, 1));
+    // An OLDER request arriving late is still redundant — the running refresh
+    // already covers it.
+    assert!(!coord.try_claim(key, 0));
 }
 
 // ── External-cache full-text search (migration 0027 + cache/search.rs) ──
