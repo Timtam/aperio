@@ -53,6 +53,7 @@ import type {
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { currentUserForList } from '../state/currentUser';
 import { useViewState } from '../state/viewStateContext';
+import { timeInputStep } from '../state/timeStep';
 import {
   canAssignSection,
   canMoveTaskBetweenLists,
@@ -175,7 +176,7 @@ export function TaskDialog({
   const fmt = useDateFormat();
   const { taskLists, selectedTaskListIds, colorLabels, sectionsByList, loadSections } =
     useCalendarStore();
-  const { showHiddenTaskListTargets } = useViewState();
+  const { showHiddenTaskListTargets, timeStepMinutes } = useViewState();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
   // Shared status actions — they own the parent/subtask cascade
@@ -1720,6 +1721,7 @@ export function TaskDialog({
                   ref={scheduledTimeRef}
                   type="time"
                   value={form.scheduledTime}
+                  step={timeInputStep(form.scheduledTime, timeStepMinutes)}
                   onChange={(e) => {
                     // Emptying the field by hand has to clear the end too, or a
                     // stale one waits in the form and reappears the moment a
@@ -1746,6 +1748,7 @@ export function TaskDialog({
               <input
                 type="time"
                 value={form.scheduledEndTime}
+                step={timeInputStep(form.scheduledEndTime, timeStepMinutes)}
                 onChange={(e) => update('scheduledEndTime', e.target.value)}
               />
             </label>
@@ -1803,6 +1806,7 @@ export function TaskDialog({
                   ref={deadlineTimeRef}
                   type="time"
                   value={form.deadlineTime}
+                  step={timeInputStep(form.deadlineTime, timeStepMinutes)}
                   onChange={(e) => update('deadlineTime', e.target.value)}
                   disabled={!form.deadlineDate}
                   aria-disabled={!form.deadlineDate || undefined}

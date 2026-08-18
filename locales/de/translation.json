@@ -603,7 +603,11 @@
         "closeToTray": "Beim Schließen in den Infobereich minimieren",
         "closeToTrayHint": "Der Schließen-Knopf blendet Aperio in den Infobereich aus, statt zu beenden. Beenden über das Menü des Infobereich-Symbols.",
         "minimizeToTray": "Beim Minimieren in den Infobereich statt in die Taskleiste",
-        "minimizeToTrayHint": "Der Minimieren-Knopf blendet Aperio in den Infobereich aus. Ein Klick auf das Symbol holt das Fenster zurück."
+        "minimizeToTrayHint": "Der Minimieren-Knopf blendet Aperio in den Infobereich aus. Ein Klick auf das Symbol holt das Fenster zurück.",
+        "timeStepLabel": "Zeitschritte",
+        "timeStepOption": "{{count}} Minuten",
+        "timeStepOption_one": "1 Minute",
+        "timeStepHint": "Wie weit ein Druck der Pfeiltasten ein Uhrzeitfeld bewegt. Eine Uhrzeit, die nicht auf diesem Raster liegt, springt weiter im Minutentakt — so wird nichts unspeicherbar, was du schon gespeichert hast."
       },
       "calendars": {
         "dayViewMode": {

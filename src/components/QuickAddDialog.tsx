@@ -13,6 +13,7 @@ import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
+import { timeInputStep } from '../state/timeStep';
 import {
   dateInput,
   defaultNewEventTimes,
@@ -49,7 +50,7 @@ export function QuickAddDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { calendars, selectedCalendarIds } = useCalendarStore();
-  const { anchor, showHiddenCalendarTargets } = useViewState();
+  const { anchor, showHiddenCalendarTargets, timeStepMinutes } = useViewState();
   const { openEventDialog } = useDialogState();
 
   // Writable calendars that can host a new event: the sidebar-visible ones, plus
@@ -265,6 +266,7 @@ export function QuickAddDialog({
             <input
               type="time"
               value={time}
+              step={timeInputStep(time, timeStepMinutes)}
               onChange={(e) => setTime(e.target.value)}
               required
             />

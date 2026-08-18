@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect } from 'react';
 
-import { VIEWS, type ViewId, type WeekStart } from './viewMath';
+import {
+  VIEWS,
+  type TimeStepMinutes,
+  type ViewId,
+  type WeekStart,
+} from './viewMath';
 
 /**
  * Active-view state context + consumer hooks. Split out of
@@ -56,6 +61,10 @@ export interface ViewStateValue {
    * both default ON. Off = only currently-visible containers are pickable (an
    * item's own container is always kept, and read-only ones are never offered).
    */
+  /** Minutes one press of a time field's spinner moves. Synced, because it
+   *  describes how the user likes to enter times, not this screen. */
+  timeStepMinutes: TimeStepMinutes;
+  setTimeStepMinutes: (minutes: TimeStepMinutes) => void;
   showHiddenCalendarTargets: boolean;
   setShowHiddenCalendarTargets: (v: boolean) => void;
   showHiddenTaskListTargets: boolean;

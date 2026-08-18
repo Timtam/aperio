@@ -51,6 +51,19 @@ export const VIEWS: ViewId[] = [
   'contacts',
 ];
 
+/** How far one press of a time field's minute spinner moves.
+ *
+ *  Minute-by-minute is the browser default, and it is a lot of presses for a
+ *  half-past-nine meeting — Outlook steps in 5, Google in 15. `1` keeps the
+ *  old behaviour for anyone who wants it. */
+export const TIME_STEP_CHOICES = [1, 5, 10, 15, 30] as const;
+export type TimeStepMinutes = (typeof TIME_STEP_CHOICES)[number];
+export const DEFAULT_TIME_STEP: TimeStepMinutes = 15;
+
+export function isValidTimeStep(n: number): n is TimeStepMinutes {
+  return (TIME_STEP_CHOICES as readonly number[]).includes(n);
+}
+
 /** Range visible in the given view, anchored at `date`. The week range
  *  honours the configurable `weekStartsOn` (defaults to Monday/ISO). */
 export function visibleRange(

@@ -23,7 +23,11 @@ import {
   UI_SCALE_STEP,
   useUiScale,
 } from '../state/uiScale';
-import { type WeekStart } from '../state/viewMath';
+import {
+  TIME_STEP_CHOICES,
+  type TimeStepMinutes,
+  type WeekStart,
+} from '../state/viewMath';
 import { useViewState } from '../state/viewStateContext';
 
 const CLOSE_TO_TRAY = 'window.closeToTray';
@@ -47,6 +51,8 @@ export function GeneralPanel() {
   const {
     weekStartsOn,
     setWeekStartsOn,
+    timeStepMinutes,
+    setTimeStepMinutes,
     startOnToday,
     setStartOnToday,
     showCancelledEvents,
@@ -221,6 +227,26 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.weekStartHint')}
+        </p>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.timeStepLabel')}
+          </span>
+          <select
+            value={timeStepMinutes}
+            onChange={(e) =>
+              setTimeStepMinutes(Number(e.target.value) as TimeStepMinutes)
+            }
+          >
+            {TIME_STEP_CHOICES.map((m) => (
+              <option key={m} value={m}>
+                {t('dialogs.settings.general.timeStepOption', { count: m })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="form__hint">
+          {t('dialogs.settings.general.timeStepHint')}
         </p>
         <label className="general-panel__toggle">
           <input

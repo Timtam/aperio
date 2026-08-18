@@ -14,6 +14,9 @@ import {
   VIEWS,
   type ViewId,
   type WeekStart,
+  DEFAULT_TIME_STEP,
+  isValidTimeStep,
+  type TimeStepMinutes,
 } from './viewMath';
 import { ViewStateContext, type ViewStateValue } from './viewStateContext';
 
@@ -50,6 +53,11 @@ const SHOW_CANCELLED_PREF = 'view.showCancelledEvents';
  *  (default on). Off = only currently-visible containers are pickable. */
 const SHOW_HIDDEN_CALENDAR_TARGETS_PREF = 'pickers.showHiddenCalendarTargets';
 const SHOW_HIDDEN_TASK_LIST_TARGETS_PREF = 'pickers.showHiddenTaskListTargets';
+/** Synced pref: how far one press of the time field's minute spinner moves.
+ *  Minute-by-minute is the browser default and it is a lot of presses for a
+ *  half-past-nine meeting; Outlook steps in 5, Google in 15. */
+const TIME_STEP_PREF = 'editor.timeStepMinutes';
+
 
 function isValidWeekStart(n: number): n is WeekStart {
   return Number.isInteger(n) && n >= 0 && n <= 6;
@@ -114,6 +122,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     useState<boolean>(true);
   const [showHiddenTaskListTargets, setShowHiddenTaskListTargetsState] =
     useState<boolean>(true);
+  const [timeStepMinutes, setTimeStepMinutesState] =
+    useState<TimeStepMinutes>(DEFAULT_TIME_STEP);
   useEffect(() => {
     let cancelled = false;
     getUserPref(WEEK_START_PREF)
@@ -135,6 +145,15 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
         // Backend unreachable → keep the default (show).
       });
     // Hydrate the "show hidden … as targets" prefs (default on until returned).
+    getUserPref(TIME_STEP_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        const n = Number(raw);
+        if (isValidTimeStep(n)) setTimeStepMinutesState(n);
+      })
+      .catch(() => {
+        // Backend unreachable → keep the default step.
+      });
     getUserPref(SHOW_HIDDEN_CALENDAR_TARGETS_PREF)
       .then((raw) => {
         if (cancelled || raw == null) return;
@@ -208,6 +227,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     setShowCancelledEventsState(v);
     void setUserPref(SHOW_CANCELLED_PREF, v ? 'true' : 'false');
   }, []);
+  const setTimeStepMinutes = useCallback((v: TimeStepMinutes) => {
+    setTimeStepMinutesState(v);
+    void setUserPref(TIME_STEP_PREF, String(v));
+  }, []);
   const setShowHiddenCalendarTargets = useCallback((v: boolean) => {
     setShowHiddenCalendarTargetsState(v);
     void setUserPref(SHOW_HIDDEN_CALENDAR_TARGETS_PREF, v ? 'true' : 'false');
@@ -236,6 +259,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       showCancelledEvents,
       setShowCancelledEvents,
       showHiddenCalendarTargets,
+      timeStepMinutes,
+      setTimeStepMinutes,
       setShowHiddenCalendarTargets,
       showHiddenTaskListTargets,
       setShowHiddenTaskListTargets,
@@ -258,6 +283,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       showCancelledEvents,
       setShowCancelledEvents,
       showHiddenCalendarTargets,
+      timeStepMinutes,
+      setTimeStepMinutes,
       setShowHiddenCalendarTargets,
       showHiddenTaskListTargets,
       setShowHiddenTaskListTargets,

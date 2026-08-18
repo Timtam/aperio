@@ -606,7 +606,11 @@
         "closeToTray": "Minimize to the tray when closing",
         "closeToTrayHint": "The close button hides Aperio in the tray instead of quitting. Use the tray icon's menu to quit.",
         "minimizeToTray": "Minimize to the tray instead of the taskbar",
-        "minimizeToTrayHint": "The minimize button hides Aperio in the tray. Click the tray icon to bring the window back."
+        "minimizeToTrayHint": "The minimize button hides Aperio in the tray. Click the tray icon to bring the window back.",
+        "timeStepLabel": "Time steps",
+        "timeStepOption": "{{count}} minutes",
+        "timeStepOption_one": "1 minute",
+        "timeStepHint": "How far one press of the arrow keys moves a time field. A time that does not sit on this grid keeps stepping minute by minute, so nothing you already saved becomes unsavable."
       },
       "calendars": {
         "dayViewMode": {

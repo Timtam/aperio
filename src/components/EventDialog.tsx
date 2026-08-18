@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { timeInputStep } from '../state/timeStep';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
 import {
@@ -197,7 +198,7 @@ export function EventDialog({
   const announce = useAnnouncer();
   const { openEventGroupCarry } = useDialogState();
   const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
-  const { showHiddenCalendarTargets } = useViewState();
+  const { showHiddenCalendarTargets, timeStepMinutes } = useViewState();
 
   const isEdit = event !== null;
   // Stable id for the attendees-picker label — used as the
@@ -1330,6 +1331,7 @@ export function EventDialog({
               <input
                 type="time"
                 value={form.startTime}
+                step={timeInputStep(form.startTime, timeStepMinutes)}
                 onChange={(e) => update('startTime', e.target.value)}
                 required
               />
@@ -1357,6 +1359,7 @@ export function EventDialog({
               <input
                 type="time"
                 value={form.endTime}
+                step={timeInputStep(form.endTime, timeStepMinutes)}
                 onChange={(e) => update('endTime', e.target.value)}
                 required
               />
