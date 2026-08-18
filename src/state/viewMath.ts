@@ -67,7 +67,15 @@ export function visibleRange(
         end: endOfWeek(date, { weekStartsOn }),
       };
     case 'month':
-      return { start: startOfMonth(date), end: endOfMonth(date) };
+      // The GRID, not the month. The month view draws whole weeks, so it
+      // renders up to six days of the previous month and six of the next —
+      // and it used to fetch only the month itself, leaving those padding
+      // days permanently empty. An event on the 31st was invisible to anyone
+      // looking at the following month's first row.
+      return {
+        start: startOfWeek(startOfMonth(date), { weekStartsOn }),
+        end: endOfWeek(endOfMonth(date), { weekStartsOn }),
+      };
     case 'year':
       return { start: startOfYear(date), end: endOfYear(date) };
     case 'agenda':

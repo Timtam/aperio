@@ -38,10 +38,13 @@ describe('viewMath', () => {
     expect(visibleRange('week', REF, 6).start.getDay()).toBe(6); // Saturday
   });
 
-  it('month view range covers the calendar month', () => {
+  it('month view range covers the calendar month and the grid around it', () => {
+    // This used to assert the range STOPPED at the month's own edges, which
+    // is what left the grid's padding days empty — the view draws whole
+    // weeks. The month itself must still be fully inside it.
     const { start, end } = visibleRange('month', REF);
-    expect(start.getDate()).toBe(1);
-    expect(end.getMonth()).toBe(REF.getMonth());
+    expect(start <= new Date(REF.getFullYear(), REF.getMonth(), 1)).toBe(true);
+    expect(end >= new Date(REF.getFullYear(), REF.getMonth() + 1, 0)).toBe(true);
   });
 
   it('year view range covers the calendar year', () => {
@@ -82,5 +85,35 @@ describe('viewMath', () => {
     expect(t.getMinutes()).toBe(0);
     expect(t.getSeconds()).toBe(0);
     expect(t.getMilliseconds()).toBe(0);
+  });
+});
+
+describe("visibleRange('month') covers the whole GRID", () => {
+  it('reaches into the neighbouring months the grid actually draws', () => {
+    // The month view draws whole weeks. Fetching only the month left the
+    // padding days it renders permanently empty — an event on the 30th of
+    // June was invisible to anyone looking at July's first row.
+    // July 2026 starts on a Wednesday, so a Monday-start grid opens on
+    // 29 June and closes on 2 August.
+    const july = new Date(2026, 6, 15);
+    const r = visibleRange('month', july, 1);
+    expect(r.start.getMonth()).toBe(5); // June
+    expect(r.start.getDate()).toBe(29);
+    expect(r.end.getMonth()).toBe(7); // August
+    expect(r.end.getDate()).toBe(2);
+  });
+
+  it('follows the week start the user chose', () => {
+    const july = new Date(2026, 6, 15);
+    expect(visibleRange('month', july, 1).start.getDay()).toBe(1); // Monday
+    expect(visibleRange('month', july, 0).start.getDay()).toBe(0); // Sunday
+  });
+
+  it('still contains every day of the month itself', () => {
+    for (const m of [0, 1, 5, 11]) {
+      const r = visibleRange('month', new Date(2026, m, 15), 1);
+      expect(r.start <= new Date(2026, m, 1)).toBe(true);
+      expect(r.end >= new Date(2026, m + 1, 0, 23, 59)).toBe(true);
+    }
   });
 });
