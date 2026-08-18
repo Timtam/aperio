@@ -22,6 +22,7 @@ import {
   toIso,
 } from '@aperio/shared';
 import { Modal } from './Modal';
+import { QuickDateButton } from './QuickDateButton';
 import { TitleSuggestBox } from './TitleSuggestBox';
 import {
   rankEventSuggestions,
@@ -258,6 +259,7 @@ export function QuickAddDialog({
               onChange={(e) => setDate(e.target.value)}
               required
             />
+            <QuickDateButton onPick={setDate} />
           </label>
           <label className="form__field">
             <span className="form__label">

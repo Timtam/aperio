@@ -14,6 +14,7 @@ import { selectableTaskLists } from '@aperio/shared';
 
 import { createTask } from '../api/client';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
+import { QuickDateButton } from '../components/QuickDateButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
@@ -274,7 +275,13 @@ export default function QuickAddTaskModal({
               {t('dialogs.task.fields.scheduled.addDate')}
             </Text>
           </Pressable>
-        ) : (
+        ) : null}
+        {/* Beside the field in BOTH states: with no date the offers are the
+            fastest way to get one, and with a date the fastest way to change
+            it. A dateless task belongs in the backlog, so nothing here fills
+            the field in on its own. */}
+        <QuickDateButton onPick={setDate} />
+        {date.trim() === '' ? null : (
           <View style={styles.pickerRow}>
             {/* Accessible field button (value in the label, picker in a
                 dialog) — the inline compact picker never joined the VoiceOver

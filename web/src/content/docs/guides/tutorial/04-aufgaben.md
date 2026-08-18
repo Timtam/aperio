@@ -348,6 +348,21 @@ Turn the toggle off to keep assignments fully manual.
 > off with `Space` is reported immediately as "done" or "open", without
 > moving the focus.
 
+## Quick dates
+
+Every date field in the quick-add carries a **Quick dates** button beside it.
+It opens four offers — today, tomorrow, the coming weekend, the start of next
+week — and each one says the date it will set, so you never have to accept one
+to find out what it was. "Next week" follows the week start you chose under
+**Settings → General**.
+
+There is deliberately nothing to configure here. Four learnable buttons are
+worth more than a list nobody would maintain, and the date field beside them
+still takes any day at all.
+
+A task you leave dateless still goes to the backlog — the offers sit next to
+the field rather than filling it in for you.
+
 ## Summary
 
 You can create, check off, schedule and repeat tasks, and assign them in

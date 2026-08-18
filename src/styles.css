@@ -1950,6 +1950,15 @@ button[aria-disabled='true'] {
   gap: var(--space-2);
 }
 
+/* The quick-date offers: one button per line, so each reads as its own choice
+   rather than as a row of chips to be scanned. */
+.quick-date__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
 /* The backlog's title bar: heading on the left, its list filter on the right. */
 .backlog-rail__bar {
   display: flex;

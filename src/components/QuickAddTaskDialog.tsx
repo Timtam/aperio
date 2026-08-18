@@ -17,6 +17,7 @@ import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { Modal } from './Modal';
+import { QuickDateButton } from './QuickDateButton';
 import { TitleSuggestBox } from './TitleSuggestBox';
 import {
   rankTaskSuggestions,
@@ -239,6 +240,10 @@ export function QuickAddTaskDialog({
             value={date}
             onChange={(e) => setDate(e.target.value)}
           />
+          {/* A task with no date belongs in the backlog, which is the whole
+              point of leaving this empty — so the offers sit BESIDE the field
+              rather than filling it in for you. */}
+          <QuickDateButton onPick={setDate} />
         </label>
 
         <label className="form__field">

@@ -23,6 +23,7 @@ export * from './planTaskDates';
 export * from './formatAttendee';
 export * from './contactChannels';
 export * from './dayMarkers';
+export * from './quickDates';
 export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';

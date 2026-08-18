@@ -1950,6 +1950,14 @@
       "openButton": "Check-in",
       "openButtonOnDay": "Check-in: {{day}}",
       "summaryLead": "Check-in"
+    },
+    "quickDate": {
+      "open": "Schnellwahl",
+      "title": "Datum wählen",
+      "today": "Heute — {{date}}",
+      "tomorrow": "Morgen — {{date}}",
+      "weekend": "Am Wochenende — {{date}}",
+      "nextWeek": "Nächste Woche — {{date}}"
     }
   },
   "sidebar": {

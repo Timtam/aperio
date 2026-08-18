@@ -21,6 +21,7 @@ import {
 import { createEvent, listCalendars, type Calendar } from '../api/calendar';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { QuickDateButton } from '../components/QuickDateButton';
 import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
@@ -295,6 +296,7 @@ export default function QuickAddEventModal({
           value={date}
           onChange={setDate}
         />
+        <QuickDateButton onPick={setDate} />
       </View>
 
       <View style={styles.field}>

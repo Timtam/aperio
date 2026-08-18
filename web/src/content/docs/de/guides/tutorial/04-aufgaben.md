@@ -386,6 +386,21 @@ Schalte die Option aus, wenn Zuweisungen rein manuell bleiben sollen.
 > Das Abhaken über die `Leertaste` wird sofort als „erledigt" bzw. „offen"
 > rückgemeldet, ohne dass sich der Fokus bewegt.
 
+## Datums-Schnellwahl
+
+Neben jedem Datumsfeld im Schnell-Anlegen steht ein Knopf **Schnellwahl**. Er
+öffnet vier Angebote — heute, morgen, das kommende Wochenende, der Beginn der
+nächsten Woche — und jedes nennt das Datum, das es setzt; du musst also keines
+annehmen, um zu erfahren, welches es war. „Nächste Woche" folgt dem
+Wochenbeginn, den du unter **Einstellungen → Allgemein** gewählt hast.
+
+Es gibt hier bewusst nichts einzustellen. Vier merkbare Knöpfe sind mehr wert
+als eine Liste, die niemand pflegt, und das Datumsfeld daneben nimmt weiterhin
+jeden beliebigen Tag.
+
+Eine Aufgabe ohne Datum landet weiterhin im Backlog — die Angebote stehen
+neben dem Feld, sie füllen es nicht von selbst aus.
+
 ## Zusammenfassung
 
 Du kannst Aufgaben anlegen, abhaken, einplanen, wiederholen lassen und in
