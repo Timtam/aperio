@@ -44,6 +44,7 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { ConferenceSection } from '../components/ConferenceSection';
 import { MeetingControls } from '../components/MeetingControls';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
+import { QuickTimeButton } from '../components/QuickTimeButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
 import { FormScrollView } from '../components/FormScrollView';
@@ -1003,6 +1004,7 @@ export default function EventEditorModal({
             value={startTime}
             onChange={(next) => setDateTime('startTime', next)}
           />
+          <QuickTimeButton value={startTime} onPick={(next) => setDateTime('startTime', next)} />
         </View>
       )}
 
@@ -1036,6 +1038,7 @@ export default function EventEditorModal({
             value={endTime}
             onChange={(next) => setDateTime('endTime', next)}
           />
+          <QuickTimeButton value={endTime} onPick={(next) => setDateTime('endTime', next)} />
         </View>
       )}
 

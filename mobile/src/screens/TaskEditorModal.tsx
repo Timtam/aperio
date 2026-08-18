@@ -49,6 +49,7 @@ import {
 import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
+import { QuickTimeButton } from '../components/QuickTimeButton';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
   rankTaskSuggestions,
@@ -1443,6 +1444,9 @@ function DateTimeField({
                 onChange={onChangeTime}
                 disabled={!editable}
               />
+              {editable && (
+                <QuickTimeButton value={timeValue} onPick={onChangeTime} />
+              )}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${legend} – ${clearTimeLabel}`}
@@ -1481,6 +1485,9 @@ function DateTimeField({
                 onChange={onChangeEnd}
                 disabled={!editable}
               />
+              {editable && (
+                <QuickTimeButton value={endValue ?? ''} onPick={onChangeEnd} />
+              )}
             </View>
           )}
           <Pressable

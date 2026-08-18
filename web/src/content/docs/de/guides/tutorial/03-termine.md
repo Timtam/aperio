@@ -234,6 +234,19 @@ die Gruppe repariert sich still. Wird nichts Passendes gefunden, bleibt alles,
 wie es ist: Es könnte eine Kopie sein, die Sie gelöscht haben, und das auf
 Verdacht zu entscheiden steht Aperio nicht zu.
 
+## Zeitschritte
+
+Unter **Einstellungen → Allgemein** legt **Zeitschritte** fest, wie weit ein
+Druck der Pfeiltasten ein Uhrzeitfeld bewegt: 1, 5, 10, 15 oder 30 Minuten
+(standardmäßig 15). Eine Uhrzeit, die nicht auf diesem Raster liegt, springt
+weiter im Minutentakt — so wird nichts unspeicherbar, was du schon gespeichert
+hast, und die genaue Eingabe funktioniert immer.
+
+Am Telefon wirkt dieselbe Einstellung anders, weil die Plattform keine Wahl
+lässt: Das Rad des nativen Pickers bewegt sich immer minutenweise. Dort
+entscheidet die Einstellung, welche Minuten der Knopf **Minuten** neben einem
+Uhrzeitfeld anbietet — ein Tippen statt dreißig Wischer bis zur halben Stunde.
+
 ## Zusammenfassung
 
 Du kannst Termine anlegen, bearbeiten, verschieben, löschen und wiederholen

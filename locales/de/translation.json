@@ -607,7 +607,8 @@
         "timeStepLabel": "Zeitschritte",
         "timeStepOption": "{{count}} Minuten",
         "timeStepOption_one": "1 Minute",
-        "timeStepHint": "Wie weit ein Druck der Pfeiltasten ein Uhrzeitfeld bewegt. Eine Uhrzeit, die nicht auf diesem Raster liegt, springt weiter im Minutentakt — so wird nichts unspeicherbar, was du schon gespeichert hast."
+        "timeStepHint": "Wie weit ein Druck der Pfeiltasten ein Uhrzeitfeld bewegt. Eine Uhrzeit, die nicht auf diesem Raster liegt, springt weiter im Minutentakt — so wird nichts unspeicherbar, was du schon gespeichert hast.",
+        "timeStepHintMobile": "Welche Minuten der Minuten-Knopf in den Editoren anbietet. Das Rad des Pickers selbst bewegt sich immer minutenweise — eine Schrittweite bietet die Plattform dort nicht."
       },
       "calendars": {
         "dayViewMode": {
@@ -1958,6 +1959,11 @@
       "tomorrow": "Morgen — {{date}}",
       "weekend": "Am Wochenende — {{date}}",
       "nextWeek": "Nächste Woche — {{date}}"
+    },
+    "quickTime": {
+      "short": "Minuten",
+      "open": "Minuten in {{step}}er-Schritten wählen",
+      "title": "Minuten nach {{hour}}"
     }
   },
   "sidebar": {

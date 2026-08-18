@@ -4,6 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
+import {
+  setTimeStep,
+  TIME_STEP_CHOICES,
+  useTimeStep,
+  type TimeStepMinutes,
+} from '../state/useTimeStep';
 import { SoundSelect } from '../components/SoundSelect';
 import { SwitchRow } from '../components/SwitchRow';
 import {
@@ -42,6 +48,11 @@ export default function GeneralSettingsScreen() {
   const styles = useThemedStyles(makeStyles);
   const [language, setLanguage] = useState<LanguageChoice>('system');
   const [weekStart, setWeekStart] = useState<WeekStart>(1);
+  const timeStep = useTimeStep();
+  const timeStepOptions = TIME_STEP_CHOICES.map((m) => ({
+    value: m,
+    label: t('dialogs.settings.general.timeStepOption', { count: m }),
+  }));
   // Calendar day/week layout (synced `calendar.dayViewMode`) — a view preference
   // like week-start, so it lives here (the mobile twin of the desktop Calendars
   // panel's setting), not under Tasks. Also switchable from the calendar toolbar.
@@ -153,6 +164,16 @@ export default function GeneralSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.general.weekStartHint')}
+        </Text>
+        <RadioGroup<TimeStepMinutes>
+          label={t('dialogs.settings.general.timeStepLabel')}
+          labelAsHeading
+          value={timeStep}
+          options={timeStepOptions}
+          onChange={setTimeStep}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.general.timeStepHintMobile')}
         </Text>
         <SwitchRow
           label={t('dialogs.settings.general.startOnTodayLabel')}

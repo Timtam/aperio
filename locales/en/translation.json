@@ -610,7 +610,8 @@
         "timeStepLabel": "Time steps",
         "timeStepOption": "{{count}} minutes",
         "timeStepOption_one": "1 minute",
-        "timeStepHint": "How far one press of the arrow keys moves a time field. A time that does not sit on this grid keeps stepping minute by minute, so nothing you already saved becomes unsavable."
+        "timeStepHint": "How far one press of the arrow keys moves a time field. A time that does not sit on this grid keeps stepping minute by minute, so nothing you already saved becomes unsavable.",
+        "timeStepHintMobile": "Which minutes the quick-minute button offers in the editors. The picker wheel itself always moves a minute at a time — the platform does not offer a step."
       },
       "calendars": {
         "dayViewMode": {
@@ -1958,6 +1959,11 @@
       "tomorrow": "Tomorrow — {{date}}",
       "weekend": "This weekend — {{date}}",
       "nextWeek": "Next week — {{date}}"
+    },
+    "quickTime": {
+      "short": "Minutes",
+      "open": "Pick minutes in steps of {{step}}",
+      "title": "Minutes past {{hour}}"
     }
   },
   "sidebar": {

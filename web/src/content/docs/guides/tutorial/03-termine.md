@@ -216,6 +216,18 @@ resolving the copy is looked for and the group repairs itself silently. If
 nothing matching is there, nothing is changed: it may be a copy you deleted, and
 dropping it on suspicion is not Aperio's call.
 
+## Time steps
+
+Under **Settings → General**, **Time steps** decides how far one press of the
+arrow keys moves a time field: 1, 5, 10, 15 or 30 minutes (15 by default). A
+time that does not sit on that grid keeps stepping minute by minute, so nothing
+you already saved becomes unsavable, and typing an exact time always works.
+
+On the phone the same setting works differently, because the platform gives no
+choice: the native picker's wheel always moves a minute at a time. There, the
+setting decides which minutes the **Minutes** button beside a time field
+offers — one tap instead of thirty swipes to reach half past.
+
 ## Summary
 
 You can create, edit, move, delete and repeat events. Next we'll handle
