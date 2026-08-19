@@ -18,7 +18,6 @@ import type { ColorLabel } from '@aperio/shared';
 import { listAccounts, type Account } from '../api/accounts';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
-import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { useCacheReload } from '../state/cacheObserver';
@@ -52,7 +51,14 @@ export default function CalendarsScreen({
   const { t } = useTranslation();
   // The stack draws a back chevron, but it isn't reachable by swiping with
   // VoiceOver — so the way out of the catalogue is a real element too.
-  useCancelHeader(navigation, 'mobile.back');
+  // EXPERIMENT: no custom header-left, so the NATIVE back button can show
+  // itself — the open question being whether it appears on one route into
+  // this screen and not the other, or stays away on both. Revert to put
+  // the custom button back.
+  //
+  // Safe to try: VoiceOver's two-finger scrub already leaves this screen
+  // (UIKit answers `accessibilityPerformEscape` on a navigation
+  // controller), so there is a way out with or without a button.
   // Per-account refresh-error surface (silent-staleness warning banner).
   const { errorsByAccount } = useRefreshErrors();
   const styles = useThemedStyles(makeStyles);

@@ -24,7 +24,6 @@ import {
   listContactLists,
 } from '../api/contacts';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
-import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
@@ -54,7 +53,14 @@ export default function ContactListsScreen({
   const { t } = useTranslation();
   // The stack draws a back chevron, but it isn't reachable by swiping with
   // VoiceOver — so the way out of the catalogue is a real element too.
-  useCancelHeader(navigation, 'mobile.back');
+  // EXPERIMENT: no custom header-left, so the NATIVE back button can show
+  // itself — the open question being whether it appears on one route into
+  // this screen and not the other, or stays away on both. Revert to put
+  // the custom button back.
+  //
+  // Safe to try: VoiceOver's two-finger scrub already leaves this screen
+  // (UIKit answers `accessibilityPerformEscape` on a navigation
+  // controller), so there is a way out with or without a button.
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   // Address-book visibility (hide a book from the Contacts browse + search).
