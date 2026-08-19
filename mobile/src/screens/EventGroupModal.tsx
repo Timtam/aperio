@@ -389,11 +389,13 @@ export default function EventGroupModal({
       contentContainerStyle={styles.content}
       accessibilityViewIsModal
     >
-      <Text ref={headingRef} style={styles.heading} accessibilityRole="header">
-        {t('dialogs.eventGroup.title')}
-      </Text>
-
-      <Text style={styles.intro} accessibilityRole="text">
+      {/* No heading of its own: the stack header already carries this exact
+          title, so a second copy said it twice to a screen reader and printed
+          it twice on screen. This status line is the first thing worth
+          hearing, so it takes over as the focus-repark target — as a plain
+          line, not a header: it is a sentence about state, and heading
+          navigation should not stop on it. */}
+      <Text ref={headingRef} style={styles.intro} accessibilityRole="text">
         {group === undefined
           ? t('dialogs.eventGroup.loading')
           : members.length > 0
@@ -407,6 +409,18 @@ export default function EventGroupModal({
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
+        </Text>
+      )}
+
+      {/* The desktop dialog labels this list (`membersLabel`); this screen did
+          not, so the group's members and the candidate options below it ran
+          together as one undifferentiated run of buttons, with nothing saying
+          which list a button came from. The candidates already have their own
+          legend; this gives the members one, and makes both reachable by
+          heading navigation. */}
+      {members.length > 0 && (
+        <Text style={styles.sectionLabel} accessibilityRole="header">
+          {t('dialogs.eventGroup.membersLabel')}
         </Text>
       )}
 
@@ -521,8 +535,8 @@ function makeStyles(c: ThemeColors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
     content: { padding: 16, gap: 12 },
-    heading: { fontSize: 20, fontWeight: '600', color: c.textPrimary },
     intro: { fontSize: 15, color: c.textPrimary },
+    sectionLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     memberRow: {
       minHeight: 44,
       justifyContent: 'center',
