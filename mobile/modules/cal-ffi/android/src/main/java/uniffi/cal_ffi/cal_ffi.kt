@@ -954,6 +954,8 @@ external fun uniffi_cal_ffi_checksum_method_host_create_contact_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_create_contact_list_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_day_marker_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_create_section_json(
@@ -963,6 +965,12 @@ external fun uniffi_cal_ffi_checksum_method_host_create_task_json(
 external fun uniffi_cal_ffi_checksum_method_host_create_task_list_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_custom_sound_path(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_day_log_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_day_logs_in_range_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_decline_group_suggestion_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_delete_account(
 ): Short
@@ -977,6 +985,8 @@ external fun uniffi_cal_ffi_checksum_method_host_delete_contact_list(
 external fun uniffi_cal_ffi_checksum_method_host_delete_contact_photo(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_delete_custom_sound(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_day_marker(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_delete_event(
 ): Short
@@ -996,7 +1006,11 @@ external fun uniffi_cal_ffi_checksum_method_host_disconnect_sync(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_discover_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_dissolve_event_group(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_event_groups_for_events_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_event_meeting_json(
 ): Short
@@ -1024,6 +1038,12 @@ external fun uniffi_cal_ffi_checksum_method_host_get_sync_adapter_summary_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_group_events_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_group_suggestion_declines_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_heal_event_group_member(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_import_sound_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_inspect_event_meeting_json(
@@ -1040,11 +1060,15 @@ external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_day_markers_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_devices_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_log_line(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_logs_dir_path(
 ): Short
@@ -1063,6 +1087,8 @@ external fun uniffi_cal_ffi_checksum_method_host_push_now(
 external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_event_group_signature(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
 ): Short
@@ -1105,6 +1131,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_contacts_include_read_only_
 external fun uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_day_log_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_device_event_store(
 ): Short
@@ -1156,11 +1184,15 @@ external fun uniffi_cal_ffi_checksum_method_host_test_account_values_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_ungroup_event_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_update_color_label_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_update_contact_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_day_marker_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
 ): Short
@@ -1368,6 +1400,8 @@ external fun uniffi_cal_ffi_fn_method_host_create_contact_json(`ptr`: Long,`list
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_contact_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_day_marker_json(`ptr`: Long,`name`: RustBuffer.ByValue,`symbol`: RustBuffer.ByValue,`colorLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_event_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_section_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`position`: Int,`colorLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1378,6 +1412,12 @@ external fun uniffi_cal_ffi_fn_method_host_create_task_list_json(`ptr`: Long,`na
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_custom_sound_path(`ptr`: Long,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_day_log_json(`ptr`: Long,`day`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_day_logs_in_range_json(`ptr`: Long,`from`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_decline_group_suggestion_json(`ptr`: Long,`firstJson`: RustBuffer.ByValue,`secondJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1391,6 +1431,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_contact_list(`ptr`: Long,`id`:
 external fun uniffi_cal_ffi_fn_method_host_delete_contact_photo(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_custom_sound(`ptr`: Long,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_day_marker(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1410,9 +1452,13 @@ external fun uniffi_cal_ffi_fn_method_host_disconnect_sync(`ptr`: Long,uniffi_ou
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_dissolve_event_group(`ptr`: Long,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`eventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_event_groups_for_events_json(`ptr`: Long,`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1438,6 +1484,12 @@ external fun uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(`ptr`: 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_group_events_json(`ptr`: Long,`membersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_group_suggestion_declines_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_heal_event_group_member(`ptr`: Long,`groupId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`oldEventId`: RustBuffer.ByValue,`newEventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1454,12 +1506,16 @@ external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,un
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_day_markers_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_devices_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_log_json(`ptr`: Long,`limit`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_log_line(`ptr`: Long,`level`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_logs_dir_path(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1478,6 +1534,8 @@ external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`req
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_refresh_event_group_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1520,6 +1578,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(`ptr`: Lon
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_day_log_json(`ptr`: Long,`logJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_set_device_event_store(`ptr`: Long,`bridge`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1570,11 +1630,15 @@ external fun uniffi_cal_ffi_fn_method_host_test_account_values_json(`ptr`: Long,
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_ungroup_event_json(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`bookkeeping`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_color_label_json(`ptr`: Long,`labelJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_contact_json(`ptr`: Long,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_day_marker_json(`ptr`: Long,`markerJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,`previousCalendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1933,6 +1997,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_create_contact_list_json() != 45100.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_day_marker_json() != 9491.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1946,6 +2013,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_custom_sound_path() != 46939.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_day_log_json() != 14823.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_day_logs_in_range_json() != 44584.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_decline_group_suggestion_json() != 11878.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_account() != 32623.toShort()) {
@@ -1967,6 +2043,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_custom_sound() != 25636.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_day_marker() != 51422.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
@@ -1996,10 +2075,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_dissolve_event_group() != 23036.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 14292.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 60698.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_event_groups_for_events_json() != 35375.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 34444.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
@@ -2038,6 +2123,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_group_events_json() != 28956.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_group_suggestion_declines_json() != 47.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_heal_event_group_member() != 53594.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2062,6 +2156,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json() != 33288.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_day_markers_json() != 34183.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2069,6 +2166,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_log_line() != 17206.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_logs_dir_path() != 51122.toShort()) {
@@ -2096,6 +2196,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_event_group_signature() != 33125.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
@@ -2159,6 +2262,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_day_log_json() != 55253.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_device_event_store() != 41986.toShort()) {
@@ -2236,6 +2342,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_ungroup_event_json() != 24713.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2243,6 +2352,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_day_marker_json() != 6220.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 11973.toShort()) {
@@ -4488,6 +4600,11 @@ public interface HostInterface {
     fun `createContactListJson`(`name`: kotlin.String): kotlin.String
     
     /**
+     * Add a marker; returns the created `DayMarker` as JSON.
+     */
+    fun `createDayMarkerJson`(`name`: kotlin.String, `symbol`: kotlin.String?, `colorLabel`: kotlin.String?): kotlin.String
+    
+    /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
      * `create_event` minus colour resolution + reminder reschedule (deferred).
@@ -4529,6 +4646,25 @@ public interface HostInterface {
      * back to the system sound. Drives preview + the Android channel sound.
      */
     fun `customSoundPath`(`sha256`: kotlin.String): kotlin.String?
+    
+    /**
+     * One day's log as JSON. An untouched day comes back as an empty log,
+     * never null — the callers render the same thing either way.
+     */
+    fun `dayLogJson`(`day`: kotlin.String): kotlin.String
+    
+    /**
+     * Every logged day in an inclusive range — what a week or month view asks
+     * for once, instead of one call per day.
+     */
+    fun `dayLogsInRangeJson`(`from`: kotlin.String, `to`: kotlin.String): kotlin.String
+    
+    /**
+     * Record that two events are NOT the same appointment, so Aperio stops
+     * offering to group them. Takes the two refs as JSON `{calendar_id,
+     * event_id}` objects.
+     */
+    fun `declineGroupSuggestionJson`(`firstJson`: kotlin.String, `secondJson`: kotlin.String)
     
     /**
      * Delete an account: unregister its adapter, clear its secrets, and
@@ -4574,6 +4710,8 @@ public interface HostInterface {
      * resolve time. Mirrors the desktop `delete_custom_sound`.
      */
     fun `deleteCustomSound`(`sha256`: kotlin.String)
+    
+    fun `deleteDayMarker`(`id`: kotlin.String)
     
     /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
@@ -4662,6 +4800,11 @@ public interface HostInterface {
     fun `discoverJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Dissolve a whole group. The events themselves are untouched.
+     */
+    fun `dissolveEventGroup`(`groupId`: kotlin.String)
+    
+    /**
      * Enable end-to-end encryption on the configured sync target (§19.7). Mints
      * fresh v2 key material (a random data key wrapped by a passphrase-derived
      * KEK, recorded in the plaintext `meta.json`), then branches on the target:
@@ -4678,9 +4821,18 @@ public interface HostInterface {
     fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
     
     /**
+     * Every group any of these events belongs to, as a JSON `EventGroup[]`.
+     *
+     * Takes a JSON array of `{calendar_id, event_id}`. Groups come back WHOLE,
+     * including members outside the rendered range — a group only reads as a
+     * whole ("this and three others").
+     */
+    fun `eventGroupsForEventsJson`(`eventsJson`: kotlin.String): kotlin.String
+    
+    /**
      * The meeting Aperio created for this event, if any, as JSON.
      */
-    fun `eventMeetingJson`(`eventId`: kotlin.String): kotlin.String
+    fun `eventMeetingJson`(`eventId`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String
     
     /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
@@ -4775,6 +4927,30 @@ public interface HostInterface {
     fun `getUserPref`(`key`: kotlin.String): kotlin.String?
     
     /**
+     * Declare that these events mean the same appointment.
+     *
+     * Takes a JSON array of `{calendar_id, event_id, title, starts_at}` and
+     * returns the resulting group as JSON. `title`/`starts_at` are the
+     * SIGNATURE: what the event looked like when it joined, kept so a member
+     * whose provider id changes can be found again.
+     */
+    fun `groupEventsJson`(`membersJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Every pair the user has said is not one appointment, as JSON.
+     */
+    fun `groupSuggestionDeclinesJson`(): kotlin.String
+    
+    /**
+     * One member, found again under the id its event carries now.
+     *
+     * Silent on purpose: it repairs Aperio's own bookkeeping and changes
+     * nothing about which events mean the same appointment. See
+     * `EventGroupsRepo::heal_member`.
+     */
+    fun `healEventGroupMember`(`groupId`: kotlin.String, `calendarId`: kotlin.String, `oldEventId`: kotlin.String, `newEventId`: kotlin.String)
+    
+    /**
      * Import an audio file into the custom-sound store (the JS picked it via
      * expo-document-picker; `path` is its local path). Returns JSON
      * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
@@ -4847,6 +5023,11 @@ public interface HostInterface {
     fun `listCustomSoundsJson`(): kotlin.String
     
     /**
+     * The marker vocabulary as a JSON `DayMarker[]`, in the user's order.
+     */
+    fun `listDayMarkersJson`(): kotlin.String
+    
+    /**
      * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
      * `SyncConflict` wire shape).
      */
@@ -4865,6 +5046,23 @@ public interface HostInterface {
      * viewer. Mirrors the desktop `list_sync_log_entries`.
      */
     fun `listSyncLogJson`(`limit`: kotlin.UInt): kotlin.String
+    
+    /**
+     * Write one line into the app's own rolling log — the file the Logs
+     * screen shows and the support bundle exports.
+     *
+     * The JS layer had no way in, and the gap was only visible from the
+     * outside: the background round is the one code path a user cannot watch
+     * happen, and its two most interesting steps — did the provider warm pass
+     * finish, was the widget snapshot rewritten — left no trace anywhere. The
+     * sync log records the peer round and nothing else, so "the pull worked
+     * but the widget was wrong" had no evidence on either side of it.
+     *
+     * Level names match the filter the user picks; anything unrecognised is
+     * logged at info rather than dropped, because losing a diagnostic to a
+     * typo in the diagnostic is the worst possible trade.
+     */
+    fun `logLine`(`level`: kotlin.String, `message`: kotlin.String)
     
     /**
      * The on-disk logs directory, for display.
@@ -4966,6 +5164,13 @@ public interface HostInterface {
      * silent staleness. Mirrors the desktop `get_refresh_errors`.
      */
     fun `refreshErrorsJson`(): kotlin.String
+    
+    /**
+     * Write down what a member's event looks like now, so it can still be
+     * found after the provider remints its id. Local and silent — see
+     * `EventGroupsRepo::refresh_signature`.
+     */
+    fun `refreshEventGroupSignature`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String)
     
     /**
      * Kick an immediate warm pass over every external account's containers +
@@ -5174,6 +5379,13 @@ public interface HostInterface {
      * `color_label_id` `None` clears it.
      */
     fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Set a day's log. Emitted even when it empties the day: the receiving
+     * side deletes the row for an empty log, which is how "I unticked the
+     * last one" reaches the other device.
+     */
+    fun `setDayLogJson`(`logJson`: kotlin.String): kotlin.String
     
     /**
      * Install the native device calendar/reminder bridge (iOS today; Android
@@ -5390,6 +5602,17 @@ public interface HostInterface {
     fun `trustSftpHostKey`(`hostPort`: kotlin.String, `fingerprint`: kotlin.String)
     
     /**
+     * Take one event out of its group. Returns the group as it stands
+     * afterwards, or `None` when the removal dissolved it (fewer than two
+     * members left) or the event was not grouped at all.
+     *
+     * `bookkeeping` says this is NOT the user taking something out — see
+     * `Removal`. The series carry sets it, because a copy it takes out is on
+     * its way straight back into the new group.
+     */
+    fun `ungroupEventJson`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `bookkeeping`: kotlin.Boolean): kotlin.String?
+    
+    /**
      * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
      * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
      * by trigger time, for the mobile layer to register as ahead-of-time OS
@@ -5413,6 +5636,12 @@ public interface HostInterface {
      * `Contact` as JSON. Routed by the contact's `list_id`.
      */
     fun `updateContactJson`(`contactJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Write a marker back whole — rename, re-symbol, recolour, reorder are
+     * one call, so the frontend needs one code path for all four.
+     */
+    fun `updateDayMarkerJson`(`markerJson`: kotlin.String): kotlin.String
     
     /**
      * Update an event; `previous_calendar_id` (the calendar the editor loaded
@@ -6265,6 +6494,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Add a marker; returns the created `DayMarker` as JSON.
+     */
+    @Throws(StoreException::class)override fun `createDayMarkerJson`(`name`: kotlin.String, `symbol`: kotlin.String?, `colorLabel`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_day_marker_json(
+        it,
+        FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`symbol`),FfiConverterOptionalString.lower(`colorLabel`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
      * `create_event` minus colour resolution + reminder reschedule (deferred).
@@ -6364,6 +6610,60 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * One day's log as JSON. An untouched day comes back as an empty log,
+     * never null — the callers render the same thing either way.
+     */
+    @Throws(StoreException::class)override fun `dayLogJson`(`day`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_day_log_json(
+        it,
+        FfiConverterString.lower(`day`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every logged day in an inclusive range — what a week or month view asks
+     * for once, instead of one call per day.
+     */
+    @Throws(StoreException::class)override fun `dayLogsInRangeJson`(`from`: kotlin.String, `to`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_day_logs_in_range_json(
+        it,
+        FfiConverterString.lower(`from`),FfiConverterString.lower(`to`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Record that two events are NOT the same appointment, so Aperio stops
+     * offering to group them. Takes the two refs as JSON `{calendar_id,
+     * event_id}` objects.
+     */
+    @Throws(StoreException::class)override fun `declineGroupSuggestionJson`(`firstJson`: kotlin.String, `secondJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_decline_group_suggestion_json(
+        it,
+        FfiConverterString.lower(`firstJson`),FfiConverterString.lower(`secondJson`),_status)
+}
+    }
+    
     
 
     
@@ -6483,6 +6783,19 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_delete_custom_sound(
         it,
         FfiConverterString.lower(`sha256`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(StoreException::class)override fun `deleteDayMarker`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_day_marker(
+        it,
+        FfiConverterString.lower(`id`),_status)
 }
     }
     
@@ -6678,6 +6991,22 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Dissolve a whole group. The events themselves are untouched.
+     */
+    @Throws(StoreException::class)override fun `dissolveEventGroup`(`groupId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_dissolve_event_group(
+        it,
+        FfiConverterString.lower(`groupId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Enable end-to-end encryption on the configured sync target (§19.7). Mints
      * fresh v2 key material (a random data key wrapped by a passphrase-derived
      * KEK, recorded in the plaintext `meta.json`), then branches on the target:
@@ -6706,15 +7035,36 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Every group any of these events belongs to, as a JSON `EventGroup[]`.
+     *
+     * Takes a JSON array of `{calendar_id, event_id}`. Groups come back WHOLE,
+     * including members outside the rendered range — a group only reads as a
+     * whole ("this and three others").
+     */
+    @Throws(StoreException::class)override fun `eventGroupsForEventsJson`(`eventsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_event_groups_for_events_json(
+        it,
+        FfiConverterString.lower(`eventsJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The meeting Aperio created for this event, if any, as JSON.
      */
-    @Throws(StoreException::class)override fun `eventMeetingJson`(`eventId`: kotlin.String): kotlin.String {
+    @Throws(StoreException::class)override fun `eventMeetingJson`(`eventId`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_event_meeting_json(
         it,
-        FfiConverterString.lower(`eventId`),_status)
+        FfiConverterString.lower(`eventId`),FfiConverterOptionalString.lower(`calendarId`),_status)
 }
     }
     )
@@ -6957,6 +7307,65 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Declare that these events mean the same appointment.
+     *
+     * Takes a JSON array of `{calendar_id, event_id, title, starts_at}` and
+     * returns the resulting group as JSON. `title`/`starts_at` are the
+     * SIGNATURE: what the event looked like when it joined, kept so a member
+     * whose provider id changes can be found again.
+     */
+    @Throws(StoreException::class)override fun `groupEventsJson`(`membersJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_group_events_json(
+        it,
+        FfiConverterString.lower(`membersJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every pair the user has said is not one appointment, as JSON.
+     */
+    @Throws(StoreException::class)override fun `groupSuggestionDeclinesJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_group_suggestion_declines_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * One member, found again under the id its event carries now.
+     *
+     * Silent on purpose: it repairs Aperio's own bookkeeping and changes
+     * nothing about which events mean the same appointment. See
+     * `EventGroupsRepo::heal_member`.
+     */
+    @Throws(StoreException::class)override fun `healEventGroupMember`(`groupId`: kotlin.String, `calendarId`: kotlin.String, `oldEventId`: kotlin.String, `newEventId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_heal_event_group_member(
+        it,
+        FfiConverterString.lower(`groupId`),FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`oldEventId`),FfiConverterString.lower(`newEventId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Import an audio file into the custom-sound store (the JS picked it via
      * expo-document-picker; `path` is its local path). Returns JSON
      * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
@@ -7124,6 +7533,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The marker vocabulary as a JSON `DayMarker[]`, in the user's order.
+     */
+    @Throws(StoreException::class)override fun `listDayMarkersJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_day_markers_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
      * `SyncConflict` wire shape).
      */
@@ -7176,6 +7602,33 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Write one line into the app's own rolling log — the file the Logs
+     * screen shows and the support bundle exports.
+     *
+     * The JS layer had no way in, and the gap was only visible from the
+     * outside: the background round is the one code path a user cannot watch
+     * happen, and its two most interesting steps — did the provider warm pass
+     * finish, was the widget snapshot rewritten — left no trace anywhere. The
+     * sync log records the peer round and nothing else, so "the pull worked
+     * but the widget was wrong" had no evidence on either side of it.
+     *
+     * Level names match the filter the user picks; anything unrecognised is
+     * logged at info rather than dropped, because losing a diagnostic to a
+     * typo in the diagnostic is the worst possible trade.
+     */override fun `logLine`(`level`: kotlin.String, `message`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_log_line(
+        it,
+        FfiConverterString.lower(`level`),FfiConverterString.lower(`message`),_status)
+}
+    }
+    
     
 
     
@@ -7385,6 +7838,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Write down what a member's event looks like now, so it can still be
+     * found after the provider remints its id. Local and silent — see
+     * `EventGroupsRepo::refresh_signature`.
+     */
+    @Throws(StoreException::class)override fun `refreshEventGroupSignature`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_event_group_signature(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterString.lower(`title`),FfiConverterString.lower(`startsAt`),_status)
+}
+    }
+    
     
 
     
@@ -7830,6 +8301,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Set a day's log. Emitted even when it empties the day: the receiving
+     * side deletes the row for an empty log, which is how "I unticked the
+     * last one" reaches the other device.
+     */
+    @Throws(StoreException::class)override fun `setDayLogJson`(`logJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_day_log_json(
+        it,
+        FfiConverterString.lower(`logJson`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -8335,6 +8825,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Take one event out of its group. Returns the group as it stands
+     * afterwards, or `None` when the removal dissolved it (fewer than two
+     * members left) or the event was not grouped at all.
+     *
+     * `bookkeeping` says this is NOT the user taking something out — see
+     * `Removal`. The series carry sets it, because a copy it takes out is on
+     * its way straight back into the new group.
+     */
+    @Throws(StoreException::class)override fun `ungroupEventJson`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `bookkeeping`: kotlin.Boolean): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_ungroup_event_json(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterBoolean.lower(`bookkeeping`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
      * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
      * by trigger time, for the mobile layer to register as ahead-of-time OS
@@ -8388,6 +8901,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_update_contact_json(
         it,
         FfiConverterString.lower(`contactJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Write a marker back whole — rename, re-symbol, recolour, reorder are
+     * one call, so the frontend needs one code path for all four.
+     */
+    @Throws(StoreException::class)override fun `updateDayMarkerJson`(`markerJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_day_marker_json(
+        it,
+        FfiConverterString.lower(`markerJson`),_status)
 }
     }
     )
@@ -9829,6 +10360,12 @@ data class NewTaskDto (
     , 
     var `scheduledTime`: kotlin.String?
     , 
+    /**
+     * End of the planned block, `HH:MM:SS`. Needs `scheduled_time`; see
+     * `cal_core::Task::scheduled_end_time`.
+     */
+    var `scheduledEndTime`: kotlin.String?
+    , 
     var `deadlineDate`: kotlin.String?
     , 
     var `deadlineTime`: kotlin.String?
@@ -9875,6 +10412,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalTypeTaskRecurrence.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -9893,6 +10431,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterTypeTaskEffort.allocationSize(value.`effort`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledEndTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
             FfiConverterOptionalLong.allocationSize(value.`deadlineReminderDays`) +
@@ -9912,6 +10451,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterTypeTaskEffort.write(value.`effort`, buf)
             FfiConverterOptionalString.write(value.`scheduledDate`, buf)
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
+            FfiConverterOptionalString.write(value.`scheduledEndTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
             FfiConverterOptionalString.write(value.`deadlineTime`, buf)
             FfiConverterOptionalLong.write(value.`deadlineReminderDays`, buf)
@@ -10098,6 +10638,12 @@ data class TaskDto (
     var `scheduledTime`: kotlin.String?
     , 
     /**
+     * End of the planned block, `HH:MM:SS`. Needs `scheduled_time`; see
+     * `cal_core::Task::scheduled_end_time`.
+     */
+    var `scheduledEndTime`: kotlin.String?
+    , 
+    /**
      * `YYYY-MM-DD`. The day the task is due by.
      */
     var `deadlineDate`: kotlin.String?
@@ -10185,6 +10731,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalTypeTaskRecurrence.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -10211,6 +10758,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterTypeTaskEffort.allocationSize(value.`effort`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledEndTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
             FfiConverterOptionalLong.allocationSize(value.`deadlineReminderDays`) +
@@ -10238,6 +10786,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterTypeTaskEffort.write(value.`effort`, buf)
             FfiConverterOptionalString.write(value.`scheduledDate`, buf)
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
+            FfiConverterOptionalString.write(value.`scheduledEndTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
             FfiConverterOptionalString.write(value.`deadlineTime`, buf)
             FfiConverterOptionalLong.write(value.`deadlineReminderDays`, buf)
