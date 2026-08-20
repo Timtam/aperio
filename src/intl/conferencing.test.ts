@@ -180,3 +180,52 @@ describe('extractUrls', () => {
     expect(found?.joinUrl).toBe(long);
   });
 });
+
+describe('DFNconf', () => {
+  it('recognises a Pexip room link', () => {
+    expect(
+      classify('https://conf.dfn.de/webapp/#/?conference=97912345'),
+    ).toBe('dfnconf');
+    expect(classify('https://conf.dfn.de/webapp/conference/97912345')).toBe(
+      'dfnconf',
+    );
+  });
+
+  it('does NOT offer Join for the documentation site', () => {
+    // The manual lives on www.conf.dfn.de and the app on conf.dfn.de. A
+    // colleague pasting "see the DFNconf instructions" into an invitation
+    // must not produce a Join button that opens a help page.
+    expect(
+      classify('https://www.conf.dfn.de/dfnconf/anleitungen-und-dokumentation/'),
+    ).toBeNull();
+  });
+
+  it('does not join the app itself', () => {
+    // `/webapp/` with no conference is the landing page.
+    expect(classify('https://conf.dfn.de/webapp/')).toBeNull();
+    expect(classify('https://conf.dfn.de/')).toBeNull();
+  });
+
+  it('leaves the Adobe Connect half alone', () => {
+    // DFNconf still runs Adobe Connect on its own host, but its meeting URLs
+    // carry no stable path marker — matching the host would offer Join for the
+    // login page too. Deliberately unclassified rather than wrongly claimed.
+    expect(classify('https://webconf.vc.dfn.de/r/abc123/')).toBeNull();
+  });
+
+  it('finds the room link in a real-shaped invitation', () => {
+    const found = detectConference({
+      location: null,
+      description: [
+        'Sie sind zu einer Videokonferenz eingeladen.',
+        '',
+        'Per Browser: https://conf.dfn.de/webapp/#/?conference=97912345',
+        'Per SIP: 97912345@conf.dfn.de',
+        'Per Telefon: +49 30 200 97912345',
+      ].join(String.fromCharCode(10)),
+    });
+    expect(found?.provider).toBe('dfnconf');
+    expect(found?.joinUrl).toBe('https://conf.dfn.de/webapp/#/?conference=97912345');
+  });
+});
+

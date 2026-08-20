@@ -41,6 +41,7 @@ export type ConferenceProvider =
   | 'jitsi'
   | 'goToMeeting'
   | 'bigBlueButton'
+  | 'dfnconf'
   | 'whereby'
   | 'other';
 
@@ -223,6 +224,21 @@ export function classify(url: string): ConferenceProvider | null {
   ) {
     return lower.includes('/j/') || lower.includes('/my/') || lower.includes('/w/')
       ? 'zoom'
+      : null;
+  }
+  // DFNconf (the German research network's Pexip service). The join links live
+  // on the bare host under /webapp/; the DOCUMENTATION lives on www.conf.dfn.de,
+  // so an exact host match is what keeps a link to the manual from offering a
+  // Join button. A conference id is required too — `/webapp/` on its own is the
+  // app's landing page and joins nothing.
+  //
+  // Only the Pexip half. DFNconf also still runs Adobe Connect on
+  // webconf.vc.dfn.de, but its meeting URLs have no stable path marker, so
+  // matching that host would offer Join for its login page as readily as for a
+  // meeting — the same trap the Webex exclusions above exist for.
+  if (host === 'conf.dfn.de') {
+    return lower.includes('conference=') || lower.includes('/conference/')
+      ? 'dfnconf'
       : null;
   }
   if (host === 'meet.google.com') return 'googleMeet';

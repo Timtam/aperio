@@ -60,6 +60,7 @@ pub enum ConferenceProvider {
     GoToMeeting,
     BigBlueButton,
     Whereby,
+    Dfnconf,
     Other,
 }
 
@@ -76,6 +77,7 @@ impl ConferenceProvider {
             ConferenceProvider::GoToMeeting => "goToMeeting",
             ConferenceProvider::BigBlueButton => "bigBlueButton",
             ConferenceProvider::Whereby => "whereby",
+            ConferenceProvider::Dfnconf => "dfnconf",
             ConferenceProvider::Other => "other",
         }
     }
@@ -450,6 +452,20 @@ pub fn classify(url: &str) -> Option<ConferenceProvider> {
     if host.ends_with("zoom.us") || host.ends_with("zoom.com") || host.ends_with("zoomgov.com") {
         return (lower.contains("/j/") || lower.contains("/my/") || lower.contains("/w/"))
             .then_some(ConferenceProvider::Zoom);
+    }
+    // DFNconf (the German research network's Pexip service). The join links live
+    // on the bare host under /webapp/; the DOCUMENTATION lives on
+    // www.conf.dfn.de, so an exact host match is what keeps a link to the manual
+    // from offering a Join button. A conference id is required too — `/webapp/`
+    // on its own is the app's landing page and joins nothing.
+    //
+    // Only the Pexip half. DFNconf also still runs Adobe Connect on
+    // webconf.vc.dfn.de, but its meeting URLs have no stable path marker, so
+    // matching that host would offer Join for its login page as readily as for
+    // a meeting — the same trap the Webex exclusions above exist for.
+    if host == "conf.dfn.de" {
+        return (lower.contains("conference=") || lower.contains("/conference/"))
+            .then_some(ConferenceProvider::Dfnconf);
     }
     if host == "meet.google.com" {
         return Some(ConferenceProvider::GoogleMeet);
@@ -1065,5 +1081,40 @@ mod tests {
         let stripped = without_meeting_block(&once, url);
         let twice = format!("{stripped}\n\n{}", meeting_block(url, Some("pw")));
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn dfnconf_room_links_are_recognised() {
+        assert_eq!(
+            classify("https://conf.dfn.de/webapp/#/?conference=97912345"),
+            Some(ConferenceProvider::Dfnconf)
+        );
+        assert_eq!(
+            classify("https://conf.dfn.de/webapp/conference/97912345"),
+            Some(ConferenceProvider::Dfnconf)
+        );
+    }
+
+    #[test]
+    fn dfnconf_documentation_is_not_a_join_link() {
+        // The manual lives on www.conf.dfn.de and the app on conf.dfn.de. A
+        // colleague pasting "see the DFNconf instructions" into an invitation
+        // must not produce a Join button that opens a help page.
+        assert_eq!(
+            classify("https://www.conf.dfn.de/dfnconf/anleitungen-und-dokumentation/"),
+            None
+        );
+        // `/webapp/` with no conference is the landing page.
+        assert_eq!(classify("https://conf.dfn.de/webapp/"), None);
+        assert_eq!(classify("https://conf.dfn.de/"), None);
+    }
+
+    #[test]
+    fn dfnconf_adobe_connect_half_is_left_alone() {
+        // DFNconf still runs Adobe Connect on its own host, but its meeting
+        // URLs carry no stable path marker — matching the host would offer Join
+        // for the login page too. Deliberately unclassified rather than
+        // wrongly claimed.
+        assert_eq!(classify("https://webconf.vc.dfn.de/r/abc123/"), None);
     }
 }
