@@ -243,6 +243,24 @@ pub async fn list_accounts_missing_credentials(
         );
         if slots.iter().any(|slot| !secret_present(&acc.id, *slot)) {
             out.push(acc);
+            continue;
+        }
+        // Per-ACCOUNT: a bring-your-own OAuth account whose client secret is
+        // on none of this device's paths (keychain, legacy config row) cannot
+        // construct its adapter — it is "not signed in here", however healthy
+        // its refresh token looks. This is exactly the account that synced in
+        // from another device before the client secret became syncable.
+        let missing_client =
+            host_core::account_setup::schema_for_kind(&plugin_manager, acc.adapter_kind.as_str())
+                .is_some_and(|schema| {
+                    host_core::account_setup::missing_own_oauth_client_secret(
+                        &schema,
+                        &acc.config_json,
+                        |slot| secret_present(&acc.id, slot),
+                    )
+                });
+        if missing_client {
+            out.push(acc);
         }
     }
     Ok(out)
@@ -1428,7 +1446,6 @@ pub async fn connect_account(
     // 3) Tokens the sign-in produced join the keychain writes. The refresh
     //    token is the durable credential; an access token is kept only when the
     //    plugin asked to be handed one.
-    let mut refresh_for_sync = None;
     if let (Some(oauth), Some(tokens)) = (&schema.oauth, &tokens) {
         if oauth.refresh_token_field.is_some() {
             let refresh = tokens
@@ -1445,7 +1462,6 @@ pub async fn connect_account(
                 .to_string();
             plan.secrets
                 .push((SecretSlot::RefreshToken, refresh.clone()));
-            refresh_for_sync = Some(refresh);
         }
         if oauth.access_token_field.is_some() {
             if let Some(access) = tokens.get("access_token").and_then(Value::as_str) {
@@ -1485,18 +1501,18 @@ pub async fn connect_account(
                 message: format!("failed to store {}: {err}", slot.wire_name()),
             });
         }
-    }
-    // E2E only: carry the durable refresh token to the user's other devices.
-    // Nothing else is synced — an OAuth client secret belongs to the build or to
-    // the user's own registration, and every device resolves its own.
-    if let Some(refresh) = refresh_for_sync {
+        // Offer every stored secret to the sync gate. The gate itself decides:
+        // non-syncable slots (the access token) are refused there, everything
+        // is E2E-only, and the bring-your-own OAuth client secret now travels —
+        // it exists on exactly this device, and the refresh token beside it is
+        // unusable without it on any other.
         crate::credential_sync::emit_credential_set(
             &event_log,
             &shared,
             &plugin_manager,
             &created.id,
-            SecretSlot::RefreshToken,
-            &refresh,
+            *slot,
+            value,
         );
     }
     if let Err(err) = registry.register(&created) {

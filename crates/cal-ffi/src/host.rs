@@ -2199,6 +2199,17 @@ impl Host {
             }
         }
 
+        // Credentials that predate their own syncability — the desktop twin
+        // sits beside its other one-shot backfills in lib.rs. E2E-gated and
+        // versioned inside; a no-op everywhere but the first launch after an
+        // upgrade that widened the syncable slots.
+        host_core::credential_sync::backfill_new_syncable_slots(
+            &graph.writer,
+            &db.shared(),
+            &plugin_manager,
+            secret_store.as_ref(),
+        );
+
         // The external-adapter snapshot cache. Construct it (+ the refresh dedup
         // coordinator + the swappable observer + the refresher), mirroring the
         // desktop lib.rs. The periodic warm loop is NOT started — mobile drives
@@ -2677,6 +2688,26 @@ impl Host {
                 .iter()
                 .any(|slot| self.secret_store.retrieve(&acc.id, *slot).is_err())
             {
+                out.push(acc);
+                continue;
+            }
+            // Per-ACCOUNT, exactly as on the desktop: a bring-your-own OAuth
+            // account whose client secret is on none of this device's paths
+            // cannot construct its adapter, however healthy its refresh token
+            // looks — the account that synced in before the client secret
+            // became syncable.
+            let missing_client = host_core::account_setup::schema_for_kind(
+                &self.plugin_manager,
+                acc.adapter_kind.as_str(),
+            )
+            .is_some_and(|schema| {
+                host_core::account_setup::missing_own_oauth_client_secret(
+                    &schema,
+                    &acc.config_json,
+                    |slot| self.secret_store.retrieve(&acc.id, slot).is_ok(),
+                )
+            });
+            if missing_client {
                 out.push(acc);
             }
         }
@@ -6022,6 +6053,15 @@ impl Host {
     /// reported "no changes" over permanently-missing events. Mirrors the desktop
     /// `reset_account_sync` command.
     pub fn reset_account_sync(&self, account_id: String) -> Result<(), StoreError> {
+        // Refuse rather than no-op — the desktop twin's reasoning verbatim: a
+        // warm pass only visits registered adapters, so this would otherwise
+        // wipe nothing, fetch nothing and report success.
+        if !self.registry.has_adapter(&account_id) {
+            return Err(StoreError::Unsupported {
+                detail: "this account is not signed in on this device, so there                          is nothing to re-sync — reconnect it under Settings,                          Accounts"
+                    .to_string(),
+            });
+        }
         self.cache
             .reset_account_sync(&account_id)
             .map_err(|e| StoreError::Storage {

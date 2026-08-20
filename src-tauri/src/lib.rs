@@ -535,6 +535,16 @@ pub fn run() {
     // is gated by a pref it sets on success.
     commands::backfill_account_events(&db, &plugin_manager, &event_log_writer);
     commands::backfill_local_task_events(&db, &event_log_writer);
+    // Credentials that predate their own syncability: refresh tokens stored
+    // before the E2E-enable bulk emit existed, and every bring-your-own OAuth
+    // client secret. Without this, a second device holds the account row and
+    // half its keys forever. E2E-gated and versioned inside.
+    host_core::credential_sync::backfill_new_syncable_slots(
+        &event_log_writer,
+        &db.shared(),
+        &plugin_manager,
+        &crate::secrets::KeyringSecretStore,
+    );
 
     // Local custom-sound store (user content, outside the sync/ subtree). §14.4:
     // the reminder scheduler + the sound import/list/preview/delete commands

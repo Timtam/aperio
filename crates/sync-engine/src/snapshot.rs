@@ -318,6 +318,10 @@ impl SnapshotBuilder {
                 SecretSlot::Password,
                 SecretSlot::RefreshToken,
                 SecretSlot::ApiToken,
+                // Bring-your-own OAuth client secret — see `syncable_from_wire`:
+                // it exists on one device only, and the refresh token beside it
+                // is unusable without it.
+                SecretSlot::OauthClientSecret,
             ] {
                 if let Ok(secret) = self.secrets.retrieve(&acc.id, slot) {
                     out.push(SnapshotCredential {

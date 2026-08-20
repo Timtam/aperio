@@ -155,6 +155,56 @@ pub fn emit_credential_cleared(
         slot: slot.wire_name().to_string(),
     }));
 }
+/// `user_prefs` key recording which credential-slot generation this device has
+/// already pushed into the log. Bumping [`SLOT_BACKFILL_VERSION`] makes every
+/// device re-run [`emit_all_local_credentials`] exactly once.
+const SLOT_BACKFILL_PREF: &str = "credentialSync.slotBackfillVersion";
+
+/// The current generation. 1 = the OAuth client secret joined the syncable
+/// slots (2026-08), and refresh tokens stored before the E2E-enable bulk emit
+/// existed had never been pushed either.
+const SLOT_BACKFILL_VERSION: i64 = 1;
+
+/// One-time re-emit of every local credential, per slot generation.
+///
+/// Two real datasets needed it on the day it was written. An account whose
+/// refresh token was stored before the E2E-enable flow learned to bulk-emit
+/// never had that token on the wire at all. And every bring-your-own OAuth
+/// client secret predates its own syncability by definition. Both leave a
+/// second device with an account row it can never open — the sidebar says
+/// "no calendars found" and nothing explains why.
+///
+/// Runs only with E2E on (the same gate every emit obeys), and does NOT mark
+/// itself done while E2E is off — a dataset that turns E2E on next month must
+/// still get its backfill. Appending a duplicate `credential.set` for a secret
+/// the wire already carried is harmless: the applier overwrites the same
+/// keychain entry with the same value.
+pub fn backfill_new_syncable_slots(
+    event_log: &EventLogWriter,
+    conn: &SharedConn,
+    manager: &plugin_core::PluginManager,
+    secrets: &dyn SecretStore,
+) {
+    if !e2e_enabled(conn) {
+        return;
+    }
+    let prefs = UserPrefsRepo::new(conn);
+    let done = prefs
+        .get(SLOT_BACKFILL_PREF)
+        .ok()
+        .flatten()
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .unwrap_or(0);
+    if done >= SLOT_BACKFILL_VERSION {
+        return;
+    }
+    emit_all_local_credentials(event_log, conn, manager, secrets);
+    if let Err(err) = prefs.set(SLOT_BACKFILL_PREF, &SLOT_BACKFILL_VERSION.to_string()) {
+        // Failing to record it means one redundant re-emit next launch —
+        // annoying in the log, harmless on the wire.
+        tracing::warn!(?err, "credential backfill: couldn't record the version");
+    }
+}
 
 /// Push every local account secret into the (now-encrypted) sync log —
 /// used when E2E is turned on *after* accounts already exist, so the
@@ -196,6 +246,10 @@ pub fn emit_all_local_credentials(
             SecretSlot::Password,
             SecretSlot::RefreshToken,
             SecretSlot::ApiToken,
+            // The bring-your-own OAuth client secret. Only user-pasted values
+            // ever occupy this slot (the built-in posture persists nothing),
+            // and the refresh token above is unusable without it.
+            SecretSlot::OauthClientSecret,
         ] {
             // Read through the injected platform secret store (the desktop
             // keyring; the mobile keychain bridge) — never a hard-coded backend.

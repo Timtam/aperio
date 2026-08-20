@@ -267,6 +267,53 @@ pub fn supports_credential_test(schema: &AccountSchema) -> bool {
 /// The OAuth CLIENT secret is deliberately absent: for the built-in posture
 /// there is nothing in the keychain to find, and an account is not
 /// disconnected for that.
+/// Whether THIS account is disconnected for want of its OAuth client secret.
+///
+/// Deliberately per-account where [`required_slots`] is per-kind: a blanket
+/// "OAuth kinds need the client-secret slot" would flag every built-in-posture
+/// account, whose devices really do resolve their own client and store
+/// nothing. Bring-your-own is different — the secret was pasted once, exists
+/// only where it was pasted (or, for legacy rows, in `config_json`), and an
+/// account without it cannot even construct its adapter. That failure used to
+/// be invisible: the refresh token synced in, the per-kind check was
+/// satisfied, and the sidebar said "no calendars found" about an account that
+/// was really "not signed in on this device".
+///
+/// `secret_present` is injected so the desktop keychain and the mobile
+/// keystore answer the same question through their own stores.
+pub fn missing_own_oauth_client_secret(
+    schema: &AccountSchema,
+    config_json: &str,
+    secret_present: impl Fn(SecretSlot) -> bool,
+) -> bool {
+    // Only schemas whose sign-in involves a client secret at all.
+    let Some(secret_field) = schema
+        .oauth
+        .as_ref()
+        .and_then(|o| o.client_secret_field.as_deref())
+    else {
+        return false;
+    };
+    let cfg: Map<String, Value> = serde_json::from_str::<Value>(config_json)
+        .ok()
+        .and_then(|v| match v {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default();
+    // Built-in posture: the build brings its own client; nothing is stored and
+    // nothing is missing.
+    if cfg.get(CLIENT_SOURCE_KEY).and_then(Value::as_str) == Some(CLIENT_SOURCE_BUILTIN) {
+        return false;
+    }
+    // A legacy row still carries the secret in `config_json`; registration
+    // adopts it from there, so the account is connectable.
+    if legacy_config_secret(&cfg, secret_field).is_some() {
+        return false;
+    }
+    !secret_present(SecretSlot::OauthClientSecret)
+}
+
 pub fn required_slots(schema: &AccountSchema) -> Vec<SecretSlot> {
     let client_secret_field = schema
         .oauth
@@ -1893,5 +1940,53 @@ mod tests {
         let read = kc.read.borrow();
         assert!(!read.contains(&SecretSlot::RefreshToken));
         assert!(!read.contains(&SecretSlot::OauthClientSecret));
+    }
+
+    #[test]
+    fn missing_client_secret_is_per_account_not_per_kind() {
+        let schema = oauth_schema();
+
+        // Bring-your-own, secret nowhere on this device: disconnected. This is
+        // the account that synced in from another device before the client
+        // secret became syncable — the sidebar used to call it "no calendars
+        // found" instead of "not signed in".
+        assert!(missing_own_oauth_client_secret(
+            &schema,
+            r#"{"client_id":"abc"}"#,
+            |_| false,
+        ));
+
+        // The keychain has it: connected.
+        assert!(!missing_own_oauth_client_secret(
+            &schema,
+            r#"{"client_id":"abc"}"#,
+            |slot| slot == SecretSlot::OauthClientSecret,
+        ));
+
+        // Legacy row still carries it in config_json: registration adopts it,
+        // so the account is connectable without a keychain entry.
+        assert!(!missing_own_oauth_client_secret(
+            &schema,
+            r#"{"client_id":"abc","client_secret":"s3cr3t"}"#,
+            |_| false,
+        ));
+
+        // Built-in posture: the build brings its own client; nothing is
+        // stored and nothing is missing. THIS case is why the check must be
+        // per-account — a per-kind rule would flag every one of these.
+        assert!(!missing_own_oauth_client_secret(
+            &schema,
+            r#"{"client_id":"abc","client_source":"builtin"}"#,
+            |_| false,
+        ));
+
+        // A schema without an oauth client secret asks for nothing.
+        let mut plain = oauth_schema();
+        plain.oauth = None;
+        assert!(!missing_own_oauth_client_secret(
+            &plain,
+            r#"{"client_id":"abc"}"#,
+            |_| false,
+        ));
     }
 }

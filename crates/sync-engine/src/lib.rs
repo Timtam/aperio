@@ -159,10 +159,14 @@ pub enum SecretSlot {
     /// end-to-end encryption is off, so a secret there would travel to the
     /// user's own sync target in the clear.
     ///
-    /// Deliberately NOT in [`Self::syncable_from_wire`]. A client secret is a
-    /// property of the BUILD or of the user's own provider registration, not of
-    /// the account, and every device resolves its own — so syncing it would put
-    /// a credential on the wire for no benefit at all.
+    /// Syncable, since 2026-08: for a bring-your-own registration this secret
+    /// exists ONLY on the device that connected the account — there is no
+    /// "resolves its own" for a value the user pasted once — and without it the
+    /// refresh token that already travels is unusable, which left a synced
+    /// Google account permanently dead on every second device. The build's own
+    /// secret is not at risk: the built-in posture never persists this slot
+    /// (`persist_secret` is false there), so only user-owned values can ever
+    /// reach the wire, and only under E2E like every other credential.
     OauthClientSecret,
 
     /// Passphrase for a private key file — SFTP key auth.
@@ -214,15 +218,18 @@ impl SecretSlot {
     /// travel through cross-device credential sync. The short-lived access
     /// token (re-derived per device) and the E2E key itself (syncing it would
     /// defeat E2E) are deliberately rejected — the single allowlist that
-    /// decides what a received credential event may write. So is the OAuth
-    /// client secret: it belongs to the build or to the user's own provider
-    /// registration, and every device resolves its own, so putting it on the
-    /// wire would be pure exposure.
+    /// decides what a received credential event may write.
+    ///
+    /// The OAuth client secret is in the list because for a bring-your-own
+    /// registration it exists on exactly one device and the refresh token —
+    /// the strictly more powerful credential — already travels; excluding it
+    /// protected nothing and stranded the account on every other device.
     pub fn syncable_from_wire(name: &str) -> Option<SecretSlot> {
         match name {
             "password" => Some(SecretSlot::Password),
             "refresh_token" => Some(SecretSlot::RefreshToken),
             "api_token" => Some(SecretSlot::ApiToken),
+            "oauth_client_secret" => Some(SecretSlot::OauthClientSecret),
             _ => None,
         }
     }
@@ -265,6 +272,24 @@ mod secret_slot_tests {
     #[test]
     fn a_key_passphrase_never_arrives_from_another_device() {
         assert!(SecretSlot::syncable_from_wire("key_passphrase").is_none());
+    }
+
+    /// The bring-your-own OAuth client secret DOES travel. It exists on exactly
+    /// one device, and the refresh token it unlocks already syncs — refusing it
+    /// left a synced Google account permanently dead on every second device.
+    #[test]
+    fn the_oauth_client_secret_travels() {
+        assert_eq!(
+            SecretSlot::syncable_from_wire("oauth_client_secret"),
+            Some(SecretSlot::OauthClientSecret)
+        );
+    }
+
+    /// The access token and the E2E key stay device-local, whatever else moves.
+    #[test]
+    fn the_short_lived_and_the_key_never_travel() {
+        assert!(SecretSlot::syncable_from_wire("access_token").is_none());
+        assert!(SecretSlot::syncable_from_wire("sync_encryption_key").is_none());
     }
 }
 

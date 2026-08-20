@@ -461,7 +461,11 @@ impl AdapterRegistry {
             })
     }
 
-    fn has_adapter(&self, account_id: &str) -> bool {
+    /// Whether ANY adapter map holds an instance for this account. Public so a
+    /// command can refuse honestly instead of no-opping: "re-sync from scratch"
+    /// on an account whose adapter never registered wipes nothing, fetches
+    /// nothing, and used to say nothing.
+    pub fn has_adapter(&self, account_id: &str) -> bool {
         self.external_cal
             .read()
             .expect("registry cal poison")

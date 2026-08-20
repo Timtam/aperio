@@ -7,6 +7,7 @@ use tauri::State;
 use super::{CommandError, CommandResult};
 use crate::cache::CacheStore;
 use crate::cache_refresh::{CacheRefreshStatus, CacheRefresher};
+use host_core::registry::AdapterRegistry;
 
 /// Kick an immediate background warm pass (manual "refresh now"). Returns
 /// as soon as the pass is queued; progress arrives via the
@@ -54,7 +55,21 @@ pub fn reset_account_sync(
     account_id: String,
     cache: State<'_, Arc<CacheStore>>,
     refresher: State<'_, Arc<CacheRefresher>>,
+    registry: State<'_, Arc<AdapterRegistry>>,
 ) -> CommandResult<()> {
+    // Refuse rather than no-op. The warm pass builds its targets from the
+    // registered adapters, so for an account without one this command would
+    // wipe nothing, fetch nothing and report success — which is exactly how
+    // "the resync button does nothing" bug reports are made. The one case
+    // that reaches this is an account that cannot sign in on this device, and
+    // the user needs to hear that, not watch a silent button.
+    if !registry.has_adapter(&account_id) {
+        return Err(CommandError {
+            code: "not_registered",
+            message: "this account is not signed in on this device, so there is                       nothing to re-sync — reconnect it under Settings, Accounts"
+                .into(),
+        });
+    }
     cache
         .reset_account_sync(&account_id)
         .map_err(CommandError::from)?;
