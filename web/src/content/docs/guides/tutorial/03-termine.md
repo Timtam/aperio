@@ -232,7 +232,8 @@ offers — one tap instead of thirty swipes to reach half past.
 
 A signature is a named block of text that goes at the **end** of a description
 — a room's join details, a standing note, a department's dial-in. Under
-**Settings → Signatures** you write them and bind one to each calendar; the
+**Settings → Signatures** — on the phone via **Signatures** in Settings — you
+write them and bind one to each calendar; the
 editor then offers that one with a single press, and a dialog for the
 exceptions.
 

@@ -251,8 +251,9 @@ Uhrzeitfeld anbietet — ein Tippen statt dreißig Wischer bis zur halben Stunde
 
 Eine Signatur ist ein benannter Textblock, der ans **Ende** einer Beschreibung
 kommt — die Zugangsdaten eines Raums, ein stehender Hinweis, die Einwahl einer
-Abteilung. Unter **Einstellungen → Signaturen** schreibst du sie und bindest je
-eine an einen Kalender; der Editor bietet dann diese mit einem einzigen Druck
+Abteilung. Unter **Einstellungen → Signaturen** — am Telefon über
+**Signaturen** in den Einstellungen — schreibst du sie und bindest je eine an
+einen Kalender; der Editor bietet dann diese mit einem einzigen Druck
 an, und einen Dialog für die Ausnahmen.
 
 Das Einfügen ist wiederholbar: Ein zweiter Druck **ersetzt** den Block, statt

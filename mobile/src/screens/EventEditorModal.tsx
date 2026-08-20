@@ -46,6 +46,7 @@ import { MeetingControls } from '../components/MeetingControls';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { QuickTimeButton } from '../components/QuickTimeButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
+import { SignatureButton } from '../components/SignatureButton';
 import { EventRsvp } from '../components/EventRsvp';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -1060,6 +1061,13 @@ export default function EventEditorModal({
           onChangeText={setDescription}
           accessibilityLabel={t('dialogs.event.fields.description')}
           multiline
+        />
+        {/* Beside the field, not inside it: a signature is an addition at the
+            end, and the text above stays the user's. */}
+        <SignatureButton
+          boundTo={calendarId}
+          description={description}
+          onChange={setDescription}
         />
         <DescriptionLinks text={description} />
       </View>

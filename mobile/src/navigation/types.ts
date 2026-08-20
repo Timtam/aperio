@@ -142,6 +142,7 @@ export type RootStackParamList = {
   TaskSettings: undefined;
   ColorLabels: undefined;
   DayMarkers: undefined;
+  Signatures: undefined;
   // Diagnostics: the rolling log — detail level, recent lines, redacted export.
   Logs: undefined;
   Contacts: undefined;

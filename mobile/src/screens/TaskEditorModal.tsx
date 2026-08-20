@@ -56,6 +56,7 @@ import {
   useTitleSuggestions,
 } from '../state/useTitleSuggestions';
 import { DescriptionLinks } from '../components/DescriptionLinks';
+import { SignatureButton } from '../components/SignatureButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
@@ -1154,6 +1155,13 @@ export default function TaskEditorModal({
           multiline
           numberOfLines={4}
           textAlignVertical="top"
+        />
+        {/* No binding: signatures bind to calendars, and a task belongs to a
+            list. It asks rather than guesses. */}
+        <SignatureButton
+          boundTo=""
+          description={form.description}
+          onChange={(next) => update('description', next)}
         />
         <DescriptionLinks text={form.description} />
       </View>
