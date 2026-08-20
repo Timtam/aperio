@@ -1793,7 +1793,7 @@
       "existingHeading": "Connected accounts",
       "manageHint": "Press F2 to rename, Delete to remove.",
       "forceResync": "Re-sync \"{{name}}\" from scratch",
-      "forceResyncShort": "Re-sync from scratch",
+      "forceResyncShort": "Re-sync",
       "deleteAccount": "Delete account \"{{name}}\"",
       "resyncing": "Re-syncing …",
       "resyncStarted": "Full re-sync started for \"{{name}}\". The calendars and lists will refresh from the server in the background.",

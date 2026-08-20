@@ -1793,7 +1793,7 @@
       "existingHeading": "Verbundene Konten",
       "manageHint": "Mit F2 umbenennen, mit Entf entfernen.",
       "forceResync": "„{{name}}“ vollständig neu synchronisieren",
-      "forceResyncShort": "Vollständig neu synchronisieren",
+      "forceResyncShort": "Neu synchronisieren",
       "deleteAccount": "Konto „{{name}}“ löschen",
       "resyncing": "Wird neu synchronisiert …",
       "resyncStarted": "Vollständige Neusynchronisierung für „{{name}}“ gestartet. Die Kalender und Listen werden im Hintergrund frisch vom Server geladen.",

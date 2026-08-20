@@ -792,7 +792,11 @@ export default function AccountsScreen() {
                     else startRepair(account);
                   }
                 }}
-                style={styles.row}
+                // Stacked, not side by side: up to four buttons next to a
+                // flex:1 text block squeezed the NAME to zero width — sighted
+                // users saw two truncated buttons and no account at all. The
+                // name gets the full row; the actions wrap beneath it.
+                style={styles.rowStacked}
               >
                 <View style={styles.rowText}>
                   <Text style={styles.accountName}>{account.display_name}</Text>
@@ -808,7 +812,7 @@ export default function AccountsScreen() {
                   ) : null}
                 </View>
                 {!isLocal && (
-                  <>
+                  <View style={styles.rowActions}>
                     {needsReconnect && (
                       <Pressable
                         accessibilityRole="button"
@@ -853,7 +857,7 @@ export default function AccountsScreen() {
                     >
                       <Text style={styles.deleteButtonText}>{t('dialogs.accounts.delete')}</Text>
                     </Pressable>
-                  </>
+                  </View>
                 )}
               </View>
             );
@@ -1061,6 +1065,15 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    rowStacked: {
+      gap: 10,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     rowText: { flex: 1, gap: 2 },
     accountName: { fontSize: 18, color: c.textPrimary, fontWeight: '600' },
     accountKind: { fontSize: 14, color: c.textSecondary },
