@@ -13,6 +13,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { timeInputStep } from '../state/timeStep';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
+import { SignatureButton } from './SignatureButton';
 import {
   addEventExdate,
   createEvent as apiCreateEvent,
@@ -1387,6 +1388,13 @@ export function EventDialog({
             value={form.description}
             onChange={(e) => update('description', e.target.value)}
             rows={4}
+          />
+          {/* Beside the field, not inside it: a signature is an addition at
+              the end, and the text above stays the user's. */}
+          <SignatureButton
+            boundTo={form.calendarId}
+            description={form.description}
+            onChange={(next) => update('description', next)}
           />
         </label>
         <DescriptionLinks text={form.description} />

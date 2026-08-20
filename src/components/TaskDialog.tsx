@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { DescriptionLinks } from './DescriptionLinks';
+import { SignatureButton } from './SignatureButton';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { useDateFormat } from '../intl/dateFormat';
@@ -1875,6 +1876,14 @@ export function TaskDialog({
             value={form.description}
             onChange={(e) => update('description', e.target.value)}
             rows={4}
+          />
+          {/* No binding: signatures bind to calendars, and a task belongs to a
+              list. The button asks which one every time rather than guessing —
+              a per-list binding can come later if it turns out to be wanted. */}
+          <SignatureButton
+            boundTo=""
+            description={form.description}
+            onChange={(next) => update('description', next)}
           />
         </label>
         <DescriptionLinks text={form.description} />

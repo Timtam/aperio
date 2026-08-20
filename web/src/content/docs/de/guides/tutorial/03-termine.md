@@ -247,6 +247,28 @@ lässt: Das Rad des nativen Pickers bewegt sich immer minutenweise. Dort
 entscheidet die Einstellung, welche Minuten der Knopf **Minuten** neben einem
 Uhrzeitfeld anbietet — ein Tippen statt dreißig Wischer bis zur halben Stunde.
 
+## Signaturen
+
+Eine Signatur ist ein benannter Textblock, der ans **Ende** einer Beschreibung
+kommt — die Zugangsdaten eines Raums, ein stehender Hinweis, die Einwahl einer
+Abteilung. Unter **Einstellungen → Signaturen** schreibst du sie und bindest je
+eine an einen Kalender; der Editor bietet dann diese mit einem einzigen Druck
+an, und einen Dialog für die Ausnahmen.
+
+Das Einfügen ist wiederholbar: Ein zweiter Druck **ersetzt** den Block, statt
+einen weiteren anzuhängen, und der Wechsel zu einer anderen Signatur tauscht
+ihn aus. Dein eigener Text darüber bleibt unangetastet — eine Signatur ist eine
+Ergänzung am Ende, keine Umschreibung. Getrennt wird sie durch eine Zeile mit
+`-- `, derselben Marke, die auch Mailprogramme benutzen — und woran Aperio den
+eigenen Block wiederfindet.
+
+**Nur Klartext, und das ist keine Einschränkung, die wir gewählt haben.** Eine
+verschickte Einladung reist als iCalendar, und dessen Beschreibungsfeld ist als
+reiner Text definiert — HTML landet dort als sichtbare Tags bei jedem
+Empfänger, dessen Programm es wörtlich darstellt. Setze einen Link in eine
+eigene Zeile, dann macht ihn praktisch jedes Programm anklickbar, und mehr
+Formatierung braucht eine Einladung nicht.
+
 ## Zusammenfassung
 
 Du kannst Termine anlegen, bearbeiten, verschieben, löschen und wiederholen

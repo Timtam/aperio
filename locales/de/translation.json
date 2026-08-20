@@ -529,7 +529,8 @@
         "sync": "Synchronisation",
         "plugins": "Plugins",
         "logs": "Protokolle",
-        "dayMarkers": "Check-in"
+        "dayMarkers": "Check-in",
+        "signatures": "Signaturen"
       },
       "logs": {
         "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
@@ -995,6 +996,24 @@
         "saved": "Check-in-Punkt {{name}} gespeichert.",
         "deleted": "Check-in-Punkt {{name}} gelöscht. Deine bisherigen Check-ins bleiben unberührt.",
         "moved": "{{name}} ist jetzt {{position}} von {{count}}."
+      },
+      "signatures": {
+        "heading": "Signaturen",
+        "intro": "Ein benannter Textblock, der ans Ende einer Beschreibung kommt — die Zugangsdaten eines Raums, ein stehender Hinweis. Binde ihn an einen Kalender, dann bietet der Editor ihn dort an.",
+        "loading": "Deine Signaturen werden geladen …",
+        "empty": "Noch keine Signaturen. Lege unten die erste an.",
+        "addHeading": "Signatur hinzufügen",
+        "add": "Signatur hinzufügen",
+        "nameLabel": "Name",
+        "nameRequired": "Bitte gib einen Namen ein.",
+        "bodyLabel": "Text",
+        "bodyHint": "Nur Klartext: Eine Einladung reist als iCalendar, und das trägt keine Formatierung. Setze einen Link in eine eigene Zeile, dann macht ihn fast jedes Programm anklickbar.",
+        "delete": "Signatur löschen",
+        "added": "Signatur {{name}} hinzugefügt.",
+        "deleted": "Signatur {{name}} gelöscht.",
+        "bindingsHeading": "Je Kalender",
+        "bindingsHint": "Welche Signatur der Editor für einen Kalender anbietet. Du kannst jederzeit eine andere wählen oder keine.",
+        "bindingNone": "Keine"
       }
     },
     "syncConflicts": {
@@ -1965,6 +1984,15 @@
       "short": "Minuten",
       "open": "Minuten in {{step}}er-Schritten wählen",
       "title": "Minuten nach {{hour}}"
+    },
+    "signature": {
+      "short": "Signatur",
+      "insertNamed": "Signatur einfügen: {{name}}",
+      "choose": "Signatur wählen",
+      "title": "Signatur",
+      "inserted": "Signatur {{name}} eingefügt.",
+      "remove": "Signatur entfernen",
+      "removed": "Signatur entfernt."
     }
   },
   "sidebar": {

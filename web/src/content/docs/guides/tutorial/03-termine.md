@@ -228,6 +228,26 @@ choice: the native picker's wheel always moves a minute at a time. There, the
 setting decides which minutes the **Minutes** button beside a time field
 offers — one tap instead of thirty swipes to reach half past.
 
+## Signatures
+
+A signature is a named block of text that goes at the **end** of a description
+— a room's join details, a standing note, a department's dial-in. Under
+**Settings → Signatures** you write them and bind one to each calendar; the
+editor then offers that one with a single press, and a dialog for the
+exceptions.
+
+Inserting is repeatable: a second press replaces the block rather than adding
+another, and switching to a different signature swaps it. The text you wrote
+above it is never touched — a signature is an addition at the end, not a
+rewrite. It is separated by a line containing `-- `, the same marker mail
+clients use, which is also how Aperio finds its own block again.
+
+**Plain text only, and that is not a limitation we chose.** A sent invitation
+travels as iCalendar, whose description field is defined as plain text — HTML
+put there arrives as visible tags in every client that renders it literally.
+Put a link on a line of its own and virtually every client will make it
+clickable, which is all the formatting an invitation needs.
+
 ## Summary
 
 You can create, edit, move, delete and repeat events. Next we'll handle

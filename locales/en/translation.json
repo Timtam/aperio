@@ -532,7 +532,8 @@
         "sync": "Sync",
         "plugins": "Plugins",
         "logs": "Logs",
-        "dayMarkers": "Check-in"
+        "dayMarkers": "Check-in",
+        "signatures": "Signatures"
       },
       "logs": {
         "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
@@ -998,6 +999,24 @@
         "saved": "Check-in item {{name}} saved.",
         "deleted": "Check-in item {{name}} deleted. Your past check-ins are untouched.",
         "moved": "{{name}} is now {{position}} of {{count}}."
+      },
+      "signatures": {
+        "heading": "Signatures",
+        "intro": "A named block of text that goes at the end of a description — a room's join details, a standing note. Bind one to a calendar and the editor offers it there.",
+        "loading": "Loading your signatures …",
+        "empty": "No signatures yet. Add the first one below.",
+        "addHeading": "Add a signature",
+        "add": "Add signature",
+        "nameLabel": "Name",
+        "nameRequired": "Please enter a name.",
+        "bodyLabel": "Text",
+        "bodyHint": "Plain text only: an invitation travels as iCalendar, which carries no formatting. Put a link on a line of its own and almost every client will make it clickable.",
+        "delete": "Delete signature",
+        "added": "Signature {{name}} added.",
+        "deleted": "Signature {{name}} deleted.",
+        "bindingsHeading": "Per calendar",
+        "bindingsHint": "Which signature the editor offers for a calendar. You can always pick another one, or none.",
+        "bindingNone": "None"
       }
     },
     "syncConflicts": {
@@ -1965,6 +1984,15 @@
       "short": "Minutes",
       "open": "Pick minutes in steps of {{step}}",
       "title": "Minutes past {{hour}}"
+    },
+    "signature": {
+      "short": "Signature",
+      "insertNamed": "Insert signature: {{name}}",
+      "choose": "Choose a signature",
+      "title": "Signature",
+      "inserted": "Signature {{name}} inserted.",
+      "remove": "Remove the signature",
+      "removed": "Signature removed."
     }
   },
   "sidebar": {
