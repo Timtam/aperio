@@ -10,6 +10,7 @@ import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminder
 import { RemindersEditor } from './RemindersEditor';
 import { SettingsSelectorDetail } from './SettingsSelectorDetail';
 import { SoundPrefField } from './SoundPrefField';
+import { CalendarSignatureField } from './CalendarSignatureField';
 
 /** Calendar day/week layout choices, rendered as a radio group. */
 const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
@@ -311,6 +312,8 @@ export function CalendarsPanel() {
               {/* §14.4 per-calendar default sound — inherits the global
                   default unless overridden. */}
               <SoundPrefField prefKey={`sound.calendar.${cal.id}`} />
+              {/* The signature new appointments in this calendar carry. */}
+              <CalendarSignatureField calendarId={cal.id} />
             </>
           )}
         />

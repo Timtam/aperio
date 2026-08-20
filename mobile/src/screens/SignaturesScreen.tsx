@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -11,15 +11,8 @@ import {
 
 import type { Signature } from '@aperio/shared';
 
-import { listCalendars, type Calendar } from '../api/calendar';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
-import {
-  bindSignature,
-  saveSignatures,
-  signatureForCalendar,
-  useSignatures,
-} from '../state/useSignatures';
+import { saveSignatures, useSignatures } from '../state/useSignatures';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Signature blocks, managed on the phone. Twin of the desktop SignaturesPanel —
@@ -34,8 +27,6 @@ export default function SignaturesScreen() {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { signatures, loading } = useSignatures();
-  const [calendars, setCalendars] = useState<Calendar[]>([]);
-  const [bindings, setBindings] = useState<Record<string, string>>({});
   const [newName, setNewName] = useState('');
   const [newBody, setNewBody] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -44,29 +35,6 @@ export default function SignaturesScreen() {
     (m: string) => AccessibilityInfo.announceForAccessibility(m),
     [],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const cals = (await listCalendars()).filter((c) => !c.read_only);
-        if (cancelled) return;
-        setCalendars(cals);
-        const pairs = await Promise.all(
-          cals.map(
-            async (c) =>
-              [c.id, (await signatureForCalendar(c.id, signatures))?.id ?? ''] as const,
-          ),
-        );
-        if (!cancelled) setBindings(Object.fromEntries(pairs));
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [signatures]);
 
   const onAdd = useCallback(async () => {
     const name = newName.trim();
@@ -187,31 +155,6 @@ export default function SignaturesScreen() {
         </Pressable>
       </View>
 
-      {signatures.length > 0 && calendars.length > 0 && (
-        <View style={styles.block}>
-          <Text style={styles.label} accessibilityRole="header">
-            {t('dialogs.settings.signatures.bindingsHeading')}
-          </Text>
-          <Text style={styles.hint} accessibilityRole="text">
-            {t('dialogs.settings.signatures.bindingsHint')}
-          </Text>
-          {calendars.map((cal) => (
-            <RadioGroup<string>
-              key={cal.id}
-              label={cal.name}
-              value={bindings[cal.id] ?? ''}
-              options={[
-                { value: '', label: t('dialogs.settings.signatures.bindingNone') },
-                ...signatures.map((s) => ({ value: s.id, label: s.name })),
-              ]}
-              onChange={(id) => {
-                setBindings((prev) => ({ ...prev, [cal.id]: id }));
-                void bindSignature(cal.id, id || null);
-              }}
-            />
-          ))}
-        </View>
-      )}
     </FormScrollView>
   );
 }

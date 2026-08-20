@@ -1992,7 +1992,9 @@
       "title": "Signatur",
       "inserted": "Signatur {{name}} eingefügt.",
       "remove": "Signatur entfernen",
-      "removed": "Signatur entfernt."
+      "removed": "Signatur entfernt.",
+      "calendarLabel": "Signatur für diesen Kalender",
+      "calendarHint": "Neue Termine in diesem Kalender tragen sie automatisch. Im Editor kannst du trotzdem eine andere wählen oder keine."
     }
   },
   "sidebar": {

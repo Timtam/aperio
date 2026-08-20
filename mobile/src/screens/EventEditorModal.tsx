@@ -18,6 +18,8 @@ import type {
 } from '@aperio/shared';
 import {
   allDayFormEndDate,
+  applySignature,
+  signatureIn,
   eventPrefillFrom,
   allDayWireEnd,
   applyDateTimeChange,
@@ -47,6 +49,10 @@ import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { QuickTimeButton } from '../components/QuickTimeButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { SignatureButton } from '../components/SignatureButton';
+import {
+  signatureForCalendar,
+  useSignatures,
+} from '../state/useSignatures';
 import { EventRsvp } from '../components/EventRsvp';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -249,6 +255,41 @@ export default function EventEditorModal({
     applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
   }, [editing, prefillFrom, loading, targetPinned, applyEventPrefill]);
   const [description, setDescription] = useState('');
+
+  // The calendar's own signature, put on a NEW appointment by itself. A
+  // binding is a default, not a button: a calendar that carries one should not
+  // need a press per appointment. An existing event is never touched.
+  //
+  // On a calendar change the block is SWAPPED rather than stacked, and only
+  // while it is still the one this editor put there — text the user wrote, or
+  // a block they deleted, is theirs. Mail clients behave the same way when the
+  // sending account changes.
+  const { signatures } = useSignatures();
+  const autoSignature = useRef<string | null>(null);
+  useEffect(() => {
+    if (editing || !calendarId) return;
+    let cancelled = false;
+    void signatureForCalendar(calendarId, signatures).then((sig) => {
+      if (cancelled) return;
+      const target = sig?.body?.trim() || null;
+      setDescription((prev) => {
+        const current = signatureIn(prev);
+        const mine = autoSignature.current;
+        if (target === null) {
+          if (current === null || current !== mine) return prev;
+          autoSignature.current = null;
+          return applySignature(prev, '');
+        }
+        if (current === target) return prev;
+        if (current !== null && current !== mine) return prev;
+        autoSignature.current = target;
+        return applySignature(prev, target);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, calendarId, signatures]);
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
   // own row; on an external calendar the colour is a host-local override (the
   // OverridesRepo path, deferred on mobile), so the picker is gated to local.

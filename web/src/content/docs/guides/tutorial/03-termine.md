@@ -233,9 +233,15 @@ offers — one tap instead of thirty swipes to reach half past.
 A signature is a named block of text that goes at the **end** of a description
 — a room's join details, a standing note, a department's dial-in. Under
 **Settings → Signatures** — on the phone via **Signatures** in Settings — you
-write them and bind one to each calendar; the
-editor then offers that one with a single press, and a dialog for the
-exceptions.
+write them. WHICH one a calendar carries is set on the calendar itself, beside
+its default reminders, and a calendar that has one puts it on **new
+appointments by itself**: no press at all in the ordinary case.
+
+The binding is a default, not a restriction. Every signature stays pickable in
+the editor whichever calendar the appointment is on, and the **Signature**
+button beside the description is there for those exceptions — including taking
+one back out. Change the calendar and the block is swapped for the new
+calendar's; text you wrote yourself, or a block you deleted, is left alone.
 
 Inserting is repeatable: a second press replaces the block rather than adding
 another, and switching to a different signature swaps it. The text you wrote

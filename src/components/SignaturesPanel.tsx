@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Signature } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { useCalendarStore } from '../state/calendarStoreContext';
 import { useSignatures } from '../state/useSignatures';
 
 /**
  * Signature blocks, managed from Settings.
  *
  * A signature is a named piece of text that goes at the end of a description —
- * a room's join details, a standing note, a department's dial-in. Mail clients
- * bind theirs to accounts; these bind to calendars, so the editor can offer the
- * right one without being asked.
+ * a room's join details, a standing note, a department's dial-in.
+ *
+ * This page WRITES them. Which calendar carries which is set on the calendar,
+ * beside its default reminders, and a calendar that has one puts it on new
+ * appointments by itself. Every signature stays pickable in the editors
+ * regardless of the calendar, because "usually this one" is a default, not a
+ * restriction.
  *
  * Plain text, deliberately and only: see `shared/signatures.ts` for why an
  * invitation cannot carry anything else.
@@ -21,17 +24,17 @@ import { useSignatures } from '../state/useSignatures';
 export function SignaturesPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars } = useCalendarStore();
-  const writable = calendars.filter((c) => !c.read_only);
-  const { signatures, loading, save, forCalendar, bind } = useSignatures(
-    writable.map((c) => c.id),
-  );
+  // Authoring only. WHICH calendar carries which signature is a property of
+  // the calendar and is set in the calendar's own detail, beside its default
+  // reminders — a matrix of every calendar was a poor way to answer a question
+  // about one, and it only appeared once a signature existed, so the binding
+  // read as missing entirely.
+  const { signatures, loading, save } = useSignatures();
 
   const [newName, setNewName] = useState('');
   const [newBody, setNewBody] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const listId = useId();
   const sectionRef = useRef<HTMLDivElement>(null);
 
   const onAdd = useCallback(async () => {
@@ -149,34 +152,6 @@ export function SignaturesPanel() {
         </button>
       </form>
 
-      {signatures.length > 0 && writable.length > 0 && (
-        <section aria-labelledby={`${listId}-bindings`}>
-          <h4 id={`${listId}-bindings`}>
-            {t('dialogs.settings.signatures.bindingsHeading')}
-          </h4>
-          <p className="form__hint">
-            {t('dialogs.settings.signatures.bindingsHint')}
-          </p>
-          {writable.map((cal) => (
-            <label className="form__field" key={cal.id}>
-              <span className="form__label">{cal.name}</span>
-              <select
-                value={forCalendar(cal.id)?.id ?? ''}
-                onChange={(e) => void bind(cal.id, e.target.value || null)}
-              >
-                <option value="">
-                  {t('dialogs.settings.signatures.bindingNone')}
-                </option>
-                {signatures.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
-        </section>
-      )}
     </div>
   );
 }

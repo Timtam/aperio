@@ -20,7 +20,13 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { RadioGroup } from '../components/RadioGroup';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import {
+  bindSignature,
+  signatureForCalendar,
+  useSignatures,
+} from '../state/useSignatures';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -61,6 +67,17 @@ export default function CalendarEditorModal({
   // The Host's reminder computation already reads this pref, so it genuinely
   // fires. Offered for every calendar (the iCloud display-fill is its use case).
   const defaultReminders = useCalendarDefaultReminders(calendarId);
+  const { signatures } = useSignatures();
+  const [boundId, setBoundId] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    void signatureForCalendar(calendarId, signatures).then((sig) => {
+      if (!cancelled) setBoundId(sig?.id ?? '');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [calendarId, signatures]);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -275,6 +292,25 @@ export default function CalendarEditorModal({
 
       {/* Per-calendar default reminders — applied to events without their own
           reminder (the iCloud "Default Alert Times" case). */}
+      {/* The signature new appointments in this calendar carry. A binding is a
+          default, not a restriction: every signature stays pickable in the
+          editors regardless of which calendar the appointment is on. */}
+      {signatures.length > 0 && (
+        <RadioGroup<string>
+          label={t('dialogs.signature.calendarLabel')}
+          labelAsHeading
+          value={boundId}
+          options={[
+            { value: '', label: t('dialogs.settings.signatures.bindingNone') },
+            ...signatures.map((sig) => ({ value: sig.id, label: sig.name })),
+          ]}
+          onChange={(id) => {
+            setBoundId(id);
+            void bindSignature(calendarId, id || null);
+          }}
+        />
+      )}
+
       {!defaultReminders.loading && (
         <View style={styles.field}>
           <Text style={styles.hint} accessibilityRole="text">

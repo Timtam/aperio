@@ -9,8 +9,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { applySignature, signatureIn } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { timeInputStep } from '../state/timeStep';
+import { useSignatures } from '../state/useSignatures';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
 import { SignatureButton } from './SignatureButton';
@@ -499,12 +502,23 @@ export function EventDialog({
   // Live mirror of the form for the pristine check below — a ref, so the reset
   // effect reads the CURRENT form without listing it as a dep (which would
   // re-run it on every keystroke).
+  const { forCalendar: signatureForCalendar } = useSignatures(
+    form.calendarId ? [form.calendarId] : [],
+  );
+  const boundSignature = form.calendarId
+    ? signatureForCalendar(form.calendarId)
+    : null;
+
   const formRef = useRef(form);
   formRef.current = form;
   /** Which offer this opening has already applied, so a re-render does not
    *  re-fill a form the user has since edited. Cleared by the reset effect
    *  below, which is the only thing that can undo a prefill. */
   const prefillApplied = useRef<string | null>(null);
+  /** The signature body this editor last put in by itself, so a calendar
+   *  change can SWAP it — and so anything the user wrote or deleted is left
+   *  alone. */
+  const autoSignature = useRef<string | null>(null);
   // The initialState this dialog last reset to — the pristine baseline.
   const appliedInitialRef = useRef<FormState | null>(null);
 
@@ -598,6 +612,37 @@ export function EventDialog({
     prefillApplied.current = prefillFrom.id;
     applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
   }, [isOpen, isEdit, prefillFrom, targetPinned, applyEventPrefill]);
+
+  /**
+   * The calendar's own signature, put on a NEW appointment by itself.
+   *
+   * A binding is a default, not a button: a calendar that carries a signature
+   * should not need a press per appointment. An existing event is never
+   * touched — its description is whatever it already is.
+   *
+   * On a calendar CHANGE the block is swapped rather than stacked, and only
+   * when it is still the one this editor put there. Text the user wrote, or a
+   * block they deleted, is theirs: mail clients behave the same way when the
+   * sending account changes.
+   */
+  useEffect(() => {
+    if (!isOpen || isEdit) return;
+    const target = boundSignature?.body?.trim() || null;
+    setForm((prev) => {
+      const current = signatureIn(prev.description);
+      const mine = autoSignature.current;
+      if (target === null) {
+        // This calendar has none. Remove ours, leave anything else standing.
+        if (current === null || current !== mine) return prev;
+        autoSignature.current = null;
+        return { ...prev, description: applySignature(prev.description, '') };
+      }
+      if (current === target) return prev; // already right
+      if (current !== null && current !== mine) return prev; // theirs, not ours
+      autoSignature.current = target;
+      return { ...prev, description: applySignature(prev.description, target) };
+    });
+  }, [isOpen, isEdit, boundSignature]);
 
   // Any change to the attendee set, the start/end window, the all-day
   // flag, or the target calendar invalidates a previous availability
