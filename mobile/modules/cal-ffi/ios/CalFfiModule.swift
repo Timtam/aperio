@@ -740,12 +740,16 @@ public class CalFfiModule: Module {
     // Re-sign-in for an EXISTING account. Both halves take only the account id:
     // everything else — which client, which redirect, whether there is a client
     // secret at all — the host reads off the account and its adapter's schema.
+    // `coded`, so `client_secret_required` reaches JS as error.code — the
+    // second-device repair asks for the secret and retries on exactly that.
     AsyncFunction("beginAccountReconnectJson") { (accountId: String) -> String in
-      try self.host.beginAccountReconnectJson(accountId: accountId)
+      try self.coded { try self.host.beginAccountReconnectJson(accountId: accountId) }
     }
 
     AsyncFunction("completeAccountReconnectJson") { (accountId: String, requestJson: String) -> String in
-      try self.host.completeAccountReconnectJson(accountId: accountId, requestJson: requestJson)
+      try self.coded {
+        try self.host.completeAccountReconnectJson(accountId: accountId, requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──

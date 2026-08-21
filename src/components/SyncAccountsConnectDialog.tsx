@@ -245,11 +245,18 @@ export function SyncAccountsConnectDialog({
     [announce, messageForError, passwordInputs, removeRow, setStatus, t],
   );
 
+  // Rows whose sign-in needs the bring-your-own client secret typed first —
+  // a SECOND device, where the secret lives only on the machine that first
+  // connected the account. The backend answers `client_secret_required`, the
+  // row grows a field, and the retry passes it along.
+  const [secretNeeded, setSecretNeeded] = useState<Record<string, boolean>>({});
+
   const onOAuthSignIn = useCallback(
     async (account: Account) => {
       setStatus(account.id, { kind: 'busy' });
       try {
-        await reconnectAccount(account.id);
+        const secret = (passwordInputs[account.id] ?? '').trim();
+        await reconnectAccount(account.id, secret || undefined);
         announce(
           t('syncAccountsConnect.connectedAnnouncement', {
             name: account.display_name,
@@ -262,13 +269,21 @@ export function SyncAccountsConnectDialog({
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('reconnect_oauth_account failed', err);
+        if (isCommandError(err) && err.code === 'client_secret_required') {
+          setSecretNeeded((prev) => ({ ...prev, [account.id]: true }));
+          setStatus(account.id, {
+            kind: 'error',
+            message: t('syncAccountsConnect.clientSecretNeeded'),
+          });
+          return;
+        }
         setStatus(account.id, {
           kind: 'error',
           message: messageForError(err),
         });
       }
     },
-    [announce, messageForError, removeRow, setStatus, t],
+    [announce, messageForError, passwordInputs, removeRow, setStatus, t],
   );
 
   return (
@@ -323,6 +338,7 @@ export function SyncAccountsConnectDialog({
               onSavePassword={() => void onSavePassword(account)}
               onOAuthSignIn={() => void onOAuthSignIn(account)}
               isOAuth={oauthKinds.has(account.adapter_kind)}
+              needsClientSecret={secretNeeded[account.id] === true}
             />
           ))}
         </ul>
@@ -348,6 +364,10 @@ interface RowProps {
   /** Whether this account signs in through its provider, decided by the host
    *  from the adapter's declaration rather than by this component. */
   isOAuth: boolean;
+  /** The device is missing the bring-your-own OAuth client secret, so the
+   *  sign-in needs it typed first. Set from the backend's own refusal — never
+   *  guessed here. */
+  needsClientSecret: boolean;
 }
 
 function SyncAccountsConnectRow({
@@ -357,6 +377,7 @@ function SyncAccountsConnectRow({
   onPasswordChange,
   onSavePassword,
   onOAuthSignIn,
+  needsClientSecret,
   isOAuth,
 }: RowProps) {
   const { t } = useTranslation();
@@ -395,6 +416,22 @@ function SyncAccountsConnectRow({
           <p className="sync-accounts-connect__row-hint">
             {t('syncAccountsConnect.oauthHint')}
           </p>
+          {needsClientSecret && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('syncAccountsConnect.clientSecretLabel')}
+              </span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                autoComplete="off"
+              />
+              <span className="form__hint">
+                {t('syncAccountsConnect.clientSecretHint')}
+              </span>
+            </label>
+          )}
           <button
             type="button"
             // aria-disabled, not native `disabled`: the OAuth round-trip opens

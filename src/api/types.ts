@@ -345,6 +345,13 @@ export interface CommandError {
     // side maps `SyncError` variants into these so the frontend can
     // pattern-match on a stable string.
     | 'io'
+    // Reconnecting a bring-your-own OAuth account on a device that does not
+    // hold its client secret — the dialog asks for the secret and retries.
+    | 'client_secret_required'
+    // "Re-sync from scratch" on an account with no registered adapter: there
+    // is nothing to wipe or fetch, and the honest answer is a refusal that
+    // points at reconnecting.
+    | 'not_registered'
     | 'encryption_required'
     // A key this device already held, tried against the target's dataset and
     // refused by it. Distinct from `decryption_failed`, which is the same

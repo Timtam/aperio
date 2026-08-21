@@ -8300,7 +8300,27 @@ impl Host {
         let (account, plugin_id, schema) = self.oauth_account(&account_id)?;
         let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
         let values = self.reconnect_values(&account, oauth);
-        let client = self.oauth_client_for(oauth, &values)?;
+        // The AUTHORIZE step never carries the client secret — only the token
+        // exchange does. On a device that does not hold the secret (a second
+        // device, before a sync round delivers it), refusing here would block
+        // the consent screen the user can perfectly well complete; the
+        // missing secret is felt at the exchange, and
+        // `complete_account_reconnect_json` can be handed it there.
+        let client = match self.oauth_client_for(oauth, &values) {
+            Ok(client) => client,
+            Err(_) => match supplied_value(&values, &oauth.client_id_field) {
+                Some(id) if !id.trim().is_empty() => host_core::account_setup::OauthClient {
+                    id: id.trim().to_string(),
+                    secret: None,
+                },
+                _ => {
+                    return Err(StoreError::Sync {
+                        code: "client_secret_required".into(),
+                        detail: "this device holds neither the account's OAuth client secret nor its client id".into(),
+                    })
+                }
+            },
+        };
         let args = Self::auth_args(oauth, &values, &client, "authorize", &[]);
         let bytes = self
             .runtime
@@ -8331,7 +8351,18 @@ impl Host {
         let req: AccountReconnectRequest = from_json("account reconnect", &request_json)?;
         let (account, plugin_id, schema) = self.oauth_account(&account_id)?;
         let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
-        let values = self.reconnect_values(&account, oauth);
+        let mut values = self.reconnect_values(&account, oauth);
+        let supplied_secret = req
+            .client_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if let (Some(field), Some(secret)) =
+            (oauth.client_secret_field.as_deref(), &supplied_secret)
+        {
+            values.insert(field.to_string(), serde_json::Value::String(secret.clone()));
+        }
         // The whole choice, not just the client: `config` records WHICH
         // registration this account is now linked to, and a reconnect that
         // drops it cannot clear a stale one. See the write below.
@@ -8344,7 +8375,23 @@ impl Host {
                 .and_then(|k| supplied_value(&values, k))
                 .as_deref(),
         )
-        .map_err(setup_err)?;
+        .map_err(|err| {
+            // The one refusal the caller can answer: type the client secret and
+            // sign in again. A CODE, not prose — the JS side matches `error.code`,
+            // and prose breaks the day it is reworded.
+            if matches!(
+                &err,
+                host_core::account_setup::AccountSetupError::InvalidInput(m)
+                    if m.contains("required alongside the client ID")
+            ) {
+                StoreError::Sync {
+                    code: "client_secret_required".into(),
+                    detail: err.to_string(),
+                }
+            } else {
+                setup_err(err)
+            }
+        })?;
         let client = &choice.client;
 
         let exchange = Self::auth_args(
@@ -8384,6 +8431,12 @@ impl Host {
         // returns no refresh token on a re-consent has left the account no
         // better off, so that is an error rather than a silent half-repair.
         let mut writes: Vec<(SecretSlot, String)> = Vec::new();
+        // A typed client secret that just carried a successful exchange is
+        // proven right — keep it, and offer it to credential sync so the next
+        // device never has to ask.
+        if let Some(secret) = &supplied_secret {
+            writes.push((SecretSlot::OauthClientSecret, secret.clone()));
+        }
         if oauth.refresh_token_field.is_some() {
             let refresh = tokens
                 .get("refresh_token")
@@ -9095,6 +9148,11 @@ struct AccountReconnectRequest {
     pkce_verifier: String,
     state: String,
     returned_state: String,
+    /// The bring-your-own OAuth client secret, typed on a device that does not
+    /// hold it. `serde(default)`, so every older caller stays valid — no
+    /// signature and therefore no binding changes.
+    #[serde(default)]
+    client_secret: Option<String>,
 }
 
 #[derive(serde::Deserialize)]

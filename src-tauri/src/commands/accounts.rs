@@ -1689,6 +1689,13 @@ pub async fn reconnect_account(
     event_log: State<'_, Arc<EventLogWriter>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
+    // The bring-your-own OAuth client secret, when this device does not hold
+    // it. A SECOND device is exactly that device: the secret exists where the
+    // account was first connected, and until a sync round carries it over
+    // (E2E only), reconnect used to dead-end here with nothing the user could
+    // do about it. Ignored when empty; on success it is stored and offered to
+    // credential sync so the third device never has to ask.
+    client_secret: Option<String>,
 ) -> CommandResult<()> {
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
@@ -1732,8 +1739,15 @@ pub async fn reconnect_account(
             code: "internal",
             message: format!("parse account config: {err}"),
         })?;
+    let supplied_secret = client_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     if let Some(field) = oauth.client_secret_field.as_deref() {
-        if let Ok(secret) = secrets::retrieve(&account.id, SecretSlot::OauthClientSecret) {
+        if let Some(secret) = &supplied_secret {
+            values.insert(field.to_string(), Value::String(secret.clone()));
+        } else if let Ok(secret) = secrets::retrieve(&account.id, SecretSlot::OauthClientSecret) {
             values.insert(field.to_string(), Value::String(secret));
         }
     }
@@ -1749,9 +1763,25 @@ pub async fn reconnect_account(
             .and_then(|k| values.get(k))
             .and_then(Value::as_str),
     )
-    .map_err(|err| CommandError {
-        code: "invalid_input",
-        message: err.to_string(),
+    .map_err(|err| {
+        // The one failure the caller can actually answer: a bring-your-own
+        // client id with no secret on this device. A DISTINCT code, so the
+        // dialog can ask for the secret and retry instead of showing a dead
+        // end — the message alone is prose, and matching prose breaks the day
+        // it is reworded.
+        let missing_secret = matches!(
+            &err,
+            host_core::account_setup::AccountSetupError::InvalidInput(m)
+                if m.contains("required alongside the client ID")
+        );
+        CommandError {
+            code: if missing_secret {
+                "client_secret_required"
+            } else {
+                "invalid_input"
+            },
+            message: err.to_string(),
+        }
     })?;
     let client = &choice.client;
 
@@ -1773,6 +1803,12 @@ pub async fn reconnect_account(
     // access token first would leave the keychain half-updated on an exchange
     // that is about to be rejected. The mobile twin already worked this way.
     let mut writes: Vec<(SecretSlot, String)> = Vec::new();
+    // A user-supplied client secret that just carried a successful sign-in is
+    // proven right — keep it, so the next reconnect (and, through the sync
+    // gate, the next device) does not have to ask again.
+    if let Some(secret) = &supplied_secret {
+        writes.push((SecretSlot::OauthClientSecret, secret.clone()));
+    }
     if oauth.refresh_token_field.is_some() {
         let refresh = tokens
             .get("refresh_token")
@@ -1797,17 +1833,17 @@ pub async fn reconnect_account(
             code: "internal",
             message: format!("failed to store {}: {err}", slot.wire_name()),
         })?;
-        if *slot == SecretSlot::RefreshToken {
-            // E2E only: propagate the refreshed durable token to other devices.
-            crate::credential_sync::emit_credential_set(
-                &event_log,
-                &shared,
-                &plugin_manager,
-                &account.id,
-                SecretSlot::RefreshToken,
-                value,
-            );
-        }
+        // E2E only, and the gate refuses the short-lived access token itself:
+        // the refreshed durable token AND a just-proven client secret both
+        // travel, so the user's other devices heal without re-entry.
+        crate::credential_sync::emit_credential_set(
+            &event_log,
+            &shared,
+            &plugin_manager,
+            &account.id,
+            *slot,
+            value,
+        );
     }
 
     // Record which registration the account is linked to NOW — same reason as

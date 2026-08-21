@@ -388,7 +388,10 @@
       "ftp": "FTPS",
       "dropbox": "Dropbox",
       "googledrive": "Google Drive"
-    }
+    },
+    "clientSecretNeeded": "Dieses Gerät kennt das OAuth-Client-Secret dieses Kontos nicht. Trage es unten ein und melde dich dann erneut an.",
+    "clientSecretLabel": "OAuth-Client-Secret",
+    "clientSecretHint": "Derselbe Wert wie beim ersten Verbinden des Kontos — aus der Konsole deines Anbieters, z. B. in der Google Cloud Console direkt unter der Client-ID."
   },
   "dialogs": {
     "firstLaunchWizard": {
@@ -1903,7 +1906,9 @@
         "ftp": "FTPS (auch Klartext-FTP)",
         "dropbox": "Dropbox",
         "googledrive": "Google Drive"
-      }
+      },
+      "clientSecretNeeded": "Dieses Gerät kennt das OAuth-Client-Secret dieses Kontos nicht. Trage es ein und melde dich dann erneut an.",
+      "clientSecretLabel": "OAuth-Client-Secret"
     },
     "reminders": {
       "title": "Erinnerungs-Übersicht",

@@ -324,6 +324,9 @@ export const completeAccountReconnect = async (
     pkce_verifier: string;
     state: string;
     returned_state: string;
+    /** Typed on a device that does not hold the bring-your-own client secret
+     *  — see reconnectOAuthAccount. */
+    client_secret?: string;
   },
 ): Promise<Account> =>
   JSON.parse(

@@ -47,6 +47,12 @@ export type OAuthConnectResult =
  *  expired would have been sent to Google's endpoint. */
 export async function reconnectOAuthAccount(
   account: Account,
+  /** The bring-your-own OAuth client secret, when this device does not hold
+   *  it — a second device before a sync round delivers it. The authorize URL
+   *  never needs it; the token exchange does, and the host rejects the
+   *  exchange with `client_secret_required` when it is absent, which is the
+   *  caller's cue to ask and retry with it. */
+  clientSecret?: string,
 ): Promise<OAuthConnectResult> {
   const authz = await beginAccountReconnect(account.id);
   const result = await WebBrowser.openAuthSessionAsync(
@@ -75,6 +81,7 @@ export async function reconnectOAuthAccount(
     pkce_verifier: authz.pkce_verifier,
     state: authz.state,
     returned_state: firstString(params.state) ?? '',
+    ...(clientSecret?.trim() ? { client_secret: clientSecret.trim() } : {}),
   });
   return { kind: 'connected', account: reconnected };
 }

@@ -559,17 +559,26 @@ export default function AccountsScreen() {
   // Re-run the provider sign-in for an OAuth account whose token expired — fresh
   // tokens land under the existing account id (its calendars / overrides stay).
   // A browser dismiss / declined consent is silent; a real failure surfaces.
+  // A second device may not hold the bring-your-own OAuth client secret. The
+  // exchange then fails with `client_secret_required`; this row's inline field
+  // collects it and the retry passes it along. Typed value lives here, not in
+  // the row, so a re-render never wipes it mid-flow.
+  const [oauthSecretId, setOauthSecretId] = useState<string | null>(null);
+  const [oauthSecret, setOauthSecret] = useState('');
+
   const reconnectOauth = useCallback(
-    async (account: Account) => {
+    async (account: Account, clientSecret?: string) => {
       setError(null);
       try {
         announce(t('mobile.oauthConnecting'));
-        const result = await reconnectOAuthAccount(account);
+        const result = await reconnectOAuthAccount(account, clientSecret);
         if (result.kind === 'cancelled') {
           announce(t('mobile.oauthCancelled'));
           return;
         }
         pendingFocusId.current = account.id;
+        setOauthSecretId(null);
+        setOauthSecret('');
         await load();
         announce(
           t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
@@ -579,6 +588,14 @@ export default function AccountsScreen() {
         // otherwise outlive the repair until the next scheduled pass.
         void refreshExternalCache().catch(() => undefined);
       } catch (err) {
+        if ((err as { code?: string })?.code === 'client_secret_required') {
+          // Not a dead end: reveal the field and say what is needed.
+          setOauthSecretId(account.id);
+          const message = t('dialogs.accounts.clientSecretNeeded');
+          setError(message);
+          announce(message);
+          return;
+        }
         const raw = errorMessage(err);
         const message =
           raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
@@ -813,12 +830,36 @@ export default function AccountsScreen() {
                 </View>
                 {!isLocal && (
                   <View style={styles.rowActions}>
+                    {oauthSecretId === account.id && (
+                      <TextInput
+                        style={styles.editInput}
+                        value={oauthSecret}
+                        onChangeText={setOauthSecret}
+                        accessibilityLabel={t('dialogs.accounts.clientSecretLabel')}
+                        placeholder={t('dialogs.accounts.clientSecretLabel')}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoFocus
+                        returnKeyType="done"
+                        onSubmitEditing={() =>
+                          void reconnectOauth(account, oauthSecret)
+                        }
+                      />
+                    )}
                     {needsReconnect && (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`${t('dialogs.accounts.reconnect')}: ${account.display_name}`}
                         onPress={() =>
-                          oauth ? void reconnectOauth(account) : startRepair(account)
+                          oauth
+                            ? void reconnectOauth(
+                                account,
+                                oauthSecretId === account.id
+                                  ? oauthSecret
+                                  : undefined,
+                              )
+                            : startRepair(account)
                         }
                         style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                       >

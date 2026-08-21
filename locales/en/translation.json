@@ -388,7 +388,10 @@
       "ftp": "FTPS",
       "dropbox": "Dropbox",
       "googledrive": "Google Drive"
-    }
+    },
+    "clientSecretNeeded": "This device does not hold this account's OAuth client secret. Enter it below, then sign in again.",
+    "clientSecretLabel": "OAuth client secret",
+    "clientSecretHint": "The same value you entered when the account was first connected — from your provider's console, e.g. the Google Cloud Console entry right under the client ID."
   },
   "dialogs": {
     "firstLaunchWizard": {
@@ -1903,7 +1906,9 @@
         "ftp": "FTPS (also plain FTP)",
         "dropbox": "Dropbox",
         "googledrive": "Google Drive"
-      }
+      },
+      "clientSecretNeeded": "This device does not hold this account's OAuth client secret. Enter it, then sign in again.",
+      "clientSecretLabel": "OAuth client secret"
     },
     "reminders": {
       "title": "Reminders overview",

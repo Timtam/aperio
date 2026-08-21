@@ -498,8 +498,11 @@ export const setAccountSecret = (accountId: string, secret: string) =>
  *  the tenant and anything else the account was configured with come off the
  *  row and its adapter's schema, host-side. Tokens land in the keychain under
  *  the existing account id, preserving downstream references. */
-export const reconnectAccount = (accountId: string) =>
-  invoke<void>('reconnect_account', { accountId });
+export const reconnectAccount = (accountId: string, clientSecret?: string) =>
+  invoke<void>('reconnect_account', {
+    accountId,
+    clientSecret: clientSecret ?? null,
+  });
 
 
 export const deleteAccount = (id: string) =>
