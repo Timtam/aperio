@@ -1,6 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  findNodeHandle,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import type { TaskUser } from '@aperio/shared';
 
@@ -37,6 +44,9 @@ export function AssigneePicker({
   const label = (u: TaskUser) =>
     u.id === currentUserId ? t('dialogs.task.assignees.you', { name: u.name }) : u.name;
 
+  /** One per remove button, in render order — the repark targets. */
+  const removeRefs = useRef<(View | null)[]>([]);
+
   const add = (user: TaskUser) => {
     if (selectedIds.has(user.id)) return;
     onChange([...value, user]);
@@ -45,11 +55,20 @@ export function AssigneePicker({
     );
   };
 
-  const remove = (user: TaskUser) => {
+  const remove = (user: TaskUser, index: number) => {
     onChange(value.filter((x) => x.id !== user.id));
     AccessibilityInfo.announceForAccessibility(
       t('dialogs.task.assignees.removed', { name: user.name }),
     );
+    // RN does not move the screen reader's cursor when the element under it
+    // unmounts — the strand `useListFocusManager` documents. Park it on the
+    // remove button that slid into this slot, else the previous one, so
+    // several people can be removed without re-navigating each time.
+    setTimeout(() => {
+      const target = removeRefs.current[index] ?? removeRefs.current[index - 1];
+      const tag = target ? findNodeHandle(target) : null;
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    }, 0);
   };
 
   return (
@@ -62,15 +81,18 @@ export function AssigneePicker({
           accessibilityLabel={t('dialogs.task.fields.assignees')}
           style={styles.list}
         >
-          {value.map((u) => (
+          {value.map((u, i) => (
             <View key={u.id} style={styles.row}>
               <Text style={styles.name} accessibilityRole="text" accessibilityLabel={label(u)}>
                 {label(u)}
               </Text>
               <Pressable
+                ref={(node) => {
+                  removeRefs.current[i] = node as View | null;
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={t('dialogs.task.assignees.remove', { name: u.name })}
-                onPress={() => remove(u)}
+                onPress={() => remove(u, i)}
                 style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
               >
                 <Text style={styles.removeButtonText} importantForAccessibility="no">
