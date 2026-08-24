@@ -120,9 +120,12 @@ Exchange und Outlook genau eine (bevorzugt eine mit der Bezeichnung
 
 Jedes Adressbuch, in dem Geburtstage stehen, erscheint zusätzlich als
 **Nur-Lese-Geburtstagskalender** in der Kalenderliste, den du wie jeden anderen
-Kalender ein- und ausblenden kannst. Diese Einträge entstehen aus den Kontakten
-selbst – dort gibt es nichts zu bearbeiten; ändere den Geburtstag am Kontakt,
-und der Kalender zieht nach.
+Kalender ein- und ausblenden kannst. Sein Name folgt deiner App-Sprache
+(„Geburtstage – Familie"); benennst du ihn um, bleibt dein Name stehen. Diese
+Einträge entstehen aus den Kontakten selbst – dort gibt es nichts zu
+bearbeiten; ändere den Geburtstag am Kontakt, und der Kalender zieht nach.
+Trägt der Geburtstag des Kontakts ein **Jahr**, steht das neue Alter mit im
+Eintrag (und in der ausgelösten Erinnerung) – „Max (42)".
 
 Einem Geburtstagskalender kannst du eigene **Standard-Erinnerungen** geben, um
 ein paar Tage vorher gewarnt zu werden statt erst am Morgen selbst.

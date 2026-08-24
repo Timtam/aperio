@@ -131,13 +131,23 @@ pub fn events_for_contacts(
             if end <= range.start || start >= range.end {
                 continue;
             }
+            let age = birthday_age(year, &bday);
             out.push(Event {
                 send_invitations: false,
                 truncate_tail_overrides: false,
                 id: format!("aperio-birthday:{}:{}", contact.id, year),
                 calendar_id: calendar_id.to_string(),
-                title: contact.display_name.clone(),
-                description: birthday_description(year, &bday),
+                // The age rides IN the title when the birth year is known —
+                // "Max (41)" — because the title is what every surface shows:
+                // the calendar chips, the search hits, and above all the
+                // reminder notification (whose text is exactly this title).
+                // Parentheses keep it language-neutral, so the synthesis stays
+                // locale-free like the rest of the core.
+                title: match age {
+                    Some(age) => format!("{} ({age})", contact.display_name),
+                    None => contact.display_name.clone(),
+                },
+                description: age.map(|age| age.to_string()),
                 location: None,
                 start,
                 end,
@@ -160,11 +170,12 @@ pub fn events_for_contacts(
     out
 }
 
-/// The age the contact reaches on this occurrence, as a bare number string (the
-/// frontend renders the localized "turns N" line). `None` when the birth year
-/// is missing / a bogus placeholder (RFC 6350 leaves pre-1900 underdefined) or
-/// the age isn't positive — the title (the name) then stands alone.
-fn birthday_description(occurrence_year: i32, birthday: &NaiveDate) -> Option<String> {
+/// The age the contact reaches on this occurrence. Feeds both the title suffix
+/// ("Max (41)") and the description (the bare number the editors render as the
+/// localized "turns N" line). `None` when the birth year is missing / a bogus
+/// placeholder (RFC 6350 leaves pre-1900 underdefined) or the age isn't
+/// positive — the title (the name) then stands alone.
+fn birthday_age(occurrence_year: i32, birthday: &NaiveDate) -> Option<i32> {
     let birth_year = birthday.year();
     let today_year = Utc::now().naive_utc().year();
     if birth_year < 1900 || birth_year > today_year + 1 {
@@ -174,7 +185,7 @@ fn birthday_description(occurrence_year: i32, birthday: &NaiveDate) -> Option<St
     if age <= 0 {
         return None;
     }
-    Some(age.to_string())
+    Some(age)
 }
 
 // ── Orchestration (local address book + the external snapshot cache) ─────────
@@ -337,9 +348,11 @@ mod tests {
         for ev in &events {
             assert_eq!(ev.calendar_id, "cal");
             assert!(ev.all_day);
-            assert_eq!(ev.title, "Max");
             let age: i32 = ev.description.as_deref().unwrap().parse().unwrap();
             assert!((39..=41).contains(&age));
+            // The known birth year puts the age into the title itself — the
+            // string every chip, search hit and reminder notification shows.
+            assert_eq!(ev.title, format!("Max ({age})"));
         }
         let years: Vec<_> = events
             .iter()
@@ -392,7 +405,8 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2026, 12, 31, 23, 59, 59).unwrap();
         let events = events_for_contacts(contacts, "cal", DateRange::new(start, end));
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].title, "Has-Birthday");
+        // 1990 → the 2026 occurrence turns 36, and the title says so.
+        assert_eq!(events[0].title, "Has-Birthday (36)");
     }
 
     #[test]
@@ -417,14 +431,30 @@ mod tests {
     }
 
     #[test]
-    fn birthday_description_emits_age_when_birth_year_is_sensible() {
-        let desc = birthday_description(2026, &NaiveDate::from_ymd_opt(1985, 4, 17).unwrap());
-        assert_eq!(desc.as_deref(), Some("41"));
+    fn birthday_age_emits_age_when_birth_year_is_sensible() {
+        let age = birthday_age(2026, &NaiveDate::from_ymd_opt(1985, 4, 17).unwrap());
+        assert_eq!(age, Some(41));
     }
 
     #[test]
-    fn birthday_description_omits_age_for_placeholder_year() {
-        let desc = birthday_description(2026, &NaiveDate::from_ymd_opt(1604, 5, 1).unwrap());
-        assert!(desc.is_none());
+    fn birthday_age_omits_age_for_placeholder_year() {
+        let age = birthday_age(2026, &NaiveDate::from_ymd_opt(1604, 5, 1).unwrap());
+        assert!(age.is_none());
+    }
+
+    #[test]
+    fn placeholder_birth_year_keeps_the_bare_name_as_title() {
+        // A pre-1900 year is a "year unknown" placeholder, not an age source —
+        // the title must stay the plain name, with no description either.
+        let contacts = vec![make_contact(
+            "Ohne-Jahr",
+            Some(NaiveDate::from_ymd_opt(1604, 5, 1).unwrap()),
+        )];
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 12, 31, 23, 59, 59).unwrap();
+        let events = events_for_contacts(contacts, "cal", DateRange::new(start, end));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].title, "Ohne-Jahr");
+        assert!(events[0].description.is_none());
     }
 }

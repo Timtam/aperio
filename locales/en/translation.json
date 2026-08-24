@@ -162,6 +162,9 @@
     "undoInFlight": "Undoing…",
     "dismissLabel": "Dismiss"
   },
+  "birthdays": {
+    "calendarName": "Birthdays – {{list}}"
+  },
   "chipMenu": {
     "edit": "Edit …",
     "goToCurrentTask": "Go to the current task",

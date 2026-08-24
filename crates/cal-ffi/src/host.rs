@@ -12273,7 +12273,9 @@ mod tests {
             1,
             "one birthday occurrence in June; got: {events}"
         );
-        assert_eq!(arr[0]["title"], serde_json::json!("Ada Lovelace"));
+        // The fixed 2026 range makes the age deterministic: 2026 − 1990 = 36,
+        // carried in the title (and thus in every reminder notification).
+        assert_eq!(arr[0]["title"], serde_json::json!("Ada Lovelace (36)"));
         assert_eq!(arr[0]["all_day"], serde_json::json!(true));
     }
 

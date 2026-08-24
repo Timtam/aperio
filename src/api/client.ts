@@ -5,6 +5,8 @@
 // `Request` structs.
 
 import { invoke } from '@tauri-apps/api/core';
+import { birthdayCalendarListName, isBirthdayCalendarId } from '@aperio/shared';
+import i18n from '../i18n';
 import { withCreatedRecurrenceZone } from '../intl/recurrence';
 import { notifyDayMarkersChanged } from '../state/dayMarkersChanged';
 import type {
@@ -58,7 +60,22 @@ export async function openExternalUrl(url: string): Promise<void> {
 
 // ── Calendars ──────────────────────────────────────────────────────────────
 
-export const listCalendars = () => invoke<Calendar[]>('list_calendars');
+/** Re-render the Host's stock English birthday-calendar name in the UI
+ *  language. Applied HERE, at the single loading boundary, so every consumer
+ *  (sidebar, pickers, chip labels) inherits it without knowing the rule. A
+ *  user-renamed birthday calendar no longer carries the stock prefix and
+ *  passes through untouched — the user's own name always wins. */
+function localizeBirthdayCalendarName(cal: Calendar): Calendar {
+  if (!isBirthdayCalendarId(cal.id)) return cal;
+  const list = birthdayCalendarListName(cal.name);
+  if (list == null) return cal;
+  return { ...cal, name: i18n.t('birthdays.calendarName', { list }) };
+}
+
+export const listCalendars = async () =>
+  (await invoke<Calendar[]>('list_calendars')).map(
+    localizeBirthdayCalendarName,
+  );
 
 export interface CreateCalendarRequest {
   name: string;

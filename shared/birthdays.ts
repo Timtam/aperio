@@ -26,3 +26,19 @@ export function isBirthdayCalendarId(id: string): boolean {
 export function isBirthdayEventId(id: string): boolean {
   return id.startsWith(BIRTHDAY_EVENT_PREFIX);
 }
+
+/** The English name prefix the Host stamps on a synthesised birthday calendar
+ *  (`"Birthdays – Family"`). Mirrors `host_core::birthdays::synthesise_calendar`
+ *  — the core stays locale-free, so the FRONTENDS re-render this one name in
+ *  the UI language at their API boundary (both `listCalendars` wrappers). */
+export const BIRTHDAY_CALENDAR_NAME_PREFIX = 'Birthdays – ';
+
+/** The contact-list part of a synthesised birthday calendar's name, or `null`
+ *  when the name doesn't carry the Host's stock prefix — which is exactly the
+ *  case after a user RENAMED the calendar (the local-override path), and a
+ *  user's own name must never be rewritten. */
+export function birthdayCalendarListName(name: string): string | null {
+  return name.startsWith(BIRTHDAY_CALENDAR_NAME_PREFIX)
+    ? name.slice(BIRTHDAY_CALENDAR_NAME_PREFIX.length)
+    : null;
+}

@@ -10,7 +10,12 @@
 // pass (so the desktop shares them too), the same path the task types took.
 
 import CalFfi from '../../modules/cal-ffi';
-import { withCreatedRecurrenceZone } from '@aperio/shared';
+import {
+  birthdayCalendarListName,
+  isBirthdayCalendarId,
+  withCreatedRecurrenceZone,
+} from '@aperio/shared';
+import i18n from '../../i18n';
 import type {
   ContainerColor,
   RecurrenceCapabilities,
@@ -124,10 +129,24 @@ export interface EventRangeRequest {
 
 // ── Calendars ──────────────────────────────────────────────────────────────
 
+/** Re-render the Host's stock English birthday-calendar name in the UI
+ *  language — the mobile twin of the desktop `listCalendars` wrapper. Applied
+ *  at the single loading boundary so every consumer inherits it; a
+ *  user-renamed birthday calendar lost the stock prefix and passes through
+ *  untouched. */
+function localizeBirthdayCalendarName(cal: Calendar): Calendar {
+  if (!isBirthdayCalendarId(cal.id)) return cal;
+  const list = birthdayCalendarListName(cal.name);
+  if (list == null) return cal;
+  return { ...cal, name: i18n.t('birthdays.calendarName', { list }) };
+}
+
 /** All calendars (local + external); also primes the Host's route map, so call
  *  it before event operations. */
 export const listCalendars = async (): Promise<Calendar[]> =>
-  JSON.parse(await CalFfi.listCalendarsJson()) as Calendar[];
+  (JSON.parse(await CalFfi.listCalendarsJson()) as Calendar[]).map(
+    localizeBirthdayCalendarName,
+  );
 
 export const createCalendar = async (
   request: CreateCalendarRequest,

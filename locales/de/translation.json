@@ -162,6 +162,9 @@
     "undoInFlight": "Wird rückgängig gemacht …",
     "dismissLabel": "Schließen"
   },
+  "birthdays": {
+    "calendarName": "Geburtstage – {{list}}"
+  },
   "chipMenu": {
     "edit": "Bearbeiten …",
     "goToCurrentTask": "Zur aktuellen Aufgabe",
