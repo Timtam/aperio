@@ -1406,6 +1406,7 @@
       "existingHeading_other": "Vorhandene Farb-Labels ({{count}})",
       "newHeading": "Neues Farb-Label anlegen",
       "editHeading": "Label „{{name}}\" bearbeiten",
+      "rowHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für weitere Aktionen.",
       "emptyHint": "Noch keine Farb-Labels — lege unten dein erstes an.",
       "nameRequired": "Bitte gib einen Namen ein.",
       "create": "Anlegen",

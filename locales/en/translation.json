@@ -1406,6 +1406,7 @@
       "existingHeading_other": "Existing color labels ({{count}})",
       "newHeading": "Add a new color label",
       "editHeading": "Edit \"{{name}}\"",
+      "rowHint": "Double-tap to edit. Swipe up or down for more actions.",
       "emptyHint": "No color labels yet — add your first below.",
       "nameRequired": "Please enter a name.",
       "create": "Create",

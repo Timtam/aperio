@@ -173,53 +173,8 @@ export default function ColorLabelsScreen() {
         </Text>
       )}
 
-      {/* Add a new named label */}
-      <Text style={styles.heading} accessibilityRole="header">
-        {t('dialogs.colorLabels.newHeading')}
-      </Text>
-      <Text style={styles.label}>{t('dialogs.colorLabels.fields.name')}</Text>
-      <TextInput
-        style={styles.input}
-        value={newName}
-        onChangeText={setNewName}
-        accessibilityLabel={t('dialogs.colorLabels.fields.name')}
-        editable={!busy}
-        autoCapitalize="sentences"
-      />
-      <Text style={styles.label}>{t('dialogs.colorLabels.fields.color')}</Text>
-      <View style={styles.hexRow}>
-        <TextInput
-          style={[styles.input, styles.hexInput]}
-          value={newHex}
-          onChangeText={setNewHex}
-          accessibilityLabel={t('dialogs.colorLabels.fields.color')}
-          placeholder="#RRGGBB"
-          editable={!busy}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {/* Live preview of the entered colour (sighted users); the swatch is
-            decorative so it carries no screen-reader label. */}
-        {normaliseHex(newHex) != null && (
-          <View
-            accessible={false}
-            style={[styles.swatch, { backgroundColor: normaliseHex(newHex) as string }]}
-          />
-        )}
-      </View>
-      <Pressable
-        ref={focus.registerAdd}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        accessibilityLabel={t('dialogs.colorLabels.create')}
-        disabled={busy}
-        onPress={() => void addLabel()}
-        style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
-      >
-        <Text style={styles.addButtonText}>{t('dialogs.colorLabels.create')}</Text>
-      </Pressable>
-
-      {/* Existing labels */}
+      {/* Existing labels FIRST — the list is what this screen is opened for;
+          the create form is the rarer errand and reads below it. */}
       <Text style={styles.heading} accessibilityRole="header">
         {t('dialogs.colorLabels.existingHeading', { count: labels.length })}
       </Text>
@@ -290,14 +245,47 @@ export default function ColorLabelsScreen() {
             </View>
           ) : (
             <View key={label.id} style={styles.labelRow}>
-              <View
+              {/* ONE screen-reader stop per label: the row itself is the
+                  element (double-tap = edit; rename/delete ride the actions
+                  rotor), so N labels cost N swipes, not 3N. The visible Edit /
+                  Delete buttons stay for sighted users and are hidden from the
+                  screen reader — they duplicate the rotor verbs exactly. */}
+              <Pressable
                 ref={focus.registerRow(index)}
                 accessible
-                accessibilityRole="text"
+                accessibilityRole="button"
                 accessibilityLabel={t('dialogs.colorLabels.optionLabel', {
                   name: label.name,
                   hex: label.hex,
                 })}
+                accessibilityHint={t('dialogs.colorLabels.rowHint')}
+                accessibilityState={{ disabled: busy }}
+                accessibilityActions={[
+                  { name: 'edit', label: t('mobile.edit') },
+                  {
+                    name: 'delete',
+                    label: t('dialogs.colorLabels.deleteAction'),
+                  },
+                ]}
+                onAccessibilityAction={(e) => {
+                  if (busy) return;
+                  if (e.nativeEvent.actionName === 'delete') {
+                    void removeLabel(label, index);
+                  } else {
+                    setEditingId(label.id);
+                    setEditName(label.name);
+                    setEditHex(label.hex);
+                  }
+                }}
+                // Guarded, not natively disabled: a disabled element under the
+                // VoiceOver cursor strands the focus, and this row IS where the
+                // cursor sits while a delete is in flight.
+                onPress={() => {
+                  if (busy) return;
+                  setEditingId(label.id);
+                  setEditName(label.name);
+                  setEditHex(label.hex);
+                }}
                 style={styles.labelInfo}
               >
                 {/* Real colour swatch + the exact hex (monospace) for sighted
@@ -315,13 +303,10 @@ export default function ColorLabelsScreen() {
                 <Text style={styles.hexValue} importantForAccessibility="no">
                   {label.hex}
                 </Text>
-              </View>
+              </Pressable>
               <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                accessibilityLabel={t('dialogs.colorLabels.renameLabel', {
-                  name: label.name,
-                })}
+                accessible={false}
+                importantForAccessibility="no-hide-descendants"
                 disabled={busy}
                 onPress={() => {
                   setEditingId(label.id);
@@ -333,11 +318,8 @@ export default function ColorLabelsScreen() {
                 <Text style={styles.smallButtonText}>{t('mobile.edit')}</Text>
               </Pressable>
               <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                accessibilityLabel={t('dialogs.colorLabels.deleteLabel', {
-                  name: label.name,
-                })}
+                accessible={false}
+                importantForAccessibility="no-hide-descendants"
                 disabled={busy}
                 onPress={() => void removeLabel(label, index)}
                 style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
@@ -350,6 +332,52 @@ export default function ColorLabelsScreen() {
           ),
         )
       )}
+
+      {/* Add a new named label — below the list, the rarer errand. */}
+      <Text style={styles.heading} accessibilityRole="header">
+        {t('dialogs.colorLabels.newHeading')}
+      </Text>
+      <Text style={styles.label}>{t('dialogs.colorLabels.fields.name')}</Text>
+      <TextInput
+        style={styles.input}
+        value={newName}
+        onChangeText={setNewName}
+        accessibilityLabel={t('dialogs.colorLabels.fields.name')}
+        editable={!busy}
+        autoCapitalize="sentences"
+      />
+      <Text style={styles.label}>{t('dialogs.colorLabels.fields.color')}</Text>
+      <View style={styles.hexRow}>
+        <TextInput
+          style={[styles.input, styles.hexInput]}
+          value={newHex}
+          onChangeText={setNewHex}
+          accessibilityLabel={t('dialogs.colorLabels.fields.color')}
+          placeholder="#RRGGBB"
+          editable={!busy}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {/* Live preview of the entered colour (sighted users); the swatch is
+            decorative so it carries no screen-reader label. */}
+        {normaliseHex(newHex) != null && (
+          <View
+            accessible={false}
+            style={[styles.swatch, { backgroundColor: normaliseHex(newHex) as string }]}
+          />
+        )}
+      </View>
+      <Pressable
+        ref={focus.registerAdd}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: busy }}
+        accessibilityLabel={t('dialogs.colorLabels.create')}
+        disabled={busy}
+        onPress={() => void addLabel()}
+        style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.addButtonText}>{t('dialogs.colorLabels.create')}</Text>
+      </Pressable>
     </ScrollView>
   );
 }
