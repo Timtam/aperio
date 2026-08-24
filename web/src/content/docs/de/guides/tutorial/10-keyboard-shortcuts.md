@@ -5,7 +5,7 @@ title: "10 – Tastaturkürzel"
 Aperio ist vollständig mit der Tastatur bedienbar. In diesem Kapitel lernst
 du die wichtigsten Kürzel kennen und passt sie bei Bedarf an. Eine
 vollständige Liste findest du in der
-[Kürzel-Referenz](/de/guides/tastaturkuerzel/).
+[Kürzel-Referenz](/de/guides/keyboard-shortcuts/).
 
 ## Die wichtigsten Kürzel
 
@@ -54,5 +54,5 @@ vollständige Liste findest du in der
 
 Du kennst die wichtigsten Kürzel und weißt, wie du sie anpasst. Damit hast
 du das Tutorial abgeschlossen – in der Referenz findest du die vollständige
-[Kürzel-Übersicht](/de/guides/tastaturkuerzel/) und Tipps zur
-[Barrierefreiheit](/de/guides/barrierefreiheit/).
+[Kürzel-Übersicht](/de/guides/keyboard-shortcuts/) und Tipps zur
+[Barrierefreiheit](/de/guides/accessibility/).

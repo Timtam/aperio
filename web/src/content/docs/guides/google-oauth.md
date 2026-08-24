@@ -42,7 +42,7 @@ Aperio talks to three Google services. Enable them for your project:
    - **People API** (contacts and attendee suggestions)
 
 > **Optional – Google Drive as sync storage:** If you also want to run
-> [device synchronization](/guides/tutorial/09-synchronisation/) through Google
+> [device synchronization](/guides/tutorial/09-synchronization/) through Google
 > Drive, additionally enable the **Google Drive API**. You can then reuse
 > the same project and the same credentials from this guide in the sync
 > dialog.
@@ -125,5 +125,5 @@ Now the two strings for Aperio are created:
 > registration — on their own they grant no access to your account. The
 > actual access tokens are created by your browser sign-in and stored
 > locally by Aperio; with
-> [end-to-end encryption](/guides/tutorial/09-synchronisation/) enabled they
+> [end-to-end encryption](/guides/tutorial/09-synchronization/) enabled they
 > additionally travel encrypted between your devices.

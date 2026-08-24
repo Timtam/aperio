@@ -30,19 +30,19 @@ knowledge required.
 The **Tutorial** builds on itself – it is best read in order:
 
 1. [Installation & First Launch](/guides/tutorial/01-installation/)
-2. [Connecting Calendars and Task Lists](/guides/tutorial/02-konten-verbinden/)
-3. [Events](/guides/tutorial/03-termine/)
-4. [Tasks](/guides/tutorial/04-aufgaben/)
-5. [Contacts](/guides/tutorial/05-kontakte/)
-6. [Views](/guides/tutorial/06-ansichten/)
-7. [Notifications](/guides/tutorial/07-benachrichtigungen/)
-8. [Search](/guides/tutorial/08-suche/)
-9. [Synchronization](/guides/tutorial/09-synchronisation/)
-10. [Keyboard Shortcuts](/guides/tutorial/10-tastaturkuerzel/)
+2. [Connecting Calendars and Task Lists](/guides/tutorial/02-connecting-accounts/)
+3. [Events](/guides/tutorial/03-events/)
+4. [Tasks](/guides/tutorial/04-tasks/)
+5. [Contacts](/guides/tutorial/05-contacts/)
+6. [Views](/guides/tutorial/06-views/)
+7. [Notifications](/guides/tutorial/07-notifications/)
+8. [Search](/guides/tutorial/08-search/)
+9. [Synchronization](/guides/tutorial/09-synchronization/)
+10. [Keyboard Shortcuts](/guides/tutorial/10-keyboard-shortcuts/)
 
 In the **Reference** section you will find the
-[full shortcut overview](/guides/tastaturkuerzel/) and a dedicated page on
-[accessibility](/guides/barrierefreiheit/) with tips for NVDA, JAWS, VoiceOver and
+[full shortcut overview](/guides/keyboard-shortcuts/) and a dedicated page on
+[accessibility](/guides/accessibility/) with tips for NVDA, JAWS, VoiceOver and
 Narrator.
 
 > **Screen-reader note:** Every chapter contains a box like this one. It

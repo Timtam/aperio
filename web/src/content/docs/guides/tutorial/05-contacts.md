@@ -7,13 +7,13 @@ which phone it is, and see where birthdays come from.
 
 Aperio keeps contacts beside your calendars and task lists, out of the same
 accounts you connected in
-[Chapter 02](/guides/tutorial/02-konten-verbinden/): an iCloud or Nextcloud
+[Chapter 02](/guides/tutorial/02-connecting-accounts/): an iCloud or Nextcloud
 account brings its CardDAV address books, a Google or Microsoft account brings
 its contacts, an Exchange account brings yours plus the company directory — and
 there is a **local address book** that needs no account at all.
 
 Contacts are what the attendee picker offers when you invite people to an
-event ([Chapter 03](/guides/tutorial/03-termine/)), and what the **birthday
+event ([Chapter 03](/guides/tutorial/03-events/)), and what the **birthday
 calendars** are built from.
 
 ## Finding your way around

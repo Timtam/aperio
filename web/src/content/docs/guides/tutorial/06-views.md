@@ -21,7 +21,7 @@ to know them and switch between them.
 
 - Via the **view menu** in the toolbar.
 - By keyboard: in many setups the digits `1`–`7` are mapped to the views;
-  your actual mapping is in the [shortcut overview](/guides/tastaturkuerzel/),
+  your actual mapping is in the [shortcut overview](/guides/keyboard-shortcuts/),
   where you can change it.
 
 ## Navigating within a view

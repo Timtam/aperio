@@ -4,7 +4,7 @@ title: "10 – Keyboard Shortcuts"
 
 Aperio is fully operable by keyboard. In this chapter you learn the most
 important shortcuts and adjust them if needed. A complete list is in the
-[shortcut reference](/guides/tastaturkuerzel/).
+[shortcut reference](/guides/keyboard-shortcuts/).
 
 ## The most important shortcuts
 
@@ -51,5 +51,5 @@ important shortcuts and adjust them if needed. A complete list is in the
 
 You know the most important shortcuts and how to customize them. With that
 you've completed the tutorial – in the Reference section you'll find the
-full [shortcut overview](/guides/tastaturkuerzel/) and tips on
-[accessibility](/guides/barrierefreiheit/).
+full [shortcut overview](/guides/keyboard-shortcuts/) and tips on
+[accessibility](/guides/accessibility/).

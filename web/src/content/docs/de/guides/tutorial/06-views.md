@@ -22,7 +22,7 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
 - Über das **Ansichtsmenü** in der Symbolleiste.
 - Per Tastatur: in vielen Programmen sind die Ziffern `1`–`7` für die
   Ansichten belegt; deine tatsächliche Belegung findest du in der
-  [Kürzel-Übersicht](/de/guides/tastaturkuerzel/) und kannst sie dort anpassen.
+  [Kürzel-Übersicht](/de/guides/keyboard-shortcuts/) und kannst sie dort anpassen.
 
 ## Navigieren in einer Ansicht
 

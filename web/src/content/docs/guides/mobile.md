@@ -43,7 +43,7 @@ the current tab. Each has a **Save** and a **Cancel** action; use the system
 ## Using a screen reader
 
 The mobile app follows the **same accessibility-first principles** as the
-desktop app (see [Accessibility](/guides/barrierefreiheit/) for the shared
+desktop app (see [Accessibility](/guides/accessibility/) for the shared
 concepts), adapted to the way VoiceOver and TalkBack work:
 
 - **One stop per item.** Each task, event or contact is a single focus stop.
@@ -92,7 +92,7 @@ stored **on this device only** (they are not synchronized):
 Reminders are delivered as **local notifications**. On first use the app asks for
 **notification permission** – grant it so reminders (and the app icon badge) can
 appear. Reminder sounds, lead times and snooze work as described under
-[Notifications](/guides/tutorial/07-benachrichtigungen/).
+[Notifications](/guides/tutorial/07-notifications/).
 
 ## Home-screen widget (iOS)
 

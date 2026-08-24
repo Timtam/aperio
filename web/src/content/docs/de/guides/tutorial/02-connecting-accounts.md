@@ -45,7 +45,7 @@ du Konten und legst bei Bedarf lokale Kalender an.
 
 Du brauchst kein Konto, um loszulegen. Lokale Kalender und Aufgabenlisten
 liegen nur auf deinem Gerät (und werden – wenn eingerichtet – über deine
-eigene [Synchronisation](/de/guides/tutorial/09-synchronisation/) abgeglichen):
+eigene [Synchronisation](/de/guides/tutorial/09-synchronization/) abgeglichen):
 
 1. Klicke unten in der **Seitenleiste** auf die passende
    Anlege-Schaltfläche: **+ Neuer Kalender**, **+ Neue Aufgabenliste** oder

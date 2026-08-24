@@ -42,7 +42,7 @@ Aperio spricht drei Google-Dienste an. Aktiviere für dein Projekt:
    - **People API** (Kontakte und Teilnehmer-Vorschläge)
 
 > **Optional – Google Drive als Sync-Speicher:** Wenn du zusätzlich die
-> [Geräte-Synchronisation](/de/guides/tutorial/09-synchronisation/) über Google Drive
+> [Geräte-Synchronisation](/de/guides/tutorial/09-synchronization/) über Google Drive
 > laufen lassen willst, aktiviere außerdem die **Google Drive API**.
 > Dasselbe Projekt und dieselben Zugangsdaten aus dieser Anleitung kannst du
 > dann auch im Sync-Dialog verwenden.
@@ -129,5 +129,5 @@ Jetzt entstehen die beiden Zeichenketten für Aperio:
 > App-Registrierung — sie gewähren für sich genommen keinen Zugriff auf dein
 > Konto. Die eigentlichen Zugangs-Tokens entstehen erst durch deine
 > Anmeldung im Browser und werden von Aperio lokal gespeichert; bei
-> aktivierter [E2E-Verschlüsselung](/de/guides/tutorial/09-synchronisation/) wandern
+> aktivierter [E2E-Verschlüsselung](/de/guides/tutorial/09-synchronization/) wandern
 > sie zusätzlich verschlüsselt zwischen deinen Geräten.

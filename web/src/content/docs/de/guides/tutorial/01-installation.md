@@ -26,7 +26,7 @@ wichtigsten Punkte:
 
 - **Sprache** der Oberfläche (Standard: deine Systemsprache).
 - **Erstes Konto** (oder du überspringst das und legst später eines an –
-  siehe [Kapitel 02](/de/guides/tutorial/02-konten-verbinden/)).
+  siehe [Kapitel 02](/de/guides/tutorial/02-connecting-accounts/)).
 - **Speicherort** – stelle deine Daten von einem vorhandenen Speicherort
   wieder her, richte einen neuen für die Synchronisierung über mehrere
   Geräte ein, oder überspringe den Schritt vorerst. Die abgefragten Felder

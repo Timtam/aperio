@@ -32,19 +32,19 @@ Du brauchst keine Vorkenntnisse.
 Das **Tutorial** baut aufeinander auf – am besten der Reihe nach:
 
 1. [Installation & Start](/de/guides/tutorial/01-installation/)
-2. [Kalender und Aufgabenlisten verbinden](/de/guides/tutorial/02-konten-verbinden/)
-3. [Termine](/de/guides/tutorial/03-termine/)
-4. [Aufgaben](/de/guides/tutorial/04-aufgaben/)
-5. [Kontakte](/de/guides/tutorial/05-kontakte/)
-6. [Ansichten](/de/guides/tutorial/06-ansichten/)
-7. [Benachrichtigungen](/de/guides/tutorial/07-benachrichtigungen/)
-8. [Suche](/de/guides/tutorial/08-suche/)
-9. [Synchronisation](/de/guides/tutorial/09-synchronisation/)
-10. [Tastaturkürzel](/de/guides/tutorial/10-tastaturkuerzel/)
+2. [Kalender und Aufgabenlisten verbinden](/de/guides/tutorial/02-connecting-accounts/)
+3. [Termine](/de/guides/tutorial/03-events/)
+4. [Aufgaben](/de/guides/tutorial/04-tasks/)
+5. [Kontakte](/de/guides/tutorial/05-contacts/)
+6. [Ansichten](/de/guides/tutorial/06-views/)
+7. [Benachrichtigungen](/de/guides/tutorial/07-notifications/)
+8. [Suche](/de/guides/tutorial/08-search/)
+9. [Synchronisation](/de/guides/tutorial/09-synchronization/)
+10. [Tastaturkürzel](/de/guides/tutorial/10-keyboard-shortcuts/)
 
 In der **Referenz** findest du die
-[vollständige Kürzel-Übersicht](/de/guides/tastaturkuerzel/) und eine eigene Seite
-zur [Barrierefreiheit](/de/guides/barrierefreiheit/) mit Tipps für NVDA, JAWS,
+[vollständige Kürzel-Übersicht](/de/guides/keyboard-shortcuts/) und eine eigene Seite
+zur [Barrierefreiheit](/de/guides/accessibility/) mit Tipps für NVDA, JAWS,
 VoiceOver und Narrator.
 
 > **Screenreader-Hinweis:** In jedem Kapitel gibt es einen solchen Kasten.

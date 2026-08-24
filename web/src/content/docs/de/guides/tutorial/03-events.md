@@ -8,7 +8,7 @@ richtest Wiederholungen ein.
 ## Einen Termin anlegen
 
 1. Wechsle in eine Kalenderansicht (z. B. **Woche**, siehe
-   [Kapitel 06](/de/guides/tutorial/06-ansichten/)).
+   [Kapitel 06](/de/guides/tutorial/06-views/)).
 2. Navigiere mit den Pfeiltasten zum gewünschten Tag bzw. zur Uhrzeit.
 3. Lege ein Ereignis an: **Termin schnell anlegen** (`Strg+N`) öffnet den
    Schnell-Dialog, **Neuer Termin** (`Strg+Umschalt+N`) das vollständige
@@ -22,7 +22,7 @@ Im Termin-Dialog kannst du außerdem festlegen:
 - **Kalender**, in dem der Termin gespeichert wird,
 - **Ort** und **Beschreibung**,
 - **Farb-Label** (mit Farbpunkt in der Auswahl),
-- **Erinnerung** (siehe [Kapitel 07](/de/guides/tutorial/07-benachrichtigungen/)),
+- **Erinnerung** (siehe [Kapitel 07](/de/guides/tutorial/07-notifications/)),
 - **Teilnehmer** (Name und/oder E-Mail-Adresse),
 - **Wiederholung** (siehe unten).
 

@@ -38,14 +38,21 @@ function rehypeBaseLinks() {
 }
 
 /**
- * Chapters that moved when Contacts became chapter 05 (everything from the old
- * 05 onwards shifted by one), plus the short-lived Reference page it replaced.
+ * Every URL a page ever lived under, mapped to where it lives now.
+ *
+ * Two waves so far: the renumbering when Contacts became chapter 05 (everything
+ * from the old 05 onwards shifted by one), and the 2026-08 rename of the
+ * German-named files to English ones so slug and filename read the same for an
+ * English-speaking maintainer. Starlight pairs a page's translations by file
+ * PATH, so the de/ twins carry the same English filenames — German titles and
+ * content, English slugs — and the old German URLs of BOTH locales redirect.
  *
  * These are not cosmetic: a tutorial chapter is exactly the kind of URL people
  * bookmark and link to, and a static host answers a stale one with a bare 404.
  * Astro emits a meta-refresh page per entry on a static build, which is what
  * GitHub Pages can serve. Keep them — an old link staying alive costs one
- * generated file each.
+ * generated file each. Renumbering-era targets point at today's names, never
+ * at another redirect, so no reader ever hops twice.
  *
  * Written base-relative and prefixed below: Astro bases the SOURCE of a
  * redirect but NOT its destination, so an unprefixed target sends the reader
@@ -54,18 +61,42 @@ function rehypeBaseLinks() {
  */
 const MOVED_PAGES = Object.fromEntries(
   Object.entries({
-    '/guides/kontakte': '/guides/tutorial/05-kontakte',
-    '/de/guides/kontakte': '/de/guides/tutorial/05-kontakte',
-    '/guides/tutorial/05-ansichten': '/guides/tutorial/06-ansichten',
-    '/de/guides/tutorial/05-ansichten': '/de/guides/tutorial/06-ansichten',
-    '/guides/tutorial/06-benachrichtigungen': '/guides/tutorial/07-benachrichtigungen',
-    '/de/guides/tutorial/06-benachrichtigungen': '/de/guides/tutorial/07-benachrichtigungen',
-    '/guides/tutorial/07-suche': '/guides/tutorial/08-suche',
-    '/de/guides/tutorial/07-suche': '/de/guides/tutorial/08-suche',
-    '/guides/tutorial/08-synchronisation': '/guides/tutorial/09-synchronisation',
-    '/de/guides/tutorial/08-synchronisation': '/de/guides/tutorial/09-synchronisation',
-    '/guides/tutorial/09-tastaturkuerzel': '/guides/tutorial/10-tastaturkuerzel',
-    '/de/guides/tutorial/09-tastaturkuerzel': '/de/guides/tutorial/10-tastaturkuerzel',
+    // Wave 1 — the chapter renumbering (targets updated to the English names).
+    '/guides/kontakte': '/guides/tutorial/05-contacts',
+    '/de/guides/kontakte': '/de/guides/tutorial/05-contacts',
+    '/guides/tutorial/05-ansichten': '/guides/tutorial/06-views',
+    '/de/guides/tutorial/05-ansichten': '/de/guides/tutorial/06-views',
+    '/guides/tutorial/06-benachrichtigungen': '/guides/tutorial/07-notifications',
+    '/de/guides/tutorial/06-benachrichtigungen': '/de/guides/tutorial/07-notifications',
+    '/guides/tutorial/07-suche': '/guides/tutorial/08-search',
+    '/de/guides/tutorial/07-suche': '/de/guides/tutorial/08-search',
+    '/guides/tutorial/08-synchronisation': '/guides/tutorial/09-synchronization',
+    '/de/guides/tutorial/08-synchronisation': '/de/guides/tutorial/09-synchronization',
+    '/guides/tutorial/09-tastaturkuerzel': '/guides/tutorial/10-keyboard-shortcuts',
+    '/de/guides/tutorial/09-tastaturkuerzel': '/de/guides/tutorial/10-keyboard-shortcuts',
+    // Wave 2 — German filenames → English (same page, same chapter number).
+    '/guides/barrierefreiheit': '/guides/accessibility',
+    '/de/guides/barrierefreiheit': '/de/guides/accessibility',
+    '/guides/tastaturkuerzel': '/guides/keyboard-shortcuts',
+    '/de/guides/tastaturkuerzel': '/de/guides/keyboard-shortcuts',
+    '/guides/tutorial/02-konten-verbinden': '/guides/tutorial/02-connecting-accounts',
+    '/de/guides/tutorial/02-konten-verbinden': '/de/guides/tutorial/02-connecting-accounts',
+    '/guides/tutorial/03-termine': '/guides/tutorial/03-events',
+    '/de/guides/tutorial/03-termine': '/de/guides/tutorial/03-events',
+    '/guides/tutorial/04-aufgaben': '/guides/tutorial/04-tasks',
+    '/de/guides/tutorial/04-aufgaben': '/de/guides/tutorial/04-tasks',
+    '/guides/tutorial/05-kontakte': '/guides/tutorial/05-contacts',
+    '/de/guides/tutorial/05-kontakte': '/de/guides/tutorial/05-contacts',
+    '/guides/tutorial/06-ansichten': '/guides/tutorial/06-views',
+    '/de/guides/tutorial/06-ansichten': '/de/guides/tutorial/06-views',
+    '/guides/tutorial/07-benachrichtigungen': '/guides/tutorial/07-notifications',
+    '/de/guides/tutorial/07-benachrichtigungen': '/de/guides/tutorial/07-notifications',
+    '/guides/tutorial/08-suche': '/guides/tutorial/08-search',
+    '/de/guides/tutorial/08-suche': '/de/guides/tutorial/08-search',
+    '/guides/tutorial/09-synchronisation': '/guides/tutorial/09-synchronization',
+    '/de/guides/tutorial/09-synchronisation': '/de/guides/tutorial/09-synchronization',
+    '/guides/tutorial/10-tastaturkuerzel': '/guides/tutorial/10-keyboard-shortcuts',
+    '/de/guides/tutorial/10-tastaturkuerzel': '/de/guides/tutorial/10-keyboard-shortcuts',
   }).map(([from, to]) => [from, `${BASE.replace(/\/$/, '')}${to}/`]),
 );
 
@@ -108,15 +139,15 @@ export default defineConfig({
               translations: { de: 'Tutorial' },
               items: [
                 { label: '01 – Installation & First Launch', translations: { de: '01 – Installation & Start' }, slug: 'guides/tutorial/01-installation' },
-                { label: '02 – Connecting Calendars and Task Lists', translations: { de: '02 – Kalender und Aufgabenlisten verbinden' }, slug: 'guides/tutorial/02-konten-verbinden' },
-                { label: '03 – Events', translations: { de: '03 – Termine' }, slug: 'guides/tutorial/03-termine' },
-                { label: '04 – Tasks', translations: { de: '04 – Aufgaben' }, slug: 'guides/tutorial/04-aufgaben' },
-                { label: '05 – Contacts', translations: { de: '05 – Kontakte' }, slug: 'guides/tutorial/05-kontakte' },
-                { label: '06 – Views', translations: { de: '06 – Ansichten' }, slug: 'guides/tutorial/06-ansichten' },
-                { label: '07 – Notifications', translations: { de: '07 – Benachrichtigungen' }, slug: 'guides/tutorial/07-benachrichtigungen' },
-                { label: '08 – Search', translations: { de: '08 – Suche' }, slug: 'guides/tutorial/08-suche' },
-                { label: '09 – Synchronization', translations: { de: '09 – Synchronisation' }, slug: 'guides/tutorial/09-synchronisation' },
-                { label: '10 – Keyboard Shortcuts', translations: { de: '10 – Tastaturkürzel' }, slug: 'guides/tutorial/10-tastaturkuerzel' },
+                { label: '02 – Connecting Calendars and Task Lists', translations: { de: '02 – Kalender und Aufgabenlisten verbinden' }, slug: 'guides/tutorial/02-connecting-accounts' },
+                { label: '03 – Events', translations: { de: '03 – Termine' }, slug: 'guides/tutorial/03-events' },
+                { label: '04 – Tasks', translations: { de: '04 – Aufgaben' }, slug: 'guides/tutorial/04-tasks' },
+                { label: '05 – Contacts', translations: { de: '05 – Kontakte' }, slug: 'guides/tutorial/05-contacts' },
+                { label: '06 – Views', translations: { de: '06 – Ansichten' }, slug: 'guides/tutorial/06-views' },
+                { label: '07 – Notifications', translations: { de: '07 – Benachrichtigungen' }, slug: 'guides/tutorial/07-notifications' },
+                { label: '08 – Search', translations: { de: '08 – Suche' }, slug: 'guides/tutorial/08-search' },
+                { label: '09 – Synchronization', translations: { de: '09 – Synchronisation' }, slug: 'guides/tutorial/09-synchronization' },
+                { label: '10 – Keyboard Shortcuts', translations: { de: '10 – Tastaturkürzel' }, slug: 'guides/tutorial/10-keyboard-shortcuts' },
               ],
             },
             {
@@ -124,8 +155,8 @@ export default defineConfig({
               translations: { de: 'Referenz' },
               items: [
                 { label: 'Mobile app', translations: { de: 'Mobile App' }, slug: 'guides/mobile' },
-                { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/tastaturkuerzel' },
-                { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
+                { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/keyboard-shortcuts' },
+                { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/accessibility' },
                 { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },
                 { label: 'Connecting Google (OAuth guide)', translations: { de: 'Google einbinden (OAuth-Anleitung)' }, slug: 'guides/google-oauth' },
                 { label: 'Video meetings with Webex', translations: { de: 'Videokonferenzen mit Webex' }, slug: 'guides/webex' },

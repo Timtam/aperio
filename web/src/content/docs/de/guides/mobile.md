@@ -46,7 +46,7 @@ du ihn, ohne zu speichern.
 
 Die mobile App folgt denselben **Barrierefreiheits-Grundsätzen** wie die
 Desktop-App (die gemeinsamen Konzepte stehen unter
-[Barrierefreiheit](/de/guides/barrierefreiheit/)), angepasst an die Arbeitsweise
+[Barrierefreiheit](/de/guides/accessibility/)), angepasst an die Arbeitsweise
 von VoiceOver und TalkBack:
 
 - **Ein Stopp pro Eintrag.** Jede Aufgabe, jeder Termin und jeder Kontakt ist ein
@@ -100,7 +100,7 @@ Erinnerungen werden als **lokale Benachrichtigungen** zugestellt. Bei der ersten
 Nutzung fragt die App nach der **Benachrichtigungsberechtigung** – erteile sie,
 damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstöne,
 Vorlaufzeiten und Schlummern funktionieren wie unter
-[Benachrichtigungen](/de/guides/tutorial/07-benachrichtigungen/) beschrieben.
+[Benachrichtigungen](/de/guides/tutorial/07-notifications/) beschrieben.
 
 ## Widget auf dem Startbildschirm (iOS)
 

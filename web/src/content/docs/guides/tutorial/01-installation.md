@@ -25,7 +25,7 @@ or data yet – a short, accessible wizard walks you through the essentials:
 
 - The interface **language** (default: your system language).
 - A **first account** (or skip it and add one later – see
-  [Chapter 02](/guides/tutorial/02-konten-verbinden/)).
+  [Chapter 02](/guides/tutorial/02-connecting-accounts/)).
 - The **storage location** – restore your data from an existing one, set up
   a new one to sync across your devices, or skip it for now. The fields you
   are asked for come from the plugin itself, so they are the same ones you

@@ -7,14 +7,14 @@ Telefonnummer sagt, welches Telefon sie ist, und siehst, woher die Geburtstage
 kommen.
 
 Aperio führt Kontakte neben deinen Kalendern und Aufgabenlisten, aus denselben
-Konten, die du in [Kapitel 02](/de/guides/tutorial/02-konten-verbinden/)
+Konten, die du in [Kapitel 02](/de/guides/tutorial/02-connecting-accounts/)
 verbunden hast: Ein iCloud- oder Nextcloud-Konto bringt seine
 CardDAV-Adressbücher mit, ein Google- oder Microsoft-Konto seine Kontakte, ein
 Exchange-Konto deine eigenen plus das Firmenverzeichnis – und es gibt ein
 **lokales Adressbuch**, das gar kein Konto braucht.
 
 Aus den Kontakten schöpft die Teilnehmerauswahl, wenn du jemanden zu einem
-Termin einlädst ([Kapitel 03](/de/guides/tutorial/03-termine/)), und aus ihnen
+Termin einlädst ([Kapitel 03](/de/guides/tutorial/03-events/)), und aus ihnen
 entstehen die **Geburtstagskalender**.
 
 ## Der Überblick
