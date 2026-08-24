@@ -13,6 +13,7 @@
     "taskHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Erledigen, Umbenennen oder Löschen.",
     "eventHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Verschieben, Gruppieren oder Löschen.",
     "openHint": "Doppeltippen zum Öffnen.",
+    "selectFieldHint": "Doppeltippen zum Auswählen.",
     "taskProjectionHint": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst.",
     "taskProjectionHintActions": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst. Nach oben oder unten wischen für weitere Aktionen.",
     "loading": "Lädt…",
@@ -1533,6 +1534,7 @@
           "YEARLY": "Jahre"
         },
         "weekdays": "Wochentage",
+        "weekdaysNone": "keine",
         "short": {
           "mon": "Mo",
           "tue": "Di",
@@ -1703,6 +1705,7 @@
           "YEARLY": "Jahre"
         },
         "weekdays": "Wochentage",
+        "weekdaysNone": "keine",
         "short": {
           "mon": "Mo",
           "tue": "Di",

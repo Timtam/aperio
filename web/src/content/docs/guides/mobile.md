@@ -69,6 +69,10 @@ concepts), adapted to the way VoiceOver and TalkBack work:
   for everyone else.
 - **Dates and times** use the **native pickers**, so they read and behave the
   way you already know from other apps on your phone.
+- **Choices in the editors** – the calendar, task list, section, colour label,
+  sound, weekday and similar pickers – are **collapsed**: one button announcing
+  "field: current value", opening the options in a small dialog. An editor is a
+  handful of swipes to walk through, not one per calendar you own.
 
 ## Mobile-specific settings
 

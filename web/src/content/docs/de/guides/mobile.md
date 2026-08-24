@@ -73,6 +73,11 @@ von VoiceOver und TalkBack:
   Schaltflächen bleiben für alle anderen sichtbar.
 - **Datum und Uhrzeit** nutzen die **nativen Auswahlfelder**, lesen und verhalten
   sich also so, wie du es von anderen Apps auf deinem Handy kennst.
+- **Auswahlen in den Editoren** – Kalender, Aufgabenliste, Abschnitt,
+  Farb-Label, Klang, Wochentage und Ähnliches – sind **eingeklappt**: ein
+  Knopf, der „Feld: aktueller Wert" ansagt und die Optionen in einem kleinen
+  Dialog öffnet. Ein Editor ist damit eine Handvoll Wischer, nicht einer pro
+  Kalender, den du besitzt.
 
 ## Einstellungen nur für Mobil
 

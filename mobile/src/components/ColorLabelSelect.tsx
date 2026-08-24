@@ -1,19 +1,19 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ColorLabel } from '@aperio/shared';
 
-import { selectableRole } from '../a11y/roles';
-import { useThemedStyles, type ThemeColors } from '../theme';
+import { SelectFieldButton } from './SelectFieldButton';
 
 /**
- * Accessible colour-label picker: a radio group over "No colour" + every named
- * label. Serves both audiences — sighted users see a real colour SWATCH per
- * option, screen-reader users hear the label NAME (the swatch is decorative and
- * carries no a11y label; the option's accessibilityLabel is the name). `value`
- * is the bound `color_label` id, `''` = none; `onChange('')` clears it. Ad-hoc
- * one-off colours are excluded (they're not user-named).
+ * Colour-label picker: ONE focus stop (a button carrying the current label's
+ * name), opening "No colour" + every named label in a dialog. Serves both
+ * audiences — sighted users see a real colour SWATCH on the button and per
+ * option, screen-reader users hear the label NAME. `value` is the bound
+ * `color_label` id, `''` = none; `onChange('')` clears it. Ad-hoc one-off
+ * colours are excluded (they're not user-named). Formerly an inline radio
+ * group; collapsed so the editors it sits in stay walkable (see
+ * SelectFieldButton).
  */
 export function ColorLabelSelect({
   value,
@@ -27,92 +27,27 @@ export function ColorLabelSelect({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const styles = useThemedStyles(makeStyles);
+  const named = useMemo(() => labels.filter((l) => !l.ad_hoc), [labels]);
   const options = useMemo(
     () => [
-      { value: '', label: t('dialogs.task.section.noColor'), hex: null as string | null },
-      ...labels
-        .filter((l) => !l.ad_hoc)
-        .map((l) => ({ value: l.id, label: l.name, hex: l.hex })),
+      { value: '', label: t('dialogs.task.section.noColor') },
+      ...named.map((l) => ({ value: l.id, label: l.name })),
     ],
-    [labels, t],
+    [named, t],
+  );
+  const hexById = useMemo(
+    () => new Map(named.map((l) => [l.id, l.hex])),
+    [named],
   );
 
   return (
-    <View
-      accessibilityRole="radiogroup"
-      accessibilityLabel={t('dialogs.colorLabels.fields.color')}
-      style={styles.group}
-    >
-      <Text style={styles.legend}>{t('dialogs.colorLabels.fields.color')}</Text>
-      {options.map((opt) => {
-        const selected = opt.value === value;
-        return (
-          <Pressable
-            key={opt.value || '__none__'}
-            accessible
-            accessibilityRole={selectableRole('radio')}
-            accessibilityState={{ selected, disabled: !!disabled }}
-            accessibilityLabel={opt.label}
-            disabled={disabled}
-            onPress={() => onChange(opt.value)}
-            style={({ pressed }) => [
-              styles.option,
-              selected && styles.optionSelected,
-              pressed && styles.optionPressed,
-              disabled && styles.optionDisabled,
-            ]}
-          >
-            <Text style={styles.marker} importantForAccessibility="no">
-              {selected ? '◉' : '○'}
-            </Text>
-            {/* Real colour swatch for sighted users (decorative for SR). "No
-                colour" gets an outlined empty box rather than a filled one. */}
-            <View
-              accessible={false}
-              style={[
-                styles.swatch,
-                opt.hex != null
-                  ? { backgroundColor: opt.hex }
-                  : styles.swatchNone,
-              ]}
-            />
-            <Text style={styles.optionLabel} importantForAccessibility="no">
-              {opt.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <SelectFieldButton
+      label={t('dialogs.colorLabels.fields.color')}
+      value={value}
+      options={options}
+      onChange={onChange}
+      disabled={disabled}
+      swatchFor={(id) => hexById.get(id) ?? null}
+    />
   );
 }
-
-const makeStyles = (c: ThemeColors) =>
-  StyleSheet.create({
-    group: { gap: 6 },
-    legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
-    option: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
-    optionSelected: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
-    optionPressed: { backgroundColor: c.surfacePressed },
-    optionDisabled: { opacity: 0.5 },
-    marker: { fontSize: 18, width: 22, textAlign: 'center', color: c.textPrimary },
-    swatch: {
-      width: 20,
-      height: 20,
-      borderRadius: 5,
-      borderWidth: 1,
-      borderColor: c.borderOverlay,
-    },
-    swatchNone: { backgroundColor: c.background, borderStyle: 'dashed' },
-    optionLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
-  });

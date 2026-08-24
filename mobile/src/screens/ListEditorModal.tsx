@@ -25,7 +25,7 @@ import {
 } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SoundSelect } from '../components/SoundSelect';
 import { SwitchRow } from '../components/SwitchRow';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -67,7 +67,7 @@ const fromTri = (s: TriState): boolean | undefined =>
 // available too now — the overrides system landed since this note first deferred
 // them on mobile.
 //
-// Screen-reader-first: the parent picker is an accessible RadioGroup (selecting
+// Screen-reader-first: the parent picker is a collapsed one-stop picker (selecting
 // an option reparents immediately); each section is its own row with Rename +
 // Delete; add/remove/rename move SR focus via useListFocusManager; section
 // mutations refresh the SHARED store cache so the grouped Tasks screen regroups;
@@ -496,7 +496,7 @@ export default function ListEditorModal({
       {/* Reparent — local lists only (the backend rejects external reparent),
           and only when there's at least one other list to nest under. */}
       {canReparent && parentOptions.length > 1 && (
-        <RadioGroup
+        <SelectFieldButton
           label={t('sidebar.menu.moveUnder')}
           value={currentParent}
           options={parentOptions}
@@ -545,7 +545,7 @@ export default function ListEditorModal({
       <Text style={styles.heading} accessibilityRole="header">
         {t('dialogs.tasks.perList.heading')}
       </Text>
-      <RadioGroup<TriState>
+      <SelectFieldButton<TriState>
         label={t('dialogs.tasks.perList.cascade')}
         value={toTri(listOverride.cascade)}
         options={[
@@ -556,7 +556,7 @@ export default function ListEditorModal({
         onChange={(v) => patchOverride({ cascade: fromTri(v) })}
         disabled={busy}
       />
-      <RadioGroup<TriState>
+      <SelectFieldButton<TriState>
         label={t('dialogs.tasks.perList.autoDate')}
         value={toTri(listOverride.autoDate)}
         options={[
@@ -567,7 +567,7 @@ export default function ListEditorModal({
         onChange={(v) => patchOverride({ autoDate: fromTri(v) })}
         disabled={busy}
       />
-      <RadioGroup<string>
+      <SelectFieldButton<string>
         label={t('dialogs.tasks.perList.carryOver')}
         value={listOverride.carryOverDefault ?? 'inherit'}
         options={[

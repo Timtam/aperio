@@ -34,7 +34,7 @@ import {
 import { ContactLabelButton } from '../components/ContactLabelButton';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -883,7 +883,7 @@ export default function ContactEditorModal({
       </Field>
 
       {listOptions.length > 0 && (
-        <RadioGroup
+        <SelectFieldButton
           label={t('dialogs.contact.listLabel')}
           value={selectedListId}
           options={listOptions}

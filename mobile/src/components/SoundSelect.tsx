@@ -7,7 +7,7 @@ import type { SoundConfig } from '@aperio/shared';
 
 import type { CustomSound } from '../api/sounds';
 import { useCustomSounds } from '../state/useCustomSounds';
-import { RadioGroup } from './RadioGroup';
+import { SelectFieldButton } from './SelectFieldButton';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible notification-sound picker (DESIGN §14.4) — the mobile twin of the
@@ -18,7 +18,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // channel); iOS previews here but the notification falls back to the system
 // sound (a build-time-bundle limitation). The caller (useSoundPref / per-item
 // state) owns the pref load/save; this owns the sound library via
-// useCustomSounds. RadioGroup keeps every option a screen-reader focus stop.
+// useCustomSounds. The choice itself is ONE focus stop (SelectFieldButton) —
+// the options open in a dialog, so a long custom-sound library doesn't
+// stretch the editor it sits in.
 
 // OS notifications play at the system volume, so per-config volume is N/A on
 // mobile; this keeps the wire SoundConfig well-formed (matches cal_core
@@ -161,7 +163,7 @@ export function SoundSelect({
 
   return (
     <View style={styles.field}>
-      <RadioGroup<string>
+      <SelectFieldButton<string>
         label={label}
         value={choice}
         options={options}

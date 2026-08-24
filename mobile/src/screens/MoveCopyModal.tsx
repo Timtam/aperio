@@ -20,7 +20,7 @@ import {
   getTasks,
 } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
@@ -339,7 +339,7 @@ export default function MoveCopyModal({
       )}
 
       {containerOptions.length > 0 ? (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t(
             params.kind === 'event'
               ? 'dialogs.moveCopy.targetCalendar'
@@ -360,7 +360,7 @@ export default function MoveCopyModal({
       )}
 
       {sectionsEnabled && (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.task.fields.section')}
           value={targetSectionId}
           options={sectionOptions}

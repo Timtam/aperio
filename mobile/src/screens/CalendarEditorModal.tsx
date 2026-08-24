@@ -20,7 +20,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import {
   bindSignature,
@@ -296,7 +296,7 @@ export default function CalendarEditorModal({
           default, not a restriction: every signature stays pickable in the
           editors regardless of which calendar the appointment is on. */}
       {signatures.length > 0 && (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.signature.calendarLabel')}
           labelAsHeading
           value={boundId}

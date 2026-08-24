@@ -58,7 +58,7 @@ import {
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { SignatureButton } from '../components/SignatureButton';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
@@ -88,7 +88,8 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // sub-4b; assignees / per-task sound / colour label stay desktop-only or are
 // preserved-as-read on edit. Pure JS — no native bridge change: it assembles a
 // full CreateTaskRequest / Task that round-trips through the existing JSON
-// bridge. Every picker is an accessible RadioGroup (RN has no native <select>).
+// bridge. Every picker is a collapsed SelectFieldButton — one focus stop;
+// the options open in a dialog (RN has no native <select>).
 
 interface FormState {
   title: string;
@@ -669,13 +670,13 @@ export default function TaskEditorModal({
     ],
     [t],
   );
-  // "Default (global)" plus the day presets. Modelled as a RadioGroup (not a
+  // "Default (global)" plus the day presets. Modelled as a picker (not a
   // segmented control) — seven options is too many for a segment row, and each
   // radio is its own focus stop for a screen-reader user.
   const deadlineReminderOptions = useMemo(() => {
     // The day presets, plus the current value spliced in (sorted) when it's a
     // non-null override that isn't a preset — e.g. a `10` synced from another
-    // device. Without this the RadioGroup announces NOTHING selected for such a
+    // device. Without this the picker announces NOTHING selected for such a
     // value, even though it saves back intact.
     const set = new Set<number>(DEADLINE_REMINDER_PRESETS);
     if (form.deadlineReminderDays != null) {
@@ -1001,7 +1002,7 @@ export default function TaskEditorModal({
         />
       </View>
 
-      <RadioGroup<string>
+      <SelectFieldButton<string>
         label={t('dialogs.task.fields.list')}
         value={form.listId}
         options={listOptions}
@@ -1015,7 +1016,7 @@ export default function TaskEditorModal({
       )}
 
       {canSection && (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.task.fields.section')}
           value={form.sectionId}
           options={sectionOptions}
@@ -1031,10 +1032,10 @@ export default function TaskEditorModal({
         />
       )}
 
-      {/* Status is a RadioGroup, not a SegmentedSelect: four options with long
+      {/* Status is a full picker, not a SegmentedSelect: four options with long
           localized labels ("In Bearbeitung", "Abgebrochen") get truncated in a
           segment row, while each radio renders its full label on its own row. */}
-      <RadioGroup<TaskStatus>
+      <SelectFieldButton<TaskStatus>
         label={t('dialogs.task.fields.status')}
         value={form.status}
         options={statusOptions}
@@ -1126,7 +1127,7 @@ export default function TaskEditorModal({
           falls back to the global countdown otherwise, so it stays hidden. */}
       {form.deadlineDate !== '' && (
         <View style={styles.field}>
-          <RadioGroup<number>
+          <SelectFieldButton<number>
             label={t('dialogs.task.fields.deadlineReminder.label')}
             value={form.deadlineReminderDays ?? DEADLINE_REMINDER_DEFAULT}
             options={deadlineReminderOptions}

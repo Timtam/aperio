@@ -55,7 +55,7 @@ import {
 } from '../state/useSignatures';
 import { EventRsvp } from '../components/EventRsvp';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
@@ -90,7 +90,7 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
 // addressable element with an explicit label; the calendar picker is a
-// RadioGroup; all-day is a switch; start/end date + time are accessible
+// collapsed picker; all-day is a switch; start/end date + time are accessible
 // DateTimeFieldButtons (always present — an event has a start and end). On edit the
 // loaded event is sent back whole with the edits applied, so recurrence /
 // reminders / attendees / the inline sound field round-trip untouched (the
@@ -965,7 +965,7 @@ export default function EventEditorModal({
       </View>
 
       {calendars.length > 0 && (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.event.fields.calendar')}
           value={calId}
           // Offer only calendars the user can write to AND hasn't hidden (the
@@ -1160,7 +1160,7 @@ export default function EventEditorModal({
         </Text>
       )}
       {isOccurrence && original?.recurrence != null && initialScope == null && (
-        <RadioGroup<'occurrence' | 'series' | 'this_and_future'>
+        <SelectFieldButton<'occurrence' | 'series' | 'this_and_future'>
           label={t('dialogs.event.scope.label')}
           value={editScope}
           options={[

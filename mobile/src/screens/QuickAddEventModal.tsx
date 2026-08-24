@@ -28,7 +28,7 @@ import {
   rankEventSuggestions,
   useTitleSuggestions,
 } from '../state/useTitleSuggestions';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -316,7 +316,7 @@ export default function QuickAddEventModal({
       </View>
 
       {calendarOptions.length > 0 ? (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.event.fields.calendar')}
           value={calId}
           options={calendarOptions}

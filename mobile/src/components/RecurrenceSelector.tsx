@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
   buildRRule,
@@ -18,16 +18,16 @@ import type {
   RecurrenceFreq,
 } from '@aperio/shared';
 
-import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
-import { RadioGroup } from './RadioGroup';
+import { MultiSelectFieldButton } from './MultiSelectFieldButton';
+import { SelectFieldButton } from './SelectFieldButton';
 
 // Mobile EVENT recurrence editor — a faithful RN port of the desktop
 // RecurrenceSelector. The RRULE parse/build logic is shared (@aperio/shared
 // rrule.ts); the value model is the raw RRULE body string (what
 // cal_core::EventRecurrence keeps in `rrule`), `null` = non-recurring.
-// <select> → RadioGroup, <input type=number> → numeric TextInput, weekday
-// checkboxes → toggle Pressables, <input type=date> → a YYYY-MM-DD field (the
+// <select> → collapsed picker, <input type=number> → numeric TextInput, weekday
+// checkboxes → a collapsed weekday multi-select, <input type=date> → a YYYY-MM-DD field (the
 // reliable SR input used elsewhere in the event editor).
 //
 // Capability gating: `capabilities` (the owning calendar's recurrence caps,
@@ -177,7 +177,7 @@ export function RecurrenceSelector({
 
   return (
     <View style={styles.group}>
-      <RadioGroup<Freq>
+      <SelectFieldButton<Freq>
         label={t('dialogs.event.recurrence.label')}
         value={rule.freq}
         options={(
@@ -219,50 +219,29 @@ export function RecurrenceSelector({
           </View>
 
           {rule.freq === 'WEEKLY' && caps.weekly_byday && (
-            <View
-              accessibilityLabel={t('dialogs.event.recurrence.weekdays')}
-              style={styles.field}
-            >
-              <Text style={styles.label}>{t('dialogs.event.recurrence.weekdays')}</Text>
-              <View style={styles.weekdayRow}>
-                {WEEKDAYS.map((d) => {
-                  const checked = rule.byDay.includes(d.rrule);
-                  return (
-                    <Pressable
-                      key={d.rrule}
-                      accessible
-                      accessibilityRole={selectableRole('checkbox')}
-                      accessibilityState={selectableCheckState(checked)}
-                      accessibilityLabel={t(`dialogs.event.recurrence.short.${d.key}`)}
-                      onPress={() =>
-                        update({
-                          ...rule,
-                          byDay: checked
-                            ? rule.byDay.filter((x) => x !== d.rrule)
-                            : [...rule.byDay, d.rrule],
-                        })
-                      }
-                      style={({ pressed }) => [
-                        styles.weekday,
-                        checked && styles.weekdayChecked,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text
-                        style={[styles.weekdayText, checked && styles.weekdayTextChecked]}
-                        importantForAccessibility="no"
-                      >
-                        {t(`dialogs.event.recurrence.short.${d.key}`)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            <MultiSelectFieldButton<string>
+              label={t('dialogs.event.recurrence.weekdays')}
+              values={rule.byDay}
+              options={WEEKDAYS.map((d) => ({
+                value: d.rrule,
+                label: t(`dialogs.event.recurrence.short.${d.key}`),
+              }))}
+              emptyLabel={t('dialogs.event.recurrence.weekdaysNone')}
+              onChange={(days) =>
+                update({
+                  ...rule,
+                  // Canonical Mo–Su order regardless of toggle order, so the
+                  // stored BYDAY stays deterministic.
+                  byDay: WEEKDAYS.map((d) => d.rrule).filter((x) =>
+                    days.includes(x),
+                  ),
+                })
+              }
+            />
           )}
 
           {isMonthlyish && (
-            <RadioGroup<string>
+            <SelectFieldButton<string>
               label={t('dialogs.event.recurrence.by.label')}
               value={selectedOptionKey}
               options={monthlyOptions.map((opt) => ({
@@ -276,7 +255,7 @@ export function RecurrenceSelector({
             />
           )}
 
-          <RadioGroup<EndMode>
+          <SelectFieldButton<EndMode>
             label={t('dialogs.event.recurrence.endLabel')}
             value={rule.endMode}
             options={[
@@ -393,17 +372,4 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     inputDisabled: { opacity: 0.5 },
-    weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    weekday: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
-    weekdayChecked: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
-    weekdayText: { fontSize: 15, color: c.textPrimary },
-    weekdayTextChecked: { fontWeight: '700', color: c.link },
-    pressed: { backgroundColor: c.surfacePressed },
   });

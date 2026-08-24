@@ -12,10 +12,10 @@ import type {
   TaskRecurrenceValue,
 } from '@aperio/shared';
 
-import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { useThemedStyles, type ThemeColors } from '../theme';
-import { RadioGroup } from './RadioGroup';
+import { MultiSelectFieldButton } from './MultiSelectFieldButton';
+import { SelectFieldButton } from './SelectFieldButton';
 
 // Mobile recurrence editor — faithful RN port of the desktop
 // TaskRecurrenceSelector. The value model + backend converters are shared
@@ -23,8 +23,8 @@ import { RadioGroup } from './RadioGroup';
 // by the Host from the adapter's plugin manifest) FILTERS options the backend
 // can't store — an unsupported frequency / interval / weekday picker /
 // day-of-month / end-mode is dropped rather than offered then silently lost on
-// save. Absent → full RFC-5545 (FULL_CAPS). <select> → RadioGroup, numbers →
-// numeric TextInput, weekday checkboxes → Pressables, fixed-dates → rows.
+// save. Absent → full RFC-5545 (FULL_CAPS). <select> → collapsed picker, numbers →
+// numeric TextInput, weekday checkboxes → a collapsed multi-select, fixed-dates → rows.
 
 const FULL_CAPS: RecurrenceCapabilities = {
   frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
@@ -122,7 +122,7 @@ export function TaskRecurrenceSelector({
 
   return (
     <View style={styles.group}>
-      <RadioGroup<TaskFreq>
+      <SelectFieldButton<TaskFreq>
         label={t('dialogs.task.recurrence.label')}
         value={value.freq}
         options={(
@@ -145,7 +145,7 @@ export function TaskRecurrenceSelector({
 
       {value.freq !== 'NONE' && (
         <>
-          <RadioGroup<TaskPlacement>
+          <SelectFieldButton<TaskPlacement>
             label={t('dialogs.task.recurrence.placementLabel')}
             value={value.placement}
             options={[
@@ -161,7 +161,7 @@ export function TaskRecurrenceSelector({
             onChange={(placement) => update({ placement })}
           />
 
-          <RadioGroup<TaskAnchor>
+          <SelectFieldButton<TaskAnchor>
             label={t('dialogs.task.recurrence.anchorLabel')}
             value={value.anchor}
             options={[
@@ -204,52 +204,24 @@ export function TaskRecurrenceSelector({
           )}
 
           {showWeekdays && (
-            <View
-              accessibilityLabel={t('dialogs.task.recurrence.weekdays')}
-              style={styles.field}
-            >
-              <Text style={styles.label}>
-                {t('dialogs.task.recurrence.weekdays')}
-              </Text>
-              <View style={styles.weekdayRow}>
-                {WEEKDAYS.map((d) => {
-                  const checked = value.byDay.includes(d.iso);
-                  return (
-                    <Pressable
-                      key={d.iso}
-                      accessible
-                      accessibilityRole={selectableRole('checkbox')}
-                      accessibilityState={selectableCheckState(checked)}
-                      accessibilityLabel={t(
-                        `dialogs.task.recurrence.short.${d.key}`,
-                      )}
-                      onPress={() =>
-                        update({
-                          byDay: checked
-                            ? value.byDay.filter((x) => x !== d.iso)
-                            : [...value.byDay, d.iso],
-                        })
-                      }
-                      style={({ pressed }) => [
-                        styles.weekday,
-                        checked && styles.weekdayChecked,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.weekdayText,
-                          checked && styles.weekdayTextChecked,
-                        ]}
-                        importantForAccessibility="no"
-                      >
-                        {t(`dialogs.task.recurrence.short.${d.key}`)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            <MultiSelectFieldButton<string>
+              label={t('dialogs.task.recurrence.weekdays')}
+              values={value.byDay}
+              options={WEEKDAYS.map((d) => ({
+                value: d.iso,
+                label: t(`dialogs.task.recurrence.short.${d.key}`),
+              }))}
+              emptyLabel={t('dialogs.task.recurrence.weekdaysNone')}
+              onChange={(days) =>
+                update({
+                  // Canonical Mo–Su order regardless of toggle order, so the
+                  // stored rule stays deterministic.
+                  byDay: WEEKDAYS.map((d) => d.iso).filter((x) =>
+                    days.includes(x),
+                  ),
+                })
+              }
+            />
           )}
 
           {showDayOfMonth && (
@@ -281,7 +253,7 @@ export function TaskRecurrenceSelector({
             onChange={(fixedDates) => update({ fixedDates })}
           />
 
-          <RadioGroup<'NEVER' | 'UNTIL'>
+          <SelectFieldButton<'NEVER' | 'UNTIL'>
             label={t('dialogs.task.recurrence.endLabel')}
             value={value.endMode}
             options={[
@@ -418,18 +390,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     inputDisabled: { opacity: 0.5 },
-    weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    weekday: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
-    weekdayChecked: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
-    weekdayText: { fontSize: 15, color: c.textPrimary },
-    weekdayTextChecked: { fontWeight: '700', color: c.link },
     fixedRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     fixedInput: { flex: 1 },
     removeBtn: {

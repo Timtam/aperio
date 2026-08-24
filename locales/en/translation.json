@@ -13,6 +13,7 @@
     "taskHint": "Double-tap to edit. Swipe up or down for complete, rename, or delete actions.",
     "eventHint": "Double-tap to edit. Swipe up or down for move, group, or delete actions.",
     "openHint": "Double-tap to open.",
+    "selectFieldHint": "Double-tap to choose.",
     "taskProjectionHint": "Future occurrence of a repeating task. Double-tap to edit the task itself.",
     "taskProjectionHintActions": "Future occurrence of a repeating task. Double-tap to edit the task itself. Swipe up or down for more actions.",
     "loading": "Loading…",
@@ -1533,6 +1534,7 @@
           "YEARLY": "years"
         },
         "weekdays": "Weekdays",
+        "weekdaysNone": "none",
         "short": {
           "mon": "Mon",
           "tue": "Tue",
@@ -1703,6 +1705,7 @@
           "YEARLY": "years"
         },
         "weekdays": "Weekdays",
+        "weekdaysNone": "none",
         "short": {
           "mon": "Mon",
           "tue": "Tue",

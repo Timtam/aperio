@@ -27,7 +27,7 @@ import {
   ungroupEvent,
 } from '../api/eventGroups';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -472,7 +472,7 @@ export default function EventGroupModal({
               {t('dialogs.eventGroup.suggestHint', { title: suggested.title })}
             </Text>
           )}
-          <RadioGroup<string>
+          <SelectFieldButton<string>
             label={t('dialogs.eventGroup.pickLabel')}
             value={picked}
             options={options}

@@ -6,7 +6,7 @@ import type { Reminder } from '@aperio/shared';
 
 import { useListFocusManager, type RowRefCallback } from '../a11y/useListFocusManager';
 import { useThemedStyles, type ThemeColors } from '../theme';
-import { RadioGroup } from './RadioGroup';
+import { SelectFieldButton } from './SelectFieldButton';
 
 // Mobile reminders editor — faithful RN port of the desktop RemindersEditor in
 // `task` mode. The local engine supports relative / absolute / app-start
@@ -176,7 +176,7 @@ function ReminderRow({
         {t('reminders.rowLabel', { n: position })}
       </Text>
 
-      <RadioGroup<ReminderKindOption>
+      <SelectFieldButton<ReminderKindOption>
         label={t('reminders.kindLabel')}
         value={kindOption}
         options={[
@@ -259,7 +259,7 @@ function RelativeFields({
           accessibilityLabel={`${rowPrefix} – ${t('reminders.amountLabel')}`}
         />
       </View>
-      <RadioGroup<RelativeUnit>
+      <SelectFieldButton<RelativeUnit>
         label={t('reminders.unitLabel')}
         value={unit}
         options={[

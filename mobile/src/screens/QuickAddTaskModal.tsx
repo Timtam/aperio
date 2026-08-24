@@ -22,7 +22,7 @@ import {
   rankTaskSuggestions,
   useTitleSuggestions,
 } from '../state/useTitleSuggestions';
-import { RadioGroup } from '../components/RadioGroup';
+import { SelectFieldButton } from '../components/SelectFieldButton';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
@@ -307,7 +307,7 @@ export default function QuickAddTaskModal({
       </View>
 
       {listOptions.length > 0 ? (
-        <RadioGroup<string>
+        <SelectFieldButton<string>
           label={t('dialogs.task.fields.list')}
           value={listId}
           options={listOptions}
