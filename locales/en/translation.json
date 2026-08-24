@@ -11,6 +11,8 @@
     "rename": "Rename",
     "delete": "Delete",
     "taskHint": "Double-tap to edit. Swipe up or down for complete, rename, or delete actions.",
+    "eventHint": "Double-tap to edit. Swipe up or down for move, group, or delete actions.",
+    "openHint": "Double-tap to open.",
     "taskProjectionHint": "Future occurrence of a repeating task. Double-tap to edit the task itself.",
     "taskProjectionHintActions": "Future occurrence of a repeating task. Double-tap to edit the task itself. Swipe up or down for more actions.",
     "loading": "Loading…",

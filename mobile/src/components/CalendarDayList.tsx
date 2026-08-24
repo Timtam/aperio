@@ -1472,7 +1472,7 @@ export function CalendarDayList({
         accessible
         accessibilityRole="button"
         accessibilityLabel={eventLabel(ev, day, span)}
-        accessibilityHint={t('mobile.taskHint')}
+        accessibilityHint={t('mobile.eventHint')}
         accessibilityActions={actions}
         onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
         style={

@@ -346,7 +346,8 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
                   title: ev.title,
                   secondary,
                 })}
-                accessibilityHint={t('mobile.taskHint')}
+                // A search hit has no row actions — it only opens the editor.
+                accessibilityHint={t('mobile.openHint')}
                 onPress={() =>
                   navigation.navigate('EventEditor', {
                     eventId: ev.id,
@@ -387,7 +388,8 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
                   title: task.title,
                   secondary,
                 })}
-                accessibilityHint={t('mobile.taskHint')}
+                // A search hit has no row actions — it only opens the editor.
+                accessibilityHint={t('mobile.openHint')}
                 onPress={() =>
                   navigation.navigate('TaskEditor', {
                     taskId: task.id,

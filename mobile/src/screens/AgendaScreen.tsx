@@ -801,7 +801,7 @@ export default function AgendaScreen({
         accessible
         accessibilityRole="button"
         accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
-        accessibilityHint={t('mobile.taskHint')}
+        accessibilityHint={t('mobile.eventHint')}
         accessibilityActions={actions}
         onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
         style={[styles.row, tint]}

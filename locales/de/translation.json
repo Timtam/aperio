@@ -11,6 +11,8 @@
     "rename": "Umbenennen",
     "delete": "Löschen",
     "taskHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Erledigen, Umbenennen oder Löschen.",
+    "eventHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Verschieben, Gruppieren oder Löschen.",
+    "openHint": "Doppeltippen zum Öffnen.",
     "taskProjectionHint": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst.",
     "taskProjectionHintActions": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst. Nach oben oder unten wischen für weitere Aktionen.",
     "loading": "Lädt…",
