@@ -252,7 +252,10 @@ Aperio automatisch die nächste Fälligkeit.
 > Vorschauen (angesagt als *„wiederkehrend, geplant"*, mit einem ↻ statt des
 > Kontrollkästchens). Abhaken, verschieben oder bearbeiten lässt sich eine
 > solche Vorschau über die aktuelle Instanz — deren Abschluss rückt die ganze
-> Serie weiter. Das gilt für **geplante** Wiederholungen, die **vom Datum der
+> Serie weiter. Dorthin führt **Zur aktuellen Aufgabe** (Rechtsklick oder
+> Umschalt+F10 am Desktop; die Rotor-Aktionen oder langes Drücken am Telefon) —
+> der Kalender springt auf den Tag, an dem die echte Aufgabe liegt. Das gilt
+> für **geplante** Wiederholungen, die **vom Datum der
 > Aufgabe** zählen; *ab Abschluss* und *im Backlog wiedervorlegen* lassen sich
 > nicht vorausberechnen und erscheinen weiter nur an ihrem nächsten Tag.
 

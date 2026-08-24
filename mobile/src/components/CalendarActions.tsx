@@ -9,10 +9,11 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 import { DayLogDialog } from './DayLogDialog';
 import { useNewEventOnDay } from './useNewEventOnDay';
+import { useNewTaskOnDay } from './useNewTaskOnDay';
 
 // The shared calendar action bar — Calendars (toggle which calendars show),
-// Search, New Event, and the day's Check-in. These are cross-cutting (they
-// apply to every calendar view), but historically only the Day view
+// Search, New Event, New Task, and the day's Check-in. These are cross-cutting
+// (they apply to every calendar view), but historically only the Day view
 // (EventsScreen) rendered them, so on Week/Month/Agenda/Year a sighted user saw
 // nothing where they should be. This component renders them visibly AND
 // accessibly for any screen.
@@ -39,6 +40,10 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
   // The shared "new event on this day" flow — the same hook feeds the host
   // screens' VoiceOver magic tap, so both entry points seed identically.
   const { addEvent, enabled } = useNewEventOnDay(navigation, anchorDay);
+  // Its task twin. This button is what makes task creation DISCOVERABLE from
+  // the calendar for a sighted user: the day headers' create actions are
+  // rotor/long-press only, and the desktop toolbar has always carried both.
+  const { addTask, enabled: taskEnabled } = useNewTaskOnDay(navigation, anchorDay);
   const [checkInOpen, setCheckInOpen] = useState(false);
   const dayKey = localDateKey(anchorDay);
   const dayLabel = anchorDay.toLocaleDateString(i18n.language, {
@@ -102,6 +107,21 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
         ]}
       >
         <Text style={styles.primaryButtonText}>{t('toolbar.newEvent')}</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !taskEnabled }}
+        accessibilityLabel={t('toolbar.newTask')}
+        disabled={!taskEnabled}
+        onPress={addTask}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.primaryButton,
+          pressed && styles.primaryPressed,
+          !taskEnabled && styles.primaryDisabled,
+        ]}
+      >
+        <Text style={styles.primaryButtonText}>{t('toolbar.newTask')}</Text>
       </Pressable>
     </>
   );

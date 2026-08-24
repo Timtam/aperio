@@ -208,6 +208,9 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
           gridLabel={t('views.week.gridLabel')}
           emptyText={t('views.week.empty')}
           dayAnnounceKey="views.week.dayAnnounce"
+          // "Go to the current task" on a recurring-task projection: move the
+          // week window to the day the real row lives on.
+          onJumpToDay={(day) => setAnchor(localMidnight(day))}
         />
       </CalendarPager>
     </MagicTapView>

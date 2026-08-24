@@ -224,7 +224,10 @@ check off a recurring task, Aperio automatically creates the next due date.
 > event — not just its next turn. Only the **current** instance is interactive;
 > the future days are read-only previews (announced *"recurring, planned"*, with
 > a ↻ in place of the checkbox). Check one off, reschedule or edit it from the
-> current instance — completing that advances the whole series. This applies to
+> current instance — completing that advances the whole series. To get there
+> from a preview, use **Go to the current task** (right-click or Shift+F10 on
+> the desktop; the rotor actions or a long-press on the phone) — the calendar
+> jumps to the day the real task sits on. This applies to
 > **scheduled** recurrences that count **from the task's date**; *from
 > completion* and *resurface-in-backlog* recurrences can't be projected ahead,
 > so they still show only on their next day.

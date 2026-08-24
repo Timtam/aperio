@@ -11,6 +11,8 @@
     "rename": "Umbenennen",
     "delete": "Löschen",
     "taskHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Erledigen, Umbenennen oder Löschen.",
+    "taskProjectionHint": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst.",
+    "taskProjectionHintActions": "Zukünftiges Vorkommen einer wiederholten Aufgabe. Doppeltippen bearbeitet die Aufgabe selbst. Nach oben oder unten wischen für weitere Aktionen.",
     "loading": "Lädt…",
     "loadingLabel": "Lädt Aufgaben",
     "empty": "Noch keine Aufgaben. Füge oben eine hinzu.",
@@ -160,6 +162,7 @@
   },
   "chipMenu": {
     "edit": "Bearbeiten …",
+    "goToCurrentTask": "Zur aktuellen Aufgabe",
     "duplicate": "Duplizieren",
     "delete": "Löschen",
     "cancelNotify": "Absagen & Teilnehmer benachrichtigen",
@@ -1201,6 +1204,7 @@
     },
     "dayStartReview": {
       "title": "Tageswechsel-Übersicht",
+      "checking": "Prüfe die Aufgaben des Tages …",
       "hint": "Aufgaben, die nach gestern noch eine Entscheidung brauchen. Pro Eintrag entscheiden oder die Sammelaktionen je Abschnitt nutzen.",
       "hintRemindersOnly": "Erinnerungen für heute — hier ist nichts zu entscheiden. Nach dem Lesen mit OK schließen.",
       "snooze": "Später erinnern",
@@ -2221,6 +2225,7 @@
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
       "assigneeSuffix": ", zugewiesen an {{names}}",
       "recurringOccurrence": ", wiederkehrend, geplant",
+      "jumpedToCurrent": "Zeigt jetzt {{date}}",
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",

@@ -50,6 +50,7 @@ import {
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
+import { useNewTaskOnDay } from '../components/useNewTaskOnDay';
 import { CalendarPager } from '../components/CalendarPager';
 import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -390,6 +391,13 @@ export default function AgendaScreen({
     },
     [firstWritableCalendarId, navigation],
   );
+  // The task twin, so the agenda's day headers offer BOTH creates like the
+  // Week/Month headers do — the agenda shows no tasks, but a day someone is
+  // looking at is still a day they may want to plan one on.
+  const { addTaskOnDay, enabled: taskCreateEnabled } = useNewTaskOnDay(
+    navigation,
+    anchor,
+  );
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
@@ -606,14 +614,19 @@ export default function AgendaScreen({
                 // sighted long-press) — the old per-day "+ new event" footer
                 // buttons were toolbar duplicates under every day (tester
                 // feedback; same treatment as Week/Month).
-                const headerActions: MenuAction[] =
-                  firstWritableCalendarId != null
+                const headerActions: MenuAction[] = [
+                  ...(firstWritableCalendarId != null
                     ? [{ name: 'newEvent', label: t('toolbar.newEvent') }]
-                    : [];
+                    : []),
+                  ...(taskCreateEnabled
+                    ? [{ name: 'newTask', label: t('toolbar.newTask') }]
+                    : []),
+                ];
                 const dayKey = key;
                 const headerTitle = fmtFullDate(occ.day);
                 const runHeaderAction = (name: string) => {
                   if (name === 'newEvent') addEventOnDay(dayKey);
+                  if (name === 'newTask') addTaskOnDay(dayKey);
                 };
                 // Hosted in a Pressable (not a bare Text) — the device-proven
                 // accessibilityActions pattern; role="header" keeps the

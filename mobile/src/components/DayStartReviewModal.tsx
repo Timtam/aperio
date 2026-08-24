@@ -33,6 +33,7 @@ import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
 import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
+import { confirmDeleteTask } from '../state/taskDeleteScope';
 import {
   effectiveForList,
   priorityScaleFor,
@@ -582,37 +583,66 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // ── Delete ───────────────────────────────────────────────────────────────────
   // The only irreversible row action (done / backlog / today / tomorrow all
   // undo), so it confirms first — same as the calendar list's task delete.
+  // A recurring DEVICE reminder gets the "only this / this and all following"
+  // scope choice instead of the plain confirm (the overdue turn of a repeating
+  // iOS reminder lands EXACTLY here, so this surface skipping the scope made
+  // the choice look unimplemented).
   const deleteTaskAction = useCallback(
     (task: Task) => {
-      Alert.alert(
-        t('dialogs.dayStartReview.delete'),
-        t('dialogs.dayStartReview.confirmDelete', { title: task.title }),
-        [
-          { text: t('dialogs.confirm.cancel'), style: 'cancel' },
-          {
-            text: t('dialogs.dayStartReview.delete'),
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                setBusy(true);
-                queueFocusAfter([task.id]);
-                try {
-                  await apiDeleteTask(task.id, task.list_id);
-                  setResolvedIds((s) => new Set(s).add(task.id));
-                  announce(
-                    t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
-                  );
-                  invalidateData();
-                } finally {
-                  setBusy(false);
-                }
-              })();
+      const plainConfirm = () =>
+        Alert.alert(
+          t('dialogs.dayStartReview.delete'),
+          t('dialogs.dayStartReview.confirmDelete', { title: task.title }),
+          [
+            { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+            {
+              text: t('dialogs.dayStartReview.delete'),
+              style: 'destructive',
+              onPress: () => {
+                void (async () => {
+                  setBusy(true);
+                  queueFocusAfter([task.id]);
+                  try {
+                    await apiDeleteTask(task.id, task.list_id);
+                    setResolvedIds((s) => new Set(s).add(task.id));
+                    announce(
+                      t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
+                    );
+                    invalidateData();
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              },
             },
-          },
-        ],
+          ],
+        );
+      confirmDeleteTask(
+        task,
+        [...taskListById.values()],
+        t,
+        (message) => {
+          // Removed or skipped, the row leaves TODAY's review either way (a
+          // skipped occurrence now lives on its next turn), so it counts as
+          // resolved and focus moves on like after the plain delete.
+          setBusy(false);
+          queueFocusAfter([task.id]);
+          setResolvedIds((s) => new Set(s).add(task.id));
+          announce(message);
+          invalidateData();
+        },
+        (message) => {
+          setBusy(false);
+          announce(t('mobile.error', { message }));
+        },
+        plainConfirm,
+        // Raise busy the moment a scope option starts (the plain path does the
+        // same inside its Alert) — otherwise the still-visible row's other
+        // buttons could act on the reminder mid-delete.
+        () => setBusy(true),
       );
     },
-    [announce, invalidateData, queueFocusAfter, t],
+    [announce, invalidateData, queueFocusAfter, t, taskListById],
   );
 
   // ── Snooze ───────────────────────────────────────────────────────────────────

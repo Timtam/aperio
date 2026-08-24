@@ -23,8 +23,10 @@ import { showEventScopeDialog } from './eventScopeDialog';
 type Tr = (key: string, vars?: Record<string, unknown>) => string;
 
 // Device accounts don't change mid-session; cache the id set after the first
-// lookup. A load failure caches an empty set → everything falls back to a plain
-// delete (never worse than before this feature).
+// SUCCESSFUL lookup. A load failure falls back to a plain delete for THIS
+// call only — it must not be cached, or one early bridge hiccup would
+// silently disable the scoped delete for the whole session (the option "just
+// doesn't appear" and nothing ever says why).
 let deviceAccountIds: Set<string> | null = null;
 
 async function loadDeviceAccountIds(): Promise<Set<string>> {
@@ -36,10 +38,10 @@ async function loadDeviceAccountIds(): Promise<Set<string>> {
         .filter((a) => a.adapter_kind === 'device_calendar')
         .map((a) => a.id),
     );
+    return deviceAccountIds;
   } catch {
-    deviceAccountIds = new Set();
+    return new Set();
   }
-  return deviceAccountIds;
 }
 
 function isDeviceRecurring(
@@ -68,6 +70,10 @@ export function confirmDeleteTask(
   onSuccess: (message: string, outcome: 'removed' | 'skipped') => void,
   onError: (message: string) => void,
   onPlainDelete: () => void,
+  // Fires the moment a scope option starts its mutation (never on cancel) —
+  // the caller's chance to raise a busy flag so its surface can't race the
+  // in-flight delete; onSuccess/onError are where it comes down again.
+  onRun?: () => void,
 ): void {
   void (async () => {
     const deviceIds = await loadDeviceAccountIds();
@@ -81,6 +87,7 @@ export function confirmDeleteTask(
       message: string,
       outcome: 'removed' | 'skipped',
     ) => {
+      onRun?.();
       void (async () => {
         try {
           await fn();

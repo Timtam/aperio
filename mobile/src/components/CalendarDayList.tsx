@@ -5,6 +5,7 @@ import {
   AccessibilityInfo,
   Alert,
   PixelRatio,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -65,6 +66,7 @@ import {
   MINUTES_PER_DAY,
   minutesFromMidnight,
   multiDayInfo,
+  parseDefaultDate,
   prioritySuffix,
   recurringSeriesTaskId,
   sortSections,
@@ -89,6 +91,7 @@ import {
   listTaskLists,
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
+import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
@@ -102,6 +105,7 @@ import {
   refreshEventGroupSignature,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
+import { overrideNextPeriodAnnounce } from './periodAnnounce';
 import { GroupSuggestionNotice } from './GroupSuggestionNotice';
 import { useCacheReload } from '../state/cacheObserver';
 import { useDayMarkersChanged } from '../state/dayMarkersChanged';
@@ -335,6 +339,13 @@ export interface CalendarDayListProps {
    * *drawn* / how tall they are changes.
    */
   dayLayout?: 'grid' | 'list';
+  /**
+   * Navigate the host view to the given local-midnight day. Wired by the
+   * calendar screens to their anchor setter; a recurring-task PROJECTION uses
+   * it to offer "go to the current task" (the real row lives on another day,
+   * and without this the only way there was paging the calendar by hand).
+   */
+  onJumpToDay?: (day: Date) => void;
 }
 
 export function CalendarDayList({
@@ -346,10 +357,12 @@ export function CalendarDayList({
   dayAnnounceKey,
   showDayHeaders = true,
   dayLayout,
+  onJumpToDay,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const tabBarInset = useTabBarInset();
+  const screenReader = useScreenReaderEnabled();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -1556,10 +1569,28 @@ export function CalendarDayList({
     // openTask — and shows a non-interactive recurrence marker instead of a
     // checkbox.
     const projection = isRecurringProjection(task);
+    // The real base row this projection previews — present by construction,
+    // since the expansion derives every projection from a base task in the
+    // SAME array. Its scheduled day is where the interactive row lives.
+    const seriesTask = projection
+      ? tasks.find((x) => x.id === recurringSeriesTaskId(task.id))
+      : undefined;
+    const seriesDay =
+      seriesTask?.scheduled_date != null
+        ? parseDefaultDate(seriesTask.scheduled_date)
+        : null;
     // ONE action list feeds the SR custom actions AND the sighted long-press
     // menu (same model as the event rows).
     const actions: MenuAction[] = projection
-      ? [{ name: 'edit', label: t('mobile.editTaskLabel') }]
+      ? [
+          { name: 'edit', label: t('mobile.editTaskLabel') },
+          // Jump the calendar to the day the CURRENT (real) row sits on —
+          // the projection is a preview, and everything one might want to do
+          // (complete, reschedule, delete) happens over there.
+          ...(onJumpToDay != null && seriesDay != null
+            ? [{ name: 'goToCurrent', label: t('chipMenu.goToCurrentTask') }]
+            : []),
+        ]
       : [
           { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
           { name: 'edit', label: t('mobile.rename') },
@@ -1572,6 +1603,26 @@ export function CalendarDayList({
         ];
     const runAction = (name: string) => {
       if (projection) {
+        if (name === 'goToCurrent' && onJumpToDay != null && seriesDay != null) {
+          const message = t('views.tasks.jumpedToCurrent', {
+            date: fmtFullDate(seriesDay),
+          });
+          if (
+            Platform.OS === 'ios' &&
+            screenReader &&
+            !dayKeys.includes(localDateKey(seriesDay))
+          ) {
+            // Cross-period jump under VoiceOver: the pager announces the new
+            // period INTERRUPTINGLY on the next commit, which would cut this
+            // message off mid-word. Hand it the message instead, so the one
+            // utterance that survives is the one naming the target day.
+            overrideNextPeriodAnnounce(message);
+          } else {
+            announce(message);
+          }
+          onJumpToDay(seriesDay);
+          return;
+        }
         openTask(task);
         return;
       }
@@ -1587,7 +1638,17 @@ export function CalendarDayList({
         accessible
         accessibilityRole="button"
         accessibilityLabel={taskLabel(task, key, resolved.labelName)}
-        accessibilityHint={t('mobile.taskHint')}
+        // A projection offers edit + go-to, not the full verb set — promising
+        // "complete, rename, or delete" here would be a lie the rotor exposes.
+        // When go-to IS offered, say the actions rotor exists at all (the
+        // sibling taskHint teaches it, so silence here would hide the verb).
+        accessibilityHint={t(
+          projection
+            ? actions.length > 1
+              ? 'mobile.taskProjectionHintActions'
+              : 'mobile.taskProjectionHint'
+            : 'mobile.taskHint',
+        )}
         accessibilityActions={actions}
         onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
         style={

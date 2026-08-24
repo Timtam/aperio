@@ -147,6 +147,9 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
           gridLabel={t('views.month.gridLabel')}
           emptyText={t('views.month.empty')}
           dayAnnounceKey="views.month.dayAnnounce"
+          // "Go to the current task" on a recurring-task projection: move the
+          // month window to the day the real row lives on.
+          onJumpToDay={(day) => setAnchor(localMidnight(day))}
         />
       </CalendarPager>
     </MagicTapView>

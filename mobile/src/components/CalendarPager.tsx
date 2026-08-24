@@ -14,6 +14,7 @@ import {
 
 import { A11yPagerView } from '../../modules/a11y-pager';
 import { registerPageAction } from '../a11y/gestureHost';
+import { takePeriodAnnounceOverride } from './periodAnnounce';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -94,9 +95,16 @@ export function CalendarPager({
     // move was exactly what the reload delayed, and the window-level scroll
     // fallback (modules/a11y-gestures) keeps paging working even if the cursor
     // drifts off the pager.
-    AccessibilityInfo.announceForAccessibilityWithOptions(periodLabel, {
-      queue: false,
-    });
+    //
+    // A programmatic jump ("Go to the current task") pre-registers a richer
+    // label naming the exact target day — the bare week/month name would cut
+    // off the jump's own announcement and leave the user without the one fact
+    // the action exists to deliver. Consume it here so the interrupting
+    // utterance IS the informative one.
+    AccessibilityInfo.announceForAccessibilityWithOptions(
+      takePeriodAnnounceOverride() ?? periodLabel,
+      { queue: false },
+    );
   }, [periodLabel, screenReader]);
 
   // Register this screen's pager step under its route name so a VoiceOver

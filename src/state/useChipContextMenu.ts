@@ -5,10 +5,13 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   detectConference,
   isImportantPriority,
+  isRecurringProjection,
   normalPriority,
+  parseDefaultDate,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { useDateFormat } from '../intl/dateFormat';
 import {
   deleteEventById,
   eventGroupsForEvents,
@@ -110,11 +113,26 @@ export interface ChipContextMenuActions {
     position?: { x: number; y: number },
     onAfter?: () => void,
   ) => Promise<void>;
+  /**
+   * Open the menu for a recurring-task PROJECTION (a read-only future
+   * occurrence in a calendar view). The full task menu would promise verbs a
+   * projection cannot honour, so this one offers exactly what it can: edit
+   * the underlying series, and jump the view to the day the CURRENT (real)
+   * row sits on — `goToDay` is the caller's anchor setter, since every view
+   * owns its own.
+   */
+  openForTaskProjection: (
+    seriesTask: Task,
+    goToDay: (day: Date) => void,
+    position?: { x: number; y: number },
+    onAfter?: () => void,
+  ) => Promise<void>;
 }
 
 export function useChipContextMenu(): ChipContextMenuActions {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const dateFormat = useDateFormat();
   const {
     openEventDialog,
     openTaskDialog,
@@ -514,5 +532,50 @@ export function useChipContextMenu(): ChipContextMenuActions {
     ],
   );
 
-  return { openForEvent, openForTask };
+  const openForTaskProjection = useCallback(
+    async (
+      seriesTask: Task,
+      goToDay: (day: Date) => void,
+      position?: { x: number; y: number },
+      onAfter?: () => void,
+    ) => {
+      // The view resolves projection → series before calling. When that lookup
+      // failed (the base row sits outside the loaded window) the caller may
+      // still hand us the projection itself, which carries no real day to jump
+      // to — then only Edit is offered.
+      const currentDay =
+        !isRecurringProjection(seriesTask) && seriesTask.scheduled_date != null
+          ? parseDefaultDate(seriesTask.scheduled_date)
+          : null;
+      const items: ContextMenuItemRequest[] = [
+        { id: 'edit', label: t('chipMenu.edit') },
+        ...(currentDay != null
+          ? ([
+              { id: 'goToCurrent', label: t('chipMenu.goToCurrentTask') },
+            ] as ContextMenuItemRequest[])
+          : []),
+      ];
+      let selected: string | null = null;
+      try {
+        selected = await showContextMenu(items, position);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('show_context_menu failed', err);
+      }
+      if (selected === 'edit') {
+        openTaskDialog(seriesTask);
+      } else if (selected === 'goToCurrent' && currentDay != null) {
+        goToDay(currentDay);
+        announce(
+          t('views.tasks.jumpedToCurrent', {
+            date: dateFormat.format(currentDay, 'PPPP'),
+          }),
+        );
+      }
+      onAfter?.();
+    },
+    [t, announce, openTaskDialog, dateFormat],
+  );
+
+  return { openForEvent, openForTask, openForTaskProjection };
 }

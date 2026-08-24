@@ -11,6 +11,8 @@
     "rename": "Rename",
     "delete": "Delete",
     "taskHint": "Double-tap to edit. Swipe up or down for complete, rename, or delete actions.",
+    "taskProjectionHint": "Future occurrence of a repeating task. Double-tap to edit the task itself.",
+    "taskProjectionHintActions": "Future occurrence of a repeating task. Double-tap to edit the task itself. Swipe up or down for more actions.",
     "loading": "Loading…",
     "loadingLabel": "Loading tasks",
     "empty": "No tasks yet. Add one above.",
@@ -160,6 +162,7 @@
   },
   "chipMenu": {
     "edit": "Edit …",
+    "goToCurrentTask": "Go to the current task",
     "duplicate": "Duplicate",
     "delete": "Delete",
     "cancelNotify": "Cancel & notify attendees",
@@ -1204,6 +1207,7 @@
     },
     "dayStartReview": {
       "title": "Day-start review",
+      "checking": "Checking today's tasks …",
       "hint": "Tasks that need a decision now that yesterday is over. Resolve them one by one or use the bulk actions per section.",
       "hintRemindersOnly": "Reminders for today — nothing needs a decision here. Close with OK when you are done reading.",
       "snooze": "Remind me later",
@@ -2221,6 +2225,7 @@
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",
       "assigneeSuffix": ", assigned to {{names}}",
       "recurringOccurrence": ", recurring, planned",
+      "jumpedToCurrent": "Now showing {{date}}",
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",

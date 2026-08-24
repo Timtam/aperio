@@ -15,6 +15,7 @@ import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
+import { warmCacheOnForeground } from '../api/sync';
 import { dayStartPreschedulesOsNotification } from '../reminders/dayStartSchedule';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
@@ -277,34 +278,66 @@ let inFlight = false;
  *  checks forever — and offline, the pre-branch blocking live reads
  *  degraded to empty too, so running local-only there is parity. */
 const CACHE_SETTLE_CAP_MS = 60_000;
+/** How long "not refreshing" still means "the pass has not STARTED yet".
+ *  The warm kick returns before the pass emits anything, so an immediate
+ *  status read says `refreshing: false` — indistinguishable from
+ *  "finished". After the grace, "not refreshing" is taken at face value,
+ *  which is also the honest answer on a device with no external accounts.
+ *  (Same reasoning, constants and shape as backgroundSync's
+ *  waitForExternalRefresh — that path polls because it runs headless; this
+ *  one subscribes because the JS observer is alive in the foreground.) */
+const WARM_START_GRACE_MS = 2_000;
 
 /**
- * Run `run` once no external cache warm pass is in flight. The day-start
- * checks burn once-a-day fire-markers; with the launch read path now
- * cache-only, running them while the launch warm pass is still filling a
- * cold external catalog would burn the markers against EMPTY data —
- * silently dropping the day's deadline-pin, carry-over, review and
- * spoken reminders for every external task. The launch warm is kicked at
- * mount (well before the 1.5s startup gate opens), so the common cold
- * start sees `refreshing` already true here and simply waits it out.
+ * Kick an (unforced) external warm pass and resolve once it has finished.
+ *
+ * The day-start checks burn once-a-day fire-markers; with the read path
+ * cache-only, evaluating against a cold external cache would burn the
+ * markers against EMPTY data — silently dropping the day's deadline-pin,
+ * carry-over, review and spoken reminders for every external task. The
+ * device-reminders account was the visible victim: its bridge installs
+ * right after the Host opens, so the launch warm pass can enumerate its
+ * targets BEFORE that account exists, and the old "wait only if a pass is
+ * already running" check then saw `refreshing: false` and evaluated
+ * against nothing. Kicking our OWN pass here (unforced — fresh containers
+ * cost nothing) guarantees every registered account, including the device
+ * bridge, has been offered one refresh before anything is decided.
  */
-function runWhenCacheSettled(run: () => void): void {
-  if (!getCacheRefreshProgress().refreshing) {
-    run();
-    return;
-  }
-  let done = false;
-  let unsub: () => void = () => {};
-  const finish = () => {
-    if (done) return;
-    done = true;
-    unsub();
-    clearTimeout(cap);
-    run();
-  };
-  const cap = setTimeout(finish, CACHE_SETTLE_CAP_MS);
-  unsub = subscribeCacheRefreshProgress((p) => {
-    if (!p.refreshing) finish();
+function settleExternalCaches(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    let unsub: () => void = () => {};
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      unsub();
+      if (graceTimer != null) clearTimeout(graceTimer);
+      clearTimeout(cap);
+      resolve();
+    };
+    const cap = setTimeout(finish, CACHE_SETTLE_CAP_MS);
+    let seenRunning = getCacheRefreshProgress().refreshing;
+    unsub = subscribeCacheRefreshProgress((p) => {
+      if (p.refreshing) {
+        seenRunning = true;
+        if (graceTimer != null) {
+          clearTimeout(graceTimer);
+          graceTimer = null;
+        }
+      } else if (seenRunning) {
+        finish();
+      }
+    });
+    // The kick is fire-and-forget on the Host worker — its promise resolving
+    // says nothing about the pass. Only a rejected bridge call ends the wait
+    // early (degraded parity: no pass will ever report back).
+    void warmCacheOnForeground().catch(() => finish());
+    if (!seenRunning) {
+      graceTimer = setTimeout(() => {
+        if (!seenRunning) finish();
+      }, WARM_START_GRACE_MS);
+    }
   });
 }
 
@@ -317,7 +350,8 @@ function runWhenCacheSettled(run: () => void): void {
  * wrong tool; an app-level modal driven by this flag is the fit.
  */
 export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => void } {
-  const { invalidateData, selectedTaskListIds, taskListsLoading } = useTaskStore();
+  const { invalidateData, selectedTaskListIds, taskListsLoading, refreshTaskLists } =
+    useTaskStore();
   const [reviewOpen, setReviewOpen] = useState(false);
 
   // The AppState listener registers once; it reads the live selection +
@@ -336,6 +370,47 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
       if (inFlight) return;
       inFlight = true;
       try {
+        // A cheap marker precheck FIRST, so the settle below (which kicks a
+        // warm pass) only ever runs when a day-start slot is actually still
+        // due — not on every foreground-resume all day long.
+        const behaviour = await readTaskBehaviour();
+        const todayKey = todayIsoKey();
+        const pinDue = shouldFireToday(
+          behaviour.dayStartTrigger,
+          await readFiredDayKey('deadlinePin'),
+          todayKey,
+        );
+        const reviewDue =
+          shouldFireToday(
+            behaviour.dayStartTrigger,
+            await readFiredDayKey('dayStartReview'),
+            todayKey,
+          ) &&
+          // A snoozed review would bail inside runDayStartReview anyway (without
+          // marking fired); checking here keeps a snoozed morning from kicking a
+          // full warm pass on every foreground-resume for nothing.
+          !(await isDayStartReviewSnoozed());
+        if (!pinDue && !reviewDue) return;
+        // The settle below takes a couple of seconds at best and a slow-network
+        // morning at worst — say so, politely, or the review modal's focus grab
+        // lands mid-task for a screen-reader user with no warning that anything
+        // was still pending.
+        AccessibilityInfo.announceForAccessibility(
+          i18n.t('dialogs.dayStartReview.checking'),
+        );
+        // Warm every registered external account (unforced) and wait it out,
+        // so the cache-only reads below see today's data — see
+        // settleExternalCaches for why waiting on an ALREADY-running pass is
+        // not enough. Then re-read the catalog: the pass may have surfaced
+        // lists (a cold device-reminders account) that the launch read
+        // missed, and the reconciler must adopt them into the selection
+        // before the review decides what today holds.
+        await settleExternalCaches();
+        await refreshTaskLists().catch(() => {});
+        // The reconciled selection lands via setState; yield one macrotask so
+        // the provider commits and `selectionRef` reflects it. (React flushes
+        // batched updates in a microtask — a timer runs strictly after.)
+        await new Promise((resolve) => setTimeout(resolve, 0));
         await runDeadlinePin(invalidateData);
         // The review reads the SELECTED lists, so it must wait for the
         // store to hydrate (an empty pre-hydration selection would mark
@@ -350,7 +425,7 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
         inFlight = false;
       }
     })();
-  }, [invalidateData, openReview]);
+  }, [invalidateData, openReview, refreshTaskLists]);
 
   const run = useCallback(() => {
     // Startup-gated: the deadline-pin + review passes fan out over every
@@ -358,14 +433,9 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
     // read on the serial native queue. Pre-gate triggers coalesce into one
     // deferred run (the fire-markers make repeats no-ops anyway); once the
     // gate is open this is a plain pass-through (foreground resumes).
-    // Each run ADDITIONALLY waits out a running external warm pass (see
-    // runWhenCacheSettled): these checks burn once-a-day fire-markers, and
-    // with the launch read path now cache-only, running them against a
-    // still-warming (possibly empty) external catalog would silently drop
-    // the day's deadline-pin/carry-over/review for every external task.
-    whenStartupSettled('dayStart', () => {
-      runWhenCacheSettled(runInner);
-    });
+    // The cache-settle wait lives INSIDE runInner, after its marker
+    // precheck, so it costs a warm kick only while a day-start slot is due.
+    whenStartupSettled('dayStart', runInner);
   }, [runInner]);
 
   // Launch + catalog-ready: fire once the task-list catalog + selection have

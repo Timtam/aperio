@@ -130,8 +130,11 @@ export function MonthView() {
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
-  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
-    useChipContextMenu();
+  const {
+    openForEvent: openEventMenu,
+    openForTask: openTaskMenu,
+    openForTaskProjection: openTaskProjectionMenu,
+  } = useChipContextMenu();
 
   const cells = useMemo(
     () => buildMonthGrid(anchor, weekStartsOn),
@@ -236,7 +239,8 @@ export function MonthView() {
   // due day (like a recurring event), not only its single current
   // scheduled_date. The occurrence on the task's own date is the real,
   // interactive task; the others are read-only projections (isRecurringProjection)
-  // that route to the series and offer no complete/reschedule/delete (the current
+  // that route to the series, offer no complete/reschedule/delete, and carry
+  // the reduced projection menu (edit + go to the current task) (the current
   // instance advances the series on completion). Non-recurring / from-completion /
   // backlog tasks pass through untouched. Keyed by the grid's covered range so a
   // series recurring into an adjacent-month padding cell still shows there.
@@ -262,6 +266,17 @@ export function MonthView() {
       return tasks.find((x) => x.id === id) ?? task;
     },
     [tasks],
+  );
+
+  // One dispatcher for every task context-menu site: a real task gets the full
+  // menu, a projection gets the two things it can honour — edit the series,
+  // and jump this view to the day the current (real) row sits on.
+  const openAnyTaskMenu = useCallback(
+    (task: Task, position?: { x: number; y: number }, onAfter?: () => void) =>
+      isRecurringProjection(task)
+        ? openTaskProjectionMenu(seriesTaskOf(task), setAnchor, position, onAfter)
+        : openTaskMenu(task, position, onAfter),
+    [openTaskMenu, openTaskProjectionMenu, seriesTaskOf, setAnchor],
   );
 
   // Per-day items for the cells + keyboard nav: the day's events followed by
@@ -567,9 +582,7 @@ export function MonthView() {
               ? { x: rect.left, y: rect.bottom }
               : undefined;
             if (item.kind === 'event') void openEventMenu(item.event, pos);
-            // A projection has no context actions (complete/reschedule/delete
-            // live on the current instance) — the menu is suppressed for it.
-            else if (!isRecurringProjection(item.task)) void openTaskMenu(item.task, pos);
+            else void openAnyTaskMenu(item.task, pos);
           }
           return;
         }
@@ -650,7 +663,7 @@ export function MonthView() {
       clearEventIndex,
       requestDelete,
       openEventMenu,
-      openTaskMenu,
+      openAnyTaskMenu,
       eventOptionId,
     ],
   );
@@ -965,7 +978,8 @@ export function MonthView() {
                         if (item.kind === 'task') {
                           const task = item.task;
                           // A read-only future occurrence of a recurring task —
-                          // rendered as a preview: no drag/complete/menu; it
+                          // rendered as a preview: no drag/complete (menu =
+                          // the reduced projection one); it
                           // opens its series on activate.
                           const projection = isRecurringProjection(task);
                           const color = resolveTaskColor(
@@ -1044,7 +1058,7 @@ export function MonthView() {
                               aria-label={aria}
                               aria-selected={isFocusedItem}
                               // A projection is read-only: not draggable, and it
-                              // opens its series (never toggles/menus) on activate.
+                              // opens its series (never toggles; its menu is the reduced projection one) on activate.
                               draggable={!projection}
                               onDragStart={
                                 projection
@@ -1068,7 +1082,7 @@ export function MonthView() {
                               onContextMenu={(cmev) => {
                                 cmev.preventDefault();
                                 cmev.stopPropagation();
-                                if (!projection) void openTaskMenu(task);
+                                void openAnyTaskMenu(task);
                               }}
                               style={
                                 color.hex

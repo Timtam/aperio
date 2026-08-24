@@ -216,6 +216,9 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
           // unchanged. Week/Month/Agenda render CalendarDayList without this prop
           // (plain linear list).
           dayLayout={dayViewMode}
+          // "Go to the current task" on a recurring-task projection: show the
+          // day the real row lives on.
+          onJumpToDay={(day) => setDay(localMidnight(day))}
         />
       </CalendarPager>
     </MagicTapView>

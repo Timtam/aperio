@@ -226,7 +226,7 @@ export function DayView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { anchor } = useViewState();
+  const { anchor, setAnchor } = useViewState();
   const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData } =
     useDialogState();
 
@@ -294,8 +294,11 @@ export function DayView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
-  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
-    useChipContextMenu();
+  const {
+    openForEvent: openEventMenu,
+    openForTask: openTaskMenu,
+    openForTaskProjection: openTaskProjectionMenu,
+  } = useChipContextMenu();
   const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
@@ -351,7 +354,8 @@ export function DayView() {
   // its stored `scheduled_date` is another turn of the series (like a recurring
   // event). The occurrence on the task's own date is the real, interactive task;
   // an occurrence on any OTHER day is a read-only projection (isRecurringProjection)
-  // that opens the series on activate and offers no complete/reschedule/delete
+  // that opens the series on activate, offers no complete/reschedule/delete,
+  // and carries the reduced projection menu (edit + go to the current task)
   // (the current instance advances the series on completion). Non-recurring /
   // from-completion / backlog tasks pass through untouched.
   const expandedTasks = useMemo(() => {
@@ -369,6 +373,32 @@ export function DayView() {
       return tasks.find((x) => x.id === id) ?? task;
     },
     [tasks],
+  );
+
+  // One dispatcher for every task context-menu site: a real task gets the full
+  // menu, a projection gets the two things it can honour — edit the series,
+  // and jump this view to the day the current (real) row sits on.
+  const pendingFocusTaskId = useRef<string | null>(null);
+  const openAnyTaskMenu = useCallback(
+    (task: Task, position?: { x: number; y: number }, onAfter?: () => void) => {
+      if (!isRecurringProjection(task)) {
+        return openTaskMenu(task, position, onAfter);
+      }
+      const seriesTask = seriesTaskOf(task);
+      return openTaskProjectionMenu(
+        seriesTask,
+        (day) => {
+          // Park the listbox cursor on the real row once the new day renders:
+          // aria-activedescendant here is index-based, so without this the
+          // old index silently lands on whatever row inherits it.
+          pendingFocusTaskId.current = seriesTask.id;
+          setAnchor(day);
+        },
+        position,
+        onAfter,
+      );
+    },
+    [openTaskMenu, openTaskProjectionMenu, seriesTaskOf, setAnchor],
   );
 
   // Tasks visible on this day (§9.4): scheduled, On-deadline, or
@@ -573,6 +603,22 @@ export function DayView() {
       setFocusIndex(Math.max(0, listItems.length - 1));
     }
   }, [listItems.length, focusIndex]);
+
+  // After a "go to the current task" jump: once the target day's list holds
+  // the series task, park the cursor on its row. Left pending until found —
+  // the list can still be showing the old day or loading when the anchor
+  // flips, and a later match on the same task id is the intended row anyway.
+  useEffect(() => {
+    const id = pendingFocusTaskId.current;
+    if (id == null) return;
+    const idx = listItems.findIndex(
+      (it) => it.kind === 'task' && it.task.id === id,
+    );
+    if (idx >= 0) {
+      pendingFocusTaskId.current = null;
+      setFocusIndex(idx);
+    }
+  }, [listItems]);
 
   // Loading indicator is gated on `showLoading` (the deferred
   // variant), not the raw `loading` flag. That way a sub-200ms
@@ -999,9 +1045,8 @@ export function DayView() {
               : undefined;
             if (focusedItem.kind === 'event') {
               void openEventMenu(focusedItem.event, pos);
-            } else if (!isRecurringProjection(focusedItem.task)) {
-              // A projection has no context actions — the menu is suppressed.
-              void openTaskMenu(focusedItem.task, pos);
+            } else {
+              void openAnyTaskMenu(focusedItem.task, pos);
             }
           }
           return;
@@ -1022,7 +1067,7 @@ export function DayView() {
       toggleTaskStatus,
       seriesTaskOf,
       openEventMenu,
-      openTaskMenu,
+      openAnyTaskMenu,
       itemId,
     ],
   );
@@ -1268,7 +1313,7 @@ export function DayView() {
                       : {}),
                   }}
                   // A projection is read-only: not draggable, opens its series
-                  // (never toggles/menus) on activate.
+                  // (never toggles; its menu is the reduced projection one) on activate.
                   draggable={!projection}
                   onDragStart={
                     projection
@@ -1301,7 +1346,7 @@ export function DayView() {
                     ev.preventDefault();
                     ev.stopPropagation();
                     setFocusIndex(i);
-                    if (!projection) void openTaskMenu(task);
+                    void openAnyTaskMenu(task);
                   }}
                 >
                   {/* GRID mode: time is read off the hour-ruler, so the option
@@ -1558,7 +1603,7 @@ export function DayView() {
           priorityScale={priorityScale}
           onToggle={toggleTaskStatus}
           onOpen={openTaskDialog}
-          onContextMenu={openTaskMenu}
+          onContextMenu={openAnyTaskMenu}
         />
       )}
 
@@ -1731,7 +1776,7 @@ function DayUntimedTasks({
             ? effortSizeModifier(task.effort)
             : '';
           // A read-only future occurrence of a recurring task — a preview only:
-          // no drag/complete/menu, and it opens its underlying series (resolved
+          // no drag/complete (menu = the reduced projection one), and it opens its underlying series (resolved
           // from allTasks) on activate. recurringSeriesTaskId strips the
           // occurrence suffix; the base task is always in allTasks.
           const projection = isRecurringProjection(task);
@@ -1769,7 +1814,8 @@ function DayUntimedTasks({
                     (ev.shiftKey && ev.key === 'F10')
                   ) {
                     ev.preventDefault();
-                    if (projection) return; // no context actions on a projection
+                    // A projection gets its own reduced menu — the handler
+                    // dispatches on the task's kind.
                     const rect = (
                       ev.currentTarget as HTMLElement
                     ).getBoundingClientRect();
@@ -1786,7 +1832,7 @@ function DayUntimedTasks({
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   ev.stopPropagation();
-                  if (!projection) void onContextMenu(task);
+                  void onContextMenu(task);
                 }}
                 // Drag-to-reschedule is a band-only affordance: the
                 // pre-grid LIST section never carried it, so keep that

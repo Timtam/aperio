@@ -321,8 +321,11 @@ export function WeekView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
-  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
-    useChipContextMenu();
+  const {
+    openForEvent: openEventMenu,
+    openForTask: openTaskMenu,
+    openForTaskProjection: openTaskProjectionMenu,
+  } = useChipContextMenu();
   const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
 
@@ -459,6 +462,17 @@ export function WeekView() {
       return tasks.find((x) => x.id === id) ?? task;
     },
     [tasks],
+  );
+
+  // One dispatcher for every task context-menu site: a real task gets the full
+  // menu, a projection gets the two things it can honour — edit the series,
+  // and jump this view to the day the current (real) row sits on.
+  const openAnyTaskMenu = useCallback(
+    (task: Task, position?: { x: number; y: number }, onAfter?: () => void) =>
+      isRecurringProjection(task)
+        ? openTaskProjectionMenu(seriesTaskOf(task), setAnchor, position, onAfter)
+        : openTaskMenu(task, position, onAfter),
+    [openTaskMenu, openTaskProjectionMenu, seriesTaskOf, setAnchor],
   );
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
@@ -1157,8 +1171,7 @@ export function WeekView() {
               ? { x: rect.left, y: rect.bottom }
               : undefined;
             if (item.kind === 'event') void openEventMenu(item.event, pos);
-            // A projection has no context actions — the menu is suppressed.
-            else if (!isRecurringProjection(item.task)) void openTaskMenu(item.task, pos);
+            else void openAnyTaskMenu(item.task, pos);
           }
           return;
         }
@@ -1240,7 +1253,7 @@ export function WeekView() {
       seriesTaskOf,
       eventOptionId,
       openEventMenu,
-      openTaskMenu,
+      openAnyTaskMenu,
     ],
   );
 
@@ -1775,7 +1788,7 @@ export function WeekView() {
                                   : undefined
                               }
                               // A projection is read-only: not draggable, opens
-                              // its series (never toggles/menus) on activate.
+                              // its series (never toggles; its menu is the reduced projection one) on activate.
                               draggable={!projection}
                               onDragStart={
                                 projection
@@ -1813,7 +1826,7 @@ export function WeekView() {
                               onContextMenu={(ev) => {
                                 ev.preventDefault();
                                 ev.stopPropagation();
-                                if (!projection) void openTaskMenu(task);
+                                void openAnyTaskMenu(task);
                               }}
                             >
                               {/* GRID mode: time is read off the hour-ruler, so
@@ -2116,7 +2129,7 @@ export function WeekView() {
                       void toggleTaskStatus(task);
                     }}
                     onContextMenu={(task) => {
-                      void openTaskMenu(task);
+                      void openAnyTaskMenu(task);
                     }}
                     taskListById={taskListById}
                     labelById={labelById}
@@ -2350,7 +2363,7 @@ function WeekDayTasks({
           ? effortSizeModifier(task.effort)
           : '';
         // A read-only future occurrence of a recurring task — a preview only:
-        // no drag/complete/menu, and it opens its underlying series (resolved
+        // no drag/complete (menu = the reduced projection one), and it opens its underlying series (resolved
         // from allTasks) on activate.
         const projection = isRecurringProjection(task);
         const seriesTask = projection
@@ -2384,7 +2397,7 @@ function WeekDayTasks({
               }
               aria-selected={isFocused}
               // A projection is read-only: not draggable, opens its series
-              // (never toggles/menus) on activate.
+              // (never toggles; its menu is the reduced projection one) on activate.
               draggable={!projection}
               onDragStart={projection ? undefined : (ev) => onDragStart(task, ev)}
               onDragEnd={projection ? undefined : onDragEnd}
@@ -2395,7 +2408,7 @@ function WeekDayTasks({
               onContextMenu={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
-                if (!projection) onContextMenu(task);
+                onContextMenu(task);
               }}
               style={
                 color.hex
