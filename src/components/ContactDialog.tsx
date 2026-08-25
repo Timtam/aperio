@@ -22,6 +22,7 @@ import {
 } from '../api/client';
 import {
   CONTACT_LABELS,
+  deriveDisplayName,
   fromContactValues,
   knownLabel,
   toContactValues,
@@ -308,6 +309,32 @@ export function ContactDialog({
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+
+  // Editing a NAME PART keeps the display name composed from the parts — but
+  // only while the current display name still IS that composition (or empty):
+  // the moment the user types their own, the comparison fails and the
+  // automation stands down until the field is cleared again. The Outlook
+  // shape; Apple/Google compose outright (see shared/contactName.ts). Loaded
+  // contacts join in naturally — a stored name that equals its own derivation
+  // keeps following the parts, any other stays untouched.
+  const applyNamePart = useCallback((patch: Partial<FormState>) => {
+    setForm((p) => {
+      const next = { ...p, ...patch };
+      if (p.isGroup) return next;
+      const partsOf = (f: FormState) => ({
+        namePrefix: f.namePrefix,
+        givenName: f.givenName,
+        familyName: f.familyName,
+        nameSuffix: f.nameSuffix,
+        organization: f.organization,
+      });
+      const prevAuto = deriveDisplayName(partsOf(p));
+      if (p.displayName.trim() === '' || p.displayName === prevAuto) {
+        next.displayName = deriveDisplayName(partsOf(next));
+      }
+      return next;
+    });
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Birthday is optional; a native date input can't be reliably
@@ -726,6 +753,9 @@ export function ContactDialog({
               required
               readOnly={viewOnly}
             />
+            <span className="form__hint">
+              {t('dialogs.contact.displayNameAutoHint')}
+            </span>
           </label>
 
           <div className="form__row form__row--two">
@@ -736,9 +766,7 @@ export function ContactDialog({
               <input
                 type="text"
                 value={form.givenName}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, givenName: e.target.value }))
-                }
+                onChange={(e) => applyNamePart({ givenName: e.target.value })}
                 autoComplete="given-name"
                 readOnly={viewOnly}
               />
@@ -750,9 +778,7 @@ export function ContactDialog({
               <input
                 type="text"
                 value={form.familyName}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, familyName: e.target.value }))
-                }
+                onChange={(e) => applyNamePart({ familyName: e.target.value })}
                 autoComplete="family-name"
                 readOnly={viewOnly}
               />
@@ -770,9 +796,7 @@ export function ContactDialog({
               <input
                 type="text"
                 value={form.namePrefix}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, namePrefix: e.target.value }))
-                }
+                onChange={(e) => applyNamePart({ namePrefix: e.target.value })}
                 autoComplete="honorific-prefix"
                 readOnly={viewOnly}
               />
@@ -784,9 +808,7 @@ export function ContactDialog({
               <input
                 type="text"
                 value={form.nameSuffix}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, nameSuffix: e.target.value }))
-                }
+                onChange={(e) => applyNamePart({ nameSuffix: e.target.value })}
                 autoComplete="honorific-suffix"
                 readOnly={viewOnly}
               />
@@ -800,9 +822,7 @@ export function ContactDialog({
             <input
               type="text"
               value={form.organization}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, organization: e.target.value }))
-              }
+              onChange={(e) => applyNamePart({ organization: e.target.value })}
               autoComplete="organization"
               readOnly={viewOnly}
             />

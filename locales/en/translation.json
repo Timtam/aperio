@@ -483,6 +483,7 @@
       "displayNameLabel": "Display name",
       "givenNameLabel": "First name",
       "familyNameLabel": "Last name",
+      "displayNameAutoHint": "Suggested from the name fields until you change it yourself.",
       "namePrefixLabel": "Title (before the name)",
       "nameSuffixLabel": "Suffix (after the name)",
       "organizationLabel": "Organization",

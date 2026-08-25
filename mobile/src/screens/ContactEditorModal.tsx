@@ -26,6 +26,7 @@ import {
   updateContact,
 } from '../api/contacts';
 import {
+  deriveDisplayName,
   fromContactValues,
   toContactValues,
   type ContactValue,
@@ -171,6 +172,43 @@ export default function ContactEditorModal({
   const [familyName, setFamilyName] = useState('');
   const [namePrefix, setNamePrefix] = useState('');
   const [nameSuffix, setNameSuffix] = useState('');
+  // Editing a NAME PART keeps the display name composed from the parts —
+  // but only while the current display name still IS that composition (or
+  // empty): the moment the user types their own, the comparison fails and
+  // the automation stands down until the field is cleared again. The
+  // Outlook shape; Apple/Google compose outright (shared/contactName.ts).
+  const applyNamePart = (patch: {
+    prefix?: string;
+    given?: string;
+    family?: string;
+    suffix?: string;
+    org?: string;
+  }) => {
+    if (patch.prefix !== undefined) setNamePrefix(patch.prefix);
+    if (patch.given !== undefined) setGivenName(patch.given);
+    if (patch.family !== undefined) setFamilyName(patch.family);
+    if (patch.suffix !== undefined) setNameSuffix(patch.suffix);
+    if (patch.org !== undefined) setOrganization(patch.org);
+    if (isGroup) return;
+    const prevAuto = deriveDisplayName({
+      namePrefix,
+      givenName,
+      familyName,
+      nameSuffix,
+      organization,
+    });
+    if (displayName.trim() === '' || displayName === prevAuto) {
+      setDisplayName(
+        deriveDisplayName({
+          namePrefix: patch.prefix ?? namePrefix,
+          givenName: patch.given ?? givenName,
+          familyName: patch.family ?? familyName,
+          nameSuffix: patch.suffix ?? nameSuffix,
+          organization: patch.org ?? organization,
+        }),
+      );
+    }
+  };
   const [organization, setOrganization] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [department, setDepartment] = useState('');
@@ -507,7 +545,10 @@ export default function ContactEditorModal({
         </Text>
       )}
 
-      <Field label={t('dialogs.contact.displayNameLabel')}>
+      <Field
+        label={t('dialogs.contact.displayNameLabel')}
+        hint={t('dialogs.contact.displayNameAutoHint')}
+      >
         <TextInput
           style={styles.input}
           value={displayName}
@@ -634,7 +675,7 @@ export default function ContactEditorModal({
         <TextInput
           style={styles.input}
           value={givenName}
-          onChangeText={setGivenName}
+          onChangeText={(v) => applyNamePart({ given: v })}
           accessibilityLabel={t('dialogs.contact.givenNameLabel')}
         />
       </Field>
@@ -643,7 +684,7 @@ export default function ContactEditorModal({
         <TextInput
           style={styles.input}
           value={familyName}
-          onChangeText={setFamilyName}
+          onChangeText={(v) => applyNamePart({ family: v })}
           accessibilityLabel={t('dialogs.contact.familyNameLabel')}
         />
       </Field>
@@ -654,7 +695,7 @@ export default function ContactEditorModal({
         <TextInput
           style={styles.input}
           value={namePrefix}
-          onChangeText={setNamePrefix}
+          onChangeText={(v) => applyNamePart({ prefix: v })}
           accessibilityLabel={t('dialogs.contact.namePrefixLabel')}
         />
       </Field>
@@ -663,7 +704,7 @@ export default function ContactEditorModal({
         <TextInput
           style={styles.input}
           value={nameSuffix}
-          onChangeText={setNameSuffix}
+          onChangeText={(v) => applyNamePart({ suffix: v })}
           accessibilityLabel={t('dialogs.contact.nameSuffixLabel')}
         />
       </Field>
@@ -672,7 +713,7 @@ export default function ContactEditorModal({
         <TextInput
           style={styles.input}
           value={organization}
-          onChangeText={setOrganization}
+          onChangeText={(v) => applyNamePart({ org: v })}
           accessibilityLabel={t('dialogs.contact.organizationLabel')}
         />
       </Field>

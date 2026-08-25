@@ -483,6 +483,7 @@
       "displayNameLabel": "Anzeigename",
       "givenNameLabel": "Vorname",
       "familyNameLabel": "Nachname",
+      "displayNameAutoHint": "Wird aus den Namensfeldern vorgeschlagen, bis du ihn selbst änderst.",
       "namePrefixLabel": "Titel (vor dem Namen)",
       "nameSuffixLabel": "Namenszusatz (nach dem Namen)",
       "organizationLabel": "Organisation",

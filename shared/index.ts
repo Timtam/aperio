@@ -15,6 +15,7 @@ export * from './reminderNotification';
 export * from './dateKey';
 export * from './multiDay';
 export * from './birthdays';
+export * from './contactName';
 export * from './taskCascade';
 export * from './taskAssignment';
 export * from './dayStart';

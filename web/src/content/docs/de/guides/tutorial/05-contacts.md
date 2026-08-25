@@ -47,7 +47,10 @@ Aktionen an der Zeile selbst.
 
 - **Anzeigename** (erforderlich), Vorname, Nachname, dazu ein **Titel vor dem
   Namen** („Prof. Dr.") und ein **Namenszusatz dahinter** („jun.") – dieselben
-  Präfix-/Suffix-Felder, die Apples Kontakte bieten.
+  Präfix-/Suffix-Felder, die Apples Kontakte bieten. Der Anzeigename **schlägt
+  sich selbst vor** – aus Titel, Vorname, Nachname und Zusatz (oder der
+  Organisation, wenn kein Name gesetzt ist) – und folgt den Feldern, bis du
+  ihn selbst änderst; ab dann gilt deine eigene Schreibweise.
 - **Organisation**, **Position** und **Abteilung**.
 - **E-Mail-Adressen**, **Telefonnummern** und **Webseiten** – beliebig viele,
   jede mit einer eigenen Bezeichnung (siehe unten).

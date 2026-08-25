@@ -43,7 +43,10 @@ carries **Edit** and **Delete** as accessibility actions on the row itself.
 
 - **Display name** (required), first name, last name, plus a **title before
   the name** ("Prof. Dr.") and a **suffix after it** ("Jr.") — the same
-  prefix/suffix Apple's Contacts offers.
+  prefix/suffix Apple's Contacts offers. The display name **suggests itself**
+  from those parts (title, first name, last name, suffix — or the
+  organization when there is no name) and keeps following them until you
+  change it yourself; from then on your own wording wins.
 - **Organization**, **job title** and **department**.
 - **Email addresses**, **phone numbers** and **websites** — any number of each,
   every one with its own label (see below).
