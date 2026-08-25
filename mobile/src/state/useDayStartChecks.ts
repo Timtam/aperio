@@ -15,15 +15,12 @@ import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
-import { warmCacheOnForeground } from '../api/sync';
+import { logLine } from '../api/logs';
+import { cacheRefreshStatus, warmCacheOnForeground } from '../api/sync';
 import { dayStartPreschedulesOsNotification } from '../reminders/dayStartSchedule';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
-import {
-  getCacheRefreshProgress,
-  subscribeCacheRefreshProgress,
-} from './cacheRefreshProgress';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { whenStartupSettled } from './startupGate';
 import { effectiveForList, readTaskBehaviour, type TaskBehaviour } from './taskBehaviour';
@@ -71,19 +68,36 @@ async function meForTasks(
  * calendar lanes. Gated by dayStartTrigger + the 'deadlinePin' fire-marker. The
  * marker is written BEFORE applying (idempotent — a partial run isn't re-fired).
  */
-async function runDeadlinePin(invalidateData: () => void): Promise<void> {
+async function runDeadlinePin(
+  invalidateData: () => void,
+  /** See runDayStartReview: a "nothing to pin" verdict only burns the marker
+   *  on a CONFIRMED cache settle; a capped one retries next foreground. */
+  settleConfirmed: boolean,
+): Promise<void> {
   const behaviour = await readTaskBehaviour();
   const todayKey = todayIsoKey();
   const fired = await readFiredDayKey('deadlinePin');
   if (!shouldFireToday(behaviour.dayStartTrigger, fired, todayKey)) return;
   const all = await loadAllTasks();
-  await writeFiredDayKey('deadlinePin', todayKey);
   const targets = filterDeadlinePinTargets(all, await meForTasks(all));
-  if (targets.length === 0) return;
+  if (targets.length === 0) {
+    if (!settleConfirmed) {
+      void logLine(
+        'info',
+        `day-start: pin found nothing on an UNSETTLED cache (tasks=${all.length}) — marker kept, next foreground retries`,
+      );
+      return;
+    }
+    await writeFiredDayKey('deadlinePin', todayKey);
+    return;
+  }
+  // Mark BEFORE applying (idempotent — a partial run isn't re-fired).
+  await writeFiredDayKey('deadlinePin', todayKey);
   for (const task of targets) {
     // Pin to today; leave scheduled_time untouched ("by 14:30" ≠ "at 14:30").
     await updateTask({ ...task, scheduled_date: todayKey });
   }
+  void logLine('info', `day-start: pinned ${targets.length} by-deadline task(s) to today`);
   AccessibilityInfo.announceForAccessibility(
     i18n.t('dialogs.deadlinePin.announce', { count: targets.length }),
   );
@@ -143,6 +157,11 @@ async function runDayStartReview(
   selectedIds: string[],
   invalidateData: () => void,
   openReview: () => void,
+  /** Whether the cache settle CONFIRMED the external caches are warm. A
+   *  "nothing to review" verdict is only believed — and only burns the
+   *  once-a-day marker — on a confirmed settle; on a capped one the next
+   *  foreground retries instead of silencing the review for the day. */
+  settleConfirmed: boolean,
 ): Promise<void> {
   const behaviour = await readTaskBehaviour();
   const todayKey = todayIsoKey();
@@ -155,16 +174,20 @@ async function runDayStartReview(
   // and they re-surface together with the review once the snooze expires.
   if (await isDayStartReviewSnoozed()) return;
   if (selectedIds.length === 0) {
-    // Nothing in scope; still record the fire so we don't keep re-checking.
-    await writeFiredDayKey('dayStartReview', todayKey);
+    // An empty selection is USUALLY a transient dip — a shrunken catalog read
+    // mid-refresh trims the reconciled selection until the lists reappear —
+    // not "this user has no lists". Burning the marker here silenced the
+    // review for the WHOLE day at exactly the moment the data was at its
+    // worst. Keep the marker and let the next foreground retry; a genuinely
+    // list-less user pays one cheap re-check per foreground.
+    void logLine(
+      'info',
+      'day-start: review skipped (empty selection) — marker kept, next foreground retries',
+    );
     return;
   }
 
   const all = await loadTasksForLists(selectedIds);
-  // Mark fired BEFORE applying — even an empty day records the fire (the gate's
-  // only job is "review for this day"); a partial run isn't re-fired.
-  await writeFiredDayKey('dayStartReview', todayKey);
-
   const meFor = await meForTasks(all);
 
   // ── Day-start TASK REMINDERS ────────────────────────────────────────────
@@ -185,6 +208,52 @@ async function runDayStartReview(
     meFor,
   );
   const reminderTotal = reminderCount(reminders);
+
+  const overdue = filterOverdue(all, meFor);
+  const slipped = filterCarriedOver(all, {
+    cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
+    meFor,
+  });
+
+  // Split slipped rows by each list's carry-over default: 'today' / 'backlog'
+  // run silently, 'ask' surfaces in the modal. A mix produces a hybrid.
+  const askRows: Task[] = [];
+  const todayRows: Task[] = [];
+  const backlogRows: Task[] = [];
+  for (const row of slipped) {
+    const def = effectiveForList(behaviour, row.list_id).carryOverDefault;
+    if (def === 'today') todayRows.push(row);
+    else if (def === 'backlog') backlogRows.push(row);
+    else askRows.push(row);
+  }
+
+  // ── The decision, and the ONLY honest places to burn the day marker ──────
+  // `surfaced` opens the modal; `autoRows` acts silently. A day with neither
+  // is only BELIEVED (and marked done) when the settle confirmed the caches
+  // were warm — a zero verdict on cold/partial data used to burn the marker
+  // and silence the review for the whole day, which is exactly the failure
+  // a screen-reader user cannot see happening.
+  const surfaced = overdue.length + askRows.length + reminderTotal;
+  const autoRows = todayRows.length + backlogRows.length;
+  if (surfaced + autoRows === 0) {
+    if (!settleConfirmed) {
+      void logLine(
+        'info',
+        `day-start: review found nothing on an UNSETTLED cache (tasks=${all.length}, selection=${selectedIds.length}) — marker kept, next foreground retries`,
+      );
+      return;
+    }
+    await writeFiredDayKey('dayStartReview', todayKey);
+    void logLine(
+      'info',
+      `day-start: review found nothing (tasks=${all.length}, selection=${selectedIds.length}) — day marked done`,
+    );
+    return;
+  }
+  // Something to say or to do: mark the day BEFORE announcing/acting, so a
+  // partial failure below can't replay the silent batch or the announcements
+  // on the next foreground.
+  await writeFiredDayKey('dayStartReview', todayKey);
 
   // Coalesce the per-group lines into ONE polite live announcement: three
   // back-to-back `announceForAccessibility` calls would each interrupt the
@@ -232,31 +301,18 @@ async function runDayStartReview(
     );
   }
 
-  const overdue = filterOverdue(all, meFor);
-  const slipped = filterCarriedOver(all, {
-    cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
-    meFor,
-  });
-
-  // Split slipped rows by each list's carry-over default: 'today' / 'backlog'
-  // run silently, 'ask' surfaces in the modal. A mix produces a hybrid.
-  const askRows: Task[] = [];
-  const todayRows: Task[] = [];
-  const backlogRows: Task[] = [];
-  for (const row of slipped) {
-    const def = effectiveForList(behaviour, row.list_id).carryOverDefault;
-    if (def === 'today') todayRows.push(row);
-    else if (def === 'backlog') backlogRows.push(row);
-    else askRows.push(row);
-  }
-
   if (todayRows.length > 0) {
     await runAutoCarryOverBatch('today', todayRows, all, behaviour);
   }
   if (backlogRows.length > 0) {
     await runAutoCarryOverBatch('backlog', backlogRows, all, behaviour);
   }
-  if (todayRows.length + backlogRows.length > 0) invalidateData();
+  if (autoRows > 0) invalidateData();
+
+  void logLine(
+    'info',
+    `day-start: review tasks=${all.length} overdue=${overdue.length} ask=${askRows.length} auto=${autoRows} reminders=${reminderTotal} -> ${surfaced > 0 ? 'open modal' : 'silent batch only'}`,
+  );
 
   // Open the modal iff there's still a decision to make OR a reminder to show
   // (the reminders section is informational but still a reason to surface the
@@ -264,7 +320,7 @@ async function runDayStartReview(
   // from the bridge rather than a possibly-stale warm cache — the checker read
   // the bridge directly (a separate fan-out), so this keeps the modal
   // authoritative over what it acts on and makes its loading-guard meaningful.
-  if (overdue.length + askRows.length + reminderTotal > 0) {
+  if (surfaced > 0) {
     invalidateData();
     openReview();
   }
@@ -279,17 +335,21 @@ let inFlight = false;
  *  degraded to empty too, so running local-only there is parity. */
 const CACHE_SETTLE_CAP_MS = 60_000;
 /** How long "not refreshing" still means "the pass has not STARTED yet".
- *  The warm kick returns before the pass emits anything, so an immediate
+ *  The warm kick returns before the pass does anything, so an immediate
  *  status read says `refreshing: false` — indistinguishable from
  *  "finished". After the grace, "not refreshing" is taken at face value,
  *  which is also the honest answer on a device with no external accounts.
  *  (Same reasoning, constants and shape as backgroundSync's
- *  waitForExternalRefresh — that path polls because it runs headless; this
- *  one subscribes because the JS observer is alive in the foreground.) */
+ *  waitForExternalRefresh.) */
 const WARM_START_GRACE_MS = 2_000;
 
+/** Poll cadence for the settle below — a bridge read per half-second for at
+ *  most a minute, only on mornings a day-start slot is still due. */
+const CACHE_SETTLE_POLL_MS = 500;
+
 /**
- * Kick an (unforced) external warm pass and resolve once it has finished.
+ * Kick an (unforced) external warm pass and wait for it to finish, reporting
+ * whether the finish was CONFIRMED or the wait gave up ('capped').
  *
  * The day-start checks burn once-a-day fire-markers; with the read path
  * cache-only, evaluating against a cold external cache would burn the
@@ -297,48 +357,45 @@ const WARM_START_GRACE_MS = 2_000;
  * carry-over, review and spoken reminders for every external task. The
  * device-reminders account was the visible victim: its bridge installs
  * right after the Host opens, so the launch warm pass can enumerate its
- * targets BEFORE that account exists, and the old "wait only if a pass is
- * already running" check then saw `refreshing: false` and evaluated
- * against nothing. Kicking our OWN pass here (unforced — fresh containers
- * cost nothing) guarantees every registered account, including the device
- * bridge, has been offered one refresh before anything is decided.
+ * targets BEFORE that account exists. Kicking our OWN pass here (unforced —
+ * fresh containers cost nothing) guarantees every registered account has
+ * been offered one refresh before anything is decided.
+ *
+ * The wait POLLS the native status (`cacheRefreshStatus`, the proven shape
+ * of backgroundSync's waitForExternalRefresh) instead of trusting the JS
+ * push mirror: at a cold start — and opening the app from the day-start
+ * notification is exactly that — the first refresh_status push can arrive
+ * seconds late, and a push that fired while JS was suspended leaves the
+ * mirror stale in either direction. The bridge read asks the Host directly.
  */
-function settleExternalCaches(): Promise<void> {
-  return new Promise((resolve) => {
-    let done = false;
-    let unsub: () => void = () => {};
-    let graceTimer: ReturnType<typeof setTimeout> | null = null;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      unsub();
-      if (graceTimer != null) clearTimeout(graceTimer);
-      clearTimeout(cap);
-      resolve();
-    };
-    const cap = setTimeout(finish, CACHE_SETTLE_CAP_MS);
-    let seenRunning = getCacheRefreshProgress().refreshing;
-    unsub = subscribeCacheRefreshProgress((p) => {
-      if (p.refreshing) {
-        seenRunning = true;
-        if (graceTimer != null) {
-          clearTimeout(graceTimer);
-          graceTimer = null;
-        }
-      } else if (seenRunning) {
-        finish();
-      }
-    });
-    // The kick is fire-and-forget on the Host worker — its promise resolving
-    // says nothing about the pass. Only a rejected bridge call ends the wait
-    // early (degraded parity: no pass will ever report back).
-    void warmCacheOnForeground().catch(() => finish());
-    if (!seenRunning) {
-      graceTimer = setTimeout(() => {
-        if (!seenRunning) finish();
-      }, WARM_START_GRACE_MS);
+async function settleExternalCaches(): Promise<'confirmed' | 'capped'> {
+  try {
+    await warmCacheOnForeground();
+  } catch {
+    // The kick itself failed — no pass will ever report back.
+    return 'capped';
+  }
+  const deadline = Date.now() + CACHE_SETTLE_CAP_MS;
+  const startedBy = Date.now() + WARM_START_GRACE_MS;
+  let seenRunning = false;
+  while (Date.now() < deadline) {
+    let refreshing: boolean;
+    try {
+      refreshing = (await cacheRefreshStatus()).refreshing;
+    } catch {
+      return 'capped';
     }
-  });
+    if (refreshing) {
+      seenRunning = true;
+    } else if (seenRunning || Date.now() > startedBy) {
+      // Ran and finished — or never started within the grace, which the
+      // native status makes trustworthy: nothing needed refreshing (all
+      // fresh / no external accounts), so the caches are as warm as they get.
+      return 'confirmed';
+    }
+    await new Promise((resolve) => setTimeout(resolve, CACHE_SETTLE_POLL_MS));
+  }
+  return 'capped';
 }
 
 /**
@@ -405,22 +462,46 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
         // lists (a cold device-reminders account) that the launch read
         // missed, and the reconciler must adopt them into the selection
         // before the review decides what today holds.
-        await settleExternalCaches();
+        const settleStart = Date.now();
+        const settle = await settleExternalCaches();
         await refreshTaskLists().catch(() => {});
         // The reconciled selection lands via setState; yield one macrotask so
         // the provider commits and `selectionRef` reflects it. (React flushes
         // batched updates in a microtask — a timer runs strictly after.)
         await new Promise((resolve) => setTimeout(resolve, 0));
-        await runDeadlinePin(invalidateData);
+        void logLine(
+          'info',
+          `day-start: due (pin=${pinDue} review=${reviewDue}), settle ${settle} in ${
+            Date.now() - settleStart
+          }ms, selection=${selectionRef.current.size}`,
+        );
+        const confirmed = settle === 'confirmed';
+        await runDeadlinePin(invalidateData, confirmed);
         // The review reads the SELECTED lists, so it must wait for the
         // store to hydrate (an empty pre-hydration selection would mark
         // the day fired with nothing to review). The catalog-ready
         // effect below re-runs us then.
         if (!loadingRef.current) {
-          await runDayStartReview([...selectionRef.current], invalidateData, openReview);
+          await runDayStartReview(
+            [...selectionRef.current],
+            invalidateData,
+            openReview,
+            confirmed,
+          );
+        } else {
+          void logLine(
+            'info',
+            'day-start: catalog still hydrating — review deferred to the catalog-ready effect',
+          );
         }
-      } catch {
+      } catch (err) {
         // Best-effort — a bridge hiccup must never crash launch/foreground.
+        // But leave a trace: this catch used to swallow the whole morning
+        // without a word, which made "the dialog just never came" undiagnosable.
+        void logLine(
+          'warn',
+          `day-start: run failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         inFlight = false;
       }
