@@ -106,5 +106,7 @@ describe('quick-add → accept an offer → editor', () => {
       name: /kalender/i,
     })) as HTMLSelectElement;
     await waitFor(() => expect(picker.value).toBe('cal-work'));
-  });
+    // Renders two full dialogs end-to-end (~3s on an idle machine) — the
+    // default 5s times out flakily under CI/parallel load.
+  }, 15_000);
 });

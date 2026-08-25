@@ -92,6 +92,7 @@ import {
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
+import { useDeferredLoading } from '../hooks/useDeferredLoading';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
@@ -214,6 +215,35 @@ function retainEvents(key: string, batch: CalendarEvent[]): void {
     const oldest = perCalendarEventsCache.keys().next().value;
     if (oldest == null) break;
     perCalendarEventsCache.delete(oldest);
+  }
+}
+
+// The last successfully LOADED state per visited window — the render-level
+// stale-while-revalidate layer the retention maps above are not. The calendar
+// views are sibling routes swapped by `navigation.replace`, so every view
+// switch MOUNTS a fresh list whose `hasLoadedRef` starts false — and the first
+// load of a fresh instance used to blank to "Loading …" even though this very
+// window was on screen a second ago. Seeding the mount from this snapshot
+// paints the last known content immediately; the mount's load() then
+// revalidates in place, exactly the useTasks model.
+interface WindowSnapshot {
+  calendars: Calendar[];
+  colorLabels: ColorLabel[];
+  taskLists: TaskList[];
+  events: CalendarEvent[];
+  tasks: Task[];
+  sections: Section[];
+}
+const WINDOW_SNAPSHOT_MAX_ENTRIES = 32;
+const windowSnapshotCache = new Map<string, WindowSnapshot>();
+
+function retainWindowSnapshot(key: string, snap: WindowSnapshot): void {
+  windowSnapshotCache.delete(key);
+  windowSnapshotCache.set(key, snap);
+  while (windowSnapshotCache.size > WINDOW_SNAPSHOT_MAX_ENTRIES) {
+    const oldest = windowSnapshotCache.keys().next().value;
+    if (oldest == null) break;
+    windowSnapshotCache.delete(oldest);
   }
 }
 
@@ -365,14 +395,32 @@ export function CalendarDayList({
   const screenReader = useScreenReaderEnabled();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
 
-  const [calendars, setCalendars] = useState<Calendar[]>([]);
-  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
-  const [taskLists, setTaskLists] = useState<TaskList[]>([]);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seed the mount from the window's last loaded snapshot (see
+  // windowSnapshotCache): a view switch re-mounts this component, and without
+  // the seed its first load blanked to "Loading …" over data that was on
+  // screen a second ago. Captured ONCE — a later window change on the same
+  // mount keeps the current content and revalidates (hasLoadedRef).
+  const seedRef = useRef<WindowSnapshot | null | undefined>(undefined);
+  if (seedRef.current === undefined) {
+    seedRef.current =
+      windowSnapshotCache.get(
+        `${range.start.toISOString()}|${range.end.toISOString()}`,
+      ) ?? null;
+  }
+  const seed = seedRef.current;
+
+  const [calendars, setCalendars] = useState<Calendar[]>(() => seed?.calendars ?? []);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>(() => seed?.colorLabels ?? []);
+  const [taskLists, setTaskLists] = useState<TaskList[]>(() => seed?.taskLists ?? []);
+  const [events, setEvents] = useState<CalendarEvent[]>(() => seed?.events ?? []);
+  const [tasks, setTasks] = useState<Task[]>(() => seed?.tasks ?? []);
+  const [sections, setSections] = useState<Section[]>(() => seed?.sections ?? []);
+  const [loading, setLoading] = useState(seed == null);
   const [error, setError] = useState<string | null>(null);
+  // "Loading …" only when the wait is long enough to notice (the desktop's
+  // useDeferredLoading, ported): a warm host-cache round trip stays silent
+  // instead of flashing the text for a frame or two.
+  const showLoading = useDeferredLoading(loading);
   // The synced "show effort as tile size" pref (default on). Hydrated on mount
   // and re-read on focus so a Settings toggle / peer sync reflects without a
   // restart. Purely visual — the SR effort suffix is always appended below.
@@ -594,8 +642,10 @@ export function CalendarDayList({
   // to the "loading" text (nothing to show yet); every later reload — focus
   // return after an editor, a delete/edit, a background-cache refresh — keeps the
   // current content visible and refreshes in place, so the view stays open
-  // desktop-style instead of flashing the loading screen.
-  const hasLoadedRef = useRef(false);
+  // desktop-style instead of flashing the loading screen. A snapshot-seeded
+  // mount counts as loaded: its content IS on screen, and the mount's load
+  // must revalidate in place rather than blank over it.
+  const hasLoadedRef = useRef(seed != null);
 
   // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
   // The grid renders a windowed-height canvas (dayHours × HOUR_PX) inside this
@@ -761,12 +811,27 @@ export function CalendarDayList({
       // Hiding those duplicates happens further down, once the groups are
       // known — because the honest way to hide one is to group the two, and
       // pairing them needs both rows (DESIGN-event-groups.md, Stufe 4).
-      setEvents(
-        expandAll(perCalendar.flat(), { start: range.start, end: range.end }),
-      );
-      setTasks(perList.flat());
-      setSections(perListSections.flat());
+      const expandedEvents = expandAll(perCalendar.flat(), {
+        start: range.start,
+        end: range.end,
+      });
+      const flatTasks = perList.flat();
+      const flatSections = perListSections.flat();
+      setEvents(expandedEvents);
+      setTasks(flatTasks);
+      setSections(flatSections);
       hasLoadedRef.current = true;
+      // Remember the loaded window so the NEXT mount of this window (a view
+      // switch re-mounts the list) paints instantly instead of blanking to
+      // "Loading …" — see windowSnapshotCache.
+      retainWindowSnapshot(`${startIso}|${endIso}`, {
+        calendars: cals,
+        colorLabels: labels,
+        taskLists: lists,
+        events: expandedEvents,
+        tasks: flatTasks,
+        sections: flatSections,
+      });
     } catch (err) {
       if (reqToken.current !== token) return;
       const message = errorMessage(err);
@@ -1989,9 +2054,14 @@ export function CalendarDayList({
       )}
 
       {loading ? (
-        <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
-          {t('views.loading')}
-        </Text>
+        // Deferred: a fast (warm-cache) load never shows the text at all —
+        // and crucially, "no events" must not show either while the answer
+        // is still unknown, so the deferred window renders nothing.
+        showLoading ? (
+          <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
+            {t('views.loading')}
+          </Text>
+        ) : null
       ) : totalItems === 0 ? (
         <Text style={styles.muted} accessibilityRole="text">
           {emptyText}

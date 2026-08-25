@@ -56,6 +56,7 @@ import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsH
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
+import { useDeferredLoading } from '../hooks/useDeferredLoading';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
@@ -122,6 +123,8 @@ export default function AgendaScreen({
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
   const [loading, setLoading] = useState(true);
+  // "Loading …" only when the wait is long enough to notice (desktop parity).
+  const showLoading = useDeferredLoading(loading);
   const [error, setError] = useState<string | null>(null);
   // First load blanks; later reloads (focus return, delete/edit, cache refresh)
   // keep the current list on screen and refresh in place — the view stays open
@@ -588,9 +591,14 @@ export default function AgendaScreen({
         periodLabel={rangeLabel}
       >
       {loading ? (
-        <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
-          {t('views.loading')}
-        </Text>
+        // Deferred (see useDeferredLoading): a fast warm load never flashes
+        // the text, and the empty-state must not show while the answer is
+        // still unknown — the deferred window renders nothing.
+        showLoading ? (
+          <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
+            {t('views.loading')}
+          </Text>
+        ) : null
       ) : visibleOccurrences.length === 0 ? (
         <Text style={styles.muted}>{t('views.agenda.empty')}</Text>
       ) : (
