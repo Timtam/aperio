@@ -1535,6 +1535,8 @@ mod tests {
                     anniversary: None,
                     job_title: None,
                     department: None,
+                    name_prefix: None,
+                    name_suffix: None,
                     display_name: "Alex".into(),
                     given_name: None,
                     family_name: None,

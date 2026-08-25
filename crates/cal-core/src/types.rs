@@ -609,6 +609,18 @@ pub struct Contact {
     pub display_name: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
+    /// Honorific name PREFIX — titles spoken before the name ("Prof. Dr.").
+    /// vCard `N` component 4, Google People `names[].honorificPrefix`, Graph
+    /// `title`. EWS only surfaces it inside the read-only `CompleteName`
+    /// wrapper, so the EWS adapter neither reads nor writes it.
+    #[serde(default)]
+    pub name_prefix: Option<String>,
+    /// Honorific name SUFFIX — generational or credential tails ("jun.",
+    /// "M.D."). vCard `N` component 5, Google People
+    /// `names[].honorificSuffix`, Graph `generation`. Same EWS caveat as the
+    /// prefix.
+    #[serde(default)]
+    pub name_suffix: Option<String>,
     /// Organisation / company name. Free-form, multi-valued in
     /// providers like Google but Aperio keeps it scalar for now —
     /// the autocomplete picker only needs the primary value.
@@ -887,6 +899,11 @@ pub struct NewContact {
     pub display_name: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
+    /// Honorific name prefix / suffix — see [`Contact::name_prefix`].
+    #[serde(default)]
+    pub name_prefix: Option<String>,
+    #[serde(default)]
+    pub name_suffix: Option<String>,
     pub organization: Option<String>,
     pub emails: Vec<ContactValue>,
     pub phone_numbers: Vec<ContactValue>,

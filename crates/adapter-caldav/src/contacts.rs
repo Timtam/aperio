@@ -206,6 +206,8 @@ pub async fn create_contact(
         display_name: new.display_name,
         given_name: new.given_name,
         family_name: new.family_name,
+        name_prefix: new.name_prefix,
+        name_suffix: new.name_suffix,
         organization: new.organization,
         emails: new.emails,
         phone_numbers: new.phone_numbers,

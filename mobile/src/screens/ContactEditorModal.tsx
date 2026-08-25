@@ -169,6 +169,8 @@ export default function ContactEditorModal({
   const [displayName, setDisplayName] = useState('');
   const [givenName, setGivenName] = useState('');
   const [familyName, setFamilyName] = useState('');
+  const [namePrefix, setNamePrefix] = useState('');
+  const [nameSuffix, setNameSuffix] = useState('');
   const [organization, setOrganization] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [department, setDepartment] = useState('');
@@ -220,6 +222,8 @@ export default function ContactEditorModal({
           setDisplayName(found.display_name);
           setGivenName(found.given_name ?? '');
           setFamilyName(found.family_name ?? '');
+          setNamePrefix(found.name_prefix ?? '');
+          setNameSuffix(found.name_suffix ?? '');
           setOrganization(found.organization ?? '');
           setJobTitle(found.job_title ?? '');
           setDepartment(found.department ?? '');
@@ -291,6 +295,8 @@ export default function ContactEditorModal({
     const cleanedAddresses = isGroup ? [] : sanitiseAddresses(addresses);
     const personGiven = isGroup ? null : given;
     const personFamily = isGroup ? null : family;
+    const personNamePrefix = isGroup ? null : namePrefix.trim() || null;
+    const personNameSuffix = isGroup ? null : nameSuffix.trim() || null;
     const personOrg = isGroup ? null : org;
     const personBirthday = isGroup ? null : birthdayValue;
     const personAnniversary = isGroup ? null : anniversary.trim() || null;
@@ -310,6 +316,8 @@ export default function ContactEditorModal({
           display_name: name,
           given_name: personGiven,
           family_name: personFamily,
+          name_prefix: personNamePrefix,
+          name_suffix: personNameSuffix,
           organization: personOrg,
           job_title: personJobTitle,
           department: personDepartment,
@@ -327,6 +335,8 @@ export default function ContactEditorModal({
           display_name: name,
           given_name: personGiven,
           family_name: personFamily,
+          name_prefix: personNamePrefix,
+          name_suffix: personNameSuffix,
           organization: personOrg,
           job_title: personJobTitle,
           department: personDepartment,
@@ -366,6 +376,8 @@ export default function ContactEditorModal({
     isGroup,
     jobTitle,
     membersText,
+    namePrefix,
+    nameSuffix,
     navigation,
     notes,
     organization,
@@ -633,6 +645,26 @@ export default function ContactEditorModal({
           value={familyName}
           onChangeText={setFamilyName}
           accessibilityLabel={t('dialogs.contact.familyNameLabel')}
+        />
+      </Field>
+
+      {/* Honorific prefix + suffix — the vCard `N` components Apple calls
+          Prefix/Suffix ("Prof. Dr." … "jun."), beside the name they belong to. */}
+      <Field label={t('dialogs.contact.namePrefixLabel')}>
+        <TextInput
+          style={styles.input}
+          value={namePrefix}
+          onChangeText={setNamePrefix}
+          accessibilityLabel={t('dialogs.contact.namePrefixLabel')}
+        />
+      </Field>
+
+      <Field label={t('dialogs.contact.nameSuffixLabel')}>
+        <TextInput
+          style={styles.input}
+          value={nameSuffix}
+          onChangeText={setNameSuffix}
+          accessibilityLabel={t('dialogs.contact.nameSuffixLabel')}
         />
       </Field>
 

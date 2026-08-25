@@ -180,6 +180,11 @@ export interface Contact {
   display_name: string;
   given_name: string | null;
   family_name: string | null;
+  /** Honorific name prefix ("Prof. Dr.") and suffix ("jun.") — vCard `N`
+   *  components 4/5, Google honorificPrefix/Suffix, Graph title/generation.
+   *  EWS surfaces neither (read-only CompleteName), so they stay null there. */
+  name_prefix: string | null;
+  name_suffix: string | null;
   organization: string | null;
   /** See `WireContactValue`: an object with a label, or a bare string for
    *  anything stored before labels existed. Normalise with
@@ -248,6 +253,11 @@ export interface NewContact {
   display_name: string;
   given_name: string | null;
   family_name: string | null;
+  /** Honorific name prefix ("Prof. Dr.") and suffix ("jun.") — vCard `N`
+   *  components 4/5, Google honorificPrefix/Suffix, Graph title/generation.
+   *  EWS surfaces neither (read-only CompleteName), so they stay null there. */
+  name_prefix: string | null;
+  name_suffix: string | null;
   organization: string | null;
   /** See `Contact.emails`. Write with `fromContactValues`. */
   emails: WireContactValue[];

@@ -143,6 +143,13 @@ Alongside the channels, a contact carries `anniversary`, `job_title` and
 has no anniversary property on `contact` in v1.0** — only `birthday`. It
 stays null on Outlook accounts rather than being faked onto another field.
 
+It also carries the honorific `name_prefix` ("Prof. Dr.") and `name_suffix`
+("jun."): vCard `N` components 4/5 on CardDAV, `honorificPrefix` /
+`honorificSuffix` on Google People, `title` / `generation` on Graph. **EWS
+surfaces both only inside the read-only `CompleteName` wrapper**, so the EWS
+adapter neither reads nor writes them — they stay null there rather than
+being written somewhere they could not round-trip.
+
 ## The adapters
 
 | Adapter | Crate | Capabilities | Protocol |

@@ -45,7 +45,9 @@ Aktionen an der Zeile selbst.
 
 ## Was in einem Kontakt steht
 
-- **Anzeigename** (erforderlich), Vorname, Nachname.
+- **Anzeigename** (erforderlich), Vorname, Nachname, dazu ein **Titel vor dem
+  Namen** („Prof. Dr.") und ein **Namenszusatz dahinter** („jun.") – dieselben
+  Präfix-/Suffix-Felder, die Apples Kontakte bieten.
 - **Organisation**, **Position** und **Abteilung**.
 - **E-Mail-Adressen**, **Telefonnummern** und **Webseiten** – beliebig viele,
   jede mit einer eigenen Bezeichnung (siehe unten).
@@ -115,6 +117,11 @@ Exchange und Outlook genau eine (bevorzugt eine mit der Bezeichnung
 > Geburtstag, aber **keines für einen Jahrestag**. Ein Jahrestag, den du an
 > einem Outlook-Kontakt einträgst, hat dort keinen Ort und ist nach der
 > nächsten Synchronisation wieder leer. Alle anderen Kontoarten behalten ihn.
+
+> **Titel und Namenszusatz bei Exchange (EWS).** Klassisches Exchange zeigt
+> Titel und Namenszusatz nur in einem schreibgeschützten Sammelfeld, Aperio
+> kann sie dort weder lesen noch speichern – nach der nächsten Synchronisation
+> sind sie wieder leer. Alle anderen Kontoarten behalten beide.
 
 ## Geburtstage im Kalender
 

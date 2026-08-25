@@ -41,7 +41,9 @@ carries **Edit** and **Delete** as accessibility actions on the row itself.
 
 ## What a contact holds
 
-- **Display name** (required), first name, last name.
+- **Display name** (required), first name, last name, plus a **title before
+  the name** ("Prof. Dr.") and a **suffix after it** ("Jr.") — the same
+  prefix/suffix Apple's Contacts offers.
 - **Organization**, **job title** and **department**.
 - **Email addresses**, **phone numbers** and **websites** — any number of each,
   every one with its own label (see below).
@@ -106,6 +108,11 @@ otherwise the first).
 > **no anniversary field**. An anniversary you enter on an Outlook contact has
 > nowhere to be stored and will be empty again after the next sync. Every other
 > account type keeps it.
+
+> **Name title and suffix on Exchange (EWS).** Classic Exchange exposes the
+> name's title and suffix only in a read-only combined field, so Aperio can
+> neither read nor store them there — they will be empty again after the next
+> sync. Every other account type keeps both.
 
 ## Birthdays in the calendar
 

@@ -14,7 +14,8 @@
 //!  - `FN` → `display_name`. Required by the spec; if absent the
 //!    parser falls back to the assembled `N` components.
 //!  - `N` (structured `family;given;additional;prefix;suffix`) →
-//!    `family_name`, `given_name`.
+//!    `family_name`, `given_name`, `name_prefix`, `name_suffix` (only the
+//!    `additional` middle names have no Aperio field).
 //!  - `ORG` (first component) → `organization`.
 //!  - `EMAIL` (multi-valued) → `emails`.
 //!  - `TEL` (multi-valued) → `phone_numbers`.
@@ -113,6 +114,8 @@ pub fn parse_vcard(
     let mut anniversary: Option<NaiveDate> = None;
     let mut job_title: Option<String> = None;
     let mut department: Option<String> = None;
+    let mut name_prefix: Option<String> = None;
+    let mut name_suffix: Option<String> = None;
 
     for raw_line in unfolded.lines() {
         let line = raw_line.trim_end_matches('\r');
@@ -145,9 +148,9 @@ pub fn parse_vcard(
             "VERSION" => { /* discard */ }
             "FN" => display_name = Some(unescape(value)),
             "N" => {
-                // `family;given;additional;prefix;suffix`. We only
-                // pull the first two components — Aperio's model
-                // doesn't carry additional / prefix / suffix.
+                // `family;given;additional;prefix;suffix`. Aperio carries
+                // four of the five — only `additional` (middle names) has no
+                // field of its own yet.
                 let parts = split_structured(value);
                 if let Some(p) = parts.first() {
                     if !p.is_empty() {
@@ -157,6 +160,16 @@ pub fn parse_vcard(
                 if let Some(p) = parts.get(1) {
                     if !p.is_empty() {
                         given_name = Some(p.clone());
+                    }
+                }
+                if let Some(p) = parts.get(3) {
+                    if !p.is_empty() {
+                        name_prefix = Some(p.clone());
+                    }
+                }
+                if let Some(p) = parts.get(4) {
+                    if !p.is_empty() {
+                        name_suffix = Some(p.clone());
                     }
                 }
             }
@@ -385,6 +398,8 @@ pub fn parse_vcard(
         anniversary,
         job_title,
         department,
+        name_prefix,
+        name_suffix,
         notes,
         addresses,
         members: if is_group { Some(members) } else { None },
@@ -739,11 +754,15 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
     }
     out.push_str(&format!("FN:{}\r\n", escape(&contact.display_name)));
     // N is always present, even when one half is blank — clients
-    // (Apple Contacts, Nextcloud's UI) sort by N if FN is missing.
+    // (Apple Contacts, Nextcloud's UI) sort by N if FN is missing. The 4th /
+    // 5th components carry the honorific prefix and suffix; the 3rd
+    // (additional names) stays empty — Aperio has no field for it.
     out.push_str(&format!(
-        "N:{};{};;;\r\n",
+        "N:{};{};;{};{}\r\n",
         escape(contact.family_name.as_deref().unwrap_or("")),
-        escape(contact.given_name.as_deref().unwrap_or(""))
+        escape(contact.given_name.as_deref().unwrap_or("")),
+        escape(contact.name_prefix.as_deref().unwrap_or("")),
+        escape(contact.name_suffix.as_deref().unwrap_or(""))
     ));
     // ORG is `organisation;unit;…`. The department has no property of its own
     // in vCard, so it travels as the second component — which is where every
@@ -931,6 +950,8 @@ pub fn rebuild_vcard(
         display_name: contact.display_name.clone(),
         given_name: contact.given_name.clone(),
         family_name: contact.family_name.clone(),
+        name_prefix: contact.name_prefix.clone(),
+        name_suffix: contact.name_suffix.clone(),
         organization: contact.organization.clone(),
         emails: contact.emails.clone(),
         phone_numbers: contact.phone_numbers.clone(),
@@ -1143,6 +1164,8 @@ mod tests {
             birthday: None,
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             notes: None,
             addresses: Vec::new(),
@@ -1157,6 +1180,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
@@ -1241,6 +1266,26 @@ mod tests {
     }
 
     #[test]
+    fn n_prefix_and_suffix_round_trip() {
+        // The 4th and 5th `N` components — the honorifics Apple, Google and
+        // Nextcloud all write — must survive a read AND come back out on
+        // write; the 3rd (additional names) stays untouched by us.
+        let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Max Mustermann\r\nN:Mustermann;Max;;Prof. Dr.;jun.\r\nEND:VCARD\r\n";
+        let parsed = parse(body);
+        assert_eq!(parsed.name_prefix.as_deref(), Some("Prof. Dr."));
+        assert_eq!(parsed.name_suffix.as_deref(), Some("jun."));
+
+        let mut new = sample_new_contact();
+        new.name_prefix = Some("Prof. Dr.".into());
+        new.name_suffix = Some("jun.".into());
+        let card = build_vcard("uid-1", &new);
+        assert!(
+            card.contains("N:Mustermann;Max;;Prof. Dr.;jun."),
+            "N line should carry the affixes: {card}"
+        );
+    }
+
+    #[test]
     fn falls_back_to_placeholder_when_everything_missing() {
         // No FN, no N — last-ditch fallback so the contact still
         // renders rather than panicking.
@@ -1314,6 +1359,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             display_name: "Smith, Inc.; LTD".into(),
             given_name: None,
@@ -1340,6 +1387,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             display_name: "T".into(),
             given_name: None,
@@ -1365,6 +1414,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             id: "id-x".into(),
             list_id: "list".into(),
@@ -1415,6 +1466,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             display_name: "Pic Person".into(),
             given_name: None,
@@ -1476,6 +1529,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             id: "id".into(),
             list_id: "list".into(),

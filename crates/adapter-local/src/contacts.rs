@@ -143,7 +143,7 @@ impl ContactsFeature for LocalAdapter {
                             etag, created_at, updated_at, members,
                             (photo_data IS NOT NULL) AS has_photo,
                             addresses, urls, anniversary,
-                            job_title, department
+                            job_title, department, name_prefix, name_suffix
                      FROM contacts
                      WHERE list_id = ?
                      ORDER BY display_name COLLATE NOCASE",
@@ -184,7 +184,7 @@ impl ContactsFeature for LocalAdapter {
                         c.etag, c.created_at, c.updated_at, c.members,
                         (c.photo_data IS NOT NULL) AS has_photo,
                         c.addresses, c.urls, c.anniversary,
-                        c.job_title, c.department
+                        c.job_title, c.department, c.name_prefix, c.name_suffix
                  FROM contacts_fts f
                  JOIN contacts c ON c.id = f.id
                  WHERE contacts_fts MATCH ?
@@ -246,8 +246,9 @@ impl ContactsFeature for LocalAdapter {
                     organization, emails, phone_numbers, birthday, notes,
                     etag, created_at, updated_at, members,
                     photo_data, photo_content_type, addresses,
-                    urls, anniversary, job_title, department
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    urls, anniversary, job_title, department,
+                    name_prefix, name_suffix
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     list_id,
@@ -272,6 +273,8 @@ impl ContactsFeature for LocalAdapter {
                         .map(|d| d.format("%Y-%m-%d").to_string()),
                     contact.job_title.as_deref(),
                     contact.department.as_deref(),
+                    contact.name_prefix.as_deref(),
+                    contact.name_suffix.as_deref(),
                 ],
             )
             .map_err(map_sql_err)?;
@@ -281,6 +284,8 @@ impl ContactsFeature for LocalAdapter {
             anniversary: contact.anniversary,
             job_title: contact.job_title,
             department: contact.department,
+            name_prefix: contact.name_prefix,
+            name_suffix: contact.name_suffix,
             id,
             list_id: list_id.to_string(),
             display_name: contact.display_name.trim().to_string(),
@@ -329,6 +334,7 @@ impl ContactsFeature for LocalAdapter {
                         phone_numbers = ?, birthday = ?, notes = ?,
                         members = ?, addresses = ?, urls = ?,
                         anniversary = ?, job_title = ?, department = ?,
+                        name_prefix = ?, name_suffix = ?,
                         updated_at = ?
                   WHERE id = ?",
                 params![
@@ -350,6 +356,8 @@ impl ContactsFeature for LocalAdapter {
                         .map(|d| d.format("%Y-%m-%d").to_string()),
                     contact.job_title.as_deref(),
                     contact.department.as_deref(),
+                    contact.name_prefix.as_deref(),
+                    contact.name_suffix.as_deref(),
                     now_s,
                     contact.id,
                 ],
@@ -625,11 +633,15 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         };
         let job_title = opt_text(row, 18)?;
         let department = opt_text(row, 19)?;
+        let name_prefix = opt_text(row, 20)?;
+        let name_suffix = opt_text(row, 21)?;
         Ok(Contact {
             urls,
             anniversary,
             job_title,
             department,
+            name_prefix,
+            name_suffix,
             id,
             list_id,
             display_name,
@@ -692,6 +704,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
@@ -749,6 +763,8 @@ mod tests {
         new.anniversary = NaiveDate::from_ymd_opt(2014, 6, 21);
         new.job_title = Some("Werkstattleiter".into());
         new.department = Some("Technik".into());
+        new.name_prefix = Some("Prof. Dr.".into());
+        new.name_suffix = Some("jun.".into());
 
         let created = adapter
             .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, new)
@@ -766,10 +782,13 @@ mod tests {
         assert_eq!(read.anniversary, NaiveDate::from_ymd_opt(2014, 6, 21));
         assert_eq!(read.job_title.as_deref(), Some("Werkstattleiter"));
         assert_eq!(read.department.as_deref(), Some("Technik"));
+        assert_eq!(read.name_prefix.as_deref(), Some("Prof. Dr."));
+        assert_eq!(read.name_suffix.as_deref(), Some("jun."));
 
         // And an update carries them through the second write path too.
         let mut edited = read.clone();
         edited.department = None;
+        edited.name_prefix = None;
         edited.urls.clear();
         adapter.update_contact(edited).await.unwrap();
         let after = adapter
@@ -778,6 +797,8 @@ mod tests {
             .unwrap()
             .remove(0);
         assert!(after.department.is_none());
+        assert!(after.name_prefix.is_none());
+        assert_eq!(after.name_suffix.as_deref(), Some("jun."));
         assert!(after.urls.is_empty());
     }
 
@@ -931,6 +952,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             id: "does-not-exist".into(),
             list_id: LOCAL_DEFAULT_CONTACT_LIST_ID.into(),
             display_name: "Ghost".into(),
@@ -992,6 +1015,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Jane Doe".into(),
             given_name: Some("Jane".into()),
             family_name: Some("Doe".into()),

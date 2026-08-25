@@ -69,7 +69,7 @@ pub const GRAPH_SUGGESTED_PEOPLE_LIST_ID: &str = "graph-suggested-people";
 const CONTACT_SELECT: &str = "id,displayName,givenName,surname,companyName,\
 emailAddresses,businessPhones,homePhones,mobilePhone,birthday,personalNotes,\
 homeAddress,businessAddress,otherAddress,parentFolderId,\
-jobTitle,department,businessHomePage,\
+jobTitle,department,businessHomePage,title,generation,\
 createdDateTime,lastModifiedDateTime";
 
 /// Field selector for `/me/people` reads. Person resources are a
@@ -546,6 +546,8 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
         anniversary: None,
         job_title: entry.job_title.filter(|s| !s.is_empty()),
         department: entry.department.filter(|s| !s.is_empty()),
+        name_prefix: entry.title.filter(|s| !s.is_empty()),
+        name_suffix: entry.generation.filter(|s| !s.is_empty()),
         id: entry.id,
         list_id: list_id.to_string(),
         display_name: display,
@@ -640,6 +642,8 @@ fn map_person(entry: PersonEntry, list_id: &str) -> Contact {
         anniversary: None,
         job_title: None,
         department: None,
+        name_prefix: None,
+        name_suffix: None,
         id: entry.id,
         list_id: list_id.to_string(),
         display_name: display,
@@ -712,6 +716,8 @@ fn new_contact_to_body(new: &NewContact) -> serde_json::Value {
         &new.urls,
         new.job_title.as_deref(),
         new.department.as_deref(),
+        new.name_prefix.as_deref(),
+        new.name_suffix.as_deref(),
     )
 }
 
@@ -729,6 +735,8 @@ fn contact_to_body(contact: &Contact) -> serde_json::Value {
         &contact.urls,
         contact.job_title.as_deref(),
         contact.department.as_deref(),
+        contact.name_prefix.as_deref(),
+        contact.name_suffix.as_deref(),
     )
 }
 
@@ -745,6 +753,8 @@ fn contact_body(
     urls: &[cal_core::ContactValue],
     job_title: Option<&str>,
     department: Option<&str>,
+    name_prefix: Option<&str>,
+    name_suffix: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
     body.insert(
@@ -882,6 +892,8 @@ fn contact_body(
     // a title the user cleared would quietly come back.
     body.insert("jobTitle".into(), string_or_null(job_title));
     body.insert("department".into(), string_or_null(department));
+    body.insert("title".into(), string_or_null(name_prefix));
+    body.insert("generation".into(), string_or_null(name_suffix));
     // Graph gives a contact ONE website. A work-labelled one is the natural
     // occupant of a field called `businessHomePage`; failing that the first
     // URL goes, so a contact with a single personal site still has it stored.
@@ -1020,6 +1032,12 @@ pub struct ContactEntry {
     pub job_title: Option<String>,
     #[serde(default)]
     pub department: Option<String>,
+    /// The personal title spoken before the name ("Dr.") — Graph's name for
+    /// the honorific prefix; `generation` is the suffix ("jun.", "III").
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub generation: Option<String>,
     /// Outlook's single website slot. Graph has no general URL
     /// collection, so this is the one web address a contact can
     /// carry — Aperio surfaces it as a `work`-labelled URL.
@@ -1143,6 +1161,8 @@ mod tests {
         let entry = ContactEntry {
             job_title: None,
             department: None,
+            title: None,
+            generation: None,
             business_home_page: None,
             id: "AAA".into(),
             display_name: Some("Anna Beispiel".into()),
@@ -1208,6 +1228,8 @@ mod tests {
         let entry = ContactEntry {
             job_title: None,
             department: None,
+            title: None,
+            generation: None,
             business_home_page: None,
             id: "BBB".into(),
             display_name: Some("".into()),
@@ -1284,6 +1306,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Anna".into(),
             given_name: None,
             family_name: None,
@@ -1319,6 +1343,8 @@ mod tests {
             anniversary: None,
             job_title: Some("Werkstattleiterin".into()),
             department: Some("Technik".into()),
+            name_prefix: Some("Dr.".into()),
+            name_suffix: Some("III".into()),
             display_name: "Anna".into(),
             given_name: Some("Anna".into()),
             family_name: Some("Beispiel".into()),
@@ -1361,6 +1387,8 @@ mod tests {
         assert_eq!(body["businessPhones"][0], "+49 30 1111");
         assert_eq!(body["emailAddresses"][0]["address"], "anna@example.com");
         assert_eq!(body["jobTitle"], "Werkstattleiterin");
+        assert_eq!(body["title"], "Dr.");
+        assert_eq!(body["generation"], "III");
         assert_eq!(body["department"], "Technik");
         assert_eq!(body["businessHomePage"], "https://beispiel.example");
         assert_eq!(body["birthday"], "1990-06-15T00:00:00Z");

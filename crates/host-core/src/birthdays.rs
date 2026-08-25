@@ -304,6 +304,8 @@ mod tests {
             urls: Vec::new(),
             anniversary: None,
             job_title: None,
+            name_prefix: None,
+            name_suffix: None,
             department: None,
             id: format!("c-{name}"),
             list_id: "list-x".into(),

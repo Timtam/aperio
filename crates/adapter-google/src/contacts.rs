@@ -946,6 +946,18 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         .and_then(|ns| ns.first())
         .and_then(|n| n.family_name.clone())
         .filter(|s| !s.is_empty());
+    let name_prefix = person
+        .names
+        .as_deref()
+        .and_then(|ns| ns.first())
+        .and_then(|n| n.honorific_prefix.clone())
+        .filter(|s| !s.is_empty());
+    let name_suffix = person
+        .names
+        .as_deref()
+        .and_then(|ns| ns.first())
+        .and_then(|n| n.honorific_suffix.clone())
+        .filter(|s| !s.is_empty());
     let primary_org = person.organizations.as_deref().and_then(|os| os.first());
     let organization = primary_org
         .and_then(|o| o.name.clone())
@@ -1019,6 +1031,8 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         anniversary,
         job_title,
         department,
+        name_prefix,
+        name_suffix,
         id: person.resource_name,
         list_id: list_id.to_string(),
         display_name,
@@ -1114,6 +1128,8 @@ fn group_to_contact(group: ContactGroup, members: Vec<GroupMember>, list_id: &st
         anniversary: None,
         job_title: None,
         department: None,
+        name_prefix: None,
+        name_suffix: None,
         id: group.resource_name,
         list_id: list_id.to_string(),
         display_name: group.name.unwrap_or_else(|| "(Unnamed group)".into()),
@@ -1140,6 +1156,8 @@ fn new_contact_to_person_body(new: &NewContact) -> serde_json::Value {
         &new.display_name,
         new.given_name.as_deref(),
         new.family_name.as_deref(),
+        new.name_prefix.as_deref(),
+        new.name_suffix.as_deref(),
         new.organization.as_deref(),
         &new.emails,
         &new.phone_numbers,
@@ -1163,6 +1181,8 @@ fn contact_to_person_body(
         &contact.display_name,
         contact.given_name.as_deref(),
         contact.family_name.as_deref(),
+        contact.name_prefix.as_deref(),
+        contact.name_suffix.as_deref(),
         contact.organization.as_deref(),
         &contact.emails,
         &contact.phone_numbers,
@@ -1185,6 +1205,8 @@ fn person_body_from_fields(
     display_name: &str,
     given_name: Option<&str>,
     family_name: Option<&str>,
+    name_prefix: Option<&str>,
+    name_suffix: Option<&str>,
     organization: Option<&str>,
     emails: &[cal_core::ContactValue],
     phone_numbers: &[cal_core::ContactValue],
@@ -1213,6 +1235,8 @@ fn person_body_from_fields(
             "displayName": display_name,
             "givenName": given_name.unwrap_or(""),
             "familyName": family_name.unwrap_or(""),
+            "honorificPrefix": name_prefix.unwrap_or(""),
+            "honorificSuffix": name_suffix.unwrap_or(""),
         }]),
     );
     // Company, job title and department are one `organizations` entry on
@@ -1483,6 +1507,8 @@ struct PersonName {
     display_name: Option<String>,
     given_name: Option<String>,
     family_name: Option<String>,
+    honorific_prefix: Option<String>,
+    honorific_suffix: Option<String>,
 }
 
 /// Google types every channel — `home`, `work`, `mobile`, and any free
@@ -1725,6 +1751,8 @@ mod tests {
                 display_name: Some("Anna Beispiel".into()),
                 given_name: Some("Anna".into()),
                 family_name: Some("Beispiel".into()),
+                honorific_prefix: Some("Dr.".into()),
+                honorific_suffix: None,
             }]),
             email_addresses: Some(vec![PersonEmail {
                 type_: None,
@@ -1777,6 +1805,8 @@ mod tests {
         assert_eq!(c.list_id, GOOGLE_CONTACT_LIST_ID);
         assert_eq!(c.display_name, "Anna Beispiel");
         assert_eq!(c.given_name.as_deref(), Some("Anna"));
+        assert_eq!(c.name_prefix.as_deref(), Some("Dr."));
+        assert!(c.name_suffix.is_none());
         assert_eq!(c.family_name.as_deref(), Some("Beispiel"));
         assert_eq!(c.organization.as_deref(), Some("Example GmbH"));
         assert_eq!(c.emails, vec!["anna@example.com".to_string()]);
@@ -1892,6 +1922,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: Some("Prof. Dr.".into()),
+            name_suffix: Some("jun.".into()),
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
@@ -1908,6 +1940,8 @@ mod tests {
         assert!(s.contains("\"displayName\":\"Max Mustermann\""));
         assert!(s.contains("\"givenName\":\"Max\""));
         assert!(s.contains("\"familyName\":\"Mustermann\""));
+        assert!(s.contains("\"honorificPrefix\":\"Prof. Dr.\""));
+        assert!(s.contains("\"honorificSuffix\":\"jun.\""));
         assert!(s.contains("\"value\":\"max@example.com\""));
         assert!(s.contains("\"value\":\"+49 170 1234567\""));
         assert!(s.contains("\"name\":\"Example GmbH\""));
@@ -1928,6 +1962,8 @@ mod tests {
                 anniversary: None,
                 job_title: None,
                 department: None,
+                name_prefix: None,
+                name_suffix: None,
                 id: "people/c123".into(),
                 list_id: GOOGLE_CONTACT_LIST_ID.into(),
                 display_name: "Max".into(),
@@ -2051,6 +2087,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),

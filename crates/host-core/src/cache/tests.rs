@@ -119,6 +119,8 @@ fn contact(id: &str) -> Contact {
         anniversary: None,
         job_title: None,
         department: None,
+        name_prefix: None,
+        name_suffix: None,
         id: id.into(),
         list_id: LIST.into(),
         display_name: format!("Person {id}"),

@@ -81,6 +81,8 @@ interface FormState {
   displayName: string;
   givenName: string;
   familyName: string;
+  namePrefix: string;
+  nameSuffix: string;
   organization: string;
   jobTitle: string;
   department: string;
@@ -119,6 +121,8 @@ function emptyForm(): FormState {
     displayName: '',
     givenName: '',
     familyName: '',
+    namePrefix: '',
+    nameSuffix: '',
     organization: '',
     jobTitle: '',
     department: '',
@@ -140,6 +144,8 @@ function fromContact(c: Contact): FormState {
     displayName: c.display_name,
     givenName: c.given_name ?? '',
     familyName: c.family_name ?? '',
+    namePrefix: c.name_prefix ?? '',
+    nameSuffix: c.name_suffix ?? '',
     organization: c.organization ?? '',
     jobTitle: c.job_title ?? '',
     department: c.department ?? '',
@@ -477,6 +483,8 @@ export function ContactDialog({
             display_name: name,
             given_name: null,
             family_name: null,
+            name_prefix: null,
+            name_suffix: null,
             organization: form.organization.trim() || null,
             job_title: null,
             department: null,
@@ -497,6 +505,8 @@ export function ContactDialog({
             display_name: name,
             given_name: form.givenName.trim() || null,
             family_name: form.familyName.trim() || null,
+            name_prefix: form.namePrefix.trim() || null,
+            name_suffix: form.nameSuffix.trim() || null,
             organization: form.organization.trim() || null,
             job_title: form.jobTitle.trim() || null,
             department: form.department.trim() || null,
@@ -744,6 +754,40 @@ export function ContactDialog({
                   setForm((p) => ({ ...p, familyName: e.target.value }))
                 }
                 autoComplete="family-name"
+                readOnly={viewOnly}
+              />
+            </label>
+          </div>
+
+          {/* Honorific prefix + suffix — the vCard `N` components Apple calls
+              Prefix/Suffix ("Prof. Dr." … "jun."). Beside the name halves,
+              because that is the name they decorate. */}
+          <div className="form__row form__row--two">
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.contact.namePrefixLabel')}
+              </span>
+              <input
+                type="text"
+                value={form.namePrefix}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, namePrefix: e.target.value }))
+                }
+                autoComplete="honorific-prefix"
+                readOnly={viewOnly}
+              />
+            </label>
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.contact.nameSuffixLabel')}
+              </span>
+              <input
+                type="text"
+                value={form.nameSuffix}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, nameSuffix: e.target.value }))
+                }
+                autoComplete="honorific-suffix"
                 readOnly={viewOnly}
               />
             </label>

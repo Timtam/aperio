@@ -33,8 +33,13 @@
 //!
 //!   - **CompleteName.** Read-only structural element wrapping
 //!     `GivenName`, `Surname`, `MiddleName`, etc. We ignore it on
-//!     read (the individual elements are already available outside)
-//!     and never emit it.
+//!     read (the individual elements are almost all available outside)
+//!     and never emit it. The exception: the honorific `Title` and
+//!     `Suffix` exist ONLY inside this wrapper — and since the wrapper
+//!     is read-only, they could never be written back, so we
+//!     deliberately don't read them either (`name_prefix` /
+//!     `name_suffix` stay `None` on EWS; a value shown but silently
+//!     lost on every save would be worse than one not shown).
 //!
 //! Out of scope for the first cut:
 //!
@@ -1227,6 +1232,11 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
         anniversary: item.wedding_anniversary.map(|d| d.naive_utc().date()),
         job_title: item.job_title,
         department: item.department,
+        // EWS surfaces the honorific prefix/suffix only inside the
+        // read-only CompleteName wrapper (see the module doc on why that
+        // wrapper is skipped) — neither read nor written here.
+        name_prefix: None,
+        name_suffix: None,
         id,
         list_id: list_id.to_string(),
         display_name,
@@ -2103,6 +2113,8 @@ fn build_contact_from_new(
         anniversary: None,
         job_title: None,
         department: None,
+        name_prefix: None,
+        name_suffix: None,
         id: encode_contact_id(item_id, change_key.as_deref()),
         list_id: list_id.to_string(),
         display_name: new.display_name.clone(),
@@ -2373,6 +2385,8 @@ fn persona_to_contact(p: ParsedPersona, list_id: &str) -> Contact {
         // The directory row carries a department, and until now the model had
         // nowhere to put it.
         department: p.department.clone(),
+        name_prefix: None,
+        name_suffix: None,
         // PersonaId is opaque and not stable across mailbox
         // moves, but it's good enough for in-session round-trips
         // (the dialog can pass it to a "view full details" route
@@ -2788,6 +2802,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Anna Beispiel".into(),
             given_name: Some("Anna".into()),
             family_name: Some("Beispiel".into()),
@@ -2824,6 +2840,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "Test".into(),
             given_name: Some("T".into()),
             family_name: Some("Person".into()),
@@ -2866,6 +2884,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             display_name: "X".into(),
             given_name: None,
             family_name: None,
@@ -2898,6 +2918,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             id: "ITEM|CK".into(),
             list_id: "LIST".into(),
             display_name: "X".into(),
@@ -2930,6 +2952,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             id: "ITEM|CK".into(),
             list_id: "LIST".into(),
             display_name: "X".into(),
@@ -2959,6 +2983,8 @@ mod tests {
             anniversary: None,
             job_title: None,
             department: None,
+            name_prefix: None,
+            name_suffix: None,
             id: "X".into(),
             list_id: "L".into(),
             display_name: "Max Mustermann".into(),

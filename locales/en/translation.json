@@ -483,6 +483,8 @@
       "displayNameLabel": "Display name",
       "givenNameLabel": "First name",
       "familyNameLabel": "Last name",
+      "namePrefixLabel": "Title (before the name)",
+      "nameSuffixLabel": "Suffix (after the name)",
       "organizationLabel": "Organization",
       "emailsLabel": "Email addresses",
       "phoneNumbersLabel": "Phone numbers",
