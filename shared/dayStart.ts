@@ -15,8 +15,12 @@ import type { Task, TaskUser } from './types';
 export function filterOverdue(
   tasks: Task[],
   meFor?: (listId: string) => TaskUser | null,
+  // The anchor day, like the reminder selectors carry it: the mobile
+  // scheduler pre-computes FUTURE days' counts for ahead-of-time OS
+  // notifications. Defaults to today — the live checkers pass nothing.
+  dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = todayIsoKey();
+  const today = dayKey;
   return tasks.filter((task) => {
     if (!task.deadline_date) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
@@ -44,9 +48,13 @@ export function filterCarriedOver(
     cascadeEnabledFor?: (listId: string) => boolean;
     meFor?: (listId: string) => TaskUser | null;
   },
+  /** Anchor day — see {@link filterOverdue}. */
+  dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = todayIsoKey();
-  const overdueIds = new Set(filterOverdue(tasks).map((t) => t.id));
+  const today = dayKey;
+  const overdueIds = new Set(
+    filterOverdue(tasks, undefined, dayKey).map((t) => t.id),
+  );
   const meFor = options?.meFor;
   const slipped = tasks.filter((task) => {
     if (!task.scheduled_date) return false;

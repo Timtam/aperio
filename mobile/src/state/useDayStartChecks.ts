@@ -286,17 +286,19 @@ async function runDayStartReview(
   if (reminderParts.length > 0) {
     AccessibilityInfo.announceForAccessibility(reminderParts.join('. '));
   }
-  if (reminderTotal > 0 && !dayStartPreschedulesOsNotification(behaviour.dayStartTrigger)) {
+  if (surfaced > 0 && !dayStartPreschedulesOsNotification(behaviour.dayStartTrigger)) {
     // One combined OS notification for the "you're not looking at Aperio"
     // reach — but ONLY for the modes the reminder scheduler does NOT
     // pre-schedule ('app-start' / the '00:00' default). For an explicit
     // morning HH:MM the ahead-of-time OS notification already fired at the
     // trigger instant; posting another here would double-notify minutes
     // apart. The live announcement above (the assistive-tech channel) and the
-    // review modal always run regardless.
+    // review modal always run regardless. The count is `surfaced` — the same
+    // sum that opens the dialog — so the notification never claims fewer
+    // tasks than the review it points at.
     void notify(
       i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
-      i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: reminderTotal }),
+      i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: surfaced }),
       'day-start reminders notification',
     );
   }

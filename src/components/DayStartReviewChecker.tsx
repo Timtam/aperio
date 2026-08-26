@@ -121,6 +121,22 @@ export function DayStartReviewChecker() {
       cascadeEnabledFor: (listId) => effectiveForList(listId).cascade,
       meFor,
     });
+    // Group slipped tasks by list and split by each list's carry-over
+    // default. Tasks in lists set to 'ask' end up in the dialog; tasks
+    // in 'today' / 'backlog' lists run through the silent batch with
+    // the appropriate action. A mix of lists with different defaults
+    // produces a hybrid — some rows handled silently, others surfaced
+    // for explicit review. Split HERE, before the reminder block, so the
+    // OS notification below can count everything the dialog will surface.
+    const askRows: Task[] = [];
+    const todayRows: Task[] = [];
+    const backlogRows: Task[] = [];
+    for (const row of slipped) {
+      const eff = effectiveForList(row.list_id);
+      if (eff.carryOverDefault === 'today') todayRows.push(row);
+      else if (eff.carryOverDefault === 'backlog') backlogRows.push(row);
+      else askRows.push(row);
+    }
     // Even on an empty day we record the fire — the gate's only job
     // is "review for this day". If new slipped / overdue rows appear
     // later (sync, manual edit), this tick wouldn't have caught
@@ -179,7 +195,12 @@ export function DayStartReviewChecker() {
     if (reminderParts.length > 0) {
       announce(reminderParts.join('. '), 'polite');
     }
-    if (reminderTotal > 0) {
+    // Everything the dialog will surface: the overdue section, the slipped
+    // rows whose list votes 'ask', and the reminder groups. The notification
+    // used to count only the reminder half, so "1 task needs your attention"
+    // fired on a morning where three overdue tasks also awaited a decision.
+    const surfaced = overdue.length + askRows.length + reminderTotal;
+    if (surfaced > 0) {
       // One combined OS notification for the "you're not looking at
       // Aperio" reach. The live announcement above already carries the
       // per-group detail for assistive tech; this is the secondary
@@ -187,26 +208,10 @@ export function DayStartReviewChecker() {
       void notify(
         t('dialogs.dayStartReview.reminders.notificationTitle'),
         t('dialogs.dayStartReview.reminders.notificationBody', {
-          count: reminderTotal,
+          count: surfaced,
         }),
         'day-start reminders notification',
       );
-    }
-
-    // Group slipped tasks by list and split by each list's carry-over
-    // default. Tasks in lists set to 'ask' end up in the dialog; tasks
-    // in 'today' / 'backlog' lists run through the silent batch with
-    // the appropriate action. A mix of lists with different defaults
-    // produces a hybrid — some rows handled silently, others surfaced
-    // for explicit review.
-    const askRows: Task[] = [];
-    const todayRows: Task[] = [];
-    const backlogRows: Task[] = [];
-    for (const row of slipped) {
-      const eff = effectiveForList(row.list_id);
-      if (eff.carryOverDefault === 'today') todayRows.push(row);
-      else if (eff.carryOverDefault === 'backlog') backlogRows.push(row);
-      else askRows.push(row);
     }
 
     const hasSilentWork = todayRows.length > 0 || backlogRows.length > 0;
@@ -244,7 +249,7 @@ export function DayStartReviewChecker() {
         // an overdue row, a slipped row whose list voted 'ask', or any
         // reminder (the reminders section is informational but still a
         // reason to surface the dialog).
-        if (overdue.length + askRows.length + reminderTotal > 0) {
+        if (surfaced > 0) {
           openDayStartReview();
         }
       })();
@@ -253,7 +258,7 @@ export function DayStartReviewChecker() {
 
     // No silent work: pure ask-mode. Open the dialog if there's anything
     // in either section OR any reminder to show, otherwise stay quiet.
-    if (overdue.length + askRows.length + reminderTotal === 0) return;
+    if (surfaced === 0) return;
     openDayStartReview();
   }, [
     loading,

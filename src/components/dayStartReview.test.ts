@@ -75,6 +75,23 @@ describe('filterOverdue', () => {
     expect(overdue.map((t) => t.id)).toEqual(['past']);
   });
 
+  it('anchors to a passed day key, like the reminder selectors', () => {
+    // The mobile scheduler pre-computes FUTURE days' day-start counts for
+    // ahead-of-time OS notifications — as of the 26th, both the 19th and the
+    // 20th have lapsed, and the carried-over twin follows the same anchor
+    // (staying disjoint from THAT day's overdue set, not today's).
+    const tasks: Task[] = [
+      { ...baseTask, id: 'past', deadline_date: '2026-05-19' },
+      { ...baseTask, id: 'today', deadline_date: '2026-05-20' },
+      { ...baseTask, id: 'future', deadline_date: '2026-05-25' },
+      { ...baseTask, id: 'slipped', scheduled_date: '2026-05-22' },
+    ];
+    const overdue = filterOverdue(tasks, undefined, '2026-05-26');
+    expect(overdue.map((t) => t.id)).toEqual(['past', 'today', 'future']);
+    const slipped = filterCarriedOver(tasks, undefined, '2026-05-26');
+    expect(slipped.map((t) => t.id)).toEqual(['slipped']);
+  });
+
   it('ignores tasks without a deadline (scheduled_date alone is not a missed commitment)', () => {
     const tasks: Task[] = [
       {

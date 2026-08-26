@@ -1,23 +1,31 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Task, TaskUser } from '@aperio/shared';
-import { buildReminderGroups, reminderCount, todayIsoKey } from '@aperio/shared';
+import {
+  buildReminderGroups,
+  filterCarriedOver,
+  filterOverdue,
+  reminderCount,
+  todayIsoKey,
+} from '@aperio/shared';
 
 import { getTasks } from '../api/client';
 import { currentUserForList } from '../state/currentUser';
 import { readDayStartSnoozeUntil } from '../state/dayStartSnooze';
 import { STORAGE_KEY, type PersistedSelection } from '../state/selection';
-import { readTaskBehaviour } from '../state/taskBehaviour';
+import { effectiveForList, readTaskBehaviour } from '../state/taskBehaviour';
 
 // Ahead-of-time DAY-START notifications. The in-app day-start checks
 // (useDayStartChecks) only run while the app is OPEN — with the app closed at
 // the dayStartTrigger time, nothing fired and the "today's tasks" reminder
 // arrived only when the user next opened the app. This module computes, for
 // each day in the scheduler's horizon whose HH:MM day-start instant is still in
-// the future, the de-duplicated reminder count for that day (the SAME shared
-// buildReminderGroups the in-app review + desktop checker use, anchored to that
-// day), so the reminder scheduler can register them as OS notifications that
-// fire with the app killed.
+// the future, the count of everything the in-app review will SURFACE on that
+// day — overdue tasks (lapsed deadline), slipped tasks whose list asks, and
+// the de-duplicated reminder groups — via the SAME shared selectors the review
+// itself uses, anchored to that day. It used to count only the reminder
+// groups, so "1 task needs your attention" fired on a morning where three
+// overdue tasks ALSO awaited a decision in the dialog.
 //
 // The count is computed from the data available at SCHEDULING time (launch /
 // foreground / after a mutation) — a later edit can make it slightly stale by
@@ -29,7 +37,9 @@ import { readTaskBehaviour } from '../state/taskBehaviour';
 export interface DayStartNotification {
   /** The local day-start instant to fire at (strictly in the future). */
   triggerAt: Date;
-  /** De-duplicated task count across the three reminder groups for that day. */
+  /** What the review will surface that day: overdue + ask-slipped + the
+   *  de-duplicated reminder groups — the same sum that decides whether the
+   *  in-app dialog opens, so the notification and the dialog tell one story. */
   count: number;
 }
 
@@ -114,13 +124,9 @@ export async function upcomingDayStartNotifications(
     remindDeadlineCountdown: behaviour.remindDeadlineCountdown,
     deadlineCountdownDays: behaviour.deadlineCountdownDays,
   };
-  if (
-    !settings.remindUntimedToday &&
-    !settings.remindDeadlineArrived &&
-    !settings.remindDeadlineCountdown
-  ) {
-    return [];
-  }
+  // NB: no "all reminder toggles off → nothing" early-out any more — the
+  // overdue/ask counts below fire regardless of the reminder knobs, exactly
+  // like the in-app review does.
 
   // NB: this reads the raw persisted selection blob; the in-app review uses
   // the store's RECONCILED selection (which auto-selects never-seen lists).
@@ -148,7 +154,28 @@ export async function upcomingDayStartNotifications(
     const triggerAt = dayInstant(dayKey, hours, minutes);
     if (triggerAt.getTime() <= now.getTime()) continue;
     if (triggerAt.getTime() <= snoozeUntil) continue;
-    const count = reminderCount(buildReminderGroups(tasks, settings, meFor, dayKey));
+    // Mirror the review's own `surfaced` sum for that day: the overdue
+    // section, the slipped rows whose list votes 'ask' (today/backlog lists
+    // run silently and don't need the user's attention), and the reminder
+    // groups. Computed from the data available NOW — a task completed before
+    // the instant fires makes the number stale, the same accepted caveat the
+    // reminder half always had; the tap opens the live review.
+    const reminders = reminderCount(
+      buildReminderGroups(tasks, settings, meFor, dayKey),
+    );
+    const overdue = filterOverdue(tasks, meFor, dayKey);
+    const askSlipped = filterCarriedOver(
+      tasks,
+      {
+        cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
+        meFor,
+      },
+      dayKey,
+    ).filter(
+      (task) =>
+        effectiveForList(behaviour, task.list_id).carryOverDefault === 'ask',
+    );
+    const count = reminders + overdue.length + askSlipped.length;
     if (count > 0) out.push({ triggerAt, count });
   }
   return out;
