@@ -14,6 +14,7 @@
 
 pub mod account_local;
 pub mod account_setup;
+pub mod account_update;
 pub mod accounts;
 pub mod birthdays;
 pub mod builtin_adapters;

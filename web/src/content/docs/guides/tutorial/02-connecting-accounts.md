@@ -62,6 +62,25 @@ several from the same provider (e.g. two Google accounts). Each source
 appears in the sidebar with its own name and color and can be shown or
 hidden individually.
 
+### Editing an account
+
+Server URL, endpoint, username, password or token can all be changed later
+without re-adding the account: in **Settings → Accounts**, select the entry
+and choose **Edit** (on the phone it is also in the row's actions). The form
+is the same one the account was added with, prefilled with the stored
+values — **password and token fields come back empty, and empty means "keep
+the stored one"**. Where the provider supports it, **Test connection**
+probes the new values (using the stored credential if you left the field
+blank) before you save. One limit: an optional stored password cannot be
+**removed** through an edit — blank always keeps it; to shed one entirely,
+delete and re-add the account.
+
+The changes synchronize: the new configuration reaches your other devices
+with the next sync round, and a changed password or token travels too when
+**end-to-end encryption** is enabled (see the synchronization chapter) — the
+other devices switch over without any re-entry. The sign-in identity of a Google/Microsoft/Webex account (the
+OAuth client) is not edited here; use **Reconnect** for that.
+
 ### Renaming an account
 
 You can change an account's display name at any time – either in

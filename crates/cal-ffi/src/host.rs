@@ -2505,12 +2505,29 @@ impl Host {
         // No OAuth client choice: a probe never signs in, so an adapter
         // reachable only with a token the sign-in produces has nothing to test
         // before the account exists, and says so by failing the probe.
-        let plan = host_core::account_setup::plan_new_account(&schema, &req.values, None).map_err(
-            |err| StoreError::InvalidField {
-                field: "values".to_string(),
-                detail: err.to_string(),
-            },
-        )?;
+        let values = match req.account_id.as_deref() {
+            Some(account_id) => {
+                host_core::account_update::inherit_stored_secrets(
+                    self.secret_store.as_ref(),
+                    account_id,
+                    &schema,
+                    &req.values,
+                )
+                .map_err(|err| StoreError::InvalidField {
+                    field: "values".to_string(),
+                    detail: err.to_string(),
+                })?
+                .0
+            }
+            None => req.values.clone(),
+        };
+        let plan =
+            host_core::account_setup::plan_new_account(&schema, &values, None).map_err(|err| {
+                StoreError::InvalidField {
+                    field: "values".to_string(),
+                    detail: err.to_string(),
+                }
+            })?;
         // At most one credential reaches a probe; a schema with several would
         // need the registry to take them all, which no adapter has asked for.
         let secret = plan.secrets.first().map(|(_, value)| value.as_str());
@@ -8497,6 +8514,17 @@ impl Host {
             .set_config(&account.id, &serde_json::Value::Object(config).to_string())
             .map_err(acc_err)?;
 
+        // The re-sign-in changed the stored config (the recorded OAuth client
+        // posture) — say so on the wire like every other config write, or the
+        // other devices keep a row that contradicts this one. BEFORE the
+        // registration attempt: the row is committed either way, and a
+        // registration hiccup must not leave the devices silently divergent.
+        append_account_event(
+            &self.writer,
+            &self.plugin_manager,
+            account.adapter_kind.as_str(),
+            SyncEvent::AccountUpdated(account_payload(&account)),
+        );
         // Live for the rest of the session without a restart. A failure leaves
         // the fresh tokens in place — retrying costs no second sign-in.
         self.registry
@@ -8522,6 +8550,33 @@ impl Host {
                 detail: "display name must not be empty".to_string(),
             });
         }
+        // EDIT of an existing account: the shared host-core implementation
+        // (blank secret fields inherit the stored credential, non-form config
+        // keys carry over, the live adapter re-registers, account.updated +
+        // credential.set go on the wire). No OAuth exchange here — the client
+        // pair stays the reconnect flow's job.
+        if let Some(account_id) = req.account_id.as_deref() {
+            let shared = self.db.shared();
+            let updated = host_core::account_update::update_account_values(
+                &shared,
+                &self.registry,
+                &self.plugin_manager,
+                self.secret_store.as_ref(),
+                &self.writer,
+                account_id,
+                Some(name),
+                &req.values,
+            )
+            .map_err(|e| StoreError::InvalidField {
+                field: "account".to_string(),
+                detail: e.to_string(),
+            })?;
+            // No warm kick here: like the create path, the JS layer follows a
+            // successful connect/edit with its own refreshExternalCache() —
+            // the one owner of that trigger on mobile.
+            return to_json(&updated);
+        }
+
         let (plugin_id, schema) = self.schema_for(&req.adapter_kind)?;
         let kind = AdapterKind::new(req.adapter_kind.clone());
 
@@ -9012,6 +9067,13 @@ impl Host {
 struct ConnectAccountRequest {
     adapter_kind: String,
     display_name: String,
+    /// When set, EDIT this existing account instead of creating one — the
+    /// Accounts screen's edit form. Optional and absent on every create, so
+    /// old callers are untouched; carried in the JSON body precisely so the
+    /// UniFFI method signature (and thus the committed Kotlin bindings) stays
+    /// unchanged.
+    #[serde(default)]
+    account_id: Option<String>,
     /// Keyed by the schema's field keys.
     #[serde(default)]
     values: serde_json::Map<String, serde_json::Value>,
@@ -9029,6 +9091,10 @@ struct ConnectAccountRequest {
 #[derive(serde::Deserialize)]
 struct SchemaFormRequest {
     adapter_kind: String,
+    /// Set by the EDIT form: a secret field left blank then probes with the
+    /// credential stored for this account — see the desktop twin.
+    #[serde(default)]
+    account_id: Option<String>,
     /// Keyed by the schema's field keys.
     #[serde(default)]
     values: serde_json::Map<String, serde_json::Value>,
@@ -9411,6 +9477,77 @@ mod tests {
         assert!(stored
             .iter()
             .any(|((_, slot), v)| slot == "password" && v == "hunter2"));
+    }
+
+    #[test]
+    fn editing_an_account_updates_config_and_keeps_a_blank_secret() {
+        let (_dir, host, kc) = open_host();
+        let created = host
+            .create_account_json(
+                r#"{
+                    "adapter_kind": "caldav",
+                    "display_name": "Work CalDAV",
+                    "config_json": "{\"server_url\":\"https://old.example.invalid/\",\"username\":\"alice\",\"auth_kind\":\"basic\"}",
+                    "secret": "hunter2"
+                }"#
+                .to_string(),
+            )
+            .unwrap();
+        let id: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let account_id = id["id"].as_str().unwrap().to_string();
+
+        // EDIT: new URL + name, secret field left BLANK — the stored password
+        // must survive byte for byte, and the undeclared `auth_kind` key must
+        // carry over (the form owns only the schema's declared fields).
+        let edit = format!(
+            r#"{{
+                "adapter_kind": "caldav",
+                "display_name": "Renamed CalDAV",
+                "account_id": "{account_id}",
+                "values": {{
+                    "server_url": "https://new.example.invalid/",
+                    "username": "alice"
+                }}
+            }}"#
+        );
+        let updated = host.connect_account_json(edit).unwrap();
+        let row: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(row["display_name"], "Renamed CalDAV");
+        let config: serde_json::Value =
+            serde_json::from_str(row["config_json"].as_str().unwrap()).unwrap();
+        assert_eq!(config["server_url"], "https://new.example.invalid/");
+        assert_eq!(
+            config["auth_kind"], "basic",
+            "undeclared config keys must carry over"
+        );
+        {
+            let stored = kc.map.lock().unwrap();
+            assert!(
+                stored
+                    .iter()
+                    .any(|((_, slot), v)| slot == "password" && v == "hunter2"),
+                "a blank secret field must keep the stored credential"
+            );
+        }
+
+        // EDIT with a NEW secret replaces the stored one.
+        let edit2 = format!(
+            r#"{{
+                "adapter_kind": "caldav",
+                "display_name": "Renamed CalDAV",
+                "account_id": "{account_id}",
+                "values": {{
+                    "server_url": "https://new.example.invalid/",
+                    "username": "alice",
+                    "secret": "hunter3"
+                }}
+            }}"#
+        );
+        host.connect_account_json(edit2).unwrap();
+        let stored = kc.map.lock().unwrap();
+        assert!(stored
+            .iter()
+            .any(|((_, slot), v)| slot == "password" && v == "hunter3"));
     }
 
     #[test]

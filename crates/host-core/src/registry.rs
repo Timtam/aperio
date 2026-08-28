@@ -122,6 +122,13 @@ pub struct AdapterRegistry {
     /// can arrive at any time), so this keeps that retry from spamming a
     /// WARN per round; cleared for an account the moment it registers.
     unregisterable: Mutex<HashSet<String>>,
+    /// The `config_json` each live adapter was REGISTERED with, keyed by
+    /// account id. The post-sync sweep compares it against the persisted row:
+    /// a synced `account.updated` (an edit made on another device) lands as a
+    /// row update only, and without this the live adapter kept running the
+    /// old server URL until the next app start. A mismatch triggers a rebuild
+    /// for exactly that account.
+    registered_config: Mutex<HashMap<String, String>>,
     /// Loaded plugins keyed by their canonical id. Every
     /// `register_*` fn pulls the matching plugin out of here +
     /// opens a fresh per-account instance against it. Empty on
@@ -291,6 +298,7 @@ impl AdapterRegistry {
             external_vc: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
             unregisterable: Mutex::new(HashSet::new()),
+            registered_config: Mutex::new(HashMap::new()),
             plugin_manager,
             data_dir,
             secret_store,
@@ -382,7 +390,27 @@ impl AdapterRegistry {
                 continue;
             }
             if only_missing && self.has_adapter(&account.id) {
-                continue;
+                // A live adapter is left alone — rebuilding drops the plugin
+                // instance's in-memory state — UNLESS the persisted config no
+                // longer matches what it was registered with: then a synced
+                // `account.updated` (an edit from another device) changed the
+                // row under it, and the rebuild is exactly what's wanted. The
+                // rebuild counts as a registration so the hosts answer with
+                // their warm pass, fetching from the new endpoint.
+                // An adapter with NO recorded fingerprint (registered through
+                // a non-schema path) is treated as current — the pre-existing
+                // "never rebuild a live adapter" behaviour — because a missing
+                // entry misread as "changed" would rebuild it every round and
+                // answer each with a full warm pass.
+                let unchanged = self
+                    .registered_config
+                    .lock()
+                    .expect("registry poisoned")
+                    .get(&account.id)
+                    .is_none_or(|cfg| cfg == &account.config_json);
+                if unchanged {
+                    continue;
+                }
             }
             match self.try_register(&account) {
                 Ok(()) => {
@@ -542,6 +570,10 @@ impl AdapterRegistry {
         self.external_vc
             .write()
             .expect("registry vc poison")
+            .remove(account_id);
+        self.registered_config
+            .lock()
+            .expect("registry poisoned")
             .remove(account_id);
         let mut routes = self.routes.lock().expect("registry routes poison");
         routes
@@ -1009,7 +1041,15 @@ impl AdapterRegistry {
         // adapter Aperio has never seen opens exactly like one it ships.
         if let Some(plugin) = &plugin {
             if let Some(schema) = plugin.manifest.account.clone() {
-                return self.register_from_schema(account, &plugin.manifest.id.clone(), &schema);
+                self.register_from_schema(account, &plugin.manifest.id.clone(), &schema)?;
+                // Remember what this adapter was built FROM, so the post-sync
+                // sweep can tell a live-but-stale adapter (a synced config
+                // edit) from a live-and-current one.
+                self.registered_config
+                    .lock()
+                    .expect("registry poisoned")
+                    .insert(account.id.clone(), account.config_json.clone());
+                return Ok(());
             }
         }
 

@@ -761,6 +761,7 @@ pub fn run() {
             commands::list_accounts_missing_credentials,
             commands::set_account_secret,
             commands::reconnect_account,
+            commands::update_account,
             commands::delete_account,
             commands::rename_account,
             commands::run_account_action,

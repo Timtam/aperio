@@ -562,7 +562,13 @@ export const runAccountAction = (
 export const testAccount = (
   adapter_kind: AdapterKind,
   values: Record<string, string | boolean>,
-) => invoke<void>('test_account', { request: { adapter_kind, values } });
+  /** Edit form: probe with the stored credential when a secret field is
+   *  blank, so testing a changed URL needs no retyped password. */
+  account_id?: string,
+) =>
+  invoke<void>('test_account', {
+    request: { adapter_kind, values, account_id: account_id ?? null },
+  });
 
 export const testCaldavConnection = (
   server_url: string,
@@ -786,6 +792,15 @@ export const connectAccount = (request: {
   display_name: string;
   values: Record<string, string | boolean>;
 }) => invoke<Account>('connect_account', { request });
+
+/** Apply the Accounts panel's EDIT form to an existing account: schema-keyed
+ *  values, blank secret fields keep the stored credential, and the change
+ *  travels (`account.updated` + E2E `credential.set`). */
+export const updateAccount = (request: {
+  account_id: string;
+  display_name?: string;
+  values: Record<string, string | boolean>;
+}) => invoke<void>('update_account', { request });
 
 /** A meeting on the provider side. */
 export interface Meeting {

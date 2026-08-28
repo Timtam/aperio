@@ -1314,6 +1314,11 @@ pub async fn run_account_action(
 #[derive(Debug, Deserialize)]
 pub struct TestAccountRequest {
     pub adapter_kind: AdapterKind,
+    /// Set by the EDIT form: a secret field left blank then probes with the
+    /// credential stored for this account, so testing a changed URL does not
+    /// demand retyping a password the user never lost.
+    #[serde(default)]
+    pub account_id: Option<String>,
     /// The form's values, keyed by the schema's field keys — the same shape
     /// [`ConnectAccountRequest`] carries, so what is tested is what would be
     /// connected.
@@ -1351,12 +1356,30 @@ pub async fn test_account(
     // be reached with a token the sign-in produces has nothing to test before
     // the account exists, and says so by failing the probe rather than by a
     // special case here.
-    let plan = host_core::account_setup::plan_new_account(&schema, &request.values, None).map_err(
-        |err| CommandError {
-            code: "invalid_input",
-            message: err.to_string(),
-        },
-    )?;
+    let values = match request.account_id.as_deref() {
+        Some(account_id) => {
+            let secrets = crate::secrets::KeyringSecretStore;
+            host_core::account_update::inherit_stored_secrets(
+                &secrets,
+                account_id,
+                &schema,
+                &request.values,
+            )
+            .map_err(|err| CommandError {
+                code: "invalid_input",
+                message: err.to_string(),
+            })?
+            .0
+        }
+        None => request.values.clone(),
+    };
+    let plan =
+        host_core::account_setup::plan_new_account(&schema, &values, None).map_err(|err| {
+            CommandError {
+                code: "invalid_input",
+                message: err.to_string(),
+            }
+        })?;
     // At most one credential reaches a probe. A schema with several would need
     // the registry to take them all, which no adapter has asked for yet.
     let secret = plan.secrets.first().map(|(_, value)| value.as_str());
@@ -1868,11 +1891,67 @@ pub async fn reconnect_account(
             message: format!("failed to record the OAuth client: {err}"),
         })?;
 
+    // The re-sign-in changed the stored config (the recorded OAuth client
+    // posture) — say so on the wire like every other config write, or the
+    // other devices keep a row that contradicts this one. BEFORE the
+    // registration attempt: the row is committed either way, and a
+    // registration hiccup must not leave the devices silently divergent.
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        account.adapter_kind.as_str(),
+        SyncEvent::AccountUpdated(account_payload(&account)),
+    );
     if let Err(err) = registry.register(&account) {
         return Err(CommandError {
             code: "internal",
             message: format!("adapter registration failed: {err}"),
         });
     }
+    Ok(())
+}
+
+/// The Accounts panel's EDIT form: schema-keyed `values` (the connect form's
+/// shape) applied to an existing account. The shared implementation inherits
+/// blank secret fields from the keychain, carries non-form config keys over,
+/// re-registers the live adapter and emits `account.updated` +
+/// `credential.set` — see `host_core::account_update`.
+#[derive(Debug, Deserialize)]
+pub struct UpdateAccountRequest {
+    pub account_id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub values: serde_json::Map<String, Value>,
+}
+
+#[tauri::command]
+pub async fn update_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
+    request: UpdateAccountRequest,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let secrets = crate::secrets::KeyringSecretStore;
+    host_core::account_update::update_account_values(
+        &shared,
+        &registry,
+        &plugin_manager,
+        &secrets,
+        &event_log,
+        &request.account_id,
+        request.display_name.as_deref(),
+        &request.values,
+    )
+    .map_err(|err| CommandError {
+        code: "invalid_input",
+        message: err.to_string(),
+    })?;
+    // New endpoint, new data: refresh so the views reflect the edited account
+    // without waiting for the periodic loop.
+    refresher.trigger();
     Ok(())
 }

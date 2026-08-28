@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -19,6 +19,7 @@ import {
   AdapterKind,
   AdapterKindInfo,
   accountFormSpec,
+  connectAccount,
   createAccount,
   listAdapterKinds,
   deleteAccount,
@@ -160,9 +161,32 @@ export default function AccountsScreen() {
     Record<string, string | boolean>
   >({});
   const [schemaKind, setSchemaKind] = useState<AdapterKind | null>(null);
+  // Non-null while the schema form EDITS this existing account (instead of
+  // creating one): submit routes through the host's update path, blank
+  // secret fields keep the stored credential.
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  // The edited account's name AT OPEN — the dialog title; the live name
+  // field must not rewrite the dialog's accessible label per keystroke.
+  const [editingAccountName, setEditingAccountName] = useState('');
+  // Monotonic token so only the NEWEST startEdit may commit its state —
+  // two quick Edit taps otherwise let whichever spec fetch resolves LAST
+  // decide which account the dialog edits.
+  const editRequest = useRef(0);
   // Which adapters this build can connect, straight from the host — the picker
   // does not carry the list, because installed plugins decide it.
   const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
+  // Data-account kinds whose plugin is loaded: only those get the Edit
+  // action (sync-only backends are edited on the Sync screen, and a
+  // missing plugin has no schema to render).
+  const editableKinds = useMemo(
+    () =>
+      new Set(
+        availableKinds
+          .filter((k) => k.owns_containers)
+          .map((k) => k.kind),
+      ),
+    [availableKinds],
+  );
 
   // The connect form's own name box, so a refused submit can put the cursor
   // where the problem is instead of only saying so.
@@ -288,6 +312,83 @@ export default function AccountsScreen() {
     [i18n.language, t],
   );
 
+  /** Open the schema form prefilled for an EXISTING account: non-secret
+   *  config values verbatim, device-local fields from their prefs slot,
+   *  secrets deliberately blank (blank = keep the stored one). The OAuth
+   *  client pair is dropped — swapping the client is the reconnect flow's
+   *  job — and secret fields lose their required-mark. */
+  const startEdit = useCallback(
+    (account: Account) => {
+      setError(null);
+      setTestMessage(null);
+      const token = (editRequest.current += 1);
+      void accountFormSpec(account.adapter_kind, i18n.language)
+        .then(async (spec) => {
+          if (editRequest.current !== token) return;
+          if (!spec) {
+            setError(t('dialogs.accounts.pluginMissing'));
+            return;
+          }
+          const oauthKeys = new Set(
+            [spec.oauth?.client_id_field, spec.oauth?.client_secret_field].filter(
+              (k): k is string => k != null,
+            ),
+          );
+          const editSpec = {
+            ...spec,
+            // No oauth block: an edit never opens a browser, so the sign-in
+            // hints the form renders for one would be lies here.
+            oauth: null,
+            fields: spec.fields
+              .filter((f) => !oauthKeys.has(f.key))
+              .map((f) => (f.kind === 'secret' ? { ...f, required: false } : f)),
+          };
+          let config: Record<string, unknown> = {};
+          try {
+            config = JSON.parse(account.config_json) as Record<string, unknown>;
+          } catch {
+            // Unreadable config seeds an empty form; saving rewrites it.
+          }
+          const seeded: Record<string, string | boolean> = {};
+          for (const field of editSpec.fields) {
+            if (field.kind === 'secret') continue;
+            if (field.device_local) {
+              const raw = await getUserPref(
+                `account.${account.id}.${field.key}`,
+              ).catch(() => null);
+              if (raw != null) {
+                try {
+                  const parsed: unknown = JSON.parse(raw);
+                  if (typeof parsed === 'boolean') seeded[field.key] = parsed;
+                  else if (parsed != null) {
+                    seeded[field.key] = String(parsed as string | number);
+                  }
+                } catch {
+                  seeded[field.key] = raw;
+                }
+              }
+              continue;
+            }
+            const held = config[field.key];
+            if (typeof held === 'boolean') seeded[field.key] = held;
+            else if (held != null) seeded[field.key] = String(held as string | number);
+          }
+          if (editRequest.current !== token) return;
+          setSchemaKind(account.adapter_kind);
+          setFormSpec(editSpec);
+          setFormValues(seeded);
+          setDisplayName(account.display_name);
+          setEditingAccountName(account.display_name);
+          setEditingAccountId(account.id);
+          setMode('schema');
+        })
+        .catch((err) => {
+          if (editRequest.current === token) setError(errorMessage(err));
+        });
+    },
+    [i18n.language, t],
+  );
+
   /**
    * Run an action the adapter declared, and merge what it answers back into
    * the form. The host checks the requirements too — this copy only saves a
@@ -340,7 +441,7 @@ export default function AccountsScreen() {
     setTestMessage(null);
     setBusyAction(TEST_ACTION_KEY);
     try {
-      await testAccountValues(schemaKind, formValues);
+      await testAccountValues(schemaKind, formValues, editingAccountId ?? undefined);
       const ok = t('dialogs.accounts.testWorks');
       setTestMessage(ok);
       announce(ok);
@@ -351,7 +452,7 @@ export default function AccountsScreen() {
     } finally {
       setBusyAction(null);
     }
-  }, [announce, formValues, schemaKind, t]);
+  }, [announce, editingAccountId, formValues, schemaKind, t]);
 
   /** Connect an adapter that declared its own form. */
   const addFromSchema = useCallback(async () => {
@@ -382,6 +483,26 @@ export default function AccountsScreen() {
     setError(null);
     setSubmitting(true);
     try {
+      // EDIT: apply to the existing account through the host's update path —
+      // no OAuth exchange, blank secret fields keep the stored credential, and
+      // the change travels (account.updated + E2E credential.set).
+      if (editingAccountId != null) {
+        const updated = await connectAccount({
+          adapter_kind: schemaKind,
+          display_name: name,
+          account_id: editingAccountId,
+          values: collectValues(formSpec, formValues),
+        });
+        resetForm();
+        setFormValues({});
+        setEditingAccountId(null);
+        setMode('list');
+        await load();
+        pendingFocusId.current = updated.id;
+        announce(t('dialogs.accounts.editSaved', { name }));
+        void refreshExternalCache().catch(() => undefined);
+        return;
+      }
       // A browser sign-in hands the screen to a native auth session, which is a
       // silent hand-off for a screen reader unless we say so.
       if (formSpec.oauth != null) announce(t('mobile.oauthConnecting'));
@@ -420,6 +541,7 @@ export default function AccountsScreen() {
   }, [
     announce,
     displayName,
+    editingAccountId,
     formSpec,
     formValues,
     load,
@@ -432,9 +554,11 @@ export default function AccountsScreen() {
   const cancelAdd = useCallback(() => {
     resetForm();
     setError(null);
+    setTestMessage(null);
     setFormSpec(null);
     setFormValues({});
     setSchemaKind(null);
+    setEditingAccountId(null);
     setMode('list');
   }, [resetForm]);
 
@@ -794,6 +918,9 @@ export default function AccountsScreen() {
                           ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
                           : []),
                         { name: 'rename', label: t('mobile.rename') },
+                        ...(editableKinds.has(account.adapter_kind)
+                          ? [{ name: 'edit', label: t('mobile.edit') }]
+                          : []),
                         { name: 'resync', label: t('dialogs.accounts.forceResyncShort') },
                         { name: 'delete', label: t('dialogs.accounts.delete') },
                       ]
@@ -801,6 +928,7 @@ export default function AccountsScreen() {
                 onAccessibilityAction={(e) => {
                   if (e.nativeEvent.actionName === 'delete') void remove(account);
                   else if (e.nativeEvent.actionName === 'rename') startRename(account);
+                  else if (e.nativeEvent.actionName === 'edit') startEdit(account);
                   else if (e.nativeEvent.actionName === 'resync') void resyncAccount(account);
                   else if (e.nativeEvent.actionName === 'reconnect') {
                     // OAuth re-runs the provider sign-in; others reveal the
@@ -878,6 +1006,18 @@ export default function AccountsScreen() {
                     >
                       <Text style={styles.smallButtonText}>{t('mobile.rename')}</Text>
                     </Pressable>
+                    {editableKinds.has(account.adapter_kind) && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t('dialogs.accounts.editAccount', {
+                          name: account.display_name,
+                        })}
+                        onPress={() => startEdit(account)}
+                        style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.smallButtonText}>{t('mobile.edit')}</Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={t('dialogs.accounts.forceResync', {
@@ -982,13 +1122,19 @@ export default function AccountsScreen() {
       <AppDialog
         visible={mode === 'schema' && formSpec != null}
         title={
-          schemaKind
-            ? t(`dialogs.accounts.kindName.${schemaKind}`, {
-                defaultValue: schemaKind,
-              })
-            : ''
+          editingAccountId != null
+            ? t('dialogs.accounts.editTitle', { name: editingAccountName })
+            : schemaKind
+              ? t(`dialogs.accounts.kindName.${schemaKind}`, {
+                  defaultValue: schemaKind,
+                })
+              : ''
         }
-        confirmLabel={t('dialogs.accounts.add')}
+        confirmLabel={
+          editingAccountId != null
+            ? t('mobile.save')
+            : t('dialogs.accounts.add')
+        }
         cancelLabel={t('mobile.cancel')}
         onConfirm={() => void addFromSchema()}
         onCancel={cancelAdd}
@@ -1005,13 +1151,19 @@ export default function AccountsScreen() {
             accessibilityLabel={t('dialogs.accounts.nameLabel')}
           />
         </View>
+        {editingAccountId != null && (
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.accounts.editSecretsHint')}
+          </Text>
+        )}
         {formSpec && (
           <AccountSchemaForm
             spec={formSpec}
             values={formValues}
-            onChange={(key, value) =>
-              setFormValues((prev) => ({ ...prev, [key]: value }))
-            }
+            onChange={(key, value) => {
+              setTestMessage(null);
+              setFormValues((prev) => ({ ...prev, [key]: value }));
+            }}
           />
         )}
         {/* One button per action the adapter declared, then the probe every

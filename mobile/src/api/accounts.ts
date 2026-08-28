@@ -232,8 +232,13 @@ export const listAdapterKinds = async (): Promise<AdapterKindInfo[]> =>
 export const testAccountValues = async (
   adapter_kind: AdapterKind,
   values: Record<string, string | boolean>,
+  /** Edit form: probe with the stored credential when a secret field is
+   *  blank, so testing a changed URL needs no retyped password. */
+  account_id?: string,
 ): Promise<void> => {
-  await CalFfi.testAccountValuesJson(JSON.stringify({ adapter_kind, values }));
+  await CalFfi.testAccountValuesJson(
+    JSON.stringify({ adapter_kind, values, account_id: account_id ?? null }),
+  );
 };
 
 /**
@@ -281,6 +286,11 @@ export const beginAccountOauth = async (
 export interface ConnectAccountRequest {
   adapter_kind: AdapterKind;
   display_name: string;
+  /** When set, EDIT this existing account instead of creating one: blank
+   *  secret fields keep the stored credential, the change travels
+   *  (`account.updated` + E2E `credential.set`), and no OAuth exchange
+   *  runs. */
+  account_id?: string;
   values: Record<string, string | boolean>;
   code?: string;
   pkce_verifier?: string;

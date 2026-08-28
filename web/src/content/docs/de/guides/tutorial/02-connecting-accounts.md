@@ -65,6 +65,27 @@ selben Anbieter (z. B. zwei Google-Konten). Jede Quelle erscheint in der
 Seitenleiste mit eigenem Namen und eigener Farbe und lässt sich einzeln
 ein- und ausblenden.
 
+### Ein Konto bearbeiten
+
+Server-URL, Endpunkt, Benutzername, Passwort oder Token lassen sich
+nachträglich ändern, ohne das Konto neu anzulegen: In **Einstellungen →
+Konten** den Eintrag auswählen und **Bearbeiten** wählen (am Telefon auch in
+den Aktionen der Zeile). Es ist dasselbe Formular wie beim Anlegen,
+vorbefüllt mit den gespeicherten Werten — **Passwort- und Token-Felder sind
+leer, und leer heißt „den gespeicherten Wert behalten"**. Wo der Anbieter es
+erlaubt, prüft **Verbindung prüfen** die neuen Werte vor dem Speichern (bei
+leerem Feld mit dem gespeicherten Passwort). Eine Grenze: Ein optionales
+gespeichertes Passwort lässt sich über das Bearbeiten nicht **entfernen** —
+leer heißt immer behalten; wer eines ganz loswerden will, legt das Konto neu
+an.
+
+Die Änderungen synchronisieren sich: Die neue Konfiguration erreicht deine
+anderen Geräte mit der nächsten Sync-Runde, und ein geändertes Passwort oder
+Token reist mit, wenn die **Ende-zu-Ende-Verschlüsselung** aktiv ist (siehe
+Synchronisations-Kapitel) — die anderen Geräte stellen ohne Neueingabe um. Die Anmelde-Identität eines
+Google-/Microsoft-/Webex-Kontos (der OAuth-Client) wird hier nicht
+bearbeitet; dafür gibt es **Neu verbinden**.
+
 ### Konto umbenennen
 
 Den Anzeigenamen eines Kontos kannst du jederzeit ändern – entweder in

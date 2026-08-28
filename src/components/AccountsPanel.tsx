@@ -40,6 +40,7 @@ import {
   clampErrorText,
   useRefreshErrors,
 } from '../state/useRefreshErrors';
+import { AccountEditDialog } from './AccountEditDialog';
 import { AccountSchemaForm } from './AccountSchemaForm';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
@@ -177,6 +178,9 @@ export function AccountsPanel() {
   const [formValues, setFormValues] = useState<
     Record<string, string | boolean>
   >({});
+
+  // The account being edited in the schema-driven edit dialog, or null.
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -1102,6 +1106,25 @@ export function AccountsPanel() {
                 )}
               </section>
             )}
+          {/* Schema-driven EDIT — only for data accounts whose plugin is
+              loaded: sync-only backends are edited on the Sync screen, and a
+              missing plugin has no schema to render. */}
+          {accounts[focusIndex] &&
+            !isLocalAt(focusIndex) &&
+            accounts[focusIndex].plugin_loaded !== false &&
+            availableKinds.find(
+              (k) => k.kind === accounts[focusIndex].adapter_kind,
+            )?.owns_containers === true && (
+              <button
+                type="button"
+                className="form__action accounts-list__edit"
+                onClick={() => setEditingAccount(accounts[focusIndex])}
+              >
+                {t('dialogs.accounts.editAccount', {
+                  name: accounts[focusIndex].display_name,
+                })}
+              </button>
+            )}
           {/* Per-account recovery: force a full cold re-sync of the FOCUSED
               external account. Clears its delta tokens + cached window so the
               next refresh re-bootstraps the whole collection from the provider —
@@ -1288,6 +1311,15 @@ export function AccountsPanel() {
           name: confirmTarget?.display_name ?? '',
         })}
       />
+
+      {editingAccount && (
+        <AccountEditDialog
+          isOpen
+          account={editingAccount}
+          onClose={() => setEditingAccount(null)}
+          onSaved={refresh}
+        />
+      )}
       <ContactsPrivacyNoticeModal
         isOpen={privacyNoticeFor !== null}
         adapterKind={privacyNoticeFor}
