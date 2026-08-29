@@ -1099,7 +1099,10 @@ fn share_user_body(
 /// `/projects/{id}/users/{user}`. Same split as [`share_user_body`]:
 /// v1 gets `permission` (current) + `right` (legacy), v2's strict schema
 /// gets only `permission`.
-fn member_permission_body(right: MemberRight, version: crate::api::ApiVersion) -> serde_json::Value {
+fn member_permission_body(
+    right: MemberRight,
+    version: crate::api::ApiVersion,
+) -> serde_json::Value {
     let perm = member_right_to_vikunja(Some(right));
     match version {
         crate::api::ApiVersion::V1 => serde_json::json!({ "permission": perm, "right": perm }),
@@ -2476,7 +2479,11 @@ mod tests {
         // older servers read `user_id` + `right`. We send both names for
         // each — sending only the old names left the user unresolved
         // (error 1005) and the level stuck at Read.
-        let body = share_user_body("alice", Some(MemberRight::Write), crate::api::ApiVersion::V1);
+        let body = share_user_body(
+            "alice",
+            Some(MemberRight::Write),
+            crate::api::ApiVersion::V1,
+        );
         assert_eq!(body["username"], "alice");
         assert_eq!(body["user_id"], "alice");
         assert_eq!(body["permission"], 1);
@@ -2484,7 +2491,11 @@ mod tests {
 
         // v2's strict schema (additionalProperties: false) rejects the
         // legacy keys with 422 — only the current pair may go out.
-        let body = share_user_body("alice", Some(MemberRight::Write), crate::api::ApiVersion::V2);
+        let body = share_user_body(
+            "alice",
+            Some(MemberRight::Write),
+            crate::api::ApiVersion::V2,
+        );
         assert_eq!(
             body,
             serde_json::json!({ "username": "alice", "permission": 1 }),
@@ -3794,7 +3805,10 @@ mod tests {
             .create_async()
             .await;
         let _buckets = server
-            .mock("GET", "/api/v2/projects/3/views/11/buckets?page=1&per_page=50")
+            .mock(
+                "GET",
+                "/api/v2/projects/3/views/11/buckets?page=1&per_page=50",
+            )
             .with_status(200)
             .with_body(r#"{"items":[{"id":9,"title":"Old","position":3.5,"limit":4}]}"#)
             .create_async()
@@ -3832,7 +3846,10 @@ mod tests {
             .create_async()
             .await;
         let _buckets = server
-            .mock("GET", "/api/v2/projects/3/views/11/buckets?page=1&per_page=50")
+            .mock(
+                "GET",
+                "/api/v2/projects/3/views/11/buckets?page=1&per_page=50",
+            )
             .with_status(200)
             .with_body(r#"{"items":[{"id":8,"title":"Other","position":1.0}]}"#)
             .create_async()

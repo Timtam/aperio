@@ -505,7 +505,10 @@ mod tests {
             "Forbidden",
         );
         // Anything else passes through as-is.
-        assert_eq!(trim_message("<html>proxy login</html>"), "<html>proxy login</html>");
+        assert_eq!(
+            trim_message("<html>proxy login</html>"),
+            "<html>proxy login</html>"
+        );
     }
 
     // ── API-version detection ──────────────────────────────────
