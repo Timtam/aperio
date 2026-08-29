@@ -94,15 +94,33 @@ export function Modal({
   // snapshot — restoring to body would be worse than doing nothing.
   // Code that needs a reliable restore (e.g. `DialogState`) captures
   // the trigger synchronously *before* opening the dialog.
+  //
+  // StrictMode-proofing (the dev build double-invokes mount effects —
+  // run, cleanup, run again, with the DOM staying put): both halves
+  // must not treat that synthetic cycle as a real open/close.
+  //   - The SNAPSHOT must not overwrite the real trigger on the second
+  //     run: by then focus is already INSIDE the dialog, and restoring
+  //     to a dialog-internal node after the real close is a no-op on a
+  //     disconnected element — focus would fall to <body> and NVDA out
+  //     of application mode.
+  //   - The RESTORE must not fire on the synthetic cleanup at all: the
+  //     dialog is still there, and yanking focus back to the trigger
+  //     silently un-announces a dialog that IS open. That's harmless
+  //     under DialogHost (the shell is inert, the yank fails) but
+  //     stranded every dialog NESTED inside another one — the Settings
+  //     account-edit dialog opened with focus left on its trigger. The
+  //     dialog node being gone is what tells a real close apart.
   useEffect(() => {
     if (!isOpen) return;
-    const candidate = document.activeElement;
-    previouslyFocused.current =
-      candidate instanceof HTMLElement && candidate !== document.body
-        ? candidate
-        : null;
-
     const dialog = dialogRef.current;
+    const candidate = document.activeElement;
+    if (!(dialog && candidate instanceof HTMLElement && dialog.contains(candidate))) {
+      previouslyFocused.current =
+        candidate instanceof HTMLElement && candidate !== document.body
+          ? candidate
+          : null;
+    }
+
     if (dialog) {
       const body = dialog.querySelector<HTMLElement>('.modal__body') ?? dialog;
       // An explicit initial-focus target wins: a content-first dialog whose
@@ -116,6 +134,11 @@ export function Modal({
     }
 
     return () => {
+      // Still in the document ⇒ StrictMode's synthetic cleanup, not a
+      // close — leave focus where the dialog put it. (`dialog` is the
+      // node this run saw; a real close removed it from the DOM before
+      // this cleanup runs, a synthetic one did not.)
+      if (dialog?.isConnected) return;
       const target = previouslyFocused.current;
       if (!target) return;
       // Defer past the current React commit so the caller's `inert`

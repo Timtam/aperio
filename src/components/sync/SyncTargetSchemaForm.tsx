@@ -98,7 +98,7 @@ export function SyncTargetSchemaForm({
 }: {
   onConnected: (outcome: SyncConnectOutcome) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const messageForError = useSyncErrorMessage();
@@ -167,7 +167,7 @@ export function SyncTargetSchemaForm({
     setSpec(null);
     setValues({});
     setPreview(null);
-    accountFormSpec(kind)
+    accountFormSpec(kind, i18n.language)
       .then((s) => {
         if (!cancelled) setSpec(s);
       })
@@ -177,7 +177,7 @@ export function SyncTargetSchemaForm({
     return () => {
       cancelled = true;
     };
-  }, [kind, messageForError, showError]);
+  }, [kind, messageForError, showError, i18n.language]);
 
   const onChange = useCallback((key: string, value: string | boolean) => {
     setValues((prev) => ({ ...prev, [key]: value }));

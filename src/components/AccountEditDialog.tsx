@@ -44,7 +44,7 @@ export function AccountEditDialog({
   /** Called after a successful save (the panel reloads its list). */
   onSaved: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const [spec, setSpec] = useState<AccountFormSpec | null>(null);
   const [values, setValues] = useState<Record<string, string | boolean>>({});
@@ -86,7 +86,7 @@ export function AccountEditDialog({
     setDisplayName(account.display_name);
     void (async () => {
       try {
-        const fetched = await accountFormSpec(account.adapter_kind);
+        const fetched = await accountFormSpec(account.adapter_kind, i18n.language);
         if (cancelled) return;
         if (fetched == null) {
           // No plugin serves this kind (the Edit button is gated on the kind
@@ -132,7 +132,7 @@ export function AccountEditDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, account, t]);
+  }, [isOpen, account, t, i18n.language]);
 
   const onChange = useCallback((key: string, value: string | boolean) => {
     setValues((prev) => ({ ...prev, [key]: value }));
