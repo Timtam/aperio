@@ -91,7 +91,9 @@ pub async fn list_task_lists(client: &VikunjaClient) -> VikunjaResult<Vec<TaskLi
     let mut page: u32 = 1;
     loop {
         let path = format!("/projects?page={page}&per_page=50");
-        let entries: Vec<ProjectEntry> = client.get_json(&path).await?;
+        // v1: a bare array (short page = last page). v2: the envelope, whose
+        // total_pages is the authoritative stop.
+        let (entries, total_pages) = client.get_page::<ProjectEntry>(&path).await?;
         if entries.is_empty() {
             break;
         }
@@ -119,7 +121,15 @@ pub async fn list_task_lists(client: &VikunjaClient) -> VikunjaResult<Vec<TaskLi
             // `read_only` accordingly.
             out.push(map_project(entry));
         }
-        if len < 50 {
+        // total_pages is authoritative when present; the short-page
+        // heuristic only decides when the server gave no count (v1) — a
+        // v2 server whose per-page cap is configured below 50 ships
+        // short pages that are nonetheless full.
+        let stop = match total_pages {
+            Some(total) => page >= total,
+            None => len < 50,
+        };
+        if stop {
             break;
         }
         page += 1;
@@ -162,7 +172,7 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
         // the per-view bucket memberships (≥0.24); older servers ignore
         // the unknown param and keep returning the flat `bucket_id`.
         let path = format!("/projects/{project_id}/tasks?page={page}&per_page=50&expand=buckets");
-        let entries: Vec<TaskEntry> = client.get_json(&path).await?;
+        let (entries, total_pages) = client.get_page::<TaskEntry>(&path).await?;
         if entries.is_empty() {
             break;
         }
@@ -188,7 +198,15 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
             }
             out.push(task);
         }
-        if len < 50 {
+        // total_pages is authoritative when present; the short-page
+        // heuristic only decides when the server gave no count (v1) — a
+        // v2 server whose per-page cap is configured below 50 ships
+        // short pages that are nonetheless full.
+        let stop = match total_pages {
+            Some(total) => page >= total,
+            None => len < 50,
+        };
+        if stop {
             break;
         }
         page += 1;
@@ -217,7 +235,7 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
         return Ok(Vec::new());
     };
     let path = format!("/projects/{project_id}/views/{}/buckets", view.id);
-    let buckets: Vec<BucketEntry> = match client.get_json(&path).await {
+    let buckets: Vec<BucketEntry> = match get_all_pages(client, &path).await {
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
     };
@@ -233,6 +251,46 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
 /// Resolve `(project_id, kanban_view_id)` for a section-management call,
 /// erroring if the project has no kanban view — Vikunja ≥0.24 hangs
 /// buckets off the view, so without one there's nothing to manage.
+/// Every row of a LIST endpoint that is unpaginated on v1 but paginated
+/// on v2 (views, buckets, project members/shares). v1 gets the single
+/// unparameterised request it always made — byte-identical to the
+/// pre-v2 adapter, and safe because a v1 server would ignore page
+/// params and answer the full array on every "page". v2 walks
+/// `page=`/`per_page=` until the envelope's `total_pages` (or a short
+/// page, when the count is missing) says done. `path` must not already
+/// carry a query string.
+async fn get_all_pages<T: serde::de::DeserializeOwned>(
+    client: &VikunjaClient,
+    path: &str,
+) -> VikunjaResult<Vec<T>> {
+    match client.version().await? {
+        crate::api::ApiVersion::V1 => client.get_json(path).await,
+        crate::api::ApiVersion::V2 => {
+            let mut out = Vec::new();
+            let mut page: u32 = 1;
+            loop {
+                let (mut items, total_pages) = client
+                    .get_page::<T>(&format!("{path}?page={page}&per_page=50"))
+                    .await?;
+                if items.is_empty() {
+                    break;
+                }
+                let len = items.len();
+                out.append(&mut items);
+                let stop = match total_pages {
+                    Some(total) => page >= total,
+                    None => len < 50,
+                };
+                if stop || page > 200 {
+                    break;
+                }
+                page += 1;
+            }
+            Ok(out)
+        }
+    }
+}
+
 async fn section_view(client: &VikunjaClient, list_id: &str) -> VikunjaResult<(i64, KanbanView)> {
     let project_id = parse_id(list_id, "task list id")?;
     let Some(view) = kanban_view(client, project_id).await else {
@@ -267,12 +325,16 @@ pub async fn create_section(
     let (project_id, view) = section_view(client, list_id).await?;
     let path = format!("/projects/{project_id}/views/{}/buckets", view.id);
     let body = serde_json::json!({ "title": name });
-    let entry: BucketEntry = client.put_json(&path, &body).await?;
+    let entry: BucketEntry = client.create_json(&path, &body).await?;
     Ok(map_bucket(entry, list_id))
 }
 
-/// `POST /projects/{p}/views/{v}/buckets/{id}` with `{ title }` — rename
-/// a bucket.
+/// Rename a bucket. v1: `POST …/buckets/{id}` with `{ title }` (partial).
+/// v2 offers only `PUT` here — a FULL replace of title, position AND the
+/// WIP `limit` — so the current bucket is read first and both other
+/// fields are echoed, or the rename would silently reorder the board and
+/// drop a user-set WIP limit. A bucket the read-back can't find is an
+/// error: replacing blind would do exactly that damage.
 pub async fn update_section(
     client: &VikunjaClient,
     list_id: &str,
@@ -286,9 +348,30 @@ pub async fn update_section(
         "/projects/{project_id}/views/{}/buckets/{bucket_id}",
         view.id
     );
-    let body = serde_json::json!({ "title": new_name });
-    let entry: BucketEntry = client.post_json(&path, &body).await?;
-    Ok(map_bucket(entry, list_id))
+    match client.version().await? {
+        crate::api::ApiVersion::V1 => {
+            let body = serde_json::json!({ "title": new_name });
+            let entry: BucketEntry = client.post_json(&path, &body).await?;
+            Ok(map_bucket(entry, list_id))
+        }
+        crate::api::ApiVersion::V2 => {
+            let list_path = format!("/projects/{project_id}/views/{}/buckets", view.id);
+            let buckets: Vec<BucketEntry> = get_all_pages(client, &list_path).await?;
+            let Some(current) = buckets.into_iter().find(|b| b.id == bucket_id) else {
+                return Err(VikunjaError::Http {
+                    status: 404,
+                    message: format!("bucket {bucket_id} not found in its kanban view"),
+                });
+            };
+            let body = serde_json::json!({
+                "title": new_name,
+                "position": current.position,
+                "limit": current.limit,
+            });
+            let entry: BucketEntry = client.put_json(&path, &body).await?;
+            Ok(map_bucket(entry, list_id))
+        }
+    }
 }
 
 /// `DELETE /projects/{p}/views/{v}/buckets/{id}` — remove a bucket; its
@@ -313,8 +396,7 @@ pub async fn delete_section(
 /// without the views endpoint, matching `list_sections`' graceful
 /// degradation.
 async fn kanban_view(client: &VikunjaClient, project_id: i64) -> Option<KanbanView> {
-    let views: Vec<ViewEntry> = client
-        .get_json(&format!("/projects/{project_id}/views"))
+    let views: Vec<ViewEntry> = get_all_pages(client, &format!("/projects/{project_id}/views"))
         .await
         .ok()?;
     views
@@ -337,10 +419,12 @@ async fn leftmost_bucket(
     view_id: i64,
     exclude: i64,
 ) -> Option<i64> {
-    let buckets: Vec<BucketEntry> = client
-        .get_json(&format!("/projects/{project_id}/views/{view_id}/buckets"))
-        .await
-        .ok()?;
+    let buckets: Vec<BucketEntry> = get_all_pages(
+        client,
+        &format!("/projects/{project_id}/views/{view_id}/buckets"),
+    )
+    .await
+    .ok()?;
     buckets
         .into_iter()
         .filter(|b| exclude == 0 || b.id != exclude)
@@ -451,7 +535,12 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
         view.id
     );
     let body = serde_json::json!({ "task_id": task_id, "bucket_id": target });
-    let moved: VikunjaResult<serde_json::Value> = client.post_json(&path, &body).await;
+    // Same path both surfaces; only the verb moved (v1 POST → v2 PUT).
+    let moved: VikunjaResult<serde_json::Value> = match client.version().await {
+        Ok(crate::api::ApiVersion::V1) => client.post_json(&path, &body).await,
+        Ok(crate::api::ApiVersion::V2) => client.put_json(&path, &body).await,
+        Err(err) => Err(err),
+    };
     match moved {
         // `target` is a non-done bucket by construction.
         Ok(_) => Some(target),
@@ -468,11 +557,12 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
     }
 }
 
-/// Replace a task's assignee set via `POST /tasks/{id}/assignees/bulk`.
-/// Vikunja's bulk endpoint takes the FULL desired list and syncs to it
-/// (adds missing, drops extras), so an empty list clears all assignees.
-/// `TaskUser.id` is the stringified Vikunja numeric user id; entries
-/// that don't parse are skipped.
+/// Replace a task's assignee set via `/tasks/{id}/assignees/bulk`
+/// (v1 `POST`, v2 `PUT` — same path, same body). Vikunja's bulk endpoint
+/// takes the FULL desired list and syncs to it (adds missing, drops
+/// extras), so an empty list clears all assignees. `TaskUser.id` is the
+/// stringified Vikunja numeric user id; entries that don't parse are
+/// skipped.
 async fn set_assignees(
     client: &VikunjaClient,
     task_id: i64,
@@ -484,9 +574,11 @@ async fn set_assignees(
         .map(|id| serde_json::json!({ "id": id }))
         .collect();
     let body = serde_json::json!({ "assignees": ids });
-    let _: serde_json::Value = client
-        .post_json(&format!("/tasks/{task_id}/assignees/bulk"), &body)
-        .await?;
+    let path = format!("/tasks/{task_id}/assignees/bulk");
+    let _: serde_json::Value = match client.version().await? {
+        crate::api::ApiVersion::V1 => client.post_json(&path, &body).await?,
+        crate::api::ApiVersion::V2 => client.put_json(&path, &body).await?,
+    };
     Ok(())
 }
 
@@ -502,7 +594,7 @@ pub async fn create_task(
     let project_id = parse_id(list_id, "task list id")?;
     let path = format!("/projects/{project_id}/tasks");
     let body = new_task_to_body(&task);
-    let entry: TaskEntry = client.put_json(&path, &body).await?;
+    let entry: TaskEntry = client.create_json(&path, &body).await?;
     let new_id = entry.id;
     let mut mapped = map_task(entry, list_id);
     // A fresh task has no assignees, so skip the round-trip unless the
@@ -574,14 +666,35 @@ pub async fn create_task(
     Ok(mapped)
 }
 
-/// `POST /tasks/{id}`. Vikunja accepts a partial body and returns
-/// the merged result. We send every user-visible field so the
-/// server's view matches the local one without diffing logic.
+/// Update a task: v1 `POST /tasks/{id}` (partial), v2 `PATCH` (JSON Merge
+/// Patch). We send every user-visible field so the server's view matches
+/// the local one without diffing logic. One semantic gap between the two
+/// surfaces needs bridging: v1 decodes the body into a fresh struct and
+/// writes ALL columns, so a field the body OMITS came back cleared — merge
+/// patch keeps an omitted key instead. The fields our body builder omits
+/// WITH clear-intent (the three dates, and a description that emptied out)
+/// therefore get an explicit `null` on v2, which is merge patch's removal
+/// form, so clearing a deadline or description keeps working. The other
+/// skip-serialized fields are omitted precisely so the server keeps them
+/// (bucket placement, colour, done_at) — merge patch honours that on its
+/// own.
 pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<Task> {
     let task_id = parse_id(&task.id, "task id")?;
     let path = format!("/tasks/{task_id}");
-    let body = task_to_body(task);
-    let entry: TaskEntry = client.post_json(&path, &body).await?;
+    let entry: TaskEntry = match client.version().await? {
+        crate::api::ApiVersion::V1 => client.post_json(&path, &task_to_body(task)).await?,
+        crate::api::ApiVersion::V2 => {
+            let mut body = serde_json::to_value(task_to_body(task))
+                .map_err(|e| VikunjaError::Protocol(format!("serialize task body: {e}")))?;
+            if let Some(obj) = body.as_object_mut() {
+                for key in ["due_date", "start_date", "end_date", "description"] {
+                    obj.entry(key.to_string())
+                        .or_insert(serde_json::Value::Null);
+                }
+            }
+            client.update_json(&path, &body).await?
+        }
+    };
     // Sync the assignee set on every update so the picker can both add
     // and clear assignees (the bulk endpoint takes the full list).
     set_assignees(client, task_id, &task.assignees).await?;
@@ -727,7 +840,7 @@ async fn set_parent_relation(
         "other_task_id": parent_id,
         "relation_kind": "parenttask",
     });
-    let res: VikunjaResult<serde_json::Value> = client.put_json(&path, &body).await;
+    let res: VikunjaResult<serde_json::Value> = client.create_json(&path, &body).await;
     match res {
         Ok(_) | Err(VikunjaError::Http { status: 409, .. }) => Ok(()),
         Err(err) => Err(err),
@@ -756,10 +869,9 @@ pub async fn delete_task(client: &VikunjaClient, task_id: &str) -> VikunjaResult
     client.delete(&path).await
 }
 
-/// `POST /projects/{id}` with the renamed `title`. Vikunja accepts a
-/// partial body — we only set the title to avoid clobbering colour
-/// or other project-level fields a future patch might also be
-/// editing.
+/// Rename a project: v1 `POST /projects/{id}` (partial), v2 `PATCH`
+/// (merge patch — equally partial). Only the title is sent, to avoid
+/// clobbering colour or other project-level fields.
 pub async fn rename_task_list(
     client: &VikunjaClient,
     list_id: &str,
@@ -768,11 +880,11 @@ pub async fn rename_task_list(
     let project_id = parse_id(list_id, "task list id")?;
     let path = format!("/projects/{project_id}");
     let body = serde_json::json!({ "title": new_name });
-    let _: serde_json::Value = client.post_json(&path, &body).await?;
+    let _: serde_json::Value = client.update_json(&path, &body).await?;
     Ok(())
 }
 
-/// `PUT /projects` — create a project. `parent_id` nests it under
+/// Create a project (v1 `PUT /projects`, v2 `POST`). `parent_id` nests it under
 /// another project (Vikunja's `parent_project_id`); `None` ⇒ top
 /// level. Returns the created project mapped to a `TaskList`.
 pub async fn create_task_list(
@@ -785,7 +897,7 @@ pub async fn create_task_list(
         let pid = parse_id(parent, "parent project id")?;
         body["parent_project_id"] = serde_json::json!(pid);
     }
-    let created: ProjectEntry = client.put_json("/projects", &body).await?;
+    let created: ProjectEntry = client.create_json("/projects", &body).await?;
     Ok(map_project(created))
 }
 
@@ -797,20 +909,30 @@ pub async fn delete_task_list(client: &VikunjaClient, list_id: &str) -> VikunjaR
     client.delete(&path).await
 }
 
-/// `GET /projects/{id}/projectusers` — the users with access to the
-/// project, i.e. the valid assignee pool (DESIGN §9.7). Degrades to an
-/// empty list on servers that don't expose the endpoint (older Vikunja)
-/// so the picker shows no candidates rather than erroring.
+/// The users with access to the project, i.e. the valid assignee pool
+/// (DESIGN §9.7): v1 `GET /projects/{id}/projectusers`; v2 dropped that
+/// endpoint in favour of `GET /projects/{id}/users/search` (empty query =
+/// everyone with access). Degrades to an empty list on error so the picker
+/// shows no candidates rather than erroring.
 pub async fn list_task_list_members(
     client: &VikunjaClient,
     list_id: &str,
 ) -> VikunjaResult<Vec<TaskUser>> {
     let project_id = parse_id(list_id, "task list id")?;
-    let users: Vec<VikunjaUser> = match client
-        .get_json(&format!("/projects/{project_id}/projectusers"))
-        .await
-    {
-        Ok(u) => u,
+    // The degrade-to-empty contract covers the version probe too — a
+    // first-call flake must not surface as a picker error.
+    let Ok(version) = client.version().await else {
+        return Ok(Vec::new());
+    };
+    let path = match version {
+        crate::api::ApiVersion::V1 => format!("/projects/{project_id}/projectusers"),
+        crate::api::ApiVersion::V2 => format!("/projects/{project_id}/users/search"),
+    };
+    // One plain request on both surfaces: v2's `users/search` returns the
+    // envelope but declares NO page/per_page params (it is served
+    // unpaginated), so walking pages here could only misfire.
+    let users: Vec<VikunjaUser> = match client.get_page(&path).await {
+        Ok((u, _)) => u,
         Err(_) => return Ok(Vec::new()),
     };
     Ok(users.into_iter().map(map_user).collect())
@@ -879,13 +1001,11 @@ pub async fn list_task_list_shares(
     list_id: &str,
 ) -> VikunjaResult<Vec<TaskListShare>> {
     let project_id = parse_id(list_id, "task list id")?;
-    let entries: Vec<ProjectUserEntry> = match client
-        .get_json(&format!("/projects/{project_id}/users"))
-        .await
-    {
-        Ok(e) => e,
-        Err(_) => return Ok(Vec::new()),
-    };
+    let entries: Vec<ProjectUserEntry> =
+        match get_all_pages(client, &format!("/projects/{project_id}/users")).await {
+            Ok(e) => e,
+            Err(_) => return Ok(Vec::new()),
+        };
     Ok(entries
         .into_iter()
         .map(|e| {
@@ -908,7 +1028,8 @@ pub async fn list_task_list_shares(
         .collect())
 }
 
-/// `GET /users?s=` — directory search for users to add as members. The
+/// Directory search for users to add as members (`GET /users?s=` on v1,
+/// `?q=` on v2 — the one renamed query parameter we use). The
 /// returned `TaskUser.id` carries the USERNAME (the membership add key).
 ///
 /// Errors propagate (rather than collapsing to an empty list) so the
@@ -919,8 +1040,12 @@ pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let users: Vec<VikunjaUser> = client
-        .get_json(&format!("/users?s={}", encode_query(query)))
+    let param = match client.version().await? {
+        crate::api::ApiVersion::V1 => "s",
+        crate::api::ApiVersion::V2 => "q",
+    };
+    let (users, _) = client
+        .get_page::<VikunjaUser>(&format!("/users?{param}={}", encode_query(query)))
         .await?;
     Ok(users
         .into_iter()
@@ -933,34 +1058,53 @@ pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<
         .collect())
 }
 
-/// Body for `PUT /projects/{id}/users`. The share is keyed on the
-/// USERNAME, which Vikunja resolves server-side via `GetUserByUsername`.
+/// Body for the share-with-user create on `/projects/{id}/users`. The
+/// share is keyed on the USERNAME, which Vikunja resolves server-side
+/// via `GetUserByUsername`.
 ///
-/// Vikunja renamed two body fields over time, and we send the old + new
-/// name for each so current and legacy servers both bind the value (an
-/// unknown extra field is ignored):
+/// v1 renamed two body fields over time, and on that surface we send the
+/// old + new name for each so current and legacy servers both bind the
+/// value (v1 ignores unknown extra fields):
 ///   - the user key: `user_id` (≤ 0.x) → `username` (current). Sending
 ///     only `user_id` left `Username` empty on current servers, so the
 ///     lookup hit error 1005 ("The user does not exist").
 ///   - the level: `right` (≤ 0.x) → `permission` (current). Sending only
 ///     `right` left `Permission` at 0 on current servers, so every share
 ///     was created/updated as Read regardless of the chosen level.
-fn share_user_body(member_ref: &str, right: Option<MemberRight>) -> serde_json::Value {
+///
+/// v2 is the opposite world: its `ProjectUser` schema is strict
+/// (`additionalProperties: false`), so the legacy keys would get the
+/// whole request REJECTED with 422 — only the current pair goes out.
+fn share_user_body(
+    member_ref: &str,
+    right: Option<MemberRight>,
+    version: crate::api::ApiVersion,
+) -> serde_json::Value {
     let perm = member_right_to_vikunja(right);
-    serde_json::json!({
-        "username": member_ref,
-        "user_id": member_ref,
-        "permission": perm,
-        "right": perm,
-    })
+    match version {
+        crate::api::ApiVersion::V1 => serde_json::json!({
+            "username": member_ref,
+            "user_id": member_ref,
+            "permission": perm,
+            "right": perm,
+        }),
+        crate::api::ApiVersion::V2 => serde_json::json!({
+            "username": member_ref,
+            "permission": perm,
+        }),
+    }
 }
 
-/// Body for `POST /projects/{id}/users/{user}` (change a share's level).
-/// Sends both `permission` (current) and `right` (legacy) — see
-/// [`share_user_body`].
-fn member_permission_body(right: MemberRight) -> serde_json::Value {
+/// Body for the change-a-share's-level call on
+/// `/projects/{id}/users/{user}`. Same split as [`share_user_body`]:
+/// v1 gets `permission` (current) + `right` (legacy), v2's strict schema
+/// gets only `permission`.
+fn member_permission_body(right: MemberRight, version: crate::api::ApiVersion) -> serde_json::Value {
     let perm = member_right_to_vikunja(Some(right));
-    serde_json::json!({ "permission": perm, "right": perm })
+    match version {
+        crate::api::ApiVersion::V1 => serde_json::json!({ "permission": perm, "right": perm }),
+        crate::api::ApiVersion::V2 => serde_json::json!({ "permission": perm }),
+    }
 }
 
 /// `PUT /projects/{id}/users` — share with a user (by username) at a
@@ -972,9 +1116,9 @@ pub async fn add_task_list_member(
     right: Option<MemberRight>,
 ) -> VikunjaResult<()> {
     let project_id = parse_id(list_id, "task list id")?;
-    let body = share_user_body(member_ref, right);
+    let body = share_user_body(member_ref, right, client.version().await?);
     let _: serde_json::Value = client
-        .put_json(&format!("/projects/{project_id}/users"), &body)
+        .create_json(&format!("/projects/{project_id}/users"), &body)
         .await?;
     Ok(())
 }
@@ -994,7 +1138,9 @@ pub async fn remove_task_list_member(
         .await
 }
 
-/// `POST /projects/{id}/users/{member}` — change a user's right.
+/// Change a user's right: v1 `POST /projects/{id}/users/{member}`, v2
+/// `PUT` on the same path (v2 offers no PATCH there; the share row only
+/// holds the permission, so the replace is harmless).
 pub async fn set_task_list_member_right(
     client: &VikunjaClient,
     list_id: &str,
@@ -1002,13 +1148,13 @@ pub async fn set_task_list_member_right(
     right: MemberRight,
 ) -> VikunjaResult<()> {
     let project_id = parse_id(list_id, "task list id")?;
-    let body = member_permission_body(right);
-    let _: serde_json::Value = client
-        .post_json(
-            &format!("/projects/{project_id}/users/{}", encode_query(member_ref)),
-            &body,
-        )
-        .await?;
+    let version = client.version().await?;
+    let body = member_permission_body(right, version);
+    let path = format!("/projects/{project_id}/users/{}", encode_query(member_ref));
+    let _: serde_json::Value = match version {
+        crate::api::ApiVersion::V1 => client.post_json(&path, &body).await?,
+        crate::api::ApiVersion::V2 => client.put_json(&path, &body).await?,
+    };
     Ok(())
 }
 
@@ -1042,8 +1188,10 @@ struct ProjectEntry {
     #[serde(default)]
     hex_color: Option<String>,
     /// Parent project id for Vikunja's nested-project tree. `0` is
-    /// Vikunja's "no parent" sentinel (top-level project).
-    #[serde(default)]
+    /// Vikunja's "no parent" sentinel (top-level project); v2 types the
+    /// field integer-or-null and marshals a top-level project's parent
+    /// as an explicit `null`, which must read as the same sentinel.
+    #[serde(default, deserialize_with = "crate::api::null_as_default")]
     parent_project_id: i64,
 }
 
@@ -1117,6 +1265,11 @@ struct BucketEntry {
     /// immaterial).
     #[serde(default)]
     position: f64,
+    /// Kanban WIP limit (`0` = unlimited). Not surfaced in Aperio, but
+    /// v2's bucket update is a full replace, so a rename must echo it
+    /// back or wipe it.
+    #[serde(default)]
+    limit: i64,
 }
 
 /// One per-view bucket membership of a task, returned with
@@ -1214,8 +1367,13 @@ struct TaskEntry {
     /// Per-view bucket memberships, populated with `?expand=buckets`
     /// (Vikunja ≥0.24). Read-only; used to resolve the task's section
     /// for the project's kanban view. Empty on older servers, which use
-    /// the flat `bucket_id` above.
-    #[serde(default, skip_serializing)]
+    /// the flat `bucket_id` above; v2 may serialize the empty set as
+    /// `null` (Go nil slice), hence the null-tolerant deserializer.
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "crate::api::null_as_default"
+    )]
     buckets: Vec<TaskBucketRef>,
     /// Task relations, grouped by kind (`models.RelatedTaskMap`). Read-only:
     /// we surface the `parenttask` bucket as `Task.parent_id`; writes go
@@ -1229,7 +1387,7 @@ struct TaskEntry {
 /// …) are unknown fields serde skips.
 #[derive(Debug, Default, Deserialize)]
 struct RelatedTasks {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::api::null_as_default")]
     parenttask: Vec<RelatedTaskRef>,
 }
 
@@ -1715,9 +1873,29 @@ mod tests {
     use super::*;
     use mockito::Server;
 
+    /// A client pinned to the v1 surface. The suite below predates the
+    /// version probe and mocks `/api/v1/...` paths verbatim; pinning keeps
+    /// every mock exact instead of prefixing a probe response to each test.
+    /// The v2 behaviour has its own suite at the bottom of this module.
     fn fixture_client(server_url: &str) -> VikunjaClient {
-        VikunjaClient::new(server_url, "test-token".into(), reqwest::Client::new())
-            .expect("fixture client")
+        VikunjaClient::with_api_version(
+            server_url,
+            "test-token".into(),
+            reqwest::Client::new(),
+            crate::api::ApiVersion::V1,
+        )
+        .expect("fixture client")
+    }
+
+    /// A client pinned to the v2 surface — mocks use `/api/v2/...` paths.
+    fn fixture_client_v2(server_url: &str) -> VikunjaClient {
+        VikunjaClient::with_api_version(
+            server_url,
+            "test-token".into(),
+            reqwest::Client::new(),
+            crate::api::ApiVersion::V2,
+        )
+        .expect("fixture client")
     }
 
     // ── Priority mapping ───────────────────────────────────────
@@ -2294,25 +2472,37 @@ mod tests {
 
     #[test]
     fn share_body_sends_username_and_permission_keys() {
-        // Current Vikunja keys the share on `username` + `permission`;
+        // v1: current Vikunja keys the share on `username` + `permission`;
         // older servers read `user_id` + `right`. We send both names for
         // each — sending only the old names left the user unresolved
         // (error 1005) and the level stuck at Read.
-        let body = share_user_body("alice", Some(MemberRight::Write));
+        let body = share_user_body("alice", Some(MemberRight::Write), crate::api::ApiVersion::V1);
         assert_eq!(body["username"], "alice");
         assert_eq!(body["user_id"], "alice");
         assert_eq!(body["permission"], 1);
         assert_eq!(body["right"], 1);
+
+        // v2's strict schema (additionalProperties: false) rejects the
+        // legacy keys with 422 — only the current pair may go out.
+        let body = share_user_body("alice", Some(MemberRight::Write), crate::api::ApiVersion::V2);
+        assert_eq!(
+            body,
+            serde_json::json!({ "username": "alice", "permission": 1 }),
+        );
     }
 
     #[test]
     fn permission_body_sends_both_level_keys() {
-        let admin = member_permission_body(MemberRight::Admin);
+        let admin = member_permission_body(MemberRight::Admin, crate::api::ApiVersion::V1);
         assert_eq!(admin["permission"], 2);
         assert_eq!(admin["right"], 2);
-        let read = member_permission_body(MemberRight::Read);
+        let read = member_permission_body(MemberRight::Read, crate::api::ApiVersion::V1);
         assert_eq!(read["permission"], 0);
         assert_eq!(read["right"], 0);
+
+        // v2: `right` would 422 against the strict schema.
+        let admin = member_permission_body(MemberRight::Admin, crate::api::ApiVersion::V2);
+        assert_eq!(admin, serde_json::json!({ "permission": 2 }));
     }
 
     #[test]
@@ -3445,5 +3635,473 @@ mod tests {
         let result = update_task(&client, &task).await.unwrap();
         no_link.assert_async().await;
         assert_eq!(result.parent_id.as_deref(), Some("8"));
+    }
+
+    // ── API v2 end-to-end ─────────────────────────────────────
+    //
+    // The same adapter logic against the `/api/v2` surface: envelope
+    // lists, swapped verbs, merge-patch updates. The client is PINNED to
+    // V2 — the detection probe itself is covered in api.rs.
+
+    #[tokio::test]
+    async fn v2_list_task_lists_reads_the_envelope_and_trusts_total_pages() {
+        let mut server = Server::new_async().await;
+        // A FULL page of 50: under v1's "short page = last page" rule the
+        // walker would fetch page 2 — the envelope says there is none.
+        let rows = (1..=50)
+            .map(|i| format!(r#"{{"id":{i},"title":"List {i}","hex_color":""}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let _page1 = server
+            .mock("GET", "/api/v2/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(format!(
+                r#"{{"items":[{rows}],"total":50,"page":1,"per_page":50,"total_pages":1}}"#
+            ))
+            .create_async()
+            .await;
+        let page2 = server
+            .mock("GET", "/api/v2/projects?page=2&per_page=50")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        page2.assert_async().await;
+        assert_eq!(lists.len(), 50);
+        assert_eq!(lists[0].name, "List 1");
+    }
+
+    #[tokio::test]
+    async fn v2_update_task_patches_and_nulls_the_cleared_fields() {
+        let mut server = Server::new_async().await;
+        // The fixture has no dates and no description. v1 cleared those by
+        // omission (fresh-struct decode); merge patch clears by explicit
+        // null — the mock only matches when the nulls really are in the
+        // body.
+        let patch = server
+            .mock("PATCH", "/api/v2/tasks/7")
+            // v2 dispatches PATCH semantics by media type — plain
+            // application/json is refused (415).
+            .match_header("content-type", "application/merge-patch+json")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"title":"Edit me","due_date":null,"start_date":null,"end_date":null,"description":null}"#
+                    .into(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"Edit me","project_id":3}"#)
+            .create_async()
+            .await;
+        let bulk = server
+            .mock("PUT", "/api/v2/tasks/7/assignees/bulk")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let _views = server
+            .mock("GET", "/api/v2/projects/3/views?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[],"total":0,"page":1,"per_page":50,"total_pages":1}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", None))
+            .await
+            .unwrap();
+        patch.assert_async().await;
+        bulk.assert_async().await;
+        assert_eq!(result.id, "7");
+    }
+
+    #[tokio::test]
+    async fn v2_create_task_posts_to_the_project() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/api/v2/projects/5/tasks")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"title":"Play"}"#.into(),
+            ))
+            .with_status(201)
+            .with_body(r#"{"id":99,"title":"Play","project_id":5}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let task = create_task(&client, "5", new_task_min("Play"))
+            .await
+            .unwrap();
+        m.assert_async().await;
+        assert_eq!(task.id, "99");
+    }
+
+    #[tokio::test]
+    async fn v2_reparent_posts_the_relation_and_accepts_409() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PATCH", "/api/v2/tasks/7")
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"Edit me","project_id":3}"#)
+            .create_async()
+            .await;
+        server
+            .mock("PUT", "/api/v2/tasks/7/assignees/bulk")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/api/v2/projects/3/views?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[]}"#)
+            .create_async()
+            .await;
+        // Authoritative parent read: none yet → a link is needed.
+        server
+            .mock("GET", "/api/v2/tasks/7")
+            .with_status(200)
+            .with_body(
+                r#"{"id":7,"title":"Edit me","project_id":3,"related_tasks":{"parenttask":[]}}"#,
+            )
+            .create_async()
+            .await;
+        // The link is a POST on v2 — and a concurrent 409 (problem+json
+        // shape) is still the desired state.
+        let link = server
+            .mock("POST", "/api/v2/tasks/7/relations")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"other_task_id":8,"relation_kind":"parenttask"}"#.into(),
+            ))
+            .with_status(409)
+            .with_body(
+                r#"{"type":"about:blank","title":"Conflict","status":409,"detail":"The task relation already exists."}"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("8".into());
+        let result = update_task(&client, &task).await.unwrap();
+        link.assert_async().await;
+        assert_eq!(result.parent_id.as_deref(), Some("8"));
+    }
+
+    #[tokio::test]
+    async fn v2_bucket_rename_replaces_with_position_and_limit_preserved() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v2/projects/3/views?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":11,"view_kind":"kanban","default_bucket_id":5}]}"#)
+            .create_async()
+            .await;
+        let _buckets = server
+            .mock("GET", "/api/v2/projects/3/views/11/buckets?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":9,"title":"Old","position":3.5,"limit":4}]}"#)
+            .create_async()
+            .await;
+        // v2 only offers a FULL-replace PUT here — the current position
+        // AND WIP limit must ride along or the rename would reorder the
+        // board and lift the limit. Exact-matched so an extra or missing
+        // key fails.
+        let put = server
+            .mock("PUT", "/api/v2/projects/3/views/11/buckets/9")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "title": "New",
+                "position": 3.5,
+                "limit": 4,
+            })))
+            .with_status(200)
+            .with_body(r#"{"id":9,"title":"New","position":3.5,"limit":4}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let section = update_section(&client, "3", "9", "New").await.unwrap();
+        put.assert_async().await;
+        assert_eq!(section.name, "New");
+    }
+
+    #[tokio::test]
+    async fn v2_bucket_rename_errors_when_the_bucket_cannot_be_read_back() {
+        // A blind {title}-only PUT would zero position/limit — when the
+        // read-back can't find the bucket, erroring out is the safe move.
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v2/projects/3/views?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":11,"view_kind":"kanban","default_bucket_id":5}]}"#)
+            .create_async()
+            .await;
+        let _buckets = server
+            .mock("GET", "/api/v2/projects/3/views/11/buckets?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":8,"title":"Other","position":1.0}]}"#)
+            .create_async()
+            .await;
+        let no_put = server
+            .mock("PUT", "/api/v2/projects/3/views/11/buckets/9")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let err = update_section(&client, "3", "9", "New").await.unwrap_err();
+        no_put.assert_async().await;
+        match err {
+            VikunjaError::Http { status: 404, .. } => {}
+            other => panic!("expected Http 404, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn v2_member_pool_reads_users_search() {
+        // v2 dropped `/projects/{id}/projectusers`; the pool comes from
+        // `/users/search` with no query.
+        let mut server = Server::new_async().await;
+        let _m = server
+            // No page/per_page: the spec declares none on users/search.
+            .mock("GET", "/api/v2/projects/7/users/search")
+            .with_status(200)
+            .with_body(
+                r#"{"items":[{"id":3,"username":"bob"}],"total":1,"page":1,"per_page":50,"total_pages":1}"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let members = list_task_list_members(&client, "7").await.unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, "3");
+        assert_eq!(members[0].name, "bob");
+    }
+
+    #[tokio::test]
+    async fn v2_search_users_asks_with_q() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("GET", "/api/v2/users?q=ali")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":8,"username":"alice"}]}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let users = search_users(&client, "ali").await.unwrap();
+        m.assert_async().await;
+        assert_eq!(users.len(), 1);
+        // search_users keys its results on the USERNAME — the membership
+        // add key — not the numeric id.
+        assert_eq!(users[0].id, "alice");
+    }
+
+    #[tokio::test]
+    async fn v2_member_right_change_puts_the_strict_body() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PUT", "/api/v2/projects/7/users/alice")
+            // Exact-matched: the legacy `right` key would 422 against
+            // v2's additionalProperties:false schema.
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "permission": 1 }),
+            ))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        set_task_list_member_right(&client, "7", "alice", MemberRight::Write)
+            .await
+            .unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn v2_add_member_posts_the_strict_body() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/api/v2/projects/7/users")
+            // Exact-matched: `user_id`/`right` would 422 on v2.
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "username": "alice", "permission": 1 }),
+            ))
+            .with_status(201)
+            .with_body(r#"{"id":1,"username":"alice","permission":1}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        add_task_list_member(&client, "7", "alice", Some(MemberRight::Write))
+            .await
+            .unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn v2_shares_list_reads_the_envelope() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v2/projects/7/users?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"{"items":[{"id":3,"username":"bob","permission":2}],"total":1,"page":1,"per_page":50,"total_pages":1}"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let shares = list_task_list_shares(&client, "7").await.unwrap();
+        assert_eq!(shares.len(), 1);
+        assert_eq!(shares[0].right, Some(MemberRight::Admin));
+    }
+
+    #[tokio::test]
+    async fn v2_rename_task_list_patches_the_title() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PATCH", "/api/v2/projects/7")
+            .match_header("content-type", "application/merge-patch+json")
+            .match_body(mockito::Matcher::Json(serde_json::json!({"title": "New"})))
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"New"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        rename_task_list(&client, "7", "New").await.unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn v2_create_task_list_posts_the_project() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/api/v2/projects")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"title":"Play"}"#.into(),
+            ))
+            .with_status(201)
+            .with_body(r#"{"id":12,"title":"Play","hex_color":""}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let list = create_task_list(&client, "Play", None).await.unwrap();
+        m.assert_async().await;
+        assert_eq!(list.id, "12");
+    }
+
+    #[tokio::test]
+    async fn v2_moves_the_bucket_with_a_put() {
+        // Mirror of update_task_moves_bucket_when_section_changed on the
+        // v2 surface: same path and body, but the verb is PUT.
+        let mut server = Server::new_async().await;
+        server
+            .mock("PATCH", "/api/v2/tasks/7")
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"Edit me","project_id":3}"#)
+            .create_async()
+            .await;
+        server
+            .mock("PUT", "/api/v2/tasks/7/assignees/bulk")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let _views = server
+            .mock("GET", "/api/v2/projects/3/views?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":11,"view_kind":"kanban","default_bucket_id":5}]}"#)
+            .create_async()
+            .await;
+        let _current = server
+            .mock("GET", "/api/v2/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        let mv = server
+            .mock("PUT", "/api/v2/projects/3/views/11/buckets/12/tasks")
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "task_id": 7, "bucket_id": 12 }),
+            ))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", Some("12")))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+        assert_eq!(result.section_id.as_deref(), Some("12"));
+    }
+
+    #[tokio::test]
+    async fn v2_walker_continues_past_a_short_page_when_total_pages_says_so() {
+        // A server whose per-page cap is configured below 50 ships short
+        // pages that are nonetheless full — only the envelope's
+        // total_pages may end the walk.
+        let mut server = Server::new_async().await;
+        let _page1 = server
+            .mock("GET", "/api/v2/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"{"items":[{"id":1,"title":"A"},{"id":2,"title":"B"}],"total":3,"page":1,"per_page":2,"total_pages":2}"#,
+            )
+            .create_async()
+            .await;
+        let page2 = server
+            .mock("GET", "/api/v2/projects?page=2&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"{"items":[{"id":3,"title":"C"}],"total":3,"page":2,"per_page":2,"total_pages":2}"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        page2.assert_async().await;
+        assert_eq!(lists.len(), 3);
+        assert_eq!(lists[2].name, "C");
+    }
+
+    #[tokio::test]
+    async fn v2_null_items_decode_as_an_empty_page() {
+        // Go marshals a nil slice as null, and the spec allows it for
+        // every list — an empty account must not read as a decode error.
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v2/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(r#"{"items":null,"total":0,"page":1,"per_page":50,"total_pages":0}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        assert!(lists.is_empty());
+    }
+
+    #[tokio::test]
+    async fn v2_null_parent_project_id_reads_as_top_level() {
+        // v2 types parent_project_id integer-or-null and marshals a
+        // top-level project's parent as explicit null — the common case,
+        // which must not fail the whole listing decode.
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v2/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"{"items":[{"id":1,"title":"Inbox","parent_project_id":null},{"id":2,"title":"Sub","parent_project_id":1}],"total":2,"page":1,"per_page":50,"total_pages":1}"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].parent_id, None);
+        assert_eq!(lists[1].parent_id.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn task_entry_tolerates_null_buckets_and_relations() {
+        // The same Go-nil-slice-as-null shape on a task's expand fields.
+        let entry: TaskEntry = serde_json::from_str(
+            r#"{"id":1,"title":"T","buckets":null,"related_tasks":{"parenttask":null}}"#,
+        )
+        .unwrap();
+        assert!(entry.buckets.is_empty());
+        assert!(entry.related_tasks.unwrap().parenttask.is_empty());
     }
 }

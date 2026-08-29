@@ -304,7 +304,9 @@ fn to_core_error(err: VikunjaError) -> CoreError {
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
-            409 | 412 => CoreError::Conflict(message),
+            // 412 is v1's validation/precondition status; api v2 reports
+            // the same failures as 422.
+            409 | 412 | 422 => CoreError::Conflict(message),
             _ => CoreError::Protocol(format!("Vikunja HTTP {status}: {message}")),
         },
         Protocol(m) => CoreError::Protocol(m),

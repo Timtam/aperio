@@ -14,6 +14,52 @@ A personal **API token** the user mints in Vikunja, sent as a `Bearer`
 token. The server base URL is user-supplied (self-hosted or hosted
 instance).
 
+## API versions
+
+Vikunja 2.4.0 introduced **API v2** and froze v1 (deprecated in 3.0,
+removed in 4.0). The adapter speaks both: it probes
+`GET /api/v2/projects` once per client (concurrent first calls share
+one probe) and pins v2 only on **positive evidence** that Vikunja's v2
+router answered — a JSON body (the list envelope, or a problem+json
+auth error), which the things standing in front of a server (SPA
+fallbacks, auth gates, WAFs) never produce. 404/405 means a pre-2.4
+server and pins v1; other non-JSON answers conservatively pin v1;
+transient answers (5xx, 408/429) and transport errors propagate
+*without* pinning, so the next call re-probes. Version-dependent
+behaviour funnels through semantic client helpers (`create_json`,
+`update_json`, `get_page`), so call sites stay verb-agnostic. The
+differences the adapter bridges:
+
+- **Verbs:** v1's unusual `PUT` = create / `POST` = update becomes
+  conventional `POST` = create / `PATCH` = update (JSON Merge Patch,
+  sent as `Content-Type: application/merge-patch+json` — v2 dispatches
+  its patch dialects by media type). PATCH is chosen over v2's
+  full-replace `PUT` so fields Aperio doesn't model (reminders,
+  favourites) survive an update.
+- **Clear semantics:** v1 cleared omitted fields (fresh-struct decode);
+  merge patch keeps them. Fields our body omits *with clear intent* —
+  the three dates and an emptied description — are sent as explicit
+  `null` on v2.
+- **Lists** become pagination envelopes (`{ items, total_pages, … }`)
+  instead of bare arrays with header-based paging; walkers trust
+  `total_pages` on v2 (the short-page heuristic only decides when no
+  count was given), `items: null` (Go's nil slice) reads as empty, and
+  endpoints that were unpaginated on v1 (views, buckets, members,
+  shares) are walked page by page on v2.
+- **Strict schemas:** v2 request bodies are validated with
+  `additionalProperties: false`. The share bodies drop the legacy
+  `user_id`/`right` compatibility keys on v2 (v1 keeps sending old +
+  new names so legacy servers bind them).
+- **Renamed/moved endpoints:** `/projects/{id}/projectusers` →
+  `/projects/{id}/users/search`; user search `?s=` → `?q=`; bucket move
+  and assignee-bulk go from `POST` to `PUT` (same path/body); share
+  right-change goes from `POST` to `PUT`; bucket rename only has a
+  full-replace `PUT` on v2, so the current bucket is read first and its
+  `position` and WIP `limit` sent along (a bucket the read-back can't
+  find is an error — replacing blind would zero both).
+- **Errors** are RFC 9457 problem+json; validation failures report 422
+  where v1 used 412 (both map to `Conflict`).
+
 ## Data model mapping
 
 - **Projects → task lists.** Projects nest via `parent_project_id`
@@ -36,33 +82,43 @@ instance).
   (`supports_in_progress: true`). Cancelled has no Vikunja equivalent
   (`done = false`, `percent_done = 0`) — the marker stays local.
 - **Subtasks are task *relations***, not a task field: the child's
-  `parenttask` relation (`PUT /tasks/{child}/relations`, removed via
-  `DELETE /tasks/{child}/relations/parenttask/{parent}`) maps onto
+  `parenttask` relation (created on `/tasks/{child}/relations`, removed
+  via `DELETE /tasks/{child}/relations/parenttask/{parent}`) maps onto
   `Task.parent_id`; reads take the first non-zero
   `related_tasks.parenttask` entry. Updates reconcile against an
   authoritative `GET /tasks/{id}` — Vikunja populates `related_tasks` only
   on reads, never on the update echo — unlink every stale parent (Vikunja
-  allows several), and treat PUT→409 (already linked) / DELETE→404
+  allows several), and treat create→409 (already linked) / DELETE→404
   (already gone) as success.
 
 ## Collaboration (assignment + membership)
 
 - **Assignees** (multi): read inline on the task; written via the bulk
-  endpoint `POST …/tasks/{id}/assignees/bulk` (replace-semantics — the full
-  desired set). The assignee `TaskUser.id` is the numeric user id.
-- **Member pool** for the picker: `GET /projects/{id}/projectusers`.
+  endpoint `…/tasks/{id}/assignees/bulk` (v1 `POST`, v2 `PUT`;
+  replace-semantics — the full desired set). The assignee `TaskUser.id`
+  is the numeric user id.
+- **Member pool** for the picker: `GET /projects/{id}/projectusers` on
+  v1, `GET /projects/{id}/users/search` on v2.
 - **Own identity** ("me"): `GET /user`.
 - **Membership/sharing:** `GET /projects/{id}/users` lists direct shares
-  *with rights* (read/write/admin → 0/1/2); add/remove/change-right via
-  `PUT`/`DELETE`/`POST` on `/projects/{id}/users` (Vikunja quirk: **PUT =
-  create, POST = update**). Sharing is immediate to existing users — no
-  invitation flow. Membership keys on the **username**, distinct from the
-  numeric-id assignee key.
-- **User search:** `GET /users?s=` for the add-member dialog.
+  *with rights* (read/write/admin → 0/1/2); add/remove/change-right on
+  `/projects/{id}/users` (create and right-change follow the version's
+  verb scheme — see "API versions"). Sharing is immediate to existing
+  users — no invitation flow. Membership keys on the **username**,
+  distinct from the numeric-id assignee key.
+- **User search:** `GET /users?s=` (v1) / `GET /users?q=` (v2) for the
+  add-member dialog.
 
 ## Testing
 
-`mockito` with canned Vikunja JSON and the project/page pagination headers.
-Tests cover list/project mapping, the date sentinel, the bucket→section
-fallback, and the assignee/membership endpoints. Live testing: any Vikunja
-instance with an API token.
+`mockito` with canned Vikunja JSON. The v1 suite pins the client to v1
+(its mocks use `/api/v1/...` paths verbatim); a v2 suite covers the
+envelope pagination (both the stop and the continue direction, plus
+`items: null`), the verb swaps (create, update, bucket move, assignee
+bulk, shares), the explicit-null merge-patch body and its
+`application/merge-patch+json` content type, the strict share bodies
+(exact-matched), and the position+limit-preserving bucket rename; the
+detection probe has its own tests (JSON vs HTML answers, 404/405,
+5xx-no-pin-then-retry). Tests cover list/project mapping, the date
+sentinel, the bucket→section fallback, and the assignee/membership
+endpoints. Live testing: any Vikunja instance with an API token.
