@@ -82,7 +82,7 @@ von VoiceOver und TalkBack:
 ## Einstellungen nur für Mobil
 
 Ein paar Einstellungen gibt es nur auf dem Handy, unter **Einstellungen →
-Allgemein**. Alle drei werden **nur auf diesem Gerät** gespeichert (sie werden
+Allgemein**. Alle werden **nur auf diesem Gerät** gespeichert (sie werden
 nicht synchronisiert):
 
 - **Hintergrund-Synchronisation.** Lässt das System die App wecken, um zu
@@ -98,6 +98,18 @@ nicht synchronisiert):
   Benachrichtigungsberechtigung. Standard: an.
 - **Haptisches Feedback.** Eine kurze Vibration, wenn eine Aktualisierung
   externer Daten beginnt und endet. Standard: an.
+- **App-Sperre.** Verlangt Face ID oder Touch ID (auf Android: Fingerabdruck
+  oder Gesichtserkennung), ersatzweise den Gerätecode, beim Start der App und
+  nach einer Minute im Hintergrund – mit der Bildschirmsperre des Geräts.
+  Ein- und Ausschalten verlangen jeweils eine Authentifizierung, und
+  ohne eingerichtete Bildschirmsperre lässt sich die Sperre nicht aktivieren.
+  Die Authentifizierungs-Abfrage erscheint einmal pro Sperre; brichst du sie
+  ab, versucht es der Knopf **Entsperren** auf dem Sperrbildschirm erneut. Sie
+  schützt den Zugriff auf die App – die Daten auf dem Gerät werden nicht
+  zusätzlich verschlüsselt. Synchronisation, Erinnerungen und das Widget
+  arbeiten hinter der Sperre weiter, und wird die Bildschirmsperre des Geräts
+  entfernt, schaltet sich die App-Sperre selbst aus, statt dich auszusperren.
+  Standard: aus.
 
 ## Erinnerungen und Benachrichtigungen
 

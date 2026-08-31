@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { A11yGestures } from '../../modules/a11y-gestures';
 import { navigationRef } from '../navigation/navigationRef';
+import { isAppLockCoverVisible } from '../state/appLock';
 
 // Routes the app-wide, window-level VoiceOver gestures (magic tap + horizontal
 // three-finger scroll, caught natively — see modules/a11y-gestures) to the
@@ -64,11 +65,18 @@ function activeRouteName(): string | undefined {
 // UIAccessibility methods when it is running, so these fire solely under a
 // screen reader.
 if (Platform.OS === 'ios') {
+  // Both gestures are caught at the WINDOW level (swizzled onto UIWindow), so
+  // they fire even while the app-lock cover — an RN Modal in the same window —
+  // is up, and would act on (and speak about) the locked content behind it:
+  // a magic tap on the cover would open the task editor above the lock.
+  // Refuse them while the cover is on screen.
   A11yGestures.addListener('magicTap', () => {
+    if (isAppLockCoverVisible()) return;
     const name = activeRouteName();
     if (name != null) magicTapActions.get(name)?.();
   });
   A11yGestures.addListener('page', (event) => {
+    if (isAppLockCoverVisible()) return;
     const name = activeRouteName();
     if (name != null) pageActions.get(name)?.(event.direction);
   });

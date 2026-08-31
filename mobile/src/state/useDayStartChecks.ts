@@ -17,6 +17,7 @@ import i18n from '../../i18n';
 import { getTasks, listTaskLists, updateTask } from '../api/client';
 import { logLine } from '../api/logs';
 import { dayStartPreschedulesOsNotification } from '../reminders/dayStartSchedule';
+import { useAppLockLocked } from './appLockContext';
 import { settleExternalCaches } from './cacheSettle';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
@@ -73,6 +74,8 @@ async function runDeadlinePin(
   /** See runDayStartReview: a "nothing to pin" verdict only burns the marker
    *  on a CONFIRMED cache settle; a capped one retries next foreground. */
   settleConfirmed: boolean,
+  /** Live app-lock probe — see runDayStartReview. */
+  isLocked: () => boolean,
 ): Promise<void> {
   const behaviour = await readTaskBehaviour();
   const todayKey = todayIsoKey();
@@ -80,6 +83,13 @@ async function runDeadlinePin(
   if (!shouldFireToday(behaviour.dayStartTrigger, fired, todayKey)) return;
   const all = await loadAllTasks();
   const targets = filterDeadlinePinTargets(all, await meForTasks(all));
+  // Re-probe the app lock AFTER the loads: the runs bail at entry too, but a
+  // re-lock during the settle/fan-out must not let the pin mutate + announce
+  // through the cover. No marker burned yet — the unlock re-run picks it up.
+  if (isLocked()) {
+    void logLine('info', 'day-start: pin deferred (app locked) — unlock re-runs');
+    return;
+  }
   if (targets.length === 0) {
     if (!settleConfirmed) {
       void logLine(
@@ -162,6 +172,12 @@ async function runDayStartReview(
    *  once-a-day marker — on a confirmed settle; on a capped one the next
    *  foreground retries instead of silencing the review for the day. */
   settleConfirmed: boolean,
+  /** Live app-lock probe. The run bails at ENTRY while locked, but the
+   *  settle + fan-outs above this point can span a minute — long enough to
+   *  background the app and re-lock. Checked again right before anything
+   *  surfaces (marker burn, announcements, the modal): the review is an RN
+   *  Modal, which would present ABOVE the lock cover fully interactive. */
+  isLocked: () => boolean,
 ): Promise<void> {
   const behaviour = await readTaskBehaviour();
   const todayKey = todayIsoKey();
@@ -225,6 +241,14 @@ async function runDayStartReview(
     if (def === 'today') todayRows.push(row);
     else if (def === 'backlog') backlogRows.push(row);
     else askRows.push(row);
+  }
+
+  // Late lock re-probe: a re-lock during the settle/fan-out must not burn the
+  // marker, speak task details through the cover, or present the review Modal
+  // above it. Nothing surfaced yet — the unlock effect re-runs the whole pass.
+  if (isLocked()) {
+    void logLine('info', 'day-start: review deferred (app locked) — unlock re-runs');
+    return;
   }
 
   // ── The decision, and the ONLY honest places to burn the day marker ──────
@@ -355,6 +379,13 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   selectionRef.current = selectedTaskListIds;
   const loadingRef = useRef(taskListsLoading);
   loadingRef.current = taskListsLoading;
+  // While the app lock covers the app, the checks HOLD: the review is an RN
+  // Modal, which would present ABOVE the lock cover fully interactive, and
+  // even the spoken announcements would read task details through the lock.
+  // The unlock flips this false and the effect below runs the deferred pass.
+  const appLocked = useAppLockLocked();
+  const appLockedRef = useRef(appLocked);
+  appLockedRef.current = appLocked;
 
   const openReview = useCallback(() => setReviewOpen(true), []);
   const closeReview = useCallback(() => setReviewOpen(false), []);
@@ -362,6 +393,7 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   const runInner = useCallback(() => {
     void (async () => {
       if (inFlight) return;
+      if (appLockedRef.current) return;
       inFlight = true;
       try {
         // A cheap marker precheck FIRST, so the settle below (which kicks a
@@ -413,7 +445,8 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
           }ms, selection=${selectionRef.current.size}`,
         );
         const confirmed = settle === 'confirmed';
-        await runDeadlinePin(invalidateData, confirmed);
+        const isLocked = () => appLockedRef.current;
+        await runDeadlinePin(invalidateData, confirmed, isLocked);
         // The review reads the SELECTED lists, so it must wait for the
         // store to hydrate (an empty pre-hydration selection would mark
         // the day fired with nothing to review). The catalog-ready
@@ -424,6 +457,7 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
             invalidateData,
             openReview,
             confirmed,
+            isLocked,
           );
         } else {
           void logLine(
@@ -471,6 +505,12 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
     });
     return () => sub.remove();
   }, [run]);
+
+  // Unlock: the passes above bailed while the app lock was up — run the
+  // morning's checks now that someone proved they may see them.
+  useEffect(() => {
+    if (!appLocked) run();
+  }, [appLocked, run]);
 
   return { reviewOpen, closeReview };
 }

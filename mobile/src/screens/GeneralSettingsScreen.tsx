@@ -1,7 +1,14 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
 import {
@@ -29,6 +36,7 @@ import {
 } from '../settings/showCancelledEvents';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
+import { useAppLockPref } from '../state/appLock';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
 import { useHapticsPref } from '../state/haptics';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
@@ -79,6 +87,46 @@ export default function GeneralSettingsScreen() {
   // Device-local OS background sync (default on) — wakes the app to sync while
   // it's backgrounded/closed; the OS decides the exact timing.
   const [bgSync, setBgSync] = useBackgroundSyncPref();
+  // Device-local app lock (default off) — biometrics / device code on start.
+  // Both toggle directions demand one successful OS authentication. Every
+  // outcome of the ASYNC flip is ANNOUNCED: the switch's own state change
+  // happens after the auth sheet closes, when the screen reader is no longer
+  // reading the switch — without a spoken result the toggle feels dead.
+  const [appLock, setAppLock] = useAppLockPref();
+  const [appLockMessage, setAppLockMessage] = useState<string | null>(null);
+  // In-flight guard: a double activation must not stack two OS auth sheets.
+  const [appLockBusy, setAppLockBusy] = useState(false);
+  const onAppLockToggle = useCallback(() => {
+    if (appLockBusy) return;
+    setAppLockBusy(true);
+    void (async () => {
+      try {
+        const next = !appLock;
+        const result = await setAppLock(next);
+        if (result === 'ok') {
+          setAppLockMessage(null);
+          AccessibilityInfo.announceForAccessibility(
+            t(next ? 'mobile.appLock.enabledAnnounce' : 'mobile.appLock.disabledAnnounce'),
+          );
+          return;
+        }
+        if (result === 'cancelled') {
+          // The user closed the sheet — the sheet itself was the feedback.
+          setAppLockMessage(null);
+          return;
+        }
+        const message = t(
+          result === 'unavailable'
+            ? 'mobile.appLock.settingUnavailable'
+            : 'mobile.appLock.settingFailed',
+        );
+        setAppLockMessage(message);
+        AccessibilityInfo.announceForAccessibility(message);
+      } finally {
+        setAppLockBusy(false);
+      }
+    })();
+  }, [appLock, appLockBusy, setAppLock, t]);
 
   // Reflect the stored choices whenever the screen is focused (they may have
   // been applied on launch — or changed on another device — before this mounted).
@@ -273,6 +321,30 @@ export default function GeneralSettingsScreen() {
           value={bgSync}
           onToggle={() => setBgSync(!bgSync)}
         />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('mobile.appLock.settingHeading')}
+        </Text>
+        <SwitchRow
+          label={t(
+            Platform.OS === 'android'
+              ? 'mobile.appLock.settingLabelAndroid'
+              : 'mobile.appLock.settingLabel',
+          )}
+          hint={t('mobile.appLock.settingHint')}
+          value={appLock}
+          onToggle={onAppLockToggle}
+          disabled={appLockBusy}
+        />
+        {appLockMessage != null && (
+          // Announced imperatively in the toggle handler — RN's "alert" role
+          // is not a live region on iOS, so the render alone would be silent.
+          <Text style={styles.hint} accessibilityRole="text">
+            {appLockMessage}
+          </Text>
+        )}
       </View>
     </ScrollView>
   );

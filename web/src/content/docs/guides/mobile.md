@@ -76,8 +76,8 @@ concepts), adapted to the way VoiceOver and TalkBack work:
 
 ## Mobile-specific settings
 
-A few settings exist only on mobile, under **Settings → General**. All three are
-stored **on this device only** (they are not synchronized):
+A few settings exist only on mobile, under **Settings → General**. All of them
+are stored **on this device only** (they are not synchronized):
 
 - **Background sync.** Lets the system wake the app to synchronize while it is in
   the background or closed, so a change made on another device – and any new
@@ -90,6 +90,16 @@ stored **on this device only** (they are not synchronized):
   the events still ahead today. Needs notification permission. Default: on.
 - **Haptic feedback.** A short vibration when an external-data refresh starts and
   finishes. Default: on.
+- **App lock.** Requires Face ID or Touch ID (on Android: fingerprint or face
+  unlock), falling back to the device code, when the app starts and after a
+  minute in the background — the device's own screen lock. Both turning it on
+  and off ask for one authentication, and it cannot be enabled on a device
+  without a screen lock. The authentication prompt appears once per lock; if
+  you cancel it, the lock screen's **Unlock** button tries again. This protects
+  access to the app — the data on the device is not additionally encrypted.
+  Synchronization, reminders and the widget keep working behind the lock, and
+  if the device's screen lock is ever removed, the app lock turns itself off
+  rather than locking you out. Default: off.
 
 ## Reminders and notifications
 

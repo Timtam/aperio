@@ -1,5 +1,20 @@
 {
   "mobile": {
+    "appLock": {
+      "settingHeading": "App-Sperre",
+      "settingLabel": "Beim Start Face ID, Touch ID oder Gerätecode verlangen",
+      "settingLabelAndroid": "Beim Start Fingerabdruck, Gesichtserkennung oder Gerätecode verlangen",
+      "settingHint": "Sperrt die App beim Start und nach einer Minute im Hintergrund — mit der Bildschirmsperre des Geräts. Das schützt den Zugriff auf die App; die Daten auf dem Gerät werden nicht zusätzlich verschlüsselt. Wird nur auf diesem Gerät gespeichert.",
+      "settingUnavailable": "Keine Geräte-Bildschirmsperre eingerichtet. Richte zuerst in den Systemeinstellungen einen Gerätecode oder Biometrie ein.",
+      "settingFailed": "Authentifizierung fehlgeschlagen — die Einstellung wurde nicht geändert.",
+      "enabledAnnounce": "App-Sperre an.",
+      "disabledAnnounce": "App-Sperre aus.",
+      "prompt": "Aperio entsperren",
+      "lockedTitle": "Aperio ist gesperrt",
+      "unlockButton": "Entsperren",
+      "retryHint": "Nicht entsperrt. Der Knopf „Entsperren“ versucht es erneut.",
+      "disabledLostEnrollment": "Die Geräte-Bildschirmsperre wurde entfernt — die App-Sperre ist jetzt ausgeschaltet."
+    },
     "newTaskLabel": "Neue Aufgabe",
     "newTaskPlaceholder": "Was ist zu tun?",
     "add": "Hinzufügen",

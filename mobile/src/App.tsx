@@ -23,6 +23,7 @@ import tasksIcon from '../assets/tabs/tasks.png';
 // first.
 import './a11y/gestureHost';
 import { useSyncTriggers } from './api/syncTriggers';
+import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
@@ -481,7 +482,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AppContent />
+        {/* The optional app lock covers EVERYTHING below it (device-local,
+            default off) — content stays mounted behind the cover, so sync,
+            reminders and navigation state survive a lock. */}
+        <AppLockGate>
+          <AppContent />
+        </AppLockGate>
       </ThemeProvider>
     </SafeAreaProvider>
   );

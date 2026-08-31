@@ -20,6 +20,7 @@
     "expo-haptics": "~56.0.3",
     "expo-image-picker": "~56.0.18",
     "expo-linking": "~56.0.14",
+    "expo-local-authentication": "~56.0.5",
     "expo-localization": "~56.0.6",
     "expo-notifications": "~56.0.18",
     "expo-splash-screen": "~56.0.10",

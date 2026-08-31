@@ -118,6 +118,12 @@
       ],
       "react-native-bottom-tabs",
       "expo-background-task",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to unlock the app with Face ID."
+        }
+      ],
       "@bacons/apple-targets"
     ]
   }

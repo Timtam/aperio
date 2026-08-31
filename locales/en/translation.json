@@ -1,5 +1,20 @@
 {
   "mobile": {
+    "appLock": {
+      "settingHeading": "App lock",
+      "settingLabel": "Require Face ID, Touch ID or device code on start",
+      "settingLabelAndroid": "Require fingerprint, face unlock or device code on start",
+      "settingHint": "Locks the app when it starts and after a minute in the background, using the device's own screen lock. This protects access to the app; the data on the device is not additionally encrypted. Stored on this device only.",
+      "settingUnavailable": "No device screen lock is set up. Set up a device code or biometrics in the system settings first.",
+      "settingFailed": "Authentication failed — the setting was not changed.",
+      "enabledAnnounce": "App lock on.",
+      "disabledAnnounce": "App lock off.",
+      "prompt": "Unlock Aperio",
+      "lockedTitle": "Aperio is locked",
+      "unlockButton": "Unlock",
+      "retryHint": "Not unlocked. The Unlock button tries again.",
+      "disabledLostEnrollment": "The device screen lock was removed — the app lock has been turned off."
+    },
     "newTaskLabel": "New task",
     "newTaskPlaceholder": "What needs doing?",
     "add": "Add",

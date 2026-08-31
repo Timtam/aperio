@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { isFreshInstance } from '../api/onboarding';
 import { getUserPref, setUserPref } from '../api/prefs';
+import { useAppLockLocked } from '../state/appLockContext';
 import { FirstLaunchWizardModal } from './FirstLaunchWizardModal';
 
 /** Marker that the first-launch check has already run, so an empty instance
@@ -24,8 +25,14 @@ const EVALUATED_KEY = 'onboarding.firstLaunchWizardEvaluated';
 export function FirstLaunchWizardGate() {
   const [open, setOpen] = useState(false);
   const evaluatedRef = useRef(false);
+  // Hold while the app lock covers the app — the wizard is an RN Modal, which
+  // would present ABOVE the lock cover. A truly fresh instance can't have the
+  // lock on, but a failed marker write plus a later-enabled lock can reach
+  // here; the effect re-runs when the lock opens.
+  const appLocked = useAppLockLocked();
 
   useEffect(() => {
+    if (appLocked) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -54,7 +61,7 @@ export function FirstLaunchWizardGate() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [appLocked]);
 
   const onClose = () => setOpen(false);
 
