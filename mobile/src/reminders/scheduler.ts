@@ -5,10 +5,12 @@ import { AppState, Platform } from 'react-native';
 
 import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
+import { logLine } from '../api/logs';
 import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
 import { setRemindersRefreshHook } from '../state/cacheObserver';
+import { settleExternalCaches } from '../state/cacheSettle';
 import { whenStartupSettled } from '../state/startupGate';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
 
@@ -141,14 +143,68 @@ export async function ensurePermission(): Promise<boolean> {
 
 let inFlight = false;
 
+/**
+ * The once-per-session external-cache settle every reschedule waits behind.
+ *
+ * `rescheduleReminders` is cancel-and-rewrite: it drops EVERY pending OS
+ * notification and re-plans from what the cache-only reads return right now.
+ * At a cold start that read races the device-reminders bridge (it installs
+ * right after the Host opens), so the first pass counted ZERO device
+ * reminders into every pre-scheduled day-start notification — and when the
+ * app was closed again before a post-warm replan ran, that undercount stood
+ * for the whole 7-day horizon: "2 Aufgaben brauchen heute deine
+ * Aufmerksamkeit" on a morning with three overdue device reminders. Waiting
+ * for the same settle the in-app review uses keeps the PREVIOUS (good)
+ * schedule in place until today's data is actually readable; a quick
+ * open/close now changes nothing instead of wrecking the week.
+ *
+ * Anchored HERE — not on the launch trigger — because the startup gate
+ * coalesces same-key callbacks: a cache update flushed while the gate is
+ * still closed replaces the parked launch run with a plain replan, which
+ * would slip past a trigger-side settle. Inside the reschedule itself no
+ * path can bypass it. One settle per session: later calls await the
+ * already-resolved promise (a no-op), so mutation/foreground replans stay
+ * as immediate as before. Mutations arriving DURING the settle are safe
+ * even though their own call bails on `inFlight` — the pending first pass
+ * reads the caches only after the settle, so it sees their writes.
+ */
+let launchSettle: Promise<void> | null = null;
+function ensureLaunchSettle(): Promise<void> {
+  launchSettle ??= settleExternalCaches()
+    .then((settle) => {
+      void logLine('info', `reminders: first reschedule waits on cache settle (${settle})`);
+    })
+    // A rejected promise here would poison EVERY later reschedule of the
+    // session (they all await this cell) — settle is best-effort, proceed.
+    .catch(() => {});
+  return launchSettle;
+}
+
+/**
+ * Declare the caches settled without running the wait — for the OS background
+ * round, which refreshes the providers and waits on them ITSELF with a
+ * platform-sized budget before rescheduling. Its headless JS context is fresh
+ * (so the settle cell is empty), and a second settle there would kick another
+ * warm pass and poll for up to a minute against iOS's ~30-second task budget —
+ * an expired background task counts as a failure and costs future scheduling.
+ * The Host it opened registered the device-calendar bridge synchronously, so
+ * its cache reads serve at worst last-known rows, never the cold-start empties
+ * the settle exists to prevent.
+ */
+export function markExternalCachesSettled(): void {
+  launchSettle ??= Promise.resolve();
+}
+
 /** Re-read the upcoming reminders from the core and replace the scheduled OS
  *  notifications with the soonest `MAX_SCHEDULED` future ones. Idempotent +
- *  guarded against overlap; never throws. */
+ *  guarded against overlap; never throws. The first run of a session waits
+ *  for the external caches to settle first (see ensureLaunchSettle). */
 export async function rescheduleReminders(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
     if (!(await ensurePermission())) return;
+    await ensureLaunchSettle();
     await ensureAndroidChannel();
     const items = await upcomingReminders(HORIZON_MINUTES);
     const hidden = await getHiddenCalendars();
@@ -249,8 +305,10 @@ setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSo
  *  trigger-enumeration pass on the serial native queue, and the OS
  *  notifications it plans sit days ahead — running it ~1.5s after first
  *  paint changes nothing for the user but keeps the queue clear for the
- *  visible screen's first read. Foreground resumes pass straight through
- *  (the gate is open by then). */
+ *  visible screen's first read. The session's FIRST reschedule additionally
+ *  waits for the external caches to settle before its cancel-and-rewrite
+ *  (see ensureLaunchSettle). Foreground resumes pass straight through (the
+ *  gate is open by then). */
 export function useReminderTriggers(): void {
   useEffect(() => {
     whenStartupSettled('reminders', () => void rescheduleReminders());

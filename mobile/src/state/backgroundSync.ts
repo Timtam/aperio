@@ -9,7 +9,7 @@ import CalFfi from '../../modules/cal-ffi';
 import { getUserPref } from '../api/prefs';
 import { cacheRefreshStatus, refreshExternalCache, syncNow, syncStatus } from '../api/sync';
 import { logLine } from '../api/logs';
-import { rescheduleReminders } from '../reminders/scheduler';
+import { markExternalCachesSettled, rescheduleReminders } from '../reminders/scheduler';
 import { refreshWidgetSnapshot } from './widgetSnapshot';
 
 // OS-scheduled background sync — the piece syncTriggers.ts explicitly deferred:
@@ -68,7 +68,10 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     const refreshFinished = await waitForExternalRefresh();
     // A pull may have added/changed events → reschedule the local reminders so
     // their notifications still fire on time. Best-effort: a reminder hiccup
-    // must not fail the (successful) sync round.
+    // must not fail the (successful) sync round. The wait above IS this
+    // headless session's cache settle — say so, or the reschedule would kick
+    // a second warm pass and poll it against the task's remaining budget.
+    markExternalCachesSettled();
     await rescheduleReminders().catch(() => undefined);
     // Same reasoning for the home-screen widgets, and this is the ONLY path that
     // reaches them without the user opening the app — the in-app triggers all
