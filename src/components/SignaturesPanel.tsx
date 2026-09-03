@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Signature } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { useSignatures } from '../state/useSignatures';
+import {
+  SettingsSelectorDetail,
+  type SettingsSelectorGroup,
+} from './SettingsSelectorDetail';
 
 /**
  * Signature blocks, managed from Settings.
@@ -20,6 +24,12 @@ import { useSignatures } from '../state/useSignatures';
  *
  * Plain text, deliberately and only: see `shared/signatures.ts` for why an
  * invitation cannot carry anything else.
+ *
+ * Laid out as the shared master/detail selector (Calendars, Tasks, Plugins):
+ * ONE listbox of signatures — a single tab stop, arrows walk it — and a
+ * detail pane editing only the selected one. Every signature used to render
+ * its name field, text area and delete button inline, three tab stops each,
+ * none of them saying which signature they belonged to.
  */
 export function SignaturesPanel() {
   const { t } = useTranslation();
@@ -69,9 +79,16 @@ export function SignaturesPanel() {
     [signatures, save],
   );
 
+  // Where the selection should land after a delete: the deleted signature's
+  // neighbour (the next one, else the previous), not the top of the list.
+  const [preferredId, setPreferredId] = useState<string | null>(null);
+
   const onDelete = useCallback(
     async (sig: Signature) => {
       setBusy(true);
+      const index = signatures.findIndex((s) => s.id === sig.id);
+      const neighbour = signatures[index + 1] ?? signatures[index - 1] ?? null;
+      setPreferredId(neighbour?.id ?? null);
       try {
         await save(signatures.filter((s) => s.id !== sig.id));
         // Deliberately NOT unbinding the calendars that pointed at it: a
@@ -83,9 +100,38 @@ export function SignaturesPanel() {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusy(false);
+        // The delete button unmounted with its detail pane — the store
+        // updates optimistically, so this holds on the error path too.
+        // Without a new home, focus falls to <body> and the screen reader
+        // leaves application mode. The list is the stable stop and announces
+        // the signature the selection moved on to; when the LAST signature
+        // went, the list is gone as well, so the panel itself takes focus.
+        const list = sectionRef.current?.querySelector<HTMLElement>(
+          '[role="listbox"]',
+        );
+        (list ?? sectionRef.current)?.focus();
       }
     },
     [signatures, save, announce, t],
+  );
+
+  const groups = useMemo<SettingsSelectorGroup<Signature>[]>(
+    () => [{ id: 'all', label: '', items: signatures }],
+    [signatures],
+  );
+  const summaryOf = useCallback(
+    (sig: Signature) => {
+      const firstLine = sig.body
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+      if (!firstLine) return t('dialogs.settings.signatures.summaryEmpty');
+      // Code points, not UTF-16 units — a slice through an emoji would leave a
+      // lone surrogate in the option's name.
+      const chars = Array.from(firstLine);
+      return chars.length > 60 ? `${chars.slice(0, 60).join('')}…` : firstLine;
+    },
+    [t],
   );
 
   return (
@@ -104,15 +150,35 @@ export function SignaturesPanel() {
       ) : signatures.length === 0 ? (
         <p className="form__hint">{t('dialogs.settings.signatures.empty')}</p>
       ) : (
-        signatures.map((sig) => (
-          <SignatureRow
-            key={sig.id}
-            signature={sig}
-            busy={busy}
-            onChange={onChange}
-            onDelete={() => void onDelete(sig)}
-          />
-        ))
+        <SettingsSelectorDetail<Signature>
+          groups={groups}
+          getItemId={signatureId}
+          getItemName={(sig) => sig.name}
+          getItemSummary={summaryOf}
+          // The same summary the option SPEAKS, shown — sighted users get
+          // the same "which one is this" cue as screen-reader users.
+          getItemBadge={summaryOf}
+          preferredItemId={preferredId}
+          selectorLabel={t('dialogs.settings.signatures.selectorLabel')}
+          optionLabel={({ name, summary }) =>
+            t('dialogs.settings.signatures.optionLabel', { name, summary })
+          }
+          detailHeading={({ name }) =>
+            t('dialogs.settings.signatures.detailHeading', { name })
+          }
+          // The panel's own heading above is an <h3>; a second one in the
+          // same section would read as its sibling rather than as the
+          // selected signature's detail.
+          detailHeadingLevel={4}
+          renderDetail={(sig) => (
+            <SignatureDetail
+              signature={sig}
+              busy={busy}
+              onChange={onChange}
+              onDelete={() => void onDelete(sig)}
+            />
+          )}
+        />
       )}
 
       <form
@@ -151,14 +217,20 @@ export function SignaturesPanel() {
           {t('dialogs.settings.signatures.add')}
         </button>
       </form>
-
     </div>
   );
 }
 
-/** One signature, edited in place. Writes on blur, like the phone's marker
- *  rows: no Save to hunt for, and backing out cannot lose an edit. */
-function SignatureRow({
+/** Stable accessor for the selector (module scope — it feeds the navigation
+ *  memos, so its identity must not change per render). */
+function signatureId(sig: Signature): string {
+  return sig.id;
+}
+
+/** The selected signature, edited in place. Writes on blur, like the phone's
+ *  marker rows: no Save to hunt for, and backing out cannot lose an edit.
+ *  Remounted by the selector whenever the selection changes. */
+function SignatureDetail({
   signature,
   busy,
   onChange,
@@ -173,13 +245,15 @@ function SignatureRow({
   const [name, setName] = useState(signature.name);
   const [body, setBody] = useState(signature.body);
 
-  // Adopt changes that arrived from elsewhere (a sync round) while this row is
-  // not being edited.
+  // Adopt changes that arrived from elsewhere (a sync round) while this
+  // signature is not being edited.
   useEffect(() => setName(signature.name), [signature.name]);
   useEffect(() => setBody(signature.body), [signature.body]);
 
   return (
-    <div className="settings-list__row settings-list__row--stacked">
+    // A plain form block: the detail region already draws the border, and
+    // the bordered list-row class inside it drew a second one.
+    <div className="form">
       <label className="form__field">
         <span className="form__label">
           {t('dialogs.settings.signatures.nameLabel')}

@@ -1041,8 +1041,10 @@
         "delete": "Signatur löschen",
         "added": "Signatur {{name}} hinzugefügt.",
         "deleted": "Signatur {{name}} gelöscht.",
-        "bindingsHeading": "Je Kalender",
-        "bindingsHint": "Welche Signatur der Editor für einen Kalender anbietet. Du kannst jederzeit eine andere wählen oder keine.",
+        "selectorLabel": "Signaturen",
+        "optionLabel": "{{name}}, {{summary}}",
+        "summaryEmpty": "noch kein Text",
+        "detailHeading": "Signatur {{name}}",
         "bindingNone": "Keine"
       }
     },

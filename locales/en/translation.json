@@ -1044,8 +1044,10 @@
         "delete": "Delete signature",
         "added": "Signature {{name}} added.",
         "deleted": "Signature {{name}} deleted.",
-        "bindingsHeading": "Per calendar",
-        "bindingsHint": "Which signature the editor offers for a calendar. You can always pick another one, or none.",
+        "selectorLabel": "Signatures",
+        "optionLabel": "{{name}}, {{summary}}",
+        "summaryEmpty": "no text yet",
+        "detailHeading": "Signature {{name}}",
         "bindingNone": "None"
       }
     },

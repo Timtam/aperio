@@ -210,9 +210,14 @@ export function SettingsSelectorDetail<T>({
             role="presentation"
             className="calendars-panel__selector-group"
           >
-            <span className="calendars-panel__account" aria-hidden="true">
-              {group.label}
-            </span>
+            {/* A caller with ONE unnamed group (the Signatures panel) passes
+                an empty label — skip the band rather than draw an empty
+                elevated strip above the first option. */}
+            {group.label && (
+              <span className="calendars-panel__account" aria-hidden="true">
+                {group.label}
+              </span>
+            )}
             <ul
               role="presentation"
               className="calendars-panel__selector-sublist"
