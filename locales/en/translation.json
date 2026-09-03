@@ -1048,6 +1048,10 @@
         "optionLabel": "{{name}}, {{summary}}",
         "summaryEmpty": "no text yet",
         "detailHeading": "Signature {{name}}",
+        "rowHint": "Double-tap to edit. Swipe up or down for more actions.",
+        "editGone": "This signature was deleted on another device.",
+        "editHeading": "Edit signature {{name}}",
+        "updated": "Signature {{name}} saved.",
         "bindingNone": "None"
       }
     },

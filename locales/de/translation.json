@@ -1045,6 +1045,10 @@
         "optionLabel": "{{name}}, {{summary}}",
         "summaryEmpty": "noch kein Text",
         "detailHeading": "Signatur {{name}}",
+        "rowHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für weitere Aktionen.",
+        "editGone": "Diese Signatur wurde auf einem anderen Gerät gelöscht.",
+        "editHeading": "Signatur {{name}} bearbeiten",
+        "updated": "Signatur {{name}} gespeichert.",
         "bindingNone": "Keine"
       }
     },
