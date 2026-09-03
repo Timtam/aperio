@@ -146,22 +146,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       # `npm ci` is exact on purpose, and that makes it sensitive to WHICH npm
-      # wrote the lockfile. Node 20 above pins npm 10 here; a lockfile written
-      # by npm 11 omits nested entries npm 10 insists on, and the build dies in
-      # 27 seconds with "Missing: <pkg> from lock file" — which happened the
-      # first time a dependency was added from a machine on npm 11.
+      # wrote the lockfile: a lockfile written by one npm major can omit nested
+      # entries another insists on, and the build then dies in 27 seconds with
+      # "Missing: <pkg> from lock file" — twice, while this job ran Node 20
+      # (npm 10) and development happened on Node 24 (npm 11). Node 24 above
+      # matches the local toolchain, so the lockfile and this step now agree
+      # by construction. Still, after touching mobile/package.json, verify
+      # before pushing — the dry run IS this step:
       #
-      # So after touching mobile/package.json, regenerate with the matching
-      # major and verify before pushing:
-      #
-      #   cd mobile
-      #   npx npm@10 install --package-lock-only
-      #   npx npm@10 ci --dry-run
-      #
-      # The dry run is the whole check — it is what this step does.
+      #   cd mobile && npm ci --dry-run
       - name: Install JS deps
         working-directory: mobile
         run: npm ci

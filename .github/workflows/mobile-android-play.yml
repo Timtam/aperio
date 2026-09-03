@@ -158,8 +158,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
+      # Node 24 above matches the local toolchain, so the lockfile and this
+      # exact install agree by construction (see the iOS workflow for the
+      # history). After touching mobile/package.json: `cd mobile && npm ci
+      # --dry-run` before pushing — the dry run IS this step.
       - name: Install JS deps
         working-directory: mobile
         run: npm ci

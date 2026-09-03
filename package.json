@@ -41,5 +41,8 @@
     "typescript": "^5",
     "vite": "^5",
     "vitest": "^1"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
   }
 }

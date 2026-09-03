@@ -14,5 +14,9 @@
     "@astrojs/starlight": "^0.40.0",
     "astro": "^6.4.5",
     "sharp": "^0.34.5"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "sharp@0.34.5": true
   }
 }

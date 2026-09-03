@@ -155,7 +155,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: needs.changes.outputs.frontend == 'true'
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: npm ci
