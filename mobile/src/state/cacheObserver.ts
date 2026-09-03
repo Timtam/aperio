@@ -54,6 +54,19 @@ export function setRemindersRefreshHook(cb: () => void): void {
   remindersRefreshHook = cb;
 }
 
+/**
+ * Non-hook subscription for a MODULE-LEVEL store (a screen uses
+ * `useCacheReload`). A store that hydrates once and holds its value in memory
+ * — the signature list — has to hear about a sync round that rewrote its row,
+ * or every consumer (editors included) keeps the pre-round value until the
+ * next launch. Returns the unsubscribe.
+ */
+export function subscribeCacheReload(category: CacheCategory, cb: () => void): () => void {
+  return subscribeBus((cat) => {
+    if (cat === category) cb();
+  });
+}
+
 function subscribeBus(cb: BusListener): () => void {
   busListeners.add(cb);
   return () => {

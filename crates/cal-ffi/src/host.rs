@@ -2209,6 +2209,10 @@ impl Host {
             &plugin_manager,
             secret_store.as_ref(),
         );
+        // Settings that joined the sync whitelist after they were written
+        // (the signature list) — the desktop's twin sits beside its
+        // credential backfill in lib.rs. Versioned inside.
+        host_core::settings_backfill::backfill_newly_synced_settings(&graph.writer, &db.shared());
 
         // The external-adapter snapshot cache. Construct it (+ the refresh dedup
         // coordinator + the swappable observer + the refresher), mirroring the

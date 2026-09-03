@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Signature } from '@aperio/shared';
 
 import { getUserPref, setUserPref } from '../api/client';
+import { useUserPrefsChanged } from './useUserPrefsChanged';
 
 /**
  * The user's signature blocks, and which one a calendar reaches for.
@@ -60,13 +61,28 @@ export function useSignatures(calendarIds: readonly string[] = []): SignatureSto
   // The ids as a stable string, so the effect re-runs when the SET changes
   // rather than on every render that rebuilds the array.
   const idsKey = [...calendarIds].sort().join(' ');
+  // Bumped when a sync round wrote our keys, so the read below re-runs: the
+  // list is read once per mount otherwise, and a signature that arrived from
+  // another device would sit in SQLite while this panel showed the old set.
+  const [syncedVersion, setSyncedVersion] = useState(0);
+  // Bumped by every local write. A re-read that started before a write must
+  // not land after it and put the pre-write list back over the optimistic one
+  // (the mobile store keeps the same guard).
+  const writeGeneration = useRef(0);
+  useUserPrefsChanged(
+    [LIST_KEY, ...(idsKey === '' ? [] : idsKey.split(' ')).map(bindingKey)],
+    () => setSyncedVersion((n) => n + 1),
+  );
 
   useEffect(() => {
     let cancelled = false;
+    const generation = writeGeneration.current;
     void (async () => {
       try {
         const raw = await getUserPref(LIST_KEY);
-        if (!cancelled) setSignatures(parse(raw));
+        if (!cancelled && generation === writeGeneration.current) {
+          setSignatures(parse(raw));
+        }
         const ids = idsKey === '' ? [] : idsKey.split(' ');
         const pairs = await Promise.all(
           ids.map(async (id) => [id, await getUserPref(bindingKey(id))] as const),
@@ -87,9 +103,10 @@ export function useSignatures(calendarIds: readonly string[] = []): SignatureSto
     return () => {
       cancelled = true;
     };
-  }, [idsKey]);
+  }, [idsKey, syncedVersion]);
 
   const save = useCallback(async (next: Signature[]) => {
+    writeGeneration.current += 1;
     setSignatures(next);
     await setUserPref(LIST_KEY, JSON.stringify(next));
   }, []);

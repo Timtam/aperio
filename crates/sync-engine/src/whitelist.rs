@@ -68,6 +68,12 @@ pub const SYNC_WHITELIST: &[&str] = &[
     "sound.",
     // Snooze options (configurable per §19.2.1).
     "snooze.options",
+    // The signature blocks (one JSON list). Their per-calendar BINDINGS
+    // already travel under the `calendar.` prefix above — the list itself
+    // did not, so a signature written on one device never reached the
+    // other, while the calendar there pointed at an id it had never seen.
+    // (Existing lists are pushed once by `settings_backfill` on upgrade.)
+    "signatures.list",
     // Window behaviour: close/minimize-to-tray. Synced so the choice
     // follows the user; a device without a usable tray simply ignores the
     // value (the toggle is gated on tray availability). Exact keys, not a
@@ -118,6 +124,15 @@ mod tests {
     #[test]
     fn backlog_width_syncs() {
         assert!(is_synced_key("backlog.width"));
+    }
+
+    #[test]
+    fn signatures_sync_as_list_and_binding() {
+        // The list itself (this used to be missing — the bindings travelled,
+        // the signatures they pointed at did not) and the per-calendar
+        // binding under the `calendar.` prefix.
+        assert!(is_synced_key("signatures.list"));
+        assert!(is_synced_key("calendar.abc.signature"));
     }
 
     #[test]

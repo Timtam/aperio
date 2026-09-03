@@ -545,6 +545,10 @@ pub fn run() {
         &plugin_manager,
         &crate::secrets::KeyringSecretStore,
     );
+    // Settings that joined the sync whitelist after they were written (the
+    // signature list): pushed once so the other devices finally see them.
+    // Versioned inside; a no-op after the first launch of an upgrade.
+    host_core::settings_backfill::backfill_newly_synced_settings(&event_log_writer, &db.shared());
 
     // Local custom-sound store (user content, outside the sync/ subtree). §14.4:
     // the reminder scheduler + the sound import/list/preview/delete commands

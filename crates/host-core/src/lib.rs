@@ -34,6 +34,7 @@ pub mod plugin_channel;
 pub mod registry;
 pub mod reminders;
 pub mod remote_plugins;
+pub mod settings_backfill;
 pub mod sftp_host_keys;
 pub mod sound;
 pub mod sound_assets;
