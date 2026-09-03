@@ -252,7 +252,10 @@ export default function SignaturesScreen() {
               {/* ONE screen-reader stop per signature: the row is the element
                   (double-tap = edit; edit/delete ride the actions rotor). The
                   visible Edit / Delete buttons stay for sighted users and are
-                  hidden from the screen reader — they duplicate the rotor verbs. */}
+                  hidden from the screen reader on both platforms — they duplicate the
+                  rotor verbs. (accessibilityElementsHidden is the iOS switch and
+                  no-hide-descendants the Android one; accessible={false} alone leaves
+                  their Text children as VoiceOver stops.) */}
               <Pressable
                 ref={focus.registerRow(index)}
                 accessible
@@ -293,6 +296,7 @@ export default function SignaturesScreen() {
               </Pressable>
               <Pressable
                 accessible={false}
+                accessibilityElementsHidden
                 importantForAccessibility="no-hide-descendants"
                 disabled={busy}
                 onPress={() => startEdit(sig, index)}
@@ -302,6 +306,7 @@ export default function SignaturesScreen() {
               </Pressable>
               <Pressable
                 accessible={false}
+                accessibilityElementsHidden
                 importantForAccessibility="no-hide-descendants"
                 disabled={busy}
                 onPress={() => void onDelete(sig, index)}
