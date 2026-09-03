@@ -88,6 +88,17 @@ function cacheSet(key: CacheKey, events: CalendarEvent[]): void {
   eventsCache.set(key, events);
 }
 
+/** The hook state a key starts from: the cached batch (loaded), or empty
+ *  and loading. Pure cache read — safe to call during render. */
+function seedFromCache(key: CacheKey): {
+  key: CacheKey;
+  events: CalendarEvent[];
+  loading: boolean;
+} {
+  const cached = cacheGet(key);
+  return { key, events: cached ?? [], loading: cached === undefined };
+}
+
 /** Test-only escape hatch — wipes the caches so each test starts clean. */
 export function __resetEventsCacheForTests(): void {
   eventsCache.clear();
@@ -120,15 +131,22 @@ export function useEvents(range: { start: Date; end: Date }) {
   );
   const key = cacheKey(idsKey, startIso, endIso);
 
-  // Lazy initialisers: the very first render already reflects the
-  // cache when the key has been seen before in this session. No
-  // flicker between empty and cached state.
-  const [events, setEvents] = useState<CalendarEvent[]>(
-    () => cacheGet(key) ?? [],
-  );
-  const [loading, setLoading] = useState<boolean>(
-    () => cacheGet(key) === undefined,
-  );
+  // The state is TAGGED with the key it describes, and a render whose key
+  // differs derives its value from the cache right here instead of showing
+  // the tagged state. The effect below re-seeds the state on a key change,
+  // but effects run AFTER the render — so the one render in between used to
+  // show the PREVIOUS range's events under the NEW range's days: paging a
+  // week, every day cell first announced the count of whatever old-range
+  // events happened to span into it (a multi-day holiday: "1 Eintrag"), then
+  // re-announced the real count a frame later. That flash happened on a
+  // cache HIT too, which read, from the outside, as if paging back had thrown
+  // the cache away. A cold key derives to empty+loading, never to stale rows.
+  const [state, setState] = useState<{
+    key: CacheKey;
+    events: CalendarEvent[];
+    loading: boolean;
+  }>(() => seedFromCache(key));
+  const current = state.key === key ? state : seedFromCache(key);
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
@@ -141,11 +159,23 @@ export function useEvents(range: { start: Date; end: Date }) {
     // fetch (cache miss).
     const cached = cacheGet(key);
     const hadCache = cached !== undefined;
+    // Functional updates that hand back `prev` when nothing changed keep
+    // React's bail-out: a dataVersion bump on a warm key must not cost every
+    // consumer view an extra render.
     if (cached) {
-      setEvents(cached);
-      setLoading(false);
+      setState((prev) =>
+        prev.key === key && prev.events === cached && !prev.loading
+          ? prev
+          : { key, events: cached, loading: false },
+      );
     } else {
-      setLoading(true);
+      setState((prev) =>
+        prev.key === key
+          ? prev.loading
+            ? prev
+            : { ...prev, loading: true }
+          : { key, events: [], loading: true },
+      );
     }
 
     // Defer the actual network call until the CALENDAR catalog is ready
@@ -158,8 +188,7 @@ export function useEvents(range: { start: Date; end: Date }) {
 
     const ids = effectiveIds;
     if (ids.length === 0) {
-      setEvents([]);
-      setLoading(false);
+      setState({ key, events: [], loading: false });
       cacheSet(key, []);
       return;
     }
@@ -244,18 +273,22 @@ export function useEvents(range: { start: Date; end: Date }) {
             // kept failing.
             const expanded = aggregate();
             cacheSet(key, expanded);
-            setEvents(expanded);
-            setLoading(false);
+            setState({ key, events: expanded, loading: false });
           } else if (!hadCache) {
             // Cold key: paint what we have so far (last-known union with
-            // this calendar's slice refreshed).
-            setEvents(aggregate());
+            // this calendar's slice refreshed). Still loading — the
+            // authoritative swap above flips that.
+            setState({ key, events: aggregate(), loading: true });
           }
         })
         .catch((err) => {
           if (cancelled) return;
           setError(err);
-          setLoading(false);
+          setState((prev) =>
+            prev.key === key
+              ? { ...prev, loading: false }
+              : { key, events: [], loading: false },
+          );
         });
     });
 
@@ -280,11 +313,12 @@ export function useEvents(range: { start: Date; end: Date }) {
   // Cancelled events are cached raw; the show-cancelled toggle filters them at
   // read time so flipping it re-filters instantly without a refetch. (Reminders
   // for cancelled events are suppressed separately, core-side, regardless.)
+  const events = current.events;
   const visibleEvents = useMemo(
     () =>
       showCancelledEvents ? events : events.filter((e) => !e.cancelled),
     [events, showCancelledEvents],
   );
 
-  return { events: visibleEvents, loading, error, calendarById };
+  return { events: visibleEvents, loading: current.loading, error, calendarById };
 }

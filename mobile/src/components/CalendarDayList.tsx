@@ -1,5 +1,13 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -398,8 +406,8 @@ export function CalendarDayList({
   // Seed the mount from the window's last loaded snapshot (see
   // windowSnapshotCache): a view switch re-mounts this component, and without
   // the seed its first load blanked to "Loading …" over data that was on
-  // screen a second ago. Captured ONCE — a later window change on the same
-  // mount keeps the current content and revalidates (hasLoadedRef).
+  // screen a second ago. Captured ONCE for the mount; a later window change
+  // on the SAME mount (a page step) re-seeds in the layout effect below.
   const seedRef = useRef<WindowSnapshot | null | undefined>(undefined);
   if (seedRef.current === undefined) {
     seedRef.current =
@@ -646,6 +654,35 @@ export function CalendarDayList({
   // mount counts as loaded: its content IS on screen, and the mount's load
   // must revalidate in place rather than blank over it.
   const hasLoadedRef = useRef(seed != null);
+
+  // A page step changes `range` on the same mount. Until the debounced reload
+  // lands (300 ms + the fetch) the PREVIOUS window's rows stayed in state and
+  // were bucketed under the NEW window's days — a multi-day event spanning
+  // both windows read as the new day's content, and a row touched meanwhile
+  // announced a stale count (the desktop useEvents fix, mirrored). Re-seed
+  // synchronously from the window snapshot instead: a warm window paints its
+  // last loaded content before the frame is drawn (a layout effect commits
+  // before paint), a cold one drops the old rows so the new days read as
+  // empty until the reload lands — NOT as "loading": that branch replaces
+  // the whole day list, and swapping the accessibility tree out on every
+  // cold page step is exactly the VoiceOver churn the reload debounce exists
+  // to avoid. The catalogs (calendars, labels, lists) are window-independent
+  // and stay.
+  const windowKey = `${range.start.toISOString()}|${range.end.toISOString()}`;
+  const seededWindowKeyRef = useRef(windowKey);
+  useLayoutEffect(() => {
+    if (seededWindowKeyRef.current === windowKey) return;
+    seededWindowKeyRef.current = windowKey;
+    const snap = windowSnapshotCache.get(windowKey);
+    if (snap) {
+      setEvents(snap.events);
+      setTasks(snap.tasks);
+      setSections(snap.sections);
+    } else {
+      setEvents([]);
+      setTasks([]);
+    }
+  }, [windowKey]);
 
   // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
   // The grid renders a windowed-height canvas (dayHours × HOUR_PX) inside this

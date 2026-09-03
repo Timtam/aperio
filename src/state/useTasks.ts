@@ -64,23 +64,37 @@ export function useTasks() {
     [selectedTaskListIds],
   );
 
-  // Lazy init: read cache before the first paint so a remount with
-  // a previously seen list selection comes back with data already.
-  const [tasks, setTasks] = useState<Task[]>(() => cacheGet(idsKey) ?? []);
-  const [loading, setLoading] = useState<boolean>(
-    () => cacheGet(idsKey) === undefined,
-  );
+  // Key-tagged state, derived from the cache during render when the key
+  // changed — same reason as useEvents: the effect re-seeds AFTER the
+  // render, so the render in between would otherwise show the previous
+  // selection's tasks (and their day counts) under the new one.
+  const [state, setState] = useState<{
+    key: CacheKey;
+    tasks: Task[];
+    loading: boolean;
+  }>(() => seedFromCache(idsKey));
+  const current = state.key === idsKey ? state : seedFromCache(idsKey);
 
   useEffect(() => {
     let cancelled = false;
     if (dataVersion > latestVersion) latestVersion = dataVersion;
 
     const cached = cacheGet(idsKey);
+    // `prev` back when nothing changed keeps React's bail-out (see useEvents).
     if (cached) {
-      setTasks(cached);
-      setLoading(false);
+      setState((prev) =>
+        prev.key === idsKey && prev.tasks === cached && !prev.loading
+          ? prev
+          : { key: idsKey, tasks: cached, loading: false },
+      );
     } else {
-      setLoading(true);
+      setState((prev) =>
+        prev.key === idsKey
+          ? prev.loading
+            ? prev
+            : { ...prev, loading: true }
+          : { key: idsKey, tasks: [], loading: true },
+      );
     }
 
     // Wait only for the TASK-LIST catalog before deciding anything else —
@@ -90,8 +104,7 @@ export function useTasks() {
 
     const ids = [...selectedTaskListIds];
     if (ids.length === 0) {
-      setTasks([]);
-      setLoading(false);
+      setState({ key: idsKey, tasks: [], loading: false });
       cacheSet(idsKey, dataVersion, []);
       return;
     }
@@ -126,8 +139,7 @@ export function useTasks() {
       // strictly newer than the frozen entry; keeping the old entry made
       // every later bump repaint outdated data first while a list failed.
       cacheSet(idsKey, dataVersion, flat);
-      setTasks(flat);
-      setLoading(false);
+      setState({ key: idsKey, tasks: flat, loading: false });
     });
 
     return () => {
@@ -144,7 +156,18 @@ export function useTasks() {
     return map;
   }, [taskLists]);
 
-  return { tasks, loading, taskListById };
+  return { tasks: current.tasks, loading: current.loading, taskListById };
+}
+
+/** The hook state a key starts from: the cached batch (loaded), or empty
+ *  and loading. Pure cache read — safe to call during render. */
+function seedFromCache(key: CacheKey): {
+  key: CacheKey;
+  tasks: Task[];
+  loading: boolean;
+} {
+  const cached = cacheGet(key);
+  return { key, tasks: cached ?? [], loading: cached === undefined };
 }
 
 function taskOrder(a: Task, b: Task): number {
