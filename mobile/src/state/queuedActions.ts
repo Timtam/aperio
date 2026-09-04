@@ -223,6 +223,10 @@ async function createSpokenEvent(action: QueuedAction): Promise<boolean> {
     reminders: [],
     sound: null,
     attendees: [],
+    // A spoken request has no reminder field (title, time, calendar only), so
+    // the calendar's default-reminder mode decides whether the appointment
+    // carries the defaults — the same rule as the quick-add.
+    use_calendar_defaults: true,
   });
   return true;
 }

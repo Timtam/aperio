@@ -469,6 +469,11 @@ export function EventDialog({
   const [keepRemindersAsDefault, setKeepRemindersAsDefault] = useState(
     remindersWereFromDefault,
   );
+  // Whether the user touched the reminders editor at all. A NEW appointment
+  // saved without a touch made no reminder choice, so the host may write the
+  // calendar's default reminders into it (the calendar's "attach" mode); an
+  // emptied list after a touch is a choice — "no reminder" — and stays so.
+  const remindersTouchedRef = useRef(false);
   // "Notify attendees": defaults ON. Only meaningful (and only shown) when
   // the calendar supports server-side scheduling AND the event has
   // attendees; on submit we gate the wire flag on those too.
@@ -1060,6 +1065,10 @@ export function EventDialog({
             sound: null,
             attendees: form.attendees,
             send_invitations: sendInvitations,
+            // An untouched editor made no reminder choice: the calendar's
+            // "attach" mode may then write its defaults into the new event.
+            use_calendar_defaults:
+              !remindersTouchedRef.current && remindersForWire.length === 0,
           });
           if (!storesColorNatively) {
             await setEventColor(
@@ -1587,6 +1596,7 @@ export function EventDialog({
             // become real per-event reminders — clear the
             // "keep as default" gate so submit actually sends them.
             setKeepRemindersAsDefault(false);
+            remindersTouchedRef.current = true;
           }}
           mode="event"
         />

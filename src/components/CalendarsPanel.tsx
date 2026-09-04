@@ -6,7 +6,12 @@ import { useTranslation } from 'react-i18next';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type { CalendarDayViewMode } from '../state/TaskCascadeProvider';
-import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import { isBirthdayCalendarId } from '@aperio/shared';
+import {
+  DEFAULT_REMINDER_MODES,
+  useCalendarDefaultReminders,
+  type DefaultReminderMode,
+} from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
 import { SettingsSelectorDetail } from './SettingsSelectorDetail';
 import { SoundPrefField } from './SoundPrefField';
@@ -39,6 +44,59 @@ const DAY_END_OPTIONS: readonly number[] = Array.from(
 
 /** Stable id accessor for the selector (module scope so its identity holds). */
 const calendarItemId = (c: { id: string }) => c.id;
+
+/**
+ * Where one calendar's default reminders live — "only in Aperio" (the overlay
+ * the scheduler applies) or "attached to new events" (written into every new
+ * appointment as its own reminders, so the iOS Calendar app and a voice
+ * assistant reading the same calendar ring too). A radiogroup like the day
+ * layout above: two options, arrow-key navigable, one tab stop.
+ */
+function DefaultReminderModeField({
+  value,
+  onChange,
+}: {
+  value: DefaultReminderMode;
+  onChange: (mode: DefaultReminderMode) => void;
+}) {
+  const { t } = useTranslation();
+  const headingId = useId();
+  const hintId = useId();
+  const groupId = useId();
+  return (
+    <section
+      className="calendars-panel__group"
+      aria-label={t('dialogs.settings.calendars.defaultsMode.heading')}
+    >
+      <h4 id={headingId} className="calendars-panel__account">
+        {t('dialogs.settings.calendars.defaultsMode.heading')}
+      </h4>
+      <p id={hintId} className="form__hint">
+        {t('dialogs.settings.calendars.defaultsMode.hint')}
+      </p>
+      <div
+        role="radiogroup"
+        id={groupId}
+        aria-labelledby={headingId}
+        aria-describedby={hintId}
+        className="tasks-settings__radiogroup"
+      >
+        {DEFAULT_REMINDER_MODES.map((option) => (
+          <label key={option} className="tasks-settings__radio">
+            <input
+              type="radio"
+              name={groupId}
+              value={option}
+              checked={value === option}
+              onChange={() => onChange(option)}
+            />
+            <span>{t(`dialogs.settings.calendars.defaultsMode.options.${option}`)}</span>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 /**
  * Calendars settings panel — per-calendar default reminders + sounds.
@@ -75,7 +133,7 @@ export function CalendarsPanel() {
     useTaskCascadeEnabled();
 
   const calendarIds = useMemo(() => calendars.map((c) => c.id), [calendars]);
-  const { getDefaultsFor, setDefaultsFor, hydrating } =
+  const { getDefaultsFor, setDefaultsFor, getModeFor, setModeFor, hydrating } =
     useCalendarDefaultReminders(calendarIds);
 
   // Group calendars by their owning account so the selector reads as
@@ -309,6 +367,15 @@ export function CalendarsPanel() {
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
               />
+              {/* Only where a new appointment can carry reminders at all: a
+                  read-only calendar (an iCal subscription) never gets one
+                  created, and a birthday calendar is synthesized here. */}
+              {!cal.read_only && !isBirthdayCalendarId(cal.id) && (
+                <DefaultReminderModeField
+                  value={getModeFor(cal.id)}
+                  onChange={(mode) => setModeFor(cal.id, mode)}
+                />
+              )}
               {/* §14.4 per-calendar default sound — inherits the global
                   default unless overridden. */}
               <SoundPrefField prefKey={`sound.calendar.${cal.id}`} />

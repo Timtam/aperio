@@ -181,6 +181,9 @@ export function QuickAddDialog({
           reminders: [],
           sound: null,
           attendees: [],
+          // No reminder field here, so the calendar's default-reminder mode
+          // decides whether the new appointment carries the defaults.
+          use_calendar_defaults: true,
         });
         announce(t('dialogs.event.created', { title: trimmed }));
         onClose();

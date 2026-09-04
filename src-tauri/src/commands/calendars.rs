@@ -485,6 +485,12 @@ pub struct CreateEventRequest {
     pub calendar_id: String,
     #[serde(flatten)]
     pub event: NewEvent,
+    /// True when the caller made no reminder choice at all (an untouched
+    /// editor, a quick-add) — then a calendar set to "attach" writes its
+    /// default reminders into the new appointment. Absent from older callers,
+    /// which keeps their events exactly as they were.
+    #[serde(default)]
+    pub use_calendar_defaults: bool,
 }
 
 #[tauri::command]
@@ -494,15 +500,26 @@ pub async fn create_event(
     cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
     let account = registry
         .account_for_calendar(&request.calendar_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     let is_local = account == LOCAL_ID;
+    let mut new_event = request.event;
+    // A calendar whose default reminders are set to "attach" writes them into
+    // a brand-new appointment the editor left without any — the caller says
+    // whether the reminders were a choice or merely unset.
+    host_core::reminders::apply_default_reminder_policy(
+        &db.shared(),
+        &request.calendar_id,
+        &mut new_event,
+        request.use_calendar_defaults,
+    );
     let event = if is_local {
         adapter
-            .create_event(&request.calendar_id, request.event)
+            .create_event(&request.calendar_id, new_event)
             .await?
     } else {
         let Some(ext) = registry.calendar_adapter(&account) else {
@@ -511,7 +528,6 @@ pub async fn create_event(
                 message: format!("calendar '{}' is not routable", request.calendar_id),
             });
         };
-        let mut new_event = request.event;
         // Color-capable provider: resolve the label to a hex so the adapter
         // writes a native RFC 7986 COLOR. Non-capable providers keep the
         // color as a host-local override (set separately via set_event_color).

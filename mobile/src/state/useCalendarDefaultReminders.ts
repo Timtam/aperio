@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Reminder } from '@aperio/shared';
 
-import { getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
+import { getUserPref, getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 
 // Per-calendar default reminders — the mobile twin of the desktop
@@ -23,17 +23,34 @@ import { refreshRemindersSoon } from '../reminders/scheduler';
 const WRITE_DEBOUNCE_MS = 150;
 
 const prefKey = (calendarId: string): string => `calendar.${calendarId}.defaultReminders`;
+const modeKey = (calendarId: string): string => `calendar.${calendarId}.defaultRemindersMode`;
+
+/**
+ * Where a calendar's default reminders live — the desktop's twin. `local` is
+ * the overlay above; `attach` writes them into every NEW appointment created
+ * in the calendar as its own reminders, so other clients of the same calendar
+ * (the iOS Calendar app, a voice assistant reading iCloud) ring too. The Host
+ * applies it on create (`use_calendar_defaults`); this hook only stores the
+ * choice, under the synced `calendar.{id}.defaultRemindersMode`.
+ */
+export type DefaultReminderMode = 'local' | 'attach';
+export const DEFAULT_REMINDER_MODES: readonly DefaultReminderMode[] = ['local', 'attach'];
 
 export interface CalendarDefaultRemindersBinding {
   value: Reminder[];
   loading: boolean;
   save: (next: Reminder[]) => void;
+  /** Where the defaults live; `local` until chosen otherwise. */
+  mode: DefaultReminderMode;
+  /** Choose where the defaults live and persist it (one tap, one write). */
+  setMode: (next: DefaultReminderMode) => void;
 }
 
 export function useCalendarDefaultReminders(
   calendarId: string,
 ): CalendarDefaultRemindersBinding {
   const [value, setValue] = useState<Reminder[]>([]);
+  const [mode, setModeState] = useState<DefaultReminderMode>('local');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,13 +59,20 @@ export function useCalendarDefaultReminders(
     // the overlay doesn't apply) — resolve empty without an FFI round-trip.
     if (!calendarId) {
       setValue([]);
+      setModeState('local');
       setLoading(false);
       return;
     }
     setLoading(true);
-    void getUserPrefJson<Reminder[]>(prefKey(calendarId))
-      .then((arr) => {
-        if (!cancelled) setValue(Array.isArray(arr) ? arr : []);
+    void Promise.all([
+      getUserPrefJson<Reminder[]>(prefKey(calendarId)),
+      getUserPref(modeKey(calendarId)),
+    ])
+      .then(([arr, rawMode]) => {
+        if (cancelled) return;
+        setValue(Array.isArray(arr) ? arr : []);
+        // Only the exact marker attaches; anything else is the overlay.
+        setModeState(rawMode === 'attach' ? 'attach' : 'local');
       })
       .catch(() => {
         if (!cancelled) setValue([]);
@@ -113,5 +137,18 @@ export function useCalendarDefaultReminders(
     [persist],
   );
 
-  return { value, loading, save };
+  // `local` is written as a value rather than a deletion so the choice travels
+  // as a synced answer, the way the desktop writes it.
+  const setMode = useCallback(
+    (next: DefaultReminderMode) => {
+      setModeState(next);
+      void setUserPref(modeKey(calendarId), next).catch(() => {
+        // The on-screen choice already reflects intent; the next open re-reads
+        // from disk, so a failed write shows up as the old value then.
+      });
+    },
+    [calendarId],
+  );
+
+  return { value, loading, save, mode, setMode };
 }

@@ -37,25 +37,48 @@ const WRITE_DEBOUNCE_MS = 150;
 
 export type DefaultRemindersMap = Record<string, Reminder[]>;
 
+/**
+ * Where a calendar's default reminders live. `local` is the overlay above:
+ * Aperio applies them at notification time and the event stays reminder-less
+ * on the wire. `attach` writes them into every NEW appointment created in the
+ * calendar as its own reminders, so other clients of the same calendar (the
+ * iOS Calendar app, a voice assistant reading iCloud) ring too. The host
+ * applies it on create (`use_calendar_defaults`); this hook only stores the
+ * choice, under the synced `calendar.{id}.defaultRemindersMode`.
+ */
+export type DefaultReminderMode = 'local' | 'attach';
+export const DEFAULT_REMINDER_MODES: readonly DefaultReminderMode[] = ['local', 'attach'];
+export type DefaultReminderModeMap = Record<string, DefaultReminderMode>;
+
 export interface CalendarDefaultReminders {
   /** Default reminders for `calendarId`, or empty array when none. */
   getDefaultsFor: (calendarId: string) => Reminder[];
   /** Set the defaults for one calendar and persist asynchronously. */
   setDefaultsFor: (calendarId: string, reminders: Reminder[]) => void;
+  /** Where `calendarId`'s defaults live; `local` until chosen otherwise. */
+  getModeFor: (calendarId: string) => DefaultReminderMode;
+  /** Choose where one calendar's defaults live and persist it. */
+  setModeFor: (calendarId: string, mode: DefaultReminderMode) => void;
   /** True until the initial hydration round-trip returns. */
   hydrating: boolean;
 }
 
 const EMPTY: Reminder[] = [];
+const MODE_SUFFIX = '.defaultRemindersMode';
 
 function prefKey(calendarId: string): string {
   return `${KEY_PREFIX}${calendarId}${KEY_SUFFIX}`;
+}
+
+function modeKey(calendarId: string): string {
+  return `${KEY_PREFIX}${calendarId}${MODE_SUFFIX}`;
 }
 
 export function useCalendarDefaultReminders(
   calendarIds: readonly string[],
 ): CalendarDefaultReminders {
   const [map, setMap] = useState<DefaultRemindersMap>({});
+  const [modes, setModes] = useState<DefaultReminderModeMap>({});
   const [hydrating, setHydrating] = useState(true);
 
   // Hydrate every visible calendar's default once we know the id
@@ -73,10 +96,16 @@ export function useCalendarDefaultReminders(
     setHydrating(true);
     void (async () => {
       const next: DefaultRemindersMap = {};
+      const nextModes: DefaultReminderModeMap = {};
       await Promise.all(
         calendarIds.map(async (id) => {
           try {
-            const raw = await getUserPref(prefKey(id));
+            const [raw, rawMode] = await Promise.all([
+              getUserPref(prefKey(id)),
+              getUserPref(modeKey(id)),
+            ]);
+            // Only the exact marker attaches; anything else is the overlay.
+            if (rawMode === 'attach') nextModes[id] = 'attach';
             if (!raw) return;
             const parsed = JSON.parse(raw) as unknown;
             if (Array.isArray(parsed)) {
@@ -95,6 +124,7 @@ export function useCalendarDefaultReminders(
       );
       if (!cancelled) {
         setMap(next);
+        setModes(nextModes);
         setHydrating(false);
       }
     })();
@@ -171,5 +201,20 @@ export function useCalendarDefaultReminders(
     [pendingWrites],
   );
 
-  return { getDefaultsFor, setDefaultsFor, hydrating };
+  const getModeFor = useCallback(
+    (calendarId: string): DefaultReminderMode => modes[calendarId] ?? 'local',
+    [modes],
+  );
+
+  // One radio click, one write — no debounce needed. `local` is written as a
+  // value rather than a deletion so the choice travels as a synced answer.
+  const setModeFor = useCallback((calendarId: string, mode: DefaultReminderMode) => {
+    setModes((prev) => (prev[calendarId] === mode ? prev : { ...prev, [calendarId]: mode }));
+    void setUserPref(modeKey(calendarId), mode).catch(() => {
+      // The in-memory choice already reflects intent; the next mount re-reads
+      // from disk, so a failed write shows up as the old value then.
+    });
+  }, []);
+
+  return { getDefaultsFor, setDefaultsFor, getModeFor, setModeFor, hydrating };
 }

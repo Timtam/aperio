@@ -13,11 +13,12 @@
 //! triggers as ahead-of-time OS-delivered local notifications). One source of
 //! truth for *what* fires *when*; each platform owns *how* it's delivered.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cal_core::{
-    ContactsFeature, DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency,
-    Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence, TaskUser,
+    ContactsFeature, DateRange, Event, EventRecurrence, NewEvent, RecurrenceEnd,
+    RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence, TaskUser,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -124,6 +125,10 @@ pub fn enumerate_local_triggers(
     // Read the day-carryover anchor BEFORE locking the connection — the pref
     // read takes its own lock and `std::sync::Mutex` isn't reentrant.
     let day_start = day_start_time(db);
+    // Local calendars have no adapter, so the external fan-out's overlay never
+    // sees them: read their configured defaults here, BEFORE the scan locks the
+    // connection (each pref read takes its own lock).
+    let calendar_defaults = local_calendar_default_reminders(db);
     let conn = match db.lock() {
         Ok(c) => c,
         Err(err) => {
@@ -148,8 +153,15 @@ pub fn enumerate_local_triggers(
                 let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
                 let all_day: bool = row.get(8).unwrap_or(false);
-                let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
-                    continue;
+                // An event without reminders of its own falls back to its
+                // calendar's defaults — the same rule `event_triggers` applies
+                // to adapter-backed calendars.
+                let reminders = match parse_reminders(reminders_json.as_deref()) {
+                    Some(own) => own,
+                    None => match calendar_defaults.get(&calendar_id) {
+                        Some(defaults) => defaults.clone(),
+                        None => continue,
+                    },
                 };
                 let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                     continue;
@@ -576,6 +588,32 @@ pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<Rem
     configured_calendar_default_reminders(db, calendar_id).unwrap_or_default()
 }
 
+/// The configured default reminders of every calendar that has local events,
+/// keyed by calendar id — only the calendars with a non-empty list. Read once
+/// per scan, so the event loop can hold the connection lock without a pref
+/// read underneath it (`std::sync::Mutex` isn't reentrant).
+fn local_calendar_default_reminders(db: &SharedConn) -> HashMap<String, Vec<Reminder>> {
+    let ids: Vec<String> = match db.lock() {
+        Ok(conn) => conn
+            .prepare("SELECT DISTINCT calendar_id FROM events")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .map(|rows| rows.flatten().collect::<Vec<String>>())
+            })
+            .unwrap_or_default(),
+        Err(err) => {
+            warn!(?err, "reminder DB mutex poisoned");
+            return HashMap::new();
+        }
+    };
+    ids.into_iter()
+        .filter_map(|id| {
+            let defaults = calendar_default_reminders(db, &id);
+            (!defaults.is_empty()).then_some((id, defaults))
+        })
+        .collect()
+}
+
 /// The same read, but able to say "the user never answered this question".
 ///
 /// `None` means no stored value at all; `Some(vec![])` means the list was
@@ -624,6 +662,101 @@ pub fn birthday_default_reminders() -> Vec<Reminder> {
         kind: ReminderKind::Relative { minutes_before: 0 },
         sound: None,
     }]
+}
+
+/// Where a calendar's default reminders live.
+///
+/// [`Local`](Self::Local) is the overlay: Aperio applies the defaults itself
+/// at notification time (see [`event_triggers`]) and the event stays
+/// reminder-less on the wire. [`Attach`](Self::Attach) writes them into every
+/// NEW appointment as its own reminders, so every other client of the same
+/// calendar rings too — the iOS Calendar app, a voice assistant reading iCloud.
+/// That is exactly what iOS does with its own "Default Alert Times", and why
+/// an appointment created there is announced everywhere while one created in
+/// Aperio used to be silent outside Aperio.
+///
+/// Stored per calendar under `calendar.<id>.defaultRemindersMode`; absent
+/// means `Local`, the behaviour every calendar had before the choice existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultReminderMode {
+    /// Aperio applies the defaults; nothing is written into the event.
+    Local,
+    /// A new appointment created without reminders of its own gets the
+    /// calendar's defaults written in as real reminders.
+    Attach,
+}
+
+impl DefaultReminderMode {
+    /// The stored value for [`Local`](Self::Local).
+    pub const LOCAL: &'static str = "local";
+    /// The stored value for [`Attach`](Self::Attach).
+    pub const ATTACH: &'static str = "attach";
+
+    /// Anything but the exact `attach` marker reads as local — an unknown or
+    /// mistyped value must never start writing into events.
+    fn parse(raw: &str) -> Self {
+        if raw.trim() == Self::ATTACH {
+            Self::Attach
+        } else {
+            Self::Local
+        }
+    }
+}
+
+/// The pref key holding a calendar's [`DefaultReminderMode`].
+pub fn default_reminder_mode_key(calendar_id: &str) -> String {
+    format!("calendar.{calendar_id}.defaultRemindersMode")
+}
+
+/// A calendar's [`DefaultReminderMode`]; local when never chosen, and local on
+/// a failed read too — the safe answer, since attaching writes to the server.
+pub fn calendar_default_reminder_mode(db: &SharedConn, calendar_id: &str) -> DefaultReminderMode {
+    let repo = UserPrefsRepo::new(db);
+    match repo.get(&default_reminder_mode_key(calendar_id)) {
+        Ok(Some(raw)) => DefaultReminderMode::parse(&raw),
+        Ok(None) => DefaultReminderMode::Local,
+        Err(err) => {
+            warn!(
+                ?err,
+                calendar_id = %calendar_id,
+                "couldn't read the calendar's default-reminder mode; \
+                 keeping the defaults local for this create",
+            );
+            DefaultReminderMode::Local
+        }
+    }
+}
+
+/// Write the calendar's default reminders into a new appointment when the
+/// calendar asks for it. Returns whether the event was changed.
+///
+/// Applies only when the caller left the reminders UNSET (`reminders_unset`:
+/// the editor was never touched and sent an empty list, or a quick-add that
+/// has no reminder field at all) and the event carries none. An explicit
+/// choice — including "no reminder at all" — is never overridden. In
+/// [`Local`](DefaultReminderMode::Local) mode nothing changes: the event stays
+/// reminder-less on the wire and the scheduler overlays the defaults as before.
+///
+/// Existing appointments are never touched by this: the update paths do not
+/// call it, so an edit of an old event can't silently grow reminders.
+pub fn apply_default_reminder_policy(
+    db: &SharedConn,
+    calendar_id: &str,
+    event: &mut NewEvent,
+    reminders_unset: bool,
+) -> bool {
+    if !reminders_unset || !event.reminders.is_empty() {
+        return false;
+    }
+    if calendar_default_reminder_mode(db, calendar_id) != DefaultReminderMode::Attach {
+        return false;
+    }
+    let defaults = calendar_default_reminders(db, calendar_id);
+    if defaults.is_empty() {
+        return false;
+    }
+    event.reminders = defaults;
+    true
 }
 
 /// Translate a batch of external events into Trigger entries. Empty
@@ -1244,6 +1377,250 @@ mod tests {
     use super::*;
     use cal_core::{EventRecurrence, Reminder, ReminderKind, Task, TaskStatus, TaskUser};
     use chrono::{Datelike, NaiveDate, NaiveTime, Timelike};
+
+    fn prefs_db() -> SharedConn {
+        crate::db::DbHandle::open_in_memory()
+            .expect("in-memory db")
+            .shared()
+    }
+
+    fn new_event_without_reminders() -> NewEvent {
+        NewEvent {
+            title: "Dentist".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 9, 4, 9, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 9, 4, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        }
+    }
+
+    fn one_hour_before() -> Vec<Reminder> {
+        vec![Reminder {
+            kind: ReminderKind::Relative { minutes_before: 60 },
+            sound: None,
+        }]
+    }
+
+    fn store_defaults(db: &SharedConn, calendar_id: &str, defaults: &[Reminder]) {
+        UserPrefsRepo::new(db)
+            .set(
+                &format!("calendar.{calendar_id}.defaultReminders"),
+                &serde_json::to_string(defaults).unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn store_mode(db: &SharedConn, calendar_id: &str, mode: &str) {
+        UserPrefsRepo::new(db)
+            .set(&default_reminder_mode_key(calendar_id), mode)
+            .unwrap();
+    }
+
+    /// Local unless the exact `attach` marker was stored: a calendar that was
+    /// never asked, and a mistyped value, both keep the old behaviour.
+    #[test]
+    fn default_reminder_mode_is_local_unless_attach_was_stored() {
+        let db = prefs_db();
+        assert_eq!(
+            calendar_default_reminder_mode(&db, "cal"),
+            DefaultReminderMode::Local
+        );
+        store_mode(&db, "cal", "attach");
+        assert_eq!(
+            calendar_default_reminder_mode(&db, "cal"),
+            DefaultReminderMode::Attach
+        );
+        store_mode(&db, "cal", "sometimes");
+        assert_eq!(
+            calendar_default_reminder_mode(&db, "cal"),
+            DefaultReminderMode::Local
+        );
+    }
+
+    /// The feature itself: attach mode + unset reminders → the defaults become
+    /// the appointment's own reminders.
+    #[test]
+    fn attach_mode_writes_the_defaults_into_a_new_event_left_without_reminders() {
+        let db = prefs_db();
+        store_defaults(&db, "cal", &one_hour_before());
+        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
+        let mut event = new_event_without_reminders();
+        assert!(apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert_eq!(event.reminders, one_hour_before());
+    }
+
+    /// Local mode is the overlay: the event stays reminder-less on the wire.
+    #[test]
+    fn local_mode_leaves_a_new_event_reminderless() {
+        let db = prefs_db();
+        store_defaults(&db, "cal", &one_hour_before());
+        let mut event = new_event_without_reminders();
+        assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert!(event.reminders.is_empty());
+        store_mode(&db, "cal", DefaultReminderMode::LOCAL);
+        assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert!(event.reminders.is_empty());
+    }
+
+    /// A choice the user made is never overridden — neither "no reminder at
+    /// all" (unset = false with an empty list) nor a reminder of their own.
+    #[test]
+    fn an_explicit_reminder_choice_is_never_overridden() {
+        let db = prefs_db();
+        store_defaults(&db, "cal", &one_hour_before());
+        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
+
+        let mut none_on_purpose = new_event_without_reminders();
+        assert!(!apply_default_reminder_policy(
+            &db,
+            "cal",
+            &mut none_on_purpose,
+            false
+        ));
+        assert!(none_on_purpose.reminders.is_empty());
+
+        let own = vec![Reminder {
+            kind: ReminderKind::Relative { minutes_before: 5 },
+            sound: None,
+        }];
+        let mut with_own = new_event_without_reminders();
+        with_own.reminders = own.clone();
+        assert!(!apply_default_reminder_policy(
+            &db,
+            "cal",
+            &mut with_own,
+            true
+        ));
+        assert_eq!(with_own.reminders, own);
+    }
+
+    /// Attach mode with nothing to attach — no defaults, or a list cleared on
+    /// purpose — changes nothing.
+    #[test]
+    fn attach_mode_with_no_defaults_changes_nothing() {
+        let db = prefs_db();
+        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
+        let mut event = new_event_without_reminders();
+        assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert!(event.reminders.is_empty());
+        store_defaults(&db, "cal", &[]);
+        assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert!(event.reminders.is_empty());
+    }
+
+    fn insert_local_event(
+        db: &SharedConn,
+        id: &str,
+        calendar_id: &str,
+        reminders_json: &str,
+        start: DateTime<Utc>,
+    ) {
+        let conn = db.lock().unwrap();
+        // The event's calendar has to exist (foreign key); one row per id.
+        conn.execute(
+            "INSERT OR IGNORE INTO calendars (
+                id, source, name, color_hex, color_source, read_only,
+                default_sound, created_at, updated_at
+             ) VALUES (?, 'local', ?, NULL, NULL, 0, NULL, ?, ?)",
+            params![
+                calendar_id,
+                calendar_id,
+                start.to_rfc3339(),
+                start.to_rfc3339()
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (
+                id, calendar_id, title, start_utc, end_utc, all_day,
+                reminders, sound, attendees, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, 0, ?, NULL, '[]', ?, ?)",
+            params![
+                id,
+                calendar_id,
+                id,
+                start.to_rfc3339(),
+                (start + ChronoDuration::hours(1)).to_rfc3339(),
+                reminders_json,
+                start.to_rfc3339(),
+                start.to_rfc3339(),
+            ],
+        )
+        .unwrap();
+    }
+
+    fn local_triggers_for(db: &SharedConn, item_id: &str) -> Vec<DateTime<Utc>> {
+        let now = Utc::now();
+        enumerate_local_triggers(db, now, now + ChronoDuration::days(2))
+            .into_iter()
+            .filter(|t| t.item_id == item_id)
+            .map(|t| t.trigger_at)
+            .collect()
+    }
+
+    /// A local calendar's defaults fire for its reminder-less events. The
+    /// overlay used to walk adapter-backed calendars only, so "only in Aperio"
+    /// was silent for exactly the calendars that live here.
+    #[test]
+    fn local_calendar_defaults_overlay_its_reminderless_events() {
+        let db = prefs_db();
+        let start = Utc::now() + ChronoDuration::hours(6);
+        insert_local_event(&db, "ev-empty-list", "cal", "[]", start);
+        insert_local_event(&db, "ev-empty-string", "cal", "", start);
+        store_defaults(&db, "cal", &one_hour_before());
+        assert_eq!(
+            local_triggers_for(&db, "ev-empty-list"),
+            vec![start - ChronoDuration::hours(1)]
+        );
+        assert_eq!(
+            local_triggers_for(&db, "ev-empty-string"),
+            vec![start - ChronoDuration::hours(1)]
+        );
+    }
+
+    /// An event's own reminders win over the calendar's defaults — a
+    /// substitution, never a merge, as for adapter-backed calendars.
+    #[test]
+    fn a_local_events_own_reminders_win_over_the_calendar_defaults() {
+        let db = prefs_db();
+        let start = Utc::now() + ChronoDuration::hours(6);
+        let own = vec![Reminder {
+            kind: ReminderKind::Relative { minutes_before: 5 },
+            sound: None,
+        }];
+        insert_local_event(
+            &db,
+            "ev-own",
+            "cal",
+            &serde_json::to_string(&own).unwrap(),
+            start,
+        );
+        store_defaults(&db, "cal", &one_hour_before());
+        assert_eq!(
+            local_triggers_for(&db, "ev-own"),
+            vec![start - ChronoDuration::minutes(5)]
+        );
+    }
+
+    /// No defaults — never configured, or cleared on purpose — means a
+    /// reminder-less local event stays silent, as it always did.
+    #[test]
+    fn a_local_calendar_without_defaults_stays_silent() {
+        let db = prefs_db();
+        let start = Utc::now() + ChronoDuration::hours(6);
+        insert_local_event(&db, "ev-quiet", "cal", "[]", start);
+        assert!(local_triggers_for(&db, "ev-quiet").is_empty());
+        store_defaults(&db, "cal", &[]);
+        assert!(local_triggers_for(&db, "ev-quiet").is_empty());
+    }
 
     /// A zoned weekly series keeps its WALL CLOCK across a DST boundary.
     ///

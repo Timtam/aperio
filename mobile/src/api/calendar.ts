@@ -181,9 +181,13 @@ export const getEventById = async (
   JSON.parse(await CalFfi.getEventByIdJson(id, calendarId)) as CalendarEvent | null;
 
 /** Create an event. `request` is the target calendar plus the NewEvent fields
- *  flattened — the desktop create_event payload shape. */
+ *  flattened — the desktop create_event payload shape. `use_calendar_defaults`
+ *  says the caller made no reminder choice at all (an untouched editor, a
+ *  quick-add): a calendar whose default reminders are set to "attach" then
+ *  writes them into the new appointment. Leave it off when `reminders` IS the
+ *  choice — including an emptied list. */
 export const createEvent = async (
-  request: { calendar_id: string } & NewEvent,
+  request: { calendar_id: string; use_calendar_defaults?: boolean } & NewEvent,
   opts: { preserveRecurrenceZone?: boolean } = {},
 ): Promise<CalendarEvent> => {
   // Stamp the device's local zone onto a brand-new timed recurring rule so it

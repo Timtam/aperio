@@ -102,6 +102,11 @@ export const getEvents = (request: EventRangeRequest) =>
 
 export interface CreateEventRequest extends NewEvent {
   calendar_id: string;
+  /** True when the user made no reminder choice at all (an untouched editor,
+   *  a quick-add). A calendar whose default reminders are set to "attach"
+   *  then writes them into the new appointment as its own reminders. Leave
+   *  it off when `reminders` IS the choice — including an emptied list. */
+  use_calendar_defaults?: boolean;
 }
 
 export const createEvent = (

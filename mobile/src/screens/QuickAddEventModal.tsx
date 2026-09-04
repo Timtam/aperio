@@ -213,6 +213,9 @@ export default function QuickAddEventModal({
         sound: null,
         attendees: [],
         send_invitations: false,
+        // No reminder field here, so the calendar's default-reminder mode
+        // decides whether the new appointment carries the defaults.
+        use_calendar_defaults: true,
       });
       // Remember the calendar for the next new-event open (see the editor).
       void writeLastUsedCalendar(calId);

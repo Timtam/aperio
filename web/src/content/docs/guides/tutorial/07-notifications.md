@@ -33,6 +33,20 @@ their own – handy for subscribed or external calendars whose entries arrive
 without an alarm. Under **Settings → Calendars**, pick a calendar and set its
 default reminders there.
 
+Beneath the list you choose where those defaults live. **Only in Aperio** is the
+setting every calendar starts with: Aperio reminds you itself, and nothing is
+written into the event – exactly how the iOS Calendar app treats its own
+"Default Alert Times". **Attached to new events** instead writes the defaults
+into every appointment you create in that calendar, as the event's own
+reminders. That is what makes other apps reading the same calendar remind you
+too – the iOS Calendar app, or a voice assistant reading your iCloud calendar.
+Only appointments you create *after* the switch are affected, and only if you
+left their reminders untouched in the editor; an appointment you gave reminders
+of your own, or deliberately none, keeps that choice. Exchange and Outlook
+calendars store a single "minutes before" reminder, so only the first such
+default is attached there; a default at a fixed time or "when the app starts"
+does not reach those appointments.
+
 ### All-day events and birthdays
 
 All-day events have no time of day, so a reminder isn't fired "one hour before"

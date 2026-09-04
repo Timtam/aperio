@@ -575,6 +575,10 @@ struct CreateEventRequest {
     calendar_id: String,
     #[serde(flatten)]
     event: NewEvent,
+    /// True when the caller made no reminder choice at all — see the desktop
+    /// `CreateEventRequest`. Absent from older callers.
+    #[serde(default)]
+    use_calendar_defaults: bool,
 }
 
 /// Configure-sync request — a flattened mirror of the desktop `SyncAdapterConfig`
@@ -3241,15 +3245,24 @@ impl Host {
     /// it; an external create self-syncs via the provider.
     pub fn create_event_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: CreateEventRequest = from_json("request", &request_json)?;
+        let mut event = req.event;
+        // Same rule as the desktop command: a calendar set to "attach" writes
+        // its default reminders into a new appointment left without any.
+        host_core::reminders::apply_default_reminder_policy(
+            &self.db.shared(),
+            &req.calendar_id,
+            &mut event,
+            req.use_calendar_defaults,
+        );
         let created = self.runtime.block_on(async {
             match self.route(&req.calendar_id)? {
                 None => self
                     .adapter
-                    .create_event(&req.calendar_id, req.event)
+                    .create_event(&req.calendar_id, event)
                     .await
                     .map_err(map_store_err),
                 Some(ext) => ext
-                    .create_event(&req.calendar_id, req.event)
+                    .create_event(&req.calendar_id, event)
                     .await
                     .map_err(map_store_err),
             }

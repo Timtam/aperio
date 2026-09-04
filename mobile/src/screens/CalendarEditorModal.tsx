@@ -12,6 +12,7 @@ import {
 
 import { isBirthdayCalendarId, type ColorLabel } from '@aperio/shared';
 
+import { ADAPTER_KIND_DEVICE_CALENDAR, listAccounts, type Account } from '../api/accounts';
 import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
@@ -21,7 +22,11 @@ import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
 import { SelectFieldButton } from '../components/SelectFieldButton';
-import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import {
+  DEFAULT_REMINDER_MODES,
+  useCalendarDefaultReminders,
+  type DefaultReminderMode,
+} from '../state/useCalendarDefaultReminders';
 import {
   bindSignature,
   signatureForCalendar,
@@ -55,6 +60,7 @@ export default function CalendarEditorModal({
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [renameText, setRenameText] = useState('');
   const [colorLabel, setColorLabel] = useState('');
+  const [accountKind, setAccountKind] = useState<Account['adapter_kind'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +91,17 @@ export default function CalendarEditorModal({
   );
 
   const reload = useCallback(async () => {
-    const [cals, labels] = await Promise.all([
+    const [cals, labels, accounts] = await Promise.all([
       listCalendars(),
       listColorLabels().catch(() => [] as ColorLabel[]),
+      listAccounts().catch(() => [] as Account[]),
     ]);
     setColorLabels(labels);
     const cal = cals.find((c) => c.id === calendarId) ?? null;
     setCalendar(cal);
+    // The owning account's kind decides whether a new appointment here can
+    // carry reminders at all (the device calendar never writes them).
+    setAccountKind(accounts.find((a) => a.id === cal?.account_id)?.adapter_kind ?? null);
     if (cal) {
       setRenameText(cal.name);
       setColorLabel(cal.color_label ?? '');
@@ -323,6 +333,32 @@ export default function CalendarEditorModal({
           />
         </View>
       )}
+
+      {/* Where the defaults live — only where a new appointment can carry
+          reminders at all: not a read-only calendar (an iCal subscription),
+          not a synthesized birthday calendar, not the device calendar (its
+          alarms are the OS's, never written by Aperio). */}
+      {!defaultReminders.loading &&
+        !isBirthday &&
+        calendar != null &&
+        !calendar.read_only &&
+        accountKind !== ADAPTER_KIND_DEVICE_CALENDAR && (
+          <View style={styles.field}>
+            <SelectFieldButton<DefaultReminderMode>
+              label={t('dialogs.settings.calendars.defaultsMode.heading')}
+              labelAsHeading
+              value={defaultReminders.mode}
+              options={DEFAULT_REMINDER_MODES.map((mode) => ({
+                value: mode,
+                label: t(`dialogs.settings.calendars.defaultsMode.options.${mode}`),
+              }))}
+              onChange={defaultReminders.setMode}
+            />
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.calendars.defaultsMode.hint')}
+            </Text>
+          </View>
+        )}
 
       {/* Delete (its events cascade away) — local calendars only; an external
           calendar is provider-owned, so it can't be deleted from here. A local
