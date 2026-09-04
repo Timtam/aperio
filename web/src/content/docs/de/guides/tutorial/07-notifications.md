@@ -50,10 +50,37 @@ Outlook-Kalender speichern eine einzige „Minuten vorher"-Erinnerung; dort wird
 nur der erste solche Eintrag angehängt, eine feste Uhrzeit kommt in diesen
 Terminen nicht an.
 
+Ein angehängter Eintrag ist beim Speichern keine Überraschung. Legst du in so
+einem Kalender einen Termin an, zeigt der Editor diese Zeilen bereits an,
+markiert als **An diesem Termin**: Es sind ganz normale Erinnerungszeilen, du
+kannst den Vorlauf ändern, eine weitere hinzufügen oder sie wieder entfernen –
+und was stehen bleibt, bekommt der Termin. Alle Zeilen zu entfernen ist eine
+Entscheidung wie jede andere; es rutscht danach kein Standard nach. Einträge,
+die **nur in Aperio** gelten, stehen dort nicht: Sie gehören nicht zum Termin,
+sondern klingeln zusätzlich zu dem, was er trägt – und dafür ist die
+Einstellungsseite des Kalenders da.
+
 Eine Standard-Erinnerung kann ein Vorlauf sein („Vor Beginn") oder ein fester
 Zeitpunkt. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
 ausgelöst, wenn sie am Eintrag selbst gesetzt ist – als Kalender-Standard wäre
 sie eine Einstellung, die sich speichern lässt und dann stumm bleibt.
+
+### Apple Kalender zeigt zwei Hinweise
+
+Ein iCloud-Konto hat einen eigenen Standardhinweis (iPhone: **Einstellungen →
+Apps → Kalender → Standardhinweise**). Apple schreibt ihn als Alarm in den
+Termin und markiert diesen Alarm als seinen eigenen Standard – daran erkennt
+die Kalender-App ihn später wieder und unterscheidet ihn von einem, den jemand
+bewusst gesetzt hat.
+
+Ein Termin, den Aperio mit einer **angehängten** Erinnerung anlegt, hat deshalb
+beide: Apples Standardhinweis und den von Aperio. Apple Kalender listet sie als
+„1. Hinweis: Standard" und „2. Hinweis", und ein Sprachassistent, der den
+Kalender vorliest, sagt den Termin womöglich zweimal an. Aperio kann Apples
+Standard von außen nicht abschalten – stell **Standardhinweise** am iPhone auf
+*Ohne*, wenn du nur die Erinnerung von Aperio willst, oder lass den
+Aperio-Eintrag auf **Nur in Aperio**, dann wird gar nichts in den Termin
+geschrieben.
 
 ### Ganztägige Termine und Geburtstage
 

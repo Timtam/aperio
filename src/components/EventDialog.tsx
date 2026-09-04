@@ -418,6 +418,17 @@ export function EventDialog({
 
 
   const [form, setForm] = useState<FormState>(initialState);
+  // The defaults of the calendar a NEW appointment is heading for. A second
+  // read, because the one above is keyed to the OPENED event and has to exist
+  // before `initialState` does — while this one follows the calendar picker.
+  const createTargetIds = useMemo(
+    // No calendar yet (a cold open, before the catalog lands) means nothing to
+    // ask about — an empty id would send a read for `calendar..defaultReminders`.
+    () => (isEdit || !form.calendarId ? [] : [form.calendarId]),
+    [isEdit, form.calendarId],
+  );
+  const { getDefaultsFor: getCreateDefaultsFor } =
+    useCalendarDefaultReminders(createTargetIds);
   // Whether the appointment lives on a calendar only Aperio reads. A local
   // calendar has no other client to tell, so "attached" and "only in Aperio"
   // would mean the same thing there and the choice is not offered.
@@ -590,6 +601,10 @@ export function EventDialog({
    *  change can SWAP it — and so anything the user wrote or deleted is left
    *  alone. */
   const autoSignature = useRef<string | null>(null);
+  /** The reminder rows this editor offered from the calendar's defaults, so a
+   *  calendar change can swap them — and so anything the user changed or
+   *  deleted is left alone. The signature's twin, for the same reason. */
+  const autoReminders = useRef<EditableReminder[]>([]);
   // The initialState this dialog last reset to — the pristine baseline.
   const appliedInitialRef = useRef<FormState | null>(null);
 
@@ -676,7 +691,10 @@ export function EventDialog({
    */
   useEffect(() => {
     if (!isOpen || isEdit || !prefillFrom) {
-      if (!isOpen) prefillApplied.current = null;
+      if (!isOpen) {
+        prefillApplied.current = null;
+        autoReminders.current = [];
+      }
       return;
     }
     if (prefillApplied.current === prefillFrom.id) return;
@@ -714,6 +732,64 @@ export function EventDialog({
       return { ...prev, description: applySignature(prev.description, target) };
     });
   }, [isOpen, isEdit, boundSignature]);
+
+  /**
+   * The calendar's ATTACHED default reminders, put on a NEW appointment by
+   * itself — visible before saving, and editable like any other row.
+   *
+   * The host would attach them anyway (`use_calendar_defaults`), but silently:
+   * the editor showed an empty reminder list and the appointment came back
+   * with alarms nobody could see, let alone remove or move. A default is an
+   * offer, and an offer has to be on screen to be declined.
+   *
+   * Only the ATTACHED half. An entry that stays in Aperio fires beside the
+   * event's own reminders rather than instead of them, so a row for it would
+   * lie — see `attachedDefaultsFor`.
+   *
+   * Declared after the prefill effect, and it yields to it: rows that came
+   * from an earlier appointment are the user's, not this calendar's. It
+   * follows the calendar picker while the rows are still untouched and still
+   * exactly what it put there, the same rule the signature above follows —
+   * anything the user typed or deleted is theirs.
+   */
+  // Keyed by the offer's CONTENT, never by the hook's function identity. An
+  // effect that re-runs on every render and calls `setForm` — even a
+  // `setForm` that returns `prev` — spins forever, because React renders once
+  // more before it can bail out, which re-runs the effect. A string dependency
+  // compares by value and settles.
+  const offeredJson = JSON.stringify(
+    isEdit
+      ? []
+      : getCreateDefaultsFor(form.calendarId)
+          .filter((d) => d.attach === true)
+          .map(({ kind, sound }) => ({ kind, sound, attach: true })),
+  );
+  useEffect(() => {
+    if (!isOpen || isEdit || remindersTouchedRef.current) return;
+    const offered = JSON.parse(offeredJson) as EditableReminder[];
+    setForm((prev) => {
+      const mine = autoReminders.current;
+      // Rows the user (or a prefill) put there stay: only an EMPTY list, or
+      // exactly what this effect last offered, may be replaced by another
+      // calendar's offer.
+      //
+      // "Empty" has to count, and not only "equals mine". StrictMode invokes
+      // passive effects twice per mount, and both passes queue their updates
+      // before either renders: the reset effect above re-applies the pristine
+      // baseline in the second pass, wiping the offer this one placed in the
+      // first — and a guard that only accepted `mine` would then see an empty
+      // list it no longer recognises and give up, leaving the appointment
+      // without the reminder the calendar offers. Untouched and empty is
+      // nothing to lose.
+      const adoptable =
+        prev.reminders.length === 0 ||
+        JSON.stringify(prev.reminders) === JSON.stringify(mine);
+      if (!adoptable) return prev;
+      if (JSON.stringify(prev.reminders) === JSON.stringify(offered)) return prev;
+      autoReminders.current = offered;
+      return { ...prev, reminders: offered };
+    });
+  }, [isOpen, isEdit, offeredJson]);
 
   // Any change to the attendee set, the start/end window, the all-day
   // flag, or the target calendar invalidates a previous availability

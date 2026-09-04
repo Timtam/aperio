@@ -365,19 +365,23 @@ export default function EventEditorModal({
   // the desktop, which hides this picker on create).
   const itemSound = useSoundPref(original ? `sound.item.${original.id}` : null);
 
-  // Per-calendar default reminders (Settings → Kalender), for the OVERLAY
-  // below. iOS-style "Standard-Hinweise" are applied at notification time and
-  // never written into the event body, so iCloud hands us `reminders: []` and
-  // the editor has to re-overlay the calendar default — otherwise the event
-  // reads as "no reminder" although one demonstrably fires. Edit-only (an
-  // empty id short-circuits the hook), exactly like the desktop.
+  // Per-calendar default reminders (Settings → Kalender). Two jobs, one read:
+  // while EDITING they re-overlay the opened event's calendar default, since
+  // an entry applied at notification time is never in the event body and the
+  // event would otherwise read as "no reminder" although one demonstrably
+  // fires; while CREATING they are OFFERED for the calendar the appointment is
+  // heading for, so an attached default can be seen, changed or removed before
+  // it is written in.
   const calendarDefaults = useCalendarDefaultReminders(
-    original?.calendar_id ?? '',
+    editing ? (original?.calendar_id ?? '') : calId,
   );
   // Guards the one-shot overlay: it must not fire twice for the same event and
   // must never clobber rows the user already edited (the pref read can resolve
   // a beat after the editor is usable).
   const overlaidForRef = useRef<string | null>(null);
+  /** The rows the create offer above last put there, so a calendar change can
+   *  swap them and anything the user changed is left alone. */
+  const offeredRemindersRef = useRef<EditableReminder[]>([]);
   const remindersTouchedRef = useRef(false);
   // Which account the appointment is heading for, and whether saying "attached"
   // there would mean anything: a LOCAL calendar has no other client to tell,
@@ -387,6 +391,39 @@ export default function EventEditorModal({
     calendars.find((c) => c.id === calId)?.account_id ?? 'local';
   const placementOffered =
     targetAccountId !== 'local' && !deviceAccountIds.has(targetAccountId);
+  /**
+   * The calendar's ATTACHED defaults, offered on a NEW appointment.
+   *
+   * The Host would attach them anyway (`use_calendar_defaults`), but silently:
+   * the editor showed an empty list and the appointment came back carrying
+   * alarms nobody could see, let alone remove or move. A default is an offer,
+   * and an offer has to be on screen to be declined. Follows the calendar
+   * picker while the rows are still untouched and still exactly what this
+   * effect put there — anything the user changed is theirs.
+   */
+  useEffect(() => {
+    if (editing || calendarDefaults.loading || remindersTouchedRef.current) return;
+    const offered: EditableReminder[] = calendarDefaults.value
+      .filter((d) => d.attach === true)
+      .map(({ kind, sound }) => ({ kind, sound, attach: true }));
+    setReminders((prev) => {
+      const mine = offeredRemindersRef.current;
+      // Rows the user (or a prefill from an earlier appointment) put there
+      // stay: only an EMPTY list, or exactly what this effect last offered,
+      // may be replaced by another calendar's offer. Empty has to count on its
+      // own — the editor's own load resets the rows, and a guard that accepted
+      // only `mine` would then see a list it no longer recognises and give up.
+      // Untouched and empty is nothing to lose; a removal sets the touched
+      // flag above and returns before ever reaching here.
+      const adoptable =
+        prev.length === 0 || JSON.stringify(prev) === JSON.stringify(mine);
+      if (!adoptable) return prev;
+      if (JSON.stringify(prev) === JSON.stringify(offered)) return prev;
+      offeredRemindersRef.current = offered;
+      return offered;
+    });
+  }, [editing, calId, calendarDefaults.loading, calendarDefaults.value]);
+
   useEffect(() => {
     if (!editing || original == null || calendarDefaults.loading) return;
     if (overlaidForRef.current === original.id) return;

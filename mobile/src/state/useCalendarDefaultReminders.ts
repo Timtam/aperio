@@ -60,8 +60,9 @@ export function useCalendarDefaultReminders(
     let cancelled = false;
     // Bumped by every local edit — see `writeGeneration` below.
     const generation = writeGeneration.current;
-    // No calendar to read for (the event editor passes '' while creating, where
-    // the overlay doesn't apply) — resolve empty without an FFI round-trip.
+    // No calendar to read for — the editor passes '' while it is opening an
+    // event whose calendar it does not know yet, and the settings row passes it
+    // for "no selection". Resolve empty without an FFI round-trip.
     if (!calendarId) {
       setValue([]);
       setLoading(false);

@@ -48,10 +48,34 @@ Aperio. Exchange and Outlook calendars store a single "minutes before" reminder,
 so only the first such entry is attached there; an entry at a fixed time does
 not reach those appointments.
 
+An attached entry is not a surprise at save time. Create an appointment in such
+a calendar and the editor already shows those rows, marked **on this event**:
+they are ordinary reminder rows, so you can change the lead time, add another,
+or take them out again, and what you leave is what the appointment gets.
+Removing every row is a choice like any other — no default slides back in
+afterwards. Entries that stay **only in Aperio** are not shown there, because
+they are not the appointment's: they ring on top of whatever it carries, and
+the calendar's settings page is where they belong.
+
 A default reminder can be a lead time ("before start") or a fixed date and time.
 "On next app start" is missing here on purpose: it only ever fires for a
 reminder set on an entry itself, so as a calendar default it would be a setting
 that saves and then stays silent.
+
+### Apple Calendar shows two alerts
+
+An iCloud account has a default alert of its own (iPhone: **Settings → Apps →
+Calendar → Default Alert Times**). Apple writes it into the appointment as an
+alarm and marks that alarm as its own default, which is how the Calendar app
+can tell it apart from one somebody set deliberately.
+
+So an appointment Aperio creates with an **attached** reminder ends up with
+both: Apple's default alert and Aperio's. Apple Calendar lists them as "1st
+alert: default" and "2nd alert", and a voice assistant reading the calendar
+may announce the appointment twice. Aperio cannot switch Apple's default off
+from the outside — set **Default Alert Times** to *None* on the iPhone if you
+want only the reminder Aperio attaches, or leave the Aperio entry **only in
+Aperio** so nothing is written into the appointment at all.
 
 ### All-day events and birthdays
 

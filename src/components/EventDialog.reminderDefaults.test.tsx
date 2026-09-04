@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { DefaultReminder } from '@aperio/shared';
 import type { Calendar, CalendarEvent } from '../api/types';
@@ -95,8 +95,15 @@ vi.mock('../state/dialogStateContext', () => ({
   useDialogState: () => DIALOG_STATE,
 }));
 vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+// ONE object with ONE function, like the sibling prefill test. A fresh
+// identity per render would make the dialog re-derive its baseline on every
+// render — the editor is built to adopt a fresh baseline while the form is
+// pristine, so a churning mock turns that into an endless loop and the test
+// spins instead of failing. The mutable `defaults` behind it is what each test
+// swaps.
+const REMINDERS = { getDefaultsFor: () => defaults };
 vi.mock('../state/useCalendarDefaultReminders', () => ({
-  useCalendarDefaultReminders: () => ({ getDefaultsFor: () => defaults }),
+  useCalendarDefaultReminders: () => REMINDERS,
 }));
 vi.mock('../state/useTitleSuggestions', async () => {
   const actual = await vi.importActual<
@@ -121,8 +128,10 @@ async function openEditor(calendarDefaults: DefaultReminder[]) {
       <EventDialog isOpen onClose={() => {}} event={EVENT} />
     </StrictMode>,
   );
-  // The dialog is up once its calendar picker is.
-  await screen.findByRole('combobox', { name: /kalender/i });
+  // The dialog is up once its calendar picker is. The generous window is for
+  // the full suite: this renders a whole editor, and under parallel load the
+  // 1s default expires while the machine is still busy elsewhere.
+  await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
 }
 
 const reminderRows = () => screen.queryAllByRole('group', { name: /Erinnerung \d/i });
@@ -146,6 +155,65 @@ describe('EventDialog → the calendar defaults it shows', () => {
   it('shows only the attached half of a mixed list', async () => {
     await openEditor([IN_APERIO, ATTACHED]);
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
+  });
+});
+
+describe('EventDialog → creating an appointment', () => {
+  async function openCreate(calendarDefaults: DefaultReminder[]) {
+    defaults = calendarDefaults;
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog
+          isOpen
+          onClose={() => {}}
+          event={null}
+          defaultCalendarId="cal-work"
+        />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i });
+  }
+
+  it("offers the calendar's attached defaults as editable rows", async () => {
+    // They would be written in on save either way. Showing them is what lets
+    // the user see, change or remove one BEFORE it lands on the appointment.
+    await openCreate([ATTACHED]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+    const applies = screen.getAllByRole('combobox', { name: /Gilt|Applies/i });
+    expect(applies.map((el) => (el as HTMLSelectElement).value)).toEqual(['attach']);
+  });
+
+  it('never offers an "only in Aperio" default as a row', async () => {
+    // That one fires beside the appointment's own reminders rather than
+    // instead of them, so a row for it would lie about what editing it does.
+    await openCreate([IN_APERIO]);
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /kalender/i })).toBeInTheDocument(),
+    );
+    expect(reminderRows()).toHaveLength(0);
+  });
+
+  it('sends nothing when the user removes what was offered', async () => {
+    savedEvent.current = { ...EVENT, reminders: [] };
+    await openCreate([ATTACHED]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+    screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }).click();
+    await waitFor(() => expect(reminderRows()).toHaveLength(0));
+
+    // A title is required, so the save would be refused without one.
+    const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
+    fireEvent.change(title, { target: { value: 'Zahnarzt' } });
+    screen.getByRole('button', { name: /^anlegen$|^create$/i }).click();
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
+    );
+    const create = invokeMock.mock.calls.find((call) => call[0] === 'create_event');
+    const payload = (create?.[1] as { request: { reminders: unknown[]; use_calendar_defaults?: boolean } })
+      .request;
+    expect(payload.reminders).toEqual([]);
+    // The removal is a decision, so the host must not put them back.
+    expect(payload.use_calendar_defaults).toBe(false);
   });
 });
 
