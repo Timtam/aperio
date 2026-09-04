@@ -240,6 +240,7 @@
     },
     "absoluteAtLabel": "Date and time",
     "appStartHint": "Fires on the next launch after the due time.",
+    "appStartNotForDefaults": "This one only fires for a reminder set on the entry itself, not as a calendar default – pick \"before start\" or a fixed time instead.",
     "sound": {
       "label": "Notification sound",
       "inherit": "Use default",

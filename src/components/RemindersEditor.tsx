@@ -53,6 +53,17 @@ export interface RemindersEditorProps {
    * calendars whose new appointments can carry reminders at all.
    */
   placement?: boolean;
+  /**
+   * Whether "on next app start" is on offer. The calendar-defaults surfaces
+   * turn it OFF: that kind is host-local by construction — no wire format
+   * carries it, and the collector that fires it reads an entry's OWN
+   * reminders from the local store — so as a calendar default it could never
+   * ring for the external calendars the defaults exist for. Offering a
+   * setting that saves and then does nothing is worse than not offering it.
+   * A row that already carries the kind keeps it on the list, so an older
+   * list still reads truthfully and can be changed.
+   */
+  allowAppStart?: boolean;
 }
 
 type RelativeUnit = 'minutes' | 'hours' | 'days';
@@ -85,6 +96,7 @@ export function RemindersEditor({
   onChange,
   mode,
   placement = false,
+  allowAppStart = true,
 }: RemindersEditorProps) {
   const { t } = useTranslation();
 
@@ -127,6 +139,7 @@ export function RemindersEditor({
                 mode={mode}
                 position={i + 1}
                 placement={placement}
+                allowAppStart={allowAppStart}
               />
             </li>
           ))}
@@ -153,6 +166,8 @@ interface ReminderRowProps {
   position: number;
   /** Show the "Applies" choice (calendar defaults only). */
   placement: boolean;
+  /** Offer "on next app start" — see `RemindersEditorProps`. */
+  allowAppStart: boolean;
 }
 
 function ReminderRow({
@@ -162,9 +177,13 @@ function ReminderRow({
   mode,
   position,
   placement,
+  allowAppStart,
 }: ReminderRowProps) {
   const { t } = useTranslation();
   const kindType = value.kind.type;
+  // Never drop the kind a row already has: a list stored before the offer was
+  // withdrawn must still read as what it is, and stay changeable.
+  const showAppStart = allowAppStart || kindType === 'app_start';
 
   const setKind = (next: ReminderKindOption) => {
     onChange({ ...value, kind: defaultsForKind(next, mode) });
@@ -190,7 +209,9 @@ function ReminderRow({
             )}
           </option>
           <option value="absolute">{t('reminders.kind.absolute')}</option>
-          <option value="app_start">{t('reminders.kind.appStart')}</option>
+          {showAppStart && (
+            <option value="app_start">{t('reminders.kind.appStart')}</option>
+          )}
         </select>
       </label>
 
@@ -216,7 +237,13 @@ function ReminderRow({
       )}
 
       {value.kind.type === 'app_start' && (
-        <p className="form__hint">{t('reminders.appStartHint')}</p>
+        <p className="form__hint">
+          {t(
+            allowAppStart
+              ? 'reminders.appStartHint'
+              : 'reminders.appStartNotForDefaults',
+          )}
+        </p>
       )}
 
       {/* §14.4 per-reminder sound override — the most specific level.

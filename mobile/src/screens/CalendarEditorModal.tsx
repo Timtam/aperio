@@ -341,6 +341,9 @@ export default function CalendarEditorModal({
             value={defaultReminders.value}
             onChange={defaultReminders.save}
             placement={placementOffered}
+            // "On next app start" is host-local by construction and could
+            // never ring as a calendar default — see the editor's prop.
+            allowAppStart={false}
           />
           {/* What the per-row choice means — only where the control exists,
               so it never describes something the screen reader can't find. */}

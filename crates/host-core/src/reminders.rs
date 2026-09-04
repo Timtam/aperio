@@ -686,6 +686,15 @@ pub fn birthday_default_reminders() -> Vec<DefaultReminder> {
 ///
 /// Lists stored before the choice existed carry no `attach` field and read as
 /// "in Aperio" — the behaviour they always had.
+///
+/// One kind can never be a default: [`ReminderKind::AppStart`]. It is fired by
+/// [`enumerate_app_start_triggers`], which reads an ENTRY's own reminders from
+/// the local store — no wire format carries the kind, so it could not reach
+/// the external calendars these defaults exist for. Both settings editors
+/// therefore withhold it here rather than save a setting that stays silent; a
+/// list that already carries one keeps it readable and changeable. Making it
+/// fire would mean teaching the app-start collector about calendars, not
+/// widening this type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DefaultReminder {
     #[serde(flatten)]

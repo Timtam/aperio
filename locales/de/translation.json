@@ -240,6 +240,7 @@
     },
     "absoluteAtLabel": "Datum und Uhrzeit",
     "appStartHint": "Wird beim nächsten App-Start nach Fälligkeit ausgelöst.",
+    "appStartNotForDefaults": "Dieser wird nur ausgelöst, wenn er am Eintrag selbst gesetzt ist, nicht als Kalender-Standard – wähle stattdessen „Vor Beginn“ oder einen festen Zeitpunkt.",
     "sound": {
       "label": "Benachrichtigungston",
       "inherit": "Standard verwenden",

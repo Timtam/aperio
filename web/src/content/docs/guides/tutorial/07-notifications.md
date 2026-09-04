@@ -45,8 +45,13 @@ Only appointments you create *after* the switch get it written in; an
 appointment you gave reminders of your own, or deliberately none, keeps that
 choice, and an event without reminders of its own still gets the entry in
 Aperio. Exchange and Outlook calendars store a single "minutes before" reminder,
-so only the first such entry is attached there; an entry at a fixed time or
-"when the app starts" does not reach those appointments.
+so only the first such entry is attached there; an entry at a fixed time does
+not reach those appointments.
+
+A default reminder can be a lead time ("before start") or a fixed date and time.
+"On next app start" is missing here on purpose: it only ever fires for a
+reminder set on an entry itself, so as a calendar default it would be a setting
+that saves and then stays silent.
 
 ### All-day events and birthdays
 

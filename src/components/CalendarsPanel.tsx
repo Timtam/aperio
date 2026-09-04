@@ -325,6 +325,9 @@ export function CalendarsPanel() {
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
                 placement={placementFor(cal)}
+                // "On next app start" is host-local by construction and could
+                // never ring as a calendar default — see the editor's prop.
+                allowAppStart={false}
               />
               {/* What the per-row choice means — next to the control, and only
                   where the control exists, so it never describes something the

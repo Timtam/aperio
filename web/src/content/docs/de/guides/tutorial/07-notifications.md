@@ -47,8 +47,13 @@ nur in Termine, die du *nach* dem Umschalten anlegst; ein Termin mit eigenen
 Erinnerungen oder bewusst ohne behält diese Wahl, und ein Termin ohne eigene
 Erinnerungen bekommt den Eintrag in Aperio weiterhin. Exchange- und
 Outlook-Kalender speichern eine einzige „Minuten vorher"-Erinnerung; dort wird
-nur der erste solche Eintrag angehängt, eine feste Uhrzeit oder „beim
-App-Start" kommt in diesen Terminen nicht an.
+nur der erste solche Eintrag angehängt, eine feste Uhrzeit kommt in diesen
+Terminen nicht an.
+
+Eine Standard-Erinnerung kann ein Vorlauf sein („Vor Beginn") oder ein fester
+Zeitpunkt. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
+ausgelöst, wenn sie am Eintrag selbst gesetzt ist – als Kalender-Standard wäre
+sie eine Einstellung, die sich speichern lässt und dann stumm bleibt.
 
 ### Ganztägige Termine und Geburtstage
 

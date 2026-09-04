@@ -97,6 +97,7 @@ export function RemindersEditor({
   onChange,
   mode = 'task',
   placement = false,
+  allowAppStart = true,
 }: {
   value: EditableReminder[];
   onChange: (next: EditableReminder[]) => void;
@@ -107,6 +108,13 @@ export function RemindersEditor({
    *  events. Only the calendar editor turns this on, and only for calendars
    *  whose new appointments can carry reminders at all. */
   placement?: boolean;
+  /** Whether "on next app start" is on offer. The calendar editor turns it
+   *  OFF: that kind is host-local by construction — no wire format carries it,
+   *  and the collector that fires it reads an entry's OWN reminders from the
+   *  local store — so as a calendar default it could never ring for the
+   *  external calendars the defaults exist for. A row that already carries the
+   *  kind keeps it on the list, so an older list still reads truthfully. */
+  allowAppStart?: boolean;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -146,6 +154,7 @@ export function RemindersEditor({
             mode={mode}
             position={i + 1}
             placement={placement}
+            allowAppStart={allowAppStart}
             rowRef={registerRow(i)}
             onChange={(next) => update(i, next)}
             onRemove={() => remove(i)}
@@ -172,6 +181,7 @@ function ReminderRow({
   mode,
   position,
   placement,
+  allowAppStart,
   rowRef,
 }: {
   value: EditableReminder;
@@ -181,6 +191,8 @@ function ReminderRow({
   position: number;
   /** Show the "Applies" choice (calendar defaults only). */
   placement: boolean;
+  /** Offer "on next app start" — see the editor's props. */
+  allowAppStart: boolean;
   /** Focus target for the SR focus manager (the row's label). */
   rowRef: RowRefCallback;
 }) {
@@ -194,6 +206,9 @@ function ReminderRow({
       : value.kind.type === 'app_start'
         ? 'app_start'
         : 'relative';
+  // Never drop the kind a row already has: a list stored before the offer was
+  // withdrawn must still read as what it is, and stay changeable.
+  const showAppStart = allowAppStart || kindOption === 'app_start';
 
   return (
     <View style={styles.row}>
@@ -214,7 +229,9 @@ function ReminderRow({
             ),
           },
           { value: 'absolute', label: t('reminders.kind.absolute') },
-          { value: 'app_start', label: t('reminders.kind.appStart') },
+          ...(showAppStart
+            ? [{ value: 'app_start' as const, label: t('reminders.kind.appStart') }]
+            : []),
         ]}
         onChange={(next) => onChange({ ...value, kind: defaultsForKind(next) })}
       />
@@ -239,7 +256,11 @@ function ReminderRow({
 
       {value.kind.type === 'app_start' && (
         <Text style={styles.hint} accessibilityRole="text">
-          {t('reminders.appStartHint')}
+          {t(
+            allowAppStart
+              ? 'reminders.appStartHint'
+              : 'reminders.appStartNotForDefaults',
+          )}
         </Text>
       )}
 
