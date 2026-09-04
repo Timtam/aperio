@@ -721,6 +721,7 @@ export type {
 import type {
   AccountFormSpec,
   EventGroup,
+  Reminder,
   SuggestionDecline,
 } from '@aperio/shared';
 
@@ -957,6 +958,78 @@ export const healEventGroupMember = (payload: {
     calendarId: payload.calendar_id,
     oldEventId: payload.old_event_id,
     newEventId: payload.new_event_id,
+  });
+
+/**
+ * Reminders Aperio keeps for ONE event and tells no provider about
+ * (migration 0043).
+ *
+ * A reminder normally rides on the event, where the provider stores it and
+ * every other client of the calendar rings too. These do not: they fire in
+ * Aperio, travel to the user's other devices through Aperio's own sync, and
+ * reach nobody else on a shared calendar. Keyed by the SERIES master id, like
+ * colour overrides and group membership.
+ */
+export interface EventLocalReminders {
+  calendar_id: string;
+  event_id: string;
+  /** An empty list is a decision ("none of my own here"), not an absence. */
+  reminders: Reminder[];
+  /** The title the event had when this was set. Half of the SIGNATURE, so the
+   *  row can find its event again after the provider remints the id. */
+  title: string;
+  /** The start it had then. The other half. */
+  starts_at: string;
+  updated_at: string;
+}
+
+/** Every private-reminder row. Small by nature — one per event that has one. */
+export const listEventLocalReminders = () =>
+  invoke<EventLocalReminders[]>('list_event_local_reminders');
+
+/** Write one event's private reminders. `title`/`starts_at` are the event's
+ *  CURRENT signature. An empty list is stored, not deleted. */
+export const setEventLocalReminders = (payload: {
+  calendar_id: string;
+  event_id: string;
+  reminders: Reminder[];
+  title: string;
+  starts_at: string;
+}) =>
+  invoke<EventLocalReminders>('set_event_local_reminders', {
+    calendarId: payload.calendar_id,
+    eventId: payload.event_id,
+    reminders: payload.reminders,
+    title: payload.title,
+    startsAt: payload.starts_at,
+  });
+
+/** Point a private-reminder row at the id its event carries now — a silent
+ *  repair of Aperio's own bookkeeping, never announced as a user change. */
+export const healEventLocalReminders = (payload: {
+  calendar_id: string;
+  old_event_id: string;
+  new_event_id: string;
+}) =>
+  invoke<boolean>('heal_event_local_reminders', {
+    calendarId: payload.calendar_id,
+    oldEventId: payload.old_event_id,
+    newEventId: payload.new_event_id,
+  });
+
+/** Write down what the event looks like now, so the signature keeps matching
+ *  after a rename or a move. Silent, like the repair. */
+export const refreshEventLocalReminderSignature = (payload: {
+  calendar_id: string;
+  event_id: string;
+  title: string;
+  starts_at: string;
+}) =>
+  invoke<void>('refresh_event_local_reminder_signature', {
+    calendarId: payload.calendar_id,
+    eventId: payload.event_id,
+    title: payload.title,
+    startsAt: payload.starts_at,
   });
 
 /** Every group any of these events belongs to — whole, including members

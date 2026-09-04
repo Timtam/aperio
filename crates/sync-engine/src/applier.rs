@@ -437,6 +437,16 @@ impl EventLogApplier {
                     .map_err(core_to_sync)?;
                 Ok(true)
             }
+            SyncEvent::EventLocalRemindersSet(payload) => {
+                let row: cal_core::EventLocalReminders =
+                    serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                        SyncError::protocol(format!("local reminders payload not valid: {err}"))
+                    })?;
+                self.adapter
+                    .upsert_event_local_reminders_from_sync(&row)
+                    .map_err(core_to_sync)?;
+                Ok(true)
+            }
             SyncEvent::EventGroupDissolved(payload) => {
                 // The envelope's timestamp, not ours: it says WHEN the other
                 // device decided, which is what an arriving update has to be

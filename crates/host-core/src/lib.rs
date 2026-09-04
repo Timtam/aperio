@@ -26,6 +26,7 @@ pub mod db;
 pub mod device_names;
 pub mod event_groups;
 pub mod event_log;
+pub mod event_reminders;
 pub mod logging;
 pub mod meetings;
 pub mod overrides;

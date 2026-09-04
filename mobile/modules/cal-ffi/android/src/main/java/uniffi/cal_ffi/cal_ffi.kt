@@ -1012,6 +1012,8 @@ external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_event_groups_for_events_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_event_local_reminders_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_event_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
@@ -1043,6 +1045,8 @@ external fun uniffi_cal_ffi_checksum_method_host_group_events_json(
 external fun uniffi_cal_ffi_checksum_method_host_group_suggestion_declines_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_heal_event_group_member(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_heal_event_local_reminders(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_import_sound_json(
 ): Short
@@ -1089,6 +1093,8 @@ external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
 external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_event_group_signature(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_signature(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
 ): Short
@@ -1137,6 +1143,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_day_log_json(
 external fun uniffi_cal_ffi_checksum_method_host_set_device_event_store(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_event_local_reminders_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_log_level(
 ): Short
@@ -1458,6 +1466,8 @@ external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Lo
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_event_groups_for_events_json(`ptr`: Long,`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_event_local_reminders_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1490,6 +1500,8 @@ external fun uniffi_cal_ffi_fn_method_host_group_suggestion_declines_json(`ptr`:
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_heal_event_group_member(`ptr`: Long,`groupId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`oldEventId`: RustBuffer.ByValue,`newEventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_heal_event_local_reminders(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`oldEventId`: RustBuffer.ByValue,`newEventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1535,6 +1547,8 @@ external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`req
 external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_event_group_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1584,6 +1598,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_device_event_store(`ptr`: Long,`b
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_event_local_reminders_json(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`remindersJson`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_set_log_level(`ptr`: Long,`level`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_section_color(`ptr`: Long,`sectionId`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -2084,6 +2100,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_event_groups_for_events_json() != 35375.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_event_local_reminders_json() != 54488.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 34444.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2130,6 +2149,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_heal_event_group_member() != 53594.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_heal_event_local_reminders() != 57037.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673.toShort()) {
@@ -2199,6 +2221,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_event_group_signature() != 33125.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_signature() != 23111.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
@@ -2271,6 +2296,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_event_local_reminders_json() != 60593.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_log_level() != 18279.toShort()) {
@@ -4830,6 +4858,13 @@ public interface HostInterface {
     fun `eventGroupsForEventsJson`(`eventsJson`: kotlin.String): kotlin.String
     
     /**
+     * Every private-reminder row, as a JSON `EventLocalReminders[]`
+     * (migration 0043). Small by nature — one per event the user gave a
+     * reminder Aperio keeps to itself.
+     */
+    fun `eventLocalRemindersJson`(): kotlin.String
+    
+    /**
      * The meeting Aperio created for this event, if any, as JSON.
      */
     fun `eventMeetingJson`(`eventId`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String
@@ -4949,6 +4984,15 @@ public interface HostInterface {
      * `EventGroupsRepo::heal_member`.
      */
     fun `healEventGroupMember`(`groupId`: kotlin.String, `calendarId`: kotlin.String, `oldEventId`: kotlin.String, `newEventId`: kotlin.String)
+    
+    /**
+     * Point a private-reminder row at the id its event carries now.
+     *
+     * Silent on purpose, exactly like the group repair below: it fixes
+     * Aperio's own bookkeeping and every device repairs its own copy. See
+     * `EventRemindersRepo::heal`.
+     */
+    fun `healEventLocalReminders`(`calendarId`: kotlin.String, `oldEventId`: kotlin.String, `newEventId`: kotlin.String): kotlin.Boolean
     
     /**
      * Import an audio file into the custom-sound store (the JS picked it via
@@ -5171,6 +5215,12 @@ public interface HostInterface {
      * `EventGroupsRepo::refresh_signature`.
      */
     fun `refreshEventGroupSignature`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String)
+    
+    /**
+     * Write down what the event looks like now, so the signature keeps
+     * matching after a rename or a move. Local and silent, like the repair.
+     */
+    fun `refreshEventLocalReminderSignature`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String)
     
     /**
      * Kick an immediate warm pass over every external account's containers +
@@ -5407,6 +5457,17 @@ public interface HostInterface {
      * stray override can never shadow a provider colour.)
      */
     fun `setEventColor`(`eventId`: kotlin.String, `calendarId`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Write one event's private reminders and tell the other devices.
+     *
+     * `reminders_json` is a `Reminder[]`; `title` and `starts_at` are the
+     * event's CURRENT signature, written down so the row can find its event
+     * again after the provider remints the id. An empty list is stored, not
+     * deleted — it is the record of a decision. Returns the stored row as
+     * JSON. Mirrors the desktop `set_event_local_reminders`.
+     */
+    fun `setEventLocalRemindersJson`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `remindersJson`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String): kotlin.String
     
     /**
      * Change the live verbosity + persist the choice (device-local). Validated
@@ -7056,6 +7117,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Every private-reminder row, as a JSON `EventLocalReminders[]`
+     * (migration 0043). Small by nature — one per event the user gave a
+     * reminder Aperio keeps to itself.
+     */
+    @Throws(StoreException::class)override fun `eventLocalRemindersJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_event_local_reminders_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The meeting Aperio created for this event, if any, as JSON.
      */
     @Throws(StoreException::class)override fun `eventMeetingJson`(`eventId`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String {
@@ -7362,6 +7442,27 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Point a private-reminder row at the id its event carries now.
+     *
+     * Silent on purpose, exactly like the group repair below: it fixes
+     * Aperio's own bookkeeping and every device repairs its own copy. See
+     * `EventRemindersRepo::heal`.
+     */
+    @Throws(StoreException::class)override fun `healEventLocalReminders`(`calendarId`: kotlin.String, `oldEventId`: kotlin.String, `newEventId`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_heal_event_local_reminders(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`oldEventId`),FfiConverterString.lower(`newEventId`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -7851,6 +7952,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_event_group_signature(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterString.lower(`title`),FfiConverterString.lower(`startsAt`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Write down what the event looks like now, so the signature keeps
+     * matching after a rename or a move. Local and silent, like the repair.
+     */
+    @Throws(StoreException::class)override fun `refreshEventLocalReminderSignature`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(
         it,
         FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterString.lower(`title`),FfiConverterString.lower(`startsAt`),_status)
 }
@@ -8362,6 +8480,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Write one event's private reminders and tell the other devices.
+     *
+     * `reminders_json` is a `Reminder[]`; `title` and `starts_at` are the
+     * event's CURRENT signature, written down so the row can find its event
+     * again after the provider remints the id. An empty list is stored, not
+     * deleted — it is the record of a decision. Returns the stored row as
+     * JSON. Mirrors the desktop `set_event_local_reminders`.
+     */
+    @Throws(StoreException::class)override fun `setEventLocalRemindersJson`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `remindersJson`: kotlin.String, `title`: kotlin.String, `startsAt`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_event_local_reminders_json(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterString.lower(`remindersJson`),FfiConverterString.lower(`title`),FfiConverterString.lower(`startsAt`),_status)
+}
+    }
+    )
+    }
     
 
     

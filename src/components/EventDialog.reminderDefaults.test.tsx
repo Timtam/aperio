@@ -16,19 +16,36 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * or in the screen reader to show it.
  */
 
-const invokeMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])));
+/** Rows the host would return for `list_event_local_reminders`. Swapped per
+ *  test; everything else answers with an empty list, as before. */
+const privateRows = vi.hoisted(() => ({ current: [] as unknown[] }));
+/** What the host would return for `update_event` — a real event shape, since
+ *  the dialog keys the private row by what came BACK from the save. */
+const savedEvent = vi.hoisted(() => ({ current: null as unknown }));
+const invokeMock = vi.hoisted(() =>
+  vi.fn((command: string, payload?: unknown) => {
+    void payload;
+    if (command === 'list_event_local_reminders') return Promise.resolve(privateRows.current);
+    if (command === 'update_event' && savedEvent.current) {
+      return Promise.resolve(savedEvent.current);
+    }
+    return Promise.resolve([]);
+  }),
+);
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: () => Promise.resolve(() => {}),
   emit: () => Promise.resolve(),
 }));
 
+// An EXTERNAL calendar: the placement choice only exists where there is
+// somebody else to tell. The local case is asserted on its own below.
 const CALENDARS: Calendar[] = [
   {
     id: 'cal-work',
     name: 'Arbeit',
     read_only: false,
-    account_id: 'local',
+    account_id: 'acc-icloud',
   } as unknown as Calendar,
 ];
 
@@ -92,6 +109,8 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   defaults = [];
+  privateRows.current = [];
+  savedEvent.current = null;
 });
 
 async function openEditor(calendarDefaults: DefaultReminder[]) {
@@ -127,5 +146,99 @@ describe('EventDialog → the calendar defaults it shows', () => {
   it('shows only the attached half of a mixed list', async () => {
     await openEditor([IN_APERIO, ATTACHED]);
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
+  });
+});
+
+describe('EventDialog → reminders Aperio keeps for this event', () => {
+  it('shows a private reminder beside the ones on the appointment', async () => {
+    // The event carries one alarm the provider stores; Aperio keeps a second
+    // one for this appointment alone. Both belong in the list — the row says
+    // which is which.
+    privateRows.current = [
+      {
+        calendar_id: 'cal-work',
+        event_id: 'ev-1',
+        reminders: [{ kind: { type: 'relative', minutes_before: 1440 }, sound: null }],
+        title: 'Zahnarzt',
+        starts_at: '2026-06-15T09:00:00.000Z',
+        updated_at: '2026-06-01T10:00:00.000Z',
+      },
+    ];
+    const withOwn = {
+      ...EVENT,
+      reminders: [{ kind: { type: 'relative', minutes_before: 15 }, sound: null }],
+    } as unknown as CalendarEvent;
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={withOwn} />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i });
+    await waitFor(() => expect(reminderRows()).toHaveLength(2));
+    // Each row says where it applies — the choice only exists for a calendar
+    // somebody else can read, which this one is.
+    const applies = screen.getAllByRole('combobox', { name: /Gilt|Applies/i });
+    expect(applies).toHaveLength(2);
+    expect(applies.map((el) => (el as HTMLSelectElement).value)).toEqual([
+      'attach',
+      'local',
+    ]);
+  });
+
+  it('keeps them when an unrelated edit is saved without touching reminders', async () => {
+    // The event carries no reminder of its own and the calendar has an
+    // ATTACHED default, so the dialog is in its "keep as default" state — the
+    // gate that governs the WIRE list. It must not speak for the private rows:
+    // saving after changing only the location once deleted them here and, over
+    // sync, on every other device.
+    const stored = [
+      { kind: { type: 'relative', minutes_before: 1440 }, sound: null },
+    ];
+    privateRows.current = [
+      {
+        calendar_id: 'cal-work',
+        event_id: 'ev-1',
+        reminders: stored,
+        title: 'Zahnarzt',
+        starts_at: '2026-06-15T09:00:00.000Z',
+        updated_at: '2026-06-01T10:00:00.000Z',
+      },
+    ];
+    savedEvent.current = { ...EVENT, reminders: [] };
+    await openEditor([ATTACHED]);
+    // Two rows: the calendar's attached default, and the private one.
+    await waitFor(() => expect(reminderRows()).toHaveLength(2));
+
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    // The save is done once the event itself went out; `act` is deliberately
+    // not used here — it would keep flushing this dialog's own re-renders.
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+    );
+
+    const wrote = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'set_event_local_reminders',
+    );
+    // Either nothing was written, or exactly what was stored — never an
+    // empty list, which is what deleted them.
+    for (const call of wrote) {
+      const payload = call[1] as { reminders: unknown } | undefined;
+      expect(payload?.reminders).toEqual(stored);
+    }
+  });
+
+  it('offers no placement choice on a calendar only Aperio reads', async () => {
+    const previous = STORE.calendars;
+    STORE.calendars = [
+      { ...CALENDARS[0], account_id: 'local' } as unknown as Calendar,
+    ];
+    try {
+      await openEditor([ATTACHED]);
+      await waitFor(() => expect(reminderRows()).toHaveLength(1));
+      expect(screen.queryAllByRole('combobox', { name: /Gilt|Applies/i })).toHaveLength(0);
+    } finally {
+      STORE.calendars = previous;
+    }
   });
 });

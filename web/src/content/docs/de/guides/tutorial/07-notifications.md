@@ -84,6 +84,39 @@ nachgestellten „abgesagt“ an. Löschst du eine einzelne Wiederholung eines
 Serientermins, verschwindet diese Wiederholung vollständig – sie bleibt nicht
 als abgesagte Zeile stehen.
 
+## Erinnerungen, die nur du bekommst
+
+Jede Erinnerung, die du an einem Termin setzt, sagt in derselben Zeile, wo sie
+gilt. **An diesem Termin** ist das, was eine Erinnerung immer war: Aperio
+schreibt sie in den Termin, der Kalender speichert sie, und jede andere App, die
+diesen Kalender liest, erinnert ebenfalls – die Kalender-App deines Telefons,
+ein Sprachassistent, der dein Konto vorliest, und jeder, mit dem du den Kalender
+teilst. Exchange- und Outlook-Kalender speichern eine einzige „Minuten
+vorher"-Erinnerung pro Termin; dort überlebt nur die erste angehängte, eine
+zweite oder eine zu fester Uhrzeit setzt du besser auf **Nur in Aperio**.
+
+**Nur in Aperio** behält sie hier. Der Termin auf dem Server bleibt unberührt,
+niemand, der den Kalender mitliest, sieht sie, und keine andere App sagt sie an
+– deine eigenen Geräte aber schon: Die Erinnerung reist über Aperios Sync wie
+deine Einstellungen und klingelt auf dem Handy genauso wie am Desktop. Das ist
+die Wahl für „jetzt losgehen" in einem geteilten Arbeitskalender oder für einen
+persönlichen Hinweis an einem Termin, den Kollegen lesen können.
+
+Die Wahl erscheint nur dort, wo sie einen Unterschied macht. Ein lokaler
+Kalender hat niemanden sonst, dem er etwas mitteilen könnte, und der Kalender
+deines Telefons, den Aperio nur mitliest, speichert keine Erinnerung, die Aperio
+schreibt – in beiden Fällen gehören die Erinnerungen ohnehin Aperio, und es gibt
+dort keine Wahl.
+
+Termin-Kennungen gehören dem Kalender und ändern sich hinter Aperios Rücken: Ein
+erneuter Abgleich kann neue vergeben, manche Anbieter tun es nach jeder
+Bearbeitung. Eine private Erinnerung merkt sich Namen und Beginn des Termins, an
+dem sie gesetzt wurde, und findet ihn darüber wieder – und Aperio hält sich diese
+Notiz aktuell, solange es den Termin sehen kann, sodass auch ein Umbenennen oder
+Verschieben sie nicht verliert. Nur wenn zwei Termine desselben Kalenders in
+Namen und Beginn übereinstimmen, lässt Aperio die Erinnerung lieber stehen, statt
+zu raten, und du kannst sie neu setzen.
+
 ## Benachrichtigungstöne
 
 Du kannst festlegen, welchen Ton eine Erinnerung abspielt – auf mehreren

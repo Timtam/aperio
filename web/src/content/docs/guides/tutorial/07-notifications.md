@@ -80,6 +80,37 @@ event is dimmed with its title struck through, and screen readers announce it
 with a trailing “cancelled”. Deleting a single occurrence of a recurring event
 removes that occurrence entirely — it does not linger as a cancelled row.
 
+## Reminders only you get
+
+Every reminder you set on an appointment says where it applies, in the same row
+as the time. **On this appointment** is what a reminder has always been: Aperio
+writes it into the appointment, the calendar stores it, and every other client
+of that calendar reminds you too – your phone's calendar app, a voice assistant
+reading your account out loud, and anyone else you share the calendar with.
+Exchange and Outlook calendars store a single "minutes before" reminder per
+appointment, so only the first attached one survives there; a second, or one at
+a fixed time, is better set to **Only in Aperio**.
+
+**Only in Aperio** keeps it here. The appointment on the server stays untouched,
+so nobody sharing the calendar sees it and no other app announces it – but your
+own devices do: the reminder travels through Aperio's sync like your settings
+do, and rings on your phone as well as on your desktop. That is the one for
+"leave now" on a shared work calendar, or a personal nudge on an appointment
+your colleagues can read.
+
+The choice appears only where it makes a difference. A local calendar has no
+other client to tell, and the calendar on your phone that Aperio only reads
+stores no reminder Aperio writes — in both, reminders are Aperio's either way
+and no choice is offered.
+
+Appointment identities belong to the calendar and change underneath Aperio: a
+re-sync can mint new ones, and some providers do it after every edit. A private
+reminder remembers the name and start of the appointment it was set on, so it
+finds it again — and Aperio keeps that note up to date as long as it can still
+see the appointment, so a rename or a move does not lose it either. Only if two
+appointments in the same calendar share a name and a start does Aperio leave the
+reminder where it is rather than guess, and you can set it again.
+
 ## Notification sounds
 
 You can choose which sound a reminder plays, on several levels — each one

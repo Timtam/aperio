@@ -124,6 +124,19 @@ pub struct SnapshotDump {
     /// again — which is exactly the nagging the record exists to stop.
     #[serde(default)]
     pub suggestion_declines: Vec<cal_core::SuggestionDecline>,
+    /// The reminders Aperio keeps for single events and tells no provider
+    /// about (migration 0043).
+    ///
+    /// In the snapshot for the same reason as the groups above: after a
+    /// compaction the snapshot is the WHOLE state a joining device receives,
+    /// and a private reminder exists nowhere but in Aperio — a device that
+    /// never learned of it simply would not ring, which is the one failure
+    /// this record exists to prevent.
+    ///
+    /// Names foreign calendars and events and has no FK into any table here,
+    /// so it can go in last without ordering hazards.
+    #[serde(default)]
+    pub event_local_reminders: Vec<cal_core::EventLocalReminders>,
 }
 
 /// A group that was dissolved, and the moment it was.
@@ -153,6 +166,7 @@ impl LocalAdapter {
             event_groups: self.dump_event_groups_for_snapshot()?,
             event_group_tombstones: self.dump_event_group_tombstones_for_snapshot()?,
             suggestion_declines: self.dump_suggestion_declines_for_snapshot()?,
+            event_local_reminders: self.dump_event_local_reminders_for_snapshot()?,
         })
     }
 
@@ -449,6 +463,37 @@ impl LocalAdapter {
         Ok(rows)
     }
 
+    /// Read every private-reminder row.
+    pub fn dump_event_local_reminders_for_snapshot(
+        &self,
+    ) -> cal_core::Result<Vec<cal_core::EventLocalReminders>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT calendar_id, event_id, reminders, title, starts_at, updated_at
+                   FROM event_local_reminders",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let encoded: String = row.get(2)?;
+                Ok(cal_core::EventLocalReminders {
+                    calendar_id: row.get(0)?,
+                    event_id: row.get(1)?,
+                    // A row we cannot read asks for nothing, and travels as
+                    // such rather than blocking the whole snapshot.
+                    reminders: serde_json::from_str(&encoded).unwrap_or_default(),
+                    title: row.get(3)?,
+                    starts_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })
+            .map_err(map_sql_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(map_sql_err)?;
+        Ok(rows)
+    }
+
     /// Read every decline.
     pub fn dump_suggestion_declines_for_snapshot(
         &self,
@@ -620,6 +665,22 @@ impl LocalAdapter {
                 Ok(()) => report.applied += 1,
                 Err(err) => {
                     warn!(?err, "snapshot apply: suggestion decline failed");
+                    report.failed += 1;
+                }
+            }
+        }
+        // Private reminders: same shape — foreign keys nowhere, last-writer
+        // rule inside the upsert.
+        for row in &dump.event_local_reminders {
+            match self.upsert_event_local_reminders_from_sync(row) {
+                Ok(()) => report.applied += 1,
+                Err(err) => {
+                    warn!(
+                        calendar_id = %row.calendar_id,
+                        event_id = %row.event_id,
+                        ?err,
+                        "snapshot apply: local reminders failed",
+                    );
                     report.failed += 1;
                 }
             }
@@ -1137,6 +1198,7 @@ mod tests {
             event_groups: vec![],
             event_group_tombstones: vec![],
             suggestion_declines: vec![],
+            event_local_reminders: vec![],
         };
         let dst = make_adapter();
         let first = dst.apply_snapshot_dump(&dump).unwrap();

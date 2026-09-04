@@ -10,6 +10,7 @@ pub mod conferencing;
 pub mod day_marker;
 pub mod error;
 pub mod event_group;
+pub mod event_local_reminders;
 pub mod extras;
 pub mod recurrence;
 pub mod reminder;
@@ -25,6 +26,7 @@ pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};
 pub use event_group::{EventGroup, EventGroupMember};
+pub use event_local_reminders::EventLocalReminders;
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,

@@ -752,6 +752,12 @@ pub fn run() {
             commands::list_upcoming_reminders,
             commands::invalidate_reminders,
             commands::set_reminder_hidden_calendars,
+            // Reminders Aperio keeps for one event and tells no provider
+            // about (migration 0043).
+            commands::list_event_local_reminders,
+            commands::set_event_local_reminders,
+            commands::heal_event_local_reminders,
+            commands::refresh_event_local_reminder_signature,
             // §14.4 custom notification sounds: import a user audio
             // file into the content-addressed store, list/delete the
             // stored sounds, and preview one (the SoundPicker's Test

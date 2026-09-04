@@ -387,6 +387,35 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
     oldEventId: string,
     newEventId: string,
   ): Promise<void>;
+  /** Every row of reminders Aperio keeps for single events and tells no
+   *  provider about, as a JSON `EventLocalReminders[]` (migration 0043). */
+  eventLocalRemindersJson(): Promise<string>;
+  /** Write one event's private reminders. `remindersJson` is a `Reminder[]`;
+   *  `title` and `startsAt` are the event's CURRENT signature, so the row can
+   *  find its event again after the provider remints the id. An empty list is
+   *  stored, not deleted. Returns the stored row as JSON. */
+  setEventLocalRemindersJson(
+    calendarId: string,
+    eventId: string,
+    remindersJson: string,
+    title: string,
+    startsAt: string,
+  ): Promise<string>;
+  /** Point a private-reminder row at the id its event carries now — a silent
+   *  repair of Aperio's own bookkeeping. Returns whether a row moved. */
+  healEventLocalReminders(
+    calendarId: string,
+    oldEventId: string,
+    newEventId: string,
+  ): Promise<boolean>;
+  /** Write down what the event looks like now, so the signature keeps
+   *  matching after a rename or a move. Silent, like the repair. */
+  refreshEventLocalReminderSignature(
+    calendarId: string,
+    eventId: string,
+    title: string,
+    startsAt: string,
+  ): Promise<void>;
   /**
    * Set (or clear, with `null`) a LOCAL container's bound colour label. `kind`
    * is `'calendar' | 'task_list' | 'contact_list'`. Only local calendars / task

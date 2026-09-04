@@ -32,10 +32,14 @@ import { SoundPicker } from './SoundPicker';
  */
 export type EditableReminder = Reminder & { attach?: boolean };
 
-/** A row with its placement set — and without the flag when it stays local. */
+/** A row with its placement set, always written out.
+ *
+ *  Explicit both ways: the event editor distinguishes "rides on the event"
+ *  from "Aperio keeps it", and an absent flag would read as the first. A list
+ *  stored before the choice existed has no flag and still reads as local,
+ *  which is the behaviour it always had. */
 function withPlacement(row: EditableReminder, attach: boolean): EditableReminder {
-  const bare: EditableReminder = { kind: row.kind, sound: row.sound };
-  return attach ? { ...bare, attach: true } : bare;
+  return { kind: row.kind, sound: row.sound, attach };
 }
 
 export interface RemindersEditorProps {
@@ -53,6 +57,14 @@ export interface RemindersEditorProps {
    * calendars whose new appointments can carry reminders at all.
    */
   placement?: boolean;
+  /**
+   * Which surface this is, when `placement` is on. It decides what a row ADDED
+   * here starts as — a calendar default starts "only in Aperio", a row on an
+   * appointment starts attached, which is what a reminder on an appointment
+   * has always been — and how the attached option is worded: a calendar
+   * default reaches NEW appointments, an event row is on THIS one.
+   */
+  placementSurface?: 'calendar' | 'event';
   /**
    * Whether "on next app start" is on offer. The calendar-defaults surfaces
    * turn it OFF: that kind is host-local by construction — no wire format
@@ -96,6 +108,7 @@ export function RemindersEditor({
   onChange,
   mode,
   placement = false,
+  placementSurface = 'calendar',
   allowAppStart = true,
 }: RemindersEditorProps) {
   const { t } = useTranslation();
@@ -119,8 +132,11 @@ export function RemindersEditor({
   );
 
   const add = useCallback(() => {
-    onChange([...value, { ...DEFAULT_RELATIVE }]);
-  }, [value, onChange]);
+    onChange([
+      ...value,
+      { ...DEFAULT_RELATIVE, attach: placementSurface === 'event' },
+    ]);
+  }, [value, onChange, placementSurface]);
 
   return (
     <fieldset className="form__field reminders">
@@ -139,6 +155,7 @@ export function RemindersEditor({
                 mode={mode}
                 position={i + 1}
                 placement={placement}
+                placementSurface={placementSurface}
                 allowAppStart={allowAppStart}
               />
             </li>
@@ -164,8 +181,10 @@ interface ReminderRowProps {
   mode: 'event' | 'task';
   /** 1-based index used in the row's aria-label. */
   position: number;
-  /** Show the "Applies" choice (calendar defaults only). */
+  /** Show the "Applies" choice. */
   placement: boolean;
+  /** Which surface it belongs to — see `RemindersEditorProps`. */
+  placementSurface: 'calendar' | 'event';
   /** Offer "on next app start" — see `RemindersEditorProps`. */
   allowAppStart: boolean;
 }
@@ -177,6 +196,7 @@ function ReminderRow({
   mode,
   position,
   placement,
+  placementSurface,
   allowAppStart,
 }: ReminderRowProps) {
   const { t } = useTranslation();
@@ -271,7 +291,13 @@ function ReminderRow({
             }
           >
             <option value="local">{t('reminders.placement.local')}</option>
-            <option value="attach">{t('reminders.placement.attach')}</option>
+            <option value="attach">
+              {t(
+                placementSurface === 'event'
+                  ? 'reminders.placement.attachEvent'
+                  : 'reminders.placement.attach',
+              )}
+            </option>
           </select>
         </label>
       )}

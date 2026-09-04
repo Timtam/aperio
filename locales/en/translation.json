@@ -223,7 +223,8 @@
     "placement": {
       "label": "Applies",
       "local": "Only in Aperio",
-      "attach": "Attached to new events"
+      "attach": "Attached to new events",
+      "attachEvent": "On this appointment"
     },
     "kind": {
       "relativeEvent": "Before start",

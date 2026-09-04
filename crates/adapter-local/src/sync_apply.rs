@@ -217,6 +217,17 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM calendars WHERE id = ?", params![calendar_id])
             .map_err(map_sql_err)?;
+        // The private reminders (migration 0043) name events that went with
+        // the calendar, and have no FK to take them along. The device that
+        // deleted the calendar clears its own; this is the same clearing on
+        // every device the deletion reaches — otherwise a row would outlive
+        // its calendar there, and the reminder scan's repair could re-point it
+        // at another appointment entirely.
+        conn.execute(
+            "DELETE FROM event_local_reminders WHERE calendar_id = ?",
+            params![calendar_id],
+        )
+        .map_err(map_sql_err)?;
         Ok(())
     }
 
@@ -613,6 +624,63 @@ impl LocalAdapter {
                 decline.event_b,
                 decline.declined_at,
                 decline.cleared_at,
+            ],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    /// Store the Aperio-only reminders another device set for one event
+    /// (migration 0043).
+    ///
+    /// Last writer wins on the whole list, the same rule the group upsert
+    /// above uses and for the same reason: the list is short and only
+    /// meaningful entire, so merging two devices' lists would produce a set
+    /// neither user asked for. An EMPTY list is a decision and is stored as
+    /// one — it must be able to win against a non-empty incumbent, which is
+    /// exactly why the row is never deleted.
+    ///
+    /// The signature travels with the list because a joining device has no
+    /// other way to learn it, and without it the row could never be repaired
+    /// after the provider remints the id.
+    pub fn upsert_event_local_reminders_from_sync(
+        &self,
+        row: &cal_core::EventLocalReminders,
+    ) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let key = format!("{} {}", row.calendar_id, row.event_id);
+        let local: Option<String> = conn
+            .query_row(
+                "SELECT updated_at FROM event_local_reminders
+                  WHERE calendar_id = ? AND event_id = ?",
+                params![row.calendar_id, row.event_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if let Some(incumbent) = local {
+            if !is_newer_claim((&row.updated_at, &key), (&incumbent, &key)) {
+                return Ok(());
+            }
+        }
+        let encoded = serde_json::to_string(&row.reminders)
+            .map_err(|err| cal_core::Error::internal(err.to_string()))?;
+        conn.execute(
+            "INSERT INTO event_local_reminders
+                 (calendar_id, event_id, reminders, title, starts_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(calendar_id, event_id) DO UPDATE SET
+                 reminders  = excluded.reminders,
+                 title      = excluded.title,
+                 starts_at  = excluded.starts_at,
+                 updated_at = excluded.updated_at",
+            params![
+                row.calendar_id,
+                row.event_id,
+                encoded,
+                row.title,
+                row.starts_at,
+                row.updated_at,
             ],
         )
         .map_err(map_sql_err)?;

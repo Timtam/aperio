@@ -571,6 +571,39 @@ public class CalFfiModule: Module {
       try self.host.groupSuggestionDeclinesJson()
     }
 
+    // Reminders Aperio keeps for one event and tells no provider about
+    // (migration 0043).
+    AsyncFunction("eventLocalRemindersJson") { () in
+      try self.host.eventLocalRemindersJson()
+    }
+
+    AsyncFunction("setEventLocalRemindersJson") {
+      (calendarId: String, eventId: String, remindersJson: String, title: String, startsAt: String) in
+      try self.host.setEventLocalRemindersJson(
+        calendarId: calendarId,
+        eventId: eventId,
+        remindersJson: remindersJson,
+        title: title,
+        startsAt: startsAt)
+    }
+
+    AsyncFunction("healEventLocalReminders") {
+      (calendarId: String, oldEventId: String, newEventId: String) in
+      try self.host.healEventLocalReminders(
+        calendarId: calendarId,
+        oldEventId: oldEventId,
+        newEventId: newEventId)
+    }
+
+    AsyncFunction("refreshEventLocalReminderSignature") {
+      (calendarId: String, eventId: String, title: String, startsAt: String) in
+      try self.host.refreshEventLocalReminderSignature(
+        calendarId: calendarId,
+        eventId: eventId,
+        title: title,
+        startsAt: startsAt)
+    }
+
     AsyncFunction("healEventGroupMember") {
       (groupId: String, calendarId: String, oldEventId: String, newEventId: String) in
       try self.host.healEventGroupMember(

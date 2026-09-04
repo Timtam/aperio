@@ -129,6 +129,9 @@ pub fn enumerate_local_triggers(
     // sees them: read their configured defaults here, BEFORE the scan locks the
     // connection (each pref read takes its own lock).
     let calendar_defaults = local_calendar_default_reminders(db);
+    // The reminders Aperio keeps for single events, read the same way and for
+    // the same reason.
+    let event_local = event_local_reminder_map(db);
     let conn = match db.lock() {
         Ok(c) => c,
         Err(err) => {
@@ -159,6 +162,10 @@ pub fn enumerate_local_triggers(
                     &parse_reminders(reminders_json.as_deref()).unwrap_or_default(),
                     calendar_defaults
                         .get(&calendar_id)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                    event_local
+                        .get(&(calendar_id.clone(), series_master_id(&id).to_string()))
                         .map(Vec::as_slice)
                         .unwrap_or(&[]),
                 );
@@ -291,6 +298,9 @@ pub async fn enumerate_external_triggers(
     let sound_prefs = SoundPrefs::load(db);
     // Day-carryover anchor for all-day events (below).
     let day_start = day_start_time(db);
+    // The reminders Aperio keeps for single events of these calendars — read
+    // once for the whole fan-out rather than per event.
+    let mut event_local = event_local_reminder_map(db);
 
     // Device-local accounts (iOS EventKit / Android CalendarProvider) are
     // EXCLUDED from Aperio's reminder scheduling: the OS itself fires the alarms
@@ -344,9 +354,19 @@ pub async fn enumerate_external_triggers(
                     continue;
                 }
             };
+            // The events of this calendar are in hand and the window is the
+            // one a reminder could fire in — the moment to find rows whose
+            // event the provider reminted. Whatever moved follows in the map
+            // too, so a repaired reminder fires in this pass.
+            for (old_id, new_id) in heal_local_reminders_for_calendar(db, &cal.id, &events) {
+                if let Some(reminders) = event_local.remove(&(cal.id.clone(), old_id)) {
+                    event_local.insert((cal.id.clone(), new_id), reminders);
+                }
+            }
             acc.extend(event_triggers(
                 &events,
                 &defaults,
+                &event_local,
                 &sound_prefs,
                 from,
                 to,
@@ -413,6 +433,10 @@ pub async fn enumerate_birthday_triggers(
     let now = Utc::now();
     let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
     let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
+    // Birthday events are synthesised here rather than stored, so nothing can
+    // key a private reminder to one yet; the map is read anyway so the merge
+    // rule stays literally the same call on every path.
+    let event_local = event_local_reminder_map(db);
     // Widen the synthesis window the same way the expansion does (a birthday
     // occurrence inside the window may sit just outside `[from, to]`).
     let (occ_from, occ_to) = occurrence_window(from, to);
@@ -442,6 +466,7 @@ pub async fn enumerate_birthday_triggers(
         acc.extend(event_triggers(
             &events,
             &defaults,
+            &event_local,
             &sound_prefs,
             from,
             to,
@@ -718,12 +743,158 @@ pub fn attached_defaults(defaults: &[DefaultReminder]) -> Vec<Reminder> {
         .collect()
 }
 
-/// What actually fires for one event of a calendar: the event's own reminders;
-/// the attach entries when it has none of its own (they would be its own had
-/// it been created here); and the in-Aperio entries always, on top — each
+/// The id of the SERIES this event belongs to.
+///
+/// A provider-sent override for one modified occurrence carries the master's
+/// id in front of the marker; everything keyed per event — private reminders,
+/// colour overrides, group membership — is keyed by the master, because a
+/// recurring appointment is one appointment. Mirrors the frontend's
+/// `seriesIdOf`.
+pub fn series_master_id(event_id: &str) -> &str {
+    match event_id.find("::rid::") {
+        Some(idx) => &event_id[..idx],
+        None => event_id,
+    }
+}
+
+/// Every event's Aperio-only reminders, keyed by `(calendar_id, series id)`.
+pub type EventLocalReminderMap = HashMap<(String, String), Vec<Reminder>>;
+
+/// Find private-reminder rows of one calendar whose event has been reminted,
+/// and point them at the id it carries now.
+///
+/// Ids belong to the provider and change underneath us — a re-bootstrap
+/// remints them, moving an event between calendars remints it, Exchange bakes
+/// a change token into its ids. A row that could not be found would simply
+/// stop ringing, in silence, which is the worst failure available here. The
+/// SIGNATURE stored with each row (the title and start the event had) is what
+/// finds it again.
+///
+/// This runs inside the reminder scan because that is where the evidence
+/// already is: the events of this calendar have just been fetched, in the
+/// window where a reminder could fire at all. No view has to remember to ask.
+///
+/// AMBIGUITY HEALS NOTHING. A calendar can hold two events with the same name
+/// at the same time, and picking one would move the reminder to an appointment
+/// nobody pointed it at — silently, since the repair says nothing. A row that
+/// cannot be resolved keeps waiting, which is visible in the editor and
+/// fixable, rather than being quietly attached to the wrong appointment.
+///
+/// Local and silent, like every other repair of Aperio's own bookkeeping:
+/// every device sees the same events and fixes its own copy (see
+/// [`crate::event_reminders::EventRemindersRepo::heal`]).
+///
+/// Returns the `(old id, new id)` pairs it moved, so the caller's in-memory
+/// map follows in the SAME pass — a row repaired here has to fire now, not one
+/// scan later.
+fn heal_local_reminders_for_calendar(
+    db: &SharedConn,
+    calendar_id: &str,
+    events: &[Event],
+) -> Vec<(String, String)> {
+    let repo = crate::event_reminders::EventRemindersRepo::new(db);
+    let rows = match repo.list() {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+    let mut moved = Vec::new();
+    let normalize = |s: &str| s.trim().to_lowercase();
+    for row in rows.iter().filter(|r| r.calendar_id == calendar_id) {
+        // The row is where it belongs. Write down what its event looks like
+        // NOW, so a rename or a move keeps it findable: a signature describing
+        // an appointment as it USED to be could never match again once the id
+        // is also reminted, and then the reminder would go quiet for good.
+        // Nothing else refreshes it — a drag onto another time, an edit in
+        // another app, a rename by the organiser all happen far from here.
+        if let Some(ev) = events
+            .iter()
+            .find(|ev| series_master_id(&ev.id) == row.event_id)
+        {
+            let start = ev.start.to_rfc3339();
+            if ev.title != row.title || start != row.starts_at {
+                if let Err(err) =
+                    repo.refresh_signature(calendar_id, &row.event_id, &ev.title, &start)
+                {
+                    warn!(?err, "couldn't refresh a private reminder's signature");
+                }
+            }
+            continue;
+        }
+        let wanted_title = normalize(&row.title);
+        if wanted_title.is_empty() {
+            continue;
+        }
+        let Ok(wanted_start) = row.starts_at.parse::<DateTime<Utc>>() else {
+            continue;
+        };
+        // Collapse to the SERIES before asking whether the answer is unique: a
+        // recurring master and a provider-sent override of its first
+        // occurrence are two rows for ONE appointment, and counting them as
+        // two would refuse a repair that is not ambiguous at all.
+        let mut candidates: Vec<&str> = events
+            .iter()
+            .filter(|ev| normalize(&ev.title) == wanted_title && ev.start == wanted_start)
+            .map(|ev| series_master_id(&ev.id))
+            .collect();
+        candidates.sort_unstable();
+        candidates.dedup();
+        let [new_id] = candidates.as_slice() else {
+            continue;
+        };
+        let new_id = *new_id;
+        match repo.heal(calendar_id, &row.event_id, new_id) {
+            Ok(true) => moved.push((row.event_id.clone(), new_id.to_string())),
+            Ok(false) => {}
+            Err(err) => warn!(
+                calendar_id = %calendar_id,
+                ?err,
+                "couldn't repoint a private reminder; it stays where it is",
+            ),
+        }
+    }
+    moved
+}
+
+/// Read the whole private-reminder overlay in one pass, ready to look up per
+/// event. There is one row per event the user gave a private reminder, so the
+/// set is small; reading it per event would take the connection lock once per
+/// event instead.
+pub fn event_local_reminder_map(db: &SharedConn) -> EventLocalReminderMap {
+    match crate::event_reminders::EventRemindersRepo::new(db).list() {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|row| !row.is_empty())
+            .map(|row| ((row.calendar_id, row.event_id), row.reminders))
+            .collect(),
+        Err(err) => {
+            warn!(
+                ?err,
+                "couldn't read the private reminders; this pass fires only what the events carry",
+            );
+            HashMap::new()
+        }
+    }
+}
+
+/// What actually fires for one event of a calendar.
+///
+/// Its own reminders, plus the ones Aperio keeps privately for it — those are
+/// the user's decision about this appointment just as much, they simply never
+/// went to the provider. Then the calendar's attach entries, but only when the
+/// two above are empty (they would have BEEN the event's own had it been
+/// created here). Then the calendar's in-Aperio entries, always, on top. Each
 /// reminder at most once.
-pub fn effective_reminders(own: &[Reminder], defaults: &[DefaultReminder]) -> Vec<Reminder> {
+pub fn effective_reminders(
+    own: &[Reminder],
+    defaults: &[DefaultReminder],
+    event_local: &[Reminder],
+) -> Vec<Reminder> {
     let mut out: Vec<Reminder> = own.to_vec();
+    for reminder in event_local {
+        if !out.contains(reminder) {
+            out.push(reminder.clone());
+        }
+    }
     if out.is_empty() {
         out.extend(attached_defaults(defaults));
     }
@@ -778,6 +949,7 @@ pub fn apply_default_reminder_policy(
 fn event_triggers(
     events: &[Event],
     calendar_defaults: &[DefaultReminder],
+    event_local: &EventLocalReminderMap,
     sound_prefs: &SoundPrefs,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
@@ -792,7 +964,13 @@ fn event_triggers(
         if ev.cancelled {
             continue;
         }
-        let effective = effective_reminders(&ev.reminders, calendar_defaults);
+        // Private reminders are keyed by the SERIES: a provider-sent override
+        // for one occurrence is the same appointment.
+        let private = event_local
+            .get(&(ev.calendar_id.clone(), series_master_id(&ev.id).to_string()))
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let effective = effective_reminders(&ev.reminders, calendar_defaults, private);
         if effective.is_empty() {
             continue;
         }
@@ -1521,7 +1699,7 @@ mod tests {
         let defaults = [attached(hour.clone()), local(five.clone())];
         // No own reminders: the attach entry stands in, the in-Aperio one rides on top.
         assert_eq!(
-            effective_reminders(&[], &defaults),
+            effective_reminders(&[], &defaults, &[]),
             vec![hour.clone(), five.clone()]
         );
         // Own reminders: the attach entry is skipped, the in-Aperio one still fires.
@@ -1530,13 +1708,148 @@ mod tests {
             sound: None,
         }];
         assert_eq!(
-            effective_reminders(&own, &defaults),
+            effective_reminders(&own, &defaults, &[]),
             vec![own[0].clone(), five.clone()]
         );
         // The same reminder is never doubled.
         assert_eq!(
-            effective_reminders(std::slice::from_ref(&five), &defaults),
+            effective_reminders(std::slice::from_ref(&five), &defaults, &[]),
             vec![five]
+        );
+    }
+
+    /// A reminder Aperio keeps privately for one event counts as that event's
+    /// own: it fires, and the calendar's attach entry has nothing left to
+    /// stand in for.
+    #[test]
+    fn a_private_reminder_counts_as_the_events_own() {
+        let hour = one_hour_before()[0].clone();
+        let five = five_minutes_before();
+        let ten = Reminder {
+            kind: ReminderKind::Relative { minutes_before: 10 },
+            sound: None,
+        };
+        let defaults = [attached(hour.clone()), local(five.clone())];
+
+        // No reminders on the event itself, one private one: the private one
+        // fires, the attach entry stays out (the event is not reminder-less),
+        // the in-Aperio entry rides on top as always.
+        assert_eq!(
+            effective_reminders(&[], &defaults, std::slice::from_ref(&ten)),
+            vec![ten.clone(), five.clone()]
+        );
+        // Beside the event's own reminders it simply adds.
+        assert_eq!(
+            effective_reminders(
+                std::slice::from_ref(&hour),
+                &defaults,
+                std::slice::from_ref(&ten)
+            ),
+            vec![hour, ten.clone(), five]
+        );
+        // And is never doubled by a default that says the same thing.
+        assert_eq!(
+            effective_reminders(&[], &[local(ten.clone())], std::slice::from_ref(&ten)),
+            vec![ten]
+        );
+    }
+
+    fn event_named(id: &str, calendar_id: &str, title: &str, start: DateTime<Utc>) -> Event {
+        let mut ev = make_event(Vec::new());
+        ev.id = id.to_string();
+        ev.calendar_id = calendar_id.to_string();
+        ev.title = title.to_string();
+        ev.start = start;
+        ev.end = start + ChronoDuration::hours(1);
+        ev
+    }
+
+    /// The point of the signature: the provider reminted the id, and the scan
+    /// — which has the events in hand anyway — finds the row's event again.
+    #[test]
+    fn a_reminted_id_is_found_again_by_title_and_start() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "old-id",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+
+        let events = vec![event_named("new-id", "cal", "  zahnarzt ", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events);
+        assert_eq!(moved, vec![("old-id".to_string(), "new-id".to_string())]);
+        assert!(repo.get("cal", "old-id").unwrap().is_none());
+        assert_eq!(
+            repo.get("cal", "new-id").unwrap().unwrap().reminders,
+            one_hour_before()
+        );
+    }
+
+    /// Two events with the same name at the same time: moving the reminder to
+    /// one of them would attach it to an appointment nobody pointed it at, and
+    /// the repair says nothing. So it heals NOTHING and keeps waiting.
+    #[test]
+    fn an_ambiguous_signature_heals_nothing() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "old-id",
+            &one_hour_before(),
+            "Standup",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+        let events = vec![
+            event_named("a", "cal", "Standup", start),
+            event_named("b", "cal", "Standup", start),
+        ];
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &events).is_empty());
+        assert!(repo.get("cal", "old-id").unwrap().is_some());
+    }
+
+    /// A row whose event is simply present is left alone, and one whose event
+    /// is out of the fetched window waits rather than being re-pointed at
+    /// whatever happens to be there.
+    #[test]
+    fn a_row_that_still_resolves_or_cannot_be_seen_is_left_alone() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "here",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+        // Present under its own id, though renamed since: nothing to repair.
+        let events = vec![event_named("here", "cal", "Zahnarzt, verlegt", start)];
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &events).is_empty());
+        // Nothing that matches the signature: the row keeps waiting.
+        let elsewhere = vec![event_named("other", "cal", "Etwas anderes", start)];
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &elsewhere).is_empty());
+        assert!(repo.get("cal", "here").unwrap().is_some());
+    }
+
+    /// Everything keyed per event is keyed by the SERIES: a provider-sent
+    /// override for one occurrence is the same appointment.
+    #[test]
+    fn the_series_master_id_drops_an_occurrence_suffix() {
+        assert_eq!(series_master_id("abc"), "abc");
+        assert_eq!(
+            series_master_id("https://dav/e.ics|uid-1::rid::2026-06-15T09:00:00+00:00"),
+            "https://dav/e.ics|uid-1"
         );
     }
 
@@ -1795,6 +2108,7 @@ mod tests {
         event_triggers(
             events,
             calendar_defaults,
+            &EventLocalReminderMap::new(),
             &SoundPrefs::default(),
             window_start,
             window_end,

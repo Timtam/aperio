@@ -223,7 +223,8 @@
     "placement": {
       "label": "Gilt",
       "local": "Nur in Aperio",
-      "attach": "Neuen Terminen angehängt"
+      "attach": "Neuen Terminen angehängt",
+      "attachEvent": "An diesem Termin"
     },
     "kind": {
       "relativeEvent": "Vor Beginn",

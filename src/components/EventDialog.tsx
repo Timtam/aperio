@@ -26,6 +26,7 @@ import {
   isCommandError,
   queryFreeBusy,
   setEventColor,
+  setEventLocalReminders,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
@@ -48,6 +49,7 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import { useEventLocalReminders } from '../state/useEventLocalReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
 import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
@@ -76,7 +78,7 @@ import {
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
-import { RemindersEditor } from './RemindersEditor';
+import { RemindersEditor, type EditableReminder } from './RemindersEditor';
 import { SoundPrefField } from './SoundPrefField';
 import type { Reminder } from '../api/types';
 
@@ -96,6 +98,22 @@ import type { Reminder } from '../api/types';
  * stores catalog picks as `"Name <email>"`; free-form entries are the
  * email itself. Free/busy needs just the address.
  */
+/** The rows that ride ON the event — a real reminder the provider stores and
+ *  every other client of the calendar sees. The placement flag is Aperio's own
+ *  bookkeeping and never goes on the wire. */
+function attachedRows(rows: readonly EditableReminder[]): Reminder[] {
+  return rows
+    .filter((r) => r.attach !== false)
+    .map(({ kind, sound }) => ({ kind, sound }));
+}
+
+/** The rows Aperio keeps for this event alone (migration 0043). */
+function privateRows(rows: readonly EditableReminder[]): Reminder[] {
+  return rows
+    .filter((r) => r.attach === false)
+    .map(({ kind, sound }) => ({ kind, sound }));
+}
+
 function attendeeEmail(entry: string): string {
   const angle = entry.match(/<([^>]+)>/);
   return (angle ? angle[1] : entry).trim();
@@ -165,7 +183,11 @@ interface FormState {
   rrule: string | null;
   /** Color-label id, or null. */
   colorLabel: string | null;
-  reminders: Reminder[];
+  /** Each row says where it lives: `attach: true` rides ON the event (a real
+   *  VALARM the provider stores and every other client of the calendar sees);
+   *  `attach: false` is a reminder Aperio keeps for this event alone. See
+   *  `EditableReminder` and migration 0043. */
+  reminders: EditableReminder[];
   /** Free-form attendee strings (DESIGN.md §10.4). The
    *  AttendeePicker stores each pick from the contacts catalog
    *  as `"Name <email>"`; raw free-form entries (typed-in
@@ -240,6 +262,14 @@ export function EventDialog({
     [getDefaultsFor],
   );
 
+  // This event's PRIVATE reminders — the ones Aperio keeps and tells no
+  // provider about. They are not part of the event, so they arrive separately
+  // and are merged into the same rows, each marked as what it is.
+  const privateSeed = useEventLocalReminders(
+    dialogCalendarId ?? null,
+    event ? seriesIdOf(event) : null,
+  );
+
   // True when the form's `reminders` slot was filled from the
   // calendar's default rather than from the event itself. Used by the
   // submit path to send `[]` instead of the defaults — keeps the wire
@@ -260,17 +290,28 @@ export function EventDialog({
       calendars,
       selectedCalendarIds,
     );
+    // The event's private reminders sit in the same list, marked as the kind
+    // that never reaches the provider. They are the user's decision about this
+    // appointment just as much — the difference is only who else gets told.
+    const privateRows: EditableReminder[] = privateSeed.reminders.map(
+      ({ kind, sound }) => ({ kind, sound, attach: false }),
+    );
     if (remindersWereFromDefault && event) {
       return {
         ...base,
         // The placement flag is the calendar's business, never an event's:
         // only the reminder itself is shown (and, once touched, sent).
-        reminders: attachedDefaultsFor(event.calendar_id).map(
-          ({ kind, sound }) => ({ kind, sound }),
-        ),
+        reminders: [
+          ...attachedDefaultsFor(event.calendar_id).map(({ kind, sound }) => ({
+            kind,
+            sound,
+            attach: true,
+          })),
+          ...privateRows,
+        ],
       };
     }
-    return base;
+    return { ...base, reminders: [...base.reminders, ...privateRows] };
   }, [
     event,
     defaultCalendarId,
@@ -281,6 +322,7 @@ export function EventDialog({
     selectedCalendarIds,
     remindersWereFromDefault,
     attachedDefaultsFor,
+    privateSeed.reminders,
   ]);
 
   /**
@@ -376,6 +418,13 @@ export function EventDialog({
 
 
   const [form, setForm] = useState<FormState>(initialState);
+  // Whether the appointment lives on a calendar only Aperio reads. A local
+  // calendar has no other client to tell, so "attached" and "only in Aperio"
+  // would mean the same thing there and the choice is not offered.
+  const targetIsLocal =
+    (calendars.find((c) => c.id === form.calendarId)?.account_id ?? 'local') ===
+    'local';
+
   /**
    * Earlier appointments with this name, offered while a NEW one is typed.
    *
@@ -424,7 +473,7 @@ export function EventDialog({
           endTime: fill.all_day ? prev.endTime : timeInput(end),
           rrule: fill.rrule,
           colorLabel: fill.color_label,
-          reminders: fill.reminders as Reminder[],
+          reminders: (fill.reminders as Reminder[]).map((r) => ({ ...r, attach: true })),
           attendees: fill.attendees,
           // The calendar the earlier appointment lived on — unless the caller
           // pinned one. Accepting an offer in this editor's own title field
@@ -807,7 +856,76 @@ export function EventDialog({
         // the calendar default a default.
         const remindersForWire = keepRemindersAsDefault
           ? []
-          : form.reminders;
+          : attachedRows(form.reminders);
+        // The rows the user marked "only in Aperio" never go to the provider;
+        // they are written to Aperio's own store after the save, against
+        // whatever id the appointment ends up with.
+        // `keepRemindersAsDefault` is about the CALENDAR's defaults, which are
+        // attached rows by construction: it exists so an untouched default is
+        // not promoted into a per-event alarm. A private row is never a
+        // default — it came out of the store — so the gate must not empty it,
+        // or an unrelated save (change the location, press Save) would delete
+        // the user's private reminder here AND on every other device.
+        const privateReminders = privateRows(form.reminders);
+        // The stored rows arrive asynchronously and reach the form only while
+        // it is still pristine. If they never landed, their absence from the
+        // rows is ignorance, not a decision — and writing an empty list would
+        // destroy them.
+        const privateSeedLanded =
+          privateSeed.reminders.length === 0 ||
+          form.reminders.some((r) => r.attach === false);
+        // Write them against whatever the appointment ended up being — a
+        // create mints an id, an occurrence override makes a new event, a
+        // series split makes a tail. The signature travels with them so the
+        // row can find its event again after the provider remints the id.
+        //
+        // An emptied list is still written when there WAS a row: that is the
+        // record of the decision, and a peer that has not heard yet must have
+        // something to lose against. A failure here never fails the save — the
+        // appointment is already stored, and a lost private reminder is worth
+        // less than an error the user cannot act on.
+        const savePrivate = async (saved: CalendarEvent) => {
+          const hadSomethingToLose =
+            privateSeed.reminders.length > 0 && privateSeedLanded;
+          if (privateReminders.length === 0 && !hadSomethingToLose) return;
+          const seriesId = seriesIdOf(saved);
+          // The SIGNATURE has to describe the event the row is keyed by. A
+          // save that carved one occurrence out of a series describes that
+          // occurrence, not the series the row names — so only a save of the
+          // series itself refreshes it; otherwise whatever was stored stands.
+          const describesTheKeyedEvent = saved.id === seriesId;
+          await setEventLocalReminders({
+            calendar_id: saved.calendar_id,
+            event_id: seriesId,
+            reminders: privateReminders,
+            title: describesTheKeyedEvent
+              ? saved.title
+              : privateSeed.title || saved.title,
+            starts_at: describesTheKeyedEvent
+              ? saved.start
+              : privateSeed.startsAt || saved.start,
+          }).catch(() => undefined);
+          // The appointment moved to another calendar, or the provider minted
+          // a new id for it: the old row names an event that is not there any
+          // more, and the scan's repair could re-point it at whatever else in
+          // that calendar shares its title and start. Empty it — the emptied
+          // list is the record, and a peer holding the old one stops firing.
+          const oldCalendar = dialogCalendarId;
+          const oldEvent = event ? seriesIdOf(event) : null;
+          const keyChanged =
+            oldCalendar != null &&
+            oldEvent != null &&
+            (oldCalendar !== saved.calendar_id || oldEvent !== seriesId);
+          if (keyChanged && privateSeed.hadRow) {
+            await setEventLocalReminders({
+              calendar_id: oldCalendar,
+              event_id: oldEvent,
+              reminders: [],
+              title: privateSeed.title,
+              starts_at: privateSeed.startsAt,
+            }).catch(() => undefined);
+          }
+        };
 
         // Notify attendees: gated identically to the toggle's visibility —
         // only when the target calendar can schedule server-side AND there
@@ -864,6 +982,7 @@ export function EventDialog({
               send_invitations: sendInvitations,
             };
             await apiUpdateEvent(overrideRow, event.calendar_id);
+            await savePrivate(overrideRow);
             if (!storesColorNatively) {
               await setEventColor(
                 overrideRow.id,
@@ -913,6 +1032,7 @@ export function EventDialog({
                 attendees: form.attendees,
                 send_invitations: sendInvitations,
               });
+              await savePrivate(created);
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
@@ -1005,6 +1125,10 @@ export function EventDialog({
                 },
                 plan,
               );
+              // The tail is a continuation of the same appointment, so the
+              // private reminders follow it rather than staying on the head,
+              // which now ends before the change the user just made.
+              await savePrivate(created);
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
@@ -1049,7 +1173,11 @@ export function EventDialog({
           // old etag's If-Match can never be satisfied at the new
           // URL. The backend takes the hint and reroutes the
           // change as a create-on-target + delete-from-source.
-          await apiUpdateEvent(updated, event.calendar_id);
+          const saved = await apiUpdateEvent(updated, event.calendar_id);
+          // A calendar-picker move is rerouted as create-on-target +
+          // delete-from-source, so the appointment comes back with the id and
+          // calendar it has NOW. The private row is keyed by exactly those.
+          await savePrivate(saved ?? updated);
           // Color rides update_event for local + color-capable calendars; only
           // a non-capable external needs the separate host-local override.
           if (!storesColorNatively) {
@@ -1087,6 +1215,7 @@ export function EventDialog({
             use_calendar_defaults:
               !remindersTouchedRef.current && remindersForWire.length === 0,
           });
+          await savePrivate(created);
           if (!storesColorNatively) {
             await setEventColor(
               created.id,
@@ -1120,6 +1249,14 @@ export function EventDialog({
       isOccurrence,
       editScope,
       keepRemindersAsDefault,
+      // What was STORED for this event decides whether an emptied list is a
+      // decision to write or ignorance to leave alone, and which signature a
+      // save that does not describe the keyed event keeps (see `savePrivate`).
+      privateSeed.hadRow,
+      privateSeed.reminders.length,
+      privateSeed.title,
+      privateSeed.startsAt,
+      dialogCalendarId,
       calendars,
       notifyAttendees,
       announce,
@@ -1616,6 +1753,18 @@ export function EventDialog({
             remindersTouchedRef.current = true;
           }}
           mode="event"
+          // Where each reminder lives is a real choice on a calendar somebody
+          // else can read: attached, the provider stores it and every client
+          // of the calendar rings; only in Aperio, it stays here. A LOCAL
+          // calendar has no such audience — its events are Aperio's own — so
+          // the choice would be one without a difference and is not offered.
+          placement={!targetIsLocal}
+          placementSurface="event"
+          // The app-start collector reads an entry's own reminders from the
+          // LOCAL store, and no wire format carries the kind — so on an
+          // external calendar it could never fire, attached or private. Same
+          // rule as the calendar defaults: don't offer what stays silent.
+          allowAppStart={targetIsLocal}
         />
 
         {/* §14.4 per-event sound override. Edit-only: the key is the
@@ -1805,7 +1954,10 @@ function buildInitialState(
       description: event.description ?? '',
       rrule: event.recurrence?.rrule ?? null,
       colorLabel: event.color_label ?? null,
-      reminders: event.reminders ?? [],
+      // The event's own reminders are attached by definition — they are on
+      // the provider. Its private ones are merged in by the dialog, which is
+      // where they arrive from (they are not part of the event).
+      reminders: (event.reminders ?? []).map((r) => ({ ...r, attach: true })),
       attendees: event.attendees ?? [],
     };
   }

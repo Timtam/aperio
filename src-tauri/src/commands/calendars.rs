@@ -297,6 +297,14 @@ pub async fn delete_calendar(
     event_log.append(SyncEvent::CalendarDeleted(IdPayload { id: id.clone() }));
     // The calendar's events went with it, so no group can go on counting them.
     super::forget_calendar_groupings(&db, &event_log, &id);
+    // Nor can a private reminder name one of them. Local and unannounced: the
+    // calendar's deletion is what travels, and every device that applies it
+    // clears its own rows from the same evidence.
+    if let Err(err) =
+        host_core::event_reminders::EventRemindersRepo::new(&db.shared()).forget_calendar(&id)
+    {
+        tracing::warn!(calendar_id = %id, ?err, "couldn't drop the calendar's private reminders");
+    }
     Ok(())
 }
 
@@ -611,6 +619,16 @@ pub async fn update_event(
                 &moved_to,
                 &updated.id,
             );
+            // The private reminders are keyed the same way, and follow for the
+            // same reason.
+            super::relocate_event_local_reminders(
+                &db,
+                &event_log,
+                &previous,
+                &updated.id,
+                &moved_to,
+                &updated.id,
+            );
             // Local↔Local move surfaces as a single UPDATE on the
             // calendar_id column — emit one EventUpdated event
             // carrying the full row.
@@ -681,6 +699,16 @@ pub async fn update_event(
         // or not that delete ever routes through the command that clears a
         // deleted event's membership.
         super::relocate_event_grouping(
+            &db,
+            &event_log,
+            &previous,
+            &event.id,
+            &event.calendar_id,
+            &created.id,
+        );
+        // The private reminders are keyed the same way, and follow for the
+        // same reason.
+        super::relocate_event_local_reminders(
             &db,
             &event_log,
             &previous,
@@ -851,6 +879,14 @@ pub async fn delete_event(
     // single occurrence finds no row and correctly changes nothing.
     if let Some(cid) = &calendar_id {
         super::forget_event_grouping(&db, &event_log, cid, &id);
+        // A private reminder cannot go on naming an appointment that is gone —
+        // and an orphan is not inert here: the scan's repair would re-point it
+        // at the one event of the calendar sharing its title and start.
+        if let Err(err) =
+            host_core::event_reminders::EventRemindersRepo::new(&db.shared()).forget_event(cid, &id)
+        {
+            tracing::warn!(event_id = %id, ?err, "couldn't drop the event's private reminders");
+        }
     }
     scheduler.invalidate();
     Ok(())

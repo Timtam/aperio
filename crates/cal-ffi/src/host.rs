@@ -2986,6 +2986,14 @@ impl Host {
         // The calendar's events went with it, so no group can go on counting
         // them.
         self.forget_calendar_groupings(&id);
+        // Nor can a private reminder name one of them. Local and unannounced:
+        // the calendar's deletion is what travels, and every device that
+        // applies it clears its own rows from the same evidence.
+        if let Err(err) = host_core::event_reminders::EventRemindersRepo::new(&self.db.shared())
+            .forget_calendar(&id)
+        {
+            tracing::warn!(calendar_id = %id, ?err, "couldn't drop the calendar's private reminders");
+        }
         self.writer
             .append(SyncEvent::CalendarDeleted(IdPayload { id }));
         Ok(())
@@ -3324,6 +3332,9 @@ impl Host {
                 // appointment, it just lives elsewhere now. Membership is keyed
                 // by (calendar, event), so it has to be carried across.
                 self.relocate_event_grouping(&previous, &updated.id, &moved_to, &updated.id);
+                // The private reminders are keyed the same way, and follow for
+                // the same reason.
+                self.relocate_event_local_reminders(&previous, &updated.id, &moved_to, &updated.id);
                 if let Ok(fields) = serde_json::to_value(&updated) {
                     self.writer.append(SyncEvent::EventUpdated(EventPayload {
                         id: updated.id.clone(),
@@ -3398,6 +3409,14 @@ impl Host {
             // it does not run the membership cleanup `delete_event` does —
             // this is what keeps the group whole across a move.
             self.relocate_event_grouping(
+                &previous,
+                &source_event_id,
+                &target_calendar_id,
+                &created.id,
+            );
+            // The private reminders are keyed the same way, and follow for the
+            // same reason.
+            self.relocate_event_local_reminders(
                 &previous,
                 &source_event_id,
                 &target_calendar_id,
@@ -3485,6 +3504,14 @@ impl Host {
         }
         if let Some(cid) = calendar_id.as_deref() {
             self.forget_event_grouping(cid, &id);
+            // A private reminder cannot go on naming an appointment that is
+            // gone — and an orphan is not inert: the scan's repair would
+            // re-point it at the one event sharing its title and start.
+            if let Err(err) = host_core::event_reminders::EventRemindersRepo::new(&self.db.shared())
+                .forget_event(cid, &id)
+            {
+                tracing::warn!(event_id = %id, ?err, "couldn't drop the event's private reminders");
+            }
             self.invalidate_events_cache(cid);
         }
         Ok(())
@@ -7077,6 +7104,98 @@ impl Host {
         to_json(&declines)
     }
 
+    /// Every private-reminder row, as a JSON `EventLocalReminders[]`
+    /// (migration 0043). Small by nature — one per event the user gave a
+    /// reminder Aperio keeps to itself.
+    pub fn event_local_reminders_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let rows = host_core::event_reminders::EventRemindersRepo::new(&shared)
+            .list()
+            .map_err(|err| StoreError::Storage {
+                detail: err.to_string(),
+            })?;
+        to_json(&rows)
+    }
+
+    /// Write one event's private reminders and tell the other devices.
+    ///
+    /// `reminders_json` is a `Reminder[]`; `title` and `starts_at` are the
+    /// event's CURRENT signature, written down so the row can find its event
+    /// again after the provider remints the id. An empty list is stored, not
+    /// deleted — it is the record of a decision. Returns the stored row as
+    /// JSON. Mirrors the desktop `set_event_local_reminders`.
+    pub fn set_event_local_reminders_json(
+        &self,
+        calendar_id: String,
+        event_id: String,
+        reminders_json: String,
+        title: String,
+        starts_at: String,
+    ) -> Result<String, StoreError> {
+        let reminders: Vec<cal_core::Reminder> = from_json("reminders", &reminders_json)?;
+        let shared = self.db.shared();
+        let now = chrono::Utc::now().to_rfc3339();
+        let row = host_core::event_reminders::EventRemindersRepo::new(&shared)
+            .set(
+                &calendar_id,
+                &event_id,
+                &reminders,
+                &title,
+                &starts_at,
+                &now,
+            )
+            .map_err(|err| StoreError::Storage {
+                detail: err.to_string(),
+            })?;
+        if let Ok(fields) = serde_json::to_value(&row) {
+            self.writer
+                .append(sync_core::SyncEvent::EventLocalRemindersSet(
+                    sync_core::EventPayload {
+                        // The event IS the identity; there is no id to mint.
+                        id: format!("{} {}", row.calendar_id, row.event_id),
+                        fields,
+                    },
+                ));
+        }
+        to_json(&row)
+    }
+
+    /// Point a private-reminder row at the id its event carries now.
+    ///
+    /// Silent on purpose, exactly like the group repair below: it fixes
+    /// Aperio's own bookkeeping and every device repairs its own copy. See
+    /// `EventRemindersRepo::heal`.
+    pub fn heal_event_local_reminders(
+        &self,
+        calendar_id: String,
+        old_event_id: String,
+        new_event_id: String,
+    ) -> Result<bool, StoreError> {
+        let shared = self.db.shared();
+        host_core::event_reminders::EventRemindersRepo::new(&shared)
+            .heal(&calendar_id, &old_event_id, &new_event_id)
+            .map_err(|err| StoreError::Storage {
+                detail: err.to_string(),
+            })
+    }
+
+    /// Write down what the event looks like now, so the signature keeps
+    /// matching after a rename or a move. Local and silent, like the repair.
+    pub fn refresh_event_local_reminder_signature(
+        &self,
+        calendar_id: String,
+        event_id: String,
+        title: String,
+        starts_at: String,
+    ) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        host_core::event_reminders::EventRemindersRepo::new(&shared)
+            .refresh_signature(&calendar_id, &event_id, &title, &starts_at)
+            .map_err(|err| StoreError::Storage {
+                detail: err.to_string(),
+            })
+    }
+
     /// One member, found again under the id its event carries now.
     ///
     /// Silent on purpose: it repairs Aperio's own bookkeeping and changes
@@ -8752,6 +8871,49 @@ impl Host {
 impl Host {
     /// Follow an event that moved to another calendar, and tell the other
     /// devices. Best-effort, like the delete twin.
+    /// Carry an event's PRIVATE reminders (migration 0043) across a move.
+    ///
+    /// Keyed by (calendar, event), so a move has to take them along — and the
+    /// repair in the reminder scan cannot do it, because it never looks
+    /// outside one calendar. Unlike that repair this is not derivable from
+    /// evidence every device has, so it travels: the moved row, and the
+    /// emptied old one so a peer still holding it stops firing.
+    fn relocate_event_local_reminders(
+        &self,
+        old_calendar_id: &str,
+        old_event_id: &str,
+        new_calendar_id: &str,
+        new_event_id: &str,
+    ) {
+        let shared = self.db.shared();
+        let now = chrono::Utc::now().to_rfc3339();
+        match host_core::event_reminders::EventRemindersRepo::new(&shared).relocate(
+            old_calendar_id,
+            old_event_id,
+            new_calendar_id,
+            new_event_id,
+            &now,
+        ) {
+            Ok(Some((moved, emptied))) => {
+                for row in [moved, emptied] {
+                    if let Ok(fields) = serde_json::to_value(&row) {
+                        self.writer
+                            .append(sync_core::SyncEvent::EventLocalRemindersSet(
+                                sync_core::EventPayload {
+                                    id: format!("{} {}", row.calendar_id, row.event_id),
+                                    fields,
+                                },
+                            ));
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(?err, "couldn't carry the private reminders across the move",)
+            }
+        }
+    }
+
     fn relocate_event_grouping(
         &self,
         old_calendar_id: &str,

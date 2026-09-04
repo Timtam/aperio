@@ -170,6 +170,22 @@ pub enum SyncEvent {
     #[serde(rename = "event_group_suggestion.declined")]
     EventGroupSuggestionDeclined(EventPayload),
 
+    /// The reminders Aperio keeps for ONE event and tells no provider about
+    /// (migration 0043). Carries the whole list, never a diff, for the same
+    /// reason the group above does: it is short, only meaningful entire, and
+    /// last-writer-wins on a value the user can see and redo beats
+    /// interleaving additions into a set nobody asked for. An EMPTY list is a
+    /// decision ("none of my own here"), not a deletion — the row stays so a
+    /// peer that has not heard yet has something to lose against.
+    ///
+    /// Synced, unlike the colour override beside it, because a reminder that
+    /// does not fire is not a degraded rendering — it is a missed
+    /// appointment, and this record is its only route to the user's other
+    /// devices. It reaches those devices and stops there: another person on
+    /// the same shared calendar never learns of it.
+    #[serde(rename = "event_local_reminders.set")]
+    EventLocalRemindersSet(EventPayload),
+
     /// A group was dissolved. The events themselves are untouched —
     /// this says only that Aperio no longer claims they are one.
     #[serde(rename = "event_group.dissolved")]
@@ -734,6 +750,17 @@ mod tests {
             SyncEvent::SettingsUpdated(SettingsPayload {
                 key: "k".into(),
                 value: serde_json::json!(42),
+            }),
+            SyncEvent::EventLocalRemindersSet(EventPayload {
+                id: "cal-1 ev-1".into(),
+                fields: serde_json::json!({
+                    "calendar_id": "cal-1",
+                    "event_id": "ev-1",
+                    "reminders": [{"kind": {"type": "relative", "minutes_before": 60}, "sound": null}],
+                    "title": "Zahnarzt",
+                    "starts_at": "2026-06-15T09:00:00Z",
+                    "updated_at": "2026-06-01T10:00:00Z",
+                }),
             }),
         ];
         for payload in payloads {

@@ -50,10 +50,14 @@ export type EditableReminder = Reminder & { attach?: boolean };
 
 type Placement = 'local' | 'attach';
 
-/** A row with its placement set — and without the flag when it stays local. */
+/** A row with its placement set, always written out.
+ *
+ *  Explicit both ways: the event editor distinguishes "rides on the event"
+ *  from "Aperio keeps it", and an absent flag would read as the first. A list
+ *  stored before the choice existed has no flag and still reads as local,
+ *  which is the behaviour it always had. */
 function withPlacement(row: EditableReminder, attach: boolean): EditableReminder {
-  const bare: EditableReminder = { kind: row.kind, sound: row.sound };
-  return attach ? { ...bare, attach: true } : bare;
+  return { kind: row.kind, sound: row.sound, attach };
 }
 
 function defaultsForKind(kind: ReminderKindOption): Reminder['kind'] {
@@ -97,6 +101,7 @@ export function RemindersEditor({
   onChange,
   mode = 'task',
   placement = false,
+  placementSurface = 'calendar',
   allowAppStart = true,
 }: {
   value: EditableReminder[];
@@ -108,6 +113,12 @@ export function RemindersEditor({
    *  events. Only the calendar editor turns this on, and only for calendars
    *  whose new appointments can carry reminders at all. */
   placement?: boolean;
+  /** Which surface this is, when `placement` is on. It decides what a row
+   *  ADDED here starts as — a calendar default starts "only in Aperio", a row
+   *  on an appointment starts attached — and how the attached option is
+   *  worded: a calendar default reaches NEW appointments, an event row is on
+   *  THIS one. */
+  placementSurface?: 'calendar' | 'event';
   /** Whether "on next app start" is on offer. The calendar editor turns it
    *  OFF: that kind is host-local by construction — no wire format carries it,
    *  and the collector that fires it reads an entry's OWN reminders from the
@@ -135,7 +146,10 @@ export function RemindersEditor({
   };
   const add = () => {
     onAdd();
-    onChange([...value, { ...DEFAULT_RELATIVE }]);
+    onChange([
+      ...value,
+      { ...DEFAULT_RELATIVE, attach: placementSurface === 'event' },
+    ]);
   };
 
   return (
@@ -154,6 +168,7 @@ export function RemindersEditor({
             mode={mode}
             position={i + 1}
             placement={placement}
+            placementSurface={placementSurface}
             allowAppStart={allowAppStart}
             rowRef={registerRow(i)}
             onChange={(next) => update(i, next)}
@@ -181,6 +196,7 @@ function ReminderRow({
   mode,
   position,
   placement,
+  placementSurface,
   allowAppStart,
   rowRef,
 }: {
@@ -189,8 +205,10 @@ function ReminderRow({
   onRemove: () => void;
   mode: 'event' | 'task';
   position: number;
-  /** Show the "Applies" choice (calendar defaults only). */
+  /** Show the "Applies" choice. */
   placement: boolean;
+  /** Which surface it belongs to — see the editor's props. */
+  placementSurface: 'calendar' | 'event';
   /** Offer "on next app start" — see the editor's props. */
   allowAppStart: boolean;
   /** Focus target for the SR focus manager (the row's label). */
@@ -272,7 +290,14 @@ function ReminderRow({
           value={value.attach ? 'attach' : 'local'}
           options={[
             { value: 'local', label: t('reminders.placement.local') },
-            { value: 'attach', label: t('reminders.placement.attach') },
+            {
+              value: 'attach',
+              label: t(
+                placementSurface === 'event'
+                  ? 'reminders.placement.attachEvent'
+                  : 'reminders.placement.attach',
+              ),
+            },
           ]}
           onChange={(next) => onChange(withPlacement(value, next === 'attach'))}
         />
