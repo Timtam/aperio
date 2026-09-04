@@ -147,6 +147,20 @@ export interface Reminder {
   sound: SoundConfig | null;
 }
 
+/**
+ * One entry of a calendar's default-reminder list (the synced
+ * `calendar.<id>.defaultReminders` pref): the reminder plus where it lives.
+ * Without `attach` it stays in Aperio — the scheduler fires it for every event
+ * of the calendar on top of the event's own reminders, and nothing is written
+ * into any event. With `attach` the host writes it into every new appointment
+ * created in the calendar as the appointment's own reminder, so other clients
+ * of the calendar (the iOS Calendar app, a voice assistant) ring too. Lists
+ * stored before the choice existed carry no flag and read as "in Aperio".
+ */
+export interface DefaultReminder extends Reminder {
+  attach?: boolean;
+}
+
 export interface TaskList {
   id: string;
   name: string;

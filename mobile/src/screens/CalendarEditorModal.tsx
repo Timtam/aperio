@@ -22,11 +22,7 @@ import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
 import { SelectFieldButton } from '../components/SelectFieldButton';
-import {
-  DEFAULT_REMINDER_MODES,
-  useCalendarDefaultReminders,
-  type DefaultReminderMode,
-} from '../state/useCalendarDefaultReminders';
+import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import {
   bindSignature,
   signatureForCalendar,
@@ -128,6 +124,15 @@ export default function CalendarEditorModal({
   // calendar's `defaultReminders` and, being all-day, anchors them to the
   // day-carryover time (e.g. "one week before" → 7 days earlier at day-start).
   const isBirthday = isBirthdayCalendarId(calendarId);
+  // Whether a default reminder here can be ATTACHED to new appointments, and
+  // therefore whether the per-row "Applies" choice is offered: not a read-only
+  // calendar (an iCal subscription), not a synthesized birthday calendar, and
+  // not the device calendar, whose alarms are the OS's and are never written.
+  const placementOffered =
+    !isBirthday &&
+    calendar != null &&
+    !calendar.read_only &&
+    accountKind !== ADAPTER_KIND_DEVICE_CALENDAR;
 
   const renameCalendar = useCallback(async () => {
     if (busy || calendar == null) return;
@@ -326,39 +331,26 @@ export default function CalendarEditorModal({
           <Text style={styles.hint} accessibilityRole="text">
             {t('dialogs.settings.calendars.hint')}
           </Text>
+          {/* Each entry also says where it lives (only in Aperio, or
+              attached to new events) — only where a new appointment can
+              carry reminders at all: not a read-only calendar (an iCal
+              subscription), not a synthesized birthday calendar, not the
+              device calendar (its alarms are the OS's, never written). */}
           <RemindersEditor
             mode="event"
             value={defaultReminders.value}
             onChange={defaultReminders.save}
+            placement={placementOffered}
           />
+          {/* What the per-row choice means — only where the control exists,
+              so it never describes something the screen reader can't find. */}
+          {placementOffered && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.calendars.hintPlacement')}
+            </Text>
+          )}
         </View>
       )}
-
-      {/* Where the defaults live — only where a new appointment can carry
-          reminders at all: not a read-only calendar (an iCal subscription),
-          not a synthesized birthday calendar, not the device calendar (its
-          alarms are the OS's, never written by Aperio). */}
-      {!defaultReminders.loading &&
-        !isBirthday &&
-        calendar != null &&
-        !calendar.read_only &&
-        accountKind !== ADAPTER_KIND_DEVICE_CALENDAR && (
-          <View style={styles.field}>
-            <SelectFieldButton<DefaultReminderMode>
-              label={t('dialogs.settings.calendars.defaultsMode.heading')}
-              labelAsHeading
-              value={defaultReminders.mode}
-              options={DEFAULT_REMINDER_MODES.map((mode) => ({
-                value: mode,
-                label: t(`dialogs.settings.calendars.defaultsMode.options.${mode}`),
-              }))}
-              onChange={defaultReminders.setMode}
-            />
-            <Text style={styles.hint} accessibilityRole="text">
-              {t('dialogs.settings.calendars.defaultsMode.hint')}
-            </Text>
-          </View>
-        )}
 
       {/* Delete (its events cascade away) — local calendars only; an external
           calendar is provider-owned, so it can't be deleted from here. A local

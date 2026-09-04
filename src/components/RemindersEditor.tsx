@@ -24,15 +24,35 @@ import { SoundPicker } from './SoundPicker';
  * short list (typically 0–3 entries) so the cost of cloning is
  * negligible and the parent gets full Undo-via-form-reset for free.
  */
+/**
+ * A row of this editor. Event and task dialogs pass plain reminders; the
+ * calendar-defaults panel passes entries that also say where the default
+ * lives (`attach`, see `DefaultReminder` in the shared types) and turns on
+ * the `placement` field so the user can choose per entry.
+ */
+export type EditableReminder = Reminder & { attach?: boolean };
+
+/** A row with its placement set — and without the flag when it stays local. */
+function withPlacement(row: EditableReminder, attach: boolean): EditableReminder {
+  const bare: EditableReminder = { kind: row.kind, sound: row.sound };
+  return attach ? { ...bare, attach: true } : bare;
+}
+
 export interface RemindersEditorProps {
-  value: Reminder[];
-  onChange: (next: Reminder[]) => void;
+  value: EditableReminder[];
+  onChange: (next: EditableReminder[]) => void;
   /**
    * Whether this editor is sitting inside an event or task dialog —
    * affects only the help text (events fire "before start", tasks
    * "before due").
    */
   mode: 'event' | 'task';
+  /**
+   * Show the per-row "Applies" choice — only in Aperio, or attached to new
+   * events. Only the calendar-defaults panel turns this on, and only for
+   * calendars whose new appointments can carry reminders at all.
+   */
+  placement?: boolean;
 }
 
 type RelativeUnit = 'minutes' | 'hours' | 'days';
@@ -64,11 +84,12 @@ export function RemindersEditor({
   value,
   onChange,
   mode,
+  placement = false,
 }: RemindersEditorProps) {
   const { t } = useTranslation();
 
   const update = useCallback(
-    (i: number, next: Reminder) => {
+    (i: number, next: EditableReminder) => {
       const out = value.slice();
       out[i] = next;
       onChange(out);
@@ -105,6 +126,7 @@ export function RemindersEditor({
                 onRemove={() => remove(i)}
                 mode={mode}
                 position={i + 1}
+                placement={placement}
               />
             </li>
           ))}
@@ -123,12 +145,14 @@ export function RemindersEditor({
 }
 
 interface ReminderRowProps {
-  value: Reminder;
-  onChange: (next: Reminder) => void;
+  value: EditableReminder;
+  onChange: (next: EditableReminder) => void;
   onRemove: () => void;
   mode: 'event' | 'task';
   /** 1-based index used in the row's aria-label. */
   position: number;
+  /** Show the "Applies" choice (calendar defaults only). */
+  placement: boolean;
 }
 
 function ReminderRow({
@@ -137,6 +161,7 @@ function ReminderRow({
   onRemove,
   mode,
   position,
+  placement,
 }: ReminderRowProps) {
   const { t } = useTranslation();
   const kindType = value.kind.type;
@@ -205,6 +230,23 @@ function ReminderRow({
           onChange={(sound) => onChange({ ...value, sound })}
           compact
         />
+      )}
+
+      {/* Where a calendar default lives — the overlay ("only in Aperio") or
+          written into new appointments. A native select, like the kind. */}
+      {placement && (
+        <label className="form__field">
+          <span className="form__label">{t('reminders.placement.label')}</span>
+          <select
+            value={value.attach ? 'attach' : 'local'}
+            onChange={(e) =>
+              onChange(withPlacement(value, e.target.value === 'attach'))
+            }
+          >
+            <option value="local">{t('reminders.placement.local')}</option>
+            <option value="attach">{t('reminders.placement.attach')}</option>
+          </select>
+        </label>
       )}
 
       <button

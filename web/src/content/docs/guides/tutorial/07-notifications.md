@@ -28,24 +28,25 @@ In the notification you can:
 ## Per-calendar default reminders
 
 Besides the reminders on individual entries, you can set **default reminders per
-calendar**. They apply to events in that calendar that carry no reminder of
-their own – handy for subscribed or external calendars whose entries arrive
-without an alarm. Under **Settings → Calendars**, pick a calendar and set its
+calendar** – handy for subscribed or external calendars whose entries arrive
+without an alarm. Where each entry applies is your choice, and it decides
+whether the entry rides on top of an event's own reminders or stands in for
+them (see below). Under **Settings → Calendars**, pick a calendar and set its
 default reminders there.
 
-Beneath the list you choose where those defaults live. **Only in Aperio** is the
-setting every calendar starts with: Aperio reminds you itself, and nothing is
-written into the event – exactly how the iOS Calendar app treats its own
-"Default Alert Times". **Attached to new events** instead writes the defaults
-into every appointment you create in that calendar, as the event's own
-reminders. That is what makes other apps reading the same calendar remind you
+Each default reminder also says where it lives. **Only in Aperio** is what every
+entry starts with: Aperio reminds you itself, and nothing is written into the
+event – exactly how the iOS Calendar app treats its own "Default Alert Times".
+**Attached to new events** instead writes that entry into every appointment you
+create in the calendar and leave without reminders of your own, as the event's
+own reminder. That is what makes other apps reading the same calendar remind you
 too – the iOS Calendar app, or a voice assistant reading your iCloud calendar.
-Only appointments you create *after* the switch are affected, and only if you
-left their reminders untouched in the editor; an appointment you gave reminders
-of your own, or deliberately none, keeps that choice. Exchange and Outlook
-calendars store a single "minutes before" reminder, so only the first such
-default is attached there; a default at a fixed time or "when the app starts"
-does not reach those appointments.
+Only appointments you create *after* the switch get it written in; an
+appointment you gave reminders of your own, or deliberately none, keeps that
+choice, and an event without reminders of its own still gets the entry in
+Aperio. Exchange and Outlook calendars store a single "minutes before" reminder,
+so only the first such entry is attached there; an entry at a fixed time or
+"when the app starts" does not reach those appointments.
 
 ### All-day events and birthdays
 

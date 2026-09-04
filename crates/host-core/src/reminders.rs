@@ -23,7 +23,7 @@ use cal_core::{
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::accounts::{AccountsRepo, AdapterKind};
@@ -153,16 +153,18 @@ pub fn enumerate_local_triggers(
                 let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
                 let all_day: bool = row.get(8).unwrap_or(false);
-                // An event without reminders of its own falls back to its
-                // calendar's defaults — the same rule `event_triggers` applies
-                // to adapter-backed calendars.
-                let reminders = match parse_reminders(reminders_json.as_deref()) {
-                    Some(own) => own,
-                    None => match calendar_defaults.get(&calendar_id) {
-                        Some(defaults) => defaults.clone(),
-                        None => continue,
-                    },
-                };
+                // The calendar's defaults ride along — the same merge rule
+                // `event_triggers` applies to adapter-backed calendars.
+                let reminders = effective_reminders(
+                    &parse_reminders(reminders_json.as_deref()).unwrap_or_default(),
+                    calendar_defaults
+                        .get(&calendar_id)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                );
+                if reminders.is_empty() {
+                    continue;
+                }
                 let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                     continue;
                 };
@@ -584,7 +586,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
 /// back to, and the callers treat empty as "no defaults configured". It means a
 /// configured default can go unapplied for one scan, so the failure is logged
 /// rather than swallowed; the next pass picks the setting up again.
-pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<Reminder> {
+pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<DefaultReminder> {
     configured_calendar_default_reminders(db, calendar_id).unwrap_or_default()
 }
 
@@ -592,7 +594,7 @@ pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<Rem
 /// keyed by calendar id — only the calendars with a non-empty list. Read once
 /// per scan, so the event loop can hold the connection lock without a pref
 /// read underneath it (`std::sync::Mutex` isn't reentrant).
-fn local_calendar_default_reminders(db: &SharedConn) -> HashMap<String, Vec<Reminder>> {
+fn local_calendar_default_reminders(db: &SharedConn) -> HashMap<String, Vec<DefaultReminder>> {
     let ids: Vec<String> = match db.lock() {
         Ok(conn) => conn
             .prepare("SELECT DISTINCT calendar_id FROM events")
@@ -624,7 +626,7 @@ fn local_calendar_default_reminders(db: &SharedConn) -> HashMap<String, Vec<Remi
 pub fn configured_calendar_default_reminders(
     db: &SharedConn,
     calendar_id: &str,
-) -> Option<Vec<Reminder>> {
+) -> Option<Vec<DefaultReminder>> {
     let key = format!("calendar.{}.defaultReminders", calendar_id);
     let repo = UserPrefsRepo::new(db);
     let raw = match repo.get(&key) {
@@ -643,7 +645,7 @@ pub fn configured_calendar_default_reminders(
             return Some(Vec::new());
         }
     };
-    Some(serde_json::from_str::<Vec<Reminder>>(&raw).unwrap_or_default())
+    Some(serde_json::from_str::<Vec<DefaultReminder>>(&raw).unwrap_or_default())
 }
 
 /// What a birthday calendar reminds you of when you have never said.
@@ -657,88 +659,83 @@ pub fn configured_calendar_default_reminders(
 /// was the wrong default: it made the feature look broken to exactly the
 /// person who asked for it. The editor still overrules this, including down
 /// to nothing — a list cleared on purpose stays cleared.
-pub fn birthday_default_reminders() -> Vec<Reminder> {
-    vec![Reminder {
-        kind: ReminderKind::Relative { minutes_before: 0 },
-        sound: None,
+pub fn birthday_default_reminders() -> Vec<DefaultReminder> {
+    vec![DefaultReminder {
+        reminder: Reminder {
+            kind: ReminderKind::Relative { minutes_before: 0 },
+            sound: None,
+        },
+        attach: false,
     }]
 }
 
-/// Where a calendar's default reminders live.
+/// One entry of a calendar's default-reminder list: the reminder plus WHERE it
+/// lives.
 ///
-/// [`Local`](Self::Local) is the overlay: Aperio applies the defaults itself
-/// at notification time (see [`event_triggers`]) and the event stays
-/// reminder-less on the wire. [`Attach`](Self::Attach) writes them into every
-/// NEW appointment as its own reminders, so every other client of the same
-/// calendar rings too — the iOS Calendar app, a voice assistant reading iCloud.
-/// That is exactly what iOS does with its own "Default Alert Times", and why
-/// an appointment created there is announced everywhere while one created in
-/// Aperio used to be silent outside Aperio.
+/// An entry that stays **in Aperio** is an overlay: the scheduler fires it for
+/// every event of the calendar, in addition to the reminders the event carries
+/// itself, and nothing is written into any event. An entry marked **attach**
+/// is written into every NEW appointment created in the calendar as the
+/// appointment's own reminder, so every other client of the calendar — the
+/// iOS Calendar app, a voice assistant reading iCloud — rings too; for an
+/// event that carries no reminders of its own (created elsewhere, or before
+/// the choice existed) the scheduler still applies it here. That is what iOS
+/// does with its own "Default Alert Times", and why an appointment created
+/// there is announced everywhere while one created in Aperio used to be
+/// silent outside Aperio.
 ///
-/// Stored per calendar under `calendar.<id>.defaultRemindersMode`; absent
-/// means `Local`, the behaviour every calendar had before the choice existed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DefaultReminderMode {
-    /// Aperio applies the defaults; nothing is written into the event.
-    Local,
-    /// A new appointment created without reminders of its own gets the
-    /// calendar's defaults written in as real reminders.
-    Attach,
+/// Lists stored before the choice existed carry no `attach` field and read as
+/// "in Aperio" — the behaviour they always had.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultReminder {
+    #[serde(flatten)]
+    pub reminder: Reminder,
+    /// Written into new appointments as their own reminder.
+    #[serde(default)]
+    pub attach: bool,
 }
 
-impl DefaultReminderMode {
-    /// The stored value for [`Local`](Self::Local).
-    pub const LOCAL: &'static str = "local";
-    /// The stored value for [`Attach`](Self::Attach).
-    pub const ATTACH: &'static str = "attach";
+/// The entries that stay in Aperio, as plain reminders.
+fn local_defaults(defaults: &[DefaultReminder]) -> impl Iterator<Item = &Reminder> {
+    defaults.iter().filter(|d| !d.attach).map(|d| &d.reminder)
+}
 
-    /// Anything but the exact `attach` marker reads as local — an unknown or
-    /// mistyped value must never start writing into events.
-    fn parse(raw: &str) -> Self {
-        if raw.trim() == Self::ATTACH {
-            Self::Attach
-        } else {
-            Self::Local
+/// The entries written into new appointments, as plain reminders.
+pub fn attached_defaults(defaults: &[DefaultReminder]) -> Vec<Reminder> {
+    defaults
+        .iter()
+        .filter(|d| d.attach)
+        .map(|d| d.reminder.clone())
+        .collect()
+}
+
+/// What actually fires for one event of a calendar: the event's own reminders;
+/// the attach entries when it has none of its own (they would be its own had
+/// it been created here); and the in-Aperio entries always, on top — each
+/// reminder at most once.
+pub fn effective_reminders(own: &[Reminder], defaults: &[DefaultReminder]) -> Vec<Reminder> {
+    let mut out: Vec<Reminder> = own.to_vec();
+    if out.is_empty() {
+        out.extend(attached_defaults(defaults));
+    }
+    for reminder in local_defaults(defaults) {
+        if !out.contains(reminder) {
+            out.push(reminder.clone());
         }
     }
+    out
 }
 
-/// The pref key holding a calendar's [`DefaultReminderMode`].
-pub fn default_reminder_mode_key(calendar_id: &str) -> String {
-    format!("calendar.{calendar_id}.defaultRemindersMode")
-}
-
-/// A calendar's [`DefaultReminderMode`]; local when never chosen, and local on
-/// a failed read too — the safe answer, since attaching writes to the server.
-pub fn calendar_default_reminder_mode(db: &SharedConn, calendar_id: &str) -> DefaultReminderMode {
-    let repo = UserPrefsRepo::new(db);
-    match repo.get(&default_reminder_mode_key(calendar_id)) {
-        Ok(Some(raw)) => DefaultReminderMode::parse(&raw),
-        Ok(None) => DefaultReminderMode::Local,
-        Err(err) => {
-            warn!(
-                ?err,
-                calendar_id = %calendar_id,
-                "couldn't read the calendar's default-reminder mode; \
-                 keeping the defaults local for this create",
-            );
-            DefaultReminderMode::Local
-        }
-    }
-}
-
-/// Write the calendar's default reminders into a new appointment when the
-/// calendar asks for it. Returns whether the event was changed.
+/// Write the calendar's attach-marked default reminders into a new
+/// appointment. Returns whether the event was changed.
 ///
 /// Applies only when the caller left the reminders UNSET (`reminders_unset`:
 /// the editor was never touched and sent an empty list, or a quick-add that
 /// has no reminder field at all) and the event carries none. An explicit
-/// choice — including "no reminder at all" — is never overridden. In
-/// [`Local`](DefaultReminderMode::Local) mode nothing changes: the event stays
-/// reminder-less on the wire and the scheduler overlays the defaults as before.
-///
-/// Existing appointments are never touched by this: the update paths do not
-/// call it, so an edit of an old event can't silently grow reminders.
+/// choice — including "no reminder at all" — is never overridden, and the
+/// entries that stay in Aperio never touch the event: the scheduler overlays
+/// them. Existing appointments are never touched by this: the update paths do
+/// not call it, so an edit of an old event can't silently grow reminders.
 pub fn apply_default_reminder_policy(
     db: &SharedConn,
     calendar_id: &str,
@@ -748,21 +745,19 @@ pub fn apply_default_reminder_policy(
     if !reminders_unset || !event.reminders.is_empty() {
         return false;
     }
-    if calendar_default_reminder_mode(db, calendar_id) != DefaultReminderMode::Attach {
+    let attached = attached_defaults(&calendar_default_reminders(db, calendar_id));
+    if attached.is_empty() {
         return false;
     }
-    let defaults = calendar_default_reminders(db, calendar_id);
-    if defaults.is_empty() {
-        return false;
-    }
-    event.reminders = defaults;
+    event.reminders = attached;
     true
 }
 
-/// Translate a batch of external events into Trigger entries. Empty
-/// `reminders` on an event falls back to the calendar's stored default
-/// reminder list (mirrors iOS's "Default Alert Times" behaviour — the
-/// VALARM isn't on the wire, the user wants it applied locally).
+/// Translate a batch of external events into Trigger entries. The calendar's
+/// stored defaults are folded in by [`effective_reminders`]: its in-Aperio
+/// entries fire on top of whatever the event carries, and its attach entries
+/// stand in when the event carries nothing (mirrors iOS's "Default Alert
+/// Times" — the VALARM isn't on the wire, the user wants it applied locally).
 ///
 /// Recurring events (`event.recurrence: Some(...)`) get expanded
 /// inside `[window_start, window_end]` so every occurrence whose
@@ -773,7 +768,7 @@ pub fn apply_default_reminder_policy(
 /// loop a non-recurring event would.
 fn event_triggers(
     events: &[Event],
-    calendar_defaults: &[Reminder],
+    calendar_defaults: &[DefaultReminder],
     sound_prefs: &SoundPrefs,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
@@ -788,11 +783,7 @@ fn event_triggers(
         if ev.cancelled {
             continue;
         }
-        let effective: &[Reminder] = if ev.reminders.is_empty() {
-            calendar_defaults
-        } else {
-            &ev.reminders
-        };
+        let effective = effective_reminders(&ev.reminders, calendar_defaults);
         if effective.is_empty() {
             continue;
         }
@@ -808,7 +799,7 @@ fn event_triggers(
             &ev.title,
             ev.start,
             ev.recurrence.as_ref(),
-            effective,
+            &effective,
             duration,
             window_start,
             window_end,
@@ -1409,7 +1400,7 @@ mod tests {
         }]
     }
 
-    fn store_defaults(db: &SharedConn, calendar_id: &str, defaults: &[Reminder]) {
+    fn store_defaults(db: &SharedConn, calendar_id: &str, defaults: &[DefaultReminder]) {
         UserPrefsRepo::new(db)
             .set(
                 &format!("calendar.{calendar_id}.defaultReminders"),
@@ -1418,54 +1409,55 @@ mod tests {
             .unwrap();
     }
 
-    fn store_mode(db: &SharedConn, calendar_id: &str, mode: &str) {
-        UserPrefsRepo::new(db)
-            .set(&default_reminder_mode_key(calendar_id), mode)
-            .unwrap();
+    /// A default entry that stays in Aperio (the overlay).
+    fn local(reminder: Reminder) -> DefaultReminder {
+        DefaultReminder {
+            reminder,
+            attach: false,
+        }
     }
 
-    /// Local unless the exact `attach` marker was stored: a calendar that was
-    /// never asked, and a mistyped value, both keep the old behaviour.
-    #[test]
-    fn default_reminder_mode_is_local_unless_attach_was_stored() {
-        let db = prefs_db();
-        assert_eq!(
-            calendar_default_reminder_mode(&db, "cal"),
-            DefaultReminderMode::Local
-        );
-        store_mode(&db, "cal", "attach");
-        assert_eq!(
-            calendar_default_reminder_mode(&db, "cal"),
-            DefaultReminderMode::Attach
-        );
-        store_mode(&db, "cal", "sometimes");
-        assert_eq!(
-            calendar_default_reminder_mode(&db, "cal"),
-            DefaultReminderMode::Local
-        );
+    /// A default entry written into new appointments.
+    fn attached(reminder: Reminder) -> DefaultReminder {
+        DefaultReminder {
+            reminder,
+            attach: true,
+        }
     }
 
-    /// The feature itself: attach mode + unset reminders → the defaults become
-    /// the appointment's own reminders.
+    fn five_minutes_before() -> Reminder {
+        Reminder {
+            kind: ReminderKind::Relative { minutes_before: 5 },
+            sound: None,
+        }
+    }
+
+    /// The feature itself: an attach entry + unset reminders → the entry
+    /// becomes the appointment's own reminder. The in-Aperio entry beside it
+    /// never touches the event.
     #[test]
-    fn attach_mode_writes_the_defaults_into_a_new_event_left_without_reminders() {
+    fn attach_entries_are_written_into_a_new_event_left_without_reminders() {
         let db = prefs_db();
-        store_defaults(&db, "cal", &one_hour_before());
-        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
+        store_defaults(
+            &db,
+            "cal",
+            &[
+                attached(one_hour_before()[0].clone()),
+                local(five_minutes_before()),
+            ],
+        );
         let mut event = new_event_without_reminders();
         assert!(apply_default_reminder_policy(&db, "cal", &mut event, true));
         assert_eq!(event.reminders, one_hour_before());
     }
 
-    /// Local mode is the overlay: the event stays reminder-less on the wire.
+    /// Entries that stay in Aperio leave the wire alone — the event is created
+    /// reminder-less, exactly as before the choice existed.
     #[test]
-    fn local_mode_leaves_a_new_event_reminderless() {
+    fn in_aperio_entries_leave_a_new_event_reminderless() {
         let db = prefs_db();
-        store_defaults(&db, "cal", &one_hour_before());
+        store_defaults(&db, "cal", &[local(one_hour_before()[0].clone())]);
         let mut event = new_event_without_reminders();
-        assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
-        assert!(event.reminders.is_empty());
-        store_mode(&db, "cal", DefaultReminderMode::LOCAL);
         assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
         assert!(event.reminders.is_empty());
     }
@@ -1475,8 +1467,7 @@ mod tests {
     #[test]
     fn an_explicit_reminder_choice_is_never_overridden() {
         let db = prefs_db();
-        store_defaults(&db, "cal", &one_hour_before());
-        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
+        store_defaults(&db, "cal", &[attached(one_hour_before()[0].clone())]);
 
         let mut none_on_purpose = new_event_without_reminders();
         assert!(!apply_default_reminder_policy(
@@ -1487,10 +1478,7 @@ mod tests {
         ));
         assert!(none_on_purpose.reminders.is_empty());
 
-        let own = vec![Reminder {
-            kind: ReminderKind::Relative { minutes_before: 5 },
-            sound: None,
-        }];
+        let own = vec![five_minutes_before()];
         let mut with_own = new_event_without_reminders();
         with_own.reminders = own.clone();
         assert!(!apply_default_reminder_policy(
@@ -1502,18 +1490,75 @@ mod tests {
         assert_eq!(with_own.reminders, own);
     }
 
-    /// Attach mode with nothing to attach — no defaults, or a list cleared on
-    /// purpose — changes nothing.
+    /// Nothing to attach — no defaults, or a list cleared on purpose — changes
+    /// nothing.
     #[test]
-    fn attach_mode_with_no_defaults_changes_nothing() {
+    fn no_attach_entries_changes_nothing() {
         let db = prefs_db();
-        store_mode(&db, "cal", DefaultReminderMode::ATTACH);
         let mut event = new_event_without_reminders();
         assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
         assert!(event.reminders.is_empty());
         store_defaults(&db, "cal", &[]);
         assert!(!apply_default_reminder_policy(&db, "cal", &mut event, true));
         assert!(event.reminders.is_empty());
+    }
+
+    /// The merge rule in one place: own reminders first; attach entries only
+    /// when there are none of its own; in-Aperio entries always, once.
+    #[test]
+    fn effective_reminders_merge_own_attach_and_in_aperio_entries() {
+        let hour = one_hour_before()[0].clone();
+        let five = five_minutes_before();
+        let defaults = [attached(hour.clone()), local(five.clone())];
+        // No own reminders: the attach entry stands in, the in-Aperio one rides on top.
+        assert_eq!(
+            effective_reminders(&[], &defaults),
+            vec![hour.clone(), five.clone()]
+        );
+        // Own reminders: the attach entry is skipped, the in-Aperio one still fires.
+        let own = vec![Reminder {
+            kind: ReminderKind::Relative { minutes_before: 10 },
+            sound: None,
+        }];
+        assert_eq!(
+            effective_reminders(&own, &defaults),
+            vec![own[0].clone(), five.clone()]
+        );
+        // The same reminder is never doubled.
+        assert_eq!(
+            effective_reminders(std::slice::from_ref(&five), &defaults),
+            vec![five]
+        );
+    }
+
+    /// The stored shape is the one the settings UI writes, and a list written
+    /// before the placement existed still reads — as an in-Aperio entry, which
+    /// is the behaviour it always had. An older device parsing a NEWER list
+    /// does the same: serde ignores the unknown field, so the entry overlays
+    /// there instead of being lost.
+    #[test]
+    fn the_stored_list_round_trips_with_and_without_the_placement_flag() {
+        let stored = r#"[
+            {"kind":{"type":"relative","minutes_before":1440},"sound":null},
+            {"kind":{"type":"relative","minutes_before":60},"sound":null,"attach":true}
+        ]"#;
+        let parsed: Vec<DefaultReminder> =
+            serde_json::from_str(stored).expect("stored list parses");
+        assert_eq!(parsed.len(), 2);
+        assert!(!parsed[0].attach, "no flag means the entry stays in Aperio");
+        assert!(parsed[1].attach);
+        assert_eq!(
+            parsed[1].reminder.kind,
+            ReminderKind::Relative { minutes_before: 60 }
+        );
+        assert_eq!(attached_defaults(&parsed), vec![parsed[1].reminder.clone()]);
+        // …and what we write is what the UI reads back.
+        let written = serde_json::to_string(&parsed).expect("serialises");
+        assert_eq!(
+            serde_json::from_str::<Vec<DefaultReminder>>(&written).unwrap(),
+            parsed
+        );
+        assert!(written.contains(r#""attach":true"#));
     }
 
     fn insert_local_event(
@@ -1559,11 +1604,14 @@ mod tests {
 
     fn local_triggers_for(db: &SharedConn, item_id: &str) -> Vec<DateTime<Utc>> {
         let now = Utc::now();
-        enumerate_local_triggers(db, now, now + ChronoDuration::days(2))
-            .into_iter()
-            .filter(|t| t.item_id == item_id)
-            .map(|t| t.trigger_at)
-            .collect()
+        let mut at: Vec<DateTime<Utc>> =
+            enumerate_local_triggers(db, now, now + ChronoDuration::days(2))
+                .into_iter()
+                .filter(|t| t.item_id == item_id)
+                .map(|t| t.trigger_at)
+                .collect();
+        at.sort();
+        at
     }
 
     /// A local calendar's defaults fire for its reminder-less events. The
@@ -1575,7 +1623,7 @@ mod tests {
         let start = Utc::now() + ChronoDuration::hours(6);
         insert_local_event(&db, "ev-empty-list", "cal", "[]", start);
         insert_local_event(&db, "ev-empty-string", "cal", "", start);
-        store_defaults(&db, "cal", &one_hour_before());
+        store_defaults(&db, "cal", &[local(one_hour_before()[0].clone())]);
         assert_eq!(
             local_triggers_for(&db, "ev-empty-list"),
             vec![start - ChronoDuration::hours(1)]
@@ -1586,16 +1634,13 @@ mod tests {
         );
     }
 
-    /// An event's own reminders win over the calendar's defaults — a
-    /// substitution, never a merge, as for adapter-backed calendars.
+    /// An in-Aperio entry fires on top of a local event's own reminders; an
+    /// attach entry does not — the event has its own.
     #[test]
-    fn a_local_events_own_reminders_win_over_the_calendar_defaults() {
+    fn a_local_events_own_reminders_get_the_in_aperio_entries_on_top() {
         let db = prefs_db();
         let start = Utc::now() + ChronoDuration::hours(6);
-        let own = vec![Reminder {
-            kind: ReminderKind::Relative { minutes_before: 5 },
-            sound: None,
-        }];
+        let own = vec![five_minutes_before()];
         insert_local_event(
             &db,
             "ev-own",
@@ -1603,10 +1648,23 @@ mod tests {
             &serde_json::to_string(&own).unwrap(),
             start,
         );
-        store_defaults(&db, "cal", &one_hour_before());
+        store_defaults(
+            &db,
+            "cal",
+            &[
+                local(one_hour_before()[0].clone()),
+                attached(Reminder {
+                    kind: ReminderKind::Relative { minutes_before: 30 },
+                    sound: None,
+                }),
+            ],
+        );
         assert_eq!(
             local_triggers_for(&db, "ev-own"),
-            vec![start - ChronoDuration::minutes(5)]
+            vec![
+                start - ChronoDuration::hours(1),
+                start - ChronoDuration::minutes(5)
+            ]
         );
     }
 
@@ -1721,7 +1779,7 @@ mod tests {
     /// `crate::sound`'s own unit tests).
     fn ev_triggers(
         events: &[Event],
-        calendar_defaults: &[Reminder],
+        calendar_defaults: &[DefaultReminder],
         window_start: DateTime<Utc>,
         window_end: DateTime<Utc>,
     ) -> Vec<Trigger> {
@@ -1813,7 +1871,7 @@ mod tests {
         ev.cancelled = true;
         let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
         let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
-        assert!(ev_triggers(&[ev], &[rel(15)], ws, we).is_empty());
+        assert!(ev_triggers(&[ev], &[local(rel(15))], ws, we).is_empty());
     }
 
     #[test]
@@ -2036,18 +2094,38 @@ mod tests {
     }
 
     #[test]
-    fn event_with_explicit_reminder_uses_it_and_ignores_calendar_default() {
-        // The event carries its own VALARM-equivalent. Calendar
-        // defaults stay defaults — they only matter when the event's
-        // reminder list is empty.
+    fn event_with_explicit_reminder_uses_it_and_ignores_an_attach_default() {
+        // The event carries its own VALARM-equivalent. An attach entry would
+        // have been written into the event had it been created here, so it
+        // stands in only for events that have none of their own.
         let ev = make_event(vec![rel(15)]);
         let (ws, we) = wide_window();
-        let triggers = ev_triggers(&[ev], &[rel(60)], ws, we);
+        let triggers = ev_triggers(&[ev], &[attached(rel(60))], ws, we);
         assert_eq!(triggers.len(), 1);
         // 8:00 start − 15 min = 7:45.
         assert_eq!(
             triggers[0].trigger_at,
             Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(),
+        );
+    }
+
+    #[test]
+    fn event_with_explicit_reminder_still_gets_an_in_aperio_default_on_top() {
+        // An entry that stays in Aperio is the calendar's baseline: it fires
+        // for every event, beside whatever the event brought itself.
+        let ev = make_event(vec![rel(15)]);
+        let (ws, we) = wide_window();
+        let mut at: Vec<DateTime<Utc>> = ev_triggers(&[ev], &[local(rel(60))], ws, we)
+            .into_iter()
+            .map(|t| t.trigger_at)
+            .collect();
+        at.sort();
+        assert_eq!(
+            at,
+            vec![
+                Utc.with_ymd_and_hms(2026, 5, 20, 7, 0, 0).unwrap(),
+                Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(),
+            ],
         );
     }
 
@@ -2059,7 +2137,7 @@ mod tests {
         // default.
         let ev = make_event(Vec::new());
         let (ws, we) = wide_window();
-        let triggers = ev_triggers(&[ev], &[rel(15)], ws, we);
+        let triggers = ev_triggers(&[ev], &[local(rel(15))], ws, we);
         assert_eq!(triggers.len(), 1);
         assert_eq!(
             triggers[0].trigger_at,
@@ -2079,7 +2157,7 @@ mod tests {
     fn event_with_multiple_defaults_emits_one_trigger_each() {
         let ev = make_event(Vec::new());
         let (ws, we) = wide_window();
-        let triggers = ev_triggers(&[ev], &[rel(60), rel(10)], ws, we);
+        let triggers = ev_triggers(&[ev], &[local(rel(60)), attached(rel(10))], ws, we);
         assert_eq!(triggers.len(), 2);
     }
 

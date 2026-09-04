@@ -7,11 +7,7 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type { CalendarDayViewMode } from '../state/TaskCascadeProvider';
 import { isBirthdayCalendarId } from '@aperio/shared';
-import {
-  DEFAULT_REMINDER_MODES,
-  useCalendarDefaultReminders,
-  type DefaultReminderMode,
-} from '../state/useCalendarDefaultReminders';
+import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
 import { SettingsSelectorDetail } from './SettingsSelectorDetail';
 import { SoundPrefField } from './SoundPrefField';
@@ -46,56 +42,13 @@ const DAY_END_OPTIONS: readonly number[] = Array.from(
 const calendarItemId = (c: { id: string }) => c.id;
 
 /**
- * Where one calendar's default reminders live — "only in Aperio" (the overlay
- * the scheduler applies) or "attached to new events" (written into every new
- * appointment as its own reminders, so the iOS Calendar app and a voice
- * assistant reading the same calendar ring too). A radiogroup like the day
- * layout above: two options, arrow-key navigable, one tab stop.
+ * Whether a calendar's default reminders can be ATTACHED to new appointments,
+ * and therefore whether the per-row "Applies" choice is offered at all: a
+ * read-only calendar (an iCal subscription) never gets an appointment created
+ * in it, and a birthday calendar is synthesized here rather than stored.
  */
-function DefaultReminderModeField({
-  value,
-  onChange,
-}: {
-  value: DefaultReminderMode;
-  onChange: (mode: DefaultReminderMode) => void;
-}) {
-  const { t } = useTranslation();
-  const headingId = useId();
-  const hintId = useId();
-  const groupId = useId();
-  return (
-    <section
-      className="calendars-panel__group"
-      aria-label={t('dialogs.settings.calendars.defaultsMode.heading')}
-    >
-      <h4 id={headingId} className="calendars-panel__account">
-        {t('dialogs.settings.calendars.defaultsMode.heading')}
-      </h4>
-      <p id={hintId} className="form__hint">
-        {t('dialogs.settings.calendars.defaultsMode.hint')}
-      </p>
-      <div
-        role="radiogroup"
-        id={groupId}
-        aria-labelledby={headingId}
-        aria-describedby={hintId}
-        className="tasks-settings__radiogroup"
-      >
-        {DEFAULT_REMINDER_MODES.map((option) => (
-          <label key={option} className="tasks-settings__radio">
-            <input
-              type="radio"
-              name={groupId}
-              value={option}
-              checked={value === option}
-              onChange={() => onChange(option)}
-            />
-            <span>{t(`dialogs.settings.calendars.defaultsMode.options.${option}`)}</span>
-          </label>
-        ))}
-      </div>
-    </section>
-  );
+function placementFor(cal: { id: string; read_only: boolean }): boolean {
+  return !cal.read_only && !isBirthdayCalendarId(cal.id);
 }
 
 /**
@@ -133,7 +86,7 @@ export function CalendarsPanel() {
     useTaskCascadeEnabled();
 
   const calendarIds = useMemo(() => calendars.map((c) => c.id), [calendars]);
-  const { getDefaultsFor, setDefaultsFor, getModeFor, setModeFor, hydrating } =
+  const { getDefaultsFor, setDefaultsFor, hydrating } =
     useCalendarDefaultReminders(calendarIds);
 
   // Group calendars by their owning account so the selector reads as
@@ -362,19 +315,24 @@ export function CalendarsPanel() {
             // The selector re-keys this subtree per selection, so the editor
             // already resets to the newly-selected calendar's values.
             <>
+              {/* Each entry also says where it lives (only in Aperio, or
+                  attached to new events) — but only where a new appointment
+                  can carry reminders at all: a read-only calendar (an iCal
+                  subscription) never gets one created, and a birthday
+                  calendar is synthesized here. */}
               <RemindersEditor
                 value={getDefaultsFor(cal.id)}
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
+                placement={placementFor(cal)}
               />
-              {/* Only where a new appointment can carry reminders at all: a
-                  read-only calendar (an iCal subscription) never gets one
-                  created, and a birthday calendar is synthesized here. */}
-              {!cal.read_only && !isBirthdayCalendarId(cal.id) && (
-                <DefaultReminderModeField
-                  value={getModeFor(cal.id)}
-                  onChange={(mode) => setModeFor(cal.id, mode)}
-                />
+              {/* What the per-row choice means — next to the control, and only
+                  where the control exists, so it never describes something the
+                  screen reader can't find. */}
+              {placementFor(cal) && (
+                <p className="form__hint">
+                  {t('dialogs.settings.calendars.hintPlacement')}
+                </p>
               )}
               {/* §14.4 per-calendar default sound — inherits the global
                   default unless overridden. */}

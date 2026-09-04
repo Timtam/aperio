@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   getUserPref,
   invalidateReminders,
   setUserPref,
 } from '../api/client';
-import type { Reminder } from '../api/types';
+import { useUserPrefsChanged } from './useUserPrefsChanged';
+import type { DefaultReminder } from '@aperio/shared';
 
 /**
  * Per-calendar default reminders.
@@ -21,9 +22,11 @@ import type { Reminder } from '../api/types';
  * iPhone shows a reminder, Aperio doesn't.
  *
  * This hook keeps the gap addressable per-calendar (some calendars
- * want a default, some don't — e.g. "Privat" yes, "Geburtstage" no).
+ * want a default, some don't — e.g. "Privat" yes, "Geburtstage" no),
+ * and per entry: each one also says whether it stays in Aperio or is
+ * written into new appointments (see `DefaultReminder` below).
  * Storage is `user_prefs` keyed by `calendar.{calendarId}.defaultReminders`,
- * value = JSON-stringified `Reminder[]`. We load every calendar's
+ * value = JSON-stringified `DefaultReminder[]`. We load every calendar's
  * value on mount; subsequent reads are a pure Map lookup.
  *
  * Writes are debounced 150 ms so an inline editor that emits one
@@ -35,51 +38,44 @@ const KEY_PREFIX = 'calendar.';
 const KEY_SUFFIX = '.defaultReminders';
 const WRITE_DEBOUNCE_MS = 150;
 
-export type DefaultRemindersMap = Record<string, Reminder[]>;
-
 /**
- * Where a calendar's default reminders live. `local` is the overlay above:
- * Aperio applies them at notification time and the event stays reminder-less
- * on the wire. `attach` writes them into every NEW appointment created in the
- * calendar as its own reminders, so other clients of the same calendar (the
- * iOS Calendar app, a voice assistant reading iCloud) ring too. The host
- * applies it on create (`use_calendar_defaults`); this hook only stores the
- * choice, under the synced `calendar.{id}.defaultRemindersMode`.
+ * Each entry also says where it lives (`attach`, see `DefaultReminder`):
+ * without the flag it stays in Aperio — the scheduler fires it for every event
+ * of the calendar on top of the event's own reminders; with it the host writes
+ * it into every new appointment (`use_calendar_defaults`) as the appointment's
+ * own reminder, so other clients of the calendar ring too. This hook only
+ * stores the list; the flag travels inside the same synced pref.
  */
-export type DefaultReminderMode = 'local' | 'attach';
-export const DEFAULT_REMINDER_MODES: readonly DefaultReminderMode[] = ['local', 'attach'];
-export type DefaultReminderModeMap = Record<string, DefaultReminderMode>;
+export type DefaultRemindersMap = Record<string, DefaultReminder[]>;
 
 export interface CalendarDefaultReminders {
   /** Default reminders for `calendarId`, or empty array when none. */
-  getDefaultsFor: (calendarId: string) => Reminder[];
+  getDefaultsFor: (calendarId: string) => DefaultReminder[];
   /** Set the defaults for one calendar and persist asynchronously. */
-  setDefaultsFor: (calendarId: string, reminders: Reminder[]) => void;
-  /** Where `calendarId`'s defaults live; `local` until chosen otherwise. */
-  getModeFor: (calendarId: string) => DefaultReminderMode;
-  /** Choose where one calendar's defaults live and persist it. */
-  setModeFor: (calendarId: string, mode: DefaultReminderMode) => void;
+  setDefaultsFor: (calendarId: string, reminders: DefaultReminder[]) => void;
   /** True until the initial hydration round-trip returns. */
   hydrating: boolean;
 }
 
-const EMPTY: Reminder[] = [];
-const MODE_SUFFIX = '.defaultRemindersMode';
+const EMPTY: DefaultReminder[] = [];
 
 function prefKey(calendarId: string): string {
   return `${KEY_PREFIX}${calendarId}${KEY_SUFFIX}`;
-}
-
-function modeKey(calendarId: string): string {
-  return `${KEY_PREFIX}${calendarId}${MODE_SUFFIX}`;
 }
 
 export function useCalendarDefaultReminders(
   calendarIds: readonly string[],
 ): CalendarDefaultReminders {
   const [map, setMap] = useState<DefaultRemindersMap>({});
-  const [modes, setModes] = useState<DefaultReminderModeMap>({});
   const [hydrating, setHydrating] = useState(true);
+  // Bumped when a sync round wrote one of these keys, so the open panel
+  // re-reads instead of showing what the other device replaced. A settings
+  // list the user is looking at is exactly where a stale value is noticed.
+  const [syncedVersion, setSyncedVersion] = useState(0);
+  // Bumped by every local edit. A re-read that started BEFORE one must not
+  // land after it: the writes are debounced, so a round arriving mid-edit
+  // would otherwise put the pre-edit list back over the rows on screen.
+  const writeGeneration = useRef(0);
 
   // Hydrate every visible calendar's default once we know the id
   // list. The Settings panel passes the full `calendars` list from
@@ -91,21 +87,20 @@ export function useCalendarDefaultReminders(
   // collapse to a sorted-joined string so a re-render with the same
   // ids in a different order doesn't trigger a redundant fetch.
   const idsKey = [...calendarIds].sort().join('|');
+  useUserPrefsChanged(
+    idsKey === '' ? [] : idsKey.split('|').map(prefKey),
+    () => setSyncedVersion((n) => n + 1),
+  );
   useEffect(() => {
     let cancelled = false;
+    const generation = writeGeneration.current;
     setHydrating(true);
     void (async () => {
       const next: DefaultRemindersMap = {};
-      const nextModes: DefaultReminderModeMap = {};
       await Promise.all(
         calendarIds.map(async (id) => {
           try {
-            const [raw, rawMode] = await Promise.all([
-              getUserPref(prefKey(id)),
-              getUserPref(modeKey(id)),
-            ]);
-            // Only the exact marker attaches; anything else is the overlay.
-            if (rawMode === 'attach') nextModes[id] = 'attach';
+            const raw = await getUserPref(prefKey(id));
             if (!raw) return;
             const parsed = JSON.parse(raw) as unknown;
             if (Array.isArray(parsed)) {
@@ -114,7 +109,7 @@ export function useCalendarDefaultReminders(
               // version the pref key (`...defaultReminders.v2`) so the
               // old data degrades to "no default" rather than
               // exploding on a Reminder shape change.
-              next[id] = parsed as Reminder[];
+              next[id] = parsed as DefaultReminder[];
             }
           } catch {
             // Backend unreachable or bad JSON: leave id absent so
@@ -122,17 +117,17 @@ export function useCalendarDefaultReminders(
           }
         }),
       );
-      if (!cancelled) {
-        setMap(next);
-        setModes(nextModes);
-        setHydrating(false);
-      }
+      if (cancelled) return;
+      // An edit happened while this read was in flight — it already holds the
+      // newer list, and its own write is on its way to disk.
+      if (generation === writeGeneration.current) setMap(next);
+      setHydrating(false);
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  }, [idsKey, syncedVersion]);
 
   // Debounced persistence — RemindersEditor emits an onChange per
   // keystroke for the minute input; without the debounce we'd write
@@ -148,12 +143,13 @@ export function useCalendarDefaultReminders(
   }, [pendingWrites]);
 
   const getDefaultsFor = useCallback(
-    (calendarId: string): Reminder[] => map[calendarId] ?? EMPTY,
+    (calendarId: string): DefaultReminder[] => map[calendarId] ?? EMPTY,
     [map],
   );
 
   const setDefaultsFor = useCallback(
-    (calendarId: string, reminders: Reminder[]) => {
+    (calendarId: string, reminders: DefaultReminder[]) => {
+      writeGeneration.current += 1;
       setMap((prev) => {
         // Empty list → drop the key so the pref store stays minimal
         // and `getDefaultsFor` returns the same `EMPTY` reference.
@@ -201,20 +197,5 @@ export function useCalendarDefaultReminders(
     [pendingWrites],
   );
 
-  const getModeFor = useCallback(
-    (calendarId: string): DefaultReminderMode => modes[calendarId] ?? 'local',
-    [modes],
-  );
-
-  // One radio click, one write — no debounce needed. `local` is written as a
-  // value rather than a deletion so the choice travels as a synced answer.
-  const setModeFor = useCallback((calendarId: string, mode: DefaultReminderMode) => {
-    setModes((prev) => (prev[calendarId] === mode ? prev : { ...prev, [calendarId]: mode }));
-    void setUserPref(modeKey(calendarId), mode).catch(() => {
-      // The in-memory choice already reflects intent; the next mount re-reads
-      // from disk, so a failed write shows up as the old value then.
-    });
-  }, []);
-
-  return { getDefaultsFor, setDefaultsFor, getModeFor, setModeFor, hydrating };
+  return { getDefaultsFor, setDefaultsFor, hydrating };
 }

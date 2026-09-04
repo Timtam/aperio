@@ -52,7 +52,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sync_core::SyncResult;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
@@ -469,6 +469,34 @@ impl SyncScheduler {
         if let Err(err) = app.emit("user-prefs-changed", &report.settings_keys) {
             warn!(?err, "failed to emit user-prefs-changed");
         }
+        Self::refresh_reminders_for_settings(app, report);
+    }
+
+    /// Make an arrived preference reach the REMINDER worker, not just the UI.
+    ///
+    /// The worker sleeps until its next known trigger and answers external
+    /// events from a five-minute snapshot, so a default reminder set on the
+    /// other device would otherwise sit in SQLite until that snapshot aged out
+    /// AND something happened to wake the worker — and a trigger that should
+    /// fire before its next wake-up would be missed outright. Every LOCAL
+    /// settings write already does this pair (see
+    /// `useCalendarDefaultReminders`); a synced write is the same change, it
+    /// just arrived from elsewhere.
+    ///
+    /// Which keys could matter is not worth splitting hairs over: a round that
+    /// applied any preference at all is rare, and a recompute is one scan.
+    fn refresh_reminders_for_settings<R: Runtime>(app: &AppHandle<R>, report: &SyncRoundReport) {
+        let Some(reminders) = app.try_state::<crate::reminders::SchedulerHandle>() else {
+            // No reminder worker in this process (a test harness). Nothing to
+            // wake, and nothing the user could act on.
+            debug!(
+                keys = report.settings_keys.len(),
+                "no reminder scheduler registered; skipping the post-sync refresh",
+            );
+            return;
+        };
+        reminders.invalidate_external_cache();
+        reminders.invalidate();
     }
 
     /// Tell the frontend that a day marker or a day's log arrived.

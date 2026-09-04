@@ -220,6 +220,11 @@
     "removeAria": "Erinnerung {{n}} entfernen",
     "rowLabel": "Erinnerung {{n}}",
     "kindLabel": "Typ",
+    "placement": {
+      "label": "Gilt",
+      "local": "Nur in Aperio",
+      "attach": "Neuen Terminen angehängt"
+    },
     "kind": {
       "relativeEvent": "Vor Beginn",
       "relativeTask": "Vor Fälligkeit",
@@ -659,7 +664,8 @@
           "startAdjusted": "Startzeit auf {{time}} angepasst",
           "endAdjusted": "Endzeit auf {{time}} angepasst"
         },
-        "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
+        "hint": "Standard-Erinnerungen für diesen Kalender. Ein Eintrag auf „Nur in Aperio“ erinnert dich hier an jeden Termin des Kalenders, zusätzlich zu dessen eigenen Erinnerungen, und wird nie in einen Termin geschrieben.",
+        "hintPlacement": "„Gilt“ wählt, wo ein Eintrag lebt. „Neuen Terminen angehängt“ schreibt ihn in jeden Termin, den du hier anlegst und ohne eigene Erinnerungen lässt, als dessen eigene Erinnerung – so erinnern auch andere Apps, die denselben Kalender lesen, etwa die iOS-Kalender-App oder ein Sprachassistent. Ein Termin, der keine eigenen Erinnerungen mitbringt, bekommt ihn hier weiterhin. Exchange und Outlook speichern eine einzige „Minuten vorher“-Erinnerung, dort kommt nur der erste angehängte Eintrag an.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "localAccount": "Lokal",
         "selectorLabel": "Kalender auswählen",
@@ -667,15 +673,7 @@
         "reminderSummaryNone": "keine Standard-Erinnerung",
         "reminderSummaryOne": "1 Standard-Erinnerung",
         "reminderSummaryOther": "{{count}} Standard-Erinnerungen",
-        "detailHeading": "Erinnerungen – {{account}} › {{calendar}}",
-        "defaultsMode": {
-          "heading": "Standard-Erinnerungen gelten",
-          "hint": "„Nur in Aperio“ behält sie hier: Aperio erinnert an Termine dieses Kalenders ohne eigene Erinnerung, in den Termin wird nichts geschrieben. „Neuen Terminen angehängt“ schreibt sie in jeden Termin, den du in diesem Kalender anlegst und ohne eigene Erinnerungen lässt, als dessen eigene Erinnerungen – so erinnern auch andere Apps, die denselben Kalender lesen, etwa die iOS-Kalender-App oder ein Sprachassistent. Ein Termin, dem du eigene Erinnerungen gibst oder bewusst keine, behält diese Wahl; bestehende Termine bleiben, wie sie sind. Exchange und Outlook speichern eine einzige „Minuten vorher“-Erinnerung, dort wird nur die erste solche Standard-Erinnerung angehängt.",
-          "options": {
-            "local": "Nur in Aperio",
-            "attach": "Neuen Terminen angehängt"
-          }
-        }
+        "detailHeading": "Erinnerungen – {{account}} › {{calendar}}"
       },
       "notifications": {
         "heading": "Benachrichtigungstöne",

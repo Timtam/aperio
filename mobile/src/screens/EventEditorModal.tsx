@@ -337,8 +337,18 @@ export default function EventEditorModal({
     overlaidForRef.current = original.id;
     if (remindersTouchedRef.current) return;
     if ((original.reminders ?? []).length > 0) return;
-    if (calendarDefaults.value.length === 0) return;
-    setReminders(calendarDefaults.value);
+    // Only an ATTACHED default belongs in these rows. The Host skips it as
+    // soon as the event carries reminders of its own (`effective_reminders`),
+    // so the row the user edits here really is the one that fires. An entry
+    // that stays in Aperio fires ON TOP of the event's own reminders instead,
+    // so showing it as an editable row would lie: changing 15 to 30 would not
+    // move it, it would add a second reminder and leave the 15 ringing. That
+    // entry belongs to the calendar, and the settings page says so.
+    const attached = calendarDefaults.value.filter((d) => d.attach === true);
+    if (attached.length === 0) return;
+    // The placement flag is the calendar's business, never an event's: only
+    // the reminder itself is shown (and, once touched, sent).
+    setReminders(attached.map(({ kind, sound }) => ({ kind, sound })));
     setKeepRemindersAsDefault(true);
   }, [editing, original, calendarDefaults.loading, calendarDefaults.value]);
 

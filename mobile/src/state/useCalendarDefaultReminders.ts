@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Reminder } from '@aperio/shared';
+import type { DefaultReminder } from '@aperio/shared';
 
-import { getUserPref, getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
+import { getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
+import { scheduleBackgroundPush } from '../api/syncTriggers';
 import { refreshRemindersSoon } from '../reminders/scheduler';
+import { subscribeCacheReload } from './cacheObserver';
 
 // Per-calendar default reminders — the mobile twin of the desktop
 // useCalendarDefaultReminders, scoped to ONE calendar (the editor edits one).
-// Mirrors iOS "Default Alert Times": the alert is applied at notification time,
-// never written into the event body. The Host's reminder computation already
-// reads `calendar.{id}.defaultReminders` (host-core reminders.rs), so what's set
-// here genuinely fires for events in that calendar that carry no own reminder.
+// Each entry says where it lives (see the JSDoc below): an entry that stays in
+// Aperio is applied at notification time and never written into an event, the
+// way iOS treats its own "Default Alert Times"; an attach entry is written
+// into new appointments as their own reminder. The Host's reminder computation
+// reads `calendar.{id}.defaultReminders` (host-core reminders.rs), so what is
+// set here genuinely fires.
 //
 // Storage is the synced `calendar.{id}.defaultReminders` user-pref, value =
-// Reminder[] JSON (empty ⇒ the key is dropped). Writes are debounced (the
+// DefaultReminder[] JSON (empty ⇒ the key is dropped). Writes are debounced (the
 // minute/date inputs emit an onChange per keystroke) and the latest value is
 // flushed on unmount so a quick edit-then-close still lands; each persisted
 // write nudges the reminder scheduler (refreshRemindersSoon — itself debounced)
@@ -23,56 +27,53 @@ import { refreshRemindersSoon } from '../reminders/scheduler';
 const WRITE_DEBOUNCE_MS = 150;
 
 const prefKey = (calendarId: string): string => `calendar.${calendarId}.defaultReminders`;
-const modeKey = (calendarId: string): string => `calendar.${calendarId}.defaultRemindersMode`;
 
 /**
- * Where a calendar's default reminders live — the desktop's twin. `local` is
- * the overlay above; `attach` writes them into every NEW appointment created
- * in the calendar as its own reminders, so other clients of the same calendar
- * (the iOS Calendar app, a voice assistant reading iCloud) ring too. The Host
- * applies it on create (`use_calendar_defaults`); this hook only stores the
- * choice, under the synced `calendar.{id}.defaultRemindersMode`.
+ * Each entry also says where it lives (`attach`, see `DefaultReminder`):
+ * without the flag it stays in Aperio — the Host fires it for every event of
+ * the calendar on top of the event's own reminders; with it the Host writes it
+ * into every new appointment (`use_calendar_defaults`) as the appointment's
+ * own reminder, so other clients of the calendar ring too. The flag travels
+ * inside the same synced pref; this hook only stores the list.
  */
-export type DefaultReminderMode = 'local' | 'attach';
-export const DEFAULT_REMINDER_MODES: readonly DefaultReminderMode[] = ['local', 'attach'];
-
 export interface CalendarDefaultRemindersBinding {
-  value: Reminder[];
+  value: DefaultReminder[];
   loading: boolean;
-  save: (next: Reminder[]) => void;
-  /** Where the defaults live; `local` until chosen otherwise. */
-  mode: DefaultReminderMode;
-  /** Choose where the defaults live and persist it (one tap, one write). */
-  setMode: (next: DefaultReminderMode) => void;
+  save: (next: DefaultReminder[]) => void;
 }
 
 export function useCalendarDefaultReminders(
   calendarId: string,
 ): CalendarDefaultRemindersBinding {
-  const [value, setValue] = useState<Reminder[]>([]);
-  const [mode, setModeState] = useState<DefaultReminderMode>('local');
+  const [value, setValue] = useState<DefaultReminder[]>([]);
   const [loading, setLoading] = useState(true);
+  // Bumped when a sync round applied a peer's data, so an open editor re-reads
+  // instead of holding the list it hydrated with. The pref rides the calendar
+  // category (it is a per-calendar setting), like the signature list next door.
+  const [syncedVersion, setSyncedVersion] = useState(0);
+  useEffect(
+    () => subscribeCacheReload('calendar', () => setSyncedVersion((n) => n + 1)),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    // Bumped by every local edit — see `writeGeneration` below.
+    const generation = writeGeneration.current;
     // No calendar to read for (the event editor passes '' while creating, where
     // the overlay doesn't apply) — resolve empty without an FFI round-trip.
     if (!calendarId) {
       setValue([]);
-      setModeState('local');
       setLoading(false);
       return;
     }
     setLoading(true);
-    void Promise.all([
-      getUserPrefJson<Reminder[]>(prefKey(calendarId)),
-      getUserPref(modeKey(calendarId)),
-    ])
-      .then(([arr, rawMode]) => {
-        if (cancelled) return;
+    void getUserPrefJson<DefaultReminder[]>(prefKey(calendarId))
+      .then((arr) => {
+        // An edit happened while this read was in flight — it already holds
+        // the newer list, and its own write is on its way to the Host.
+        if (cancelled || generation !== writeGeneration.current) return;
         setValue(Array.isArray(arr) ? arr : []);
-        // Only the exact marker attaches; anything else is the overlay.
-        setModeState(rawMode === 'attach' ? 'attach' : 'local');
       })
       .catch(() => {
         if (!cancelled) setValue([]);
@@ -83,13 +84,17 @@ export function useCalendarDefaultReminders(
     return () => {
       cancelled = true;
     };
-  }, [calendarId]);
+  }, [calendarId, syncedVersion]);
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pending = useRef<Reminder[] | null>(null);
+  const pending = useRef<DefaultReminder[] | null>(null);
+  // Bumped by every local edit. A re-read that started BEFORE one must not
+  // land after it: the writes are debounced, so a sync round arriving mid-edit
+  // would otherwise put the pre-edit list back over the rows on screen.
+  const writeGeneration = useRef(0);
 
   const persist = useCallback(
-    (next: Reminder[]) => {
+    (next: DefaultReminder[]) => {
       const p =
         next.length === 0
           ? // An empty MARKER, not a deletion — the desktop writes the same.
@@ -99,7 +104,15 @@ export function useCalendarDefaultReminders(
             // switch would turn itself on again.
             setUserPref(prefKey(calendarId), '')
           : setUserPrefJson(prefKey(calendarId), next);
-      void p.then(() => refreshRemindersSoon()).catch(() => {
+      void p
+        .then(() => {
+          refreshRemindersSoon();
+          // A synced setting: push it now rather than at the next periodic
+          // round, the way every other mobile mutation does. Without this the
+          // change sat here until the next timer or app-exit flush.
+          scheduleBackgroundPush();
+        })
+        .catch(() => {
         // Pref write failed; the in-memory value already reflects intent and the
         // next open re-reads from disk. Nothing to invalidate.
       });
@@ -108,7 +121,8 @@ export function useCalendarDefaultReminders(
   );
 
   const save = useCallback(
-    (next: Reminder[]) => {
+    (next: DefaultReminder[]) => {
+      writeGeneration.current += 1;
       setValue(next);
       pending.current = next;
       if (timer.current) clearTimeout(timer.current);
@@ -137,18 +151,5 @@ export function useCalendarDefaultReminders(
     [persist],
   );
 
-  // `local` is written as a value rather than a deletion so the choice travels
-  // as a synced answer, the way the desktop writes it.
-  const setMode = useCallback(
-    (next: DefaultReminderMode) => {
-      setModeState(next);
-      void setUserPref(modeKey(calendarId), next).catch(() => {
-        // The on-screen choice already reflects intent; the next open re-reads
-        // from disk, so a failed write shows up as the old value then.
-      });
-    },
-    [calendarId],
-  );
-
-  return { value, loading, save, mode, setMode };
+  return { value, loading, save };
 }

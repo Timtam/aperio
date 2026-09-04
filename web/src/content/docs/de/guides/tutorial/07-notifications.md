@@ -29,25 +29,26 @@ In der Benachrichtigung kannst du:
 ## Standard-Erinnerungen pro Kalender
 
 Neben den Erinnerungen an einzelnen Einträgen kannst du **Standard-Erinnerungen
-pro Kalender** festlegen. Sie greifen für Termine dieses Kalenders, die keine
-eigene Erinnerung mitbringen – nützlich etwa für abonnierte oder externe
-Kalender, deren Einträge ohne Alarm ankommen. Unter **Einstellungen → Kalender**
+pro Kalender** festlegen – nützlich etwa für abonnierte oder externe Kalender,
+deren Einträge ohne Alarm ankommen. Wo ein Eintrag gilt, wählst du selbst, und
+das entscheidet, ob er zusätzlich zu den eigenen Erinnerungen eines Termins
+feuert oder für sie einspringt (siehe unten). Unter **Einstellungen → Kalender**
 wählst du einen Kalender und legst dort seine Standard-Erinnerungen fest.
 
-Unter der Liste wählst du, wo diese Standards gelten. **Nur in Aperio** ist die
-Einstellung, mit der jeder Kalender beginnt: Aperio erinnert selbst, in den
+Jede Standard-Erinnerung sagt außerdem, wo sie gilt. **Nur in Aperio** ist die
+Einstellung, mit der jeder Eintrag beginnt: Aperio erinnert selbst, in den
 Termin wird nichts geschrieben – genau so behandelt die iOS-Kalender-App ihre
-eigenen „Standardhinweise". **Neuen Terminen angehängt** schreibt die Standards
-stattdessen in jeden Termin, den du in diesem Kalender anlegst, als dessen
-eigene Erinnerungen. Erst dadurch erinnern auch andere Apps, die denselben
-Kalender lesen – die iOS-Kalender-App oder ein Sprachassistent, der deinen
-iCloud-Kalender vorliest. Betroffen sind nur Termine, die du *nach* dem
-Umschalten anlegst, und nur, wenn du ihre Erinnerungen im Editor nicht
-angefasst hast; ein Termin mit eigenen Erinnerungen oder bewusst ohne behält
-diese Wahl. Exchange- und Outlook-Kalender speichern eine einzige „Minuten
-vorher"-Erinnerung; dort wird nur die erste solche Standard-Erinnerung
-angehängt, eine feste Uhrzeit oder „beim App-Start" kommt in diesen Terminen
-nicht an.
+eigenen „Standardhinweise". **Neuen Terminen angehängt** schreibt diesen Eintrag
+stattdessen in jeden Termin, den du in diesem Kalender anlegst und ohne eigene
+Erinnerungen lässt, als dessen eigene Erinnerung. Erst dadurch erinnern auch
+andere Apps, die denselben Kalender lesen – die iOS-Kalender-App oder ein
+Sprachassistent, der deinen iCloud-Kalender vorliest. Hineingeschrieben wird er
+nur in Termine, die du *nach* dem Umschalten anlegst; ein Termin mit eigenen
+Erinnerungen oder bewusst ohne behält diese Wahl, und ein Termin ohne eigene
+Erinnerungen bekommt den Eintrag in Aperio weiterhin. Exchange- und
+Outlook-Kalender speichern eine einzige „Minuten vorher"-Erinnerung; dort wird
+nur der erste solche Eintrag angehängt, eine feste Uhrzeit oder „beim
+App-Start" kommt in diesen Terminen nicht an.
 
 ### Ganztägige Termine und Geburtstage
 

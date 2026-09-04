@@ -220,6 +220,11 @@
     "removeAria": "Remove reminder {{n}}",
     "rowLabel": "Reminder {{n}}",
     "kindLabel": "Type",
+    "placement": {
+      "label": "Applies",
+      "local": "Only in Aperio",
+      "attach": "Attached to new events"
+    },
     "kind": {
       "relativeEvent": "Before start",
       "relativeTask": "Before due",
@@ -662,7 +667,8 @@
           "startAdjusted": "Start time adjusted to {{time}}",
           "endAdjusted": "End time adjusted to {{time}}"
         },
-        "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
+        "hint": "Default reminders for this calendar. An entry set to \"Only in Aperio\" reminds you here of every event in the calendar, in addition to the event's own reminders, and is never written into an event.",
+        "hintPlacement": "\"Applies\" chooses where an entry lives. \"Attached to new events\" writes it into every appointment you create here and leave without reminders of your own, as the appointment's own reminder – so other apps reading the same calendar remind you too, such as the iOS Calendar app or a voice assistant. An event that carries no reminders of its own still gets it here. Exchange and Outlook store a single \"minutes before\" reminder, so only the first attached entry reaches them.",
         "empty": "No calendars yet — add an account first.",
         "localAccount": "Local",
         "selectorLabel": "Choose calendar",
@@ -670,15 +676,7 @@
         "reminderSummaryNone": "no default reminder",
         "reminderSummaryOne": "1 default reminder",
         "reminderSummaryOther": "{{count}} default reminders",
-        "detailHeading": "Reminders – {{account}} › {{calendar}}",
-        "defaultsMode": {
-          "heading": "Default reminders apply",
-          "hint": "\"Only in Aperio\" keeps them here: Aperio reminds you of events in this calendar that carry no reminder of their own, and nothing is written into the event. \"Attached to new events\" writes them into every appointment you create in this calendar and leave without reminders of your own, as the appointment's own reminders, so other apps reading the same calendar remind you too – the iOS Calendar app, or a voice assistant. An appointment you give reminders of your own, or deliberately none, keeps that choice; existing appointments stay as they are. Exchange and Outlook store a single \"minutes before\" reminder, so only the first such default is attached there.",
-          "options": {
-            "local": "Only in Aperio",
-            "attach": "Attached to new events"
-          }
-        }
+        "detailHeading": "Reminders – {{account}} › {{calendar}}"
       },
       "notifications": {
         "heading": "Notification sounds",

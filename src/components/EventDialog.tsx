@@ -227,6 +227,19 @@ export function EventDialog({
     calendarIdsForDefaults,
   );
 
+  // Only an ATTACHED default belongs in these rows. The core skips it as soon
+  // as the event carries reminders of its own (`effective_reminders`), so the
+  // row the user edits here really is the one that fires. An entry that stays
+  // in Aperio fires ON TOP of the event's own reminders instead, so showing it
+  // as an editable row would lie: changing 15 to 30 would not move it, it
+  // would add a second reminder at 30 and leave the 15 ringing. That entry
+  // belongs to the calendar, and the settings page says so.
+  const attachedDefaultsFor = useCallback(
+    (calendarId: string) =>
+      getDefaultsFor(calendarId).filter((d) => d.attach === true),
+    [getDefaultsFor],
+  );
+
   // True when the form's `reminders` slot was filled from the
   // calendar's default rather than from the event itself. Used by the
   // submit path to send `[]` instead of the defaults — keeps the wire
@@ -235,7 +248,7 @@ export function EventDialog({
     isEdit &&
     event !== null &&
     (event.reminders ?? []).length === 0 &&
-    getDefaultsFor(event.calendar_id).length > 0;
+    attachedDefaultsFor(event.calendar_id).length > 0;
 
   const initialState = useMemo<FormState>(() => {
     const base = buildInitialState(
@@ -250,7 +263,11 @@ export function EventDialog({
     if (remindersWereFromDefault && event) {
       return {
         ...base,
-        reminders: getDefaultsFor(event.calendar_id),
+        // The placement flag is the calendar's business, never an event's:
+        // only the reminder itself is shown (and, once touched, sent).
+        reminders: attachedDefaultsFor(event.calendar_id).map(
+          ({ kind, sound }) => ({ kind, sound }),
+        ),
       };
     }
     return base;
@@ -263,7 +280,7 @@ export function EventDialog({
     calendars,
     selectedCalendarIds,
     remindersWereFromDefault,
-    getDefaultsFor,
+    attachedDefaultsFor,
   ]);
 
   /**
