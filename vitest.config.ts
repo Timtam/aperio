@@ -20,5 +20,11 @@ export default defineConfig({
     globals: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     setupFiles: ['src/test-setup.ts'],
+    // The dialog tests render whole editors, and the suite runs them in
+    // parallel workers: a test that takes ~2 s alone can sit well past the 5 s
+    // default while the machine is busy elsewhere. The timeout is only how
+    // long a test is ALLOWED to take, so raising it costs nothing on a green
+    // run and stops a loaded machine from reporting failures that are not.
+    testTimeout: 20_000,
   },
 });
