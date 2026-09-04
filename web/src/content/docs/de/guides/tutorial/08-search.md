@@ -30,6 +30,10 @@ So findest du auch in vielen Einträgen schnell das Richtige.
   in der Seitenleiste aus, wird sie auch in der Suche ausgespart.
 - Ein ausgewähltes Ergebnis öffnet sich an seiner Stelle im Kalender bzw.
   in der Liste, sodass du den Kontext siehst.
+- Kommst du von einem Ergebnis zurück, steht deine Suche noch: Suchbegriff
+  und Filter bleiben, und die Ergebnisse werden neu geholt – ein Eintrag, den
+  du gerade bearbeitet hast, kommt also so zurück, wie er jetzt ist. Schließt
+  du die Suche, ist sie beendet: Das nächste `Strg+F` beginnt mit leerem Feld.
 
 > **Screenreader-Hinweis:** Das Suchfeld ist mit der Ergebnisliste
 > verknüpft (Combobox-Muster). Die Zahl der Treffer wird angesagt, und mit

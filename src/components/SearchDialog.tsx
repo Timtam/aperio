@@ -48,26 +48,84 @@ interface Hit {
   secondary: string;
 }
 
+/**
+ * What the user last searched for, kept across the dialog being taken down.
+ *
+ * The dialog host renders exactly ONE dialog: opening a hit replaces this
+ * dialog with the editor, and closing the editor mounts a FRESH one. Without
+ * this, coming back from an appointment you just edited meant an empty search
+ * field and an empty result list — the work of finding the thing again, every
+ * time, which is worst for someone who navigates by keyboard and hears the
+ * list rather than seeing it.
+ *
+ * Module scope, because at most one search dialog exists at a time and the
+ * value has no business in the app's state tree. The QUERY and the FILTERS are
+ * kept; the hits are not — they are re-fetched on mount, so what comes back
+ * reflects the edit that was just made rather than the list as it was before.
+ */
+const lastSearch: {
+  query: string;
+  kind: SearchKind;
+  calendarIds: Set<string>;
+  listIds: Set<string>;
+  since: string;
+  until: string;
+  eventType: EventTypeFilter;
+  taskStatuses: Set<TaskStatus>;
+} = {
+  query: '',
+  kind: 'both',
+  calendarIds: new Set(),
+  listIds: new Set(),
+  since: '',
+  until: '',
+  eventType: 'any',
+  taskStatuses: new Set(),
+};
+
+/** Forget it — a dialog CLOSED by the user starts clean next time. */
+function forgetLastSearch(): void {
+  lastSearch.query = '';
+  lastSearch.kind = 'both';
+  lastSearch.calendarIds = new Set();
+  lastSearch.listIds = new Set();
+  lastSearch.since = '';
+  lastSearch.until = '';
+  lastSearch.eventType = 'any';
+  lastSearch.taskStatuses = new Set();
+}
+
 export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
+  // The user closing the dialog means they are done searching; opening a hit
+  // does not, and that is the difference this keeps. Wrapped once so both the
+  // Escape/backdrop path and the button below forget the same way.
+  const closeAndForget = useCallback(() => {
+    forgetLastSearch();
+    onClose();
+  }, [onClose]);
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { calendars, taskLists } = useCalendarStore();
   const { openEventDialog, openTaskDialog } = useDialogState();
 
-  const [query, setQuery] = useState('');
-  const [kind, setKind] = useState<SearchKind>('both');
+  // Seeded from the last search so opening a hit and coming back lands where
+  // the user left off — see `lastSearch`.
+  const [query, setQuery] = useState(() => lastSearch.query);
+  const [kind, setKind] = useState<SearchKind>(() => lastSearch.kind);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set(lastSearch.calendarIds),
   );
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set(lastSearch.listIds),
   );
-  const [since, setSince] = useState('');
-  const [until, setUntil] = useState('');
-  const [eventType, setEventType] = useState<EventTypeFilter>('any');
+  const [since, setSince] = useState(() => lastSearch.since);
+  const [until, setUntil] = useState(() => lastSearch.until);
+  const [eventType, setEventType] = useState<EventTypeFilter>(
+    () => lastSearch.eventType,
+  );
   const [selectedTaskStatuses, setSelectedTaskStatuses] = useState<
     Set<TaskStatus>
-  >(() => new Set());
+  >(() => new Set(lastSearch.taskStatuses));
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -147,6 +205,29 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
       selectedTaskStatuses,
     ],
   );
+  // Remember what is being searched for, for the next time this dialog is
+  // mounted (see `lastSearch`). Written on every change rather than on close,
+  // because opening a hit takes the dialog down without closing it.
+  useEffect(() => {
+    lastSearch.query = query;
+    lastSearch.kind = kind;
+    lastSearch.calendarIds = new Set(selectedCalendarIds);
+    lastSearch.listIds = new Set(selectedListIds);
+    lastSearch.since = since;
+    lastSearch.until = until;
+    lastSearch.eventType = eventType;
+    lastSearch.taskStatuses = new Set(selectedTaskStatuses);
+  }, [
+    query,
+    kind,
+    selectedCalendarIds,
+    selectedListIds,
+    since,
+    until,
+    eventType,
+    selectedTaskStatuses,
+  ]);
+
   useEffect(() => {
     const trimmed = query.trim();
     lastQueryRef.current = trimmed;
@@ -253,7 +334,7 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={closeAndForget}
       title={t('dialogs.search.title')}
       className="modal--form modal--wide"
     >
@@ -514,7 +595,7 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
         </ul>
 
         <div className="form__actions">
-          <button type="button" onClick={onClose} className="form__action">
+          <button type="button" onClick={closeAndForget} className="form__action">
             {t('dialogs.close')}
           </button>
         </div>

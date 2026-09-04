@@ -29,6 +29,10 @@ This lets you quickly find the right entry even among many.
   sidebar, it is also left out of search.
 - A selected result opens in its place in the calendar or list, so you see
   the context.
+- Coming back from a result keeps your search: the term and the filters are
+  still there, and the results are looked up again, so an entry you just
+  edited comes back the way it is now. Closing search ends it – the next
+  `Ctrl+F` starts on an empty field.
 
 > **Screen-reader note:** The search field is linked to the result list
 > (combobox pattern). The number of matches is announced, and you move
