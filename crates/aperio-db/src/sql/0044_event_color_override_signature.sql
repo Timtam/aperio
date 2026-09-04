@@ -1,0 +1,32 @@
+-- Migration 0044: give the per-event colour override an anchor it can keep.
+--
+-- `event_color_overrides` (migration 0026) names an event by the provider's id
+-- and nothing else. Ids belong to the provider and change underneath us — a
+-- re-bootstrap remints them, moving an event between calendars remints it, and
+-- Exchange bakes a change token into its ids and remints them unprompted. When
+-- that happens the row goes on pointing at an id nothing answers to: the
+-- appointment loses the colour the user gave it, in silence, and the row stays
+-- behind for good.
+--
+-- The same trap `event_groups` (migration 0035) avoided by storing a SIGNATURE
+-- beside the ids, and `event_local_reminders` (0043) after it. This closes it
+-- here: the title and start the event had when the colour was bound, so the
+-- event can be found again.
+--
+-- The row also learns WHICH CALENDAR it belongs to, which it never recorded
+-- (migration 0026 keyed on the event id alone). Without it a signature is not
+-- an anchor but a wildcard: the same appointment routinely exists in several
+-- calendars — once in the work calendar so colleagues see it, once copied into
+-- a private one — and rendering one of them would find "an event with this
+-- title at this time" in the other and move the colour there. `event_groups`
+-- (0035) and `event_local_reminders` (0043) both name the calendar for exactly
+-- this reason.
+--
+-- All three columns default to the empty string rather than being backfilled.
+-- There is nothing to backfill FROM — the row never knew what its event looked
+-- like. An empty signature simply cannot be matched, and the read path stamps
+-- the real one (and the calendar) the next time it sees the event, so every
+-- existing row anchors itself the first time its calendar is rendered.
+ALTER TABLE event_color_overrides ADD COLUMN title TEXT NOT NULL DEFAULT '';
+ALTER TABLE event_color_overrides ADD COLUMN starts_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE event_color_overrides ADD COLUMN calendar_id TEXT NOT NULL DEFAULT '';

@@ -20,7 +20,7 @@
 //! `rename_calendar` trait method.
 
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -438,6 +438,17 @@ pub fn apply_color_to_sections(repo: &OverridesRepo<'_>, sections: &mut [cal_cor
 pub struct EventColorOverride {
     pub event_id: String,
     pub color_label_id: String,
+    /// The title the event had when the read path last saw it. Half of the
+    /// SIGNATURE that lets the row find its event again after the provider
+    /// remints the id (migration 0044); empty until the event is first seen.
+    pub title: String,
+    /// The start it had then. The other half.
+    pub starts_at: String,
+    /// Which calendar the event lives in. Learned with the signature, and
+    /// just as necessary: the same appointment routinely exists in several
+    /// calendars, so a signature without a calendar would match a copy
+    /// somewhere else and take the colour with it.
+    pub calendar_id: String,
     pub updated_at: String,
 }
 
@@ -447,14 +458,17 @@ impl OverridesRepo<'_> {
     pub fn list_event_color_overrides(&self) -> Result<Vec<EventColorOverride>, OverridesError> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT event_id, color_label_id, updated_at
+            "SELECT event_id, color_label_id, title, starts_at, calendar_id, updated_at
                FROM event_color_overrides",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(EventColorOverride {
                 event_id: row.get(0)?,
                 color_label_id: row.get(1)?,
-                updated_at: row.get(2)?,
+                title: row.get(2)?,
+                starts_at: row.get(3)?,
+                calendar_id: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })?;
         let mut out = Vec::new();
@@ -492,6 +506,201 @@ impl OverridesRepo<'_> {
             params![event_id],
         )?;
         Ok(())
+    }
+
+    /// Write down what the event looks like NOW, so the row can be found again
+    /// once the provider remints its id (migration 0044).
+    ///
+    /// `updated_at` deliberately does NOT move: this describes the event, it
+    /// does not change the user's colour choice.
+    pub fn refresh_event_color_signature(
+        &self,
+        event_id: &str,
+        calendar_id: &str,
+        title: &str,
+        starts_at: &str,
+    ) -> Result<(), OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "UPDATE event_color_overrides
+                SET calendar_id = ?, title = ?, starts_at = ?
+              WHERE event_id = ?",
+            params![calendar_id, title, starts_at, event_id],
+        )?;
+        Ok(())
+    }
+
+    /// Point a colour binding at the id its event carries now.
+    ///
+    /// Only the clean case is repaired: the old id moves onto an id that has
+    /// no row. A row ALREADY sitting on the new id is the colour the user gave
+    /// the appointment that is actually in front of them, and the caller's
+    /// evidence — "this id was not in this fetch of this calendar" — is not
+    /// proof the other event is gone. Nothing is deleted on that: these rows
+    /// never leave the device (migration 0026), so a wrong delete is forever,
+    /// and a stale row that lingers is invisible while a colour taken from the
+    /// wrong appointment is not.
+    ///
+    /// Local and silent: there is nobody to tell, and every device repairs its
+    /// own from the events it can see.
+    pub fn heal_event_color(
+        &self,
+        old_event_id: &str,
+        new_event_id: &str,
+    ) -> Result<bool, OverridesError> {
+        if old_event_id == new_event_id {
+            return Ok(false);
+        }
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        let read = |id: &str| -> Result<Option<String>, rusqlite::Error> {
+            tx.query_row(
+                "SELECT updated_at FROM event_color_overrides WHERE event_id = ?",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+        };
+        if read(old_event_id)?.is_none() {
+            tx.commit()?;
+            return Ok(false);
+        }
+        let moved = if read(new_event_id)?.is_some() {
+            // Two rows want the same id. One of them belongs to an appointment
+            // on screen; the other's claim rests on an absence. Leave both.
+            false
+        } else {
+            tx.execute(
+                "UPDATE event_color_overrides SET event_id = ? WHERE event_id = ?",
+                params![new_event_id, old_event_id],
+            )?;
+            true
+        };
+        tx.commit()?;
+        Ok(moved)
+    }
+}
+
+/// Keep the colour bindings of one calendar's events anchored, while the
+/// events that prove it are in hand.
+///
+/// A binding names its event by the provider's id, and ids change underneath
+/// us: a re-bootstrap remints them, moving an event between calendars remints
+/// it, Exchange does it unprompted. Two things happen here, both silent:
+///
+///   * a row whose event is present has its SIGNATURE and its CALENDAR written
+///     down (migration 0044) — what the appointment looks like NOW, so a later
+///     rename or move never makes it unfindable. Rows written before this have
+///     neither and learn both the first time their calendar is rendered.
+///   * a row of THIS calendar whose id nothing answers to is pointed at the one
+///     event matching what it remembers.
+///
+/// Three guards, each for a way this could paint the wrong appointment — and a
+/// colour moved by mistake is worse than a colour that stays missing, because
+/// nothing announces it:
+///
+///   * only rows of the calendar being rendered may be called vanished. The
+///     same appointment routinely exists in several calendars, and without
+///     this, rendering one would find the copy in the other and take the
+///     colour with it — then the next render would take it back.
+///   * AMBIGUITY REPAIRS NOTHING: two appointments of the same name at the same
+///     time leave the row alone.
+///   * a row whose remembered start lies outside what this batch covers is left
+///     alone. Merely scrolling to another week would otherwise send the repair
+///     hunting among unrelated events. The batch covers its requested `range`
+///     AND the span of the events it actually contains — a recurring master's
+///     DTSTART can be months before the window it is rendered in, and that row
+///     is precisely the kind this table is keyed for.
+///
+/// Cost: one full read of this small table, plus a scan of the batch for each
+/// row of this calendar that cannot be found. The refresh writes only when
+/// something actually differs, so a rendered day that changed nothing performs
+/// no SQL beyond that read.
+pub fn heal_event_color_anchors(
+    repo: &OverridesRepo<'_>,
+    calendar_id: &str,
+    events: &[cal_core::Event],
+    range: (chrono::DateTime<Utc>, chrono::DateTime<Utc>),
+) {
+    let Ok(rows) = repo.list_event_color_overrides() else {
+        return;
+    };
+    if rows.is_empty() {
+        return;
+    }
+    let normalize = |s: &str| s.trim().to_lowercase();
+    // A row counts as present under EITHER id its event answers to: the series
+    // master, which is what the write path binds to (migrations 0026 and
+    // 0035), and the row's own id, because a provider-sent override of one
+    // occurrence carries the master's in front of the marker and an older row
+    // may be bound to that. Recognising both means such a row is refreshed
+    // where it is rather than quietly reclassified as a whole-series binding.
+    let mut present: std::collections::HashMap<&str, &cal_core::Event> =
+        std::collections::HashMap::new();
+    for ev in events {
+        present.insert(ev.id.as_str(), ev);
+        present
+            .entry(crate::reminders::series_master_id(&ev.id))
+            .or_insert(ev);
+    }
+    // What this batch can speak for: the window it was fetched for, widened by
+    // the events it actually holds.
+    let (mut lower, mut upper) = range;
+    for ev in events {
+        lower = lower.min(ev.start);
+        upper = upper.max(ev.start);
+    }
+    for row in &rows {
+        if let Some(ev) = present.get(row.event_id.as_str()) {
+            let start = ev.start.to_rfc3339();
+            if ev.title != row.title || start != row.starts_at || row.calendar_id != calendar_id {
+                if let Err(err) = repo.refresh_event_color_signature(
+                    &row.event_id,
+                    calendar_id,
+                    &ev.title,
+                    &start,
+                ) {
+                    tracing::warn!(?err, "couldn't refresh an event colour's signature");
+                }
+            }
+            continue;
+        }
+
+        // Another calendar's row is not missing — it was never in this batch.
+        if row.calendar_id != calendar_id {
+            continue;
+        }
+        let wanted_title = normalize(&row.title);
+        if wanted_title.is_empty() {
+            // No signature (a row from before migration 0044, or an event with
+            // no title at all): nothing to match on, so nothing to repair.
+            continue;
+        }
+        let Ok(wanted_start) = row.starts_at.parse::<chrono::DateTime<Utc>>() else {
+            continue;
+        };
+        if wanted_start < lower || wanted_start > upper {
+            continue;
+        }
+        // Collapse to the series before asking whether the answer is unique: a
+        // master and a provider-sent override of one of its occurrences are two
+        // rows for ONE appointment.
+        let mut candidates: Vec<&str> = events
+            .iter()
+            .filter(|ev| normalize(&ev.title) == wanted_title && ev.start == wanted_start)
+            .map(|ev| crate::reminders::series_master_id(&ev.id))
+            .collect();
+        candidates.sort_unstable();
+        candidates.dedup();
+        let [found] = candidates.as_slice() else {
+            continue;
+        };
+        if let Err(err) = repo.heal_event_color(&row.event_id, found) {
+            tracing::warn!(
+                ?err,
+                "couldn't repoint an event colour; it stays where it is"
+            );
+        }
     }
 }
 
@@ -741,6 +950,38 @@ mod tests {
         assert!(repo.list_section_color_overrides().unwrap().is_empty());
     }
 
+    /// A minimal external event, for the anchor tests below.
+    fn event_fixture(
+        id: &str,
+        title: &str,
+        start: chrono::DateTime<chrono::Utc>,
+    ) -> cal_core::Event {
+        cal_core::Event {
+            id: id.into(),
+            calendar_id: "icloud:cal".into(),
+            title: title.into(),
+            description: None,
+            location: None,
+            start,
+            end: start + chrono::Duration::hours(1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: start,
+            updated_at: start,
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
+    }
+
     #[test]
     fn event_color_override_roundtrips_and_applies() {
         use chrono::{TimeZone, Utc};
@@ -797,6 +1038,234 @@ mod tests {
         // Clear reverts.
         repo.clear_event_color_label("icloud:evt-1").unwrap();
         assert!(repo.list_event_color_overrides().unwrap().is_empty());
+    }
+
+    /// The point of the signature: the provider reminted the id, and the read
+    /// path — which has the events in hand anyway — finds the row's event
+    /// again, so the colour the user chose is not lost in silence.
+    #[test]
+    fn an_event_colour_survives_a_reminted_id() {
+        use chrono::{Duration, TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-4', 'Reise', '#fb8c00')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        let start = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let window = (start - Duration::days(1), start + Duration::days(1));
+        let mk = |id: &str, title: &str| event_fixture(id, title, start);
+
+        repo.set_event_color_label("icloud:old", "label-4").unwrap();
+        // First render: the row learns what its event looks like. Existing
+        // rows have no signature at all, and this is where they get one.
+        heal_event_color_anchors(&repo, "icloud:cal", &[mk("icloud:old", "Reise")], window);
+        let row = &repo.list_event_color_overrides().unwrap()[0];
+        assert_eq!(row.title, "Reise");
+        assert_eq!(row.starts_at, start.to_rfc3339());
+
+        // The provider reminted the id: the same appointment, a new name for
+        // it. The binding follows.
+        heal_event_color_anchors(&repo, "icloud:cal", &[mk("icloud:new", " reise ")], window);
+        let rows = repo.list_event_color_overrides().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].event_id, "icloud:new");
+        assert_eq!(rows[0].color_label_id, "label-4");
+    }
+
+    /// Two appointments of the same name at the same time: moving the colour
+    /// to one of them would paint an appointment nobody pointed at, silently.
+    /// So it repairs NOTHING — and neither does a row whose appointment simply
+    /// is not in the window that was rendered.
+    #[test]
+    fn an_event_colour_is_never_moved_on_a_guess() {
+        use chrono::{Duration, TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-5', 'Team', '#fb8c00')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        let start = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let window = (start - Duration::days(1), start + Duration::days(1));
+        repo.set_event_color_label("icloud:old", "label-5").unwrap();
+        repo.refresh_event_color_signature(
+            "icloud:old",
+            "icloud:cal",
+            "Standup",
+            &start.to_rfc3339(),
+        )
+        .unwrap();
+
+        // Ambiguous: two events answer to the signature.
+        heal_event_color_anchors(
+            &repo,
+            "icloud:cal",
+            &[
+                event_fixture("icloud:a", "Standup", start),
+                event_fixture("icloud:b", "Standup", start),
+            ],
+            window,
+        );
+        assert_eq!(
+            repo.list_event_color_overrides().unwrap()[0].event_id,
+            "icloud:old"
+        );
+
+        // Out of the rendered window: "not here" means nothing, so the row
+        // waits rather than being hunted for among unrelated events.
+        let elsewhere = (start + Duration::days(30), start + Duration::days(31));
+        heal_event_color_anchors(
+            &repo,
+            "icloud:cal",
+            &[event_fixture(
+                "icloud:c",
+                "Standup",
+                start + Duration::days(30),
+            )],
+            elsewhere,
+        );
+        assert_eq!(
+            repo.list_event_color_overrides().unwrap()[0].event_id,
+            "icloud:old"
+        );
+    }
+
+    /// The same appointment routinely exists in two calendars — once where
+    /// colleagues see it, once copied where it is read out. Rendering one of
+    /// them must not take the other's colour: the copies are different events,
+    /// and the repair says nothing, so the theft would be invisible. Worse,
+    /// alternating renders would pass it back and forth forever.
+    #[test]
+    fn an_event_colour_is_never_taken_from_another_calendar() {
+        use chrono::{Duration, TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-6', 'Team', '#fb8c00')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        let start = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let window = (start - Duration::days(1), start + Duration::days(1));
+        let in_calendar = |id: &str, cal: &str| {
+            let mut ev = event_fixture(id, "Jour fixe", start);
+            ev.calendar_id = cal.into();
+            ev
+        };
+
+        // Coloured in the WORK calendar, and rendered there once so the row
+        // knows where it belongs.
+        repo.set_event_color_label("work:evt", "label-6").unwrap();
+        heal_event_color_anchors(&repo, "work", &[in_calendar("work:evt", "work")], window);
+
+        // Now render only the PRIVATE calendar, which holds its own copy of
+        // the same meeting. Nothing was reminted anywhere.
+        let mut private = vec![in_calendar("private:evt", "private")];
+        heal_event_color_anchors(&repo, "private", &private, window);
+        apply_color_to_events(&repo, &mut private);
+
+        let rows = repo.list_event_color_overrides().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].event_id, "work:evt", "the colour stayed put");
+        assert!(
+            private[0].color_label.is_none(),
+            "the private copy was never given a colour",
+        );
+    }
+
+    /// Two rows want the same id: one belongs to an appointment on screen, the
+    /// other's claim rests on an absence. Neither is destroyed — these rows
+    /// never leave the device, so a wrong delete is forever, and a lingering
+    /// stale row is invisible while a colour taken from the wrong appointment
+    /// is not.
+    #[test]
+    fn a_colliding_repair_destroys_nothing() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES
+                     ('label-7', 'Alt', '#fb8c00'), ('label-8', 'Neu', '#1e88e5')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        repo.set_event_color_label("icloud:old", "label-7").unwrap();
+        repo.set_event_color_label("icloud:new", "label-8").unwrap();
+
+        assert!(!repo.heal_event_color("icloud:old", "icloud:new").unwrap());
+        let rows = repo.list_event_color_overrides().unwrap();
+        assert_eq!(rows.len(), 2, "both rows survive");
+        let by_id: std::collections::HashMap<_, _> = rows
+            .iter()
+            .map(|r| (r.event_id.as_str(), r.color_label_id.as_str()))
+            .collect();
+        assert_eq!(by_id["icloud:old"], "label-7");
+        assert_eq!(by_id["icloud:new"], "label-8");
+    }
+
+    /// A recurring series is what this table is keyed for, and its master's
+    /// start can be months before the week being rendered. The window a batch
+    /// can speak for therefore includes the events it actually holds, or such
+    /// a row could never be repaired at all.
+    #[test]
+    fn a_recurring_master_outside_the_window_can_still_be_found() {
+        use chrono::{TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-9', 'Serie', '#fb8c00')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        let dtstart = Utc.with_ymd_and_hms(2026, 1, 5, 9, 0, 0).unwrap();
+        repo.set_event_color_label("icloud:series-old", "label-9")
+            .unwrap();
+        repo.refresh_event_color_signature(
+            "icloud:series-old",
+            "icloud:cal",
+            "Standup",
+            &dtstart.to_rfc3339(),
+        )
+        .unwrap();
+
+        // A week in June is rendered; the master row comes with it, as the
+        // cache returns rows by overlap, and its start is far outside.
+        let week = (
+            Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 8, 0, 0, 0).unwrap(),
+        );
+        heal_event_color_anchors(
+            &repo,
+            "icloud:cal",
+            &[event_fixture("icloud:series-new", "Standup", dtstart)],
+            week,
+        );
+        assert_eq!(
+            repo.list_event_color_overrides().unwrap()[0].event_id,
+            "icloud:series-new",
+        );
     }
 
     #[test]

@@ -69,7 +69,7 @@ use host_core::meetings::{
 use host_core::overrides::{
     apply_color_to_calendars, apply_color_to_contact_lists, apply_color_to_events,
     apply_color_to_sections, apply_color_to_task_lists, apply_to_calendars, apply_to_task_lists,
-    ContainerKind, OverridesError, OverridesRepo,
+    heal_event_color_anchors, ContainerKind, OverridesError, OverridesRepo,
 };
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
@@ -3090,7 +3090,17 @@ impl Host {
                     }
                 }
                 let shared = self.db.shared();
-                apply_color_to_events(&OverridesRepo::new(&shared), &mut events);
+                let overrides = OverridesRepo::new(&shared);
+                // The events of this calendar are in hand and the window is
+                // the one they were fetched for — the moment to keep the
+                // colour bindings anchored.
+                heal_event_color_anchors(
+                    &overrides,
+                    &req.calendar_id,
+                    &events,
+                    (range.start, range.end),
+                );
+                apply_color_to_events(&overrides, &mut events);
                 if event_self_warm_needed(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);

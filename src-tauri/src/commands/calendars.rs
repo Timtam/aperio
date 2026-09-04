@@ -24,7 +24,8 @@ use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{
-    apply_color_to_calendars, apply_color_to_events, apply_to_calendars, OverridesRepo,
+    apply_color_to_calendars, apply_color_to_events, apply_to_calendars, heal_event_color_anchors,
+    OverridesRepo,
 };
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
@@ -457,7 +458,18 @@ pub async fn get_events(
     // can't store a per-event color (iCloud etc.). `apply_color_to_events`
     // skips any event already carrying a native `color_hex`, so a leftover
     // Stage-1 override can never shadow a provider's native color here.
-    apply_color_to_events(&OverridesRepo::new(&db.shared()), &mut cached);
+    let shared = db.shared();
+    let overrides = OverridesRepo::new(&shared);
+    // The events of this calendar are in hand and the window is the one they
+    // were fetched for — the moment to keep the colour bindings anchored (see
+    // `heal_event_color_anchors`).
+    heal_event_color_anchors(
+        &overrides,
+        &request.calendar_id,
+        &cached,
+        (range.start, range.end),
+    );
+    apply_color_to_events(&overrides, &mut cached);
     tracing::info!(
         target: "aperio::cache",
         calendar_id = %request.calendar_id,
