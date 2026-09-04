@@ -16,7 +16,7 @@ use thiserror::Error;
 
 /// The schema version the current code expects. [`run`] applies every
 /// migration up to and including this one.
-pub const CURRENT_SCHEMA_VERSION: u32 = 44;
+pub const CURRENT_SCHEMA_VERSION: u32 = 45;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -207,6 +207,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 44,
         sql: include_str!("sql/0044_event_color_override_signature.sql"),
+    },
+    Migration {
+        target: 45,
+        sql: include_str!("sql/0045_event_meeting_signature.sql"),
     },
 ];
 

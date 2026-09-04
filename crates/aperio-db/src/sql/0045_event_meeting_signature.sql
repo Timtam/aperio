@@ -1,0 +1,31 @@
+-- Migration 0045: give the event↔meeting binding an anchor it can keep.
+--
+-- `event_meetings` (migration 0034) records which provider-side meeting Aperio
+-- created for which event, and names that event by the provider's id alone.
+-- Ids change underneath us — a re-bootstrap remints them, moving an event
+-- between calendars remints it, Exchange bakes a change token into its ids and
+-- remints them unprompted — and when that happens the binding points at an id
+-- nothing answers to.
+--
+-- What is lost is not visible the way a colour or a reminder is, which is why
+-- it went unnoticed: the Join button simply stops offering itself, and the
+-- meeting can no longer be taken down with its event. It stays on the provider
+-- forever, and the only record of who made it is the row that can no longer
+-- find it. That is precisely the failure migration 0034 created this table to
+-- prevent.
+--
+-- So the row learns the same SIGNATURE the tables around it already carry: the
+-- title and start the appointment had, and the calendar it lives in. The
+-- calendar is not decoration — the same appointment routinely exists in
+-- several calendars, and a signature without one would match the copy rather
+-- than the original. See `event_groups` (0035), `event_local_reminders` (0043)
+-- and `event_color_overrides` (0044), and `host_core::event_anchor` for the
+-- rule all of them share.
+--
+-- All three default to the empty string rather than being backfilled: there is
+-- nothing to backfill FROM. An empty signature cannot be matched, and the read
+-- path stamps the real one the next time it sees the event, so every existing
+-- binding anchors itself the first time its calendar is rendered.
+ALTER TABLE event_meetings ADD COLUMN title TEXT NOT NULL DEFAULT '';
+ALTER TABLE event_meetings ADD COLUMN starts_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE event_meetings ADD COLUMN calendar_id TEXT NOT NULL DEFAULT '';

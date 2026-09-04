@@ -15,7 +15,7 @@
 //! Nothing here knows a provider. The account id routes to whatever
 //! videoconference adapter is registered for it, and the meeting id is opaque.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::db::SharedConn;
@@ -34,6 +34,14 @@ pub struct EventMeeting {
     /// What the user actually clicks. Kept alongside so the UI can show the
     /// binding without a network call.
     pub join_url: String,
+    /// The title the appointment had when the read path last saw it, the start
+    /// it had, and the calendar it lives in — the SIGNATURE that lets the row
+    /// find its event again after the provider remints the id (migration
+    /// 0045). Empty until the event is first seen; see
+    /// [`crate::event_anchor`].
+    pub title: String,
+    pub starts_at: String,
+    pub calendar_id: String,
     pub created_at: String,
 }
 
@@ -193,6 +201,12 @@ impl<'a> MeetingsRepo<'a> {
             account_id: account_id.to_string(),
             meeting_id: meeting_id.to_string(),
             join_url: join_url.to_string(),
+            // The signature is learned by the read path the next time this
+            // event is rendered — `bind` is called from a create/update flow
+            // that does not necessarily know the appointment's final shape.
+            title: String::new(),
+            starts_at: String::new(),
+            calendar_id: String::new(),
             created_at,
         })
     }
@@ -201,7 +215,8 @@ impl<'a> MeetingsRepo<'a> {
     pub fn get(&self, event_id: &str) -> Result<Option<EventMeeting>, MeetingsError> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT event_id, account_id, meeting_id, join_url, created_at
+            "SELECT event_id, account_id, meeting_id, join_url, title, starts_at,
+                    calendar_id, created_at
                FROM event_meetings WHERE event_id = ?",
         )?;
         let row = stmt
@@ -211,7 +226,10 @@ impl<'a> MeetingsRepo<'a> {
                     account_id: row.get(1)?,
                     meeting_id: row.get(2)?,
                     join_url: row.get(3)?,
-                    created_at: row.get(4)?,
+                    title: row.get(4)?,
+                    starts_at: row.get(5)?,
+                    calendar_id: row.get(6)?,
+                    created_at: row.get(7)?,
                 })
             })
             .optional()?;
@@ -264,6 +282,83 @@ impl<'a> MeetingsRepo<'a> {
         Ok(None)
     }
 
+    /// Every binding. Small by nature — one row per event Aperio made a
+    /// meeting for — and the anchor repair needs them all at once.
+    pub fn list(&self) -> Result<Vec<EventMeeting>, MeetingsError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT event_id, account_id, meeting_id, join_url, title, starts_at,
+                    calendar_id, created_at
+               FROM event_meetings",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(EventMeeting {
+                event_id: row.get(0)?,
+                account_id: row.get(1)?,
+                meeting_id: row.get(2)?,
+                join_url: row.get(3)?,
+                title: row.get(4)?,
+                starts_at: row.get(5)?,
+                calendar_id: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Write down what the event looks like NOW, so the binding can be found
+    /// again once the provider remints its id.
+    ///
+    /// `created_at` deliberately does not move: this describes the event, it
+    /// does not change when the meeting was made.
+    pub fn refresh_signature(
+        &self,
+        event_id: &str,
+        calendar_id: &str,
+        title: &str,
+        starts_at: &str,
+    ) -> Result<(), MeetingsError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "UPDATE event_meetings
+                SET calendar_id = ?, title = ?, starts_at = ?
+              WHERE event_id = ?",
+            params![calendar_id, title, starts_at, event_id],
+        )?;
+        Ok(())
+    }
+
+    /// Point a binding at the id its event carries now.
+    ///
+    /// Only the clean case is repaired: a row already sitting on the new id is
+    /// the meeting made for the appointment that is actually there, and the
+    /// caller's evidence — "this id was not in this fetch of this calendar" —
+    /// is not proof the other event is gone. Nothing is deleted on that: a
+    /// binding is the ONLY record of a meeting Aperio created, so dropping the
+    /// wrong one strands that meeting on the provider for good.
+    pub fn heal(&self, old_event_id: &str, new_event_id: &str) -> Result<bool, MeetingsError> {
+        if old_event_id == new_event_id {
+            return Ok(false);
+        }
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let exists = |id: &str| -> Result<bool, rusqlite::Error> {
+            conn.prepare("SELECT 1 FROM event_meetings WHERE event_id = ?")?
+                .exists(params![id])
+        };
+        if !exists(old_event_id)? || exists(new_event_id)? {
+            return Ok(false);
+        }
+        let changed = conn.execute(
+            "UPDATE event_meetings SET event_id = ? WHERE event_id = ?",
+            params![new_event_id, old_event_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn unbind(&self, event_id: &str) -> Result<Option<EventMeeting>, MeetingsError> {
         let existing = self.get(event_id)?;
         if existing.is_some() {
@@ -277,6 +372,58 @@ impl<'a> MeetingsRepo<'a> {
     }
 }
 
+/// Keep the meeting bindings of one calendar's events anchored, while the
+/// events that prove it are in hand.
+///
+/// A binding names its event by the provider's id, and ids change underneath
+/// us. What to repair — and, mostly, what to leave alone — is decided by
+/// [`crate::event_anchor::plan_repairs`], which every table of this kind
+/// shares; this only applies the answer.
+///
+/// Losing a binding is quieter than losing a colour or a reminder: the Join
+/// button stops offering itself and the meeting can never be taken down with
+/// its event, so it stays on the provider with nothing left pointing at it.
+/// That is the failure migration 0034 exists to prevent, which is why these
+/// rows are anchored too.
+pub fn heal_event_meeting_anchors(
+    repo: &MeetingsRepo<'_>,
+    calendar_id: &str,
+    events: &[cal_core::Event],
+    range: (DateTime<Utc>, DateTime<Utc>),
+) {
+    let Ok(rows) = repo.list() else {
+        return;
+    };
+    let anchored: Vec<crate::event_anchor::Anchored> = rows
+        .iter()
+        .map(|row| crate::event_anchor::Anchored {
+            event_id: row.event_id.clone(),
+            calendar_id: row.calendar_id.clone(),
+            title: row.title.clone(),
+            starts_at: row.starts_at.clone(),
+        })
+        .collect();
+    for repair in crate::event_anchor::plan_repairs(&anchored, calendar_id, events, range) {
+        let outcome = match repair {
+            crate::event_anchor::Repair::Refresh {
+                event_id,
+                calendar_id,
+                title,
+                starts_at,
+            } => repo.refresh_signature(&event_id, &calendar_id, &title, &starts_at),
+            crate::event_anchor::Repair::Repoint { event_id, to } => {
+                repo.heal(&event_id, &to).map(|_| ())
+            }
+        };
+        if let Err(err) = outcome {
+            tracing::warn!(
+                ?err,
+                "couldn't anchor a meeting binding; it stays where it is"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +433,126 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = DbHandle::open(dir.path().join("test.sqlite")).expect("open");
         (dir, db)
+    }
+
+    fn meeting_event(id: &str, title: &str, start: DateTime<Utc>) -> cal_core::Event {
+        cal_core::Event {
+            id: id.into(),
+            calendar_id: "webex:cal".into(),
+            title: title.into(),
+            description: None,
+            location: None,
+            start,
+            end: start + chrono::Duration::hours(1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: start,
+            updated_at: start,
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
+    }
+
+    /// The whole point: the provider reminted the id, and the binding follows —
+    /// so the Join button keeps working and the meeting can still be taken
+    /// down with its event instead of being stranded.
+    #[test]
+    fn a_meeting_binding_survives_a_reminted_id() {
+        use chrono::TimeZone;
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = MeetingsRepo::new(&shared);
+        let start = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let window = (
+            start - chrono::Duration::days(1),
+            start + chrono::Duration::days(1),
+        );
+        repo.bind("old", "acc-1", "mtg-1", "https://example.test/j/1")
+            .unwrap();
+
+        // First render: the row learns what its event looks like. A binding
+        // made before migration 0045 has no signature at all, and this is
+        // where it gets one.
+        heal_event_meeting_anchors(
+            &repo,
+            "webex:cal",
+            &[meeting_event("old", "Weekly", start)],
+            window,
+        );
+        let row = repo.get("old").unwrap().expect("still there");
+        assert_eq!(row.title, "Weekly");
+        assert_eq!(row.calendar_id, "webex:cal");
+
+        // The id was reminted; the binding follows.
+        heal_event_meeting_anchors(
+            &repo,
+            "webex:cal",
+            &[meeting_event("new", " weekly ", start)],
+            window,
+        );
+        assert!(repo.get("old").unwrap().is_none());
+        let moved = repo.get("new").unwrap().expect("moved");
+        assert_eq!(moved.meeting_id, "mtg-1");
+        assert_eq!(moved.join_url, "https://example.test/j/1");
+    }
+
+    /// A binding is the only record of a meeting Aperio created, so a repair
+    /// that collides destroys neither row — stranding the wrong meeting on the
+    /// provider is not recoverable.
+    #[test]
+    fn a_colliding_meeting_repair_destroys_nothing() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = MeetingsRepo::new(&shared);
+        repo.bind("old", "acc-1", "mtg-old", "https://example.test/j/old")
+            .unwrap();
+        repo.bind("new", "acc-1", "mtg-new", "https://example.test/j/new")
+            .unwrap();
+        assert!(!repo.heal("old", "new").unwrap());
+        assert_eq!(repo.get("old").unwrap().unwrap().meeting_id, "mtg-old");
+        assert_eq!(repo.get("new").unwrap().unwrap().meeting_id, "mtg-new");
+    }
+
+    /// The same appointment in another calendar is a different event, and its
+    /// meeting is not this one's to take.
+    #[test]
+    fn a_meeting_binding_is_never_taken_from_another_calendar() {
+        use chrono::TimeZone;
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = MeetingsRepo::new(&shared);
+        let start = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let window = (
+            start - chrono::Duration::days(1),
+            start + chrono::Duration::days(1),
+        );
+        repo.bind("work:evt", "acc-1", "mtg-1", "https://example.test/j/1")
+            .unwrap();
+        heal_event_meeting_anchors(
+            &repo,
+            "webex:cal",
+            &[meeting_event("work:evt", "Jour fixe", start)],
+            window,
+        );
+
+        // Rendering a DIFFERENT calendar that holds its own copy.
+        let mut copy = meeting_event("private:evt", "Jour fixe", start);
+        copy.calendar_id = "private:cal".into();
+        heal_event_meeting_anchors(&repo, "private:cal", &[copy], window);
+        assert!(
+            repo.get("work:evt").unwrap().is_some(),
+            "the binding stayed put"
+        );
+        assert!(repo.get("private:evt").unwrap().is_none());
     }
 
     #[test]

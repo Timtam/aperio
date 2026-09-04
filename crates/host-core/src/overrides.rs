@@ -585,35 +585,12 @@ impl OverridesRepo<'_> {
 /// events that prove it are in hand.
 ///
 /// A binding names its event by the provider's id, and ids change underneath
-/// us: a re-bootstrap remints them, moving an event between calendars remints
-/// it, Exchange does it unprompted. Two things happen here, both silent:
-///
-///   * a row whose event is present has its SIGNATURE and its CALENDAR written
-///     down (migration 0044) — what the appointment looks like NOW, so a later
-///     rename or move never makes it unfindable. Rows written before this have
-///     neither and learn both the first time their calendar is rendered.
-///   * a row of THIS calendar whose id nothing answers to is pointed at the one
-///     event matching what it remembers.
-///
-/// Three guards, each for a way this could paint the wrong appointment — and a
-/// colour moved by mistake is worse than a colour that stays missing, because
-/// nothing announces it:
-///
-///   * only rows of the calendar being rendered may be called vanished. The
-///     same appointment routinely exists in several calendars, and without
-///     this, rendering one would find the copy in the other and take the
-///     colour with it — then the next render would take it back.
-///   * AMBIGUITY REPAIRS NOTHING: two appointments of the same name at the same
-///     time leave the row alone.
-///   * a row whose remembered start lies outside what this batch covers is left
-///     alone. Merely scrolling to another week would otherwise send the repair
-///     hunting among unrelated events. The batch covers its requested `range`
-///     AND the span of the events it actually contains — a recurring master's
-///     DTSTART can be months before the window it is rendered in, and that row
-///     is precisely the kind this table is keyed for.
+/// us. What to repair — and, mostly, what to leave alone — is decided by
+/// [`crate::event_anchor::plan_repairs`], which every table of this kind
+/// shares; this only applies the answer.
 ///
 /// Cost: one full read of this small table, plus a scan of the batch for each
-/// row of this calendar that cannot be found. The refresh writes only when
+/// row of this calendar that cannot be found. Writes happen only when
 /// something actually differs, so a rendered day that changed nothing performs
 /// no SQL beyond that read.
 pub fn heal_event_color_anchors(
@@ -625,80 +602,31 @@ pub fn heal_event_color_anchors(
     let Ok(rows) = repo.list_event_color_overrides() else {
         return;
     };
-    if rows.is_empty() {
-        return;
-    }
-    let normalize = |s: &str| s.trim().to_lowercase();
-    // A row counts as present under EITHER id its event answers to: the series
-    // master, which is what the write path binds to (migrations 0026 and
-    // 0035), and the row's own id, because a provider-sent override of one
-    // occurrence carries the master's in front of the marker and an older row
-    // may be bound to that. Recognising both means such a row is refreshed
-    // where it is rather than quietly reclassified as a whole-series binding.
-    let mut present: std::collections::HashMap<&str, &cal_core::Event> =
-        std::collections::HashMap::new();
-    for ev in events {
-        present.insert(ev.id.as_str(), ev);
-        present
-            .entry(crate::reminders::series_master_id(&ev.id))
-            .or_insert(ev);
-    }
-    // What this batch can speak for: the window it was fetched for, widened by
-    // the events it actually holds.
-    let (mut lower, mut upper) = range;
-    for ev in events {
-        lower = lower.min(ev.start);
-        upper = upper.max(ev.start);
-    }
-    for row in &rows {
-        if let Some(ev) = present.get(row.event_id.as_str()) {
-            let start = ev.start.to_rfc3339();
-            if ev.title != row.title || start != row.starts_at || row.calendar_id != calendar_id {
-                if let Err(err) = repo.refresh_event_color_signature(
-                    &row.event_id,
-                    calendar_id,
-                    &ev.title,
-                    &start,
-                ) {
-                    tracing::warn!(?err, "couldn't refresh an event colour's signature");
-                }
+    let anchored: Vec<crate::event_anchor::Anchored> = rows
+        .iter()
+        .map(|row| crate::event_anchor::Anchored {
+            event_id: row.event_id.clone(),
+            calendar_id: row.calendar_id.clone(),
+            title: row.title.clone(),
+            starts_at: row.starts_at.clone(),
+        })
+        .collect();
+    for repair in crate::event_anchor::plan_repairs(&anchored, calendar_id, events, range) {
+        let outcome = match repair {
+            crate::event_anchor::Repair::Refresh {
+                event_id,
+                calendar_id,
+                title,
+                starts_at,
+            } => repo.refresh_event_color_signature(&event_id, &calendar_id, &title, &starts_at),
+            crate::event_anchor::Repair::Repoint { event_id, to } => {
+                repo.heal_event_color(&event_id, &to).map(|_| ())
             }
-            continue;
-        }
-
-        // Another calendar's row is not missing — it was never in this batch.
-        if row.calendar_id != calendar_id {
-            continue;
-        }
-        let wanted_title = normalize(&row.title);
-        if wanted_title.is_empty() {
-            // No signature (a row from before migration 0044, or an event with
-            // no title at all): nothing to match on, so nothing to repair.
-            continue;
-        }
-        let Ok(wanted_start) = row.starts_at.parse::<chrono::DateTime<Utc>>() else {
-            continue;
         };
-        if wanted_start < lower || wanted_start > upper {
-            continue;
-        }
-        // Collapse to the series before asking whether the answer is unique: a
-        // master and a provider-sent override of one of its occurrences are two
-        // rows for ONE appointment.
-        let mut candidates: Vec<&str> = events
-            .iter()
-            .filter(|ev| normalize(&ev.title) == wanted_title && ev.start == wanted_start)
-            .map(|ev| crate::reminders::series_master_id(&ev.id))
-            .collect();
-        candidates.sort_unstable();
-        candidates.dedup();
-        let [found] = candidates.as_slice() else {
-            continue;
-        };
-        if let Err(err) = repo.heal_event_color(&row.event_id, found) {
+        if let Err(err) = outcome {
             tracing::warn!(
                 ?err,
-                "couldn't repoint an event colour; it stays where it is"
+                "couldn't anchor an event colour; it stays where it is"
             );
         }
     }

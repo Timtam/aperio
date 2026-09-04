@@ -3100,6 +3100,14 @@ impl Host {
                     &events,
                     (range.start, range.end),
                 );
+                // The meeting bindings hang on the same ids and are anchored
+                // the same way (migration 0045).
+                host_core::meetings::heal_event_meeting_anchors(
+                    &host_core::meetings::MeetingsRepo::new(&shared),
+                    &req.calendar_id,
+                    &events,
+                    (range.start, range.end),
+                );
                 apply_color_to_events(&overrides, &mut events);
                 if event_self_warm_needed(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);

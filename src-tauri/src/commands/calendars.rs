@@ -469,6 +469,14 @@ pub async fn get_events(
         &cached,
         (range.start, range.end),
     );
+    // The meeting bindings hang on the same ids and are anchored the same way
+    // (migration 0045) — losing one strands a meeting on the provider.
+    host_core::meetings::heal_event_meeting_anchors(
+        &host_core::meetings::MeetingsRepo::new(&shared),
+        &request.calendar_id,
+        &cached,
+        (range.start, range.end),
+    );
     apply_color_to_events(&overrides, &mut cached);
     tracing::info!(
         target: "aperio::cache",
