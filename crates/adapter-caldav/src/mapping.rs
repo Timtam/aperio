@@ -33,9 +33,22 @@ use cal_core::{
     AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
-use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
+use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Property};
 
 use crate::error::{CaldavError, CaldavResult};
+
+/// The one VALARM property Aperio insists on authoring: it is the event's own
+/// title, so it has to follow the title being written. Everything else on an
+/// UNCHANGED alarm is the server's to keep — including the TRIGGER, whose exact
+/// spelling matters: `reminder_to_alarm` renders a relative trigger through
+/// chrono, which prints total seconds (`-PT3600S`), where Apple wrote `-PT1H`.
+/// Same instant, different text, and re-spelling an alarm we did not touch is
+/// exactly the kind of damage this preservation exists to avoid.
+const ALARM_PROPS_WE_AUTHOR: [&str; 1] = ["DESCRIPTION"];
+
+/// Apple's mark on an alarm — or on a whole event — that says "this is the
+/// ACCOUNT's default alert, not one somebody chose here".
+const APPLE_DEFAULT_ALARM: &str = "X-APPLE-DEFAULT-ALARM";
 
 /// Parse the calendar-data of a CalDAV REPORT response into a
 /// chronologically sorted list of events. One VCALENDAR body may
@@ -280,6 +293,206 @@ fn parse_valarms(ev: &icalendar::Event) -> Vec<Reminder> {
         out.push(Reminder { kind, sound: None });
     }
     out
+}
+
+/// The alarms already on the server's copy of an event, so a write doesn't
+/// destroy what it cannot rebuild.
+///
+/// A VALARM carries more than the reminder Aperio models. Apple writes the
+/// ACCOUNT's default alert into the appointment itself, as a VALARM marked
+/// `X-APPLE-DEFAULT-ALARM:TRUE` — that marker is how the Calendar app later
+/// tells its own default from an alert somebody set deliberately — and every
+/// alarm gets a `UID` besides. Rebuilding the VEVENT from core fields spelled
+/// the reminder right and threw the rest away, so an appointment made on an
+/// iPhone came back from any Aperio edit with Apple's own default looking
+/// hand-made.
+///
+/// The rule is per alarm and turns on whether the reminder CHANGED. An alarm
+/// whose reminder is untouched is written back with the previous copy's
+/// properties laid over the ones we generate — same trigger, same identity,
+/// same marker. One the user moved or removed keeps nothing: it is not the
+/// account's default any more, and claiming otherwise would be a worse lie
+/// than losing the mark.
+#[derive(Debug, Clone, Default)]
+pub struct PriorAlarms {
+    alarms: Vec<PriorAlarm>,
+    /// The marker as it sat on the VEVENT itself (iCloud writes it in both
+    /// places). Only re-emitted for an alarm set that came through untouched.
+    event_marker: Option<Property>,
+}
+
+#[derive(Debug, Clone)]
+struct PriorAlarm {
+    /// What this VALARM parses to, so matching runs on the reminder Aperio
+    /// understands rather than on raw TRIGGER text. It has to: Apple writes
+    /// `-PT1H` and we would write `-PT3600S` for the very same reminder, so
+    /// comparing the text would match nothing at all.
+    ///
+    /// `None` for an alarm this crate cannot put back the way it found it —
+    /// see [`faithful_reminder`]. Such an alarm is never claimed, so the mark
+    /// falls away with it and the write is exactly what it was before any of
+    /// this existed. Recording it at all is the point: the alarm still counts
+    /// towards "did the set survive", which is how a VALARM Aperio silently
+    /// drops stops being mistaken for one that came through untouched.
+    reminder: Option<Reminder>,
+    properties: Vec<Property>,
+    multi_properties: Vec<Property>,
+    /// Apple's mark, held apart from the rest because it may only come back
+    /// for a set nobody touched — see [`PriorAlarms`].
+    default_marker: Option<Property>,
+    /// Set once this alarm has been claimed, so two identical reminders can't
+    /// both inherit the same alarm's identity.
+    claimed: bool,
+}
+
+impl PriorAlarms {
+    /// Read the alarms off the MASTER VEVENT of a resource body.
+    ///
+    /// Overrides (the VEVENTs carrying RECURRENCE-ID) are skipped on purpose:
+    /// [`event_to_ical`] only ever writes the master, and an override's alarms
+    /// belong to that one occurrence. A body we cannot parse yields nothing,
+    /// which costs only the preservation — never the write.
+    pub fn read(body: &str) -> Self {
+        let Ok(parsed) = body.parse::<ICalendar>() else {
+            return Self::default();
+        };
+        for comp in &parsed.components {
+            let icalendar::CalendarComponent::Event(ev) = comp else {
+                continue;
+            };
+            if ev.property_value("RECURRENCE-ID").is_some() {
+                continue;
+            }
+            return Self {
+                alarms: prior_alarms_of(ev),
+                event_marker: ev.properties().get(APPLE_DEFAULT_ALARM).cloned(),
+            };
+        }
+        Self::default()
+    }
+
+    /// Claim the previous alarm this reminder came from, if it is still there
+    /// unchanged, and return its index. Claiming is what makes two identical
+    /// reminders take two different alarms rather than the same one twice.
+    fn claim(&mut self, reminder: &Reminder) -> Option<usize> {
+        let idx = self.alarms.iter().position(|a| {
+            !a.claimed && a.reminder.as_ref().is_some_and(|r| r.kind == reminder.kind)
+        })?;
+        self.alarms[idx].claimed = true;
+        Some(idx)
+    }
+
+    /// True once every alarm the server had has been claimed by a reminder we
+    /// are writing — i.e. the alarm set came through this edit untouched. Only
+    /// then may the VEVENT-level marker stay: it speaks for all of them.
+    fn all_claimed(&self) -> bool {
+        self.alarms.iter().all(|a| a.claimed)
+    }
+}
+
+/// Split every VALARM on `ev` into the reminder it means and the properties
+/// Aperio does not write itself.
+fn prior_alarms_of(ev: &icalendar::Event) -> Vec<PriorAlarm> {
+    let mut out = Vec::new();
+    for child in ev.components() {
+        if child.component_kind() != "VALARM" {
+            continue;
+        }
+        let action = child
+            .property_value("ACTION")
+            .map(|s| s.to_ascii_uppercase())
+            .unwrap_or_default();
+        let properties: Vec<Property> = child
+            .properties()
+            .iter()
+            .filter(|(key, _)| {
+                !ALARM_PROPS_WE_AUTHOR.contains(&key.as_str())
+                    && key.as_str() != APPLE_DEFAULT_ALARM
+            })
+            .map(|(_, prop)| prop.clone())
+            .collect();
+        let multi_properties: Vec<Property> = child
+            .multi_properties()
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        out.push(PriorAlarm {
+            reminder: faithful_reminder(child, &action, &properties, &multi_properties),
+            default_marker: child.properties().get(APPLE_DEFAULT_ALARM).cloned(),
+            properties,
+            multi_properties,
+            claimed: false,
+        });
+    }
+    out
+}
+
+/// The reminder this VALARM stands for — but ONLY when Aperio could put the
+/// alarm back the way it found it. `None` means "hands off": the alarm is left
+/// unclaimed, so nothing is inherited from it and the whole set counts as
+/// changed.
+///
+/// Preserving half of something is worse than not preserving it. Each check
+/// below is a way the write would otherwise hand the server an alarm that says
+/// something the server did not say:
+///
+/// * A TRIGGER Aperio cannot read is an alarm Aperio also cannot SHOW — the
+///   reminder never reaches the editor, and the rebuild drops the VALARM
+///   entirely. Apple's "1 week before" default (`TRIGGER:-P1W`) is exactly
+///   this. Counting it as unchanged would stamp "still the account's default"
+///   on a set the write is about to shrink, and an account that believes that
+///   may put its missing alarm back — resurrecting a reminder nobody has.
+/// * `RELATED=END` means "before the END", which Aperio reads as "before the
+///   start" and would keep writing as such. Inheriting the trigger text
+///   freezes a meaning the editor never showed; writing our own silently moves
+///   an alarm nobody touched. Neither is honest, so the alarm is left alone.
+/// * An ACTION we would not have written (AUDIO, where we build DISPLAY) is
+///   not just a label: RFC 5545 §3.6.6 gives each action its own set of
+///   allowed properties, and an AUDIO alarm carrying the DESCRIPTION we author
+///   is a body a strict server answers with 403.
+/// * A parameter whose value needs quoting does not survive this crate's
+///   writer — it re-quotes only for `:` and `;`, so `X-ADDRESS="Hauptstr. 1,
+///   Berlin"` comes back unquoted and reads as a LIST of values. Until now
+///   these properties were dropped on every write, so nothing round-tripped
+///   through that gap; sending them back mangled would be a new kind of
+///   damage, not a repair.
+fn faithful_reminder(
+    alarm: &impl Component,
+    action: &str,
+    properties: &[Property],
+    multi_properties: &[Property],
+) -> Option<Reminder> {
+    let trigger = alarm.properties().get("TRIGGER")?;
+    if trigger
+        .params()
+        .get("RELATED")
+        .is_some_and(|p| !p.value().eq_ignore_ascii_case("START"))
+    {
+        return None;
+    }
+    let kind = resolve_trigger(trigger, action)?;
+    if action != action_we_would_write(&kind) {
+        return None;
+    }
+    let reproducible = |prop: &Property| {
+        prop.params()
+            .values()
+            .all(|param| !param.value().contains([',', '"']))
+    };
+    if !properties.iter().chain(multi_properties).all(reproducible) {
+        return None;
+    }
+    Some(Reminder { kind, sound: None })
+}
+
+/// The ACTION [`reminder_to_alarm`] emits for this kind. Kept beside it so the
+/// two cannot drift apart.
+fn action_we_would_write(kind: &ReminderKind) -> &'static str {
+    match kind {
+        ReminderKind::Email { .. } => "EMAIL",
+        _ => "DISPLAY",
+    }
 }
 
 /// Decide whether `TRIGGER` carries an absolute date-time or a
@@ -545,7 +758,16 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
 /// server schedules the meeting; otherwise they're omitted (no scheduling).
 pub fn new_event_to_ical(uid: &str, event: &NewEvent, organizer: Option<&str>) -> String {
     let mut ical_ev = icalendar::Event::new();
-    apply_common(&mut ical_ev, uid, event, organizer);
+    // A brand-new appointment has no previous copy, so there is nothing to
+    // preserve — and Apple's default-alert marker is Apple's to apply, never
+    // ours to forge.
+    apply_common(
+        &mut ical_ev,
+        uid,
+        event,
+        organizer,
+        &mut PriorAlarms::default(),
+    );
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     with_vtimezone(cal.to_string(), event)
@@ -584,7 +806,24 @@ fn with_vtimezone(mut ical: String, event: &NewEvent) -> String {
 }
 
 /// Render an existing event back to iCal for the update PUT.
+///
+/// Rebuilds the VEVENT from core fields, so it knows nothing about the copy it
+/// replaces. Callers that hold that copy should use
+/// [`event_to_ical_preserving`] instead: it keeps the parts of an unchanged
+/// alarm that Aperio does not model — Apple's default-alert marker above all.
 pub fn event_to_ical(event: &Event, organizer: Option<&str>) -> String {
+    event_to_ical_preserving(event, organizer, PriorAlarms::default())
+}
+
+/// [`event_to_ical`], with the alarms of the server's current copy in hand.
+///
+/// See [`PriorAlarms`] for what survives and why. `prior` is consumed because
+/// each of its alarms may be claimed only once.
+pub fn event_to_ical_preserving(
+    event: &Event,
+    organizer: Option<&str>,
+    mut prior: PriorAlarms,
+) -> String {
     let new = NewEvent {
         title: event.title.clone(),
         description: event.description.clone(),
@@ -607,7 +846,11 @@ pub fn event_to_ical(event: &Event, organizer: Option<&str>) -> String {
     // *different* event and spawns a duplicate. `decode_event_id` yields the
     // bare uid for both composite and legacy bare ids.
     let (_, uid) = decode_event_id(&event.id);
-    new_event_to_ical(uid, &new, organizer)
+    let mut ical_ev = icalendar::Event::new();
+    apply_common(&mut ical_ev, uid, &new, organizer, &mut prior);
+    let mut cal = ICalendar::new();
+    cal.push(ical_ev.done());
+    with_vtimezone(cal.to_string(), &new)
 }
 
 fn apply_common(
@@ -615,6 +858,7 @@ fn apply_common(
     uid: &str,
     event: &NewEvent,
     organizer: Option<&str>,
+    prior: &mut PriorAlarms,
 ) {
     ical_ev.uid(uid);
     ical_ev.summary(&event.title);
@@ -678,9 +922,49 @@ fn apply_common(
     // VALARM children — one per Reminder so iCloud's iOS / Alexa
     // bridge sees the reminders we set, and we keep their default
     // ones when we round-trip an event we read back.
+    // Built first and pushed second: whether Apple's mark may come back is a
+    // fact about the WHOLE set, and that is not known until every reminder has
+    // been matched against the server's copy.
+    let mut built = Vec::with_capacity(event.reminders.len());
     for reminder in &event.reminders {
-        if let Some(alarm) = reminder_to_alarm(reminder, &event.title) {
-            ical_ev.alarm(alarm);
+        let Some(mut alarm) = reminder_to_alarm(reminder, &event.title) else {
+            continue;
+        };
+        // An alarm the user left alone keeps what the server's copy said about
+        // it — its own UID, its X-properties, and the exact TRIGGER text. Only
+        // DESCRIPTION is ours, because it is the title we are writing.
+        let claimed = prior.claim(reminder);
+        if let Some(idx) = claimed {
+            let kept = &prior.alarms[idx];
+            for prop in &kept.properties {
+                alarm.append_property(prop.clone());
+            }
+            for prop in &kept.multi_properties {
+                alarm.append_multi_property(prop.clone());
+            }
+        }
+        built.push((alarm, claimed));
+    }
+    // Apple's mark says "this is the ACCOUNT's default alert". It survives only
+    // an edit that left the alarms alone: every alarm the server had claimed,
+    // and none added beside them. The moment the set changes it is the user's
+    // choice, not the account's default — and handing a changed set back still
+    // marked invites the account to "repair" it into what its default says,
+    // which would resurrect a reminder the user had just deleted.
+    let set_untouched =
+        !built.is_empty() && built.iter().all(|(_, c)| c.is_some()) && prior.all_claimed();
+    for (mut alarm, claimed) in built {
+        if set_untouched {
+            if let Some(marker) = claimed.and_then(|i| prior.alarms[i].default_marker.clone()) {
+                alarm.append_property(marker);
+            }
+        }
+        ical_ev.alarm(alarm);
+    }
+    // The mark sits on the VEVENT as well, where it speaks for all of them.
+    if set_untouched {
+        if let Some(marker) = prior.event_marker.clone() {
+            ical_ev.append_property(marker);
         }
     }
     // ORGANIZER + ATTENDEE drive RFC 6638 server-side scheduling. On an
@@ -1726,6 +2010,397 @@ END:VCALENDAR\r
             }
             other => panic!("expected Relative reminder, got {other:?}"),
         }
+    }
+
+    /// A body shaped like what iCloud actually stores for an appointment
+    /// created on an iPhone: the account's default alert, written into the
+    /// event as a marked VALARM with an identity of its own.
+    fn icloud_body_with_default_alarm() -> &'static str {
+        "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//Apple Inc.//iCloud Calendar//EN\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-PT1H\r
+UID:alarm-1\r
+X-WR-ALARMUID:alarm-1\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+"
+    }
+
+    /// The event as Aperio holds it — read back from that same body, which is
+    /// how it really reaches a write, with the reminders the user left behind.
+    fn event_with_reminders(kinds: Vec<ReminderKind>) -> Event {
+        let mut event = parse_calendar_data(icloud_body_with_default_alarm(), "cal-1")
+            .unwrap()
+            .remove(0);
+        event.reminders = kinds
+            .into_iter()
+            .map(|kind| Reminder { kind, sound: None })
+            .collect();
+        event
+    }
+
+    #[test]
+    fn keeps_apples_default_alarm_mark_when_the_reminder_is_untouched() {
+        // The whole point. Apple recognises its own default alert by this
+        // mark; rebuilding the VEVENT dropped it, so an appointment made on an
+        // iPhone came back from a plain title edit with Apple's default
+        // looking hand-made.
+        let prior = PriorAlarms::read(icloud_body_with_default_alarm());
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        // Counted per LEVEL, not in total: two marks on the alarm and none on
+        // the event would satisfy a bare count of two.
+        let (event_part, alarm_part) = out.split_once("BEGIN:VALARM").unwrap();
+        assert!(
+            event_part.contains("X-APPLE-DEFAULT-ALARM:TRUE"),
+            "the mark is missing from the event itself:\n{out}"
+        );
+        assert!(
+            alarm_part.contains("X-APPLE-DEFAULT-ALARM:TRUE"),
+            "the mark is missing from the alarm:\n{out}"
+        );
+        assert_eq!(out.matches("X-APPLE-DEFAULT-ALARM").count(), 2, "{out}");
+        // Anchored to a whole line: `X-WR-ALARMUID:alarm-1` contains the same
+        // text, so a bare substring test cannot see the loss it names.
+        assert!(
+            out.contains("\r\nUID:alarm-1\r\n"),
+            "the alarm's own identity was lost:\n{out}"
+        );
+        assert!(
+            out.contains("X-WR-ALARMUID:alarm-1"),
+            "an unknown X-property was dropped:\n{out}"
+        );
+        // The server's own spelling survives: we would write -PT3600S for the
+        // very same reminder, and re-spelling an alarm nobody touched is
+        // exactly the damage this avoids.
+        assert!(
+            out.contains("TRIGGER:-PT1H"),
+            "the untouched alarm was re-spelled:\n{out}"
+        );
+        // DESCRIPTION stays ours — it is the title being written.
+        assert!(out.contains("DESCRIPTION:Zahnarzt"), "{out}");
+    }
+
+    #[test]
+    fn drops_the_mark_once_the_user_moves_the_reminder() {
+        // 60 → 30 is the user's choice, not the account's default any more.
+        let prior = PriorAlarms::read(icloud_body_with_default_alarm());
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 30 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("X-APPLE-DEFAULT-ALARM"),
+            "a reminder the user moved must not still claim to be the account default:\n{out}"
+        );
+        assert!(
+            !out.contains("UID:alarm-1"),
+            "a changed reminder must not inherit the old alarm's identity:\n{out}"
+        );
+        assert!(out.contains("TRIGGER:-PT1800S"), "{out}");
+    }
+
+    #[test]
+    fn drops_the_mark_once_the_user_adds_a_reminder_beside_it() {
+        // The kept alarm is still Apple's, but the SET is no longer the
+        // account's default — and handing a changed set back still marked
+        // invites the account to repair it into what its default says.
+        let prior = PriorAlarms::read(icloud_body_with_default_alarm());
+        let event = event_with_reminders(vec![
+            ReminderKind::Relative { minutes_before: 60 },
+            ReminderKind::Relative { minutes_before: 10 },
+        ]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("X-APPLE-DEFAULT-ALARM"),
+            "an extended set must not stay marked as the account default:\n{out}"
+        );
+        // The untouched alarm still keeps its identity — that is not the mark.
+        assert!(out.contains("UID:alarm-1"), "{out}");
+    }
+
+    #[test]
+    fn removing_the_reminder_takes_the_mark_with_it() {
+        let prior = PriorAlarms::read(icloud_body_with_default_alarm());
+        let event = event_with_reminders(Vec::new());
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(!out.contains("BEGIN:VALARM"), "{out}");
+        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
+    }
+
+    #[test]
+    fn two_identical_reminders_take_two_different_alarms() {
+        // Both alarms fire an hour before and are indistinguishable after the
+        // parse. Each may be claimed once, or one alarm's identity would be
+        // written twice and the other's lost.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:a\r
+TRIGGER:-PT1H\r
+UID:alarm-a\r
+END:VALARM\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:b\r
+TRIGGER:-PT60M\r
+UID:alarm-b\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let prior = PriorAlarms::read(body);
+        let event = event_with_reminders(vec![
+            ReminderKind::Relative { minutes_before: 60 },
+            ReminderKind::Relative { minutes_before: 60 },
+        ]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(out.contains("UID:alarm-a"), "{out}");
+        assert!(out.contains("UID:alarm-b"), "{out}");
+        assert_eq!(out.matches("UID:alarm-a").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn an_overrides_alarms_are_not_the_masters() {
+        // One resource, master plus a modified occurrence. `event_to_ical`
+        // only ever writes the master, so only the master's alarms may be
+        // inherited — the override's belong to that one occurrence.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Serie\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+RRULE:FREQ=WEEKLY\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:master\r
+TRIGGER:-PT1H\r
+UID:alarm-master\r
+END:VALARM\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+RECURRENCE-ID:20260527T080000Z\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Serie\r
+DTSTART:20260527T090000Z\r
+DTEND:20260527T100000Z\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:override\r
+TRIGGER:-PT1H\r
+UID:alarm-override\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let prior = PriorAlarms::read(body);
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(out.contains("UID:alarm-master"), "{out}");
+        assert!(!out.contains("alarm-override"), "{out}");
+    }
+
+    #[test]
+    fn a_new_appointment_never_forges_the_mark() {
+        // Apple's mark is Apple's to apply. A create has no previous copy, and
+        // event_to_ical without one must behave exactly as it always did.
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical(&event, None);
+        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
+        assert!(out.contains("TRIGGER:-PT3600S"), "{out}");
+    }
+
+    /// An event carrying one alarm Aperio can read and one it cannot.
+    fn body_with_an_unreadable_alarm(unreadable: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+{unreadable}BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-PT1H\r
+UID:alarm-hour\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+"
+        )
+    }
+
+    #[test]
+    fn an_alarm_aperio_cannot_read_still_counts_as_part_of_the_set() {
+        // Apple's default-alert menu offers "1 week before", and iCloud stores
+        // that as TRIGGER:-P1W — which this crate's duration parser cannot
+        // read. The reminder never reaches the editor and the rebuild drops
+        // the VALARM, so the set the PUT carries is SMALLER than the server's.
+        // Calling that untouched would tell the account its default is intact
+        // and invite it to put the missing alarm back.
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(
+            "BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-P1W\r
+UID:alarm-week\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+END:VALARM\r
+",
+        ));
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("X-APPLE-DEFAULT-ALARM"),
+            "an alarm went missing from the set, so it is not the account default any more:\n{out}"
+        );
+    }
+
+    #[test]
+    fn an_alarm_relative_to_the_end_is_left_alone() {
+        // RELATED=END means "before the END". Aperio reads it as "before the
+        // start" and shows it that way, so neither keeping the text nor
+        // writing our own is honest — the alarm is not ours to touch.
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(
+            "BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER;RELATED=END:-PT15M\r
+UID:alarm-end\r
+END:VALARM\r
+",
+        ));
+        let event = event_with_reminders(vec![
+            ReminderKind::Relative { minutes_before: 15 },
+            ReminderKind::Relative { minutes_before: 60 },
+        ]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("UID:alarm-end"),
+            "an alarm Aperio misreads must not have its identity carried over:\n{out}"
+        );
+        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
+    }
+
+    #[test]
+    fn an_audio_alarm_is_not_dressed_up_as_a_display_one() {
+        // RFC 5545 §3.6.6 gives each ACTION its own allowed properties, and an
+        // AUDIO alarm may not carry a DESCRIPTION. Inheriting the ACTION while
+        // still authoring the DESCRIPTION built exactly that body — which a
+        // validating server answers with 403.
+        let prior = PriorAlarms::read(
+            "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:AUDIO\r
+TRIGGER:-PT1H\r
+UID:alarm-audio\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+",
+        );
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("ACTION:AUDIO"),
+            "we build a DISPLAY alarm; wearing the old ACTION makes it invalid:\n{out}"
+        );
+        assert!(out.contains("ACTION:DISPLAY"), "{out}");
+    }
+
+    #[test]
+    fn a_property_this_crate_cannot_re_quote_is_not_carried_over() {
+        // The writer only re-quotes a parameter value containing `:` or `;`,
+        // so a comma inside one comes back UNQUOTED — and RFC 5545 §3.2 then
+        // reads it as a list of values. Every real street address has a comma
+        // in it. These properties used to be dropped on every write; handing
+        // them back mangled would be new damage, not a repair.
+        let prior = PriorAlarms::read(
+            "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-PT1H\r
+UID:alarm-1\r
+X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-ADDRESS=\"Hauptstr. 1, Berlin\":geo:52.5,13.4\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+",
+        );
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+
+        assert!(
+            !out.contains("X-ADDRESS"),
+            "a parameter we cannot re-quote must not be written back:\n{out}"
+        );
+        assert!(
+            !out.contains("UID:alarm-1"),
+            "the alarm is not reproducible, so nothing of it is inherited:\n{out}"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_previous_copy_costs_only_the_preservation() {
+        let prior = PriorAlarms::read("not an icalendar body at all");
+        let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
+        let out = event_to_ical_preserving(&event, None, prior);
+        assert!(
+            out.contains("BEGIN:VALARM"),
+            "the write itself must stand:\n{out}"
+        );
+        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
     }
 
     #[test]

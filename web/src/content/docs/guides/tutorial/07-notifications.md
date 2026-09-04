@@ -69,6 +69,18 @@ Calendar → Default Alert Times**). Apple writes it into the appointment as an
 alarm and marks that alarm as its own default, which is how the Calendar app
 can tell it apart from one somebody set deliberately.
 
+Aperio keeps that mark. Editing an appointment made on an iPhone — its title,
+its time, anything — leaves the alert itself alone, mark and all, so it stays
+Apple's default instead of turning into an alert you appear to have set by
+hand. Change the reminder here, add one beside it or take it away, and the mark
+goes: it is your choice then, and an account that still believed the alert was
+its own could put its version back.
+
+Where Aperio cannot put an alert back exactly as it found it — one it cannot
+read in the first place, or one written in a way this app would have to respell
+— it leaves the alert to the server and drops the mark rather than guess. Those
+appointments behave as they did before.
+
 So an appointment Aperio creates with an **attached** reminder ends up with
 both: Apple's default alert and Aperio's. Apple Calendar lists them as "1st
 alert: default" and "2nd alert", and a voice assistant reading the calendar

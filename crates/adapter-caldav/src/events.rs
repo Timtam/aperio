@@ -26,8 +26,8 @@ use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
 use crate::mapping::{
-    decode_event_id, event_to_ical, new_event_to_ical, override_recurrence_id, parse_calendar_data,
-    parse_calendar_data_with_href,
+    decode_event_id, event_to_ical_preserving, new_event_to_ical, override_recurrence_id,
+    parse_calendar_data, parse_calendar_data_with_href, PriorAlarms,
 };
 use crate::xml::parse_multistatus;
 
@@ -244,6 +244,43 @@ pub async fn update_event(
     put_master_only(client, event, credentials, organizer).await
 }
 
+/// Read the alarms already on the server's copy, so the PUT below doesn't
+/// destroy what it cannot rebuild (see [`PriorAlarms`]).
+///
+/// Best effort in every direction: an event with no reminders can inherit
+/// nothing, so it is not worth a request; a read that fails costs only the
+/// preservation and never the write. The cost is one GET on a save that
+/// carries reminders — a user-initiated action, one at a time.
+async fn read_prior_alarms(
+    client: &Client,
+    resource: &Url,
+    event: &Event,
+    credentials: &Credentials,
+) -> PriorAlarms {
+    if event.reminders.is_empty() {
+        return PriorAlarms::default();
+    }
+    let Ok(mut headers) = auth_header(credentials) else {
+        return PriorAlarms::default();
+    };
+    headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
+    let Ok(response) = client
+        .get(resource.clone())
+        .headers(headers)
+        .send_retrying()
+        .await
+    else {
+        return PriorAlarms::default();
+    };
+    if !response.status().is_success() {
+        return PriorAlarms::default();
+    }
+    match response.text().await {
+        Ok(body) => PriorAlarms::read(&body),
+        Err(_) => PriorAlarms::default(),
+    }
+}
+
 /// The plain update: serialise just the master and PUT it, letting the server
 /// keep the resource's other components (overrides) on the next round-trip.
 async fn put_master_only(
@@ -255,13 +292,18 @@ async fn put_master_only(
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url_for_event(&cal_url, &event.id)?;
-    let body = event_to_ical(&event, organizer);
+    let prior = read_prior_alarms(client, &resource, &event, credentials).await;
+    let body = event_to_ical_preserving(&event, organizer, prior);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("text/calendar; charset=utf-8"),
     );
+    // If-Match still guards with the CALLER's ETag, not one from the read
+    // above: the read is only there to see what the alarms looked like, and
+    // conflict detection has to keep answering "did this change since the user
+    // last saw it", not "since a moment ago".
     if let Some(etag) = &event.etag {
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
@@ -316,8 +358,10 @@ async fn update_event_dropping_tail_overrides(
 
     // Master via event_to_ical (new RRULE/UNTIL + VTIMEZONE); merge keeps the
     // in-range override blocks verbatim and drops the tail. A parse mismatch →
-    // bail to the plain PUT (never worse than today).
-    let master_vcal = event_to_ical(&event, organizer);
+    // bail to the plain PUT (never worse than today). The body is already in
+    // hand, so the master's untouched alarms keep their identity for free —
+    // the overrides' alarms survive anyway, being spliced back verbatim.
+    let master_vcal = event_to_ical_preserving(&event, organizer, PriorAlarms::read(&body));
     let new_body = match merge_dropping_tail_overrides(&body, &master_vcal, until, cal_url.as_str())
     {
         Some(b) => b,
@@ -579,8 +623,11 @@ pub async fn add_event_exdate(
     // the master with its updated EXDATE list. Servers reattach
     // their other components on the next round-trip.
     // Re-serialising the master after an EXDATE skip — never a scheduling
-    // write, so no organizer.
-    let serialised = crate::mapping::event_to_ical(&master_clone, None);
+    // write, so no organizer. Skipping one occurrence changes nothing about
+    // the alarms, so they all come back exactly as the server had them: the
+    // body we just read is right here.
+    let serialised =
+        crate::mapping::event_to_ical_preserving(&master_clone, None, PriorAlarms::read(&body));
 
     // Step 3: PUT the modified body back. If-Match guards against a
     // race with a concurrent edit; without an ETag we send the
@@ -824,7 +871,9 @@ fn expect_write_success(response: &reqwest::Response) -> CaldavResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests still call the preservation-free renderer directly.
     use crate::config::{AuthKind, CaldavAccountConfig};
+    use crate::mapping::event_to_ical;
     use chrono::TimeZone;
     use mockito::Server;
 
@@ -1088,6 +1137,176 @@ END:VCALENDAR</c:calendar-data>
             .unwrap();
         m.assert_async().await;
         assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
+    }
+
+    #[tokio::test]
+    async fn update_reads_the_server_copy_and_puts_apples_mark_back() {
+        // The wiring, end to end: a plain update has no body in hand, so it
+        // reads the server's copy first and hands the alarms to the renderer.
+        // Without that read the PUT would spell Apple's own default alert as a
+        // hand-made alarm and the Calendar app would stop recognising it.
+        let mut server = Server::new_async().await;
+        let get = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(200)
+            .with_header("content-type", "text/calendar")
+            .with_body(
+                "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:abc-123@aperio\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Standup\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T083000Z\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-PT1H\r
+UID:alarm-1\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+",
+            )
+            .create_async()
+            .await;
+        let put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            // The caller's ETag, NOT the one the read above just saw: a change
+            // since the user last looked still has to surface as a conflict.
+            .match_header("if-match", "\"old-etag\"")
+            .match_body(mockito::Matcher::Regex("X-APPLE-DEFAULT-ALARM:TRUE".into()))
+            .with_status(204)
+            .with_header("etag", "\"new-etag\"")
+            .create_async()
+            .await;
+
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let existing = Event {
+            reminders: vec![cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+                sound: None,
+            }],
+            ..sample_existing_event(&cal_url)
+        };
+        update_event(&client(), existing, &creds(&server.url()), None)
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn update_without_reminders_does_not_read_first() {
+        // Nothing to inherit, so the extra round-trip would buy nothing.
+        // Asserted by a GET mock that must never be hit — without it this test
+        // passed whether the read happened or not.
+        let mut server = Server::new_async().await;
+        let get = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .expect(0)
+            .with_status(200)
+            .create_async()
+            .await;
+        let put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(204)
+            .with_header("etag", "\"new-etag\"")
+            .create_async()
+            .await;
+
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        update_event(
+            &client(),
+            sample_existing_event(&cal_url),
+            &creds(&server.url()),
+            None,
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        get.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_costs_the_mark_and_not_the_save() {
+        // The preservation is a courtesy; the write is the job.
+        let mut server = Server::new_async().await;
+        let _get = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(500)
+            .create_async()
+            .await;
+        let put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(204)
+            .with_header("etag", "\"new-etag\"")
+            .create_async()
+            .await;
+
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let existing = Event {
+            reminders: vec![cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+                sound: None,
+            }],
+            ..sample_existing_event(&cal_url)
+        };
+        let updated = update_event(&client(), existing, &creds(&server.url()), None)
+            .await
+            .unwrap();
+        put.assert_async().await;
+        assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
+    }
+
+    /// The event as the caller holds it before an update: on the server
+    /// already (so it carries an ETag), with no reminders of its own.
+    fn sample_existing_event(cal_url: &Url) -> Event {
+        Event {
+            id: "abc-123@aperio".into(),
+            calendar_id: cal_url.to_string(),
+            title: "Standup".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            etag: Some("\"old-etag\"".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
     }
 
     #[tokio::test]

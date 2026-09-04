@@ -73,6 +73,19 @@ Termin und markiert diesen Alarm als seinen eigenen Standard – daran erkennt
 die Kalender-App ihn später wieder und unterscheidet ihn von einem, den jemand
 bewusst gesetzt hat.
 
+Aperio erhält diese Markierung. Bearbeitest du einen am iPhone angelegten
+Termin – Titel, Uhrzeit, was auch immer –, bleibt der Hinweis selbst unangetastet,
+Markierung inklusive: Er bleibt Apples Standard und wird nicht zu einem Hinweis,
+den du scheinbar selbst gesetzt hast. Änderst du die Erinnerung hier, legst eine
+daneben oder nimmst sie weg, verschwindet die Markierung: Dann ist es deine
+Entscheidung – und ein Konto, das den Hinweis weiter für seinen hielte, könnte
+seine Version wieder hineinschreiben.
+
+Wo Aperio einen Hinweis nicht exakt so zurückschreiben kann, wie er vorlag –
+weil die App ihn gar nicht lesen kann oder ihn anders schreiben müsste –, lässt
+sie ihn dem Server und verzichtet auf die Markierung, statt zu raten. Solche
+Termine verhalten sich wie bisher.
+
 Ein Termin, den Aperio mit einer **angehängten** Erinnerung anlegt, hat deshalb
 beide: Apples Standardhinweis und den von Aperio. Apple Kalender listet sie als
 „1. Hinweis: Standard" und „2. Hinweis", und ein Sprachassistent, der den
