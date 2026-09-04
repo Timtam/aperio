@@ -97,6 +97,56 @@ describe('QuickAddDialog → accepting a title offer', () => {
     expect(opts.targetPinned).toBe(false);
   });
 
+  it('does not pin when the DEFAULT moves under an untouched picker', async () => {
+    // The release-build regression. Nothing about the picker changes; the
+    // default it would be compared against does. Here the sidebar selection
+    // drops the first calendar while the dialog is open, so `initial`
+    // re-derives to another one and slides under the untouched picker. Judging
+    // "did the user pick?" by comparing the two then answers yes, and the
+    // offer's calendar stops travelling into the editor.
+    const { QuickAddDialog } = await import('./QuickAddDialog');
+    const { rerender } = render(<QuickAddDialog isOpen onClose={() => {}} />);
+    const select = screen.getByRole('combobox', {
+      name: /kalender/i,
+    }) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('cal-local'));
+
+    STORE.selectedCalendarIds = new Set(['cal-work']);
+    rerender(<QuickAddDialog isOpen onClose={() => {}} />);
+    await waitFor(() => expect(select.value).toBe('cal-work'));
+
+    const title = screen.getByRole('combobox', { name: /titel/i });
+    fireEvent.change(title, { target: { value: 'thomas' } });
+    fireEvent.keyDown(title, { key: 'ArrowDown' });
+    fireEvent.keyDown(title, { key: 'Enter' });
+    await waitFor(() => expect(openEventDialog).toHaveBeenCalled());
+    const opts = openEventDialog.mock.calls[0][1] as { targetPinned?: boolean };
+    expect(opts.targetPinned).toBe(false);
+  });
+
+  it("keeps the user's pick even after the default catches up with it", async () => {
+    // The other half, and the one that loses data: the user DID pick a
+    // calendar, and afterwards the default moves onto the same one — the
+    // sidebar selection changes, a refresh reorders the catalog. Comparing
+    // picker against default now says "unchanged", so the offer's calendar
+    // overrules a choice the user actually made.
+    const { QuickAddDialog } = await import('./QuickAddDialog');
+    const { rerender } = render(<QuickAddDialog isOpen onClose={() => {}} />);
+    const select = screen.getByRole('combobox', { name: /kalender/i });
+    fireEvent.change(select, { target: { value: 'cal-work' } });
+
+    STORE.selectedCalendarIds = new Set(['cal-work']);
+    rerender(<QuickAddDialog isOpen onClose={() => {}} />);
+
+    const title = screen.getByRole('combobox', { name: /titel/i });
+    fireEvent.change(title, { target: { value: 'thomas' } });
+    fireEvent.keyDown(title, { key: 'ArrowDown' });
+    fireEvent.keyDown(title, { key: 'Enter' });
+    await waitFor(() => expect(openEventDialog).toHaveBeenCalled());
+    const opts = openEventDialog.mock.calls[0][1] as { targetPinned?: boolean };
+    expect(opts.targetPinned).toBe(true);
+  });
+
   it('does not pin either when the calendars arrive a beat late', async () => {
     // The real launch order: the dialog opens before the calendar list has
     // resolved, so its picker starts empty and adopts the default afterwards.

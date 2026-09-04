@@ -87,6 +87,17 @@ export function QuickAddTaskDialog({
   const listIdRef = useRef(listId);
   listIdRef.current = listId;
   const appliedInitialRef = useRef<Initial | null>(null);
+  /**
+   * Whether the user MOVED the list picker, recorded when they do it.
+   *
+   * The event twin's story exactly (see `calendarPickedRef` in
+   * QuickAddDialog): this used to be inferred by comparing the picker with the
+   * re-derived default, and that default moves on its own — a background
+   * catalog refresh, a changed selection. Once it lands on the list the user
+   * had picked, the comparison says "untouched" and the offer's list overrules
+   * a choice they actually made.
+   */
+  const listPickedRef = useRef(false);
 
   // `initial` is a useMemo over the task-list catalog, so it re-derives identity
   // on every background refresh while the dialog is open. Re-applying it then
@@ -97,6 +108,7 @@ export function QuickAddTaskDialog({
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
+      listPickedRef.current = false;
       return;
     }
     const b = appliedInitialRef.current;
@@ -116,7 +128,9 @@ export function QuickAddTaskDialog({
       b.date = initial.date;
       setDate(initial.date);
     }
-    if (listIdRef.current === b.listId) {
+    // A picker the user moved is theirs; a late default must not slide under
+    // it, however untouched it looks by value alone.
+    if (!listPickedRef.current && listIdRef.current === b.listId) {
       b.listId = initial.listId;
       setListId(initial.listId);
     }
@@ -223,8 +237,10 @@ export function QuickAddTaskDialog({
               prefillFrom: source,
               // A list the user actually moved this dialog's picker to
               // outranks the one the earlier task lived on; an untouched
-              // default does not.
-              targetPinned: listId !== initial.listId,
+              // default does not. Recorded when it happens — the default it
+              // would otherwise be compared against moves by itself (see
+              // `listPickedRef`).
+              targetPinned: listPickedRef.current,
               replace: true,
             });
           }}
@@ -252,7 +268,10 @@ export function QuickAddTaskDialog({
           </span>
           <select
             value={listId}
-            onChange={(e) => setListId(e.target.value)}
+            onChange={(e) => {
+              listPickedRef.current = true;
+              setListId(e.target.value);
+            }}
             required
           >
             <option value="" disabled>

@@ -105,6 +105,18 @@ export function QuickAddDialog({
   const calendarIdRef = useRef(calendarId);
   calendarIdRef.current = calendarId;
   const appliedInitialRef = useRef<Initial | null>(null);
+  /**
+   * Whether the user MOVED the calendar picker, recorded when they do it.
+   *
+   * This used to be inferred by comparing the picker's value with the
+   * re-derived default — but that default moves on its own. The catalog
+   * arrives after the dialog opens, a background refresh re-derives it, the
+   * sidebar selection changes: any of those can make an untouched picker
+   * differ from the current default, and the dialog would then report a
+   * choice the user never made, so an offer's calendar stopped travelling
+   * into the editor. A fact beats a guess.
+   */
+  const calendarPickedRef = useRef(false);
 
   // `initial` is a useMemo over `selectable` (calendars + selection), so it
   // re-derives identity on every background catalog refresh while the dialog is
@@ -117,6 +129,7 @@ export function QuickAddDialog({
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
+      calendarPickedRef.current = false;
       return;
     }
     const b = appliedInitialRef.current;
@@ -141,7 +154,9 @@ export function QuickAddDialog({
       b.time = initial.time;
       setTime(initial.time);
     }
-    if (calendarIdRef.current === b.calendarId) {
+    // A picker the user moved is theirs; a late default must not slide under
+    // it, however untouched it looks by value alone.
+    if (!calendarPickedRef.current && calendarIdRef.current === b.calendarId) {
       b.calendarId = initial.calendarId;
       setCalendarId(initial.calendarId);
     }
@@ -243,8 +258,10 @@ export function QuickAddDialog({
               prefillFrom: source,
               // A calendar the user actually moved this dialog's picker to
               // outranks the one the earlier appointment lived on; an
-              // untouched default does not.
-              targetPinned: calendarId !== initial.calendarId,
+              // untouched default does not. Recorded when it happens — the
+              // default it would otherwise be compared against moves by
+              // itself (see `calendarPickedRef`).
+              targetPinned: calendarPickedRef.current,
               replace: true,
             });
           }}
@@ -284,7 +301,10 @@ export function QuickAddDialog({
           </span>
           <select
             value={calendarId}
-            onChange={(e) => setCalendarId(e.target.value)}
+            onChange={(e) => {
+              calendarPickedRef.current = true;
+              setCalendarId(e.target.value);
+            }}
             required
           >
             <option value="" disabled>
