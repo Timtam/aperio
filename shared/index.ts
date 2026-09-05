@@ -2,6 +2,7 @@
 // reused by the desktop and mobile apps. Grows over time (calendar hooks,
 // settings handlers, …); the task domain is what lives here first.
 export * from './types';
+export * from './reminderPrefs';
 export * from './taskStatus';
 export * from './taskGrouping';
 export * from './taskDay';

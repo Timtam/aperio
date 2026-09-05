@@ -1883,6 +1883,251 @@ mod tests {
         assert!(written.contains(r#""attach":true"#));
     }
 
+    /// The Rust half of the wire contract in
+    /// `shared/contracts/calendarDefaultReminders.json`. Its TypeScript twin
+    /// (`src/state/calendarDefaultReminders.contract.test.ts`) reads the same
+    /// file, so the two languages check themselves against one fixture rather
+    /// than against each other's good intentions.
+    ///
+    /// Everything above tests Rust against Rust: a value is built here,
+    /// serialised here and parsed back here, which keeps passing however the
+    /// TypeScript side spells things. This is the only test in the crate that
+    /// reads text the OTHER side is responsible for producing.
+    mod wire_contract {
+        use super::*;
+
+        /// `include_str!` on purpose: if the fixture moves or is deleted, this
+        /// crate stops COMPILING. A test that silently skips the contract it
+        /// exists to check would be worse than no test.
+        const CONTRACT: &str =
+            include_str!("../../../shared/contracts/calendarDefaultReminders.json");
+
+        fn contract() -> serde_json::Value {
+            serde_json::from_str(CONTRACT).expect("the contract fixture is valid JSON")
+        }
+
+        #[test]
+        fn the_pref_key_is_built_the_way_the_contract_says() {
+            // Three places used to spell this key: two TypeScript hooks and
+            // the `format!` below. The apps now share one builder; this pins
+            // the Rust end of it. A mismatch is invisible — the settings panel
+            // reads back its own writer and looks right, while the host finds
+            // nothing and every default reminder of that calendar stops
+            // existing, including a birthday calendar's built-in one.
+            let c = contract();
+            let example = &c["prefKey"]["example"];
+            let calendar_id = example["calendarId"].as_str().unwrap();
+            let expected = example["key"].as_str().unwrap();
+            assert_eq!(
+                format!("calendar.{}.defaultReminders", calendar_id),
+                expected,
+                "the Rust reader's key no longer matches the one the apps write"
+            );
+            // And it still carries the prefix that puts it on the sync
+            // whitelist — a key outside it saves locally and never travels.
+            let prefix = c["prefKey"]["syncedUnderPrefix"].as_str().unwrap();
+            assert!(expected.starts_with(prefix));
+        }
+
+        #[test]
+        fn every_shape_the_apps_write_parses_into_what_it_promised() {
+            for sample in contract()["samples"].as_array().unwrap() {
+                let name = sample["name"].as_str().unwrap();
+                let stored = sample["stored"].as_str().unwrap();
+                let parsed: Vec<DefaultReminder> = serde_json::from_str(stored)
+                    .unwrap_or_else(|err| panic!("sample '{name}' no longer parses: {err}"));
+                let entries = sample["entries"].as_array().unwrap();
+                assert_eq!(parsed.len(), entries.len(), "sample '{name}': entry count");
+
+                for (got, want) in parsed.iter().zip(entries) {
+                    assert_eq!(
+                        got.attach,
+                        want["attach"].as_bool().unwrap(),
+                        "sample '{name}': placement"
+                    );
+                    assert_eq!(
+                        got.reminder.sound.is_some(),
+                        want["hasSound"].as_bool().unwrap(),
+                        "sample '{name}': sound"
+                    );
+                    match (&got.reminder.kind, want["kind"].as_str().unwrap()) {
+                        (ReminderKind::Relative { minutes_before }, "relative") => assert_eq!(
+                            *minutes_before,
+                            want["minutes_before"].as_i64().unwrap(),
+                            "sample '{name}': lead time"
+                        ),
+                        (ReminderKind::Absolute { at }, "absolute") => assert_eq!(
+                            at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                            want["at"].as_str().unwrap(),
+                            "sample '{name}': instant"
+                        ),
+                        (ReminderKind::Email { minutes_before }, "email") => assert_eq!(
+                            *minutes_before,
+                            want["minutes_before"].as_i64().unwrap(),
+                            "sample '{name}': lead time"
+                        ),
+                        (ReminderKind::AppStart, "app_start") => {}
+                        (kind, expected) => {
+                            panic!("sample '{name}': read {kind:?}, contract says {expected}")
+                        }
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn the_shapes_the_contract_calls_rejected_really_are() {
+            // These are not curiosities. Each is what a plausible edit on the
+            // TypeScript side would produce — a camelCase cleanup, a dropped
+            // serde tag — and each one takes the WHOLE list down with it,
+            // because the Vec parses all-or-nothing. If one of these ever
+            // starts parsing, the contract has drifted and this test is the
+            // only thing between that and a silent phone.
+            for sample in contract()["rejected"].as_array().unwrap() {
+                let name = sample["name"].as_str().unwrap();
+                let stored = sample["stored"].as_str().unwrap();
+                assert!(
+                    serde_json::from_str::<Vec<DefaultReminder>>(stored).is_err(),
+                    "'{name}' parses now — the contract fixture is out of date"
+                );
+            }
+        }
+
+        /// The sample by name, so a test says WHICH shape it is driving.
+        fn sample(name: &str) -> String {
+            contract()["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+                .unwrap_or_else(|| panic!("no contract sample called '{name}'"))["stored"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+
+        #[test]
+        fn the_bytes_the_apps_store_reach_a_new_appointment_as_its_own_reminder() {
+            // The host half of the manual device test, driven by the exact
+            // text the settings screen writes rather than by a value built
+            // here: pref in the database → a new appointment carrying the
+            // alarm that makes the iPhone and a voice assistant announce it.
+            // The adapter half — that reminder becoming a VALARM on the wire —
+            // is pinned by `a_calendar_default_reaches_the_wire_as_a_valarm`
+            // in adapter-caldav, off the same fixture.
+            let db = prefs_db();
+            UserPrefsRepo::new(&db)
+                .set(
+                    "calendar.work.defaultReminders",
+                    &sample("mixed-list-both-placements"),
+                )
+                .unwrap();
+
+            let mut event = new_event_without_reminders();
+            assert!(apply_default_reminder_policy(&db, "work", &mut event, true));
+            // ONLY the attached entry travels. The in-Aperio one fires beside
+            // whatever the appointment carries, and writing it in would make
+            // the provider ring twice for one setting.
+            assert_eq!(
+                event.reminders,
+                vec![Reminder {
+                    kind: ReminderKind::Relative { minutes_before: 60 },
+                    sound: None,
+                }],
+            );
+        }
+
+        #[test]
+        fn a_list_that_is_only_in_aperio_writes_nothing_into_the_appointment() {
+            let db = prefs_db();
+            UserPrefsRepo::new(&db)
+                .set(
+                    "calendar.work.defaultReminders",
+                    &sample("relative-1440-in-aperio"),
+                )
+                .unwrap();
+
+            let mut event = new_event_without_reminders();
+            assert!(!apply_default_reminder_policy(
+                &db, "work", &mut event, true
+            ));
+            assert!(event.reminders.is_empty());
+        }
+
+        #[test]
+        fn a_list_stored_before_the_placement_existed_still_writes_nothing() {
+            // The upgrade path: a calendar configured by an older version has
+            // no flag on its entries, and must keep meaning what it meant —
+            // in Aperio. Silently promoting those to real alarms would push
+            // reminders onto every appointment on the user's other clients.
+            let db = prefs_db();
+            UserPrefsRepo::new(&db)
+                .set(
+                    "calendar.work.defaultReminders",
+                    &sample("legacy-without-the-placement-flag"),
+                )
+                .unwrap();
+
+            let mut event = new_event_without_reminders();
+            assert!(!apply_default_reminder_policy(
+                &db, "work", &mut event, true
+            ));
+            assert!(event.reminders.is_empty());
+        }
+
+        #[test]
+        fn one_malformed_entry_takes_the_whole_calendars_defaults_with_it() {
+            // Not a wish — a warning, pinned so nobody is surprised by it. The
+            // stored list parses all-or-nothing, so a single entry in a shape
+            // Rust cannot read silences every default on that calendar. That
+            // is why the contract above exists at all; this test records what
+            // the cliff looks like from the bottom.
+            let db = prefs_db();
+            let contract = contract();
+            let bad = contract["rejected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == "one-bad-entry-among-good-ones")
+                .unwrap()["stored"]
+                .as_str()
+                .unwrap();
+            UserPrefsRepo::new(&db)
+                .set("calendar.work.defaultReminders", bad)
+                .unwrap();
+
+            let mut event = new_event_without_reminders();
+            assert!(!apply_default_reminder_policy(
+                &db, "work", &mut event, true
+            ));
+            assert!(
+                event.reminders.is_empty(),
+                "the good entry beside the bad one is lost too"
+            );
+        }
+
+        #[test]
+        fn the_clear_marker_reads_as_an_empty_list_not_as_never_configured() {
+            // Both apps clear a list by writing an empty STRING rather than
+            // deleting the key, because a missing key means "never
+            // configured" — and a birthday calendar falls back to its
+            // built-in reminder there, so the off switch would turn itself
+            // back on. The empty string must decode to an empty list.
+            let db = prefs_db();
+            let contract = contract();
+            let marker = contract["clearMarker"]["stored"].as_str().unwrap();
+            UserPrefsRepo::new(&db)
+                .set("calendar.cal.defaultReminders", marker)
+                .unwrap();
+            assert_eq!(
+                configured_calendar_default_reminders(&db, "cal"),
+                Some(Vec::new()),
+                "a cleared list must not read as 'never configured'"
+            );
+            assert!(calendar_default_reminders(&db, "cal").is_empty());
+        }
+    }
+
     fn insert_local_event(
         db: &SharedConn,
         id: &str,

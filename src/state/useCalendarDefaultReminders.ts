@@ -6,7 +6,7 @@ import {
   setUserPref,
 } from '../api/client';
 import { useUserPrefsChanged } from './useUserPrefsChanged';
-import type { DefaultReminder } from '@aperio/shared';
+import { calendarDefaultRemindersKey, type DefaultReminder } from '@aperio/shared';
 
 /**
  * Per-calendar default reminders.
@@ -34,8 +34,6 @@ import type { DefaultReminder } from '@aperio/shared';
  * `useTaskListShowCompleted`.
  */
 
-const KEY_PREFIX = 'calendar.';
-const KEY_SUFFIX = '.defaultReminders';
 const WRITE_DEBOUNCE_MS = 150;
 
 /**
@@ -59,9 +57,9 @@ export interface CalendarDefaultReminders {
 
 const EMPTY: DefaultReminder[] = [];
 
-function prefKey(calendarId: string): string {
-  return `${KEY_PREFIX}${calendarId}${KEY_SUFFIX}`;
-}
+// The key is a contract with the Rust host, so it is built in ONE place for
+// both apps — see `calendarDefaultRemindersKey`.
+const prefKey = calendarDefaultRemindersKey;
 
 export function useCalendarDefaultReminders(
   calendarIds: readonly string[],

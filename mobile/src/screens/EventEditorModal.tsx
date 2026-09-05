@@ -19,6 +19,7 @@ import type {
 import {
   allDayFormEndDate,
   applySignature,
+  madeNoReminderChoice,
   signatureIn,
   eventPrefillFrom,
   allDayWireEnd,
@@ -1022,8 +1023,10 @@ export default function EventEditorModal({
           send_invitations: sendInvitations,
           // An untouched editor made no reminder choice: the calendar's
           // "attach" mode may then write its defaults into the new event.
-          use_calendar_defaults:
-            !remindersTouchedRef.current && remindersForWire.length === 0,
+          use_calendar_defaults: madeNoReminderChoice(
+            remindersTouchedRef.current,
+            remindersForWire,
+          ),
         });
         await savePrivate(created);
         if (!isLocalCal) {

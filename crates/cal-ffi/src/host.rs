@@ -10213,6 +10213,113 @@ mod tests {
         )
     }
 
+    /// The MOBILE half of the calendar-default-reminder chain, driven by the
+    /// same fixture as host-core and the TypeScript suite
+    /// (`shared/contracts/calendarDefaultReminders.json`).
+    ///
+    /// This hop only exists on the phone, which is exactly the hop that used
+    /// to need an EAS build and a device to check: the editor sets the flag,
+    /// this Host applies the calendar's policy, and the adapter turns the
+    /// result into an alarm the provider stores.
+    mod calendar_default_reminders_contract {
+        use super::*;
+
+        const CONTRACT: &str =
+            include_str!("../../../shared/contracts/calendarDefaultReminders.json");
+
+        fn sample(name: &str) -> String {
+            let contract: serde_json::Value =
+                serde_json::from_str(CONTRACT).expect("the contract fixture is valid JSON");
+            contract["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+                .unwrap_or_else(|| panic!("no contract sample called '{name}'"))["stored"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+
+        /// `new_event_json` with the flag the editors send when the user made
+        /// no reminder choice. The plain helper omits it entirely, which is
+        /// why nothing used to exercise the true branch.
+        fn request_without_a_reminder_choice(cal: &str) -> String {
+            let base = new_event_json(cal, "Zahnarzt");
+            format!(
+                "{},\"use_calendar_defaults\":true}}",
+                base.trim_end_matches('}')
+            )
+        }
+
+        #[test]
+        fn an_attached_default_lands_on_an_appointment_created_on_the_phone() {
+            let (_dir, host, _kc) = open_host();
+            let cal = make_calendar(&host);
+            host.set_user_pref(
+                format!("calendar.{cal}.defaultReminders"),
+                sample("mixed-list-both-placements"),
+            )
+            .unwrap();
+
+            let created = host
+                .create_event_json(request_without_a_reminder_choice(&cal))
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_str(&created).unwrap();
+            let reminders = v["reminders"].as_array().expect("reminders array");
+            assert_eq!(
+                reminders.len(),
+                1,
+                "only the ATTACHED entry belongs on the appointment: {v}"
+            );
+            assert_eq!(reminders[0]["kind"]["type"], "relative");
+            assert_eq!(reminders[0]["kind"]["minutes_before"], 60);
+        }
+
+        #[test]
+        fn a_reminder_choice_the_user_made_is_never_overruled() {
+            // The flag is the whole gate: without it the caller HAS made a
+            // choice — including the choice of none — and the calendar's
+            // default must stay out of it.
+            let (_dir, host, _kc) = open_host();
+            let cal = make_calendar(&host);
+            host.set_user_pref(
+                format!("calendar.{cal}.defaultReminders"),
+                sample("mixed-list-both-placements"),
+            )
+            .unwrap();
+
+            let created = host
+                .create_event_json(new_event_json(&cal, "Zahnarzt"))
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_str(&created).unwrap();
+            assert!(
+                v["reminders"].as_array().unwrap().is_empty(),
+                "an explicit empty list is a decision, not an omission: {v}"
+            );
+        }
+
+        #[test]
+        fn a_default_that_stays_in_aperio_never_reaches_the_appointment() {
+            let (_dir, host, _kc) = open_host();
+            let cal = make_calendar(&host);
+            host.set_user_pref(
+                format!("calendar.{cal}.defaultReminders"),
+                sample("relative-1440-in-aperio"),
+            )
+            .unwrap();
+
+            let created = host
+                .create_event_json(request_without_a_reminder_choice(&cal))
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_str(&created).unwrap();
+            assert!(
+                v["reminders"].as_array().unwrap().is_empty(),
+                "an in-Aperio entry fires beside the appointment, never on it: {v}"
+            );
+        }
+    }
+
     #[test]
     fn create_event_round_trips_through_get_and_get_by_id() {
         let (_dir, host, _kc) = open_host();

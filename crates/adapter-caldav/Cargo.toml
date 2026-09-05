@@ -26,6 +26,10 @@ base64 = "0.22"
 [dev-dependencies]
 tokio = { workspace = true }
 mockito = "1"
+# Reading `shared/contracts/calendarDefaultReminders.json`, the fixture this
+# crate shares with host-core and the TypeScript suite so the calendar
+# default-reminder chain is pinned end to end rather than half at each end.
+serde_json.workspace = true
 
 [lints]
 workspace = true

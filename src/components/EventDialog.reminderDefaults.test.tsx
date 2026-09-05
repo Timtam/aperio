@@ -194,6 +194,32 @@ describe('EventDialog → creating an appointment', () => {
     expect(reminderRows()).toHaveLength(0);
   });
 
+  it('tells the host no reminder choice was made when nothing was touched', async () => {
+    // The POSITIVE half of `use_calendar_defaults`, which nothing pinned: only
+    // this flag lets the host write a calendar's attached default into the new
+    // appointment. Silently sending `false` would leave the alarm off the
+    // provider — the appointment saves, the editor looks right, and only a
+    // phone that stays quiet would ever say otherwise.
+    savedEvent.current = { ...EVENT, reminders: [] };
+    await openCreate([IN_APERIO]);
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /kalender/i })).toBeInTheDocument(),
+    );
+
+    const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
+    fireEvent.change(title, { target: { value: 'Zahnarzt' } });
+    screen.getByRole('button', { name: /^anlegen$|^create$/i }).click();
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
+    );
+    const create = invokeMock.mock.calls.find((call) => call[0] === 'create_event');
+    const payload = (
+      create?.[1] as { request: { reminders: unknown[]; use_calendar_defaults?: boolean } }
+    ).request;
+    expect(payload.reminders).toEqual([]);
+    expect(payload.use_calendar_defaults).toBe(true);
+  });
+
   it('sends nothing when the user removes what was offered', async () => {
     savedEvent.current = { ...EVENT, reminders: [] };
     await openCreate([ATTACHED]);

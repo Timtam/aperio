@@ -1,0 +1,104 @@
+{
+  "what": "The wire contract for a calendar's default reminders — the synced user-pref that TypeScript writes and Rust reads. Both suites read THIS file, so a rename on either side fails a test instead of going silent.",
+  "why": "The Rust reader ends in serde_json::from_str::<Vec<DefaultReminder>>(raw).unwrap_or_default(). One unparsable entry discards the WHOLE list, with no log line and nothing visible in the UI: the settings panel still shows the reminders (it reads back its own writer), while new appointments reach the provider with no alarm, the in-Aperio overlay stops firing, and every birthday calendar goes quiet because an empty list reads as 'the user cleared it'. Nothing but running the real app on a real account would show it — which is exactly the manual test this file exists to retire.",
+  "writtenBy": [
+    "src/state/useCalendarDefaultReminders.ts",
+    "mobile/src/state/useCalendarDefaultReminders.ts"
+  ],
+  "readBy": ["crates/host-core/src/reminders.rs (configured_calendar_default_reminders)"],
+
+  "prefKey": {
+    "template": "calendar.{calendarId}.defaultReminders",
+    "example": { "calendarId": "work", "key": "calendar.work.defaultReminders" },
+    "syncedUnderPrefix": "calendar."
+  },
+
+  "clearMarker": {
+    "stored": "",
+    "note": "Both clients write an empty STRING to clear the list rather than deleting the key. A deleted key reads as 'never configured', which brings a birthday calendar's built-in reminder straight back — the off switch would turn itself on again. The empty string must therefore decode to an empty list, not to 'unset'."
+  },
+
+  "samples": [
+    {
+      "name": "relative-60-attached",
+      "note": "The case behind the whole feature: an hour before, written INTO new appointments so iCloud, the iPhone and a voice assistant announce it too.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":60},\"sound\":null,\"attach\":true}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 60, "attach": true, "hasSound": false }
+      ]
+    },
+    {
+      "name": "relative-1440-in-aperio",
+      "note": "A day before, staying in Aperio: nothing is written into any appointment.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":1440},\"sound\":null,\"attach\":false}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 1440, "attach": false, "hasSound": false }
+      ]
+    },
+    {
+      "name": "legacy-without-the-placement-flag",
+      "note": "Written before the placement choice existed, and by an older device that still does not know the field. It has to keep meaning what it always meant: in Aperio.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":30},\"sound\":null}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 30, "attach": false, "hasSound": false }
+      ]
+    },
+    {
+      "name": "mixed-list-both-placements",
+      "note": "The two placements side by side — the shape a real calendar ends up with.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":60},\"sound\":null,\"attach\":true},{\"kind\":{\"type\":\"relative\",\"minutes_before\":1440},\"sound\":null,\"attach\":false}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 60, "attach": true, "hasSound": false },
+        { "kind": "relative", "minutes_before": 1440, "attach": false, "hasSound": false }
+      ]
+    },
+    {
+      "name": "with-a-system-sound",
+      "note": "A reminder carrying its own sound. SoundConfig is a nested tagged enum, so it is the shape most likely to drift.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":15},\"sound\":{\"source\":{\"type\":\"system\"},\"volume\":80},\"attach\":true}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 15, "attach": true, "hasSound": true }
+      ]
+    },
+    {
+      "name": "with-a-custom-sound",
+      "note": "The custom variant carries a payload field, which a tag rename would break silently.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":15},\"sound\":{\"source\":{\"type\":\"custom\",\"sha256\":\"abc123\"},\"volume\":50},\"attach\":false}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 15, "attach": false, "hasSound": true }
+      ]
+    },
+    {
+      "name": "absolute",
+      "note": "A fixed moment rather than a lead time. The instant is whatever Date.toISOString() produces.",
+      "stored": "[{\"kind\":{\"type\":\"absolute\",\"at\":\"2026-09-06T13:00:00.000Z\"},\"sound\":null,\"attach\":true}]",
+      "entries": [
+        { "kind": "absolute", "at": "2026-09-06T13:00:00.000Z", "attach": true, "hasSound": false }
+      ]
+    },
+    {
+      "name": "empty-list",
+      "note": "A list the user emptied on purpose. Distinct from a missing key, which means 'never configured'.",
+      "stored": "[]",
+      "entries": []
+    }
+  ],
+
+  "rejected": [
+    {
+      "name": "camel-cased-field",
+      "note": "What a well-meant TypeScript cleanup would produce.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutesBefore\":60},\"sound\":null,\"attach\":true}]"
+    },
+    {
+      "name": "missing-kind-tag",
+      "note": "What dropping serde's internal tag would produce.",
+      "stored": "[{\"kind\":{\"minutes_before\":60},\"sound\":null,\"attach\":true}]"
+    },
+    {
+      "name": "one-bad-entry-among-good-ones",
+      "note": "The reason this contract is checked at all: the list is parsed all-or-nothing, so a single malformed entry takes every other reminder of that calendar down with it.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":60},\"sound\":null,\"attach\":true},{\"kind\":{\"type\":\"nonsense\"},\"sound\":null}]"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { DefaultReminder } from '@aperio/shared';
+import { calendarDefaultRemindersKey, type DefaultReminder } from '@aperio/shared';
 
 import { getUserPrefJson, setUserPref, setUserPrefJson } from '../api/prefs';
 import { scheduleBackgroundPush } from '../api/syncTriggers';
@@ -26,7 +26,9 @@ import { subscribeCacheReload } from './cacheObserver';
 
 const WRITE_DEBOUNCE_MS = 150;
 
-const prefKey = (calendarId: string): string => `calendar.${calendarId}.defaultReminders`;
+// The key is a contract with the Rust host, so it is built in ONE place for
+// both apps — see `calendarDefaultRemindersKey`.
+const prefKey = calendarDefaultRemindersKey;
 
 /**
  * Each entry also says where it lives (`attach`, see `DefaultReminder`):

@@ -2403,6 +2403,116 @@ END:VCALENDAR\r
         assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
     }
 
+    /// The far end of the chain in `shared/contracts/calendarDefaultReminders.json`.
+    ///
+    /// host-core pins the near end — the stored pref becoming a new
+    /// appointment's own reminder (`wire_contract` in host-core's reminders.rs,
+    /// same fixture). This pins what a CalDAV server then receives, which is
+    /// the only thing an iPhone or a voice assistant can act on.
+    ///
+    /// Together the two replace the part of the manual device test that a
+    /// machine can check: set a calendar's default to "attached", create an
+    /// appointment, and see the alarm arrive at the provider. What is left for
+    /// a real device is only what Apple and Amazon do with it afterwards.
+    mod calendar_default_reminders_contract {
+        use super::*;
+
+        /// `include_str!`, so moving the fixture breaks the BUILD rather than
+        /// quietly skipping the contract.
+        const CONTRACT: &str =
+            include_str!("../../../shared/contracts/calendarDefaultReminders.json");
+
+        /// The reminders a contract sample describes, built from its
+        /// language-neutral `entries` rather than from a Rust literal — the
+        /// point is that the shape comes from the shared file.
+        fn attached_reminders_of(sample_name: &str) -> Vec<Reminder> {
+            let contract: serde_json::Value =
+                serde_json::from_str(CONTRACT).expect("the contract fixture is valid JSON");
+            let sample = contract["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == sample_name)
+                .unwrap_or_else(|| panic!("no contract sample called '{sample_name}'"))
+                .clone();
+            sample["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["attach"].as_bool().unwrap())
+                .map(|e| Reminder {
+                    kind: match e["kind"].as_str().unwrap() {
+                        "relative" => ReminderKind::Relative {
+                            minutes_before: e["minutes_before"].as_i64().unwrap(),
+                        },
+                        "absolute" => ReminderKind::Absolute {
+                            at: e["at"].as_str().unwrap().parse().unwrap(),
+                        },
+                        other => panic!("contract sample uses an unhandled kind '{other}'"),
+                    },
+                    sound: None,
+                })
+                .collect()
+        }
+
+        fn new_appointment(reminders: Vec<Reminder>) -> NewEvent {
+            NewEvent {
+                title: "Zahnarzt".into(),
+                description: None,
+                location: None,
+                start: Utc.with_ymd_and_hms(2026, 9, 6, 8, 0, 0).unwrap(),
+                end: Utc.with_ymd_and_hms(2026, 9, 6, 9, 0, 0).unwrap(),
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                color_hex: None,
+                reminders,
+                sound: None,
+                attendees: Vec::new(),
+                send_invitations: false,
+            }
+        }
+
+        #[test]
+        fn a_calendar_default_reaches_the_wire_as_a_valarm() {
+            let reminders = attached_reminders_of("mixed-list-both-placements");
+            assert_eq!(reminders.len(), 1, "one attached entry in that sample");
+            let out = new_event_to_ical("evt-1", &new_appointment(reminders), None);
+
+            assert_eq!(
+                out.matches("BEGIN:VALARM").count(),
+                1,
+                "the attached default has to arrive as exactly one alarm:\n{out}"
+            );
+            assert!(out.contains("ACTION:DISPLAY"), "{out}");
+            // An hour before, in the spelling this crate produces.
+            assert!(
+                out.contains("TRIGGER:-PT3600S"),
+                "the alarm does not fire an hour before:\n{out}"
+            );
+        }
+
+        #[test]
+        fn an_appointment_with_no_reminders_carries_no_alarm() {
+            // The other half of the promise: a calendar whose defaults all
+            // stay in Aperio must not put anything on the wire, or every
+            // client of that calendar would ring for a setting the user
+            // deliberately kept local.
+            let out = new_event_to_ical("evt-1", &new_appointment(Vec::new()), None);
+            assert!(!out.contains("BEGIN:VALARM"), "{out}");
+        }
+
+        #[test]
+        fn an_absolute_default_reaches_the_wire_at_its_exact_instant() {
+            let reminders = attached_reminders_of("absolute");
+            let out = new_event_to_ical("evt-1", &new_appointment(reminders), None);
+            assert!(
+                out.contains("TRIGGER;VALUE=DATE-TIME:20260906T130000Z"),
+                "the fixed moment did not survive:\n{out}"
+            );
+        }
+    }
+
     #[test]
     fn ignores_non_vevent_components() {
         let body = "BEGIN:VCALENDAR\r

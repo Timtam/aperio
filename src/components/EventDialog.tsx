@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { applySignature, signatureIn } from '@aperio/shared';
+import { applySignature, madeNoReminderChoice, signatureIn } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { timeInputStep } from '../state/timeStep';
@@ -1288,8 +1288,10 @@ export function EventDialog({
             send_invitations: sendInvitations,
             // An untouched editor made no reminder choice: the calendar's
             // "attach" mode may then write its defaults into the new event.
-            use_calendar_defaults:
-              !remindersTouchedRef.current && remindersForWire.length === 0,
+            use_calendar_defaults: madeNoReminderChoice(
+              remindersTouchedRef.current,
+              remindersForWire,
+            ),
           });
           await savePrivate(created);
           if (!storesColorNatively) {
