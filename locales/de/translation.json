@@ -1636,6 +1636,7 @@
         "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt."
       },
       "assignees": {
+        "nobody": "Niemand",
         "add": "Person hinzufügen …",
         "addNamed": "{{name}} hinzufügen",
         "added": "{{name}} hinzugefügt",

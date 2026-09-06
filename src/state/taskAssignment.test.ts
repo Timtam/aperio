@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { TaskUser } from '../api/types';
 import {
+  clampAssignees,
   classifyDoneByMe,
   isMineOrUnassigned,
   selfAssignOnStatusChange,
+  taskAssignmentMode,
 } from '@aperio/shared';
 
 const me: TaskUser = { id: '7', name: 'Me', email: null };
@@ -55,5 +57,45 @@ describe('isMineOrUnassigned / classifyDoneByMe', () => {
     expect(classifyDoneByMe([me], me)).toBe('me');
     expect(classifyDoneByMe([other], me)).toBe('other');
     expect(classifyDoneByMe([other], null)).toBe('me');
+  });
+});
+
+describe('task assignment → what a source can hold', () => {
+  it('reads an undeclared adapter as "cannot assign"', () => {
+    // The cautious default, mirroring `TaskCapabilities::default()`. Crediting
+    // a silent manifest with assignment is how the picker came to offer a
+    // choice the source could not keep.
+    expect(taskAssignmentMode(undefined)).toBe('none');
+    expect(taskAssignmentMode({ task_capabilities: undefined })).toBe('none');
+    expect(
+      taskAssignmentMode({
+        task_capabilities: { subtasks: true } as never,
+      }),
+    ).toBe('none');
+  });
+
+  it('reads what the adapter declared', () => {
+    expect(
+      taskAssignmentMode({
+        task_capabilities: { task_assignment: 'single' } as never,
+      }),
+    ).toBe('single');
+  });
+
+  it('trims a moved task to what the new list holds', () => {
+    // Carry a two-assignee Vikunja task to a Todoist list: the form must lose
+    // the second here, where it is visible, rather than on the wire.
+    const anna = { id: 'u1', name: 'Anna', email: null } as never;
+    const bernd = { id: 'u2', name: 'Bernd', email: null } as never;
+    expect(clampAssignees('single', [anna, bernd])).toEqual([anna]);
+    expect(clampAssignees('multiple', [anna, bernd])).toEqual([anna, bernd]);
+  });
+
+  it('never empties a list it merely cannot show', () => {
+    // `none` hides the picker; the task may still carry assignees another
+    // client wrote, and clearing them on open would destroy what the user was
+    // never shown.
+    const anna = { id: 'u1', name: 'Anna', email: null } as never;
+    expect(clampAssignees('none', [anna])).toEqual([anna]);
   });
 });

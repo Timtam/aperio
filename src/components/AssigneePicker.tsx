@@ -1,15 +1,24 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { TaskAssignment } from '@aperio/shared';
+
 import type { TaskUser } from '../api/types';
 import { useAnnouncer } from '../a11y/announcerContext';
 
 /**
- * Multi-select picker for task assignees, scoped to a list's member
- * pool (DESIGN §9.7). Selected users render as removable chips; a
- * `<select>` offers the members not yet picked. The caller gates
- * rendering on whether the list has any assignable members, so this
- * component itself stays purely presentational.
+ * Picker for task assignees, scoped to a list's member pool (DESIGN §9.7).
+ *
+ * Two shapes, chosen by what the SOURCE can hold. `multiple` renders the
+ * selected users as removable chips with a `<select>` offering the rest;
+ * `single` renders one `<select>` and nothing else, because a source that
+ * keeps one assignee must not be asked for two.
+ *
+ * That distinction is the point rather than a refinement. Todoist stores a
+ * single `assignee_id`; its adapter takes the first and warns about the rest,
+ * so a second person picked here was dropped on write — the save reported
+ * success and the name was gone at the next refresh, which is the silent kind
+ * of loss. The caller passes the list's declared `task_assignment` mode.
  *
  * Removal parks focus before the chip unmounts. The Modal's focus net
  * explicitly does not cover a focused element that UNMOUNTS — the node is
@@ -22,11 +31,15 @@ export function AssigneePicker({
   members,
   value,
   currentUserId,
+  mode = 'multiple',
   onChange,
 }: {
   members: TaskUser[];
   value: TaskUser[];
   currentUserId: string | null;
+  /** What the source can hold. `none` is not passed — the caller does not
+   *  render the picker at all then. */
+  mode?: TaskAssignment;
   onChange: (next: TaskUser[]) => void;
 }) {
   const { t } = useTranslation();
@@ -76,6 +89,31 @@ export function AssigneePicker({
     },
     [value, onChange, announce, t],
   );
+
+  // One assignee at most: one control, one focus stop, and no way to pick a
+  // second person the source would drop. Empty value = unassigned, which is a
+  // real choice here rather than the absence of one.
+  if (mode === 'single') {
+    return (
+      <div className="assignee-picker" ref={rootRef} tabIndex={-1}>
+        <select
+          className="assignee-picker__single"
+          value={value[0]?.id ?? ''}
+          onChange={(e) => {
+            const picked = members.find((m) => m.id === e.target.value);
+            onChange(picked ? [picked] : []);
+          }}
+        >
+          <option value="">{t('dialogs.task.assignees.nobody')}</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {label(m)}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
 
   return (
     <div className="assignee-picker" ref={rootRef} tabIndex={-1}>

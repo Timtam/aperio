@@ -63,8 +63,8 @@ pub use manager::{
     SYMBOL_INTERACTIVE_AUTH, SYMBOL_PROBE_HOST_KEY, USER_PLUGINS_DIR,
 };
 pub use manifest::{
-    AdapterKindInfo, PluginManifest, RecurrenceCapabilities, RecurrenceFreq, TaskCapabilities,
-    MANIFEST_FILENAME,
+    AdapterKindInfo, PluginManifest, RecurrenceCapabilities, RecurrenceFreq, TaskAssignment,
+    TaskCapabilities, MANIFEST_FILENAME,
 };
 pub use plugin_type::PluginType;
 pub use shim::{

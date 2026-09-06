@@ -88,11 +88,23 @@ export interface TaskCapabilities {
   /** How members are added when `manageable`: directory search (Vikunja) or
    *  raw-email invite (Todoist). */
   member_add_by: MemberAddMethod;
+  /** How many people a task on this source can be assigned to. Absent ⇒
+   *  `none`, matching `TaskCapabilities::default()`. */
+  task_assignment?: TaskAssignment;
 }
 
 /** How members are added to a task list (DESIGN §9.7): pick from a user
  *  directory (Vikunja) or invite by raw email (Todoist). */
 export type MemberAddMethod = 'search' | 'email';
+
+/** How many people a task can be assigned to on a given source (DESIGN §9.7).
+ *  Mirrors `plugin_core::TaskAssignment`.
+ *
+ *  Declared rather than discovered, because the limit is otherwise invisible
+ *  until it has cost something: Todoist keeps a single `assignee_id`, so a
+ *  second person picked in the editor is dropped on write and the save still
+ *  reports success. */
+export type TaskAssignment = 'none' | 'single' | 'multiple';
 
 /** A sub-grouping of tasks within one list — a Vikunja bucket or a Todoist
  *  section. Mirrors `cal_core::Section`. */

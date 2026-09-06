@@ -9,27 +9,38 @@ import {
   View,
 } from 'react-native';
 
-import type { TaskUser } from '@aperio/shared';
+import type { TaskAssignment, TaskUser } from '@aperio/shared';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 
-// Multi-select picker for task assignees, scoped to a list's member pool
-// (DESIGN §9.7) — the mobile twin of the desktop AssigneePicker. Selected users
-// render as a list of removable rows; the members not yet picked render as
-// "add" buttons (RN has no native <select>). Purely presentational: the caller
-// gates rendering on whether the list has any assignable members. Screen-
+// Picker for task assignees, scoped to a list's member pool (DESIGN §9.7) —
+// the mobile twin of the desktop AssigneePicker, and it takes the same two
+// shapes, chosen by what the SOURCE can hold.
+//
+// `multiple`: selected users render as removable rows, the rest as "add"
+// buttons (RN has no native <select>). `single`: one radio group, because a
+// source that keeps one assignee must not be asked for two — Todoist stores a
+// single `assignee_id` and its adapter drops the rest on write, with the save
+// still reporting success.
+//
+// Purely presentational: the caller gates rendering on the list's declared
+// `task_assignment` mode and on there being any assignable members. Screen-
 // reader-first — every row/button is an addressable element with an explicit
-// "Add {name}" / "Remove {name}" label, and add/remove announce the result.
+// label, and every change announces its result.
 
 export function AssigneePicker({
   members,
   value,
   currentUserId,
+  mode = 'multiple',
   onChange,
 }: {
   members: TaskUser[];
   value: TaskUser[];
   currentUserId: string | null;
+  /** What the source can hold. `none` is not passed — the caller does not
+   *  render the picker at all then. */
+  mode?: TaskAssignment;
   onChange: (next: TaskUser[]) => void;
 }) {
   const { t } = useTranslation();
@@ -70,6 +81,57 @@ export function AssigneePicker({
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     }, 0);
   };
+
+  // One assignee at most: a radio group, so the screen reader says which one
+  // is chosen and there is no way to pick a second the source would drop.
+  // "Nobody" is a real choice here, not the absence of one.
+  if (mode === 'single') {
+    const pick = (user: TaskUser | null) => {
+      onChange(user ? [user] : []);
+      AccessibilityInfo.announceForAccessibility(
+        user
+          ? t('dialogs.task.assignees.added', { name: user.name })
+          : t('dialogs.task.assignees.nobody'),
+      );
+    };
+    const chosenId = value[0]?.id ?? null;
+    return (
+      <View style={styles.field}>
+        <Text style={styles.label}>{t('dialogs.task.fields.assignees')}</Text>
+        <View
+          accessibilityRole="radiogroup"
+          accessibilityLabel={t('dialogs.task.fields.assignees')}
+          style={styles.addList}
+        >
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ checked: chosenId == null }}
+            accessibilityLabel={t('dialogs.task.assignees.nobody')}
+            onPress={() => pick(null)}
+            style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.addButtonText} importantForAccessibility="no">
+              {t('dialogs.task.assignees.nobody')}
+            </Text>
+          </Pressable>
+          {members.map((m) => (
+            <Pressable
+              key={m.id}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: chosenId === m.id }}
+              accessibilityLabel={label(m)}
+              onPress={() => pick(m)}
+              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.addButtonText} importantForAccessibility="no">
+                {label(m)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.field}>

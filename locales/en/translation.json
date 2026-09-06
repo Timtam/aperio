@@ -1636,6 +1636,7 @@
         "deleted": "Section \"{{name}}\" deleted; its tasks are now ungrouped."
       },
       "assignees": {
+        "nobody": "Nobody",
         "add": "Add person …",
         "addNamed": "Add {{name}}",
         "added": "Added {{name}}",

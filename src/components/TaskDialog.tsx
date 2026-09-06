@@ -30,7 +30,9 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import {
   selectableTaskLists,
+  clampAssignees,
   selfAssignOnStatusChange,
+  taskAssignmentMode,
   taskPrefillFrom,
 } from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
@@ -531,6 +533,24 @@ export function TaskDialog({
     [task, listForSections],
   );
   const sectionsEnabled = canAssignSection(listForSections);
+  // How many people the TARGET list's source can hold on one task. Gates the
+  // picker entirely (`none`) and, above that, whether it offers more than one
+  // — a source that keeps a single assignee must not be asked for two, or the
+  // second is dropped on write with the save still reporting success.
+  const assignmentMode = taskAssignmentMode(listForSections);
+  // Moving a task to a list that holds ONE assignee has to trim the form, not
+  // just the picker: the form would otherwise still carry both, the save would
+  // send both, and the adapter would drop one without saying so. Keyed on the
+  // mode alone — the only thing that can make an existing selection too big.
+  useEffect(() => {
+    if (assignmentMode !== 'single') return;
+    setForm((prev) => {
+      const trimmed = clampAssignees(assignmentMode, prev.assignees);
+      return trimmed.length === prev.assignees.length
+        ? prev
+        : { ...prev, assignees: trimmed };
+    });
+  }, [assignmentMode]);
   const canMoveLists = canMoveTaskBetweenLists(sourceList);
   // Lock the list picker when editing a task whose source adapter
   // can't reparent tasks (Todoist). Creation is unaffected — you can
@@ -1445,7 +1465,7 @@ export function TaskDialog({
           )}
         </label>
 
-        {members.length > 0 && (
+        {assignmentMode !== 'none' && members.length > 0 && (
           <div className="form__field">
             <span className="form__label">
               {t('dialogs.task.fields.assignees')}
@@ -1454,6 +1474,7 @@ export function TaskDialog({
               members={members}
               value={form.assignees}
               currentUserId={currentUserId}
+              mode={assignmentMode}
               onChange={(next) => update('assignees', next)}
             />
           </div>

@@ -310,6 +310,16 @@ For shared lists (e.g. Todoist) you can:
 - **manage members** from the list's context menu (invite, remove),
 - **assign a person** to individual tasks.
 
+How many people a task can carry is the provider's answer, and the editor
+offers only what will still be there afterwards. **Vikunja** holds any number —
+the chosen people appear as a list you add to. **Todoist** holds exactly one,
+so there you get a single choice with "Nobody" as its first option: picking
+someone replaces the previous person instead of putting a second one beside
+them, which would be dropped on save. Move a task with several people to a list
+that holds one and the **first** stays — visible in the editor before you save.
+On lists without assignment (local, Microsoft To Do, Google) the field is not
+shown at all.
+
 ### Letting Aperio assign you automatically
 
 When a list's backend knows who *you* are (e.g. **Vikunja**), Aperio can keep

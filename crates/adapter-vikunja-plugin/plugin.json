@@ -21,6 +21,7 @@
     "delete_lists": true,
     "manageable": true,
     "member_add_by": "search",
+    "task_assignment": "multiple",
     "recurrence": {
       "frequencies": ["daily", "weekly", "monthly"],
       "interval_frequencies": ["daily", "weekly"],

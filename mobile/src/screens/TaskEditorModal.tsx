@@ -33,7 +33,9 @@ import {
   isImportantPriority,
   normalPriority,
   selectableTaskLists,
+  clampAssignees,
   selfAssignOnStatusChange,
+  taskAssignmentMode,
   taskPrefillFrom,
   toBackend,
 } from '@aperio/shared';
@@ -592,6 +594,24 @@ export default function TaskEditorModal({
   // The block's end. Only the local store, CalDAV, Vikunja and Todoist keep
   // one, and it is meaningless without a start.
   const canSetSpan = (caps?.task_span ?? false) && canSetTime;
+  // How many people the target list's source can hold on one task. Gates the
+  // picker entirely (`none`) and, above that, whether it offers more than one
+  // — asking for a second assignee a source cannot keep loses it silently.
+  const assignmentMode = taskAssignmentMode(
+    taskLists.find((l) => l.id === form.listId),
+  );
+  // Moving a task to a list that holds ONE assignee has to trim the form, not
+  // just the picker: the form would otherwise still carry both, the save would
+  // send both, and the adapter would drop one without saying so.
+  useEffect(() => {
+    if (assignmentMode !== 'single') return;
+    setForm((prev) => {
+      const trimmed = clampAssignees(assignmentMode, prev.assignees);
+      return trimmed.length === prev.assignees.length
+        ? prev
+        : { ...prev, assignees: trimmed };
+    });
+  }, [assignmentMode]);
   const recurrenceCaps = useMemo(
     () => taskLists.find((l) => l.id === form.listId)?.recurrence_capabilities,
     [taskLists, form.listId],
@@ -1194,11 +1214,12 @@ export default function TaskEditorModal({
 
       {/* Assignees — only when the selected list has an assignable member pool
           (external, sharing-capable providers). Hidden for local lists. */}
-      {members.length > 0 && (
+      {assignmentMode !== 'none' && members.length > 0 && (
         <AssigneePicker
           members={members}
           value={form.assignees}
           currentUserId={currentUserId}
+          mode={assignmentMode}
           onChange={(next) => update('assignees', next)}
         />
       )}

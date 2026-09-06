@@ -22,7 +22,8 @@
     "create_lists": true,
     "delete_lists": true,
     "manageable": true,
-    "member_add_by": "email"
+    "member_add_by": "email",
+    "task_assignment": "single"
   },
   "account": {
     "fields": [

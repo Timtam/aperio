@@ -345,6 +345,16 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
   entfernen),
 - einzelnen Aufgaben eine **Person zuweisen**.
 
+Wie viele Personen eine Aufgabe tragen kann, sagt der jeweilige Anbieter, und
+der Editor bietet nur das an, was dort auch bleibt. **Vikunja** hält beliebig
+viele – du siehst die gewählten Personen als Liste und fügst weitere hinzu.
+**Todoist** hält genau eine, deshalb steht dort eine einzelne Auswahl mit
+„Niemand" als erster Möglichkeit: eine neue Wahl ersetzt die alte, statt eine
+zweite Person danebenzustellen, die beim Speichern verloren ginge. Verschiebst
+du eine Aufgabe mit mehreren Personen in eine Liste, die nur eine hält, bleibt
+die **erste** übrig – sichtbar im Editor, bevor du speicherst. Auf Listen ohne
+Zuweisung (lokal, Microsoft To Do, Google) erscheint das Feld gar nicht.
+
 ### Aperio dich automatisch zuweisen lassen
 
 Wenn der Anbieter einer Liste weiß, wer *du* bist (z. B. **Vikunja**), kann

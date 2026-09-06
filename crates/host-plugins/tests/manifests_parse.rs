@@ -362,3 +362,62 @@ fn every_declared_kind_is_named_in_both_locales() {
          {missing:#?}",
     );
 }
+
+/// What each adapter that can assign a task to somebody declares it can hold
+/// (DESIGN §9.7). Spelled out here so a change has to be made twice — once in
+/// the manifest, once in front of somebody reading this list.
+///
+/// The limit is invisible from the outside: Todoist's REST task carries a
+/// single `assignee_id`, so its adapter takes `assignees[0]` and warns about
+/// the rest. Before this capability existed the editor happily offered a
+/// second person, the save reported success, and the name was gone at the next
+/// refresh. Anything not listed here declares nothing and is read as `none`,
+/// which hides the picker rather than crediting an adapter with an ability
+/// whose failure is silent.
+const TASK_ASSIGNMENT: &[(&str, plugin_core::TaskAssignment)] = &[
+    (
+        "adapter-todoist-plugin",
+        plugin_core::TaskAssignment::Single,
+    ),
+    (
+        "adapter-vikunja-plugin",
+        plugin_core::TaskAssignment::Multiple,
+    ),
+];
+
+#[test]
+fn the_adapters_that_can_assign_say_how_many_people_they_hold() {
+    let manifests = manifests_in_tree();
+    for (dir, expected) in TASK_ASSIGNMENT {
+        let (_, manifest) = manifests
+            .iter()
+            .find(|(name, _)| name == dir)
+            .unwrap_or_else(|| panic!("no manifest for {dir}"));
+        assert_eq!(
+            manifest.tasks.task_assignment, *expected,
+            "{dir} no longer declares the assignment limit the editor gates on",
+        );
+    }
+}
+
+#[test]
+fn an_adapter_that_says_nothing_cannot_assign() {
+    // The default has to be the CAUTIOUS one. Crediting a silent manifest with
+    // multi-assignment is how the picker came to offer a choice the source
+    // could not keep.
+    let manifests = manifests_in_tree();
+    let declared: Vec<&str> = TASK_ASSIGNMENT.iter().map(|(dir, _)| *dir).collect();
+    let mut checked = 0;
+    for (dir, manifest) in &manifests {
+        if declared.contains(&dir.as_str()) {
+            continue;
+        }
+        assert_eq!(
+            manifest.tasks.task_assignment,
+            plugin_core::TaskAssignment::None,
+            "{dir} declares an assignment mode but is not listed in TASK_ASSIGNMENT",
+        );
+        checked += 1;
+    }
+    assert!(checked >= 5, "only checked {checked} silent manifests");
+}

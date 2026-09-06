@@ -160,6 +160,32 @@ pub enum MemberAddMethod {
     Email,
 }
 
+/// How many people a task adapter can hold on one task (DESIGN §9.7).
+///
+/// Declared because the limit is otherwise invisible until it has already
+/// cost something. Todoist stores a single `assignee_id`; its adapter takes
+/// `assignees[0]` and warns about the rest, so a second person picked in the
+/// editor is dropped on write — the save reports success and the name is gone
+/// at the next refresh. The picker has to know the limit BEFORE the user
+/// spends a choice on it.
+///
+/// `None` is the default: an adapter that says nothing is taken at its word
+/// rather than credited with an ability it would silently fail to keep — the
+/// same rule `task_span` follows next door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAssignment {
+    /// The source has no notion of assigning a task to a person, or the
+    /// adapter does not implement it. The picker is not offered at all.
+    #[default]
+    None,
+    /// Exactly one person per task (Todoist's `assignee_id`).
+    Single,
+    /// Any number of people per task (Vikunja's assignee list, and what
+    /// Microsoft Planner would offer).
+    Multiple,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCapabilities {
     /// Task lists (projects) nest into a tree. Flat backends leave
@@ -277,6 +303,13 @@ pub struct TaskCapabilities {
     /// dialog's add control; ignored when `manageable` is `false`.
     #[serde(default)]
     pub member_add_by: MemberAddMethod,
+    /// How many people a task on this source can be assigned to. Drives
+    /// whether the editor offers the assignee picker at all and, when it
+    /// does, whether it lets the user pick more than one. See
+    /// [`TaskAssignment`] for why the limit is declared rather than
+    /// discovered.
+    #[serde(default)]
+    pub task_assignment: TaskAssignment,
     /// Which recurrence shapes this adapter can store for tasks (mirrors
     /// the calendar side's per-account recurrence caps). Absent → full
     /// support, so the task recurrence editor offers everything. A backend
@@ -308,6 +341,7 @@ impl Default for TaskCapabilities {
             delete_lists: false,
             manageable: false,
             member_add_by: MemberAddMethod::Search,
+            task_assignment: TaskAssignment::None,
             recurrence: RecurrenceCapabilities::default(),
         }
     }

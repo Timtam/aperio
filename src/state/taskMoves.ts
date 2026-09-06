@@ -30,6 +30,7 @@ const DEFAULT_CAPS: TaskCapabilities = {
   delete_lists: false,
   manageable: false,
   member_add_by: 'search',
+  task_assignment: 'none',
 };
 
 export function capabilitiesOf(list: TaskList | undefined): TaskCapabilities {
