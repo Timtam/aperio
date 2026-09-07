@@ -3108,6 +3108,7 @@ dependencies = [
  "plugin-core",
  "serde_json",
  "sync-engine",
+ "tokio",
 ]
 
 [[package]]

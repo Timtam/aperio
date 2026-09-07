@@ -919,12 +919,29 @@ impl AdapterRegistry {
         // An adapter whose credential is genuinely optional — a public iCal
         // feed — gets `None` and says so through its own schema rather than
         // through a special case here.
-        let config = crate::account_setup::init_config(&schema, config_json, |_slot| {
+        let mut config = crate::account_setup::init_config(&schema, config_json, |_slot| {
             secret
                 .map(str::to_string)
                 .ok_or(sync_engine::SecretError::NotFound)
         })
         .map_err(|err| RegistryError::Construct(err.to_string()))?;
+
+        // The confirmed host key, exactly as `register_from_schema` merges it
+        // below. This was the ONE opener in the tree that skipped it, and the
+        // omission was invisible for as long as the plugin tolerated a missing
+        // pin: the probe opened an adapter whose verifier would have accepted
+        // any key, and for a sync-only plugin — which has no listing to run —
+        // that open IS the whole test, so the button answered "fine" without
+        // ever consulting the pin it was implicitly relying on.
+        //
+        // Merging it here makes the test agree with what the account will
+        // actually do: a confirmed host passes, an unconfirmed one is refused
+        // by `HostKeyNotTrusted`, which both frontends already recognise and
+        // translate — rather than by a message from inside the plugin that
+        // nothing up here can act on.
+        if let Some((key, fingerprint)) = self.apply_host_key_pin(&schema, &config)? {
+            config = merge_account_config(&config, &[(&key, Value::String(fingerprint))])?;
+        }
 
         let instance = self.open_plugin_instance(&plugin.manifest.id, config)?;
 
@@ -1384,6 +1401,36 @@ mod tests {
         )
     }
 
+    /// The iCal plugin, registered under a manifest whose account schema
+    /// declares a host-key pin.
+    ///
+    /// A real pin-declaring plugin (SFTP) cannot be used here — host-core must
+    /// not depend on a sync adapter, which is exactly why the probe's missing
+    /// merge went unnoticed by every test in this crate. Borrowing iCal's
+    /// descriptor and giving it a pinned schema tests the REGISTRY's rule,
+    /// which is the part that was wrong; the plugin behind it is irrelevant to
+    /// the question and never gets opened in the refusing case.
+    fn ical_registry_with_pinned_schema() -> AdapterRegistry {
+        let mut manifest = ical_manifest();
+        let mut schema = manifest.account.clone().expect("iCal declares a schema");
+        schema.host_key_pin = Some(plugin_core::account_schema::AccountHostKeyPin {
+            field: "pinned_fingerprint".into(),
+            host_field: "host".into(),
+            port_field: "port".into(),
+        });
+        manifest.account = Some(schema);
+
+        let manager = Arc::new(PluginManager::new("0.1.0"));
+        let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
+        manager
+            .register_static(manifest, descriptor, adapter_ical_plugin::DESTROY_FN)
+            .expect("register the static iCal plugin");
+        AdapterRegistry::new(
+            manager,
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        )
+    }
+
     fn ical_config(url: &str) -> String {
         serde_json::json!({ "feed_url": url, "username": Value::Null }).to_string()
     }
@@ -1610,6 +1657,66 @@ mod tests {
             }
             other => panic!("wrong refusal: {other}"),
         }
+    }
+
+    /// The probe used to be the ONE opener that never merged the pin, and the
+    /// omission hid behind the plugin tolerating a missing one.
+    ///
+    /// For a sync-only adapter there is no listing to run, so opening the
+    /// instance IS the whole test — which meant "Verbindung testen" answered
+    /// "fine" for a host whose key had never been confirmed, and would have
+    /// gone on answering "fine" while the adapter underneath accepted whatever
+    /// key the network offered. The moment the plugin started refusing an empty
+    /// pin, the same button flipped to always-failing, including for accounts
+    /// that were pinned and syncing. Both readings came from the same missing
+    /// merge.
+    #[tokio::test]
+    async fn the_probe_refuses_a_host_whose_key_is_not_confirmed() {
+        let registry = ical_registry_with_pinned_schema();
+        registry.set_host_key_pins(Arc::new(Pins(None)));
+        let err = registry
+            .probe_account(
+                &crate::accounts::AdapterKind::new("ical"),
+                r#"{"feed_url":"https://files.example.com/f.ics","username":null,"host":"files.example.com","port":22}"#,
+                None,
+            )
+            .await
+            .expect_err("an unconfirmed host must not be probed");
+        match err {
+            RegistryError::HostKeyNotTrusted { host_port } => {
+                // The error both frontends already know how to translate and
+                // offer a "check the fingerprint" button for — not a sentence
+                // from inside the plugin that nothing up here can act on.
+                assert_eq!(host_port, "files.example.com:22");
+            }
+            other => panic!("wrong refusal: {other}"),
+        }
+    }
+
+    /// And the other half, which is the direction a user actually feels: a
+    /// host that HAS been confirmed gets PAST the gate.
+    ///
+    /// The probe then goes on to do whatever that adapter's probe does — here
+    /// iCal fetches its feed, so the call still ends in a network error
+    /// against a host that does not exist. That is the assertion: the failure
+    /// must no longer be `HostKeyNotTrusted`. Without the merge above, a
+    /// pinned, syncing account was told its host key was unconfirmed.
+    #[tokio::test]
+    async fn a_confirmed_host_key_gets_past_the_gate() {
+        let registry = ical_registry_with_pinned_schema();
+        registry.set_host_key_pins(Arc::new(Pins(Some("SHA256:abc".into()))));
+        let err = registry
+            .probe_account(
+                &crate::accounts::AdapterKind::new("ical"),
+                r#"{"feed_url":"https://files.example.invalid/f.ics","username":null,"host":"files.example.com","port":22}"#,
+                None,
+            )
+            .await
+            .expect_err("the feed host does not resolve");
+        assert!(
+            !matches!(err, RegistryError::HostKeyNotTrusted { .. }),
+            "a confirmed pin was not merged: {err}"
+        );
     }
 
     /// A host that has never wired the store is in the same position as one

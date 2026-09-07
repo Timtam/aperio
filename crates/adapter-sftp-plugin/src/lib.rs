@@ -60,58 +60,87 @@ fn default_auth_method() -> String {
     "password".to_string()
 }
 
+/// Build the adapter from its init config, or say why not.
+///
+/// Split out of the FFI export so the refusals below can be tested as
+/// ordinary Rust. They are the kind of rule that must not be taken on trust.
+fn adapter_from_config(json: &str) -> Result<SftpSyncAdapter, String> {
+    let cfg: InitConfig =
+        serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
+    if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() || cfg.path.trim().is_empty() {
+        return Err("host, user and path must not be empty".to_string());
+    }
+    let auth = match cfg.auth_method.as_str() {
+        "password" => {
+            if cfg.password.is_empty() {
+                return Err("password auth requires non-empty password".to_string());
+            }
+            SftpAuth::Password {
+                password: cfg.password,
+            }
+        }
+        "key" => {
+            if cfg.key_path.trim().is_empty() {
+                return Err("key auth requires key_path".to_string());
+            }
+            let passphrase = if cfg.key_passphrase.is_empty() {
+                None
+            } else {
+                Some(cfg.key_passphrase)
+            };
+            SftpAuth::PrivateKey {
+                path: PathBuf::from(cfg.key_path.trim()),
+                passphrase,
+            }
+        }
+        other => return Err(format!("unknown auth_method: {other}")),
+    };
+
+    // §19.5. Without a pin this used to build a verifier with an empty
+    // known-hosts map, and `InMemoryHostKeyVerifier` answers `AcceptAndRemember`
+    // for anything it has not seen — it accepts whatever key the network
+    // presents and treats it as the truth from then on. No error, no prompt,
+    // and the first connection after that is indistinguishable from a
+    // machine-in-the-middle.
+    //
+    // Both hosts already refuse before they get here (`Unbuildable::
+    // HostKeyNotTrusted` in host_core::sync_target::build, and the legacy
+    // `build_adapter` path on the desktop). This is the second lock on the same
+    // door: the check that mattered lived entirely outside the thing it
+    // protects, so any future caller reaching the plugin directly — another
+    // host, a test harness, a path nobody has written yet — got blind
+    // trust-on-first-use for free. A plugin that refuses cannot be talked into
+    // it by a caller that forgot.
+    //
+    // Nothing legitimate arrives here without a pin. Learning a server's
+    // fingerprint is `plugin_probe_host_key` below, a separate export that
+    // does not consult a verifier at all.
+    if cfg.pinned_fingerprint.trim().is_empty() {
+        return Err(
+            "refusing to connect without a pinned host key: confirm the server's \
+             fingerprint first (DESIGN §19.5)"
+                .to_string(),
+        );
+    }
+    let host_port = format!("{}:{}", cfg.host.trim(), cfg.port);
+    let verifier: Arc<dyn HostKeyVerifier> = Arc::new(InMemoryHostKeyVerifier::with_known(
+        &host_port,
+        cfg.pinned_fingerprint.trim(),
+    ));
+    Ok(SftpSyncAdapter::new(
+        cfg.host.trim(),
+        cfg.port,
+        cfg.user.trim(),
+        auth,
+        PathBuf::from(cfg.path.trim()),
+        verifier,
+    ))
+}
+
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
 pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
-    open_instance_with(config_json, |json| {
-        let cfg: InitConfig =
-            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
-        if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() || cfg.path.trim().is_empty() {
-            return Err("host, user and path must not be empty".to_string());
-        }
-        let auth = match cfg.auth_method.as_str() {
-            "password" => {
-                if cfg.password.is_empty() {
-                    return Err("password auth requires non-empty password".to_string());
-                }
-                SftpAuth::Password {
-                    password: cfg.password,
-                }
-            }
-            "key" => {
-                if cfg.key_path.trim().is_empty() {
-                    return Err("key auth requires key_path".to_string());
-                }
-                let passphrase = if cfg.key_passphrase.is_empty() {
-                    None
-                } else {
-                    Some(cfg.key_passphrase)
-                };
-                SftpAuth::PrivateKey {
-                    path: PathBuf::from(cfg.key_path.trim()),
-                    passphrase,
-                }
-            }
-            other => return Err(format!("unknown auth_method: {other}")),
-        };
-        let verifier: Arc<dyn HostKeyVerifier> = if cfg.pinned_fingerprint.trim().is_empty() {
-            Arc::new(InMemoryHostKeyVerifier::new())
-        } else {
-            let host_port = format!("{}:{}", cfg.host.trim(), cfg.port);
-            Arc::new(InMemoryHostKeyVerifier::with_known(
-                &host_port,
-                cfg.pinned_fingerprint.trim(),
-            ))
-        };
-        Ok(SftpSyncAdapter::new(
-            cfg.host.trim(),
-            cfg.port,
-            cfg.user.trim(),
-            auth,
-            PathBuf::from(cfg.path.trim()),
-            verifier,
-        ))
-    })
+    open_instance_with(config_json, adapter_from_config)
 }
 
 /// # Safety
@@ -339,4 +368,79 @@ async fn plugin_probe_host_key(args_json: String) -> Result<Vec<u8>, String> {
 
 plugin_sdk::declare_probe_host_key! {
     handler: plugin_probe_host_key,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(pin: &str) -> String {
+        serde_json::json!({
+            "host": "ssh.example.invalid",
+            "port": 22,
+            "user": "alice",
+            "path": "/home/alice/aperio",
+            "auth_method": "password",
+            "password": "swordfish",
+            "pinned_fingerprint": pin,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_pinned_host_key_opens_the_adapter() {
+        assert!(adapter_from_config(&config("SHA256:abcd1234")).is_ok());
+    }
+
+    #[test]
+    fn no_pin_is_refused_rather_than_trusted_on_first_use() {
+        // The whole point. Before this, an empty pin built a verifier with an
+        // empty known-hosts map, which answers AcceptAndRemember to any key it
+        // has not seen — so the connection succeeded against whatever answered
+        // and remembered it as the truth.
+        let err = adapter_from_config(&config("")).expect_err("must refuse");
+        assert!(err.contains("pinned host key"), "unhelpful message: {err}");
+    }
+
+    #[test]
+    fn a_pin_of_only_whitespace_is_no_pin() {
+        // It reaches the verifier trimmed, so an untrimmed check would let a
+        // space through as a "pin" and land back on blind trust.
+        assert!(adapter_from_config(&config("   ")).is_err());
+    }
+
+    #[test]
+    fn an_absent_pin_field_is_no_pin_either() {
+        // `pinned_fingerprint` is `#[serde(default)]`, so a caller that simply
+        // omits it must not be treated more kindly than one that sends "".
+        let cfg = serde_json::json!({
+            "host": "ssh.example.invalid",
+            "port": 22,
+            "user": "alice",
+            "path": "/home/alice/aperio",
+            "auth_method": "password",
+            "password": "swordfish",
+        })
+        .to_string();
+        assert!(adapter_from_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn the_other_refusals_still_come_first() {
+        // The pin check sits after the auth checks, so a config that is wrong
+        // in two ways still reports the field the user can act on rather than
+        // the security rule they have not reached yet.
+        let cfg = serde_json::json!({
+            "host": "ssh.example.invalid",
+            "port": 22,
+            "user": "alice",
+            "path": "/home/alice/aperio",
+            "auth_method": "password",
+            "password": "",
+            "pinned_fingerprint": "",
+        })
+        .to_string();
+        let err = adapter_from_config(&cfg).expect_err("must refuse");
+        assert!(err.contains("password"), "got: {err}");
+    }
 }

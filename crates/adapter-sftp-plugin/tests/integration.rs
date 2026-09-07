@@ -70,3 +70,36 @@ fn multiple_sftp_servers_get_distinct_handles() {
     let b = open_one(&manager, "ssh-b.example.invalid");
     assert_ne!(a.handle() as usize, b.handle() as usize);
 }
+
+/// A caller that reaches the plugin DIRECTLY, without a pin, is refused.
+///
+/// This is the one that matters. The unit tests next door prove the rule; this
+/// proves it survives the FFI boundary, which is the surface a future host — or
+/// anything else that loads this .dll — actually touches. Before it, the only
+/// thing standing between an unconfirmed server and a silent
+/// trust-on-first-use was a check in the caller.
+#[test]
+fn opening_without_a_pinned_host_key_is_refused_through_the_ffi_boundary() {
+    let manager = make_manager();
+    let loaded = manager
+        .get("com.aperio.sync-adapter-sftp")
+        .expect("registered");
+    let cfg = serde_json::json!({
+        "host": "ssh.example.invalid",
+        "port": 22,
+        "user": "alice",
+        "path": "/home/alice/aperio",
+        "auth_method": "password",
+        "password": "swordfish",
+        // No pinned_fingerprint at all — exactly what a caller that forgot
+        // sends, and what used to buy blind trust.
+    });
+    let err = manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect_err("the plugin must refuse an unpinned host");
+    let text = err.to_string();
+    assert!(
+        text.contains("pinned host key"),
+        "the refusal has to say what is wrong: {text}"
+    );
+}

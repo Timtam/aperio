@@ -32,7 +32,10 @@ adapter-webex-plugin = { path = "../adapter-webex-plugin", optional = true }
 # The credential-layer tests assert what the SHIPPED manifests imply about
 # keychain slots, which is host-core's derivation, not this crate's.
 host-core.workspace = true
-sync-engine.workspace = true
+# `FakeSecrets` for the probe test, and a runtime for it: `probe_account` is
+# async. Both are dev-only — the crate itself needs neither.
+sync-engine = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # `manifests_parse` reads the two locale files to prove every kind an adapter
 # declares has a label a screen reader can read out. A missing key is silent at
 # runtime, so it has to be caught here.
