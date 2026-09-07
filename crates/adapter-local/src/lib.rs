@@ -14,6 +14,15 @@
 //! the connection in. The adapter assumes the schema from
 //! `src-tauri/src/db/sql/0001_init.sql` is present.
 
+/// This adapter's manifest, embedded from the crate's own directory.
+///
+/// The adapter is linked in rather than loaded (see
+/// `host_core::builtin_adapters`), but it is DESCRIBED like every other
+/// adapter, and the host reads that description through this const rather than
+/// reaching into this crate's directory. Bytes, not a parsed `PluginManifest`
+/// (DESIGN.md section 20).
+pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json"));
+
 mod calendars;
 mod color_labels;
 mod contacts;

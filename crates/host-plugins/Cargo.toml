@@ -11,10 +11,10 @@ description = "Aperio — static plugin registry: links the bundled adapter -plu
 [dependencies]
 plugin-core.workspace = true
 
-# The 17 bundled adapter plugins, linked statically (rlib) rather than
+# The 12 bundled adapter plugins, linked statically (rlib) rather than
 # dlopen-ed. Optional + gated behind the `static` feature so a consumer that
 # only wants the dlopen path (the desktop host) can depend on this crate with
-# `default-features = false` and not drag the 17 rlibs into its binary.
+# `default-features = false` and not drag the 12 rlibs into its binary.
 adapter-caldav-plugin = { path = "../adapter-caldav-plugin", optional = true }
 adapter-ical-plugin = { path = "../adapter-ical-plugin", optional = true }
 adapter-google-plugin = { path = "../adapter-google-plugin", optional = true }
@@ -67,7 +67,7 @@ sftp = ["registry", "dep:adapter-sftp-plugin"]
 dropbox = ["registry", "dep:adapter-dropbox-plugin"]
 webex = ["registry", "dep:adapter-webex-plugin"]
 
-# Convenience: link + register ALL 17 bundled adapter plugins (the default).
+# Convenience: link + register ALL 12 bundled adapter plugins (the default).
 static = [
     "caldav",
     "ical",

@@ -19,6 +19,14 @@
 //! (unencrypted — the host's frontend gates it behind a
 //! warning).
 
+/// This plugin's manifest, embedded from the crate's own directory.
+///
+/// Hosts read the manifest through this const rather than reaching across the
+/// workspace for `../../<crate>/plugin.json`. Bytes, not a parsed
+/// `PluginManifest`: the parsed type belongs to whichever `plugin-core` the
+/// reader resolved, which need not be this crate's (DESIGN.md section 20).
+pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json"));
+
 use std::os::raw::{c_char, c_void};
 
 use adapter_ftp::{FtpsMode, FtpsSyncAdapter};

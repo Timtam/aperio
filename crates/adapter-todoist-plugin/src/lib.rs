@@ -13,6 +13,14 @@
 //! (when used) stays host-side + the host threads the token in
 //! via `config_json` per ABI v2's `open_instance` hook.
 
+/// This plugin's manifest, embedded from the crate's own directory.
+///
+/// Hosts read the manifest through this const rather than reaching across the
+/// workspace for `../../<crate>/plugin.json`. Bytes, not a parsed
+/// `PluginManifest`: the parsed type belongs to whichever `plugin-core` the
+/// reader resolved, which need not be this crate's (DESIGN.md section 20).
+pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json"));
+
 use std::os::raw::{c_char, c_void};
 
 use adapter_todoist::TodoistAdapter;
@@ -375,10 +383,8 @@ mod tests {
     /// the host how to set up a Todoist account. Parsing it here means a typo
     /// fails the build rather than the first user who tries to connect.
     fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
-        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../plugin.json"
-        ))
-        .expect("plugin.json parses and its account schema validates")
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(crate::MANIFEST)
+            .expect("plugin.json parses and its account schema validates")
     }
 
     #[test]

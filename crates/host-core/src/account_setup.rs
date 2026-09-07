@@ -1821,10 +1821,9 @@ mod tests {
     /// instead of at the provider as an `invalid_client` weeks later.
     #[test]
     fn a_required_client_secret_still_fails_loudly() {
-        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../adapter-google-plugin/plugin.json"
-        ))
-        .expect("the shipped manifest parses");
+        let manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_google_plugin::MANIFEST)
+                .expect("the shipped manifest parses");
         let schema = manifest
             .account
             .expect("the shipped manifest declares an account schema");

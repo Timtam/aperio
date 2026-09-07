@@ -593,10 +593,9 @@ mod tests {
     /// away from the shipped manifest.
     fn manager_with_ical() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
-        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../adapter-ical-plugin/plugin.json"
-        ))
-        .expect("the shipped iCal manifest parses");
+        let manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_ical_plugin::MANIFEST)
+                .expect("the shipped iCal manifest parses");
         let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
         manager
             .register_static(manifest, descriptor, adapter_ical_plugin::DESTROY_FN)
@@ -624,10 +623,9 @@ mod tests {
     /// away from what actually ships.
     fn manager_with_sync_only() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
-        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../adapter-webdav-plugin/plugin.json"
-        ))
-        .expect("the shipped WebDAV sync manifest parses");
+        let manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_webdav_plugin::MANIFEST)
+                .expect("the shipped WebDAV sync manifest parses");
         // Read off the manifest rather than assumed: if the shipped kind is
         // renamed, every test below would otherwise start asking about a kind
         // no plugin serves and quietly assert the unknown-kind branch instead.
@@ -702,10 +700,9 @@ mod tests {
     fn an_adopted_kind_inherits_the_adopting_plugins_rule() {
         const RETIRED: &str = "retired-folder-sync";
         let manager = plugin_core::PluginManager::new("0.1.0");
-        let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../adapter-webdav-plugin/plugin.json"
-        ))
-        .expect("the shipped WebDAV sync manifest parses");
+        let mut manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_webdav_plugin::MANIFEST)
+                .expect("the shipped WebDAV sync manifest parses");
         manifest.adopts_adapter_kinds = vec![RETIRED.to_string()];
         let descriptor = unsafe { adapter_webdav_plugin::build_descriptor() };
         manager

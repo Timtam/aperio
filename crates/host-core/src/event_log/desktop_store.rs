@@ -481,10 +481,9 @@ mod tests {
         // unknown-kind branch. (Folder sync used to serve here; it folded into
         // the built-in store, whose account holds calendars and therefore does
         // not answer the question this test asks.)
-        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../../adapter-webdav-plugin/plugin.json"
-        ))
-        .expect("the shipped WebDAV sync manifest parses");
+        let manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_webdav_plugin::MANIFEST)
+                .expect("the shipped WebDAV sync manifest parses");
         let sync_kind = manifest
             .adapter_kind
             .clone()

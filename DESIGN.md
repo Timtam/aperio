@@ -3375,6 +3375,33 @@ und kann darüber ein rotiertes Zugangsdatum zurückmelden (Abschnitt 20.10). Au
 solange es nicht verlangt wird: das Token ist Vollmacht, und Vollmacht, die
 niemand angefordert hat, hat auch niemand geprüft.
 
+#### Wie der Host an die Bytes kommt
+
+Jede Kiste, die ein `plugin.json` mitbringt, exportiert es selbst:
+
+```rust
+pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json"));
+```
+
+Wer das Manifest braucht — `host-plugins` beim statischen Registrieren,
+`host-core::builtin_adapters` für die eingebauten Adapter, jeder Test, der gegen
+ein echtes Schema prüft — liest diese Konstante. **Nicht** den Pfad in das
+Verzeichnis der Nachbarkiste. Ein `include_bytes!("../../adapter-x-plugin/plugin.json")`
+funktioniert nur, solange beide Kisten in demselben Checkout nebeneinander
+liegen; eine cargo-Abhängigkeit liefert die *Kiste*, nicht das Verzeichnis, aus
+dem sie gebaut wurde. Zehn dieser Zugriffe, auf fünf verschiedene Kisten, hatten
+nicht einmal eine Abhängigkeitskante — nichts als das Verzeichnislayout verband
+die beiden Kisten.
+
+**Bytes, kein geparstes `PluginManifest`.** Der geparste Typ gehört derjenigen
+`plugin-core`-Auflösung, die der *Leser* gewählt hat; gäbe die Kiste einen Wert
+ihrer eigenen Kopie heraus, wären beide auf dieselbe Auflösung festgelegt —
+genau die Kopplung, die die Konstante auflöst.
+
+Zwei Tests halten das fest (`crates/host-plugins/tests/manifest_reach.rs`):
+keine Quelle greift auf das Manifest einer anderen Kiste zu, und keine Kiste mit
+`plugin.json` vergisst, es zu exportieren.
+
 ### 20.5 Plugin-Manager (Laufzeit)
 
 Der Plugin-Manager im Rust-Backend ist zuständig für:

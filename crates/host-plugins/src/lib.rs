@@ -12,10 +12,16 @@
 //!
 //! [`register_all_static`] is the static counterpart to `scan_dir`:
 //! for each bundled plugin it parses the crate's own `plugin.json`
-//! (`include_bytes!` — the SAME manifest the desktop ships, so the
-//! two paths can't drift) and hands the crate-mangled
-//! `build_descriptor()` + `DESTROY_FN` to
+//! — read from that crate's `MANIFEST` const, so it is the SAME
+//! manifest the desktop ships and the two paths can't drift — and
+//! hands the crate-mangled `build_descriptor()` + `DESTROY_FN` to
 //! [`plugin_core::manager::PluginManager::register_static`].
+//!
+//! The manifest arrives through the plugin crate's own public const
+//! rather than an `include_bytes!` path into its source directory.
+//! That reach only ever worked because the crates are neighbours in
+//! one checkout; a cargo dependency hands you the crate, not the
+//! directory it was built from.
 //!
 //! Interactive-auth / discover / probe-host-key fn-pointers are left
 //! `None` by `register_static` for now; wiring the static OAuth path
@@ -23,11 +29,7 @@
 //! deferred to the mobile OAuth phase.
 
 #[cfg(feature = "registry")]
-use plugin_core::{
-    manager::{PluginManager, StaticHooks},
-    manifest::PluginManifest,
-    PluginResult,
-};
+use plugin_core::{manager::PluginManager, manifest::PluginManifest, PluginResult};
 
 /// Register every bundled adapter plugin into `manager` via static
 /// linkage instead of `dlopen`.
@@ -39,65 +41,65 @@ use plugin_core::{
 /// whose descriptor is NULL) returns its error and aborts the rest.
 ///
 /// Compiled when any per-adapter feature is enabled (the `static`
-/// convenience feature — the default — turns on all 17); with none on,
+/// convenience feature — the default — turns on all 12); with none on,
 /// this crate links no `-plugin` rlibs. Each adapter's registration is
 /// gated on its own feature, so a consumer (e.g. the mobile cal-ffi)
 /// links exactly the adapters it ships.
 #[cfg(feature = "registry")]
 pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     /// Parse one crate's embedded `plugin.json` + register its
-    /// statically-linked descriptor. The optional third token wires the
+    /// statically-linked descriptor. The optional second token wires the
     /// crate's auth hook (the crate-mangled typed twin `__aperio_*_impl`,
     /// which P0 left `pub` in each auth-capable `-plugin` crate) through
     /// `register_static_with_hooks`, so OAuth / Autodiscover / TOFU adapters
     /// expose their handler when statically embedded:
-    ///   `register!(crate, "path")`                    — no auth hook
-    ///   `register!(crate, "path", interactive_auth)`  — OAuth (Google/MS/…)
-    ///   `register!(crate, "path", discover)`          — Autodiscover (EWS)
-    ///   `register!(crate, "path", probe_host_key)`    — TOFU (SFTP)
+    ///   `register!(crate)`                    — no auth hook
+    ///   `register!(crate, interactive_auth)`  — OAuth (Google/MS/…)
+    ///   `register!(crate, discover)`          — Autodiscover (EWS)
+    ///   `register!(crate, probe_host_key)`    — TOFU (SFTP)
     macro_rules! register {
-        ($plugin_crate:ident, $manifest_path:literal) => {{
-            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+        ($plugin_crate:ident) => {{
+            let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
             // SAFETY: `build_descriptor` returns a freshly heap-
             // allocated descriptor; `register_static` takes ownership
             // and pairs it with `DESTROY_FN` for teardown on drop.
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
             manager.register_static(manifest, descriptor, $plugin_crate::DESTROY_FN)?;
         }};
-        ($plugin_crate:ident, $manifest_path:literal, interactive_auth) => {{
-            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+        ($plugin_crate:ident, interactive_auth) => {{
+            let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
             manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                StaticHooks {
+                plugin_core::manager::StaticHooks {
                     interactive_auth_fn: Some($plugin_crate::__aperio_interactive_auth_impl),
                     ..Default::default()
                 },
             )?;
         }};
-        ($plugin_crate:ident, $manifest_path:literal, discover) => {{
-            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+        ($plugin_crate:ident, discover) => {{
+            let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
             manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                StaticHooks {
+                plugin_core::manager::StaticHooks {
                     discover_fn: Some($plugin_crate::__aperio_discover_impl),
                     ..Default::default()
                 },
             )?;
         }};
-        ($plugin_crate:ident, $manifest_path:literal, probe_host_key) => {{
-            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+        ($plugin_crate:ident, probe_host_key) => {{
+            let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
             manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                StaticHooks {
+                plugin_core::manager::StaticHooks {
                     probe_host_key_fn: Some($plugin_crate::__aperio_probe_host_key_impl),
                     ..Default::default()
                 },
@@ -107,63 +109,31 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
 
     // Calendar / task adapters.
     #[cfg(feature = "caldav")]
-    register!(
-        adapter_caldav_plugin,
-        "../../adapter-caldav-plugin/plugin.json"
-    );
+    register!(adapter_caldav_plugin);
     #[cfg(feature = "ical")]
-    register!(adapter_ical_plugin, "../../adapter-ical-plugin/plugin.json");
+    register!(adapter_ical_plugin);
     #[cfg(feature = "google")]
-    register!(
-        adapter_google_plugin,
-        "../../adapter-google-plugin/plugin.json",
-        interactive_auth
-    );
+    register!(adapter_google_plugin, interactive_auth);
     #[cfg(feature = "microsoft-graph")]
-    register!(
-        adapter_microsoft_graph_plugin,
-        "../../adapter-microsoft-graph-plugin/plugin.json",
-        interactive_auth
-    );
+    register!(adapter_microsoft_graph_plugin, interactive_auth);
     #[cfg(feature = "ews")]
-    register!(
-        adapter_ews_plugin,
-        "../../adapter-ews-plugin/plugin.json",
-        discover
-    );
+    register!(adapter_ews_plugin, discover);
     #[cfg(feature = "vikunja")]
-    register!(
-        adapter_vikunja_plugin,
-        "../../adapter-vikunja-plugin/plugin.json"
-    );
+    register!(adapter_vikunja_plugin);
     #[cfg(feature = "todoist")]
-    register!(
-        adapter_todoist_plugin,
-        "../../adapter-todoist-plugin/plugin.json"
-    );
+    register!(adapter_todoist_plugin);
 
     // Sync adapters. The folder mirror is not among them: it folded into the
     // built-in store, is linked in like the store, and reaches the orchestrator
     // without a manifest or a vtable — see `host_core::builtin_adapters`.
     #[cfg(feature = "webdav")]
-    register!(
-        adapter_webdav_plugin,
-        "../../adapter-webdav-plugin/plugin.json"
-    );
+    register!(adapter_webdav_plugin);
     #[cfg(feature = "ftp")]
-    register!(adapter_ftp_plugin, "../../adapter-ftp-plugin/plugin.json");
+    register!(adapter_ftp_plugin);
     #[cfg(feature = "sftp")]
-    register!(
-        adapter_sftp_plugin,
-        "../../adapter-sftp-plugin/plugin.json",
-        probe_host_key
-    );
+    register!(adapter_sftp_plugin, probe_host_key);
     #[cfg(feature = "dropbox")]
-    register!(
-        adapter_dropbox_plugin,
-        "../../adapter-dropbox-plugin/plugin.json",
-        interactive_auth
-    );
+    register!(adapter_dropbox_plugin, interactive_auth);
 
     // Video-conferencing adapters.
     //
@@ -172,11 +142,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     // statically-embedded build too — without it a mobile sign-in has nothing
     // to call.
     #[cfg(feature = "webex")]
-    register!(
-        adapter_webex_plugin,
-        "../../adapter-webex-plugin/plugin.json",
-        interactive_auth
-    );
+    register!(adapter_webex_plugin, interactive_auth);
 
     Ok(())
 }

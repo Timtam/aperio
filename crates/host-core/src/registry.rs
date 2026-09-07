@@ -1382,7 +1382,7 @@ mod tests {
     /// through to a per-kind arm that no longer exists. A copy of a manifest is
     /// a manifest that will disagree with the manifest.
     fn ical_manifest() -> PluginManifest {
-        PluginManifest::from_bytes(include_bytes!("../../adapter-ical-plugin/plugin.json"))
+        PluginManifest::from_bytes(adapter_ical_plugin::MANIFEST)
             .expect("the shipped iCal manifest parses")
     }
 
@@ -1456,10 +1456,8 @@ mod tests {
         let descriptor = unsafe { adapter_webex_plugin::build_descriptor() };
         manager
             .register_static(
-                PluginManifest::from_bytes(include_bytes!(
-                    "../../adapter-webex-plugin/plugin.json"
-                ))
-                .expect("the shipped Webex manifest parses"),
+                PluginManifest::from_bytes(adapter_webex_plugin::MANIFEST)
+                    .expect("the shipped Webex manifest parses"),
                 descriptor,
                 adapter_webex_plugin::DESTROY_FN,
             )

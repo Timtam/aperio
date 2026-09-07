@@ -513,6 +513,45 @@ Vorteil.
 - Hinweis: Der **lokale** Sync-Log existiert; gemeint ist die Pufferung von Schreibzugriffen auf **externe** Provider.
 - Einstieg: neue Migration + die Mutationspfade in `src-tauri/src/commands/`.
 
+### A10 · Adapter in eigene Repositories herauslösen (§20) `[~]`
+
+Entscheidung vom 2026-09-07: Kern + UI bleiben ein Repo, die **Adapter** ziehen
+aus — sie waren von Anfang an eigenständige Projekte, dafür gibt es das
+Plugin-System. Ablösbar sind **12**: `adapter-local` und
+`adapter-device-calendar` haben keine `-plugin`/`-cdylib`-Schicht, sie sind über
+`host_core::builtin_adapters` fest eingebaut.
+
+Erst entkoppeln, dann umziehen. Die ersten fünf Pakete sind für sich wertvoll,
+auch falls nie ein Repo entsteht.
+
+- [x] **Paket 1 — Manifeste gehören ihrer Kiste.** Jede der 14 Kisten mit
+  `plugin.json` exportiert `pub const MANIFEST: &[u8]`; alle 35 relativen
+  `include_bytes!`-Zugriffe lesen jetzt diese Konstante. Fünf bis dahin gar
+  nicht deklarierte cargo-Kanten sind nachgetragen. Zwei Wächter in
+  `crates/host-plugins/tests/manifest_reach.rs`.
+- [ ] **Paket 2 — Tests über die Registry statt den Dateibaum.**
+  `manifests_parse.rs` walkt `crates/*/plugin.json`; nach dem Umzug findet der
+  Lauf zwei Manifeste und seine Anti-Stille-Wächter schlagen an.
+- [ ] **Paket 3 — Ein Adapter kann sich selbst benennen.** Der Anzeigename einer
+  `adapter_kind` liegt in `locales/*/translation.json`, es gibt kein
+  Manifest-Feld dafür; fünf Aufrufstellen übergeben kein `defaultValue`, ein
+  unbekannter Kind wird also als roher i18n-Schlüssel vorgelesen. Das ist heute
+  schon ein a11y-Fehler, unabhängig vom Umzug.
+- [ ] **Paket 4 — Staging aus `build.rs` in ein xtask** (`cargo metadata` statt
+  `<workspace>/crates/<name>`); killt zugleich den `include_str!("../build.rs")`-
+  Scrape in `src-tauri/src/bundled_plugins.rs` und das Zwei-Build-Rennen.
+- [ ] **Paket 5 — `.aperio`-Packer.** Der Installer liest das Format, gebaut wird
+  es nirgends (die einzige Stelle, die je ein Archiv schreibt, ist ein
+  Test-Helfer in `plugin-core/src/archive.rs`). Solange die zwölf Adapter noch
+  im Baum liegen, ist das die billigste Validierung des Formats.
+- [ ] Danach erst: ABI-Vorwärtspfad (`struct_size`), Versionierung der fünf
+  Vertragskisten, `adapter-caldav`s Zugriff auf `shared/contracts/` auflösen —
+  und ein erster Umzug mit **einem** Adapter als Probe (webdav oder vikunja;
+  CalDAV ist die schlechteste Wahl).
+- Offene Entscheidung: behält Mobile git-Abhängigkeiten auf alle zwölf
+  `-plugin`-Kisten? iOS verbietet dlopen, „eigenständig" kann dort nie mehr
+  heißen als „gepinnte Quell-Revision".
+
 ---
 
 ## 🟠 B. Teilweise umgesetzt / kleinere Lücken

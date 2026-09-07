@@ -3057,8 +3057,13 @@ dependencies = [
 name = "host-core"
 version = "0.1.0"
 dependencies = [
+ "adapter-device-calendar",
+ "adapter-dropbox-plugin",
+ "adapter-ftp-plugin",
+ "adapter-google-plugin",
  "adapter-ical-plugin",
  "adapter-local",
+ "adapter-sftp-plugin",
  "adapter-webdav-plugin",
  "adapter-webex-plugin",
  "aperio-db",

@@ -16,6 +16,11 @@ base64 = "0.22"
 builtin-oauth.workspace = true
 cal-core.workspace = true
 adapter-local.workspace = true
+# The device adapter is not called from here — the mobile host holds the typed
+# adapter — but `builtin_adapters` reads its manifest to learn the kind name,
+# and that is a dependency whether or not it is declared. It used to be read by
+# relative path, which worked only because the crates are neighbours.
+adapter-device-calendar.workspace = true
 plugin-core.workspace = true
 sync-core.workspace = true
 sync-engine.workspace = true
@@ -64,6 +69,13 @@ adapter-webdav-plugin = { path = "../adapter-webdav-plugin" }
 # question about the REAL plugin: whether it exports `list_meetings` at all is
 # what decides it, and a hand-written twin cannot answer that.
 adapter-webex-plugin = { path = "../adapter-webex-plugin" }
+# The sync-target connect/migrate tests assert against the field keys the SYNC
+# adapters actually declare, so they read each one's shipped manifest. Same
+# reason as WebDAV above; these four are the remaining kinds those tests cover.
+adapter-google-plugin = { path = "../adapter-google-plugin" }
+adapter-sftp-plugin = { path = "../adapter-sftp-plugin" }
+adapter-ftp-plugin = { path = "../adapter-ftp-plugin" }
+adapter-dropbox-plugin = { path = "../adapter-dropbox-plugin" }
 # Re-declare the engine + local adapter with their test-support features so the
 # moved applier/onboarding/sync tests reach FakeSecrets / the in-memory store.
 # Dev-only: the normal (mobile) build never enables these.

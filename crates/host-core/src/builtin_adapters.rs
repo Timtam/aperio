@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 fn local_manifest() -> &'static PluginManifest {
     static MANIFEST: OnceLock<PluginManifest> = OnceLock::new();
     MANIFEST.get_or_init(|| {
-        PluginManifest::from_bytes(include_bytes!("../../adapter-local/plugin.json"))
+        PluginManifest::from_bytes(adapter_local::MANIFEST)
             .expect("the built-in store's manifest parses and validates")
     })
 }
@@ -52,7 +52,7 @@ fn local_manifest() -> &'static PluginManifest {
 fn device_manifest() -> &'static PluginManifest {
     static MANIFEST: OnceLock<PluginManifest> = OnceLock::new();
     MANIFEST.get_or_init(|| {
-        PluginManifest::from_bytes(include_bytes!("../../adapter-device-calendar/plugin.json"))
+        PluginManifest::from_bytes(adapter_device_calendar::MANIFEST)
             .expect("the device adapter's manifest parses and validates")
     })
 }
