@@ -57,6 +57,23 @@ fn device_manifest() -> &'static PluginManifest {
     })
 }
 
+/// Every adapter the host implements itself, as it declares itself.
+///
+/// The counterpart to `PluginManager::all()` for the adapters that are linked
+/// rather than loaded. Between the two, a caller has the whole set of adapters
+/// a build ships without having to know which came from a shared library — and,
+/// more to the point, without walking `crates/` to find out. A directory walk
+/// answers "which crates happen to sit next to this one"; this answers "which
+/// adapters does this build declare", which is the question every caller
+/// actually has.
+///
+/// Whole manifests rather than [`AdapterKindInfo`]: a caller checking what an
+/// adapter promises — its capabilities, its account schema, what it says about
+/// assigning a task — needs the declaration, not the summary the pickers use.
+pub fn builtin_manifests() -> Vec<&'static PluginManifest> {
+    vec![local_manifest(), device_manifest()]
+}
+
 /// The adapter kind the phone's own calendars and reminders answer to.
 ///
 /// Read from the manifest rather than written here. It is persisted in

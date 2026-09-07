@@ -529,9 +529,15 @@ auch falls nie ein Repo entsteht.
   `include_bytes!`-Zugriffe lesen jetzt diese Konstante. Fünf bis dahin gar
   nicht deklarierte cargo-Kanten sind nachgetragen. Zwei Wächter in
   `crates/host-plugins/tests/manifest_reach.rs`.
-- [ ] **Paket 2 — Tests über die Registry statt den Dateibaum.**
-  `manifests_parse.rs` walkt `crates/*/plugin.json`; nach dem Umzug findet der
-  Lauf zwei Manifeste und seine Anti-Stille-Wächter schlagen an.
+- [x] **Paket 2 — Tests über die Registry statt den Dateibaum.**  
+  ↳ `manifests_parse.rs` fragt jetzt einen von `register_all_static` gefüllten
+  `PluginManager` plus `builtin_adapters::builtin_manifests()`; die Tabellen
+  schlüsseln nach Plugin-Id statt Verzeichnisname. Am simulierten
+  Nach-Umzug-Baum gemessen: vorher fielen 4 der 7 Tests um, jetzt bleiben alle
+  8 grün. Übrig bleiben zwei Baum-Fragen, beide in einem Test: kein
+  `plugin.json`, das kein Build deklariert, und keine zwei Kisten mit derselben
+  Plugin-Id — Letzteres kann die Registry gar nicht sehen, weil der Manager die
+  zweite Registrierung ablehnt.
 - [ ] **Paket 3 — Ein Adapter kann sich selbst benennen.** Der Anzeigename einer
   `adapter_kind` liegt in `locales/*/translation.json`, es gibt kein
   Manifest-Feld dafür; fünf Aufrufstellen übergeben kein `defaultValue`, ein

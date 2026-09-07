@@ -3402,6 +3402,32 @@ Zwei Tests halten das fest (`crates/host-plugins/tests/manifest_reach.rs`):
 keine Quelle greift auf das Manifest einer anderen Kiste zu, und keine Kiste mit
 `plugin.json` vergisst, es zu exportieren.
 
+#### Wonach die Tests fragen
+
+Was ein Adapter *verspricht* — welche Kind-Zeichenkette er beansprucht, ob er
+ein Konten-Schema deklariert, wie viele Personen er einer Aufgabe zuweisen kann
+— wird gegen die **Registry** geprüft, nicht gegen den Verzeichnisbaum
+(`crates/host-plugins/tests/manifests_parse.rs`). Quelle ist ein
+`PluginManager`, den `register_all_static` gefüllt hat, plus
+`host_core::builtin_adapters::builtin_manifests()` für die beiden Adapter, die
+der Host einbindet statt sie zu laden. Beide Listen werden dort gepflegt, wo sie
+ohnehin stehen; der Test führt keine dritte.
+
+Ein `read_dir` über `crates/` beantwortete die Frage „welche Kisten liegen
+zufällig neben dieser" — genau die Tatsache, die ein Umzug ändert. Die Tabellen
+schlüsseln deshalb auch nach **Plugin-Id** statt nach Verzeichnisnamen: die Id
+deklariert das Manifest und darauf schlüsselt der Loader.
+
+Zwei Fragen bleiben Fragen über den Baum. **Kein `plugin.json` in diesem Repo,
+das kein Build deklariert:** ein Manifest, das niemand lädt, erreicht keinen
+Nutzer — es ist aber eine Kiste, die jemand anschließen wollte und nicht
+angeschlossen hat. Und **keine zwei Kisten mit derselben Plugin-Id** — das kann
+die Registry gar nicht sehen, weil der Manager die zweite Registrierung ablehnt
+und das Paar nie als Paar ankommt. Beide Fragen haben nur dann eine Antwort,
+wenn der Build alle Adapter einbindet; der Test trägt genau diese **Bedingung**
+und nicht den Namen des Sammel-Features, denn `cal-ffi` schaltet die zwölf
+einzeln ein und nennt `static` nie.
+
 ### 20.5 Plugin-Manager (Laufzeit)
 
 Der Plugin-Manager im Rust-Backend ist zuständig für:
