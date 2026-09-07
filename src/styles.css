@@ -1661,6 +1661,26 @@ button[aria-disabled='true'] {
   white-space: nowrap;
 }
 
+/* A path field and its browse button, side by side (AccountSchemaForm's
+ * `directory` / `file` kinds). Same shape as `.subtasks__add` next door: the
+ * input takes the room, the button keeps its label on one line. `min-width: 0`
+ * is what lets the input shrink inside the flex row instead of pushing the
+ * button off the edge — a path is long, and its field is the one that gives. */
+.form__path {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.form__path input {
+  flex: 1;
+  min-width: 0;
+}
+
+.form__path button {
+  white-space: nowrap;
+}
+
 .form__row {
   display: flex;
   gap: var(--space-3);

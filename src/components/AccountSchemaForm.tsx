@@ -1,4 +1,6 @@
+import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import type { AccountFormField, AccountFormSpec } from '@aperio/shared';
@@ -25,6 +27,18 @@ import type { AccountFormField, AccountFormSpec } from '@aperio/shared';
  * are not rendered at all. Showing two empty inputs that need not be filled
  * reads as "you must supply these" — and for a screen-reader user, two more
  * stops on the way to the button for nothing.
+ *
+ * ## Paths
+ *
+ * A `directory` or `file` field keeps its text input and gains a browse button
+ * beside it. The input stays because typing a path is the reliable way in: it
+ * works with the keyboard alone, it is what the SFTP key field has always
+ * done, and a picker that REPLACED it would take that away. The button is the
+ * convenience, not the mechanism.
+ *
+ * Cancelling changes nothing, deliberately — a picker that cleared the field on
+ * cancel would destroy a path the user had typed, and "I changed my mind about
+ * browsing" is not "I want this empty".
  */
 export function AccountSchemaForm({
   spec,
@@ -37,6 +51,45 @@ export function AccountSchemaForm({
   onChange: (key: string, value: string | boolean) => void;
 }) {
   const { t } = useTranslation();
+  /** The path inputs, so focus can land on the one that just changed. */
+  const pathInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [browseError, setBrowseError] = useState<string | null>(null);
+
+  const browse = useCallback(
+    async (field: AccountFormField, button: HTMLButtonElement | null) => {
+      setBrowseError(null);
+      let picked: string | null;
+      try {
+        picked = (await openFileDialog({
+          multiple: false,
+          directory: field.kind === 'directory',
+        })) as string | null;
+      } catch (err) {
+        // Never silent: a dialog that refuses to open would otherwise look
+        // like a button that does nothing, and the way out — type the path —
+        // is not obvious unless it is said.
+        setBrowseError(
+          t('dialogs.accounts.browseFailed', {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        button?.focus();
+        return;
+      }
+      // Cancelled. The field keeps whatever it had, and focus goes back to the
+      // button the user pressed — nothing happened, so nothing should move.
+      if (picked == null) {
+        button?.focus();
+        return;
+      }
+      onChange(field.key, picked);
+      // Land on the input itself: the screen reader then reads the field and
+      // its NEW value, which is the confirmation. Announcing it separately
+      // would say the path twice.
+      pathInputs.current[field.key]?.focus();
+    },
+    [onChange, t],
+  );
 
   // A build with its own credentials asks for neither half of the pair; the
   // backend then signs in with what it carries.
@@ -117,41 +170,65 @@ export function AccountSchemaForm({
             </label>
           );
         }
+        const isPath = field.kind === 'directory' || field.kind === 'file';
         return (
           <label className="form__field" key={field.key}>
             <span className="form__label">{label(field)}</span>
-            <input
-              type={
-                field.kind === 'secret'
-                  ? 'password'
-                  : field.kind === 'number'
-                    ? 'number'
-                    : 'text'
-              }
-              inputMode={
-                field.kind === 'url'
-                  ? 'url'
-                  : field.kind === 'number'
-                    ? 'numeric'
+            <div className={isPath ? 'form__path' : undefined}>
+              <input
+                ref={
+                  isPath
+                    ? (el) => {
+                        pathInputs.current[field.key] = el;
+                      }
                     : undefined
-              }
-              value={value}
-              onChange={(e) => onChange(field.key, e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              required={field.required}
-            />
-            {/* A `directory` or `file` field is a path, typed. A picker button
-                belongs here and is deliberately not in this commit: it needs a
-                Tauri dialog command, a focus return after the native dialog
-                closes, and a decision about what happens when the user cancels
-                — none of which should ride along unannounced with a schema
-                change. Typing a path already works, which is what the SFTP key
-                field has always done. */}
+                }
+                type={
+                  field.kind === 'secret'
+                    ? 'password'
+                    : field.kind === 'number'
+                      ? 'number'
+                      : 'text'
+                }
+                inputMode={
+                  field.kind === 'url'
+                    ? 'url'
+                    : field.kind === 'number'
+                      ? 'numeric'
+                      : undefined
+                }
+                value={value}
+                onChange={(e) => onChange(field.key, e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                required={field.required}
+              />
+              {isPath && (
+                // Named after its field, because a form can carry two of these
+                // — a folder to sync into and a key file — and "Browse" twice
+                // in a row tells a screen-reader user nothing about which.
+                <button
+                  type="button"
+                  className="form__action"
+                  aria-label={t(
+                    field.kind === 'directory'
+                      ? 'dialogs.accounts.browseDirectoryNamed'
+                      : 'dialogs.accounts.browseFileNamed',
+                    { field: label(field) },
+                  )}
+                  onClick={(e) => void browse(field, e.currentTarget)}
+                >
+                  {t('dialogs.accounts.browse')}
+                </button>
+              )}
+            </div>
             {description && <span className="form__hint">{description}</span>}
           </label>
         );
       })}
+      {browseError && (
+        <FocusableNote className="form__error">{browseError}</FocusableNote>
+      )}
       {spec.oauth && (
         <FocusableNote className="form__hint">
           {t('dialogs.accounts.oauthFlowHint')}

@@ -27,6 +27,14 @@ nur noch aus, welches deiner Konten den Datensatz hält.
    und **Google Drive** reitet auf einem Google-Konto, das du vielleicht
    schon für deine Kalender hast. Für beide überspringst du diesen Schritt
    und wählst sie im nächsten.
+   Felder, die einen **Pfad auf diesem Gerät** meinen – der Ordner des
+   lokalen Speichers, die SSH-Schlüsseldatei für SFTP –, haben am Desktop
+   einen Knopf **Durchsuchen …** neben dem Eingabefeld. Tippen bleibt
+   gleichwertig: der Knopf ist die Bequemlichkeit, das Feld der Weg. Brichst
+   du die Auswahl ab, bleibt stehen, was im Feld stand. Auf dem Handy gibt es
+   den Knopf nicht, weil es dort keinen Systemdialog gibt, der einen Pfad
+   zurückgibt.
+
 3. Wechsle auf **Synchronisation**. Unter **Synchronisationsziel** stehen
    genau die Konten, die einen Datensatz halten können.
 4. Wähle das gewünschte Konto in der Liste und aktiviere

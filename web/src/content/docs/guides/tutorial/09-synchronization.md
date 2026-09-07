@@ -29,6 +29,13 @@ which of your accounts holds the dataset.
    next one. **Google Drive is not a separate entry**: a Google account
    can hold the dataset itself, so if you already have one for your
    calendars, skip this step and pick it in the next one.
+   Fields that mean a **path on this machine** — the local store's folder, the
+   SSH key file for SFTP — have a **Browse …** button beside the input on the
+   desktop. Typing stays equal to it: the button is the convenience, the field
+   is the way in. Cancel the picker and whatever was in the field stays there.
+   There is no such button on the phone, because no system dialog there hands a
+   path back.
+
 3. Switch to **Synchronization**. Under **Sync target** you'll find exactly
    the accounts that can hold a dataset.
 4. Pick the one you want in the list and choose **Sync through …**. Aperio
