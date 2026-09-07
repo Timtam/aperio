@@ -8,8 +8,17 @@
 > umgesetzt* verworfen (siehe „Bestätigt umgesetzt" am Ende).
 >
 > Abschnittsnummern (§) verweisen auf `DESIGN.md`.
-> Status: `[ ]` offen · `[~]` teilweise · `[x]` erledigt.
+> Status: `[ ]` offen · `[~]` teilweise · `[x]` erledigt · `[-]` hinfällig.
 > Diese Datei ist die laufende, code-abgeglichene Ergänzung zu DESIGN.md §25.
+>
+> **Nachgeführt am 2026-09-07** — nach 1199 Commits war die Liste erheblich
+> veraltet. Derselbe Abgleich noch einmal, gegen den heutigen Code: von 49
+> offenen bzw. teilweisen Punkten sind **16 längst erledigt**, 7 weiter
+> teilweise (jetzt mit dem konkreten Rest), einer **hinfällig**, 25 wirklich
+> offen. Wo ein Punkt kippte, steht unter ihm eine `↳`-Zeile mit dem Befund —
+> vor allem, wie es gelöst wurde, damit der nächste Leser nicht dieselbe Suche
+> wiederholt. Punkte, die weiter offen sind, wurden bewusst nicht kommentiert:
+> ihre Beschreibung stimmt ja noch.
 
 ---
 
@@ -26,7 +35,8 @@
 
 ### A2 · System-Integration: Datei-/URL-Verknüpfungen (§17) — nahezu vollständig offen
 - [ ] `.ics`-Dateiverknüpfung + Import-Dialog (Vorschau Titel/Datum/Beschreibung, Kalenderwahl, Batch- oder Einzelauswahl) (§17.1)
-- [ ] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)
+- [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
+  ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
 - [ ] Plattform-Registrierung per-User ohne Admin: Windows-Registry (HKCU), macOS `CFBundleDocumentTypes`, Linux `.desktop` MimeType (§17.1/§17.2)
 - [ ] Erst-Start-Assistent „Systemintegration einrichten" (Checkboxen .ics / webcal / .aperio + optional Desktop-Verknüpfung; tastatur- + screenreader-bedienbar) (§17.3)
@@ -59,7 +69,7 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 
-### A7a · Wie oft die Daten hinter den Widgets frisch werden `[~]`
+### A7a · Wie oft die Daten hinter den Widgets frisch werden `[x]`
 Gerätebefund: das Widget hing tagelang hinterher, geschätzt ein bis zwei
 Aktualisierungen am Tag. ZWEI unabhängige Ursachen, beide behoben.
 
@@ -131,7 +141,8 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
       Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
       mit `aps-environment` (siehe `withoutPushEntitlement.js`).
-- [~] **Schritt 1** — Widget-Target über `@bacons/apple-targets`
+- [x] **Schritt 1** — Widget-Target über `@bacons/apple-targets`  
+  ↳ Erledigt: Target an drei Stellen verdrahtet; das Widget wurde seither AUF dem Telefon beobachtet, was nur eine installierte, signierte Extension kann.
       (`mobile/targets/widget/`), feste Zeile, keine Daten. Beweist, dass das
       Target angelegt, signiert und installiert wird.
       **Eine Extension ist eine ZWEITE App-ID** (`com.aperio.mobile.widget`)
@@ -161,7 +172,8 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       die Existenz einer Datei — entscheidet weiterhin, welche Kopie lebt.
       ⚠️ Weiterhin einseitig: eine App-Version VOR dem Umzug sucht in
       Application Support, findet dort aber jetzt wieder alles.
-- [~] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei
+- [x] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei  
+  ↳ Erledigt inkl. der dreisprachigen Neusortierung zur Renderzeit. Was bleibt, sind benannte Randfälle, keine fehlende Implementierung.
       statt über den mitgelinkten Rust-Kern. Beim Ausarbeiten von 2b fiel die
       Annahme, auf der der Linking-Plan stand:
 
@@ -197,7 +209,8 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       („Als Nächstes" / „Up Next") können nicht aus dem Snapshot kommen — sie
       werden gelesen, bevor Daten existieren — und hängen deshalb an
       `Locale.preferredLanguages` statt an der App-Sprache.
-- [~] **Schritt 3** — Widget 3 „Nächster Termin" (`targets/widget/NextUp.swift`):
+- [x] **Schritt 3** — Widget 3 „Nächster Termin" (`targets/widget/NextUp.swift`):  
+  ↳ Erledigt. Zwei Stellen der Prosa sind ungenau statt unvollständig: der Countdown tickt NICHT sekündlich — NextUp.swift:107 baut pro Timeline-Eintrag einen String.
       eine Zeile plus Countdown, Familien `.accessoryRectangular` und
       `.accessoryInline` (Sperrbildschirm). `.accessoryCircular` bewusst NICHT —
       es fasst einen Glyph oder eine Zahl, und beides kann nicht sagen, WAS
@@ -329,7 +342,7 @@ ehrlicher Meldung über das, was nicht ging), Stufe 3 (Erkennung + Vorschlag; da
 Meeting wandert an die Gruppe) und die Selbstheilung über die gespeicherte
 Signatur, wenn ein Anbieter eine Kennung neu vergibt.
 
-### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
+### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[x]` — code-vollstaendig
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.
 
 WARUM NUR iOS: Google bietet **keinen** Built-in Intent für Kalendertermine
@@ -344,7 +357,8 @@ stehen. „Termin morgen um 11 in Aperio" in einem Satz geht nicht; Siri fragt d
 Parameter nach. Für einen Screenreader-Nutzer ist der geführte Dialog eher ein
 Vorteil.
 
-- [~] **Schritt 1** — beweisen, dass App-Target-Swift Siri überhaupt erreicht:
+- [x] **Schritt 1** — beweisen, dass App-Target-Swift Siri überhaupt erreicht:  
+  ↳ Erledigt: zwei Config-Plugin-Mods (dangerous mod schreibt die Dateien, Xcode-Mod hängt sie in die Build-Phasen). Gerätetest bestätigt.
       `plugins/withAppShortcuts.js` kopiert `mobile/ios-app/AperioShortcuts.swift`
       ins generierte App-Target und trägt es ins Xcode-Projekt ein. Inhalt: EIN
       Kurzbefehl, der nur die App öffnet.
@@ -354,7 +368,8 @@ Vorteil.
       scheidet damit aus.
       ✅ Gerätetest: Kurzbefehl erscheint, „Hey Siri, öffne Aperio" startet die
       App. Der Weg trägt.
-- [~] **Schritt 2** — `CreateEventIntent` mit Titel + `Date`. Siri löst die
+- [x] **Schritt 2** — `CreateEventIntent` mit Titel + `Date`. Siri löst die  
+  ↳ Erledigt (feste 60 Minuten; Kalender fällt auf zuletzt genutzt → erster schreibbarer zurück). Durch den Gerätetest von Schritt 2b end-to-end belegt.
       gesprochene Zeit selbst auf; wir reihen die Anfrage in dieselbe
       Aktions-Warteschlange wie der Widget-Haken und die App legt sie beim
       Hereinkommen an.
@@ -370,7 +385,8 @@ Vorteil.
       hier — es war `0xdead10cc` (siehe Schritt 2a der Widgets). Der Kurzbefehl
       startet die App in den Hintergrund und lässt sie kurz darauf suspendieren,
       also traf er das Muster nur besonders zuverlässig.
-- [~] **Schritt 2b** — deutsche Phrasen.
+- [x] **Schritt 2b** — deutsche Phrasen.  
+  ↳ Erledigt: Phrasen in `de.lproj/AppShortcuts.strings`, geschlüsselt über den englischen Originalstring; ein vitest hält beide Dateien synchron.
       GERÄTEBEFUND, der die Notwendigkeit belegt: „erstelle einen neuen Termin
       mit Aperio" landete im APPLE-Kalender — erkennbar daran, dass dessen
       Rückfrage bei Terminüberschneidung kam.
@@ -426,7 +442,8 @@ Vorteil.
       Für Toni ändert sich ohnehin nichts: sein Gerät meldet
       `deviceNotCapable`. Der geführte Dialog aus Schritt 2 ist der Weg, der
       bei ihm wirkt.
-- [~] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
+- [x] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit  
+  ↳ Erledigt, jede Auflage wörtlich eingehalten (EntityStringQuery statt EntityQuery, Snapshot-Datei statt DB-Handle im Intent-Prozess, `__default__` zuerst).
       `EntityStringQuery` (nicht `EntityQuery`: nur die String-Variante kann
       einen GESPROCHENEN Namen auflösen, und genau darum geht es).
       AUSLÖSER war ein Gerätebefund: Termine per Sprache landeten immer im
@@ -445,7 +462,8 @@ Vorteil.
       Nur beschreibbare und nicht ausgeblendete Kalender; bei Aufgabenlisten
       dagegen ALLE, weil die Listenauswahl in der Aufgabenansicht ein Fokus-
       Werkzeug ist und keine Aussage darüber, was existiert.
-- [~] **Schritt 4** — tatsächlich anlegen, jetzt auch Aufgaben.
+- [x] **Schritt 4** — tatsächlich anlegen, jetzt auch Aufgaben.  
+  ↳ Code-vollständig inkl. der zwei feinen Regeln (Tag ohne Uhrzeit; nie den Rust-Kern im Intent-Prozess öffnen). 🚩 `CreateTaskIntent` ist der einzige Intent ohne Gerätebericht.
       `CreateTaskIntent`: Titel + Liste werden gefragt, der Tag NICHT — optionale
       Parameter fragt Siri nicht ab, und das ist richtig so: die meisten
       gesprochenen Aufgaben sind „merk dir das" und gehören ins Backlog, nicht
@@ -460,7 +478,8 @@ Vorteil.
       zweiter schreibender Prozess auf einer Datenbank, plus ein teurer
       Host-Start pro Sprachbefehl.
 
-- [~] **Android** — „Als Nächstes" über **Glance**
+- [x] **Android** — „Als Nächstes" über **Glance**  
+  ↳ Erledigt und im Baum nachprüfbar (Glance für die TalkBack-lesbare CheckBox, `filesDir/widget` statt App Group, Receiver mit exported=true). 🚩 Ohne Android-Hardware ungeprüft.
       (`modules/cal-ffi/android/.../AperioWidget.kt`). Liest denselben Snapshot;
       kein App Group nötig, ein Android-Widget läuft im Prozess der App unter
       derselben uid, also reicht `filesDir/widget/`.
@@ -489,7 +508,8 @@ Vorteil.
 
 ### A6 · Offline-Queue für externe APIs (§18.2)
 - [ ] SQLite-Queue, die Mutationen an externe Kalender/Aufgaben (create/update/delete event+task) offline puffert
-- [ ] Retry bei Reconnect inkl. ETag-Prüfung
+- [~] Retry bei Reconnect inkl. ETag-Prüfung  
+  ↳ Die ETag-Hälfte existiert überall (bedingte Writes, 412-Erkennung). Es fehlt nur der Puffer aus Punkt 1 — ohne Queue gibt es nichts zum Nachspielen.
 - Hinweis: Der **lokale** Sync-Log existiert; gemeint ist die Pufferung von Schreibzugriffen auf **externe** Provider.
 - Einstieg: neue Migration + die Mutationspfade in `src-tauri/src/commands/`.
 
@@ -528,22 +548,30 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 - [ ] `attachments`-Feld am Event-Model + `attachments`-Spalte in `events_fts` + Trigger.
 
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
-- [ ] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.
-- [ ] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.
+- [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
+  ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
+- [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
+  ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
 
 ---
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)
-- [ ] EWS: Recurrence lesen/schreiben (aktuell beim Schreiben verworfen, „Phase 6f.2-Follow-up")
-- [ ] Todoist: `due_string` ↔ `TaskRecurrence` (aktuell out of scope)
+- [x] EWS: Recurrence lesen/schreiben (aktuell beim Schreiben verworfen, „Phase 6f.2-Follow-up")  
+  ↳ Erledigt über die geteilte `<t:Recurrence>`-Maschinerie der Kalenderseite; EWS' fehlendes Jahres-INTERVAL ist als eingeschränkte Recurrence-Capability deklariert, der Editor graut es aus.
+- [~] Todoist: `due_string` ↔ `TaskRecurrence` (aktuell out of scope)  
+  ↳ Backlog-/On-Demand-Regeln round-trippen inzwischen verlustfrei über den §9.12-Extras-Block; es fehlt die einfache terminierte Regel — und ihr Fehlen ist als Capability deklariert, statt still zu scheitern.
 
 ### C2 · Task-Detailpunkte (§9 — geringere Konfidenz, in Agent-Notizen erwähnt)
-- [ ] Recurrence-Template nach Abschluss generieren (für alle Adapter out of scope)
-- [ ] TaskView-Filter-UI
-- [ ] Move/Copy-Prompts (Subtasks mitnehmen / Recurrence-Instanz vs. Regel / Reminder-Kompatibilität)
-- [ ] `role="group"` + `aria-label` an Subtask-Eltern (a11y)
+- [x] Recurrence-Template nach Abschluss generieren (für alle Adapter out of scope)  
+  ↳ Ins Gegenteil gedreht: der Spawner läuft für JEDEN Adapter. Zwei Spiegelzweige — Provider kann die Regel nicht → die nächste Instanz wird erzeugt; Provider wiederholt selbst → terminaler Completion-Record, damit die erledigte Runde sichtbar bleibt.
+- [~] TaskView-Filter-UI  
+  ↳ Gruppierung (Status | Liste) steht auf beiden Oberflächen, Listen-Filter über Seitenleiste + Backlog-Dialog. Es fehlt der Filter nach Status / Priorität / Zeitraum.
+- [~] Move/Copy-Prompts (Subtasks mitnehmen / Recurrence-Instanz vs. Regel / Reminder-Kompatibilität)  
+  ↳ Geteiltes Urteil: Subtasks per ENTSCHEIDUNG gelöst (Kinder reisen immer, der Dialog sagt es) — der Prompt ist hinfällig. Recurrence-Scope für Termine gebaut. Offen bleibt die Reminder-Kompatibilität.
+- [x] `role="group"` + `aria-label` an Subtask-Eltern (a11y)  
+  ↳ Als echter W3C-Baum gelöst statt als angeklebte Gruppe: role=tree / treeitem / verschachtelte role=group, eingeklappt komplett ausgeblendet statt nur per CSS.
 
 ### C3 · All-Day-Datumsbehandlung in Google / Graph / EWS ✅ erledigt
 Alle drei Adapter hatten den UTC-Kalendertag-Bug des CalDAV-Adapters; gefixt auf

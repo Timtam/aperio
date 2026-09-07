@@ -1155,9 +1155,30 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 | **Vikunja** | ✅ Ja | `…/tasks/{id}/assignees` (PUT / `bulk` / DELETE / GET), Schlüssel `user_id` | `GET /projects/{id}/projectusers?s=` | Ja |
 | **Todoist** | ✅ Begrenzt | `assignee_id` (nur geteilte Projekte) | `GET /projects/{id}/collaborators` | **Nein, nur 1** |
 | **MS To Do** | ❌ Nein | — (Graph-`todoTask` hat kein Zuweisungsfeld) | — | — |
-| **MS Planner** | ✅ Ja (eigener Adapter) | `assignments` (AAD-GUID), Consent `Group.ReadWrite.All` | `GET /groups/{id}/members` | Ja |
+| **MS Planner** | ✅ Ja (eigener Adapter) | `assignments` (AAD-GUID), Scope `Tasks.ReadWrite` — **kein** Admin-Consent | `GET /groups/{id}/members` (Group-Scope, Admin-Consent) | Ja |
 
-**Wichtig:** Microsoft **To Do** kann Zuweisung über die API nicht — das kollaborative Microsoft-Pendant ist **Planner** (eigener, schwergewichtiger Adapter; hier zunächst _out of scope_).
+**Wichtig:** Microsoft **To Do** kann Zuweisung über die API nicht — das kollaborative Microsoft-Pendant ist **Planner** (eigener Adapter; hier zunächst _out of scope_).
+
+> **Korrektur (2026-09-06, gegen Microsofts eigene Docs-Quelle geprüft).** Die
+> Zeile oben nannte lange `Group.ReadWrite.All` als Consent für Planner, und
+> daraus wurde „schwergewichtiger Adapter". Das stimmt so nicht: der delegierte
+> Scope für die **gesamte** Planner-CRUD-Fläche in Graph **v1.0** ist
+> `Tasks.ReadWrite` — derselbe, den `adapter-microsoft-graph` für To Do schon
+> anfordert (`auth.rs:63`) — und er ist `AdminConsentRequired: No`.
+> `Group.*.All` steht nur in der Spalte „higher privileged".
+>
+> Ein Group-Scope (Admin-Consent: **ja**) wird erst für den **beliebigen
+> Mitglieder-Pool** gebraucht (`GET /groups/{id}/members`). Umgehbar: den Picker
+> aus den bereits am Plan zugewiesenen Personen speisen und die GUIDs über
+> `User.ReadBasic.All` (delegiert, **kein** Admin-Consent) auflösen. Plan-Discovery
+> läuft über `/me/memberOf` (`User.Read`) + `/groups/{id}/planner/plans`
+> (`Tasks.ReadWrite`) — also ebenfalls ohne Admin.
+>
+> Die echten Hürden liegen woanders: **nur Arbeits-/Schulkonten** (private
+> Microsoft-Konten sind auf jedem Planner-Endpunkt „Not supported"), **nur
+> Basic-Pläne** (Premium liegt in Dataverse), **kein Delta in v1.0** (Polling),
+> und `plannerTask` nimmt **keine open extensions** — der `com.aperio.extras`-
+> Beutel hätte dort kein Zuhause. Details siehe Recherche-Notiz.
 
 **Datenmodell.** Ein einheitlicher, mehrwertiger Typ:
 
@@ -1169,7 +1190,7 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 
 **Eigen-Identität („ich").** Um „mir / anderen / niemandem zugewiesen" zu unterscheiden, liefert jeder Adapter `current_user() -> Option<TaskUser>` (Vikunja `GET /user`); die Identität wird beim Verbinden einmal geholt und am Account abgelegt.
 
-**Capability.** Pro Adapter im Plugin-Manifest deklariert (`task_assignment: none | single | multiple`); das UI blendet den Picker aus, wo nicht unterstützt (lokal, MS To Do), und schaltet bei Todoist auf Einfach-Auswahl.
+**Capability.** ✅ Pro Adapter im Plugin-Manifest deklariert (`task_assignment: none | single | multiple`, `plugin-core/src/manifest.rs`); das UI blendet den Picker aus, wo nicht unterstützt (lokal, MS To Do), und schaltet bei Todoist auf Einfach-Auswahl. Default ist `none` — ein Manifest, das schweigt, wird nicht mit einer Fähigkeit beliehen, deren Scheitern unsichtbar ist (dieselbe Regel wie `task_span`). `single` ist ein **eigenes** Control, kein kleineres: Desktop eine Auswahl mit „Niemand" als erster Möglichkeit, Mobile eine Radiogruppe; eine neue Wahl **ersetzt** die alte. Beim Listenwechsel kappen beide Editoren auf die **erste** Person — dieselbe, die auch der Adapter behält. Die Regel liegt einmal in `shared/taskAssignment.ts`. Bis dahin hing der Picker an `members.length > 0`, also an einer Netzwerkantwort statt an dem, was die Quelle halten kann: Todoist bot Mehrfachauswahl an, der Adapter verwarf die zweite Person beim Schreiben, und das Speichern meldete Erfolg (d5ab891e).
 
 **UI.** Im Aufgaben-Dialog ein „Zugewiesen an"-Picker (Suche über die Listen-Mitglieder, Multi-Chips, capability-gated). „Für andere einplanen" ist damit Datum **+** Assignee im selben Dialog — beides sind Aufgaben-Felder. In der Aufgaben-Ansicht ein Assignee-Badge je Zeile plus Filter „mir / anderen / niemandem".
 
