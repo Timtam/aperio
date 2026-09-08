@@ -25,6 +25,15 @@ jobs:
       # Real releases get the fully-optimised ship profile (fat LTO,
       # single codegen unit); CI/PR builds default to the fast profile.
       release_profile: true
+    # A called workflow has its own secret scope and inherits nothing. Without
+    # this, every OAuth client in the built artifact is empty — see the
+    # `secrets:` declaration in build-artifacts.yml for what that cost.
+    secrets:
+      APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+      APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+      APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+      APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+      APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
 
   publish:
     name: Publish GitHub Release

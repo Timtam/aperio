@@ -226,3 +226,12 @@ jobs:
       && needs.frontend.result == 'success'
       && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.frontend == 'true') }}
     uses: ./.github/workflows/build-artifacts.yml
+    # A called workflow has its own secret scope and inherits nothing. Without
+    # this, every OAuth client in the built artifact is empty — see the
+    # `secrets:` declaration in build-artifacts.yml for what that cost.
+    secrets:
+      APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+      APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+      APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+      APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+      APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}

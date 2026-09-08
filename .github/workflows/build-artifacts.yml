@@ -28,6 +28,32 @@ on:
         required: false
         type: boolean
         default: false
+    # A called workflow does NOT see the caller's secrets. Without this block
+    # every `${{ secrets.APERIO_OAUTH_* }}` below expands to the empty string —
+    # including the two Webex ones that DO exist — and `builtin-oauth`'s
+    # build.rs treats empty as absent, so the build succeeds and every desktop
+    # artifact ships with no built-in OAuth client at all. That is what was
+    # happening; the env block below was added to fix exactly this and could
+    # not, because the values never arrived.
+    #
+    # Named rather than `secrets: inherit`, deliberately: `inherit` is scoped by
+    # GitHub to "the same organization or enterprise", so its behaviour depends
+    # on who owns the repository. Named secrets do not.
+    #
+    # All optional. A client that has not been registered yet is a provider the
+    # build ships without, which is a decision, not a failure — and the step
+    # below says which, by name, in the log.
+    secrets:
+      APERIO_OAUTH_WEBEX_CLIENT_ID:
+        required: false
+      APERIO_OAUTH_WEBEX_CLIENT_SECRET:
+        required: false
+      APERIO_OAUTH_GOOGLE_CLIENT_ID:
+        required: false
+      APERIO_OAUTH_GOOGLE_CLIENT_SECRET:
+        required: false
+      APERIO_OAUTH_MICROSOFT_CLIENT_ID:
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -113,6 +139,23 @@ jobs:
       # target/release/, then `cargo xtask stage-plugins
       # --release` copies each into
       # target/release/plugins/bundled/<id>/.
+      # Names and presence only — a credential must never reach a build log, so
+      # nothing here prints a value or even a length. The mobile workflows carry
+      # the identical step; this one exists because a CALLED workflow has its
+      # own secret scope, so their answer says nothing about this build's.
+      - name: Which OAuth clients this build can bake in
+        env:
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        shell: bash
+        run: |
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+            if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
+          done
+
       - name: tauri build
         env:
           # Same reason as the mobile workflows: `builtin-oauth`'s build.rs bakes
@@ -122,9 +165,11 @@ jobs:
           # unnoticed here — the CI artefacts shipped with nothing baked.
           #
           # A secret that does not exist expands to empty, and build.rs treats
-          # empty as absent, so the build succeeds either way. Presence is
-          # reported by the mobile workflows' check step; these are the same
-          # secrets, so it covers both.
+          # empty as absent, so the build succeeds either way. Which is why the
+          # step above reports presence HERE: the mobile workflows' identical
+          # check proves nothing about THIS workflow's environment, and this one
+          # is a CALLED workflow, whose secrets arrive only because
+          # `workflow_call` names them at the top of the file.
           APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
           APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
@@ -243,6 +288,23 @@ jobs:
       # arch's plugins beside its binary. Build, then copy — the same two steps
       # as the CI `rust` job and tauri's beforeBuildCommand, and for the same
       # reason: the copying cannot happen until the libraries exist.
+      # Names and presence only — a credential must never reach a build log, so
+      # nothing here prints a value or even a length. The mobile workflows carry
+      # the identical step; this one exists because a CALLED workflow has its
+      # own secret scope, so their answer says nothing about this build's.
+      - name: Which OAuth clients this build can bake in
+        env:
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        shell: bash
+        run: |
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+            if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
+          done
+
       - name: Build workspace for both macOS arches
         env:
           # Same reason as the mobile workflows: `builtin-oauth`'s build.rs bakes
@@ -252,9 +314,11 @@ jobs:
           # unnoticed here — the CI artefacts shipped with nothing baked.
           #
           # A secret that does not exist expands to empty, and build.rs treats
-          # empty as absent, so the build succeeds either way. Presence is
-          # reported by the mobile workflows' check step; these are the same
-          # secrets, so it covers both.
+          # empty as absent, so the build succeeds either way. Which is why the
+          # step above reports presence HERE: the mobile workflows' identical
+          # check proves nothing about THIS workflow's environment, and this one
+          # is a CALLED workflow, whose secrets arrive only because
+          # `workflow_call` names them at the top of the file.
           APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
           APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
