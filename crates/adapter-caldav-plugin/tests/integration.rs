@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use plugin_core::{
+use plugin_sdk::plugin_core::{
     abi::AperioPlugin,
     manager::PluginManager,
     manifest::PluginManifest,
@@ -45,7 +45,11 @@ fn register() -> PluginManager {
     m
 }
 
-fn open_one(manager: &PluginManager, server: &str, user: &str) -> Arc<plugin_core::LoadedInstance> {
+fn open_one(
+    manager: &PluginManager,
+    server: &str,
+    user: &str,
+) -> Arc<plugin_sdk::plugin_core::LoadedInstance> {
     let loaded = manager.get("com.aperio.cal-adapter-caldav").unwrap();
     let cfg = serde_json::json!({
         "server_url": server,

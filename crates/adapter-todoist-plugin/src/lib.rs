@@ -24,9 +24,9 @@ pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "
 use std::os::raw::{c_char, c_void};
 
 use adapter_todoist::TodoistAdapter;
-use cal_core::adapter::{Capability, Credentials as CalCredentials};
-use cal_core::types::{MemberRight, NewTask};
-use cal_core::TasksFeature;
+use plugin_sdk::cal_core::adapter::{Capability, Credentials as CalCredentials};
+use plugin_sdk::cal_core::types::{MemberRight, NewTask};
+use plugin_sdk::cal_core::TasksFeature;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{AdapterVtable, TasksVtable};
@@ -70,7 +70,7 @@ unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) ->
         Err(r) => return r,
     };
     dispatch(h, move |p| async move {
-        cal_core::Adapter::authenticate(p, creds).await
+        plugin_sdk::cal_core::Adapter::authenticate(p, creds).await
     })
 }
 
@@ -84,7 +84,8 @@ unsafe extern "C" fn ffi_capabilities(
             Ok(i) => i,
             Err(r) => return r,
         };
-        let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
+        let caps: Vec<Capability> =
+            plugin_sdk::cal_core::Adapter::capabilities(inst.plugin()).to_vec();
         ok_response(&caps)
     })
 }
@@ -124,7 +125,7 @@ unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> 
 }
 
 unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task: cal_core::Task = match decode_args(a, l) {
+    let task: plugin_sdk::cal_core::Task = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };

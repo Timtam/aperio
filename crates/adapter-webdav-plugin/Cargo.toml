@@ -14,14 +14,12 @@ crate-type = ["rlib"]
 [dependencies]
 plugin-sdk.workspace = true
 adapter-webdav = { path = "../adapter-webdav" }
-sync-core.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
-plugin-core.workspace = true
 tokio = { workspace = true }
 
 [lints]

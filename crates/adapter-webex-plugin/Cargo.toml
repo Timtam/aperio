@@ -14,7 +14,6 @@ crate-type = ["rlib"]
 [dependencies]
 plugin-sdk.workspace = true
 adapter-webex = { path = "../adapter-webex" }
-vc-core.workspace = true
 
 chrono.workspace = true
 serde.workspace = true
@@ -26,7 +25,6 @@ tracing.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
-plugin-core.workspace = true
 
 [lints]
 workspace = true

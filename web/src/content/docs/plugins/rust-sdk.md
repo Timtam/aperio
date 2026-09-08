@@ -15,7 +15,7 @@ are written — read one of those crates alongside this page.
 ```rust
 use std::os::raw::{c_char, c_void};
 
-use cal_core::{Adapter, TasksFeature /*, CalendarFeature, … */};
+use plugin_sdk::cal_core::{Adapter, TasksFeature /*, CalendarFeature, … */};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{AdapterVtable, TasksVtable};
@@ -68,7 +68,7 @@ unsafe extern "C" fn ffi_get_tasks(
 
 // Multiple args → a small #[derive(Deserialize)] struct:
 #[derive(serde::Deserialize)]
-struct CreateTaskArgs { list_id: String, task: cal_core::NewTask }
+struct CreateTaskArgs { list_id: String, task: plugin_sdk::cal_core::NewTask }
 
 unsafe extern "C" fn ffi_create_task(
     h: *mut c_void, a: *const u8, l: usize,
@@ -125,6 +125,11 @@ plugin_sdk::declare_lifecycle! {
 
 ## What you get for free
 
+- **One dependency:** `plugin-sdk` re-exports `cal_core`, `sync_core`,
+  `vc_core` and `plugin_core`, so `use plugin_sdk::cal_core::Event;` works and
+  your `Cargo.toml` names exactly one Aperio crate. It is not only tidiness:
+  every crate you name is a version you have to keep in step with Aperio, and
+  a plugin in its own repository feels that four times over otherwise.
 - **Safety:** you write `async fn` trait methods returning
   `cal_core::Result<T>`; the SDK turns `Err(Error::Unsupported(…))` etc.
   into the wire error contract.

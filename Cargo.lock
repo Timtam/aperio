@@ -37,9 +37,7 @@ name = "adapter-caldav-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-caldav",
- "cal-core",
  "chrono",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -92,12 +90,10 @@ version = "0.1.0"
 dependencies = [
  "adapter-dropbox",
  "base64 0.22.1",
- "plugin-core",
  "plugin-sdk",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sync-core",
 ]
 
 [[package]]
@@ -134,9 +130,7 @@ name = "adapter-ews-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ews",
- "cal-core",
  "chrono",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -171,11 +165,9 @@ version = "0.1.0"
 dependencies = [
  "adapter-ftp",
  "base64 0.22.1",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "sync-core",
 ]
 
 [[package]]
@@ -216,13 +208,10 @@ version = "0.1.0"
 dependencies = [
  "adapter-google",
  "base64 0.22.1",
- "cal-core",
  "chrono",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "sync-core",
 ]
 
 [[package]]
@@ -258,8 +247,6 @@ name = "adapter-ical-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ical",
- "cal-core",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -319,9 +306,7 @@ name = "adapter-microsoft-graph-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-microsoft-graph",
- "cal-core",
  "chrono",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -356,11 +341,9 @@ version = "0.1.0"
 dependencies = [
  "adapter-sftp",
  "base64 0.22.1",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "sync-core",
 ]
 
 [[package]]
@@ -394,8 +377,6 @@ name = "adapter-todoist-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-todoist",
- "cal-core",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -431,8 +412,6 @@ name = "adapter-vikunja-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-vikunja",
- "cal-core",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -470,11 +449,9 @@ version = "0.1.0"
 dependencies = [
  "adapter-webdav",
  "base64 0.22.1",
- "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "sync-core",
  "tokio",
 ]
 
@@ -514,13 +491,11 @@ version = "0.1.0"
 dependencies = [
  "adapter-webex",
  "chrono",
- "plugin-core",
  "plugin-sdk",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tracing",
- "vc-core",
 ]
 
 [[package]]

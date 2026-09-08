@@ -29,12 +29,12 @@ use base64::Engine as _;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{AdapterVtable, SyncVtable};
+use plugin_sdk::sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 use plugin_sdk::{
     decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
     PluginInstance,
 };
 use serde::Deserialize;
-use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
 plugin_sdk::sync_dispatch_helpers!(WebDavSyncAdapter);
 

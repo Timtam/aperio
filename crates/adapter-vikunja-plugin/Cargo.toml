@@ -14,11 +14,9 @@ crate-type = ["rlib"]
 [dependencies]
 plugin-sdk.workspace = true
 adapter-vikunja = { path = "../adapter-vikunja" }
-cal-core.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
 [dev-dependencies]
-plugin-core.workspace = true
 [lints]
 workspace = true

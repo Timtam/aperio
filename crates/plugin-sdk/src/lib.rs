@@ -120,10 +120,32 @@ pub mod response;
 pub mod runtime;
 pub mod strings;
 
-// Plugin authors import everything they need from the SDK so
-// they don't have to add plugin-core to their own Cargo.toml.
+// Plugin authors import everything they need from the SDK so they don't have to
+// name any other Aperio crate in their own Cargo.toml.
+//
+// The domain crates are re-exported for the same reason `plugin_core` already
+// was, and it matters more than convenience once an adapter lives in its own
+// repository: every crate an adapter NAMES is a version it has to track. Four
+// names mean four things to keep in step — by git tag, by `[patch]`, by
+// submodule path, whichever mechanism wins. One name means one.
+//
+// This is a re-export and not a move, deliberately. `cal-core` is the shared
+// vocabulary — what an Event or a Task IS — and `host-core`, `cal-ffi`,
+// `sync-engine` and the desktop app speak it too, none of which are plugins.
+// Folding it into `plugin-core` would make the host depend on the plugin
+// LOADER, `libloading` and the `.aperio` installer included, just to know what
+// a Task is. The dependency already runs the other way: `plugin-core` depends
+// on all three of these.
+//
+// Adapters that are NOT plugins keep naming the domain crate directly —
+// `adapter-local` and `adapter-device-calendar` are part of the app binary and
+// have no business compiling an FFI SDK.
 pub use panic_guard::{guarded, guarded_void};
 pub use plugin_core;
+
+pub use cal_core;
+pub use sync_core;
+pub use vc_core;
 
 pub use args::decode_args;
 pub use discover::discover_with;

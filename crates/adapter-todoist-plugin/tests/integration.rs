@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use plugin_core::{
+use plugin_sdk::plugin_core::{
     abi::AperioPlugin,
     manager::PluginManager,
     manifest::PluginManifest,
@@ -49,7 +49,7 @@ fn register() -> PluginManager {
     m
 }
 
-fn open_one(manager: &PluginManager, token: &str) -> Arc<plugin_core::LoadedInstance> {
+fn open_one(manager: &PluginManager, token: &str) -> Arc<plugin_sdk::plugin_core::LoadedInstance> {
     let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
     let cfg = serde_json::json!({ "token": token });
     manager
@@ -101,10 +101,10 @@ fn open_instance_rejects_empty_token() {
         .open_instance(loaded, &bad_cfg.to_string())
         .unwrap_err();
     match err {
-        plugin_core::error::PluginError::InstanceOpen { status, .. } => {
+        plugin_sdk::plugin_core::error::PluginError::InstanceOpen { status, .. } => {
             assert_eq!(
                 status,
-                plugin_core::PLUGIN_ERR_INVALID_CONFIG,
+                plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG,
                 "empty token should surface as invalid_config",
             );
         }

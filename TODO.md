@@ -622,6 +622,19 @@ auch falls nie ein Repo entsteht.
   `mobile/`** (ein Mobile-only-Commit meldet drei gruene Checks und hat nichts
   ausgefuehrt), und **`locales/**` steht in keinem Paths-Filter**, obwohl ein
   Rust-Test, `tsc`, vitest und das ausgelieferte Bundle es lesen.
+- [x] **Eine Tür statt vier.** `plugin-sdk` re-exportiert jetzt `cal_core`,
+  `sync_core` und `vc_core` neben dem `plugin_core`, das es ohnehin schon
+  weiterreichte; die zwölf `-plugin`- und zwölf `-cdylib`-Kisten gehen darüber
+  (64 Ersetzungen in `src/`, 29 in `tests/`) und haben ihre Abhängigkeiten
+  abgelegt. Ein Adapter-Tripel nennt damit **zwei** Aperio-Kisten statt drei,
+  und die Plugin-Hälfte nur noch eine. Nebenbei repariert: die SDK-Makros
+  expandierten zu `::cal_core::` — ein absoluter Pfad in die Kiste des
+  AUFRUFERS —, jetzt `$crate::cal_core::`, also selbsttragend.
+  `one_door.rs` fragt die Manifeste (ein `use` lässt sich umschreiben, eine
+  Abhängigkeit muss deklariert werden), rot bewiesen. 2213 Tests unverändert.
+  OFFEN, Tonis Entscheidung: die `adapter-X`-Logikkiste bleibt bei ihrer
+  Domänen-Kiste — auf eins käme man nur, wenn auch der reine HTTP-Client das
+  FFI-SDK einbindet.
 - [ ] Danach erst: Versionierung der fünf Vertragskisten, `adapter-caldav`s
   Zugriff auf `shared/contracts/` auflösen — und ein erster Umzug mit **einem**
   Adapter als Probe. **Vikunja, nicht webdav**: `host-core` greift an sechs

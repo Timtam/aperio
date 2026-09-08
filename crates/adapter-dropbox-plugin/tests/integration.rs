@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use plugin_core::{
+use plugin_sdk::plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
     Capability, PluginType, ABI_VERSION,
 };
@@ -38,7 +38,10 @@ fn make_manager() -> PluginManager {
     m
 }
 
-fn open_one(manager: &PluginManager, refresh_token: &str) -> Arc<plugin_core::LoadedInstance> {
+fn open_one(
+    manager: &PluginManager,
+    refresh_token: &str,
+) -> Arc<plugin_sdk::plugin_core::LoadedInstance> {
     let loaded = manager
         .get("com.aperio.sync-adapter-dropbox")
         .expect("registered");

@@ -14,13 +14,11 @@ crate-type = ["rlib"]
 [dependencies]
 plugin-sdk.workspace = true
 adapter-caldav = { path = "../adapter-caldav" }
-cal-core.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
-plugin-core.workspace = true
 [lints]
 workspace = true

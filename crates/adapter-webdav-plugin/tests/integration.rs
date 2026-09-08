@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use plugin_core::{
+use plugin_sdk::plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
     Capability, PluginType, ABI_VERSION,
 };
-use sync_core::SyncAdapter;
+use plugin_sdk::sync_core::SyncAdapter;
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -41,7 +41,7 @@ fn make_manager() -> PluginManager {
     manager
 }
 
-fn open_one(manager: &PluginManager, url: &str) -> Arc<plugin_core::LoadedInstance> {
+fn open_one(manager: &PluginManager, url: &str) -> Arc<plugin_sdk::plugin_core::LoadedInstance> {
     let loaded = manager
         .get("com.aperio.sync-adapter-webdav")
         .expect("registered");
@@ -75,9 +75,9 @@ async fn test_connection_against_bogus_url_surfaces_network_error() {
         .await
         .expect_err("bogus URL must fail");
     match err {
-        sync_core::SyncError::Network(_)
-        | sync_core::SyncError::NotFound(_)
-        | sync_core::SyncError::Io(_) => {}
+        plugin_sdk::sync_core::SyncError::Network(_)
+        | plugin_sdk::sync_core::SyncError::NotFound(_)
+        | plugin_sdk::sync_core::SyncError::Io(_) => {}
         other => panic!("unexpected error variant: {other:?}"),
     }
 }
@@ -92,7 +92,7 @@ fn rejects_empty_url_at_open() {
     let err = manager.open_instance(loaded, &bad.to_string()).unwrap_err();
     assert!(matches!(
         err,
-        plugin_core::error::PluginError::InstanceOpen { .. }
+        plugin_sdk::plugin_core::error::PluginError::InstanceOpen { .. }
     ));
 }
 

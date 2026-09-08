@@ -40,9 +40,9 @@ use adapter_webex::{oauth, WebexAccountConfig, WebexAdapter};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{AdapterVtable, VcVtable};
+use plugin_sdk::vc_core::{MeetingId, MeetingRemoval, NewMeeting, VcAdapter};
 use plugin_sdk::{decode_args, open_instance_with, PluginInstance};
 use serde::Deserialize;
-use vc_core::{MeetingId, MeetingRemoval, NewMeeting, VcAdapter};
 
 plugin_sdk::vc_dispatch_helpers!(WebexAdapter);
 

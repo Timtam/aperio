@@ -23,7 +23,7 @@
 //! protocol level, so the write-side methods (`create_event`,
 //! `update_event`, `delete_event`, `add_event_exdate`,
 //! `rename_calendar`) are left at `None` and the host's shim
-//! surfaces them as `cal_core::Error::Unsupported`.
+//! surfaces them as `plugin_sdk::cal_core::Error::Unsupported`.
 
 /// This plugin's manifest, embedded from the crate's own directory.
 ///
@@ -36,9 +36,9 @@ pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "
 use std::os::raw::{c_char, c_void};
 
 use adapter_ical::{Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter};
-use cal_core::adapter::{Capability, Credentials as CalCredentials};
-use cal_core::types::DateRange;
-use cal_core::CalendarFeature;
+use plugin_sdk::cal_core::adapter::{Capability, Credentials as CalCredentials};
+use plugin_sdk::cal_core::types::DateRange;
+use plugin_sdk::cal_core::CalendarFeature;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{AdapterVtable, CalendarVtable};
@@ -97,7 +97,7 @@ unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) ->
         Err(r) => return r,
     };
     dispatch(h, move |p| async move {
-        cal_core::Adapter::authenticate(p, creds).await
+        plugin_sdk::cal_core::Adapter::authenticate(p, creds).await
     })
 }
 
@@ -111,7 +111,8 @@ unsafe extern "C" fn ffi_capabilities(
             Ok(i) => i,
             Err(r) => return r,
         };
-        let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
+        let caps: Vec<Capability> =
+            plugin_sdk::cal_core::Adapter::capabilities(inst.plugin()).to_vec();
         ok_response(&caps)
     })
 }

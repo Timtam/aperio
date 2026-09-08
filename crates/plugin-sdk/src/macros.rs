@@ -460,7 +460,7 @@ macro_rules! cal_dispatch_helpers {
         where
             T: ::serde::Serialize,
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::cal_core::error::Result<T>>,
+            Fut: ::std::future::Future<Output = $crate::cal_core::error::Result<T>>,
         {
             $crate::cal_dispatch::<$adapter, T, F, Fut>(handle, call)
         }
@@ -472,7 +472,7 @@ macro_rules! cal_dispatch_helpers {
         ) -> $crate::plugin_core::ffi::PluginCallResult
         where
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::cal_core::error::Result<()>>,
+            Fut: ::std::future::Future<Output = $crate::cal_core::error::Result<()>>,
         {
             $crate::cal_dispatch_unit::<$adapter, F, Fut>(handle, call)
         }
@@ -505,7 +505,7 @@ macro_rules! vc_dispatch_helpers {
         where
             T: ::serde::Serialize,
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::vc_core::VcResult<T>>,
+            Fut: ::std::future::Future<Output = $crate::vc_core::VcResult<T>>,
         {
             $crate::vc_dispatch::<$adapter, T, F, Fut>(handle, call)
         }
@@ -517,7 +517,7 @@ macro_rules! vc_dispatch_helpers {
         ) -> $crate::plugin_core::ffi::PluginCallResult
         where
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::vc_core::VcResult<()>>,
+            Fut: ::std::future::Future<Output = $crate::vc_core::VcResult<()>>,
         {
             $crate::vc_dispatch_unit::<$adapter, F, Fut>(handle, call)
         }
@@ -551,7 +551,7 @@ macro_rules! sync_dispatch_helpers {
         where
             T: ::serde::Serialize,
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::sync_core::SyncResult<T>>,
+            Fut: ::std::future::Future<Output = $crate::sync_core::SyncResult<T>>,
         {
             $crate::sync_dispatch::<$adapter, T, F, Fut>(handle, call)
         }
@@ -563,7 +563,7 @@ macro_rules! sync_dispatch_helpers {
         ) -> $crate::plugin_core::ffi::PluginCallResult
         where
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<Output = ::sync_core::SyncResult<()>>,
+            Fut: ::std::future::Future<Output = $crate::sync_core::SyncResult<()>>,
         {
             $crate::sync_dispatch_unit::<$adapter, F, Fut>(handle, call)
         }

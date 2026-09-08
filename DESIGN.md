@@ -3469,6 +3469,34 @@ die beiden Kisten.
 ihrer eigenen Kopie heraus, wären beide auf dieselbe Auflösung festgelegt —
 genau die Kopplung, die die Konstante auflöst.
 
+#### Eine Tür: `plugin-sdk`
+
+Eine Plugin-Kiste nennt **eine** Aperio-Kiste, das SDK. Es re-exportiert
+`plugin_core`, `cal_core`, `sync_core` und `vc_core`, also ist alles über
+`plugin_sdk::` erreichbar. In diesem Repo ist das Bequemlichkeit; sobald ein
+Adapter in einem eigenen Repository liegt, ist es mehr: **jede Kiste, die er
+NENNT, ist eine Version, die er nachführen muss** — per git-Tag, per `[patch]`,
+per Submodul-Pfad, welcher Mechanismus auch gewinnt. Vier Namen sind vier
+Dinge, die zueinander passen müssen; einer ist einer.
+
+Es ist ein Re-Export, kein Umzug, und das ist Absicht. `cal-core` ist das
+gemeinsame **Vokabular** — was ein Termin oder eine Aufgabe IST —, und
+`host-core`, `cal-ffi`, `sync-engine` und die Desktop-App sprechen es ebenfalls,
+von denen keines ein Plugin ist. Es nach `plugin-core` zu falten hieße, dass der
+Host den Plugin-LADER mitzieht, samt `libloading` und dem `.aperio`-Installer,
+nur um zu wissen, was eine Aufgabe ist. Die Abhängigkeit läuft ohnehin
+andersherum: `plugin-core` hängt an allen dreien.
+
+Die `adapter-X`-Logikkiste darunter bleibt bei ihrer Domänen-Kiste. Sie
+implementiert cal-cores Traits und spricht HTTP — ein Anbieter-Client, der
+zufällig als Plugin verpackt wird. `adapter-local` und
+`adapter-device-calendar` sind Teil der App-Binary und werden nie als Plugin
+geladen; sie hätten für ein FFI-SDK erst recht keinen Grund.
+
+`crates/host-plugins/tests/one_door.rs` fragt die **Manifeste**, nicht die
+Quellen: ein `use` lässt sich umschreiben, eine Abhängigkeit muss deklariert
+werden — und genau die wird beim Umzug zum zusätzlichen Pin.
+
 Zwei Tests halten das fest (`crates/host-plugins/tests/manifest_reach.rs`):
 keine Quelle bindet eine Datei **außerhalb ihrer eigenen Kiste** ein, und keine
 Kiste mit `plugin.json` vergisst, es zu exportieren.

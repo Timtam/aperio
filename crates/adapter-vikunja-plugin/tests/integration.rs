@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use plugin_core::{
+use plugin_sdk::plugin_core::{
     abi::AperioPlugin,
     manager::PluginManager,
     manifest::PluginManifest,
@@ -45,7 +45,7 @@ fn open_one(
     manager: &PluginManager,
     server_url: &str,
     token: &str,
-) -> Arc<plugin_core::LoadedInstance> {
+) -> Arc<plugin_sdk::plugin_core::LoadedInstance> {
     let loaded = manager.get("com.aperio.cal-adapter-vikunja").unwrap();
     let cfg = serde_json::json!({ "server_url": server_url, "token": token });
     manager

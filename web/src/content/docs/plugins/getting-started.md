@@ -9,8 +9,11 @@ will implement just enough to list one (empty) calendar.
 
 - **Rust** (stable) with the ability to build a `cdylib` (the default
   toolchain can).
-- The Aperio source tree, or at least the published `plugin-sdk` and
-  `cal-core` crates, available as dependencies.
+- The Aperio source tree, or at least the `plugin-sdk` crate, available as a
+  dependency. That is the only Aperio crate you name: it re-exports
+  `cal_core`, `sync_core`, `vc_core` and `plugin_core`, so everything you need
+  is reachable through it. One name is one version to keep in step, which is
+  what you want when your plugin lives in its own repository.
 
 ## 2. Create a cdylib crate
 
@@ -25,8 +28,7 @@ edition = "2021"
 crate-type = ["cdylib"]   # produces a loadable shared library
 
 [dependencies]
-cal-core = { path = "../aperio/crates/cal-core" }      # or the published crate
-plugin-sdk = { path = "../aperio/crates/plugin-sdk" }
+plugin-sdk = { path = "../aperio/crates/plugin-sdk" }  # the only Aperio crate
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -39,7 +41,7 @@ support — here just a minimal `CalendarFeature` that returns no calendars:
 
 ```rust
 use async_trait::async_trait;
-use cal_core::{
+use plugin_sdk::cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability,
     Credentials, Result,
 };

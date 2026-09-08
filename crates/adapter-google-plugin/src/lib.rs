@@ -42,21 +42,23 @@ use std::os::raw::{c_char, c_void};
 use adapter_google::drive::{DriveSyncAdapter, GoogleDriveAccountConfig};
 use adapter_google::{GoogleAdapter, TokenSet};
 use base64::Engine as _;
-use cal_core::adapter::{Capability, Credentials as CalCredentials};
-use cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
-use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use chrono::{DateTime, Utc};
+use plugin_sdk::cal_core::adapter::{Capability, Credentials as CalCredentials};
+use plugin_sdk::cal_core::types::{
+    AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask,
+};
+use plugin_sdk::cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{
     AdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable,
 };
+use plugin_sdk::sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 use plugin_sdk::{
     decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
     PluginInstance,
 };
 use serde::Deserialize;
-use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
 /// One Google account, in both of the roles it can now play.
 ///
@@ -89,9 +91,9 @@ pub struct GoogleAccount {
 /// account, it just signed in for Drive alone. Re-connecting it runs the
 /// current consent, which asks for both, so the repair is the ordinary one the
 /// accounts screen already offers for an OAuth account.
-fn cal_half(account: &GoogleAccount) -> Result<&GoogleAdapter, cal_core::error::Error> {
+fn cal_half(account: &GoogleAccount) -> Result<&GoogleAdapter, plugin_sdk::cal_core::error::Error> {
     account.cal.as_ref().ok_or_else(|| {
-        cal_core::error::Error::authentication(
+        plugin_sdk::cal_core::error::Error::authentication(
             "this account was connected for Drive storage only; reconnect it to use its \
              calendars, tasks and contacts",
         )
@@ -99,9 +101,11 @@ fn cal_half(account: &GoogleAccount) -> Result<&GoogleAdapter, cal_core::error::
 }
 
 /// The Drive half, or the refusal that says why it is missing.
-fn drive_half(account: &GoogleAccount) -> Result<&DriveSyncAdapter, sync_core::SyncError> {
+fn drive_half(
+    account: &GoogleAccount,
+) -> Result<&DriveSyncAdapter, plugin_sdk::sync_core::SyncError> {
     account.drive.as_ref().ok_or_else(|| {
-        sync_core::SyncError::Auth(
+        plugin_sdk::sync_core::SyncError::Auth(
             "this Google account holds no refresh token, so it cannot reach Drive; reconnect it"
                 .to_string(),
         )
@@ -125,7 +129,7 @@ fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     F: FnOnce(&'static GoogleAdapter) -> Fut,
-    Fut: std::future::Future<Output = cal_core::error::Result<T>>,
+    Fut: std::future::Future<Output = plugin_sdk::cal_core::error::Result<T>>,
 {
     plugin_sdk::cal_dispatch::<GoogleAccount, T, _, _>(handle, move |acct| async move {
         call(cal_half(acct)?).await
@@ -135,7 +139,7 @@ where
 fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     F: FnOnce(&'static GoogleAdapter) -> Fut,
-    Fut: std::future::Future<Output = cal_core::error::Result<()>>,
+    Fut: std::future::Future<Output = plugin_sdk::cal_core::error::Result<()>>,
 {
     plugin_sdk::cal_dispatch_unit::<GoogleAccount, _, _>(handle, move |acct| async move {
         call(cal_half(acct)?).await
@@ -146,7 +150,7 @@ fn sync_dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     F: FnOnce(&'static DriveSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<T>>,
+    Fut: std::future::Future<Output = plugin_sdk::sync_core::SyncResult<T>>,
 {
     plugin_sdk::sync_dispatch::<GoogleAccount, T, _, _>(handle, move |acct| async move {
         call(drive_half(acct)?).await
@@ -156,7 +160,7 @@ where
 fn sync_dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     F: FnOnce(&'static DriveSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<()>>,
+    Fut: std::future::Future<Output = plugin_sdk::sync_core::SyncResult<()>>,
 {
     plugin_sdk::sync_dispatch_unit::<GoogleAccount, _, _>(handle, move |acct| async move {
         call(drive_half(acct)?).await
@@ -264,7 +268,7 @@ unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) ->
         Err(r) => return r,
     };
     dispatch(h, move |p| async move {
-        cal_core::Adapter::authenticate(p, creds).await
+        plugin_sdk::cal_core::Adapter::authenticate(p, creds).await
     })
 }
 
@@ -283,7 +287,7 @@ unsafe extern "C" fn ffi_capabilities(
         // which is the truthful answer rather than an error — the caller is asking
         // what this account can do, and the reply is "none of this".
         let caps: Vec<Capability> = match inst.plugin().cal.as_ref() {
-            Some(cal) => cal_core::Adapter::capabilities(cal).to_vec(),
+            Some(cal) => plugin_sdk::cal_core::Adapter::capabilities(cal).to_vec(),
             None => Vec::new(),
         };
         ok_response(&caps)
@@ -355,7 +359,7 @@ unsafe extern "C" fn ffi_create_event(h: *mut c_void, a: *const u8, l: usize) ->
 }
 
 unsafe extern "C" fn ffi_update_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let event: cal_core::Event = match decode_args(a, l) {
+    let event: plugin_sdk::cal_core::Event = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -500,7 +504,7 @@ unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> 
 }
 
 unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task: cal_core::Task = match decode_args(a, l) {
+    let task: plugin_sdk::cal_core::Task = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -647,7 +651,7 @@ unsafe extern "C" fn ffi_update_contact(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let contact: cal_core::Contact = match decode_args(a, l) {
+    let contact: plugin_sdk::cal_core::Contact = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };

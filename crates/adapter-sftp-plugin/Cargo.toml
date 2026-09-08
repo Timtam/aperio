@@ -14,13 +14,11 @@ crate-type = ["rlib"]
 [dependencies]
 plugin-sdk.workspace = true
 adapter-sftp = { path = "../adapter-sftp" }
-sync-core.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
-plugin-core.workspace = true
 [lints]
 workspace = true
