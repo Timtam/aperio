@@ -3644,6 +3644,17 @@ eine `cdylib` erzeugt und von einer `*-plugin`-Kiste abhängt. `cal-ffi` ist
 ebenfalls eine cdylib, hängt aber von keinem Adapter direkt ab und ist deshalb
 korrekt keines.
 
+**Die Hülle muss Mitglied sein, die `*-plugin`-Kiste dahinter nicht.** Zwei
+Fragen, zwei Antworten, sobald ein Adapter in ein eigenes Repository zieht: Auf
+eine cdylib kann nichts zeigen, sie ist ein Blatt, das cargo allein wegen der
+Mitgliedschaft baut — zöge sie mit um, würde sie in *keinem* Repository je
+gebaut. Die rlib dahinter darf dagegen von überall kommen, und ihre
+`plugin.json` kommt mit: eine git-Abhängigkeit landet samt Manifest unter
+`~/.cargo/git/checkouts/…`, und cargo nennt diesen Pfad wie jeden anderen.
+Deshalb wird die Verzeichniskarte aus **allen** Paketen des Graphen gebaut, der
+Hüllen-Scan aber nur über `workspace_members` — sonst würde eine fremde cdylib
+aus dem Abhängigkeitsbaum als Plugin gestaget.
+
 **Eine blinde Stelle hat diese Frage aber**, und ausgerechnet die, auf die es
 zuläuft: Ein Adapter, der den Workspace *verlässt*, existiert für
 `cargo metadata` nicht mehr. Der xtask fände elf statt zwölf, stagete elf und
