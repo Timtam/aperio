@@ -622,6 +622,17 @@ auch falls nie ein Repo entsteht.
   `mobile/`** (ein Mobile-only-Commit meldet drei gruene Checks und hat nichts
   ausgefuehrt), und **`locales/**` steht in keinem Paths-Filter**, obwohl ein
   Rust-Test, `tsc`, vitest und das ausgelieferte Bundle es lesen.
+- [x] **Probe-Umzug einmal komplett durchgespielt** (vikunja, 2026-09-08,
+  danach restlos abgebaut). Es geht, und es fällt überall LAUT aus: Pfad-Deps
+  überleben keine git-Konsumtion; ohne `[patch]` zwei `plugin-core` und E0308 an
+  `register_static`; mit `[patch]` vereinheitlicht cargo sauber (nachgemessen);
+  die cdylib-Hülle muss im App-Repo bleiben. Der Wächter aus 6dabd91b hat den
+  fehlenden Adapter namentlich gemeldet. Gefehlt hat genau eine Zeile — sie ist
+  jetzt drin: `metadata()` fragt mit Abhängigkeiten, `discover` filtert die
+  Hüllen über `workspace_members`. App 2213→2106 Tests, Adapter-Repo 107.
+  OFFEN: ob der iOS-Build dieselbe Vereinheitlichung erreicht (nur CI kann das).
+  Preis je Repo: ~40 Zeilen materialisiertes `[workspace.*]`; `reqwest`
+  WÖRTLICH kopieren, sonst kippt die globale Feature-Vereinigung den TLS-Stack.
 - [x] **Eine Tür statt vier.** `plugin-sdk` re-exportiert jetzt `cal_core`,
   `sync_core` und `vc_core` neben dem `plugin_core`, das es ohnehin schon
   weiterreichte; die zwölf `-plugin`- und zwölf `-cdylib`-Kisten gehen darüber

@@ -369,7 +369,11 @@ fn host_triple() -> Result<String, String> {
 fn metadata() -> Result<serde_json::Value, String> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let out = Command::new(cargo)
-        .args(["metadata", "--no-deps", "--format-version", "1"])
+        // WITH dependencies. `--no-deps` would list only workspace members, and
+        // an adapter that has moved into its own repository is then invisible —
+        // its `plugin.json` sits in cargo's git checkout, which only the full
+        // graph names. See `discover`.
+        .args(["metadata", "--format-version", "1"])
         .output()
         .map_err(|e| format!("running `cargo metadata`: {e}"))?;
     if !out.status.success() {
@@ -383,13 +387,30 @@ fn metadata() -> Result<serde_json::Value, String> {
 
 /// Every workspace member that produces a cdylib and depends on a `*-plugin`
 /// crate — the shape a bundled plugin has, rather than a list of their names.
+///
+/// # The shell is a member; the plugin crate need not be
+///
+/// Those two are asked separately, because they answer differently once an
+/// adapter moves into its own repository.
+///
+/// The SHELL has to stay a workspace member. Nothing can depend on a cdylib, so
+/// it is a leaf cargo builds only by virtue of membership; if it moved out too,
+/// no repository would ever build it.
+///
+/// The `-plugin` rlib behind it can come from anywhere, and its `plugin.json`
+/// comes with it — a git dependency is checked out under
+/// `~/.cargo/git/checkouts/…`, manifest and all, and cargo reports that path
+/// like any other. So the directory map is built from EVERY package in the
+/// graph while the shell scan stays on members. Reading both from
+/// `--no-deps` was the one line that made staging refuse an out-of-tree
+/// adapter; it is also why that refusal was written to say what it needed.
 fn discover(metadata: &serde_json::Value) -> Result<Vec<Bundled>, String> {
     let packages = metadata["packages"]
         .as_array()
         .ok_or("cargo metadata has no packages")?;
 
-    // Where each member lives, so a `-plugin` dependency can be turned into the
-    // directory holding its manifest.
+    // Where each package lives, so a `-plugin` dependency can be turned into the
+    // directory holding its manifest — wherever cargo put it.
     let dirs: std::collections::BTreeMap<&str, PathBuf> = packages
         .iter()
         .filter_map(|p| {
@@ -399,11 +420,27 @@ fn discover(metadata: &serde_json::Value) -> Result<Vec<Bundled>, String> {
         })
         .collect();
 
+    // The shells, and only the shells. With dependencies in the graph,
+    // `packages` holds every crate the build touches; a cdylib among them that
+    // this workspace does not own is not something to stage.
+    let members: std::collections::BTreeSet<&str> = metadata["workspace_members"]
+        .as_array()
+        .ok_or("cargo metadata has no workspace_members")?
+        .iter()
+        .filter_map(|id| id.as_str())
+        .collect();
+
     let mut found = Vec::new();
     for package in packages {
         let Some(name) = package["name"].as_str() else {
             continue;
         };
+        if !package["id"]
+            .as_str()
+            .is_some_and(|id| members.contains(id))
+        {
+            continue;
+        }
         let makes_cdylib = package["targets"]
             .as_array()
             .into_iter()
@@ -704,5 +741,174 @@ fn verify(bundled: &[Bundled], bundled_dir: &Path) -> Result<String, String> {
             "the staged plugins do not match the workspace:\n  {}",
             problems.join("\n  "),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A crate directory with a `plugin.json` in it, as cargo would report.
+    ///
+    /// Real directories rather than a fabricated path: `discover` READS the
+    /// manifest to learn the plugin id, so a test that only checks path
+    /// arithmetic would not be testing the thing that broke.
+    fn crate_dir(root: &Path, rel: &str, id: &str) -> PathBuf {
+        let dir = root.join(rel);
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(
+            dir.join("plugin.json"),
+            format!(r#"{{"id":"{id}","name":"X","version":"0.1.0"}}"#),
+        )
+        .expect("write plugin.json");
+        dir
+    }
+
+    /// A scratch root that cleans itself up.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = env::temp_dir().join(format!("aperio-xtask-{name}"));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).expect("mkdir scratch");
+            Self(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const SHELL_ID: &str = "path+file:///repo/crates/adapter-x-cdylib#0.1.0";
+
+    fn metadata_for(shell_dir: &Path, plugin_dir: &Path, plugin_id: &str) -> serde_json::Value {
+        json!({
+            "workspace_members": [SHELL_ID],
+            "packages": [
+                {
+                    "name": "adapter-x-cdylib",
+                    "id": SHELL_ID,
+                    "manifest_path": shell_dir.join("Cargo.toml").to_string_lossy(),
+                    "targets": [{ "crate_types": ["cdylib"] }],
+                    "dependencies": [
+                        { "name": "plugin-sdk", "kind": null },
+                        { "name": "adapter-x-plugin", "kind": null },
+                    ],
+                },
+                {
+                    "name": "adapter-x-plugin",
+                    "id": plugin_id,
+                    "manifest_path": plugin_dir.join("Cargo.toml").to_string_lossy(),
+                    "targets": [{ "crate_types": ["rlib"] }],
+                    "dependencies": [{ "name": "plugin-sdk", "kind": null }],
+                },
+            ],
+        })
+    }
+
+    /// The case that already worked, kept so the change is a widening rather
+    /// than a swap.
+    #[test]
+    fn a_shell_finds_a_plugin_crate_in_the_same_workspace() {
+        let scratch = Scratch::new("same-workspace");
+        let shell = crate_dir(&scratch.0, "crates/adapter-x-cdylib", "unused");
+        let plugin = crate_dir(&scratch.0, "crates/adapter-x-plugin", "com.example.x");
+
+        let found = discover(&metadata_for(
+            &shell,
+            &plugin,
+            "path+file:///repo/crates/adapter-x-plugin#0.1.0",
+        ))
+        .expect("discovery");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].plugin_id, "com.example.x");
+        assert_eq!(found[0].plugin_dir, plugin);
+    }
+
+    /// The case the extraction creates, and the reason `metadata()` stopped
+    /// passing `--no-deps`.
+    ///
+    /// The shell stays a workspace member — a cdylib is a leaf nothing can
+    /// depend on, so it has to. The rlib behind it comes from another
+    /// repository, checked out by cargo with its `plugin.json` beside its
+    /// `Cargo.toml`. Read the graph without dependencies and that crate has no
+    /// directory at all as far as this task is concerned, and staging refuses
+    /// the very adapter it exists to stage.
+    #[test]
+    fn a_shell_finds_a_plugin_crate_that_lives_in_another_repository() {
+        let scratch = Scratch::new("another-repo");
+        let shell = crate_dir(&scratch.0, "crates/adapter-x-cdylib", "unused");
+        // The shape cargo really produces for a git dependency.
+        let plugin = crate_dir(
+            &scratch.0,
+            "git/checkouts/adapter-x-abc123/deadbee/crates/adapter-x-plugin",
+            "com.example.x",
+        );
+
+        let found = discover(&metadata_for(
+            &shell,
+            &plugin,
+            "git+file:///elsewhere?branch=main#adapter-x-plugin@0.1.0",
+        ))
+        .expect(
+            "an out-of-tree plugin crate has a directory too — cargo's git \
+             checkout — and its plugin.json is in it",
+        );
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].plugin_id, "com.example.x");
+        assert!(
+            found[0]
+                .plugin_dir
+                .components()
+                .any(|c| c.as_os_str() == "checkouts"),
+            "the manifest should be read from cargo's checkout, got {}",
+            found[0].plugin_dir.display(),
+        );
+    }
+
+    /// A cdylib that is not ours is not a plugin shell.
+    ///
+    /// With dependencies in the graph the package list holds every crate the
+    /// build touches, so the scan has to say which ones this workspace owns
+    /// instead of assuming the list already is the workspace. Without that,
+    /// widening the graph would start staging other people's libraries.
+    #[test]
+    fn a_cdylib_from_a_dependency_is_not_mistaken_for_a_shell() {
+        let scratch = Scratch::new("foreign-cdylib");
+        let shell = crate_dir(&scratch.0, "crates/adapter-x-cdylib", "unused");
+        let plugin = crate_dir(&scratch.0, "crates/adapter-x-plugin", "com.example.x");
+        let stranger = crate_dir(&scratch.0, "registry/stranger-cdylib", "com.stranger.x");
+
+        let mut metadata = metadata_for(
+            &shell,
+            &plugin,
+            "path+file:///repo/crates/adapter-x-plugin#0.1.0",
+        );
+        // Identical in every respect except membership.
+        metadata["packages"].as_array_mut().unwrap().push(json!({
+            "name": "stranger-cdylib",
+            "id": "registry+https://github.com/rust-lang/crates.io-index#stranger-cdylib@1.0.0",
+            "manifest_path": stranger.join("Cargo.toml").to_string_lossy(),
+            "targets": [{ "crate_types": ["cdylib"] }],
+            "dependencies": [
+                { "name": "plugin-sdk", "kind": null },
+                { "name": "adapter-x-plugin", "kind": null },
+            ],
+        }));
+
+        let found = discover(&metadata).expect("discovery");
+        assert_eq!(
+            found.len(),
+            1,
+            "only this workspace's own shell should be staged, got {:?}",
+            found.iter().map(|b| &b.cdylib_crate).collect::<Vec<_>>(),
+        );
+        assert_eq!(found[0].cdylib_crate, "adapter-x-cdylib");
     }
 }
