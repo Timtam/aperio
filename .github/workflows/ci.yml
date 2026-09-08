@@ -53,6 +53,13 @@ jobs:
               # step of the job is skipped, and the whole thing reports green
               # having compiled nothing.
               - 'xtask/**'
+              # Cross-language wire contracts. Rust `include_str!`s these, so a
+              # commit that touches one and nothing else must compile Rust —
+              # otherwise the halves that pin the contract (host-core's
+              # `wire_contract`, adapter-caldav's) are skipped on exactly the
+              # commit they exist to catch, while the TypeScript twin runs and
+              # reports green. Same shape as the xtask hole above.
+              - 'shared/contracts/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain*'

@@ -33,13 +33,19 @@
 //! manager's lock — the host snapshots the [`LoadedInstance`] Arc
 //! once and calls into the vtable directly.
 //!
-//! ## Static-plugins build
+//! ## Two hosts, not two modes
 //!
-//! The `static-plugins` feature flag (DESIGN.md §20.6) flips the
-//! manager into a path where bundled adapters are registered via
-//! a compile-time list instead of `dlopen`. The
-//! [`PluginManager::register_static`] entry point is what that
-//! flag eventually calls.
+//! There is no flag. Which path a build takes follows from WHICH
+//! HOST it is (DESIGN.md §20.6): the desktop app `dlopen`s staged
+//! cdylibs through [`PluginManager::scan_dir`], while the mobile
+//! host links the adapter `-plugin` rlibs — iOS forbids dlopen —
+//! and hands each one to [`PluginManager::register_static`].
+//!
+//! The mobile host picks its adapters through `host-plugins`'
+//! per-adapter cargo features, one `dep:` each, and that list is
+//! also what `cargo xtask stage-plugins` checks the desktop's
+//! staging against, so the two platforms cannot drift apart
+//! quietly.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};

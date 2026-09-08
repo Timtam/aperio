@@ -170,6 +170,7 @@ fn stage_plugins(args: &[String]) -> Result<String, String> {
             workspace_root.display(),
         ));
     }
+    check_against_what_mobile_links(&bundled, &metadata)?;
 
     let profile_dir = match &target {
         Some(triple) => target_dir.join(triple),
@@ -544,6 +545,94 @@ fn cdylib_extension() -> &'static str {
 ///
 /// Only `com.aperio.*` is touched. A third-party plugin somebody dropped in by
 /// hand is theirs, and this is the wrong thing to be deleting it.
+/// Every adapter the mobile build links must also be one the desktop stages,
+/// and the reverse.
+///
+/// `discover` asks the workspace what exists, which is the right question and
+/// has one blind spot: an adapter that LEAVES the workspace stops existing, so
+/// discovery finds eleven instead of twelve, stages eleven, and reports
+/// success. The release artifact then ships without that adapter and every gate
+/// is green — the exact silence that moving an adapter into its own repository
+/// is going to cause, on the day it is least expected.
+///
+/// So discovery is checked against a list that does NOT come from workspace
+/// membership: `host-plugins`' `static` feature, which names the twelve
+/// adapters the mobile host links statically. That list is not a tally kept for
+/// this check — it is load-bearing already (`cal-ffi` enables those features one
+/// by one to drop adapters it does not ship), so it cannot rot quietly.
+///
+/// Using it here buys a second thing beyond the blind spot: the two platforms
+/// are made to agree. An adapter added to one side and forgotten on the other
+/// now fails, by name, in whichever direction it happened.
+fn check_against_what_mobile_links(
+    bundled: &[Bundled],
+    metadata: &serde_json::Value,
+) -> Result<(), String> {
+    let features = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["name"].as_str() == Some("host-plugins"))
+        .map(|p| &p["features"])
+        .ok_or("no `host-plugins` package in cargo metadata — that is where the mobile host declares which adapters it links")?;
+
+    // `static = ["caldav", "ical", …]`, and each of those is
+    // `caldav = ["registry", "dep:adapter-caldav-plugin"]`. The `dep:` entry is
+    // the plugin crate, which is the name discovery works in too.
+    let linked: BTreeSet<String> = features["static"]
+        .as_array()
+        .ok_or("`host-plugins` has no `static` feature; the mobile host no longer declares its adapters in the place this check reads")?
+        .iter()
+        .filter_map(|f| f.as_str())
+        .flat_map(|feature| {
+            features[feature]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str())
+                .filter_map(|e| e.strip_prefix("dep:"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    if linked.is_empty() {
+        return Err("`host-plugins`' `static` feature names no adapter crates; this check would pass on anything".to_string());
+    }
+
+    let staged: BTreeSet<String> = bundled
+        .iter()
+        .map(|b| {
+            b.plugin_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+
+    let mobile_only: Vec<&String> = linked.difference(&staged).collect();
+    let desktop_only: Vec<&String> = staged.difference(&linked).collect();
+    if mobile_only.is_empty() && desktop_only.is_empty() {
+        return Ok(());
+    }
+
+    let mut message = String::from("desktop and mobile disagree about which adapters Aperio ships");
+    for name in mobile_only {
+        message.push_str(&format!(
+            "\n  {name}: linked into the mobile host, but no workspace cdylib stages it for the desktop. \
+             If this adapter moved to its own repository, stage-plugins has to be taught where to find \
+             it — leaving it out here would ship a desktop build without it, quietly"
+        ));
+    }
+    for name in desktop_only {
+        message.push_str(&format!(
+            "\n  {name}: staged for the desktop, but `host-plugins`' `static` feature does not link it \
+             into the mobile host. The phone would not have this adapter"
+        ));
+    }
+    Err(message)
+}
+
 fn prune(bundled: &[Bundled], bundled_dir: &Path) -> Result<Vec<String>, String> {
     let expected: BTreeSet<&str> = bundled.iter().map(|b| b.plugin_id.as_str()).collect();
     let Ok(entries) = fs::read_dir(bundled_dir) else {

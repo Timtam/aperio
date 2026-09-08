@@ -590,9 +590,28 @@ auch falls nie ein Repo entsteht.
   (`lock_meeting = Some(0x8000...)`). Die Größen von Revision 3 stehen jetzt
   je Vtable als Konstante da (`ForeignVtable::REVISION_3_SIZE`), sind eine
   historische Tatsache und wandern beim Anhängen nicht mit.
+- [x] **Paket 7 — Wächter, die auch anschlagen können.**
+  ↳ Drei Löcher, alle in der Kategorie „grün, weil nichts geprüft wurde“:
+  (1) `stage-plugins` fragte allein den Workspace, also hätte ein Adapter, der
+  ihn VERLÄSST, elf statt zwölf ergeben — gestaget, gemeldet, grün, Artefakt
+  ohne Adapter. Geprüft wird jetzt gegen die Adapter-Features von
+  `host-plugins`, die der Mobile-Host ohnehin trägt; nebenbei müssen Desktop
+  und Mobile damit dieselben zwölf führen. (2) Der Reach-Wächter fragte
+  `arg.contains("plugin.json")` und konnte deshalb nur bei einem Dateinamen
+  anschlagen; er fragt jetzt, ob der Pfad die eigene Kiste verlässt, und fand
+  sofort den Zugriff, der die ganze Zeit dalag. (3) `TASK_ASSIGNMENT` hörte
+  still auf zu fragen, wenn ein Plugin nicht mehr da war. Dazu: `shared/contracts/**`
+  löst jetzt die Rust-Jobs aus (beide Rust-Hälften des Wire-Contracts wurden
+  bei genau dem Commit übersprungen, der ihn ändert), und die toten Features
+  `dynamic-plugins`/`static-plugins` sind weg — kein `cfg` hat sie je gelesen,
+  DESIGN §20.6 beschrieb sie trotzdem als den Desktop/Mobile-Schalter.
 - [ ] Danach erst: Versionierung der fünf Vertragskisten, `adapter-caldav`s
   Zugriff auf `shared/contracts/` auflösen — und ein erster Umzug mit **einem**
-  Adapter als Probe (webdav oder vikunja; CalDAV ist die schlechteste Wahl).
+  Adapter als Probe. **Vikunja, nicht webdav**: `host-core` greift an sechs
+  Stellen in `adapter_webdav_plugin` hinein und die App kodiert webdavs
+  Init-Config-Schema an drei lebenden Stellen (`sync_target/build.rs`); vikunja
+  nennt `host-core` gar nicht. Beide Zugriffe von `adapter-caldav` sind für die
+  Probe irrelevant — weder vikunja noch webdav haben einen.
 - Offene Entscheidung: behält Mobile git-Abhängigkeiten auf alle zwölf
   `-plugin`-Kisten? iOS verbietet dlopen, „eigenständig" kann dort nie mehr
   heißen als „gepinnte Quell-Revision".

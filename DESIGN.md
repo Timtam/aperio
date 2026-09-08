@@ -457,7 +457,7 @@ Alle Adapter, die in diesem Dokument spezifiziert sind, werden **mit der Haupt-A
 Damit gilt:
 
 - **Einheitliche Wartung:** Adapter-Updates erfolgen mit App-Releases; kein Drift zwischen Aperio-Version und Adapter-Version
-- **Mobile-tauglich:** Für eine spätere Mobile-Portierung (Abschnitt 25.1) werden alle gebundelten Adapter statisch in die App einkompiliert (Feature-Flag `static-plugins`, siehe Abschnitt 20.6) – dynamisches Plugin-Laden ist auf Mobile nicht möglich. Da alle relevanten Adapter gebundelt sind, fehlt auf Mobile keine Funktionalität
+- **Mobile-tauglich:** Für eine spätere Mobile-Portierung (Abschnitt 25.1) werden alle gebundelten Adapter statisch in die App einkompiliert (über die Adapter-Features von `host-plugins`, siehe Abschnitt 20.6) – dynamisches Plugin-Laden ist auf Mobile nicht möglich. Da alle relevanten Adapter gebundelt sind, fehlt auf Mobile keine Funktionalität
 - **Crates.io-Wiederverwendbarkeit:** Jeder Adapter ist eine reine Rust-Crate und kann unabhängig auf crates.io veröffentlicht werden
 - **Auskopplung ohne Architektur-Bruch:** Soll ein Adapter später aus dem Workspace in ein eigenes Repository wandern (z.B. weil die Wartung an einen externen Maintainer übergeht), genügt:
   1. Crate-Verzeichnis in das neue Repo verschieben
@@ -3088,7 +3088,7 @@ Das Plugin-System ist die architektonische Grundlage für alle Adapter (Kalender
 **Kernprinzipien:**
 - Einheitliche Plugin-ABI für alle Plugin-Typen
 - Nativ kompiliert pro Plattform (`.dll` / `.dylib` / `.so`)
-- Auf Desktop dynamisch zur Laufzeit geladen; auf Mobile statisch einkompiliert (Feature-Flag `static-plugins`, siehe Abschnitt 20.6)
+- Auf Desktop dynamisch zur Laufzeit geladen; auf Mobile statisch einkompiliert (über die Adapter-Features von `host-plugins`, siehe Abschnitt 20.6)
 - Sprach-agnostisch über stabiles C-ABI
 - Erweiterbar um neue Plugin-Typen ohne Änderung am Core
 
@@ -3443,8 +3443,19 @@ ihrer eigenen Kopie heraus, wären beide auf dieselbe Auflösung festgelegt —
 genau die Kopplung, die die Konstante auflöst.
 
 Zwei Tests halten das fest (`crates/host-plugins/tests/manifest_reach.rs`):
-keine Quelle greift auf das Manifest einer anderen Kiste zu, und keine Kiste mit
-`plugin.json` vergisst, es zu exportieren.
+keine Quelle bindet eine Datei **außerhalb ihrer eigenen Kiste** ein, und keine
+Kiste mit `plugin.json` vergisst, es zu exportieren.
+
+Die erste fragte lange nur nach Manifesten — ihre Regel war
+`arg.contains("plugin.json")`, sie konnte also bei genau einem Dateinamen
+anschlagen und bei keinem anderen. Der Zugriff, den sie deshalb nie sehen
+konnte, war real und lag die ganze Zeit da: `adapter-caldav` bindet die
+Wire-Contract-Fixture der App ein (`shared/contracts/`). Die Frage ist nicht,
+welche Datei gelesen wird, sondern ob eine cargo-Abhängigkeit sie erreichen
+könnte. Die drei bestehenden Zugriffe stehen namentlich in `KNOWN_REACHES`, mit
+Begründung — zwei davon liest die App ihre eigene Datei, der dritte ist Schuld
+und wartet auf die Entscheidung, wie ein ausgelagerter Adapter eingebunden wird
+(Submodul behält den Pfad, cargo-git-Abhängigkeit nicht).
 
 #### Wie ein Adapter heißt
 
@@ -3606,31 +3617,43 @@ eine `cdylib` erzeugt und von einer `*-plugin`-Kiste abhängt. `cal-ffi` ist
 ebenfalls eine cdylib, hängt aber von keinem Adapter direkt ab und ist deshalb
 korrekt keines.
 
-Für mobile Plattformen (iOS, Android), wo dynamisches Nachladen von Bibliotheken nicht erlaubt ist, werden gebundelte Plugins **statisch einkompiliert** – über ein Feature-Flag im Build-System:
+**Eine blinde Stelle hat diese Frage aber**, und ausgerechnet die, auf die es
+zuläuft: Ein Adapter, der den Workspace *verlässt*, existiert für
+`cargo metadata` nicht mehr. Der xtask fände elf statt zwölf, stagete elf und
+meldete Erfolg — das Release-Artefakt käme ohne diesen Adapter heraus, mit
+grünen Toren. Deshalb wird die Antwort gegen eine Liste geprüft, die **nicht**
+aus der Workspace-Mitgliedschaft stammt: die Adapter-Features von
+`host-plugins`, mit denen der Mobile-Host seine zwölf statisch linkt. Diese
+Liste ist keine Zählung für diese Prüfung, sie trägt ohnehin (§20.6), kann also
+nicht still veralten. Nebenbei erzwingt sie, dass beide Plattformen dieselben
+Adapter führen: was auf einer Seite dazukommt und auf der anderen vergessen
+wird, fällt namentlich auf, in welcher Richtung auch immer.
 
-```toml
-# Cargo.toml
-[features]
-dynamic-plugins = []          # Desktop: dynamisch laden
-static-plugins  = [           # Mobile: statisch einkompilieren
-    "adapter-google",
-    "adapter-microsoft-graph",
-    "adapter-ews",
-    "adapter-caldav",
-    "adapter-ical",
-    "adapter-vikunja",
-    "adapter-todoist",
-    "adapter-webdav",
-    "adapter-ftp",
-    "adapter-sftp",
-    "adapter-dropbox",
-    "adapter-webex",
-]
-```
+Auf mobilen Plattformen (iOS, Android) ist dynamisches Nachladen nicht erlaubt,
+also werden die gebundelten Adapter dort **statisch einkompiliert**.
+
+**Es gibt dafür kein Feature-Flag an der App.** Der Unterschied ist nicht ein
+Modus, den ein Host umschaltet, sondern *welcher Host es ist*:
+
+- **Desktop.** `src-tauri` hängt gar nicht von `host-plugins` ab. Es lädt, was
+  gestaget wurde, über `PluginManager::scan_dir` — ein Adapter ist dort eine
+  **Datei, die die App findet**.
+- **Mobile.** `cal-ffi` hängt von `host-plugins` ab und schaltet dessen
+  Adapter-Features einzeln ein (`caldav`, `ical`, `google`, …, je ein
+  `dep:adapter-X-plugin`); `register_all_static` übergibt jedes an
+  `PluginManager::register_static`. Ein Adapter ist dort **Quelltext, den die
+  App mitkompiliert**.
+
+Die Feature-Liste `static` in `crates/host-plugins/Cargo.toml` ist damit die
+einzige geschriebene Aufzählung der zwölf gebundelten Adapter — und sie ist
+nicht bloß eine Aufzählung, sondern trägt: Mobile lässt einen Adapter weg,
+indem es sein Feature nicht einschaltet. `cargo xtask stage-plugins` prüft die
+Desktop-Seite gegen genau diese Liste, sodass ein Adapter, der auf einer Seite
+dazukommt oder verschwindet, auf der anderen nicht still fehlt (siehe unten).
 
 `adapter-local` taucht in dieser Liste bewusst nicht auf — er ist host-intern (siehe Hinweis in §20.2) und wird direkt von src-tauri als gewöhnliche Bibliothek genutzt, nicht über den Plugin-Manager. Auf Mobile gilt dasselbe wie auf Desktop: der `LocalAdapter` ist Teil der App-Binary, nicht ein zu ladendes Artefakt.
 
-Der Plugin-Manager erkennt zur Laufzeit, welcher Modus aktiv ist, und lädt Plugins entsprechend. Die Plugin-API bleibt für den Rest der App identisch.
+Die Plugin-API bleibt für den Rest der App in beiden Fällen identisch.
 
 ### 20.7 Community-Plugins: Installation & Sicherheit
 

@@ -593,6 +593,21 @@ fn the_adapters_that_can_assign_say_how_many_people_they_hold() {
             "{id} no longer declares the assignment limit the editor gates on",
         );
     }
+
+    // …but a build that links BOTH has to find both. Without this, the loop
+    // above is a question that stops being asked the moment an adapter is no
+    // longer where it was looked for — and an adapter moving somewhere else is
+    // exactly what is planned. Gated on the features rather than on a count, so
+    // it says which build it is talking about.
+    #[cfg(all(feature = "todoist", feature = "vikunja"))]
+    for (id, _) in TASK_ASSIGNMENT {
+        assert!(
+            manifests.iter().any(|(seen, _)| seen == id),
+            "{id} is linked into this build but declared no manifest here, so \
+             the limit above went unchecked. Either it is not registering any \
+             more, or this table names an adapter that has moved",
+        );
+    }
 }
 
 #[test]

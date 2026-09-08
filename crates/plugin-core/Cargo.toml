@@ -12,9 +12,12 @@ description = "Aperio — plugin ABI contract, manifest parser, manager runtime,
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# Dynamic plugin loader. Phase P1 only — mobile builds will use the
-# `static-plugins` feature instead, where adapters compile straight
-# into the host binary and libloading isn't on the dep graph.
+# Dynamic plugin loader, used by the DESKTOP host. The mobile host
+# (cal-ffi) never calls `scan_dir` — it links the adapters through
+# `host-plugins` and registers them with `register_static` — but it
+# does compile this crate, so libloading is on its graph too. Putting
+# the loader behind a feature would be the way to change that, and
+# nothing does today.
 libloading.workspace = true
 # `.aperio` community-plugin archives are ZIP-based — the
 # archive module unzips them under plugins/user/.

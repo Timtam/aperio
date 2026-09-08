@@ -1,4 +1,4 @@
-//! A manifest is read from the crate that owns it, not from its directory.
+//! A file is read from the crate that owns it, not from its directory.
 //!
 //! Every host that needed an adapter's `plugin.json` used to embed it by
 //! relative path — `include_bytes!("../../adapter-caldav-plugin/plugin.json")`
@@ -13,6 +13,13 @@
 //! hosts read that. These two tests keep it that way: one refuses a reach
 //! across crate boundaries, the other refuses a manifest-owning crate that
 //! forgot to export its own.
+//!
+//! The first test asked about manifests only until it was widened — its rule
+//! was `arg.contains("plugin.json")`, which could fail on one filename and no
+//! other. The reach it could not see was real and had been there the whole
+//! time: an adapter embedding the app's wire-contract fixture. The question is
+//! not which file is being read, it is whether a cargo dependency could reach
+//! it.
 //!
 //! Both walk the tree on purpose. They are statements about THIS repository's
 //! sources, so they have to stay meaningful after the adapters move out — which
@@ -105,8 +112,57 @@ fn include_arg(text: &str, start: usize) -> Option<String> {
 /// count: the number of crates is exactly what the extraction changes.
 const WALK_ANCHORS: [&str; 2] = ["crates/host-plugins/src/lib.rs", "src-tauri/src/lib.rs"];
 
+/// Does this include reach outside the crate that contains the source file?
+///
+/// The question is about the CRATE, not about `..`. A file under `src/` reaching
+/// `../icons/icon.png` is reading its own crate's asset directory and travels
+/// wherever the crate does; a file reaching `../../../shared/` is reading
+/// something only this checkout's layout puts there.
+///
+/// Arguments that are not a plain string literal are skipped: the sanctioned
+/// form is `concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json")`, which is
+/// anchored at the crate root by construction and cannot escape.
+fn escapes_its_crate(source: &Path, arg: &str) -> bool {
+    let Some(literal) = arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')) else {
+        return false;
+    };
+    let Some(crate_root) = crate_root_of(source) else {
+        return false;
+    };
+    let Some(dir) = source.parent() else {
+        return false;
+    };
+
+    // Resolved lexically, without touching the filesystem: the file being
+    // included may legitimately not exist yet on a branch, and a missing file
+    // is the other test's business, not this one's.
+    let mut resolved = dir.to_path_buf();
+    for part in literal.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                resolved.pop();
+            }
+            other => resolved.push(other),
+        }
+    }
+    !resolved.starts_with(&crate_root)
+}
+
+/// The nearest ancestor holding a `Cargo.toml` — the crate a source file
+/// belongs to, and the boundary a cargo dependency can carry.
+fn crate_root_of(source: &Path) -> Option<PathBuf> {
+    let mut dir = source.parent()?;
+    loop {
+        if dir.join("Cargo.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
 #[test]
-fn no_crate_embeds_another_crates_manifest() {
+fn no_crate_embeds_a_file_from_outside_itself() {
     let root = repo_root();
     let mut sources = Vec::new();
     rust_sources(&crates_dir(), &mut sources);
@@ -124,6 +180,7 @@ fn no_crate_embeds_another_crates_manifest() {
     }
 
     let mut offenders = Vec::new();
+    let mut known = Vec::new();
     for path in &sources {
         // This file quotes the shape it forbids, in the module docs above.
         if path.ends_with("manifest_reach.rs") {
@@ -136,8 +193,16 @@ fn no_crate_embeds_another_crates_manifest() {
             while let Some(hit) = text[at..].find(macro_name) {
                 let start = at + hit + macro_name.len();
                 if let Some(arg) = include_arg(&text, start) {
-                    if arg.contains("plugin.json") && arg.contains("../../") {
-                        offenders.push(format!("{}: {macro_name}({arg})", path.display()));
+                    if escapes_its_crate(path, &arg) {
+                        let site = format!("{}: {macro_name}({arg})", path.display());
+                        if KNOWN_REACHES
+                            .iter()
+                            .any(|k| site.replace('\\', "/").contains(k))
+                        {
+                            known.push(site);
+                        } else {
+                            offenders.push(site);
+                        }
                     }
                 }
                 at = start;
@@ -145,15 +210,64 @@ fn no_crate_embeds_another_crates_manifest() {
         }
     }
 
+    // Anything climbing out of its own crate, not just a `plugin.json`.
+    //
+    // The rule used to be `arg.contains("plugin.json")`, which is the
+    // count-floor mistake wearing a different hat: it could only ever fail on
+    // the one filename it was written for, so the OTHER reach across the same
+    // boundary — adapter-caldav embedding the app's wire contract — sat here
+    // for as long as this test has existed without it being able to notice.
     assert!(
         offenders.is_empty(),
-        "a manifest is being read out of another crate's directory, which only \
-         works while the crates are neighbours. Read the owning crate's \
-         `MANIFEST` const instead (and declare the cargo dependency that makes \
-         it reachable):\n  {}",
+        "a crate is embedding a file from outside itself, which only works \
+         while the crates are neighbours in one checkout. Read it from the \
+         crate that OWNS it (and declare the cargo dependency that makes it \
+         reachable), the way every `plugin.json` is read:\n  {}",
         offenders.join("\n  "),
     );
+
+    // The named exceptions have to actually turn up. Without this, a mistyped
+    // path or a scanner that stopped reading would empty both lists and the
+    // test would pass by finding nothing at all — which is the failure this
+    // whole file exists to make impossible.
+    for expected in KNOWN_REACHES {
+        assert!(
+            known
+                .iter()
+                .any(|k| k.replace('\\', "/").contains(expected)),
+            "the known reach at {expected} was not found. Either it is gone — \
+             delete it from KNOWN_REACHES, and this guard gets stricter for \
+             free — or the scan is no longer reading what it thinks it is",
+        );
+    }
 }
+
+/// Reaches that exist on purpose, each with the reason it is allowed and what
+/// would end it. Named individually: a count would let a new one hide.
+///
+/// All three read `shared/contracts/`, the directory holding the wire contracts
+/// that BOTH languages check themselves against. Two of them are the app
+/// reading its own file and are correct as they stand.
+///
+/// The third is not, and is recorded here rather than fixed because fixing it
+/// costs different things depending on a decision that has not been made. If
+/// `adapter-caldav` reaches its own repository as a git SUBMODULE it keeps this
+/// relative path and nothing breaks; as a cargo GIT DEPENDENCY the crate is
+/// copied into cargo's checkout directory and this line stops compiling. The
+/// fix — a crate that owns the contracts and hands out their bytes — is the
+/// same move every `plugin.json` already made, and it is worth making once the
+/// mechanism is chosen rather than twice.
+const KNOWN_REACHES: [&str; 3] = [
+    // The app reading its own file: the near end of the chain, a stored pref
+    // parsing into reminders.
+    "crates/host-core/src/reminders.rs",
+    // The same hop on the phone, where the Host applies the calendar's policy.
+    "crates/cal-ffi/src/host.rs",
+    // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
+    // VALARM a CalDAV server stores — asserted from the app's own numbers, by
+    // an adapter that is meant to leave this repository.
+    "crates/adapter-caldav/src/mapping.rs",
+];
 
 #[test]
 fn every_manifest_owning_crate_exports_its_manifest() {
