@@ -38,6 +38,127 @@ use std::path::{Path, PathBuf};
 use crate::error::{PluginError, PluginResult};
 use crate::manifest::{PluginManifest, MANIFEST_FILENAME};
 
+/// The modification time stamped into every archive entry: the zip epoch,
+/// 1980-01-01, which is what `zip::DateTime::default()` is.
+///
+/// Fixed rather than the file's own mtime, so the same directory always packs
+/// to the same bytes. Two builds of one commit are then comparable, and a
+/// rebuild that changed nothing does not look like a new release.
+fn archive_timestamp() -> zip::DateTime {
+    zip::DateTime::default()
+}
+
+/// Build a `.aperio` archive out of a staged plugin directory.
+///
+/// The counterpart to [`install_archive`], and deliberately its mirror image:
+/// installing extracts an archive into `<root>/<plugin-id>/`, and a staged
+/// bundled plugin already IS that directory — `plugin.json` beside
+/// `<plugin-id>.{dll,dylib,so}`. So packing is "zip this directory" and the two
+/// halves cannot drift into different ideas of the layout.
+///
+/// Until this existed the format had a complete reader and no writer at all:
+/// `inspect_archive`, `install_archive`, the path-traversal guard, the install
+/// dialog — all of it against a shape that nothing in the tree produced. The
+/// only `.aperio` file that had ever existed was built by a test helper. An
+/// adapter author's first archive would have been the first real one.
+///
+/// Returns the manifest it packed, parsed and validated. Two refusals, for
+/// different reasons. A directory with no `plugin.json` would pack into an
+/// archive the reader rejects outright — nothing is lost by saying so at the
+/// packing end, where the person who can fix it is standing. One with no
+/// library is worse: it installs cleanly and loads nothing, and
+/// `PluginManager::load_from_dir` reports that as one failed load among others,
+/// on the user's machine, after they chose to install it.
+pub fn pack_archive(
+    plugin_dir: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+) -> PluginResult<PluginManifest> {
+    let plugin_dir = plugin_dir.as_ref();
+    let dest = dest.as_ref();
+
+    let manifest_path = plugin_dir.join(MANIFEST_FILENAME);
+    let manifest_bytes = fs::read(&manifest_path).map_err(|e| {
+        PluginError::Io(format!(
+            "read {}: {e} — a plugin directory is its manifest plus its library",
+            manifest_path.display(),
+        ))
+    })?;
+    let manifest = PluginManifest::from_bytes(&manifest_bytes)?;
+
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    let dir = fs::read_dir(plugin_dir)
+        .map_err(|e| PluginError::Io(format!("read {}: {e}", plugin_dir.display())))?;
+    for entry in dir {
+        let entry = entry.map_err(|e| PluginError::Io(format!("read dir entry: {e}")))?;
+        let path = entry.path();
+        // One level, no recursion: the layout `install_archive` writes is flat,
+        // and a nested tree here would be one this reader has never seen.
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return Err(PluginError::Io(format!(
+                "{} has a name that is not valid UTF-8, which a zip entry must be",
+                path.display(),
+            )));
+        };
+        entries.push((name.to_string(), path));
+    }
+    // Sorted so the same directory always produces byte-identical archives.
+    // Whoever compares two builds should be comparing the plugins, not the
+    // order a filesystem happened to enumerate them in.
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let has_library = entries.iter().any(|(name, _)| {
+        Path::new(name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e, "dll" | "dylib" | "so"))
+    });
+    if !has_library {
+        return Err(PluginError::Manifest(format!(
+            "{} holds no shared library, so the archive would install and load \
+             nothing. Stage the plugin first — see `cargo xtask stage-plugins`",
+            plugin_dir.display(),
+        )));
+    }
+
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| PluginError::Io(format!("mkdir {}: {e}", parent.display())))?;
+    }
+    let file = fs::File::create(dest)
+        .map_err(|e| PluginError::Io(format!("create {}: {e}", dest.display())))?;
+    let mut writer = zip::ZipWriter::new(file);
+    // Deflate: an adapter's cdylib is ten megabytes of mostly-compressible
+    // code, and this is a file someone downloads.
+    //
+    // The timestamp is pinned to the zip epoch, and that is what makes two
+    // packs of one directory byte-identical. Left at its default it is not:
+    // `SimpleFileOptions::default()` calls the zip crate's
+    // `DateTime::default_for_write`, which returns the WALL CLOCK when that
+    // crate's `time` feature is on and 1980 when it is not. `time` is in its
+    // default set; this workspace happens to switch defaults off for an
+    // unrelated reason, and cargo unifies features across the whole graph — so
+    // one new dependency asking for `zip` with defaults would silently start
+    // stamping the hour into every archive. Naming it here does not depend on
+    // anyone noticing that.
+    let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(archive_timestamp());
+    for (name, path) in &entries {
+        writer
+            .start_file(name.as_str(), options)
+            .map_err(zip_to_plugin_error)?;
+        let bytes =
+            fs::read(path).map_err(|e| PluginError::Io(format!("read {}: {e}", path.display())))?;
+        io::Write::write_all(&mut writer, &bytes)
+            .map_err(|e| PluginError::Io(format!("write {name} into {}: {e}", dest.display())))?;
+    }
+    writer.finish().map_err(zip_to_plugin_error)?;
+    Ok(manifest)
+}
+
 /// Read + parse the `plugin.json` from a `.aperio` archive
 /// without writing anything to disk. Used by the install
 /// dialog to render the preview + perform the ABI / min-app-
@@ -222,6 +343,127 @@ mod tests {
         assert_eq!(manifest.id, "com.example.test-plugin");
         assert_eq!(manifest.version, "1.0.0");
         assert_eq!(manifest.author.as_deref(), Some("Tester"));
+    }
+
+    /// The two halves are one shape: what `pack_archive` writes is what
+    /// `install_archive` lays back down, file for file.
+    ///
+    /// The format had a reader and no writer, so this is the first thing that
+    /// has ever asked whether the two agree.
+    #[test]
+    fn packing_a_plugin_dir_round_trips_through_installing_it() {
+        let dir = tempdir().unwrap();
+        let staged = dir.path().join("com.example.test-plugin");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join(MANIFEST_FILENAME), sample_manifest_json()).unwrap();
+        fs::write(staged.join("com.example.test-plugin.dll"), b"a library").unwrap();
+        fs::write(staged.join("README.txt"), b"carried along").unwrap();
+
+        let archive = dir.path().join("plugin.aperio");
+        let packed = pack_archive(&staged, &archive).expect("packs");
+        assert_eq!(packed.id, "com.example.test-plugin");
+
+        // The reader agrees about the manifest without unpacking anything.
+        let inspected = inspect_archive(&archive).expect("inspects");
+        assert_eq!(inspected.id, packed.id);
+        assert_eq!(inspected.version, packed.version);
+
+        let root = dir.path().join("installed");
+        let installed = install_archive(&archive, &root).expect("installs");
+        assert_eq!(installed.plugin_dir, root.join("com.example.test-plugin"));
+
+        // Every file, and its contents — not just the two the format names.
+        for name in [
+            "com.example.test-plugin.dll",
+            "README.txt",
+            MANIFEST_FILENAME,
+        ] {
+            let before = fs::read(staged.join(name)).unwrap();
+            let after = fs::read(installed.plugin_dir.join(name))
+                .unwrap_or_else(|e| panic!("{name} did not survive the round trip: {e}"));
+            assert_eq!(before, after, "{name} changed on the way through");
+        }
+    }
+
+    /// A directory with a manifest and no library packs into an archive that
+    /// installs cleanly and loads nothing.
+    ///
+    /// Refused here rather than discovered there: the host reports a missing
+    /// library as one failed load among others, on the user's machine, after
+    /// they chose to install it.
+    #[test]
+    fn packing_refuses_a_plugin_with_no_library() {
+        let dir = tempdir().unwrap();
+        let staged = dir.path().join("com.example.test-plugin");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join(MANIFEST_FILENAME), sample_manifest_json()).unwrap();
+
+        let err = pack_archive(&staged, dir.path().join("plugin.aperio"))
+            .expect_err("a manifest alone is not a plugin");
+        assert!(
+            matches!(&err, PluginError::Manifest(m) if m.contains("no shared library")),
+            "unexpected error: {err:?}",
+        );
+    }
+
+    #[test]
+    fn packing_refuses_a_directory_with_no_manifest() {
+        let dir = tempdir().unwrap();
+        let staged = dir.path().join("com.example.test-plugin");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("com.example.test-plugin.dll"), b"a library").unwrap();
+
+        let err = pack_archive(&staged, dir.path().join("plugin.aperio"))
+            .expect_err("a library alone is not a plugin either");
+        assert!(
+            matches!(err, PluginError::Io(_)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    /// Packing the same directory twice produces the same bytes.
+    ///
+    /// So two builds can be compared, and so a rebuild that changes nothing
+    /// does not look like a new release.
+    #[test]
+    fn packing_is_deterministic() {
+        let dir = tempdir().unwrap();
+        let staged = dir.path().join("com.example.test-plugin");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join(MANIFEST_FILENAME), sample_manifest_json()).unwrap();
+        fs::write(staged.join("com.example.test-plugin.dll"), b"a library").unwrap();
+        fs::write(staged.join("a-second-file.txt"), b"and another").unwrap();
+
+        let first = dir.path().join("first.aperio");
+        let second = dir.path().join("second.aperio");
+        pack_archive(&staged, &first).unwrap();
+        pack_archive(&staged, &second).unwrap();
+        assert_eq!(
+            fs::read(&first).unwrap(),
+            fs::read(&second).unwrap(),
+            "the same directory packed twice should be byte-identical",
+        );
+
+        // Comparing two packs is nearly useless on its own: they happen
+        // microseconds apart, and a zip timestamp has two-second granularity,
+        // so a writer stamping the wall clock would land both in the same
+        // bucket and pass this about 1999 times in 2000. What actually has to
+        // hold is that no clock is consulted at all — so the stamp is read back
+        // and checked against the epoch it is pinned to.
+        let file = fs::File::open(&first).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        assert!(zip.len() >= 2, "the fixture packs a manifest and a library");
+        for i in 0..zip.len() {
+            let entry = zip.by_index(i).unwrap();
+            let stamped = entry.last_modified().expect("every entry carries a stamp");
+            assert_eq!(
+                (stamped.year(), stamped.month(), stamped.day()),
+                (1980, 1, 1),
+                "{} was stamped {stamped:?} — something is reading the clock, and \
+                 two builds of one commit have stopped being comparable",
+                entry.name(),
+            );
+        }
     }
 
     #[test]

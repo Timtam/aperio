@@ -3592,6 +3592,35 @@ Der Plugin-Manager erkennt zur Laufzeit, welcher Modus aktiv ist, und lädt Plug
 
 Community-Plugins werden manuell als Datei (Archiv oder Verzeichnis) installiert. Der Nutzer zieht die Datei in das Plugin-Management-Fenster oder wählt sie über einen Dateiauswahl-Dialog.
 
+#### Das Archiv hat auch einen Erzeuger
+
+Ein `.aperio` ist ein flaches Zip: `plugin.json` plus `<plugin-id>.{dll,dylib,so}`
+— dieselbe Ablage, die `install_archive` wieder auslegt, und dieselbe, in der ein
+gebündeltes Plugin gestaget wird. Deshalb ist Packen „dieses Verzeichnis zippen"
+(`plugin_core::pack_archive`) und Installieren „dieses Zip auspacken", und die
+beiden Hälften können nicht auseinanderlaufen.
+
+Der Leser war lange vollständig — `inspect_archive`, `install_archive`, der
+Pfad-Traversal-Schutz, der Bestätigungsdialog — und es gab **nichts**, was je ein
+solches Archiv erzeugt hätte. Das einzige `.aperio`, das je existierte, baute ein
+Test-Helfer mit einer Attrappe als Bibliothek. Das erste echte hätte ein fremder
+Adapter-Autor gebaut, und der hätte herausgefunden, was am Format nicht stimmt.
+
+Jetzt packt `cargo xtask pack-plugins` die zwölf gebündelten Adapter, und ein
+Test packt sie, inspiziert sie, installiert sie und **lädt** sie — ein Archiv,
+das sich in ein Verzeichnis auspacken lässt, das der Host nicht öffnen kann, hat
+nichts bewiesen.
+
+Zwei Verweigerungen beim Packen, beide gegen ein Archiv, das sauber installiert
+und nutzlos ist: ein Verzeichnis ohne `plugin.json` und eines ohne Bibliothek.
+
+**Ein Archiv pro Plattform, und das Archiv sagt es nicht.** `locate_library`
+findet die Bibliothek über die Dateiendung, ein Windows-arm64- und ein
+Windows-x64-Build sehen also gleich aus und sind nicht austauschbar. Der
+Ziel-Triple steht deshalb im Dateinamen — die einzige Stelle, an der ihn jemand
+sehen kann. Eine Architektur-Dimension im Format selbst wäre die richtige
+Lösung; sie fehlt und ist notiert.
+
 #### Installations-Ablauf
 
 ```

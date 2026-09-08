@@ -58,18 +58,23 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let task = args.first().map(String::as_str);
     match task {
-        Some("stage-plugins") => match stage_plugins(&args[1..]) {
-            Ok(report) => {
-                println!("{report}");
-                ExitCode::SUCCESS
-            }
-            Err(err) => {
-                eprintln!("error: {err}");
-                ExitCode::FAILURE
-            }
-        },
+        Some("stage-plugins") => run(stage_plugins(&args[1..])),
+        Some("pack-plugins") => run(pack_plugins(&args[1..])),
         _ => {
             eprintln!("{USAGE}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(outcome: Result<String, String>) -> ExitCode {
+    match outcome {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: {err}");
             ExitCode::FAILURE
         }
     }
@@ -90,7 +95,18 @@ Tasks:
         --dir     the staged directory to check, instead of the one under
                   target/. For a layout assembled somewhere else — the macOS
                   universal build lipo-fuses two arches into a staging tree of
-                  its own, and that tree needs proving too.";
+                  its own, and that tree needs proving too.
+
+  pack-plugins [--release] [--target <triple>] [--out <dir>]
+        Pack every staged plugin into a `.aperio` archive — the format the
+        plugin installer reads. Run it after `stage-plugins`.
+
+        Archives land in target/<profile>/plugins/packaged/ unless --out says
+        otherwise, named `<plugin-id>-<version>-<triple>.aperio`. The triple is
+        in the name because it is NOT in the archive: the installer picks a
+        library by file extension alone, so a Windows arm64 build and a Windows
+        x64 build produce archives that look alike and are not
+        interchangeable.";
 
 /// One bundled plugin, as the workspace describes it.
 struct Bundled {
@@ -230,6 +246,118 @@ fn stage_plugins(args: &[String]) -> Result<String, String> {
     ))
 }
 
+/// Pack every staged plugin into a `.aperio` archive.
+///
+/// The format has had a complete reader since the plugin installer was written
+/// — inspect, install, a path-traversal guard, a confirmation dialog — and
+/// until now nothing that produced one. The only `.aperio` file that had ever
+/// existed was built by a unit-test helper, which meant the first real archive
+/// anyone made would have been an out-of-tree adapter author's, discovering
+/// whatever was wrong with the shape on their own time.
+///
+/// Twelve adapters are staged in this repository. Packing them is the cheapest
+/// possible proof that the writer and the reader agree about the format, and it
+/// costs a few seconds after a build that already happened.
+fn pack_plugins(args: &[String]) -> Result<String, String> {
+    let mut release = false;
+    let mut target: Option<String> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--release" => release = true,
+            "--target" => {
+                target = Some(
+                    rest.next()
+                        .ok_or_else(|| "--target needs a triple".to_string())?
+                        .clone(),
+                )
+            }
+            "--out" => {
+                out = Some(PathBuf::from(
+                    rest.next()
+                        .ok_or_else(|| "--out needs a path".to_string())?,
+                ))
+            }
+            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+        }
+    }
+
+    let metadata = metadata()?;
+    let target_dir = PathBuf::from(
+        metadata["target_directory"]
+            .as_str()
+            .ok_or("cargo metadata has no target_directory")?,
+    );
+    let bundled = discover(&metadata)?;
+    if bundled.is_empty() {
+        return Err("no bundled plugins found; see `stage-plugins`".to_string());
+    }
+
+    let profile_dir = match &target {
+        Some(triple) => target_dir.join(triple),
+        None => target_dir.clone(),
+    }
+    .join(if release { "release" } else { "debug" });
+    let staged_dir = profile_dir.join("plugins").join("bundled");
+    let out_dir = out.unwrap_or_else(|| profile_dir.join("plugins").join("packaged"));
+
+    // Named for what it is, because the archive cannot say it. `locate_library`
+    // finds the library by extension, so nothing inside distinguishes an arm64
+    // build from an x64 one.
+    let triple = match &target {
+        Some(triple) => triple.clone(),
+        None => host_triple()?,
+    };
+
+    let mut packed = Vec::new();
+    for plugin in &bundled {
+        let dir = staged_dir.join(&plugin.plugin_id);
+        if !dir.is_dir() {
+            return Err(format!(
+                "{} is not staged at {}. Run `cargo xtask stage-plugins{}` first",
+                plugin.plugin_id,
+                dir.display(),
+                if release { " --release" } else { "" },
+            ));
+        }
+        let version = manifest_string(&dir, "version")?;
+        let dest = out_dir.join(format!("{}-{version}-{triple}.aperio", plugin.plugin_id));
+        plugin_core::pack_archive(&dir, &dest).map_err(|e| e.to_string())?;
+        packed.push(dest);
+    }
+
+    // Every archive read back through the reader that will meet it in the
+    // wild. Producing a file nobody has opened is how the format got here.
+    for archive in &packed {
+        plugin_core::inspect_archive(archive)
+            .map_err(|e| format!("{} does not read back: {e}", archive.display()))?;
+    }
+
+    Ok(format!(
+        "packed {} plugins into {}",
+        packed.len(),
+        out_dir.display(),
+    ))
+}
+
+/// The target triple this build runs on, asked of rustc rather than guessed.
+fn host_triple() -> Result<String, String> {
+    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let out = Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .map_err(|e| format!("running `rustc -vV`: {e}"))?;
+    if !out.status.success() {
+        return Err("`rustc -vV` failed".to_string());
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .map(|host| host.trim().to_string())
+        .ok_or_else(|| "`rustc -vV` printed no host line".to_string())
+}
+
 /// What `cargo metadata` says about this workspace, with dependencies left out:
 /// every member is listed either way, and resolving the graph costs a network
 /// round trip this task has no use for.
@@ -367,15 +495,20 @@ fn discover(metadata: &serde_json::Value) -> Result<Vec<Bundled>, String> {
 /// The `id` a crate's `plugin.json` declares — the name of its staged directory
 /// and the key the host loads it under.
 fn plugin_id(plugin_dir: &Path) -> Result<String, String> {
+    manifest_string(plugin_dir, "id")
+}
+
+/// One top-level string out of a directory's `plugin.json`.
+fn manifest_string(plugin_dir: &Path, field: &str) -> Result<String, String> {
     let path = plugin_dir.join("plugin.json");
     let text = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let value: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
-    value["id"]
+    value[field]
         .as_str()
-        .filter(|id| !id.trim().is_empty())
+        .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| format!("{} declares no id", path.display()))
+        .ok_or_else(|| format!("{} declares no {field}", path.display()))
 }
 
 /// Cargo's filename for a cdylib, which differs per platform.

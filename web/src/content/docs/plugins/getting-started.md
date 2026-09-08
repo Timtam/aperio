@@ -97,9 +97,35 @@ See [the manifest reference](/plugins/manifest/) for every field.
 cargo build --release   # produces target/release/{lib}my_plugin.{so,dll,dylib}
 ```
 
-Package the shared library together with `plugin.json` into a `.aperio`
-archive, then install it from the app's plugin settings and try it. The
+A `.aperio` archive is a **zip file**, flat, with two things in it:
+
+```
+plugin.json                       your manifest, verbatim
+com.example.my-plugin.dll         your library, named after your plugin id
+```
+
+The library's extension is the platform's — `.dll`, `.dylib`, `.so` — and its
+stem is your plugin id, because that is the first name the host looks for. Any
+other files you put in are extracted alongside and ignored.
+
+```sh
+cd target/release
+cp ../../plugin.json .
+cp libmy_plugin.so com.example.my-plugin.so
+zip com.example.my-plugin-1.0.0-x86_64-unknown-linux-gnu.aperio     plugin.json com.example.my-plugin.so
+```
+
+**One archive per platform.** Nothing inside says which one it is: the host
+picks the library by file extension, so a Windows arm64 build and a Windows x64
+build produce archives that look identical and are not interchangeable. Put the
+target triple in the filename — it is the only place a person can see it.
+
+Then install it from Settings → Plugins and try it. The
 [`hello-world` example](/plugins/examples/hello-world/) is exactly this, complete.
+
+> Aperio's own bundled adapters are packed the same way, by
+> `cargo xtask pack-plugins` in its repository. Whatever breaks about the format
+> breaks for them first.
 
 ## Where to go next
 

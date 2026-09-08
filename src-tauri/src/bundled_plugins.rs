@@ -313,4 +313,88 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
     }
+    /// Every real adapter survives being packed into a `.aperio` archive and
+    /// installed back out of it.
+    ///
+    /// The archive format had a complete reader — inspect, install, the
+    /// path-traversal guard, the confirmation dialog — and, until the packer
+    /// was written, nothing anywhere that produced one. The only `.aperio` file
+    /// that had ever existed was a unit-test fixture holding a dummy library.
+    ///
+    /// So this is the format meeting real plugins for the first time: twelve
+    /// adapters, each with a ten-megabyte cdylib and its own manifest, packed
+    /// and installed and then LOADED — because an archive that unpacks into a
+    /// directory the host cannot dlopen has proved nothing. The first
+    /// out-of-tree adapter author should not be the one to find out.
+    #[test]
+    fn every_staged_plugin_survives_being_packed_and_installed() {
+        let Some(scan_dir) = staged_plugins_dir() else {
+            eprintln!(
+                "skipping: no staged plugins dir — run `cargo build --workspace` and \
+                 then `cargo xtask stage-plugins`",
+            );
+            return;
+        };
+
+        let work = TempDir::new().expect("tempdir");
+        let archives = work.path().join("archives");
+        let installed_root = work.path().join("installed");
+        std::fs::create_dir_all(&archives).expect("mkdir");
+
+        let mut ids = Vec::new();
+        for entry in std::fs::read_dir(&scan_dir)
+            .expect("read staged dir")
+            .flatten()
+        {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let archive = archives.join(format!("{name}.aperio"));
+
+            let packed = plugin_core::pack_archive(&dir, &archive)
+                .unwrap_or_else(|e| panic!("packing {name}: {e}"));
+            assert_eq!(packed.id, name, "the staged dir is named for the plugin id");
+
+            // The dialog's preview path, before anything is written.
+            let inspected = plugin_core::inspect_archive(&archive)
+                .unwrap_or_else(|e| panic!("inspecting {name}: {e}"));
+            assert_eq!(inspected.id, packed.id);
+
+            let installed = plugin_core::install_archive(&archive, &installed_root)
+                .unwrap_or_else(|e| panic!("installing {name}: {e}"));
+            assert_eq!(installed.plugin_dir, installed_root.join(&name));
+            ids.push(name);
+        }
+
+        // The whole point: what came out of the archives is loadable, by the
+        // same manager and the same code path a user's install would take.
+        let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+        for id in &ids {
+            manager
+                .load_from_dir(installed_root.join(id))
+                .unwrap_or_else(|e| {
+                    panic!("{id} installed from its archive but will not load: {e}")
+                });
+        }
+        assert_eq!(
+            manager.len(),
+            ids.len(),
+            "every installed plugin should be loaded: {} of {}",
+            manager.len(),
+            ids.len(),
+        );
+
+        // Named, not counted — the number is what changes when an adapter is
+        // retired on purpose.
+        assert!(
+            ids.iter().any(|id| id == "com.aperio.cal-adapter-caldav"),
+            "CalDAV was not among the plugins packed: {ids:?}",
+        );
+    }
 }

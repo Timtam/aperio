@@ -559,10 +559,16 @@ auch falls nie ein Repo entsteht.
   derselben Zahl sind auf eine geschrumpft — die Tabelle in `build.rs`, drei
   `sed`/`grep`-Stellen in den Workflows und der
   `include_str!("../build.rs")`-Scrape sind alle weg.
-- [ ] **Paket 5 — `.aperio`-Packer.** Der Installer liest das Format, gebaut wird
-  es nirgends (die einzige Stelle, die je ein Archiv schreibt, ist ein
-  Test-Helfer in `plugin-core/src/archive.rs`). Solange die zwölf Adapter noch
-  im Baum liegen, ist das die billigste Validierung des Formats.
+- [x] **Paket 5 — `.aperio`-Packer.**  
+  ↳ `plugin_core::pack_archive` liegt neben dem Leser, damit beide Hälften
+  dieselbe Vorstellung vom Format haben: Packen ist „dieses Verzeichnis zippen",
+  Installieren „dieses Zip auspacken", und die gestagete Ablage IST die Ablage
+  im Archiv. `cargo xtask pack-plugins` erzeugt die zwölf; ein Test packt,
+  inspiziert, installiert und **lädt** jeden echten Adapter. Verweigert werden
+  ein Verzeichnis ohne Manifest und eines ohne Bibliothek. Die Autoren-Doku
+  beschreibt jetzt das Format, statt „irgendwie in ein `.aperio` packen" zu
+  sagen. OFFEN bleibt die Architektur-Dimension: das Archiv unterscheidet
+  windows-x64 nicht von windows-arm64, der Triple steht nur im Dateinamen.
 - [ ] Danach erst: ABI-Vorwärtspfad (`struct_size`), Versionierung der fünf
   Vertragskisten, `adapter-caldav`s Zugriff auf `shared/contracts/` auflösen —
   und ein erster Umzug mit **einem** Adapter als Probe (webdav oder vikunja;

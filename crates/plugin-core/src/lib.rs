@@ -46,7 +46,7 @@ pub use abi::{
     LOG_LEVEL_TRACE, LOG_LEVEL_WARN, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL,
     PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY, SYMBOL_SET_LOG,
 };
-pub use archive::{inspect_archive, install_archive, InstalledArchive};
+pub use archive::{inspect_archive, install_archive, pack_archive, InstalledArchive};
 pub use capability::Capability;
 pub use error::{PluginError, PluginResult};
 pub use ffi::{

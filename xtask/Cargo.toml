@@ -10,6 +10,9 @@ description = "Aperio — repository automation run as `cargo xtask <task>`; tod
 publish = false
 
 [dependencies]
+# The `.aperio` writer lives beside its reader, in plugin-core, so the two
+# cannot drift into different ideas of the format. This task is the CLI over it.
+plugin-core.workspace = true
 # The workspace is the source of truth for which plugins exist, and
 # `cargo metadata` is how you ask it. Parsed with serde_json rather than the
 # `cargo_metadata` crate: three fields are needed, and a build tool earns its
