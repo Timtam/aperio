@@ -294,6 +294,10 @@ fn pack_plugins(args: &[String]) -> Result<String, String> {
     if bundled.is_empty() {
         return Err("no bundled plugins found; see `stage-plugins`".to_string());
     }
+    // Same blind spot, same check: this task asks the workspace too, so an
+    // adapter that left it would be quietly absent from the archives as well as
+    // from the staging tree.
+    check_against_what_mobile_links(&bundled, &metadata)?;
 
     let profile_dir = match &target {
         Some(triple) => target_dir.join(triple),
