@@ -569,10 +569,30 @@ auch falls nie ein Repo entsteht.
   beschreibt jetzt das Format, statt „irgendwie in ein `.aperio` packen" zu
   sagen. OFFEN bleibt die Architektur-Dimension: das Archiv unterscheidet
   windows-x64 nicht von windows-arm64, der Triple steht nur im Dateinamen.
-- [ ] Danach erst: ABI-Vorwärtspfad (`struct_size`), Versionierung der fünf
-  Vertragskisten, `adapter-caldav`s Zugriff auf `shared/contracts/` auflösen —
-  und ein erster Umzug mit **einem** Adapter als Probe (webdav oder vikunja;
-  CalDAV ist die schlechteste Wahl).
+- [x] **Paket 6 — ABI-Vorwärtsfähigkeit (`struct_size`).**  
+  ↳ ABI 4 hängt **nichts** an: jede der sechs Vtables bekommt ein `struct_size`
+  in die vier Byte Padding, die auf 64-Bit ohnehin hinter `vtable_version`
+  lagen. Kein Slot ist gewandert, keine Vtable gewachsen — der bestehende
+  `vtable_sizes_match_c_header` beweist es, weil er unverändert grün bleibt.
+  Der Host dereferenziert eine fremde Vtable nicht mehr, sondern kopiert über
+  `read_vtable` genau die Bytes, die das Plugin nach eigener Angabe geschrieben
+  hat, in eine genullte eigene Struktur; ein Slot, den das Plugin noch nicht
+  kannte, kommt als `None` an. Damit lädt ein Plugin für ABI 3 weiter, und
+  **Anhängen kostet ab jetzt keine ABI-Erhöhung mehr** — genau die Bremse, die
+  einen ausgelagerten Adapter sonst bei jeder Methode am Kern festgenagelt
+  hätte. Verifiziert nicht nur im Test: eine echte, aus `a6559338` gebaute
+  ABI-3-cdylib lädt im ABI-4-Host (rot bewiesen per Sabotage).
+
+  Der Review fand die Falle dabei: v3 trägt keine Länge, und die naheliegende
+  Ersatzgröße — `size_of::<T>()` des Hosts — ist genau bis zum ersten
+  angehängten Slot richtig. Danach läse der Host jedes v3-Plugin über sein Ende
+  hinaus und riefe auf, was dahinter liegt; simuliert und reproduziert
+  (`lock_meeting = Some(0x8000...)`). Die Größen von Revision 3 stehen jetzt
+  je Vtable als Konstante da (`ForeignVtable::REVISION_3_SIZE`), sind eine
+  historische Tatsache und wandern beim Anhängen nicht mit.
+- [ ] Danach erst: Versionierung der fünf Vertragskisten, `adapter-caldav`s
+  Zugriff auf `shared/contracts/` auflösen — und ein erster Umzug mit **einem**
+  Adapter als Probe (webdav oder vikunja; CalDAV ist die schlechteste Wahl).
 - Offene Entscheidung: behält Mobile git-Abhängigkeiten auf alle zwölf
   `-plugin`-Kisten? iOS verbietet dlopen, „eigenständig" kann dort nie mehr
   heißen als „gepinnte Quell-Revision".

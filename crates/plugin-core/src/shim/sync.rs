@@ -77,10 +77,31 @@ impl FfiSyncAdapter {
             // registry asks every shim and lets the null answer decide.
             return None;
         }
-        // SAFETY: the slot is non-null and points at a SyncVtable static in
-        // the plugin library; the LoadedPlugin Arc inside the instance keeps it
-        // alive.
-        let vtable_ref: &SyncVtable = unsafe { &*outer.sync };
+        // Copied, not borrowed. A reference would assert this host's whole
+        // struct is there, and the point of `read_vtable` is that a plugin
+        // built against a shorter revision only wrote a prefix of it — the
+        // slots it never had arrive as `None` rather than as whatever bytes
+        // follow the plugin's struct in its data segment.
+        //
+        // SAFETY: the pointer is non-null (checked above) and points at a
+        // vtable in the plugin's library; the LoadedPlugin Arc inside the
+        // instance keeps that library alive.
+        let vtable = match unsafe { crate::vtables::read_vtable(outer.sync) } {
+            Ok(vtable) => vtable,
+            // Named, not lumped: "wrong revision" and "you left
+            // struct_size at zero" send a plugin author to different
+            // fields, and this line is the only thing that tells them
+            // which surface went missing and why.
+            Err(why) => {
+                warn!(
+                    plugin_id = %plugin.manifest.id,
+                    %why,
+                    "refusing to wrap the sync surface: its vtable is unreadable",
+                );
+                return None;
+            }
+        };
+        let vtable_ref: &SyncVtable = &vtable;
         if !vtable_ref.has_minimum_surface() {
             warn!(
                 plugin_id = %plugin.manifest.id,

@@ -3,13 +3,17 @@ title: "ABI versions and how to migrate"
 description: "What each Aperio plugin-ABI revision changed, what a plugin author has to do about it, and the rules that decide when the number moves at all."
 ---
 
-A plugin declares an `abi_version` in its `plugin.json`, and the host refuses to
-load a plugin whose number is not exactly its own. This page says what each
-revision contains and what moving to it costs you.
+A plugin declares an `abi_version` in its `plugin.json`, and the host loads it if
+that number is in the range the host supports. This page says what each revision
+contains and what moving to it costs you.
 
-**Current: ABI 3.** The authoritative number is `ABI_VERSION` in
-`crates/plugin-core/src/version.rs`; if your host refuses your plugin with an ABI
-mismatch, that constant is what it compared against.
+**Current: ABI 4, and ABI 3 still loads.** The authoritative numbers are
+`ABI_VERSION` and `ABI_VERSION_MIN` in `crates/plugin-core/src/version.rs`; if
+your host refuses your plugin with an ABI mismatch, those are what it compared
+against. Anything ABOVE the host's own is refused — a host cannot tell a revision
+it has never seen from one that changed what an existing field means. Use
+`min_app_version` when your plugin needs a newer Aperio, so the user is told to
+update Aperio instead of shown an ABI error.
 
 ## If you only do one thing
 
@@ -19,11 +23,61 @@ Three edits, and they apply to every plugin:
    gone.
 2. `"capabilities": [...]` naming every family you serve, including `"sync"` or
    `"videoconference"` if that is what you are.
-3. `"abi_version": 3`.
+3. `"abi_version": 4`, and set `struct_size` on every vtable you fill in —
+   `sizeof` the struct. See v3 to v4 below; it is two lines and it is what keeps
+   your plugin loading when Aperio adds a method.
 
 Then point your vtable at an `AdapterVtable` (section 1 below). Videoconference
 adapters have one more thing to do, because an existing method changed the shape
 of its argument — section 2.
+
+## v3 → v4
+
+One field, and nothing else changed.
+
+Every vtable now carries a `struct_size` right after `vtable_version`, in the
+alignment padding that was already there on 64-bit targets. No slot moved, no
+vtable grew, and no method was added. Set it to `sizeof` the struct you are
+filling in. In Rust the SDK does it for you; in C:
+
+```c
+static const AperioCalendarVtable CALENDAR_VTABLE = {
+    .vtable_version = APERIO_PLUGIN_ABI_VERSION,
+    .struct_size    = sizeof(AperioCalendarVtable),
+    .list_calendars = my_list_calendars,
+    /* … */
+};
+```
+
+### Why it is worth two lines
+
+Because it is the field that stops the next revision from breaking you.
+
+Until now, adding one method to a vtable locked out every existing plugin. Not
+because those plugins were wrong, but because the host could not tell how long
+their vtable was: a struct built against the shorter layout is
+indistinguishable from a longer one, and guessing means calling whatever
+happened to follow it in memory. So the only safe answer was to refuse anything
+whose version was not exactly the host's — and your plugin needed a rebuild for
+a method it does not implement.
+
+With a length, the host copies your bytes into a zeroed struct of its own. A
+slot you predate arrives as NULL and is reported as unsupported, exactly like a
+slot you deliberately left out. Your plugin keeps working against Aperio
+versions released after it.
+
+The other direction is not on offer and cannot be: an Aperio older than your
+`abi_version` still refuses your plugin outright, before it looks at a single
+vtable. It has to — a version number alone cannot tell that revision it never
+heard of apart from one that changed what an existing slot means. If your plugin
+needs a newer Aperio, say so in `min_app_version`; the user then gets "update
+Aperio" instead of an ABI error.
+
+A plugin still declaring `"abi_version": 3` loads, and keeps loading after
+Aperio appends slots: the host has revision 3's struct sizes written down and
+reads exactly that far. Move to 4 anyway — a plugin that states its own size is
+read at its own size, which is one fewer thing for the host to remember on your
+behalf, and revision 3 support will not last forever.
 
 ## v2 → v3
 
@@ -165,11 +219,13 @@ on the user's other device, not one an invitation brought in.
 that have no calendar entry at all.
 
 **Appending those two slots is what forced the version bump**, and the reason is
-worth knowing because it will bite the next person: the host has no per-vtable
-length. It reads your vtable as a struct of the size IT was compiled with. A
-plugin built against the shorter layout, loaded by a newer host, would be read
-past its end. Strict equality on `abi_version` is the only thing standing
-between that and calling whatever memory follows.
+worth knowing: at v3 the host had no per-vtable length. It read your vtable as a
+struct of the size IT was compiled with. A plugin built against the shorter
+layout, loaded by a newer host, would have been read past its end, and strict
+equality on `abi_version` was the only thing standing between that and calling
+whatever memory follows. That is no longer the cost of an append — [v3 to
+v4](#v3--v4) added the length, and it is the last append that will ever need a
+bump.
 
 `vtable_version` — the `u32` at offset 0 of every vtable — is now actually read
 (`vtable_layout_ok`), which it was not before v3 despite the header claiming so
@@ -243,15 +299,20 @@ than writing a plugin, this is the checklist.
 
 **Bump required:**
 
-- Appending a slot to an **existing** vtable — including a family pointer on
-  `AdapterVtable`. The host has no per-vtable length, so an older plugin would be
-  read past its end.
 - Changing an existing slot's argument or return shape, once the current
   revision has shipped.
-- Any change to a struct's C layout.
+- Any change to a struct's C layout other than appending — reordering, resizing
+  or removing a field.
 
 **No bump:**
 
+- **Appending a slot to an existing vtable**, including a family pointer on
+  `AdapterVtable`. This used to be the headline reason for a bump: the host had
+  no per-vtable length, so an older plugin would have been read past its end.
+  `struct_size` ended that in v4 — an older plugin's missing slots read as
+  absent, and it keeps loading. That covers ABI 3 plugins too, which carry no
+  size of their own: the host has revision 3's struct sizes written down, so
+  appending does not move them.
 - A new optional **named export**, looked up by symbol at load time and absent
   without consequence: `aperio_plugin_interactive_auth`,
   `aperio_plugin_discover`, `aperio_plugin_probe_host_key`,

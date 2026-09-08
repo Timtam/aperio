@@ -38,6 +38,7 @@ per feature family:
 ```text
 AdapterVtable {
     vtable_version: u32,          // = ABI_VERSION
+    struct_size:    u32,          // = sizeof(AdapterVtable)
     calendar:        *const CalendarVtable,   // null if unsupported
     tasks:           *const TasksVtable,      // null if unsupported
     contacts:        *const ContactsVtable,   // null if unsupported
@@ -126,18 +127,22 @@ the supplied function pointer for each line they want forwarded.
 
 ## Versioning & compatibility
 
-`vtable_version` is `ABI_VERSION`, and the host reads it before it trusts the
-rest of a vtable's layout. The rules:
+Every vtable starts with the same two `u32`s: `vtable_version` (= `ABI_VERSION`)
+and `struct_size` (= `sizeof` that struct). They are the only two fields the host
+reads before it knows the layout, and **you must set both** — the size is what
+lets a newer host read your vtable without assuming it is as long as its own.
+The rules:
 
-- **Never reorder or remove** a vtable slot. New methods are **appended**
-  to the end, so existing offsets stay stable.
-- **Appending a slot to an existing vtable requires an ABI bump.** The host
-  has no per-vtable length: it reads your vtable as a struct of the size IT
-  was compiled with, so a plugin built against the shorter layout would be
-  read past its end. Strict equality on `abi_version` is what prevents that.
-  (An earlier version of this page said such a plugin would simply see the
-  new slot as `None`. That was never true for an appended slot — only for a
-  slot a plugin chooses to leave `NULL` within the same revision.)
+- **Never reorder or remove** a vtable slot, and never change the size of an
+  existing field. New methods are **appended** to the end, so existing offsets
+  stay stable.
+- **Appending a slot to an existing vtable needs no ABI bump** (as of ABI 4).
+  The host copies `struct_size` bytes of your vtable into a zeroed one of its
+  own, so a slot appended after you built arrives as `None` and is reported as
+  unsupported — the same as a slot you deliberately left `NULL`. Your plugin
+  keeps loading. Before ABI 4 the host had no per-vtable length and had to
+  refuse anything whose revision did not match exactly, which is why the ABI 3
+  notes still describe an append as a breaking change: it was one, then.
 - Adding a whole **new** vtable for a **new** plugin type needs no bump:
   nothing reads it unless that type exists.
 - Because data is serde JSON, adding a `#[serde(default)]` field to a

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "plugin_type": "adapter",
   "capabilities": ["calendar", "tasks", "contacts", "sync"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled adapter for Google Calendar, Google Tasks, Google People (Contacts) and Google Drive as a sync target.",

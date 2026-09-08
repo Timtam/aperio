@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "plugin_type": "adapter",
   "capabilities": ["sync"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for FTP servers — explicit FTPS (AUTH TLS), implicit FTPS, or plain unencrypted FTP for legacy LAN setups.",

@@ -808,10 +808,11 @@ pub struct FailedPluginInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FailedPluginReason {
-    /// Manifest's `abi_version` doesn't match host's
-    /// [`plugin_core::ABI_VERSION`]. The plugin is from a
-    /// different ABI generation; either side needs an update
-    /// for the binary to be loadable.
+    /// Manifest's `abi_version` is outside the range this host reads,
+    /// [`plugin_core::ABI_VERSION_MIN`]`..=`[`plugin_core::ABI_VERSION`].
+    /// In practice that means the plugin is newer than the app (update
+    /// Aperio) or older than anything this host still has a description
+    /// of (the plugin needs a rebuild).
     AbiMismatch { host: u32, plugin: u32 },
     /// Plugin requires a newer Aperio than the running build.
     AppTooOld { required: String, running: String },

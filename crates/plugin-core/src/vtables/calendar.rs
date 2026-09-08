@@ -47,8 +47,12 @@ use super::VtableMethodFn;
 /// multiple vtables in parallel via the SDK macros.)
 ///
 /// Layout MUST stay binary-compatible across plugin-core 0.x patch
-/// versions; new methods are appended at the end + their absence
-/// is signalled by the host detecting an older `abi_version`.
+/// versions. New methods are APPENDED at the end, and no ABI bump
+/// is needed for that: the host copies `struct_size` bytes and
+/// finds `None` in a slot the plugin predates. Absence is never
+/// inferred from `abi_version` — the host cannot and does not
+/// distinguish "absent because old" from "absent because
+/// unimplemented", and both mean the same thing to a caller.
 #[repr(C)]
 #[derive(Debug)]
 pub struct CalendarVtable {
@@ -58,6 +62,22 @@ pub struct CalendarVtable {
     /// (new method appended to one vtable only) can be detected
     /// without touching the global ABI version.
     pub vtable_version: u32,
+    /// Size of this struct as the plugin built it, in bytes.
+    ///
+    /// The field that makes appending a slot survivable. A host reads it,
+    /// copies that many bytes into a zeroed struct of its own, and finds
+    /// `None` in every slot the plugin did not have — instead of reading
+    /// past the end of the plugin's struct and calling whatever followed.
+    ///
+    /// Only meaningful when [`Self::vtable_version`] is at least
+    /// [`crate::ABI_VERSION_STRUCT_SIZE`]. Before that revision these four
+    /// bytes were padding, and padding is indeterminate: a garbage value
+    /// there that happened to exceed the host's size would reintroduce the
+    /// exact hazard this closes.
+    ///
+    /// It occupies padding that was already there on every 64-bit target,
+    /// so no slot moved and no vtable grew when it was added.
+    pub struct_size: u32,
 
     // ── Base Adapter methods ────────────────────────────────────
     /// `authenticate(Credentials) -> AuthToken`. May be `None`
@@ -101,6 +121,26 @@ pub struct CalendarVtable {
     pub respond_to_event: Option<VtableMethodFn>,
 }
 
+// SAFETY: `#[repr(C)]`, opens with `vtable_version` then `struct_size`, and
+// holds nothing after them but `Option<VtableMethodFn>` slots — so an all-zero
+// tail reads as `None`, which is what "the plugin does not implement this"
+// already means everywhere else. The revision-3 size is the one below.
+unsafe impl crate::vtables::ForeignVtable for CalendarVtable {
+    // Revision 3 shipped 14 slots behind the leading `u32`, and the four
+    // bytes that are now `struct_size` were padding it already had: 120
+    // bytes. A literal, not `size_of::<Self>()` — see `read_vtable`. It stays
+    // 120 when a slot is appended, because appending does not change a
+    // struct that already shipped.
+    const REVISION_3_SIZE: usize = 120;
+}
+
+// The invariant `read_vtable` relies on to stay in bounds. Appending a slot
+// keeps it true; shrinking the struct, or mistyping the size above, does not.
+const _: () = assert!(
+    <CalendarVtable as crate::vtables::ForeignVtable>::REVISION_3_SIZE
+        <= std::mem::size_of::<CalendarVtable>()
+);
+
 impl CalendarVtable {
     /// Build an "all-None" vtable. Useful in tests + as a starting
     /// point for the SDK macro's code generator — the macro fills
@@ -110,6 +150,7 @@ impl CalendarVtable {
     pub const fn empty() -> Self {
         Self {
             vtable_version: crate::ABI_VERSION,
+            struct_size: std::mem::size_of::<Self>() as u32,
             authenticate: None,
             capabilities: None,
             list_calendars: None,

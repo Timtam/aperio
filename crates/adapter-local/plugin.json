@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "plugin_type": "adapter",
   "capabilities": ["calendar", "tasks", "contacts", "sync"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "The built-in store: calendars, task lists and address books that live in Aperio's own database rather than at a provider — and, given a folder, the place the dataset is mirrored to.",

@@ -19,6 +19,8 @@
 //! differs: calendar / tasks / contacts shims surface
 //! `cal_core::Error`, the sync shim surfaces `sync_core::SyncError`.
 
+use tracing::warn;
+
 pub mod calendar;
 mod call;
 pub mod contacts;
@@ -49,10 +51,11 @@ pub use vc::FfiVcAdapter;
 /// serves is then a question about the pointers inside, and every shim asks it
 /// the same way.
 ///
-/// `None` when the pointer is null or the layout revision is not this host's.
-/// Both mean the same thing to a caller — this plugin cannot be called — and
-/// neither is worth a distinct error, because the loader has already rejected
-/// the version mismatch loudly and this is the belt to that's braces.
+/// `None` when the pointer is null or the outer vtable is unreadable. Both mean
+/// the same thing to a caller — this plugin cannot be called — so the return
+/// stays an `Option`; the reason a read failed is logged here rather than
+/// carried, because the loader has already rejected the same plugin loudly and
+/// this is the belt to that's braces.
 pub(super) fn adapter_vtable(
     plugin: &crate::LoadedPlugin,
 ) -> Option<crate::vtables::AdapterVtable> {
@@ -60,16 +63,21 @@ pub(super) fn adapter_vtable(
     if raw.is_null() {
         return None;
     }
-    // SAFETY: `vtable_version` sits at offset 0 of every vtable in every
-    // revision, so it is the one field readable before the layout is known.
-    // Everything past it is read only once the revision matches this host's.
-    let version = unsafe { *(raw as *const u32) };
-    if !crate::vtables::vtable_layout_ok(version) {
-        return None;
+    // SAFETY: the ABI contract makes this an `AdapterVtable`, and `read_vtable`
+    // reads only the two-field header until it knows how far the plugin's own
+    // struct goes. It refuses a revision this host does not know, which is why
+    // nothing here checks the version itself.
+    match unsafe { crate::vtables::read_vtable(raw as *const crate::vtables::AdapterVtable) } {
+        Ok(vtable) => Some(vtable),
+        Err(why) => {
+            warn!(
+                plugin_id = %plugin.manifest.id,
+                %why,
+                "refusing to wrap the plugin: its outer vtable is unreadable",
+            );
+            None
+        }
     }
-    // SAFETY: the revision matches, so the struct behind the pointer has this
-    // host's layout, and the ABI contract makes it an `AdapterVtable`.
-    Some(unsafe { &*(raw as *const crate::vtables::AdapterVtable) }.clone_shallow())
 }
 
 pub(super) fn manifest_capabilities(

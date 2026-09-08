@@ -8,7 +8,7 @@
     "tasks",
     "contacts"
   ],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled Exchange Web Services adapter for on-premise Exchange and Exchange-alike servers (Kerio Connect, Zimbra-with-EWS).",

@@ -102,7 +102,7 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
 };
 
 // One pointer per family you serve; `..empty()` leaves the rest null and
-// stamps `vtable_version` for you.
+// stamps `vtable_version` and `struct_size` for you.
 pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     tasks: &TASKS_VTABLE,
     ..AdapterVtable::empty()
@@ -132,7 +132,10 @@ plugin_sdk::declare_lifecycle! {
   (e.g. `search_users` → empty, `add_task_list_member` → `Unsupported`), so
   you only wire the slots you actually support.
 - **Forward compatibility:** when the host adds a new trait method/slot, an
-  unrecompiled plugin simply has `None` there and the host falls back.
+  unrecompiled plugin simply has `None` there and the host falls back. This is
+  true as of ABI 4 and was not before it: the host had no way to tell how long
+  your vtable was, so it refused anything built against an older revision
+  outright. The SDK stamps the `struct_size` that makes it work.
 - **Logging:** your `tracing` / `log` output is forwarded to the host log
   automatically — the SDK exports `aperio_plugin_set_log` and installs a
   forwarding subscriber, so `warn!`/`info!`/… land in `aperio.log` with no

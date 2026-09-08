@@ -17,8 +17,9 @@ use crate::error::{PluginError, PluginResult};
 
 /// ABI version Aperio currently speaks. Mirrors
 /// `APERIO_PLUGIN_ABI_VERSION` in `aperio_plugin.h`. A plugin whose
-/// `abi_version` field doesn't equal this is refused at load time
-/// (see [`crate::PluginError::AbiMismatch`]).
+/// `abi_version` is outside [`ABI_VERSION_MIN`]`..=`[`ABI_VERSION`] is refused
+/// at load time (see [`crate::PluginError::AbiMismatch`]); older revisions
+/// inside that range load, anything newer does not.
 ///
 /// Bump rules: any breaking change to the C-ABI surface (struct
 /// layout, vtable contracts) increments this by 1 and ships with
@@ -40,9 +41,10 @@ use crate::error::{PluginError, PluginResult};
 ///   slots, `resolve_meeting` (find a meeting by its join link, the
 ///   only identifier that reaches a calendar event) and
 ///   `list_meetings` (surface meetings that have no calendar entry
-///   at all). Appending to an EXISTING vtable is what forces a bump:
-///   the host has no per-vtable length, so a plugin built against the
-///   shorter layout would be read past its end. In the same revision
+///   at all). Appending to an EXISTING vtable is what forced this
+///   bump: the host had no per-vtable length yet, so a plugin built
+///   against the shorter layout would have been read past its end.
+///   See **4** — that is no longer what an append costs. In the same revision
 ///   the `delete_meeting` slot's argument changed shape in place,
 ///   from a bare `MeetingId` string to `{id, notify_attendees}` —
 ///   taking a meeting down is also a question about the people
@@ -82,10 +84,59 @@ use crate::error::{PluginError, PluginResult};
 ///   named export never moves this number: the host looks it up by
 ///   symbol and asks a plugin that lacks it to do less.
 ///
+/// - **4** — the revision that appends NOTHING.
+///
+///   Every vtable gained a `struct_size` field, in the four bytes of padding
+///   that already followed `vtable_version` on every 64-bit target. No slot
+///   moved, no vtable grew, and no method was added: revision 4 exists only so
+///   that revision 5 can add one without locking every existing plugin out.
+///
+///   That was the cost until now. `vtable_layout_ok` demanded exact equality,
+///   because a host with no per-vtable length cannot tell a shorter struct from
+///   a longer one, and guessing means calling whatever `.rodata` follows it. So
+///   appending a single slot meant every plugin in the world had to be rebuilt
+///   before it could load again — for a method it does not implement.
+///
+///   With a length, the host copies the plugin's own bytes into a zeroed struct
+///   of its own and finds `None` in whatever the plugin did not have.
+///   Appending a slot stops being an ABI break.
+///
+///   ONE direction, and only one is possible. A newer host reads an older
+///   plugin; the reverse stays refused, here and in
+///   [`crate::vtables::vtable_layout_ok`]. A version number alone cannot
+///   distinguish "revision 5 appended a method", which a prefix read survives,
+///   from "revision 5 changed what an existing slot means", which it does not —
+///   and a host that never heard of revision 5 cannot tell which it is holding.
+///   [`check_min_app_version`] is the lever for a plugin that needs a newer
+///   Aperio: it turns the refusal into "update Aperio" rather than "wrong ABI".
+///
+///   A plugin declaring **3** still loads, and keeps loading after a slot is
+///   appended. Revision 3 states no length, so the host supplies one — not its
+///   OWN current size, which would grow with the next append and run off the
+///   end of a revision-3 struct, but the size that revision actually shipped,
+///   recorded per vtable as
+///   [`crate::vtables::ForeignVtable::REVISION_3_SIZE`].
+///
 /// The plugin-facing mirror of this list is
 /// `web/src/content/docs/plugins/abi-versions.md`. THIS is the
 /// authoritative copy; if the two disagree, the page is the bug.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
+
+/// The first revision whose vtables carry a trustworthy
+/// [`crate::vtables::AdapterVtable::struct_size`].
+///
+/// Below it those bytes are padding, and padding is indeterminate — a value
+/// read from there could be anything, and a large one would send the host past
+/// the end of the plugin's struct.
+pub const ABI_VERSION_STRUCT_SIZE: u32 = 4;
+
+/// The oldest revision this host will load.
+///
+/// Not a promise to support every past revision forever: it is the range over
+/// which the host knows each layout well enough to read it safely. Revision 3
+/// qualifies because 4 added no slot to it — the structs are the same shape,
+/// and the host can supply the length that revision did not carry.
+pub const ABI_VERSION_MIN: u32 = 3;
 
 /// Three-component semantic version. Only the (major, minor, patch)
 /// tuple is preserved — pre-release / build metadata gets dropped
@@ -166,11 +217,26 @@ pub fn check_min_app_version(min_app_version: &str, app_version: &str) -> Plugin
     }
 }
 
-/// Check that the manifest's ABI version equals the host's. Strict
-/// equality (not >=) because the ABI is a single hard contract;
-/// going forwards or backwards both mean someone needs to update.
+/// Check that the manifest's ABI version is one this host can read:
+/// `ABI_VERSION_MIN..=ABI_VERSION`, currently 3 to 4.
+///
+/// A RANGE, not equality — equality was the rule until ABI 4, and it was the
+/// only safe answer while the host had no way to tell how long a plugin's
+/// vtable really was. It can now, so refusing an older plugin outright would be
+/// a rule with no reason left behind it.
+///
+/// The range is a statement about safety, not politeness. Its floor is the
+/// oldest revision whose layout this host still has a description of (see
+/// [`crate::vtables::ForeignVtable::REVISION_3_SIZE`]); dropping the floor
+/// lower would admit revisions 1 and 2, whose vtable shape depended on a
+/// `plugin_type` tag this host no longer reads. Its ceiling is this host's own
+/// revision, and it does not move: a host cannot tell a later revision that
+/// merely appended a slot from one that changed what an existing slot means, so
+/// it must refuse both. [`check_min_app_version`] is the lever for a plugin
+/// that needs a newer Aperio — the user is told to update the app rather than
+/// shown an ABI number.
 pub fn check_abi_version(manifest_abi: u32) -> PluginResult<()> {
-    if manifest_abi == ABI_VERSION {
+    if (ABI_VERSION_MIN..=ABI_VERSION).contains(&manifest_abi) {
         Ok(())
     } else {
         Err(PluginError::AbiMismatch {

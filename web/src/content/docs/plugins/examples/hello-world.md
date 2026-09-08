@@ -25,7 +25,7 @@ hello-world/
   "version": "0.1.0",
   "plugin_type": "adapter",
   "capabilities": ["calendar"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "You",
   "description": "Minimal example calendar adapter.",

@@ -111,11 +111,14 @@ unsafe impl Send for OpenInstanceResult {}
 /// UTF-8 (cf. `aperio_plugin.h`).
 ///
 /// Layout MUST stay binary-compatible across plugin-core 0.x patch
-/// versions. Adding fields requires bumping [`crate::ABI_VERSION`].
+/// versions. Adding a field to THIS struct requires bumping
+/// [`crate::ABI_VERSION`]: unlike a vtable, the descriptor carries no
+/// `struct_size`, so the host cannot tell a short one from a long one.
 #[repr(C)]
 pub struct AperioPlugin {
-    /// ABI version emitted by the plugin. The manager refuses to
-    /// proceed when this doesn't equal [`crate::ABI_VERSION`].
+    /// ABI version emitted by the plugin. The manager refuses to proceed
+    /// when it is outside [`crate::ABI_VERSION_MIN`]`..=`[`crate::ABI_VERSION`],
+    /// or when it disagrees with the manifest's own `abi_version`.
     pub abi_version: u32,
 
     /// Reverse-DNS id. Must match the manifest's `id` field.

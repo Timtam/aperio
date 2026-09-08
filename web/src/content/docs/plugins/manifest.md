@@ -14,7 +14,7 @@ reads it to discover the plugin before loading any code.
   "version": "0.1.0",
   "plugin_type": "adapter",
   "capabilities": ["tasks"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Todoist (REST API v2).",
@@ -42,7 +42,7 @@ reads it to discover the plugin before loading any code.
 | `version` | string | ✅ | Plugin version (semver). |
 | `plugin_type` | string | ✅ | `"adapter"` for every provider surface, or `"notification"`. There is no per-surface type — what a plugin does is its `capabilities`. |
 | `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any combination of `"calendar"`, `"tasks"`, `"contacts"`, `"sync"`, `"videoconference"`. Must match the non-null pointers in the vtable exactly; the host checks at load time. An adapter that declares none is rejected. |
-| `abi_version` | number | ✅ | The ABI the plugin was built against (current: `3`). Must equal the host's exactly — see [ABI versions and how to migrate](/plugins/abi-versions/). |
+| `abi_version` | number | ✅ | The ABI the plugin was built against (current: `4`). Must be in the range the host supports — 3 to 4 today, and never above the host's own. See [ABI versions and how to migrate](/plugins/abi-versions/). |
 | `min_app_version` | string | ✅ | Lowest app version that can load this plugin. |
 | `author` | string | ✅ | Author/maintainer. |
 | `description` | string | ✅ | One-line description shown in plugin settings. |

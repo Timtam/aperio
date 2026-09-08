@@ -10,11 +10,24 @@
  * Stability rules
  * ───────────────
  * - This header is versioned by `APERIO_PLUGIN_ABI_VERSION`. Aperio
- *   refuses to load plugins whose `abi_version` field doesn't equal
- *   the host's. Bumps to the constant are breaking changes and ship
- *   with release notes describing the migration path.
- * - All struct layouts here MUST stay binary-compatible within one
- *   ABI version. Adding new fields requires a new version bump.
+ *   loads a plugin whose `abi_version` is in the range the host
+ *   supports — currently 3 to 4, the low end being the oldest
+ *   revision it still has a description of. Anything ABOVE the
+ *   host's own is refused, because a host cannot know whether a
+ *   revision it has never seen merely added something or changed
+ *   what an existing field means. If your plugin needs a newer
+ *   Aperio, say so in `min_app_version`: the user is then told to
+ *   update Aperio rather than shown an ABI error.
+ * - Struct layouts here MUST stay binary-compatible within one ABI
+ *   version. APPENDING a field to a vtable does NOT require a bump:
+ *   every vtable carries its own `struct_size`, so the host copies
+ *   only what your plugin wrote and finds NULL in the rest (see
+ *   aperio_plugin_vtables.h). Reordering, resizing or removing a
+ *   field does require a bump, and so does changing what an
+ *   existing field means — a length cannot describe those.
+ * - Appending to a NON-vtable struct in this header — the
+ *   descriptor below — is still a bump: those carry no size of
+ *   their own.
  *
  * Library vs. instance lifecycle (v2)
  * ───────────────────────────────────
@@ -59,8 +72,19 @@ extern "C" {
  * - v2: instance handles. Descriptor lost `init`/`destroy`, gained
  *       `open_instance` / `close_instance`. Every vtable method now
  *       takes the opaque instance handle as its first argument.
+ * - v3: one outer vtable for every plugin (AperioAdapterVtable, one
+ *       pointer per feature family) instead of a cast that depended
+ *       on `plugin_type`; `vtable_version` actually read; two slots
+ *       appended to AperioVcVtable, and `delete_meeting` took an
+ *       object instead of a bare id.
+ * - v4: every vtable carries its own `struct_size`, in the padding
+ *       that already followed `vtable_version` on 64-bit targets.
+ *       Nothing was appended and nothing moved. This is the
+ *       revision that makes the NEXT append free — see the
+ *       stability rules above. A v3 plugin still loads: the host
+ *       remembers how big v3's structs were.
  */
-#define APERIO_PLUGIN_ABI_VERSION 3u
+#define APERIO_PLUGIN_ABI_VERSION 4u
 
 /*
  * Lifecycle return codes.
@@ -190,11 +214,16 @@ typedef struct OpenInstanceResult {
  * NUL-terminated UTF-8. The host MUST NOT free any of them.
  *
  * Layout MUST stay binary-compatible across plugin-core 0.x patch
- * versions. Adding fields requires bumping APERIO_PLUGIN_ABI_VERSION.
+ * versions. Adding a field to THIS struct requires bumping
+ * APERIO_PLUGIN_ABI_VERSION: unlike a vtable, the descriptor carries
+ * no size of its own, so the host cannot tell a short one from a long
+ * one.
  */
 typedef struct AperioPlugin {
-    /* ABI version emitted by the plugin (compare against
-       APERIO_PLUGIN_ABI_VERSION; mismatch → refuse to load). */
+    /* ABI version emitted by the plugin. The host accepts the range
+       it supports (3 to 4 today) and refuses anything above
+       APERIO_PLUGIN_ABI_VERSION. MUST equal the `abi_version` in
+       your plugin.json — the host cross-checks the two. */
     uint32_t abi_version;
 
     /* Stable id, e.g. "com.aperio.cal-adapter-local". MUST match

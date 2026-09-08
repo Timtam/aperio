@@ -23,6 +23,22 @@ use super::VtableMethodFn;
 #[derive(Debug)]
 pub struct SyncVtable {
     pub vtable_version: u32,
+    /// Size of this struct as the plugin built it, in bytes.
+    ///
+    /// The field that makes appending a slot survivable. A host reads it,
+    /// copies that many bytes into a zeroed struct of its own, and finds
+    /// `None` in every slot the plugin did not have — instead of reading
+    /// past the end of the plugin's struct and calling whatever followed.
+    ///
+    /// Only meaningful when [`Self::vtable_version`] is at least
+    /// [`crate::ABI_VERSION_STRUCT_SIZE`]. Before that revision these four
+    /// bytes were padding, and padding is indeterminate: a garbage value
+    /// there that happened to exceed the host's size would reintroduce the
+    /// exact hazard this closes.
+    ///
+    /// It occupies padding that was already there on every 64-bit target,
+    /// so no slot moved and no vtable grew when it was added.
+    pub struct_size: u32,
 
     // ── SyncAdapter methods ────────────────────────────────────
     /// `test_connection()` — adapter-specific probe. The
@@ -56,10 +72,31 @@ pub struct SyncVtable {
     pub fetch_sound_asset: Option<VtableMethodFn>,
 }
 
+// SAFETY: `#[repr(C)]`, opens with `vtable_version` then `struct_size`, and
+// holds nothing after them but `Option<VtableMethodFn>` slots — so an all-zero
+// tail reads as `None`, which is what "the plugin does not implement this"
+// already means everywhere else. The revision-3 size is the one below.
+unsafe impl crate::vtables::ForeignVtable for SyncVtable {
+    // Revision 3 shipped 10 slots behind the leading `u32`, and the four
+    // bytes that are now `struct_size` were padding it already had: 88
+    // bytes. A literal, not `size_of::<Self>()` — see `read_vtable`. It stays
+    // 88 when a slot is appended, because appending does not change a
+    // struct that already shipped.
+    const REVISION_3_SIZE: usize = 88;
+}
+
+// The invariant `read_vtable` relies on to stay in bounds. Appending a slot
+// keeps it true; shrinking the struct, or mistyping the size above, does not.
+const _: () = assert!(
+    <SyncVtable as crate::vtables::ForeignVtable>::REVISION_3_SIZE
+        <= std::mem::size_of::<SyncVtable>()
+);
+
 impl SyncVtable {
     pub const fn empty() -> Self {
         Self {
             vtable_version: crate::ABI_VERSION,
+            struct_size: std::mem::size_of::<Self>() as u32,
             test_connection: None,
             fetch_meta: None,
             push_meta: None,

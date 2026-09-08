@@ -3120,20 +3120,49 @@ Das `plugin-core`-Crate stellt bereit:
 > Was hier steht, ist die Zusammenfassung dazu und wird bei jeder ABI-Änderung
 > mitgezogen.
 
-**Aktuelle ABI-Version: 2.** Sie wird beim Laden auf **strikte Gleichheit**
-geprüft, nicht auf „mindestens“ — ein Plugin für v1 und ein Plugin für v3
-werden beide abgewiesen. Geprüft wird zweimal: gegen `abi_version` im Manifest
-und gegen `abi_version` im Deskriptor, und beide müssen auch untereinander
-übereinstimmen. v1 kannte genau eine Instanz je geladener Bibliothek und trug
-`init`/`destroy` am Deskriptor; v2 führte Instanz-Handles ein, ersetzte die
-beiden durch `open_instance`/`close_instance` und stellte jeder Vtable-Methode
-das Instanz-Handle als erstes Argument voran.
+**Aktuelle ABI-Version: 4.** Geladen wird jedes Plugin, dessen Version im
+Bereich **3 bis 4** liegt (`ABI_VERSION_MIN..=ABI_VERSION`); v1 und v2 werden
+abgewiesen. Geprüft wird zweimal: gegen `abi_version` im Manifest und gegen
+`abi_version` im Deskriptor, und beide müssen auch untereinander
+übereinstimmen.
+
+v1 kannte genau eine Instanz je geladener Bibliothek und trug `init`/`destroy`
+am Deskriptor; v2 führte Instanz-Handles ein, ersetzte die beiden durch
+`open_instance`/`close_instance` und stellte jeder Vtable-Methode das
+Instanz-Handle als erstes Argument voran; v3 legte alle Oberflächen in **eine**
+äußere Vtable zusammen (`AperioAdapterVtable`, siehe 20.3) und begann,
+`vtable_version` tatsächlich zu lesen; v4 hängt **nichts** an, sondern gibt
+jeder Vtable ein `struct_size` — und damit endet die strikte Gleichheit.
+
+Bis v4 musste der Host exakt vergleichen, weil er die Länge einer fremden
+Vtable nicht kannte: eine kürzere Struktur ist von einer längeren nicht zu
+unterscheiden, und raten heißt aufrufen, was zufällig dahinter liegt. Ein
+einziger angehängter Slot zwang deshalb jedes existierende Plugin zum Neubau —
+für eine Methode, die es gar nicht implementiert. v3 selbst trägt noch keine
+Länge; für diese eine Revision hat der Host die Größen **aufgeschrieben**
+(`ForeignVtable::REVISION_3_SIZE`, je Vtable eine Konstante). Nicht die eigene
+aktuelle Größe: die wächst beim nächsten Anhängen mit und läse dann über das
+Ende jedes v3-Plugins hinaus — genau die Lücke, die diese Revision schließen
+soll. Mit der Größe kopiert der Host genau die Bytes, die das Plugin nach
+eigener Angabe geschrieben hat, in
+eine genullte eigene Struktur; was das Plugin nicht hatte, liest sich als
+`None` und wird als „nicht unterstützt“ gemeldet.
+
+Das gilt in **einer** Richtung, und mehr ist nicht möglich: neuer Host liest
+altes Plugin. Umgekehrt weist ein Host jede Revision oberhalb der eigenen
+weiterhin ab, und zwar am Manifest, bevor er überhaupt eine Vtable ansieht. Eine
+Versionsnummer allein kann „Revision 5 hat eine Methode angehängt“ (überlebt
+einen Präfix-Lesevorgang) nicht von „Revision 5 hat die Bedeutung eines
+bestehenden Slots geändert“ (überlebt ihn nicht) unterscheiden — und ein Host,
+der Revision 5 nie gesehen hat, weiß nicht, welche der beiden er in der Hand
+hält. Für ein Plugin, das ein neueres Aperio braucht, ist `min_app_version` der
+Hebel: die Ablehnung sagt dann „Aperio aktualisieren“ statt „falsche ABI“.
 
 ```c
 // aperio_plugin.h (vereinfacht — Feldreihenfolge ist verbindlich)
 
 typedef struct AperioPlugin {
-    uint32_t abi_version;     // == APERIO_PLUGIN_ABI_VERSION (2)
+    uint32_t abi_version;     // == APERIO_PLUGIN_ABI_VERSION (4)
     const char* id;           // z.B. "com.example.myplugin"
     const char* name;         // Anzeigename
     const char* version;      // SemVer
@@ -3165,8 +3194,9 @@ best-effort auflöst — fehlt einer, wird das Plugin trotzdem geladen:
 | `aperio_plugin_discover` | Autodiscover (EWS) |
 | `aperio_plugin_probe_host_key` | Host-Key-Abfrage vor dem ersten Verbinden (SFTP, TOFU) |
 
-Jede Vtable ist eine `#[repr(C)]`-Struktur aus `uint32_t vtable_version` plus
-Funktionszeigern desselben Typs:
+Jede Vtable ist eine `#[repr(C)]`-Struktur aus zwei `uint32_t` —
+`vtable_version` und `struct_size`, die einzigen beiden Felder, die der Host
+liest, bevor er das Layout kennt — plus Funktionszeigern desselben Typs:
 
 ```c
 typedef PluginCallResult (*AperioVtableMethodFn)(
@@ -3220,17 +3250,31 @@ Schweigen.
 
 Beide Slots dürfen NULL sein — nicht jeder Anbieter kann das, und wer es nicht
 kann, ist nicht kaputt: der Host lässt die jeweilige Möglichkeit dann einfach
-weg. Das Anhängen dieser beiden Slots ist der Grund für die ABI-Erhöhung von 2
-auf 3 (siehe den Kasten unten).
+weg. Das Anhängen dieser beiden Slots war der Grund für die ABI-Erhöhung von 2
+auf 3 (siehe den Kasten unten) — und der letzte seiner Art.
 
-> **Slots anhängen ist derzeit nur zusammen mit einer ABI-Erhöhung sicher.**
-> Das Feld `vtable_version` wird von jedem Plugin gesetzt, vom Host aber noch
-> **nicht ausgewertet**; geprüft wird allein `abi_version`. Würde man einer
-> bestehenden Vtable einen Slot anhängen, ohne die ABI-Version zu erhöhen,
-> läse der Host bei einem älteren Plugin über dessen Struktur hinaus und riefe
-> auf, was dahinter liegt. Eine **neue** Vtable für einen **neuen** Plugin-Typ
-> anzulegen ist dagegen unkritisch: sie wird nur gelesen, wenn dieser Typ
+> **Slots anhängen kostet seit ABI 4 keine ABI-Erhöhung mehr.** Der Host
+> kopiert `struct_size` Bytes der fremden Vtable in eine genullte eigene; ein
+> Slot, den das Plugin noch nicht kannte, kommt dort als NULL an und wird als
+> „nicht unterstützt“ gemeldet — genau wie ein Slot, den das Plugin absichtlich
+> leer lässt. Bis dahin galt das Gegenteil: `vtable_version` wurde bis v3 gar
+> nicht ausgewertet, und danach nur auf Gleichheit, weil dem Host die Länge
+> fehlte; ein angehängter Slot hätte den Host bei einem älteren Plugin über
+> dessen Struktur hinaus lesen lassen. Unverändert verboten bleibt alles, was
+> eine Länge nicht beschreiben kann: umordnen, entfernen, ein bestehendes Feld
+> in seiner Größe ändern. Eine **neue** Vtable für einen **neuen** Plugin-Typ
+> anzulegen war und ist unkritisch: sie wird nur gelesen, wenn dieser Typ
 > überhaupt existiert.
+>
+> Wer anhängt, muss **nichts** weiter tun — insbesondere `ABI_VERSION_MIN`
+> nicht anfassen. v3 trägt selbst keine Länge, und der Host setzt dafür nicht
+> seine eigene aktuelle Größe ein, sondern die aufgeschriebene
+> (`ForeignVtable::REVISION_3_SIZE`). Genau daran hing die Falle: mit der
+> eigenen Größe wäre der erste angehängte Slot der gewesen, der jedes
+> v3-Plugin über sein Ende hinaus liest — also ausgerechnet die Operation, die
+> diese Revision freigeben soll. Anhängen an den **Deskriptor**
+> (`AperioPlugin`) bleibt dagegen eine ABI-Erhöhung: der trägt keine eigene
+> Größe.
 
 ### 20.4 Plugin-Manifest (`plugin.json`)
 
@@ -3251,7 +3295,7 @@ myplugin/
   "version": "1.0.0",
   "plugin_type": "adapter",
   "capabilities": ["calendar"],
-  "abi_version": 3,
+  "abi_version": 4,
   "min_app_version": "1.0.0",
   "author": "Max Mustermann",
   "description": "Verbindet sich mit XY-Kalender",
@@ -3259,7 +3303,7 @@ myplugin/
 }
 ```
 
-`abi_version` im Manifest muss mit der vom Plugin-Manager unterstützten ABI-Version übereinstimmen, sonst wird das Plugin abgelehnt — und zwar exakt, nicht „mindestens“ (siehe Abschnitt 20.3). `min_app_version` ist der Hebel für Vorwärtskompatibilität: ein Plugin, das eine erst später eingeführte Fähigkeit oder einen neuen Plugin-Typ voraussetzt, trägt hier die einführende Release-Version ein, damit ältere Aperio-Versionen mit „Aperio aktualisieren“ scheitern statt mit einer irreführenden Manifest-Fehlermeldung. `capabilities` deklariert die unterstützten Features (`calendar`, `tasks`, `contacts` – siehe Abschnitt 10.2 für Details).
+`abi_version` im Manifest muss in dem vom Plugin-Manager unterstützten Bereich liegen (derzeit 3 bis 4), sonst wird das Plugin abgelehnt (siehe Abschnitt 20.3). `min_app_version` ist der Hebel für Vorwärtskompatibilität: ein Plugin, das eine erst später eingeführte Fähigkeit oder einen neuen Plugin-Typ voraussetzt, trägt hier die einführende Release-Version ein, damit ältere Aperio-Versionen mit „Aperio aktualisieren“ scheitern statt mit einer irreführenden Manifest-Fehlermeldung. `capabilities` deklariert die unterstützten Features (`calendar`, `tasks`, `contacts` – siehe Abschnitt 10.2 für Details).
 
 #### 20.4.1 Konto-Schema (`account`)
 
@@ -3516,7 +3560,7 @@ fn load_plugin(path: &Path) -> Result<LoadedPlugin> {
     let manifest = read_manifest(path)?;
 
     // ABI-Versionscheck
-    if manifest.abi_version != SUPPORTED_ABI_VERSION {
+    if !(ABI_VERSION_MIN..=ABI_VERSION).contains(&manifest.abi_version) {
         return Err(PluginError::AbiMismatch);
     }
 

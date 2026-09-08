@@ -71,7 +71,10 @@ pub use shim::{
     FfiCalendarAdapter, FfiContactsAdapter, FfiSyncAdapter, FfiTasksAdapter, FfiVcAdapter,
 };
 pub use strings::{resolve_label, StringCatalogue, FALLBACK_LANG};
-pub use version::{check_abi_version, check_min_app_version, Version, ABI_VERSION};
+pub use version::{
+    check_abi_version, check_min_app_version, Version, ABI_VERSION, ABI_VERSION_MIN,
+    ABI_VERSION_STRUCT_SIZE,
+};
 pub use vtables::{
     AdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable, VcVtable,
 };

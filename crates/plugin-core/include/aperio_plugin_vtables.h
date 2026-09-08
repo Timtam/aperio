@@ -32,26 +32,26 @@
  * Every struct here is `#[repr(C)]` on the Rust side; field order and
  * types below MUST match it byte-for-byte.
  *
- * `vtable_version` is the FIRST field of every vtable, in every revision,
- * and the host READS it before trusting anything else in the struct: a
- * value other than `APERIO_PLUGIN_ABI_VERSION` means the host cannot know
- * how many slots are really there, so it refuses to wrap the plugin
- * rather than reading past the end of it. Plugin authors MUST set every
- * `vtable_version` field to `APERIO_PLUGIN_ABI_VERSION`.
+ * `vtable_version` and `struct_size` are the FIRST TWO fields of every
+ * vtable, and they are the only two the host reads before it knows the
+ * layout. Set both: the version to `APERIO_PLUGIN_ABI_VERSION`, the size
+ * to `sizeof` the struct you are filling in.
  *
- * New methods are APPENDED at the end of a vtable, and appending to an
- * EXISTING vtable REQUIRES bumping `APERIO_PLUGIN_ABI_VERSION`. Strict
- * equality on the manifest then keeps an older plugin out entirely, which
- * is the only safe answer while the host has no per-vtable length. Adding
- * a WHOLE NEW vtable for a new plugin type needs no bump: nothing reads
- * it unless that type exists.
+ * New methods are APPENDED at the end of a vtable, and appending no
+ * longer requires a version bump. The host copies `struct_size` bytes of
+ * your vtable into a zeroed one of its own, so a slot you predate arrives
+ * as NULL and is reported as unsupported. Your plugin keeps loading.
  *
- * The four bytes of alignment padding after `vtable_version` on 64-bit
- * targets are RESERVED for a future `uint32_t struct_size`. Do not write
- * into them. When that field arrives it will carry a NEW
- * `vtable_version`, because padding in a plugin built before it existed
- * is indeterminate and a garbage value there would defeat the very gate
- * it is meant to relax.
+ * That is what `struct_size` bought. Before it, the host had no way to
+ * tell a shorter struct from a longer one, so the only safe answer was to
+ * refuse anything whose version did not match exactly — and one appended
+ * method meant every plugin in the world had to be rebuilt before it
+ * could load again.
+ *
+ * Revision 4 is the one that added the field, into the alignment padding
+ * that already followed `vtable_version` on 64-bit targets. Nothing moved
+ * and nothing grew. A plugin declaring revision 3 still loads: the host
+ * knows that layout and supplies the length it did not carry.
  *
  * Keep this file in sync with `crates/plugin-core/src/vtables/*.rs`
  * whenever a slot is added.
@@ -94,6 +94,13 @@ typedef PluginCallResult (*AperioVtableMethodFn)(
 typedef struct AperioCalendarVtable {
     uint32_t vtable_version;
 
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
+
     /* Base Adapter methods. */
     AperioVtableMethodFn authenticate; /* Credentials -> AuthToken */
     AperioVtableMethodFn capabilities; /* () -> Vec<Capability> */
@@ -131,6 +138,13 @@ typedef struct AperioCalendarVtable {
  */
 typedef struct AperioTasksVtable {
     uint32_t vtable_version;
+
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
 
     AperioVtableMethodFn authenticate;
     AperioVtableMethodFn capabilities;
@@ -184,6 +198,13 @@ typedef struct AperioTasksVtable {
 typedef struct AperioContactsVtable {
     uint32_t vtable_version;
 
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
+
     AperioVtableMethodFn authenticate;
     AperioVtableMethodFn capabilities;
 
@@ -212,6 +233,13 @@ typedef struct AperioContactsVtable {
 typedef struct AperioSyncVtable {
     uint32_t vtable_version;
 
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
+
     AperioVtableMethodFn test_connection;
     AperioVtableMethodFn fetch_meta;       /* () -> Option<MetaJson> */
     AperioVtableMethodFn push_meta;
@@ -232,6 +260,13 @@ typedef struct AperioSyncVtable {
  */
 typedef struct AperioVcVtable {
     uint32_t vtable_version;
+
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
 
     AperioVtableMethodFn test_connection;
     AperioVtableMethodFn create_meeting; /* NewMeeting -> Meeting */
@@ -272,6 +307,13 @@ typedef struct AperioVcVtable {
  */
 typedef struct AperioAdapterVtable {
     uint32_t                       vtable_version;
+
+    /* Size of THIS struct as you built it: sizeof(the struct).
+     * The host copies this many bytes and finds NULL in every slot
+     * you did not have, so a method appended after your build does
+     * not stop your plugin from loading. Set it; anything smaller
+     * than the two-uint32 header is a plugin the host refuses. */
+    uint32_t struct_size;
     const AperioCalendarVtable    *calendar; /* NULL ⇒ no Calendar cap */
     const AperioTasksVtable       *tasks;    /* NULL ⇒ no Tasks cap */
     const AperioContactsVtable    *contacts; /* NULL ⇒ no Contacts cap */
