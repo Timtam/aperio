@@ -36,6 +36,7 @@
 //! Every plugin is treated as unsigned and the install dialog
 //! always surfaces the §20.7 warning.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -347,6 +348,87 @@ impl Default for TaskCapabilities {
     }
 }
 
+/// What one adapter kind is called, in the plugin's own words.
+///
+/// Same shape as every other label a manifest declares: verbatim text that
+/// works with no catalogue at all, plus an optional key into
+/// [`PluginManifest::strings`] that takes precedence when the plugin speaks the
+/// reader's language.
+///
+/// Two names rather than one because the app has always had two, and they do
+/// not derive from each other. The long one describes ("Exchange on-premise
+/// (EWS)", "CalDAV (iCloud, Nextcloud, …)") and is what an account row and the
+/// Add-account picker show; the short one identifies ("Exchange (EWS)",
+/// "CalDAV") and is what a dense list of accounts shows. Trying to build the
+/// long one out of the short one plus a parenthetical worked for most kinds and
+/// broke on exactly the two that matter, so both are declared.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KindName {
+    /// The descriptive name. Used verbatim when [`Self::name_key`] resolves to
+    /// nothing, which is the normal case for a plugin with no catalogue.
+    pub name: String,
+
+    /// Key into [`PluginManifest::strings`], taking precedence over
+    /// [`Self::name`] — the same arrangement the account-field labels use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_key: Option<String>,
+
+    /// The compact name, for surfaces that list many accounts at once. Absent
+    /// means "the same as the descriptive one", which is the right answer for
+    /// every kind whose name is just a product name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
+
+    /// Key into [`PluginManifest::strings`], taking precedence over
+    /// [`Self::short_name`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name_key: Option<String>,
+}
+
+/// What to call `kind`, resolved in `lang`: the descriptive name and the
+/// compact one.
+///
+/// The manifest's [`PluginManifest::kind_names`] entry when it has one, and the
+/// plugin's own [`PluginManifest::name`] when it does not — so a plugin that
+/// serves a single adapter is nameable having written nothing extra. The
+/// compact form falls back to the descriptive one, which is the right answer
+/// for every kind whose name is simply a product name.
+///
+/// `strings` is the plugin's catalogue as the caller resolved it —
+/// `PluginManager::strings_for` for a loaded plugin, the manifest's own
+/// `strings` for one the host links in. Passed rather than read off the
+/// manifest so the escape-hatch catalogue a plugin exports at runtime wins here
+/// too, exactly as it does for account-field labels.
+pub fn resolve_kind_name(
+    manifest: &PluginManifest,
+    strings: &StringCatalogue,
+    kind: &str,
+    lang: &str,
+) -> (String, String) {
+    let Some(entry) = manifest.kind_names.get(kind) else {
+        return (manifest.name.clone(), manifest.name.clone());
+    };
+    let name = crate::resolve_label(Some(strings), entry.name_key.as_deref(), &entry.name, lang);
+    // The verbatim short name is optional and so is its key, and either alone
+    // is enough. A key with no verbatim partner is a plugin that translated the
+    // short form and had no English to write — the shape the account-field
+    // hints already allow — so the descriptive name stands in only when NEITHER
+    // resolves.
+    let short = match (entry.short_name.as_deref(), entry.short_name_key.as_deref()) {
+        (None, None) => name,
+        (verbatim, key) => {
+            let resolved =
+                crate::resolve_label(Some(strings), key, verbatim.unwrap_or_default(), lang);
+            if resolved.is_empty() {
+                name
+            } else {
+                resolved
+            }
+        }
+    };
+    (name.to_string(), short.to_string())
+}
+
 /// One account-bearing adapter a loaded plugin serves.
 ///
 /// What a connect picker needs and nothing more. It is assembled from the
@@ -385,10 +467,19 @@ pub struct AdapterKindInfo {
     /// So a surface that creates filters on `offered`; a surface that offers a
     /// CHOICE among things that can already exist accepts `offered || implicit`.
     pub implicit: bool,
-    /// The plugin's display name — the label to use when the app has no
-    /// translation for this kind, which is the normal case for a third-party
-    /// plugin.
+    /// What to call this kind, resolved in the language the caller asked for.
+    ///
+    /// From the owning manifest's [`PluginManifest::kind_names`] when it names
+    /// the kind, and from the plugin's own [`PluginManifest::name`] when it
+    /// does not. Either way it is a name a person can read: no caller has to
+    /// hold a table of kind strings to render an account row, and no adapter
+    /// needs an entry in the app's translation files to be nameable.
     pub name: String,
+
+    /// The compact form of [`Self::name`], for surfaces that show many accounts
+    /// at once. Equal to `name` unless the manifest declares a shorter one.
+    pub short_name: String,
+
     pub plugin_id: String,
     /// Whether accounts of this adapter own calendars and task lists.
     pub owns_containers: bool,
@@ -543,11 +634,34 @@ pub struct PluginManifest {
     /// with nothing said. `offered: false` is what keeps the Add-account list
     /// from growing an entry for an adapter that no longer exists separately.
     ///
-    /// It follows that an adopted kind DOES need a display name in the app's
-    /// locale files, because account rows are labelled from the kind — see the
-    /// `every_declared_kind_is_named_in_both_locales` test in `host-plugins`.
+    /// It follows that an adopted kind DOES need a display name, and that the
+    /// adopting plugin is the one that owes it — see [`Self::kind_names`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adopts_adapter_kinds: Vec<String>,
+
+    /// What to call each kind this manifest claims, keyed by the kind.
+    ///
+    /// The name of an adapter kind used to live in the app's own locale files,
+    /// under `dialogs.accounts.kindName.<kind>`. That made a name something
+    /// only the app could give, which is the one thing an out-of-tree adapter
+    /// can never do for itself: it can be installed, loaded, connected and
+    /// synced, and the account row for it would still have to be labelled by an
+    /// entry somebody added to Aperio's translation files.
+    ///
+    /// So the plugin names its own kinds, the same way it names its account
+    /// fields — verbatim text plus an optional key into [`Self::strings`],
+    /// resolved by [`crate::resolve_label`].
+    ///
+    /// Both an OWN kind ([`Self::adapter_kind`]) and every ADOPTED one
+    /// ([`Self::adopts_adapter_kinds`]) belong here: an adopted kind still
+    /// labels the account rows that carry it, and the plugin that took them on
+    /// is the only one left who knows what they were.
+    ///
+    /// Absent is not a crime — [`AdapterKindInfo`] falls back to the plugin's
+    /// own [`Self::name`], which is what a one-adapter plugin would have
+    /// written anyway.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kind_names: BTreeMap<String, KindName>,
 
     /// This plugin's own text, in the languages it speaks — see
     /// [`crate::strings`] for why it lives here rather than in the host's
@@ -653,6 +767,37 @@ impl PluginManifest {
             return Err(PluginError::Manifest(
                 "adopts_adapter_kinds needs an adapter_kind of its own to adopt into".into(),
             ));
+        }
+        // A name for a kind this manifest does not claim names nothing: no
+        // surface would ever ask for it, so it is either a typo in the kind or
+        // a leftover from a kind that was dropped. Both read as "the name is
+        // there" to whoever wrote it, and neither is.
+        for kind in self.kind_names.keys() {
+            if Some(kind.as_str()) != self.adapter_kind.as_deref()
+                && !self.adopts_adapter_kinds.contains(kind)
+            {
+                return Err(PluginError::Manifest(format!(
+                    "kind_names names `{kind}`, which this manifest neither declares nor adopts",
+                )));
+            }
+        }
+        // An empty name is worse than an absent one: absent falls back to the
+        // plugin's own name, empty renders as nothing at all.
+        for (kind, entry) in &self.kind_names {
+            if entry.name.trim().is_empty() {
+                return Err(PluginError::Manifest(format!(
+                    "kind_names.{kind} has an empty name; leave the entry out to fall back to the plugin's name",
+                )));
+            }
+            if entry
+                .short_name
+                .as_ref()
+                .is_some_and(|s| s.trim().is_empty())
+            {
+                return Err(PluginError::Manifest(format!(
+                    "kind_names.{kind} has an empty short_name; leave it out to fall back to the descriptive name",
+                )));
+            }
         }
         Ok(())
     }

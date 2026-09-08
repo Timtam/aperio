@@ -538,11 +538,18 @@ auch falls nie ein Repo entsteht.
   `plugin.json`, das kein Build deklariert, und keine zwei Kisten mit derselben
   Plugin-Id — Letzteres kann die Registry gar nicht sehen, weil der Manager die
   zweite Registrierung ablehnt.
-- [ ] **Paket 3 — Ein Adapter kann sich selbst benennen.** Der Anzeigename einer
-  `adapter_kind` liegt in `locales/*/translation.json`, es gibt kein
-  Manifest-Feld dafür; fünf Aufrufstellen übergeben kein `defaultValue`, ein
-  unbekannter Kind wird also als roher i18n-Schlüssel vorgelesen. Das ist heute
-  schon ein a11y-Fehler, unabhängig vom Umzug.
+- [x] **Paket 3 — Ein Adapter kann sich selbst benennen.**  
+  ↳ `kind_names` im Manifest (langer + kurzer Name, wörtlich + Katalog-Schlüssel),
+  aufgelöst in `adapter_kinds(lang)` und `builtin_adapter_kinds(lang)`. Die 68
+  Locale-Einträge sind weg, die Frontends lesen den Namen aus `AdapterKindInfo`.
+  Der a11y-Fehler ist damit erledigt: keine Aufrufstelle kann mehr einen
+  Punkt-Schlüssel vorlesen lassen. Der Name reitet auf der KONTOZEILE mit
+  (`list_accounts` liefert `kind_name`), weil eine Zeile anders fragt als ein
+  Picker: sie wird gezeichnet, auch wenn das Plugin deaktiviert ist, und ohne
+  zweite Anfrage, die zu spät kommen oder scheitern kann. Wächter: jedes Kind in
+  jeder Sprache seines Adapters benannt (Eigenschaft EINES Manifests), die App
+  trägt keine Adapternamen mehr, und ein deaktiviertes Plugin behält den Namen
+  seiner Konten.
 - [ ] **Paket 4 — Staging aus `build.rs` in ein xtask** (`cargo metadata` statt
   `<workspace>/crates/<name>`); killt zugleich den `include_str!("../build.rs")`-
   Scrape in `src-tauri/src/bundled_plugins.rs` und das Zwei-Build-Rennen.

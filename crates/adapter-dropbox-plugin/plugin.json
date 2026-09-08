@@ -9,6 +9,12 @@
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for Dropbox (API v2 + OAuth2 PKCE).",
   "adapter_kind": "dropbox",
+  "kind_names": {
+    "dropbox": {
+      "name": "Dropbox",
+      "name_key": "kind.dropbox.name"
+    }
+  },
   "signed": false,
   "account": {
     "fields": [
@@ -51,7 +57,8 @@
       "account.client_id.hint": "From your app on dropbox.com/developers/apps, on its settings page under \"App key\". Create the app with the \"App folder\" or \"Full Dropbox\" access type. It identifies the app, not you, and is not a secret.",
       "account.client_id.label": "App key (client ID)",
       "account.client_secret.hint": "Right under the app key, as \"App secret\". It is needed alongside the app key — Dropbox issues no token without it. Kept in the system keychain, never in the account row.",
-      "account.client_secret.label": "App secret"
+      "account.client_secret.label": "App secret",
+      "kind.dropbox.name": "Dropbox"
     },
     "de": {
       "account.base_path.hint": "Ordner in deiner Dropbox, der die Sync-Daten enthält (log/, snapshot.json, …). Leer bedeutet den Wurzelordner der App. Beispiel: /aperio",
@@ -59,7 +66,8 @@
       "account.client_id.hint": "Aus deiner App auf dropbox.com/developers/apps, auf deren Einstellungsseite unter „App key“. Lege die App mit dem Zugriffstyp „App folder“ oder „Full Dropbox“ an. Identifiziert die App, nicht dich, und ist kein Geheimnis.",
       "account.client_id.label": "App key (Client-ID)",
       "account.client_secret.hint": "Direkt unter dem App key, als „App secret“. Es wird zusammen mit dem App key benötigt — ohne es gibt Dropbox kein Token heraus. Wird im Schlüsselbund des Systems abgelegt, nie in der Kontozeile.",
-      "account.client_secret.label": "App secret"
+      "account.client_secret.label": "App secret",
+      "kind.dropbox.name": "Dropbox"
     }
   }
 }

@@ -49,6 +49,7 @@ reads it to discover the plugin before loading any code.
 | `signed` | boolean | ✅ | Whether the plugin is signed (bundled plugins are `false`). |
 | `adapter_kind` | string | — | The value accounts of this adapter carry in the `adapter_kind` column, e.g. `"caldav"`, `"webex"`. Set it if your plugin has accounts; the host builds its kind→plugin map from these. See below. |
 | `adopts_adapter_kinds` | string[] | — | Kinds written by an adapter this plugin has absorbed, so the rows keep resolving here. Resolution only — never offered as its own entry. See below. |
+| `kind_names` | object | — | What to call each kind you claim or adopt, keyed by the kind. Without it your accounts are labelled with your plugin's `name` — which is wrong the moment you serve more than one kind. See below. |
 | `account` | object | — | What the plugin needs in order to have an account: the fields to ask for, which are secrets, and whether it signs in via OAuth. See below. |
 
 ## Capability detail blocks
@@ -103,6 +104,44 @@ An account whose kind no plugin serves is not an error. It lists like any other
 and shows as "plugin missing" — which is exactly what a user sees on a device
 that has not installed your plugin yet.
 
+## `kind_names` — what your kinds are called
+
+Every kind you claim in `adapter_kind` or `adopts_adapter_kinds` needs a name a
+person can read, because that is what labels an account row, groups the
+accounts list and fills the Add-account picker.
+
+```json
+"kind_names": {
+  "acme": {
+    "name": "Acme Calendar (acme.example)",
+    "name_key": "kind.acme.name",
+    "short_name": "Acme",
+    "short_name_key": "kind.acme.short"
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | Your own string, used verbatim when no key resolves. Required. |
+| `name_key` | Optional key into your `strings` catalogue; takes precedence over `name`. |
+| `short_name` | Optional compact form, for surfaces listing many accounts at once. Absent means "the same as `name`", which is right when your name is simply the product's. |
+| `short_name_key` | Optional key for the compact form. Either half is enough — a key with no verbatim partner resolves fine. |
+
+The same arrangement as the account-field labels: verbatim text that works with
+no catalogue at all, plus a key that wins when you speak the reader's language.
+
+**Aperio does not name your adapter, and cannot.** The names used to live in the
+app's own translation files, which meant an adapter it had never heard of could
+be installed, connected and synced — and its accounts would still have had no
+name. Nothing is worse than it sounds: the app renders a missing translation key
+as the key itself, so a screen reader read out "dialogs dot accounts dot kind
+name dot acme", once per account, with nothing on screen looking wrong.
+
+If you leave `kind_names` out, your accounts fall back to the plugin's own
+`name`. That is survivable for a plugin serving one kind and wrong for one
+serving two — both rows get the same label.
+
 ## `adopts_adapter_kinds` — taking over another adapter's rows
 
 Two adapters sometimes become one: a provider you served with two plugins turns
@@ -135,10 +174,9 @@ What you take on with them:
   The Add-account picker and the sync-target form both skip them, so a merged
   adapter is offered once, under one name.
 - **An adopted kind still needs its display name.** Account rows are labelled
-  from the kind, so a bundled adapter that adopts one must keep that kind's
-  entry in `locales/{en,de}/translation.json` under
-  `dialogs.accounts.kindName.*`. Dropping it is not a blank label — a screen
-  reader reads out the raw key.
+  from the kind, so give the adopted kind its own `kind_names` entry. You are
+  the only one left who knows what those rows were: the adapter that named them
+  is gone.
 - **Delete the plugin you adopted from.** While both are installed the one that
   declares the kind as its own keeps it, so the adopting half serves nothing —
   and which one a user's accounts bind to depends on what they have installed.
@@ -170,7 +208,7 @@ out of the account row, and hands your plugin back the init config it asked for.
 | `key` | Identifier, and the key this value appears under in your plugin's init config. A non-secret field is persisted in `config_json` under the same key. |
 | `kind` | One of the seven below. Drives the control the user gets — including the on-screen keyboard on mobile, which is why `url` is worth distinguishing from `text`. |
 | `label` | Your own string. Used verbatim when the app has no translation, which is the normal case for a third-party plugin. |
-| `label_key` | Optional translation key the app resolves in the user's language; it takes precedence over `label`. Bundled adapters set this so their strings live in the app's locale files. |
+| `label_key` | Optional key into your own `strings` catalogue, resolved in the user's language; it takes precedence over `label`. |
 | `hint` / `hint_key` | Optional explanatory line under the field. Same arrangement. |
 | `required` | Whether the form refuses to submit without it. |
 | `default` | Starting value — a boolean for `bool`, a string otherwise. A `number` default is a string too (`"22"`), and it must parse. |

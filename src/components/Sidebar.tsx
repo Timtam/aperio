@@ -134,7 +134,7 @@ export function Sidebar({
    *  stays focusable while the sidebar is collapsed. */
   collapsed: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   // Per-account refresh-error surface (silent-staleness warning). The
   // sidebar is the app's one always-mounted consumer, so it owns the
@@ -168,14 +168,14 @@ export function Sidebar({
   const [needsConnect, setNeedsConnect] = useState<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
-    void fetchAccountsNeedingConnect().then((pending) => {
+    void fetchAccountsNeedingConnect(i18n.language).then((pending) => {
       if (cancelled) return;
       setNeedsConnect(new Set((pending ?? []).map((a) => a.id)));
     });
     return () => {
       cancelled = true;
     };
-  }, [accounts]);
+  }, [accounts, i18n.language]);
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
@@ -191,7 +191,7 @@ export function Sidebar({
   >(undefined);
   useEffect(() => {
     let cancelled = false;
-    listAdapterKinds()
+    listAdapterKinds(i18n.language)
       .then((kinds) => {
         if (cancelled) return;
         setDataHoldingKinds(
@@ -208,7 +208,9 @@ export function Sidebar({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-run when the language changes: each adapter names its own kinds,
+    // so the answer is only in the language it was asked for.
+  }, [i18n.language]);
 
   const tree = useMemo(
     () =>
@@ -1377,6 +1379,7 @@ export function Sidebar({
           <AccountSubtree
             key={account.key}
             account={account}
+            kindName={account.kindName}
             refreshError={errorsByAccount.get(account.accountId)}
             needsConnect={needsConnect.has(account.accountId)}
             expansion={expansion}
@@ -1645,6 +1648,10 @@ function collectLeaves(
 
 interface AccountSubtreeProps {
   account: AccountNode;
+  /** What the adapter that owns this account's kind calls itself, resolved by
+   *  the parent from the host's answer. The tree holds no table of provider
+   *  names, and neither does the app. */
+  kindName: string;
   expansion: ReturnType<typeof useSidebarExpansion>;
   focusedKey: string | null;
   onFocusKey: (key: string) => void;
@@ -1670,6 +1677,7 @@ interface AccountSubtreeProps {
 
 function AccountSubtree({
   account,
+  kindName,
   refreshError,
   needsConnect,
   expansion,
@@ -1713,7 +1721,7 @@ function AccountSubtree({
         ariaLabel={
           t('sidebar.tree.accountLabel', {
             name: account.displayName,
-            kind: t(`dialogs.accounts.kindName.${account.adapterKind}`),
+            kind: kindName,
           }) +
           (needsConnect
             ? ' ' + t('sidebar.tree.needsConnect')
@@ -1764,7 +1772,7 @@ function AccountSubtree({
               </span>
             )}
             <span className="sidebar__account-kind" aria-hidden="true">
-              {t(`dialogs.accounts.kindName.${account.adapterKind}`)}
+              {kindName}
             </span>
           </>
         )}

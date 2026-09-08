@@ -10,6 +10,16 @@
   "description": "Bundled adapter for Google Calendar, Google Tasks, Google People (Contacts) and Google Drive as a sync target.",
   "adapter_kind": "google",
   "adopts_adapter_kinds": ["googledrive"],
+  "kind_names": {
+    "google": {
+      "name": "Google",
+      "name_key": "kind.google.name"
+    },
+    "googledrive": {
+      "name": "Google Drive",
+      "name_key": "kind.googledrive.name"
+    }
+  },
   "signed": false,
   "tasks": {
     "task_time_of_day": false,
@@ -64,7 +74,9 @@
       "account.client_secret.hint": "Sits right under the client ID in the same Cloud Console entry. Despite the name, Google's own docs concede the secret isn't actually secret for Desktop apps — Aperio keeps it in the system keychain all the same.",
       "account.client_secret.label": "Google OAuth client secret",
       "account.folder_name.hint": "Only used if you later pick this account as the place your data is stored. It is the folder under My Drive that holds it; Aperio creates it on the first sync, and blank means Aperio. Aperio asks for the drive.file scope alone, so it can only ever see the files it created itself — nothing else in your Drive.",
-      "account.folder_name.label": "Drive folder"
+      "account.folder_name.label": "Drive folder",
+      "kind.google.name": "Google",
+      "kind.googledrive.name": "Google Drive"
     },
     "de": {
       "account.client_id.hint": "Aus deiner Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, Typ „Desktop App\"). Eine eigene Client-ID ist notwendig, weil Aperio noch keine verifizierte Google-App-Registrierung hat.",
@@ -72,7 +84,9 @@
       "account.client_secret.hint": "Direkt unter der Client-ID in der Cloud Console. Trotz „Secret\" laut Google für Desktop-Apps nicht wirklich geheim — wird trotzdem im Schlüsselbund des Systems abgelegt.",
       "account.client_secret.label": "Google OAuth Client-Secret",
       "account.folder_name.hint": "Wird nur gebraucht, wenn du dieses Konto später als Speicherort deiner Daten wählst. Es ist der Ordner unter „Meine Ablage“, der sie enthält; Aperio legt ihn beim ersten Synchronisieren an, leer bedeutet Aperio. Aperio fordert allein den Scope drive.file an und sieht deshalb ausschließlich die Dateien, die es selbst angelegt hat — sonst nichts in deiner Ablage.",
-      "account.folder_name.label": "Drive-Ordner"
+      "account.folder_name.label": "Drive-Ordner",
+      "kind.google.name": "Google",
+      "kind.googledrive.name": "Google Drive"
     }
   }
 }

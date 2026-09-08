@@ -416,49 +416,122 @@ fn an_adopted_kind_has_no_other_claimant() {
     assert!(problems.is_empty(), "{}", problems.join("; "));
 }
 
-/// Every kind an adapter declares has a name a person can hear.
+/// Every kind an adapter declares has a name a person can hear, in every
+/// language that adapter speaks — and the adapter is the one who says it.
 ///
-/// Both account-row label sites — the desktop's `AccountsPanel`/`Sidebar` and
-/// the mobile `AccountsScreen` — call
-/// `t('dialogs.accounts.kindName.' + kind)` with no `defaultValue`, and the
-/// reconnect dialog does the same with `syncAccountsConnect.kind.`. i18next
-/// returns the key itself when it misses, so the failure mode is not a blank or
-/// a fallback: it is a row that a screen reader reads out as
-/// "dialogs dot accounts dot kind name dot googledrive", once per account,
-/// forever, with nothing on screen looking wrong to a sighted reviewer.
+/// The name used to live in the app's locale files, under
+/// `dialogs.accounts.kindName.<kind>` and `syncAccountsConnect.kind.<kind>`.
+/// That made naming a thing only Aperio could do: an out-of-tree adapter could
+/// be installed, loaded, connected and synced, and its account rows would still
+/// have had to be labelled by an entry somebody added to Aperio's translations.
+/// A kind with no entry was not merely unnamed — i18next renders a missing key
+/// as the key, so a screen reader read out "dialogs dot accounts dot kind name
+/// dot googledrive", once per account, forever, with nothing on screen looking
+/// wrong to a sighted reviewer.
 ///
-/// So it is asserted here, against the shipped locale files, rather than left to
-/// be noticed.
+/// So this is a property of ONE manifest, deliberately: an adapter in its own
+/// repository can assert exactly this about itself, with no access to Aperio's
+/// translation files and nothing to keep in step with them. The old shape —
+/// walk the tree, then check the app's locale files — was a question only this
+/// repository could ask, about names only this repository could give.
 ///
 /// ADOPTED kinds count. They are listed by `PluginManager::adapter_kinds()`
 /// (only `offered` is false), so an account carrying one is drawn, grouped and
-/// labelled through exactly the same `t(...)` call as any other. A kind that
-/// stops being anybody's `adapter_kind` because it was adopted must not fall
-/// out of this guard on the way.
+/// labelled like any other, and the adopting plugin is the only one left who
+/// knows what its rows were.
 #[test]
-fn every_declared_kind_is_named_in_both_locales() {
+fn every_kind_an_adapter_declares_is_named_in_every_language_it_speaks() {
+    let mut problems = Vec::new();
+
+    for (id, manifest) in declared_manifests() {
+        let kinds: Vec<&str> = manifest
+            .adapter_kind
+            .as_deref()
+            .into_iter()
+            .chain(manifest.adopts_adapter_kinds.iter().map(String::as_str))
+            .collect();
+        if kinds.is_empty() {
+            continue;
+        }
+        // Its own catalogue's languages, plus the one every catalogue must
+        // carry. An adapter that speaks only German is still readable by an
+        // English reader — through the verbatim name, which is what
+        // `resolve_kind_name` falls back to.
+        let mut langs = manifest.strings.languages();
+        if !langs.iter().any(|l| l == plugin_core::FALLBACK_LANG) {
+            langs.push(plugin_core::FALLBACK_LANG.to_string());
+        }
+
+        for kind in kinds {
+            for lang in &langs {
+                let (name, short) =
+                    plugin_core::resolve_kind_name(&manifest, &manifest.strings, kind, lang);
+                if name.trim().is_empty() {
+                    problems.push(format!("{id}: {kind} has no name in {lang}"));
+                }
+                if short.trim().is_empty() {
+                    problems.push(format!("{id}: {kind} has no short name in {lang}"));
+                }
+                // The fallback exists so a plugin with no catalogue still
+                // renders, but a BUNDLED adapter falling back to the plugin's
+                // own name means somebody forgot the `kind_names` entry — and
+                // it shows up as two kinds of one plugin sharing a label.
+                if name == manifest.name && !manifest.kind_names.contains_key(kind) {
+                    problems.push(format!(
+                        "{id}: {kind} has no kind_names entry, so it borrows the plugin's \
+                         own name `{}`",
+                        manifest.name,
+                    ));
+                }
+
+                // Non-emptiness alone would not catch a MISSING TRANSLATION.
+                // `resolve_label` falls back to the verbatim text, which is
+                // English and non-empty, so deleting a German catalogue entry
+                // would leave every assertion above green while a German reader
+                // silently gets the English string. A declared key has to
+                // resolve in every language the manifest claims to speak.
+                if let Some(entry) = manifest.kind_names.get(kind) {
+                    for (what, key) in [
+                        ("name", entry.name_key.as_deref()),
+                        ("short name", entry.short_name_key.as_deref()),
+                    ] {
+                        let Some(key) = key else { continue };
+                        if manifest.strings.lookup(key, lang).is_none() {
+                            problems.push(format!(
+                                "{id}: {kind} declares the {what} key `{key}` but the \
+                                 catalogue has no {lang} entry for it, so a {lang} reader \
+                                 gets the English text",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "these kinds have no name of their own, and an account row is labelled \
+         from the kind:\n  {}",
+        problems.join("\n  "),
+    );
+}
+
+/// Nothing in the app's own translations names an adapter any more.
+///
+/// The other half of the move, and the one that would otherwise rot quietly: a
+/// leftover `kindName` block would still resolve, so the app would go on naming
+/// the fourteen bundled adapters correctly while every out-of-tree adapter went
+/// unnamed — the exact asymmetry this was meant to end, hidden by the fact that
+/// the only adapters anyone tests with are the bundled ones.
+#[test]
+fn the_app_no_longer_carries_names_for_adapters() {
     let repo_root = crates_dir()
         .parent()
         .expect("crates/ lives in the repo root")
         .to_path_buf();
 
-    let mut kinds: Vec<String> = declared_manifests()
-        .into_iter()
-        .flat_map(|(_, m)| {
-            m.adapter_kind
-                .into_iter()
-                .chain(m.adopts_adapter_kinds)
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    kinds.sort();
-    kinds.dedup();
-    assert!(
-        !kinds.is_empty(),
-        "no kinds found — the registry is probably empty"
-    );
-
-    let mut missing = Vec::new();
+    let mut leftovers = Vec::new();
     for lang in ["en", "de"] {
         let path = repo_root
             .join("locales")
@@ -467,37 +540,17 @@ fn every_declared_kind_is_named_in_both_locales() {
         let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let root: serde_json::Value = serde_json::from_slice(&bytes)
             .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
-
-        for (block, value) in [
-            (
-                "dialogs.accounts.kindName",
-                root.pointer("/dialogs/accounts/kindName"),
-            ),
-            (
-                "syncAccountsConnect.kind",
-                root.pointer("/syncAccountsConnect/kind"),
-            ),
-        ] {
-            let table = value
-                .and_then(serde_json::Value::as_object)
-                .unwrap_or_else(|| panic!("{lang}: {block} is not an object"));
-            for kind in &kinds {
-                let named = table
-                    .get(kind)
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|s| !s.trim().is_empty());
-                if !named {
-                    missing.push(format!("{lang}: {block}.{kind}"));
-                }
+        for pointer in ["/dialogs/accounts/kindName", "/syncAccountsConnect/kind"] {
+            if root.pointer(pointer).is_some() {
+                leftovers.push(format!("{lang}: {pointer}"));
             }
         }
     }
 
     assert!(
-        missing.is_empty(),
-        "these kind labels are missing, and i18next renders a missing key as the \
-         key itself — a screen reader reads the literal dotted string out loud: \
-         {missing:#?}",
+        leftovers.is_empty(),
+        "the app is naming adapters again; the name belongs to the manifest of \
+         the adapter that owns the kind: {leftovers:?}",
     );
 }
 

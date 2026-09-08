@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for FTP servers — explicit FTPS (AUTH TLS), implicit FTPS, or plain unencrypted FTP for legacy LAN setups.",
   "adapter_kind": "ftp",
+  "kind_names": {
+    "ftp": {
+      "name": "FTPS (also plain FTP)",
+      "name_key": "kind.ftp.name",
+      "short_name": "FTPS",
+      "short_name_key": "kind.ftp.short"
+    }
+  },
   "signed": false,
   "account": {
     "fields": [
@@ -100,7 +108,9 @@
       "account.port.hint": "21 for explicit FTPS and for plain FTP, 990 for implicit FTPS. Change it only if your server was set up on a different port.",
       "account.port.label": "Port",
       "account.user.hint": "The FTP login name as the server's administrator issued it — not an e-mail address unless the server uses one.",
-      "account.user.label": "Username"
+      "account.user.label": "Username",
+      "kind.ftp.name": "FTPS (also plain FTP)",
+      "kind.ftp.short": "FTPS"
     },
     "de": {
       "account.host.hint": "Hostname oder IP-Adresse des Servers, ohne Schema und ohne Pfad — ftp.example.com oder 192.168.1.10.",
@@ -117,7 +127,9 @@
       "account.port.hint": "21 für explizites FTPS und für Klartext-FTP, 990 für implizites FTPS. Nur ändern, wenn der Server auf einem anderen Port eingerichtet ist.",
       "account.port.label": "Port",
       "account.user.hint": "Der FTP-Anmeldename, wie ihn die Serververwaltung vergeben hat — keine E-Mail-Adresse, außer der Server verlangt eine.",
-      "account.user.label": "Benutzername"
+      "account.user.label": "Benutzername",
+      "kind.ftp.name": "FTPS (auch Klartext-FTP)",
+      "kind.ftp.short": "FTPS"
     }
   }
 }

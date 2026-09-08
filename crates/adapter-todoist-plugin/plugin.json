@@ -9,6 +9,12 @@
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Todoist (REST API v2).",
   "adapter_kind": "todoist",
+  "kind_names": {
+    "todoist": {
+      "name": "Todoist",
+      "name_key": "kind.todoist.name"
+    }
+  },
   "signed": false,
   "tasks": {
     "task_span": true,
@@ -41,11 +47,13 @@
   "strings": {
     "en": {
       "account.token.hint": "Find your token in Todoist under Settings → Integrations → Developer → API token. The token never leaves your system keychain after you press \"Add\".",
-      "account.token.label": "API token"
+      "account.token.label": "API token",
+      "kind.todoist.name": "Todoist"
     },
     "de": {
       "account.token.hint": "Du findest dein Token in Todoist unter Einstellungen → Integrationen → Entwickler → API-Token. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
-      "account.token.label": "API-Token"
+      "account.token.label": "API-Token",
+      "kind.todoist.name": "Todoist"
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { CalendarStoreContext } from './calendarStoreContext';
 import {
@@ -181,6 +182,7 @@ function writePersisted(value: PersistedSelection) {
 }
 
 export function CalendarStoreProvider({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation();
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
@@ -287,9 +289,12 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshAccounts = useCallback(async () => {
-    const list = await listAccounts();
+    // The language goes with the request: each row carries the name of its own
+    // adapter, resolved by the backend, and the sidebar labels its account
+    // branches from it.
+    const list = await listAccounts(i18n.language);
     setAccounts(list);
-  }, []);
+  }, [i18n.language]);
 
   const loadSections = useCallback(async (listId: string) => {
     // Sorted HERE, once, rather than at each of the half-dozen places that

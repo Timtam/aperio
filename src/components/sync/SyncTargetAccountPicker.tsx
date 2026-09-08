@@ -128,7 +128,7 @@ export function SyncTargetAccountPicker({
   active,
   onChanged,
 }: SyncTargetAccountPickerProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const messageForError = useSyncErrorMessage();
   const { openAccounts, dataVersion } = useDialogState();
@@ -172,7 +172,7 @@ export function SyncTargetAccountPicker({
     try {
       const [accs, kinds] = await Promise.all([
         listAccounts(),
-        listAdapterKinds(),
+        listAdapterKinds(i18n.language),
       ]);
       setAccounts(accs);
       setSyncKinds(kinds.filter((k) => k.can_sync));
@@ -187,7 +187,7 @@ export function SyncTargetAccountPicker({
     } finally {
       setLoaded(true);
     }
-  }, [messageForError]);
+  }, [messageForError, i18n.language]);
 
   // Re-read on mount, on `dataVersion` — adding an account (the "no accounts
   // yet" route below sends the user off to do exactly that) and enabling or
@@ -256,15 +256,13 @@ export function SyncTargetAccountPicker({
       syncKinds
         .map((kind) => ({
           id: kind.kind,
-          label: t(`dialogs.accounts.kindName.${kind.kind}`, {
-            defaultValue: kind.name,
-          }),
+          label: kind.name,
           items: accounts.filter(
             (account) => account.adapter_kind === kind.kind,
           ),
         }))
         .filter((group) => group.items.length > 0),
-    [accounts, syncKinds, t],
+    [accounts, syncKinds],
   );
 
   const runSelect = useCallback(

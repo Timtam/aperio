@@ -569,6 +569,7 @@ mod tests {
                 account: None,
                 adapter_kind: None,
                 adopts_adapter_kinds: Vec::new(),
+                kind_names: Default::default(),
                 strings: Default::default(),
             },
             descriptor_ptr,

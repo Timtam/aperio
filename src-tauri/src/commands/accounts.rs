@@ -152,6 +152,19 @@ const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
 pub struct AccountListEntry {
     #[serde(flatten)]
     pub account: Account,
+    /// What the adapter behind this row calls itself, resolved in the language
+    /// asked for.
+    ///
+    /// It rides on the ROW rather than being looked up from the adapter-kind
+    /// listing, and that is the whole point. The listing is fetched separately,
+    /// arrives later than the rows, can fail, and hides disabled plugins — three
+    /// ways for a row to be drawn with no name, and a row with no name reads out
+    /// its kind string. `host_core::builtin_adapters::kind_name_for` reaches the
+    /// manifest of a disabled plugin too; only a genuinely uninstalled one is
+    /// nameless, and that row already says so.
+    pub kind_name: String,
+    /// The compact form, for surfaces listing many accounts at once.
+    pub kind_short_name: String,
     pub plugin_loaded: bool,
     /// Whether this account can mint meetings — i.e. its plugin declares itself
     /// a `videoconference-adapter`. Read from the manifest rather than from a
@@ -164,7 +177,10 @@ pub struct AccountListEntry {
 pub async fn list_accounts(
     db: State<'_, DbHandle>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    // The language to name each row's adapter in. Absent means English.
+    lang: Option<String>,
 ) -> CommandResult<Vec<AccountListEntry>> {
+    let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let accounts = repo.list()?;
@@ -183,8 +199,15 @@ pub async fn list_accounts(
                     p.manifest
                         .has_capability(&plugin_core::Capability::Videoconference)
                 });
+            let (kind_name, kind_short_name) = host_core::builtin_adapters::kind_name_for(
+                plugin_manager.inner(),
+                account.adapter_kind.as_str(),
+                lang,
+            );
             AccountListEntry {
                 account,
+                kind_name,
+                kind_short_name,
                 plugin_loaded,
                 is_videoconference,
             }
@@ -224,7 +247,12 @@ pub async fn list_accounts(
 pub async fn list_accounts_missing_credentials(
     db: State<'_, DbHandle>,
     plugin_manager: State<'_, Arc<PluginManager>>,
-) -> CommandResult<Vec<Account>> {
+    // Same as `list_accounts`: these rows are drawn, one per account, in the
+    // reconnect dialog the first-launch restore opens — so they carry the name
+    // of their own adapter rather than leaving the dialog to look one up.
+    lang: Option<String>,
+) -> CommandResult<Vec<AccountListEntry>> {
+    let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let all = repo.list()?;
@@ -242,7 +270,7 @@ pub async fn list_accounts_missing_credentials(
             acc.adapter_kind.as_str(),
         );
         if slots.iter().any(|slot| !secret_present(&acc.id, *slot)) {
-            out.push(acc);
+            out.push(needs_connect_entry(&plugin_manager, acc, lang));
             continue;
         }
         // Per-ACCOUNT: a bring-your-own OAuth account whose client secret is
@@ -260,10 +288,38 @@ pub async fn list_accounts_missing_credentials(
                     )
                 });
         if missing_client {
-            out.push(acc);
+            out.push(needs_connect_entry(&plugin_manager, acc, lang));
         }
     }
     Ok(out)
+}
+
+/// One row for the reconnect dialog, named like every other account row.
+///
+/// `plugin_loaded` and `is_videoconference` are what [`list_accounts`] derives;
+/// neither means anything to this dialog, and both are cheap and honest to
+/// carry rather than inventing a second wire shape for the same row.
+fn needs_connect_entry(
+    plugin_manager: &PluginManager,
+    account: Account,
+    lang: &str,
+) -> AccountListEntry {
+    let plugin = plugin_manager.plugin_for_adapter_kind(account.adapter_kind.as_str());
+    let (kind_name, kind_short_name) = host_core::builtin_adapters::kind_name_for(
+        plugin_manager,
+        account.adapter_kind.as_str(),
+        lang,
+    );
+    AccountListEntry {
+        plugin_loaded: account.adapter_kind.is_host_internal() || plugin.is_some(),
+        is_videoconference: plugin.is_some_and(|p| {
+            p.manifest
+                .has_capability(&plugin_core::Capability::Videoconference)
+        }),
+        account,
+        kind_name,
+        kind_short_name,
+    }
 }
 
 /// Best-effort check for a keychain entry's presence. Treats any
@@ -1203,9 +1259,14 @@ pub fn account_form_spec(
 #[tauri::command]
 pub fn list_adapter_kinds(
     plugin_manager: State<'_, Arc<PluginManager>>,
+    // The language to name the kinds in. An adapter names its own kinds now
+    // (`PluginManifest::kind_names`), so the answer is only as good as the
+    // language it was asked in. Absent means English.
+    lang: Option<String>,
 ) -> CommandResult<Vec<plugin_core::AdapterKindInfo>> {
     Ok(host_core::builtin_adapters::all_adapter_kinds(
         plugin_manager.inner(),
+        lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG),
     ))
 }
 

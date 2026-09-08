@@ -225,8 +225,8 @@ public class CalFfiModule: Module {
     // JSON passthrough in the cal_core/desktop wire shape; a thrown StoreError
     // rejects the JS promise. Mirrors the Android module.
 
-    AsyncFunction("accountsJson") { () -> String in
-      try self.host.accountsJson()
+    AsyncFunction("accountsJson") { (lang: String?) -> String in
+      try self.host.accountsJson(lang: lang)
     }
 
     AsyncFunction("createAccountJson") { (requestJson: String) -> String in
@@ -268,8 +268,8 @@ public class CalFfiModule: Module {
       try self.host.resetAccountSync(accountId: accountId)
     }
 
-    AsyncFunction("listAccountsMissingCredentialsJson") { () -> String in
-      try self.host.listAccountsMissingCredentialsJson()
+    AsyncFunction("listAccountsMissingCredentialsJson") { (lang: String?) -> String in
+      try self.host.listAccountsMissingCredentialsJson(lang: lang)
     }
 
     AsyncFunction("setAccountSecret") { (accountId: String, secret: String) in
@@ -752,8 +752,8 @@ public class CalFfiModule: Module {
       try self.host.eventMeetingJson(eventId: eventId, calendarId: calendarId)
     }
 
-    AsyncFunction("listAdapterKindsJson") { () -> String in
-      try self.host.listAdapterKindsJson()
+    AsyncFunction("listAdapterKindsJson") { (lang: String?) -> String in
+      try self.host.listAdapterKindsJson(lang: lang)
     }
 
     AsyncFunction("accountFormSpecJson") { (adapterKind: String, lang: String?) -> String in

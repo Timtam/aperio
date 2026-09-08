@@ -337,6 +337,22 @@ export interface Account {
    *  Optional in the wire shape so legacy `list_accounts`
    *  consumers that read this struct outside the panel
    *  context (e.g. snapshot serialisation) don't trip. */
+  /** What the adapter behind this row calls itself, resolved by the backend in
+   *  the language asked for.
+   *
+   *  On the ROW rather than looked up from the adapter-kind listing: that
+   *  listing is fetched separately, arrives after the rows, can fail, and hides
+   *  disabled plugins. A row drawn without a name reads out its kind string —
+   *  "microsoft_graph" — which is exactly what a screen reader must never be
+   *  given. The backend reaches a disabled plugin's manifest too; only a
+   *  genuinely uninstalled adapter is nameless, and that row says so.
+   *
+   *  Optional in the wire shape for the same reason `plugin_loaded` is: the
+   *  struct is also read outside the panel context. */
+  kind_name?: string;
+  /** The compact form of {@link kind_name}, for surfaces listing many accounts
+   *  at once. */
+  kind_short_name?: string;
   plugin_loaded?: boolean;
 }
 

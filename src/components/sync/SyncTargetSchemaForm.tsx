@@ -135,7 +135,7 @@ export function SyncTargetSchemaForm({
   // list. Never a list of names here.
   useEffect(() => {
     let cancelled = false;
-    listAdapterKinds()
+    listAdapterKinds(i18n.language)
       .then((all) => {
         if (cancelled) return;
         // `can_sync`, and then either creatable or already there. A kind its
@@ -156,7 +156,9 @@ export function SyncTargetSchemaForm({
     return () => {
       cancelled = true;
     };
-  }, [messageForError, showError]);
+    // Re-run when the language changes: each adapter names its own kinds,
+    // so the answer is only in the language it was asked for.
+  }, [messageForError, showError, i18n.language]);
 
   // The chosen backend's fields. Values reset with the kind: a URL is not a
   // host, and carrying one across would leave the form describing a target
@@ -232,7 +234,7 @@ export function SyncTargetSchemaForm({
           return;
         }
         await acceptRemoteDatasetValues(kind, sent, device, pp);
-        const needing = (await fetchAccountsNeedingConnect()) ?? [];
+        const needing = (await fetchAccountsNeedingConnect(i18n.language)) ?? [];
         announce(t('dialogs.settings.sync.onboardRestoreOk'), 'assertive');
         onConnected({ joined: true, accountsNeedingConnect: needing });
         return;
@@ -269,6 +271,7 @@ export function SyncTargetSchemaForm({
     spec,
     t,
     values,
+    i18n.language,
   ]);
 
   return (
@@ -284,7 +287,7 @@ export function SyncTargetSchemaForm({
         >
           {kinds.map((k) => (
             <option key={k.kind} value={k.kind}>
-              {t(`dialogs.accounts.kindName.${k.kind}`, { defaultValue: k.name })}
+              {k.name}
             </option>
           ))}
         </select>

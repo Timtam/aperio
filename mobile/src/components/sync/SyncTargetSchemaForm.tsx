@@ -157,7 +157,7 @@ export function SyncTargetSchemaForm({
   // list. Never a list of names here.
   useEffect(() => {
     let cancelled = false;
-    listAdapterKinds()
+    listAdapterKinds(i18n.language)
       .then((all) => {
         if (cancelled) return;
         // `can_sync`, and then either creatable or already there. A kind its
@@ -178,7 +178,9 @@ export function SyncTargetSchemaForm({
     return () => {
       cancelled = true;
     };
-  }, [messageForError, showError]);
+    // Re-run when the language changes: each adapter names its own kinds,
+    // so the answer is only in the language it was asked for.
+  }, [messageForError, showError, i18n.language]);
 
   // The chosen backend's fields. Values reset with the kind: a URL is not a
   // host, and carrying one across would leave the form describing a target
@@ -214,11 +216,9 @@ export function SyncTargetSchemaForm({
     () =>
       kinds.map((k) => ({
         value: k.kind as string,
-        label: t(`dialogs.accounts.kindName.${k.kind}`, {
-          defaultValue: k.name,
-        }),
+        label: k.name,
       })),
-    [kinds, t],
+    [kinds],
   );
 
   const openTrustFor = useCallback(

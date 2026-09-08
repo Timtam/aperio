@@ -92,11 +92,14 @@ pub fn device_calendar_kind() -> &'static str {
 /// The mobile accounts screen asks for this one by name, because whether it can
 /// be offered at all is a question about the operating system and a permission,
 /// not about which plugins are loaded.
-pub fn device_adapter_kind_info() -> AdapterKindInfo {
+pub fn device_adapter_kind_info(lang: &str) -> AdapterKindInfo {
     let m = device_manifest();
+    let kind = device_calendar_kind().to_string();
+    let (name, short_name) = plugin_core::resolve_kind_name(m, &m.strings, &kind, lang);
     AdapterKindInfo {
-        kind: device_calendar_kind().to_string(),
-        name: m.name.clone(),
+        kind,
+        name,
+        short_name,
         plugin_id: m.id.clone(),
         // It holds no dataset: the phone's own store is not somewhere Aperio
         // can put its sync payload.
@@ -130,42 +133,55 @@ pub fn device_adapter_kind_info() -> AdapterKindInfo {
 /// phone platforms, and it is ADDED by granting a permission rather than
 /// existing from the first launch. The mobile accounts screen offers it on its
 /// own terms, which is a different question from the one this list answers.
-pub fn builtin_adapter_kinds() -> Vec<AdapterKindInfo> {
+pub fn builtin_adapter_kinds(lang: &str) -> Vec<AdapterKindInfo> {
     let m = local_manifest();
-    vec![AdapterKindInfo {
-        kind: m
-            .adapter_kind
-            .clone()
-            .expect("the built-in store's manifest declares its kind"),
-        // Never. There is exactly one built-in store, it is created during
-        // bootstrap, and it cannot be deleted — so an Add-account picker must
-        // not offer to make a second. This is the same flag an adopted kind
-        // uses, and for the same underlying reason: the entry describes an
+    let own = m
+        .adapter_kind
+        .clone()
+        .expect("the built-in store's manifest declares its kind");
+    // Its adopted kinds deliberately do NOT ride along. `local_folder` is the
+    // folder sync's old name, and a row written under it still resolves — but
+    // NAMING such a row is `kind_name_for`'s job now, and it reads the manifest
+    // directly. Putting the kind in this list instead would hand it the store's
+    // own capability flags, and `holds_data` is what the sidebar filters
+    // account branches on: a retired sync kind would sprout a permanently empty
+    // branch that can never fill.
+    let info = |kind: String, offered: bool, implicit: bool| {
+        let (name, short_name) = plugin_core::resolve_kind_name(m, &m.strings, &kind, lang);
+        AdapterKindInfo {
+            kind,
+            offered,
+            implicit,
+            name,
+            short_name,
+            plugin_id: m.id.clone(),
+            owns_containers: m.has_data_family(),
+            declares_account_schema: m.account.is_some(),
+            declares_oauth: false,
+            holds_data: m
+                .capabilities
+                .iter()
+                .any(|c| *c != plugin_core::capability::Capability::Sync),
+            can_sync: m
+                .capabilities
+                .contains(&plugin_core::capability::Capability::Sync),
+        }
+    };
+    vec![info(
+        own,
+        // Never offered. There is exactly one built-in store, it is created
+        // during bootstrap, and it cannot be deleted — so an Add-account picker
+        // must not offer to make a second. This is the same flag an adopted
+        // kind uses, and for the same underlying reason: the entry describes an
         // account that exists, not one that can be created.
-        offered: false,
-        // …but choosable. It is the one storage backend that needs no account
-        // created first, because the account is the one every device already
-        // has. Without this the sync form would have dropped it and "a folder
-        // on this device" would have stopped being an answer at onboarding.
-        implicit: true,
-        name: m.name.clone(),
-        plugin_id: m.id.clone(),
-        owns_containers: m.has_data_family(),
-        // It DOES declare a schema now — one field, the folder its data is
-        // mirrored into when this account is chosen as the storage. Nothing is
-        // asked at creation time (there is nothing to create), so the flag is
-        // read off the manifest rather than pinned false.
-        declares_account_schema: m.account.is_some(),
-        // It signs in nowhere: it is already there.
-        declares_oauth: false,
-        holds_data: m
-            .capabilities
-            .iter()
-            .any(|c| *c != plugin_core::capability::Capability::Sync),
-        can_sync: m
-            .capabilities
-            .contains(&plugin_core::capability::Capability::Sync),
-    }]
+        false,
+        // …but choosable, which is what `implicit` says. It is the one storage
+        // backend that needs no account created first, because the account is
+        // the one every device already has. Without this the sync form would
+        // have dropped it and "a folder on this device" would have stopped
+        // being an answer at onboarding.
+        true,
+    )]
 }
 
 /// The schema that describes a built-in kind's storage settings.
@@ -243,15 +259,73 @@ fn open_sync_inner(
     )))
 }
 
+/// What to call the adapter behind one `adapter_kind`, resolved in `lang`:
+/// the descriptive name and the compact one.
+///
+/// This is what an ACCOUNT ROW is labelled from, and it is deliberately not the
+/// same lookup as [`all_adapter_kinds`]. That one answers "which adapters can
+/// this build offer" — a list, fetched once, filtered to what is usable. A row
+/// asks something narrower and harder: "what is THIS account's adapter called",
+/// and it has to have an answer every time the row is drawn.
+///
+/// So this reaches further than the picker's list does, in two directions:
+///
+/// - **Built-in first.** The store and the device adapter are never plugins;
+///   their manifests are compiled in and cannot be absent.
+/// - **`any_plugin_for_adapter_kind`, not `plugin_for_adapter_kind`.** The
+///   second hides DISABLED plugins, and a disabled plugin's accounts are
+///   exactly the rows that stay on screen saying "plugin missing". The manager
+///   still holds the manifest; declining to read the name out of it would put a
+///   machine string in front of the reader at the one moment they most need a
+///   word they recognise.
+///
+/// - **Failed loads last.** A plugin whose library would not open parsed its
+///   manifest on the way, and the manager kept it. A name needs nothing else.
+///
+/// The last stop is the kind itself. It is reached when the plugin is genuinely
+/// gone — uninstalled, its manifest with it — and then nothing anywhere knows
+/// what that adapter called itself. The row says so in its own words.
+pub fn kind_name_for(
+    manager: &plugin_core::PluginManager,
+    adapter_kind: &str,
+    lang: &str,
+) -> (String, String) {
+    for manifest in builtin_manifests() {
+        if manifest.serves_kind(adapter_kind) {
+            return plugin_core::resolve_kind_name(manifest, &manifest.strings, adapter_kind, lang);
+        }
+    }
+    if let Some(plugin) = manager.any_plugin_for_adapter_kind(adapter_kind) {
+        let strings = plugin_core::PluginManager::strings_for(&plugin, lang);
+        return plugin_core::resolve_kind_name(&plugin.manifest, &strings, adapter_kind, lang);
+    }
+    // A plugin whose LIBRARY would not load still parsed its manifest — the
+    // manager keeps it on the failed-load list for the plugins panel to explain
+    // — and a manifest is all a name needs. This is the desktop's ordinary
+    // breakage: a quarantined DLL, an ABI refusal after an update, a bundled
+    // adapter missing from the staged directory. The account rows stay on
+    // screen saying "plugin missing", and they can say it about something with
+    // a name.
+    for failed in manager.failed_loads() {
+        if let Some(manifest) = failed.manifest {
+            if manifest.serves_kind(adapter_kind) {
+                let strings = manifest.strings.clone();
+                return plugin_core::resolve_kind_name(&manifest, &strings, adapter_kind, lang);
+            }
+        }
+    }
+    (adapter_kind.to_string(), adapter_kind.to_string())
+}
+
 /// The plugin kinds plus the built-in ones, sorted and deduplicated the same
 /// way `adapter_kinds()` does its own.
 ///
 /// The one call both hosts make. Keeping the merge here rather than in each
 /// host is the point: a third built-in adapter appears on both platforms by
 /// being added above.
-pub fn all_adapter_kinds(manager: &plugin_core::PluginManager) -> Vec<AdapterKindInfo> {
-    let mut kinds = manager.adapter_kinds();
-    for builtin in builtin_adapter_kinds() {
+pub fn all_adapter_kinds(manager: &plugin_core::PluginManager, lang: &str) -> Vec<AdapterKindInfo> {
+    let mut kinds = manager.adapter_kinds(lang);
+    for builtin in builtin_adapter_kinds(lang) {
         // A plugin claiming a built-in kind cannot be registered anyway
         // (`AdapterKind::is_host_internal` short-circuits it), so the built-in
         // declaration is the truth and a colliding entry is dropped rather
@@ -267,6 +341,39 @@ pub fn all_adapter_kinds(manager: &plugin_core::PluginManager) -> Vec<AdapterKin
 mod tests {
     use super::*;
     use crate::accounts::AdapterKind;
+
+    /// A plugin whose library will not open still names its own accounts.
+    ///
+    /// The desktop populates its manager purely by `dlopen`, so a quarantined
+    /// DLL, an ABI refusal after an update, or a staging directory that was
+    /// never filled all end the same way: the manifest parses, the library does
+    /// not open, and the plugin is not registered. Those accounts stay on
+    /// screen — they are the rows that say "plugin missing" — and this is what
+    /// keeps them from saying it about `caldav` instead of about CalDAV.
+    #[test]
+    fn a_plugin_whose_library_would_not_open_still_names_its_accounts() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let plugin_dir = dir.path().join("com.aperio.cal-adapter-caldav");
+        std::fs::create_dir_all(&plugin_dir).expect("plugin dir");
+        // The manifest as it ships, and no library beside it.
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            adapter_caldav_plugin::MANIFEST,
+        )
+        .expect("write manifest");
+
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let errors = manager.scan_dir(dir.path());
+        assert!(
+            !errors.is_empty(),
+            "the library is missing, so the load fails"
+        );
+        assert_eq!(manager.len(), 0, "nothing was registered");
+
+        let (name, short) = kind_name_for(&manager, "caldav", "de");
+        assert_ne!(name, "caldav", "a failed load still parsed its manifest");
+        assert_eq!(short, "CalDAV");
+    }
 
     /// The two host-internal kinds are persisted in `accounts.adapter_kind` and
     /// declared in a manifest, and the two spellings must be the same one.
@@ -299,7 +406,7 @@ mod tests {
     /// about the operating system.
     #[test]
     fn the_device_adapter_declares_itself_without_joining_the_builtin_list() {
-        let info = device_adapter_kind_info();
+        let info = device_adapter_kind_info("en");
         assert_eq!(info.kind, "device_calendar");
         assert!(!info.can_sync, "the phone's own store holds no dataset");
         assert!(info.owns_containers, "it owns calendars and reminder lists");
@@ -308,7 +415,9 @@ mod tests {
             "it exists only once access has been granted"
         );
         assert!(
-            !builtin_adapter_kinds().iter().any(|k| k.kind == info.kind),
+            !builtin_adapter_kinds("en")
+                .iter()
+                .any(|k| k.kind == info.kind),
             "device_calendar must not appear in the built-in list — it is \
              platform-conditional and permission-gated, and the mobile accounts \
              screen offers it on its own terms",
@@ -319,10 +428,22 @@ mod tests {
     /// shipped manifest rather than restated here.
     #[test]
     fn the_built_in_store_declares_itself() {
-        let kinds = builtin_adapter_kinds();
-        assert_eq!(kinds.len(), 1);
-        let local = &kinds[0];
-        assert_eq!(local.kind, "local");
+        let kinds = builtin_adapter_kinds("en");
+        let local = kinds
+            .iter()
+            .find(|k| k.kind == "local")
+            .expect("the built-in store declares its own kind");
+
+        // Its adopted kind deliberately stays OUT of this list. A row written
+        // under the folder sync's old name is named by `kind_name_for`, which
+        // reads the manifest; listing the kind here would hand it the store's
+        // capability flags, and `holds_data` is what the sidebar filters
+        // account branches on.
+        assert!(
+            !kinds.iter().any(|k| k.kind == "local_folder"),
+            "an adopted kind must not inherit the store's data flags",
+        );
+        assert_eq!(kinds.len(), 1, "the store's own kind, and nothing else");
         assert!(local.holds_data, "it holds calendars, tasks and contacts");
         assert!(local.owns_containers);
         assert!(
@@ -345,7 +466,8 @@ mod tests {
     #[test]
     fn the_declared_kind_is_the_one_the_host_reserves() {
         assert!(
-            crate::accounts::AdapterKind::new(&builtin_adapter_kinds()[0].kind).is_host_internal()
+            crate::accounts::AdapterKind::new(&builtin_adapter_kinds("en")[0].kind)
+                .is_host_internal()
         );
     }
 
@@ -354,7 +476,7 @@ mod tests {
     #[test]
     fn the_merged_list_is_sorted_and_contains_both_halves() {
         let manager = plugin_core::PluginManager::new("0.1.0");
-        let merged = all_adapter_kinds(&manager);
+        let merged = all_adapter_kinds(&manager, "en");
         assert!(merged.iter().any(|k| k.kind == "local"));
         let mut sorted = merged.clone();
         sorted.sort_by(|a, b| a.kind.cmp(&b.kind));

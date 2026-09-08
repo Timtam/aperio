@@ -85,6 +85,12 @@ export interface AccountNode {
   /** "local" / "caldav" / "google" / ... — used by the UI to show
    *  a small badge or icon hint. */
   adapterKind: string;
+  /** What that adapter calls itself, as the backend resolved it on the account
+   *  row. Carried through the tree so a branch is labelled without a second
+   *  lookup that could be late, fail, or hide a disabled plugin — see
+   *  `Account.kind_name`. Falls back to the kind, which is what an account
+   *  whose plugin is gone can honestly be called. */
+  kindName: string;
   /** When the account has no children yet (just registered, lists
    *  still loading), `children` is empty and `isEmpty` is true. */
   isEmpty: boolean;
@@ -320,6 +326,7 @@ export function buildSidebarTree(input: {
       accountId: acc.id,
       displayName: acc.display_name,
       adapterKind: acc.adapter_kind,
+      kindName: acc.kind_name || acc.adapter_kind,
       isEmpty: sections.length === 0,
       children: sections,
     };

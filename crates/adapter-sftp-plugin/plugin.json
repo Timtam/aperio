@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for SFTP servers — password or SSH-key auth, host-key pinning via pre-validated fingerprint.",
   "adapter_kind": "sftp",
+  "kind_names": {
+    "sftp": {
+      "name": "SFTP (file transfer over SSH)",
+      "name_key": "kind.sftp.name",
+      "short_name": "SFTP",
+      "short_name_key": "kind.sftp.short"
+    }
+  },
   "signed": false,
   "account": {
     "host_key_pin": {
@@ -122,7 +130,9 @@
       "account.port.hint": "22 unless the server listens on a different port.",
       "account.port.label": "Port",
       "account.user.hint": "Your SSH login name on that server — the part before the @ in ssh anna@backup.example.com.",
-      "account.user.label": "Username"
+      "account.user.label": "Username",
+      "kind.sftp.name": "SFTP (file transfer over SSH)",
+      "kind.sftp.short": "SFTP"
     },
     "de": {
       "account.auth_method.hint": "Passwort oder ein SSH-Schlüssel auf diesem Gerät. Die Wahl gilt nur für dieses Gerät — ein anderes Gerät kann sich am selben Server anders anmelden.",
@@ -142,7 +152,9 @@
       "account.port.hint": "22, sofern der Server nicht auf einem anderen Port lauscht.",
       "account.port.label": "Port",
       "account.user.hint": "Dein SSH-Anmeldename auf diesem Server — der Teil vor dem @ in ssh anna@backup.example.com.",
-      "account.user.label": "Benutzername"
+      "account.user.label": "Benutzername",
+      "kind.sftp.name": "SFTP (Dateiübertragung über SSH)",
+      "kind.sftp.short": "SFTP"
     }
   }
 }

@@ -204,7 +204,7 @@ fn every_bundled_adapter_answers_both_picker_questions() {
     let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
     host_plugins::register_all_static(&manager).expect("all bundled plugins register");
 
-    let kinds = manager.adapter_kinds();
+    let kinds = manager.adapter_kinds("en");
     assert!(!kinds.is_empty(), "no adapter kinds at all");
 
     for info in &kinds {
@@ -273,7 +273,7 @@ fn every_bundled_adapter_answers_both_picker_questions() {
     // it is the one place a dataset can live without an account of its own —
     // and the only entry that answers both questions while being creatable by
     // nobody, because it is already there.
-    let builtin = host_core::builtin_adapters::builtin_adapter_kinds();
+    let builtin = host_core::builtin_adapters::builtin_adapter_kinds("en");
     let local = builtin
         .iter()
         .find(|k| k.kind == "local")

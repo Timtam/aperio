@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for WebDAV servers — Nextcloud, ownCloud, Apache mod_dav, IIS WebDAV, …",
   "adapter_kind": "webdav",
+  "kind_names": {
+    "webdav": {
+      "name": "WebDAV (Nextcloud, ownCloud, …)",
+      "name_key": "kind.webdav.name",
+      "short_name": "WebDAV",
+      "short_name_key": "kind.webdav.short"
+    }
+  },
   "signed": false,
   "account": {
     "fields": [
@@ -46,7 +54,9 @@
       "account.url.hint": "Full URL of the folder Aperio syncs into, for example https://cloud.example.com/remote.php/dav/files/anna/aperio/. That folder must already exist; Aperio creates only its own subfolders inside it.",
       "account.url.label": "Folder URL",
       "account.user.hint": "Optional: leave it blank for a server that serves this folder without authentication. Otherwise the account name of the WebDAV share, which is not always your e-mail address.",
-      "account.user.label": "Username"
+      "account.user.label": "Username",
+      "kind.webdav.name": "WebDAV (Nextcloud, ownCloud, …)",
+      "kind.webdav.short": "WebDAV"
     },
     "de": {
       "account.password.hint": "Optional und nur zusammen mit einem Benutzernamen sinnvoll. Wird als HTTP-Basic-Authentifizierung gesendet, also eine https-Adresse verwenden. Wo der Anbieter App-Passwörter kennt, eines davon nehmen (Nextcloud: Einstellungen, Sicherheit). Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
@@ -54,7 +64,9 @@
       "account.url.hint": "Vollständige URL des Ordners, in den Aperio synchronisiert, etwa https://cloud.example.com/remote.php/dav/files/anna/aperio/. Dieser Ordner muss bereits existieren; Aperio legt darin nur seine eigenen Unterordner an.",
       "account.url.label": "Ordner-URL",
       "account.user.hint": "Optional: leer lassen, wenn der Server den Ordner ohne Anmeldung ausliefert. Sonst der Kontoname der WebDAV-Freigabe, der nicht immer die E-Mail-Adresse ist.",
-      "account.user.label": "Benutzername"
+      "account.user.label": "Benutzername",
+      "kind.webdav.name": "WebDAV (Nextcloud, ownCloud, …)",
+      "kind.webdav.short": "WebDAV"
     }
   }
 }

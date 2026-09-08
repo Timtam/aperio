@@ -175,6 +175,21 @@ export default function AccountsScreen() {
   // Which adapters this build can connect, straight from the host — the picker
   // does not carry the list, because installed plugins decide it.
   const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
+  /** Everything the host reported, host-internal kinds included.
+   *
+   *  {@link availableKinds} is the half a user can act on; this is the half a
+   *  row is NAMED from. Filtering it here would put the app back in the
+   *  business of knowing what "local" or "this device" is called. */
+  const [namedKinds, setNamedKinds] = useState<AdapterKindInfo[]>([]);
+  /** The phone's own store, named by its own manifest like every other
+   *  adapter. Whether to OFFER it is a question about the OS and a permission,
+   *  which `DEVICE_KIND_AVAILABLE` answers; what to CALL it is not.
+   *
+   *  Absent until the listing lands, and it stays absent if that call fails —
+   *  which is why the entry it labels is only drawn once it is here. A button
+   *  that announced itself as "device_calendar" would be worse than one the
+   *  screen honestly does not offer yet. */
+  const deviceKind = namedKinds.find((k) => k.kind === 'device_calendar');
   // Data-account kinds whose plugin is loaded: only those get the Edit
   // action (sync-only backends are edited on the Sync screen, and a
   // missing plugin has no schema to render).
@@ -221,8 +236,8 @@ export default function AccountsScreen() {
   const load = useCallback(async () => {
     try {
       const [accs, missing] = await Promise.all([
-        listAccounts(),
-        listAccountsMissingCredentials(),
+        listAccounts(i18n.language),
+        listAccountsMissingCredentials(i18n.language),
       ]);
       setAccounts(accs);
       setMissingIds(new Set(missing.map((a) => a.id)));
@@ -233,7 +248,9 @@ export default function AccountsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [announce, t]);
+    // The language is part of the request: each row carries its own
+    // adapter's name, resolved by the backend in the language asked for.
+  }, [announce, t, i18n.language]);
 
   useEffect(() => {
     void load();
@@ -241,9 +258,13 @@ export default function AccountsScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    listAdapterKinds()
+    listAdapterKinds(i18n.language)
       .then((kinds) => {
         if (!cancelled) {
+          // Everything the host reported, host-internal kinds included: this is
+          // what a row is NAMED from, and the built-in store and the device
+          // store have rows like any other adapter.
+          setNamedKinds(kinds);
           // Storage backends belong here too. Deliberately NOT filtered on
           // `offered`: this list also answers questions ABOUT existing
           // accounts (the repair mode below), so an account whose kind its
@@ -261,7 +282,9 @@ export default function AccountsScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-run when the language changes: each adapter names its own kinds,
+    // so the answer is only in the language it was asked for.
+  }, [i18n.language]);
 
   // Move screen-reader focus to the newly created row once the list re-renders.
   useEffect(() => {
@@ -810,7 +833,7 @@ export default function AccountsScreen() {
         <View accessibilityRole="list" style={styles.list}>
           {accounts.map((account) => {
             const isLocal = account.adapter_kind === 'local';
-            const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
+            const kindName = account.kind_name || account.adapter_kind;
             const missing = missingIds.has(account.id);
             // Whether a repair is a paste or a sign-in is the ADAPTER's
             // statement, carried on the kind listing. Unknown kinds (a plugin
@@ -1081,9 +1104,7 @@ export default function AccountsScreen() {
         {availableKinds
           .filter((entry) => entry.offered)
           .map((entry) => {
-          const label = t(`dialogs.accounts.kindName.${entry.kind}`, {
-            defaultValue: entry.name,
-          });
+          const label = entry.name;
           return (
             <Pressable
               key={entry.kind}
@@ -1099,19 +1120,17 @@ export default function AccountsScreen() {
             </Pressable>
           );
         })}
-        {DEVICE_KIND_AVAILABLE && (
+        {DEVICE_KIND_AVAILABLE && deviceKind && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t('dialogs.accounts.kindName.device_calendar')}
+            accessibilityLabel={deviceKind.name}
             onPress={() => onPickProvider('device_calendar')}
             style={({ pressed }) => [
               styles.secondaryButton,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.secondaryButtonText}>
-              {t('dialogs.accounts.kindName.device_calendar')}
-            </Text>
+            <Text style={styles.secondaryButtonText}>{deviceKind.name}</Text>
           </Pressable>
         )}
       </AppDialog>
@@ -1125,9 +1144,10 @@ export default function AccountsScreen() {
           editingAccountId != null
             ? t('dialogs.accounts.editTitle', { name: editingAccountName })
             : schemaKind
-              ? t(`dialogs.accounts.kindName.${schemaKind}`, {
-                  defaultValue: schemaKind,
-                })
+              ? // The kind was picked from the listing a moment ago, so its
+                // entry is there; the empty string is the type's problem, not a
+                // case a user reaches.
+                (namedKinds.find((k) => k.kind === schemaKind)?.name ?? '')
               : ''
         }
         confirmLabel={
@@ -1216,7 +1236,7 @@ export default function AccountsScreen() {
 
       <AppDialog
         visible={mode === 'device'}
-        title={t('dialogs.accounts.kindName.device_calendar')}
+        title={deviceKind?.name ?? ''}
         confirmLabel={t('dialogs.accounts.deviceGrantButton')}
         cancelLabel={t('mobile.cancel')}
         onConfirm={() => void addDevice()}

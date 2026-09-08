@@ -9,6 +9,12 @@
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Vikunja (self-hosted or hosted instance, REST API).",
   "adapter_kind": "vikunja",
+  "kind_names": {
+    "vikunja": {
+      "name": "Vikunja",
+      "name_key": "kind.vikunja.name"
+    }
+  },
   "signed": false,
   "tasks": {
     "task_span": true,
@@ -59,13 +65,15 @@
       "account.server_url.hint": "The base URL of your Vikunja instance — just the server root, no path. Aperio detects the API version and appends the path itself.",
       "account.server_url.label": "Vikunja server URL",
       "account.token.hint": "Create a token in Vikunja under Settings → API Tokens. The token never leaves your system keychain after you press \"Add\".",
-      "account.token.label": "API token"
+      "account.token.label": "API token",
+      "kind.vikunja.name": "Vikunja"
     },
     "de": {
       "account.server_url.hint": "Die Basis-URL deiner Vikunja-Instanz – nur der Server-Stamm, ohne Pfad. Aperio erkennt die API-Version und hängt den Pfad selbst an.",
       "account.server_url.label": "Vikunja-Server-URL",
       "account.token.hint": "Erzeuge ein Token in Vikunja unter Einstellungen → API-Tokens. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
-      "account.token.label": "API-Token"
+      "account.token.label": "API-Token",
+      "kind.vikunja.name": "Vikunja"
     }
   }
 }

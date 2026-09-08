@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled Microsoft Graph adapter — Outlook calendars, Microsoft To Do tasks and Outlook contacts (Microsoft 365 / Exchange Online).",
   "adapter_kind": "microsoft_graph",
+  "kind_names": {
+    "microsoft_graph": {
+      "name": "Microsoft (Outlook / To Do)",
+      "name_key": "kind.microsoft_graph.name",
+      "short_name": "Microsoft 365",
+      "short_name_key": "kind.microsoft_graph.short"
+    }
+  },
   "signed": false,
   "tasks": {
     "task_time_of_day": false,
@@ -48,13 +56,17 @@
       "account.authority.hint": "Must match your Azure app registration's \"supported account types\". Enter \"common\" for all Microsoft accounts (personal + work/school), \"consumers\" for personal Microsoft accounts only (outlook.com, hotmail.com, live.com), \"organizations\" for work/school accounts only — or your tenant ID. \"common\" is usually right.",
       "account.authority.label": "Account type",
       "account.client_id.hint": "From the Azure portal (Entra ID → App registrations → your app → Application (client) ID). Register the app as type \"Public client/native (mobile & desktop)\" with redirect URI \"http://localhost\". It looks like 12345678-1234-1234-1234-123456789abc.",
-      "account.client_id.label": "Microsoft Application (Client) ID"
+      "account.client_id.label": "Microsoft Application (Client) ID",
+      "kind.microsoft_graph.name": "Microsoft (Outlook / To Do)",
+      "kind.microsoft_graph.short": "Microsoft 365"
     },
     "de": {
       "account.authority.hint": "Muss zu deiner Azure-App-Registrierung passen — „Supported account types\". Trage „common\" ein für alle Microsoft-Konten (privat + geschäftlich), „consumers\" für nur private Microsoft-Konten (outlook.com, hotmail.com, live.com), „organizations\" für nur Schul- / Arbeitskonten — oder die ID deines Tenants. „common\" ist meist die richtige Wahl.",
       "account.authority.label": "Konto-Typ",
       "account.client_id.hint": "Aus dem Azure-Portal (Entra ID → App registrations → deine App → Application (client) ID). Lege die App als Typ „Public client/native (mobile & desktop)\" an, Redirect-URI auf „http://localhost\". Sie sieht aus wie 12345678-1234-1234-1234-123456789abc.",
-      "account.client_id.label": "Microsoft Application (Client) ID"
+      "account.client_id.label": "Microsoft Application (Client) ID",
+      "kind.microsoft_graph.name": "Microsoft (Outlook / To Do)",
+      "kind.microsoft_graph.short": "Microsoft 365"
     }
   }
 }

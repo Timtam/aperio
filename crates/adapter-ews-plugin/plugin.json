@@ -13,6 +13,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled Exchange Web Services adapter for on-premise Exchange and Exchange-alike servers (Kerio Connect, Zimbra-with-EWS).",
   "adapter_kind": "ews",
+  "kind_names": {
+    "ews": {
+      "name": "Exchange on-premise (EWS)",
+      "name_key": "kind.ews.name",
+      "short_name": "Exchange (EWS)",
+      "short_name_key": "kind.ews.short"
+    }
+  },
   "signed": false,
   "recurrence": {
     "interval_frequencies": [
@@ -108,7 +116,9 @@
       "account.password.hint": "The password of your Exchange mailbox. EWS authenticates with HTTP Basic on every request; the password is stored only in your operating system's credential store.",
       "account.password.label": "Password",
       "account.username.hint": "Usually your full email address, but some servers want DOMAIN\\username. Ask your admin if unsure.",
-      "account.username.label": "Username"
+      "account.username.label": "Username",
+      "kind.ews.name": "Exchange on-premise (EWS)",
+      "kind.ews.short": "Exchange (EWS)"
     },
     "de": {
       "account.action.discover.busy": "Suche …",
@@ -122,7 +132,9 @@
       "account.password.hint": "Das Passwort deines Exchange-Postfachs. EWS meldet sich bei jeder Anfrage per HTTP-Basic an; das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
       "account.password.label": "Passwort",
       "account.username.hint": "Meist deine vollständige E-Mail-Adresse, manche Server wollen aber DOMAIN\\Benutzername. Bei Unsicherheit den Admin fragen.",
-      "account.username.label": "Benutzername"
+      "account.username.label": "Benutzername",
+      "kind.ews.name": "Exchange On-Premise (EWS)",
+      "kind.ews.short": "Exchange (EWS)"
     }
   }
 }

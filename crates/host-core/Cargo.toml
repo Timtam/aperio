@@ -72,6 +72,9 @@ adapter-webex-plugin = { path = "../adapter-webex-plugin" }
 # The sync-target connect/migrate tests assert against the field keys the SYNC
 # adapters actually declare, so they read each one's shipped manifest. Same
 # reason as WebDAV above; these four are the remaining kinds those tests cover.
+# The failed-load naming test needs one real manifest to stage; CalDAV is the
+# adapter whose accounts most often outlive a broken library.
+adapter-caldav-plugin = { path = "../adapter-caldav-plugin" }
 adapter-google-plugin = { path = "../adapter-google-plugin" }
 adapter-sftp-plugin = { path = "../adapter-sftp-plugin" }
 adapter-ftp-plugin = { path = "../adapter-ftp-plugin" }

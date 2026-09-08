@@ -3402,6 +3402,79 @@ Zwei Tests halten das fest (`crates/host-plugins/tests/manifest_reach.rs`):
 keine Quelle greift auf das Manifest einer anderen Kiste zu, und keine Kiste mit
 `plugin.json` vergisst, es zu exportieren.
 
+#### Wie ein Adapter heißt
+
+Den Anzeigenamen einer `adapter_kind` deklariert **der Adapter**, in seinem
+Manifest, pro Kind das er beansprucht — eigenes wie adoptiertes:
+
+```json
+"kind_names": {
+  "caldav": {
+    "name": "CalDAV (iCloud, Nextcloud, …)",
+    "name_key": "kind.caldav.name",
+    "short_name": "CalDAV",
+    "short_name_key": "kind.caldav.short"
+  }
+}
+```
+
+Dieselbe Form wie jedes andere Label im Manifest: wörtlicher Text plus ein
+optionaler Schlüssel in `strings`, aufgelöst von `resolve_label`. Zwei Namen,
+weil die App immer zwei hatte und sie sich nicht auseinander herleiten lassen —
+der lange beschreibt (Kontozeile, Konto-hinzufügen-Auswahl), der kurze
+identifiziert (dichte Listen). „Exchange on-premise (EWS)" gegen „Exchange
+(EWS)" ist der Fall, an dem jede Herleitung scheitert.
+
+`PluginManager::adapter_kinds(lang)` löst beide auf und legt sie in
+`AdapterKindInfo`; die Frontends lesen sie von dort und halten **keine** Tabelle
+von Anbieternamen mehr.
+
+**Eine Kontozeile fragt anders als ein Picker.** Ein Picker baut sich aus einer
+Liste, die einmal geholt wird und gefiltert ist — was nicht angeboten werden
+kann, fehlt darin zu Recht. Eine Zeile wird gezeichnet, ob ihr Plugin gerade
+ladbar ist oder nicht, und sie wird für jemanden gezeichnet, der sie *hört*.
+Darum trägt jede Kontozeile ihren Namen selbst: `list_accounts` liefert
+`kind_name` + `kind_short_name`, aufgelöst von
+`host_core::builtin_adapters::kind_name_for`. Das ist bewusst eine andere
+Auflösung als die Liste:
+
+- eingebaute Adapter zuerst — ihre Manifeste sind einkompiliert und können nicht
+  fehlen;
+- dann `any_plugin_for_adapter_kind`, **nicht** `plugin_for_adapter_kind`: das
+  zweite verbirgt DEAKTIVIERTE Plugins, und genau deren Konten sind die Zeilen,
+  die stehen bleiben und „Plugin fehlt" sagen. Der Manager hält das Manifest
+  weiter; den Namen daraus nicht zu lesen hieße, dem Leser ausgerechnet dort
+  eine Maschinenzeichenkette vorzusetzen, wo er ein Wort braucht.
+
+- zuletzt die **fehlgeschlagenen Ladevorgänge**: ein Plugin, dessen Bibliothek
+  sich nicht öffnen ließ, hat sein Manifest unterwegs trotzdem gelesen, und der
+  Manager hebt es auf. Mehr braucht ein Name nicht. Das ist der gewöhnliche
+  Desktop-Schaden — eine in Quarantäne verschobene DLL, eine ABI-Absage nach
+  einem Update, ein leeres `plugins/bundled/`.
+
+Letzte Station ist der kind selbst — erreicht, wenn das Plugin wirklich
+deinstalliert ist und sein Manifest mit ihm. Dann weiß nirgends jemand, wie
+dieser Adapter hieß, und die Zeile sagt das mit eigenen Worten.
+
+Dieselbe Anreicherung trägt `list_accounts_missing_credentials`: seine Zeilen
+gehen unverändert in den Wiederverbinden-Dialog, den die Wiederherstellung beim
+ersten Start öffnet — je Konto eine.
+
+**Warum das nicht in `locales/` bleiben konnte.** Dort lag es, unter
+`dialogs.accounts.kindName.<kind>`. Damit konnte nur Aperio einen Adapter
+benennen: ein fremder Adapter ließ sich installieren, laden, verbinden und
+synchronisieren — und seine Kontozeilen hätten trotzdem auf einen Eintrag
+gewartet, den jemand in Aperios Übersetzungsdateien nachträgt. Ein Kind ohne
+Eintrag war nicht bloß namenlos: i18next gibt einen fehlenden Schlüssel als den
+Schlüssel zurück, ein Screenreader las also „dialogs Punkt accounts Punkt kind
+name Punkt googledrive" vor, einmal pro Konto, ohne dass auf dem Bildschirm
+etwas falsch aussah.
+
+Zwei Wächter halten das: jedes Kind hat in jeder Sprache, die sein Adapter
+spricht, einen eigenen Namen — eine Eigenschaft EINES Manifests, die ein Adapter
+in einem eigenen Repository über sich selbst behaupten kann — und die App
+trägt keine Adapternamen mehr.
+
 #### Wonach die Tests fragen
 
 Was ein Adapter *verspricht* — welche Kind-Zeichenkette er beansprucht, ob er

@@ -2304,7 +2304,13 @@ impl Host {
     /// the editor's "create meeting" control without a change here or in the
     /// UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
     /// same on both platforms.
-    pub fn accounts_json(&self) -> Result<String, StoreError> {
+    ///
+    /// `kind_name` rides on the row rather than being looked up from the
+    /// adapter-kind listing: that listing arrives later than the rows, can
+    /// fail, and hides disabled plugins, and a row drawn without a name reads
+    /// out its kind string instead. Empty `lang` means English.
+    pub fn accounts_json(&self, lang: Option<String>) -> Result<String, StoreError> {
+        let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         let accounts = repo.list().map_err(acc_err)?;
@@ -2319,10 +2325,17 @@ impl Host {
                         .has_capability(&plugin_core::Capability::Videoconference)
                 });
                 let plugin_loaded = account.adapter_kind.is_host_internal() || plugin.is_some();
+                let (kind_name, kind_short_name) = host_core::builtin_adapters::kind_name_for(
+                    &self.plugin_manager,
+                    account.adapter_kind.as_str(),
+                    lang,
+                );
                 let mut value = serde_json::to_value(&account).unwrap_or(serde_json::Value::Null);
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("plugin_loaded".into(), plugin_loaded.into());
                     obj.insert("is_videoconference".into(), is_videoconference.into());
+                    obj.insert("kind_name".into(), kind_name.into());
+                    obj.insert("kind_short_name".into(), kind_short_name.into());
                 }
                 value
             })
@@ -2691,7 +2704,15 @@ impl Host {
     /// errs toward letting the user re-authenticate). The local account and
     /// secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
     /// Mirrors the desktop `list_accounts_missing_credentials`.
-    pub fn list_accounts_missing_credentials_json(&self) -> Result<String, StoreError> {
+    ///
+    /// Each row carries `kind_name`, like the account listing: these rows are
+    /// drawn one per account in the reconnect dialog the restore flow opens,
+    /// and a row without a name reads out its kind string.
+    pub fn list_accounts_missing_credentials_json(
+        &self,
+        lang: Option<String>,
+    ) -> Result<String, StoreError> {
+        let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         let all = repo.list().map_err(acc_err)?;
@@ -2736,7 +2757,23 @@ impl Host {
                 out.push(acc);
             }
         }
-        to_json(&out)
+        let named: Vec<serde_json::Value> = out
+            .into_iter()
+            .map(|account| {
+                let (kind_name, kind_short_name) = host_core::builtin_adapters::kind_name_for(
+                    &self.plugin_manager,
+                    account.adapter_kind.as_str(),
+                    lang,
+                );
+                let mut value = serde_json::to_value(&account).unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("kind_name".into(), kind_name.into());
+                    obj.insert("kind_short_name".into(), kind_short_name.into());
+                }
+                value
+            })
+            .collect();
+        to_json(&named)
     }
 
     /// (Re-)store the secret half of a NON-OAuth account's credentials — the
@@ -8411,10 +8448,24 @@ impl Host {
     /// [`host_core::builtin_adapters`]. The device calendar does not: it exists
     /// only where the native bridge does and is added by granting a permission,
     /// so the accounts screen offers it on its own terms.
-    pub fn list_adapter_kinds_json(&self) -> Result<String, StoreError> {
-        to_json(&host_core::builtin_adapters::all_adapter_kinds(
-            &self.plugin_manager,
-        ))
+    ///
+    /// `lang` names the kinds: an adapter names its own now
+    /// (`PluginManifest::kind_names`), so the answer is only as good as the
+    /// language it was asked in. `None` means English, the same arrangement
+    /// `account_form_spec_json` next door uses.
+    pub fn list_adapter_kinds_json(&self, lang: Option<String>) -> Result<String, StoreError> {
+        let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
+        let mut kinds = host_core::builtin_adapters::all_adapter_kinds(&self.plugin_manager, lang);
+        // The phone's own store rides along HERE and not in the shared merge:
+        // it exists only where this bridge does, and the desktop asking the
+        // same question must not be told about a kind it can never serve. The
+        // screen still decides whether to OFFER it — that is a question about
+        // the operating system and a permission — but an account already
+        // carrying the kind needs a name whatever the answer is, and the name
+        // comes from its manifest like every other adapter's.
+        kinds.push(host_core::builtin_adapters::device_adapter_kind_info(lang));
+        kinds.sort_by(|a, b| a.kind.cmp(&b.kind));
+        to_json(&kinds)
     }
 
     /// Begin a schema-driven OAuth sign-in: build the consent URL for the
@@ -9629,7 +9680,7 @@ mod tests {
     #[test]
     fn fresh_host_lists_only_the_seeded_local_account() {
         let (_dir, host, _kc) = open_host();
-        let json = host.accounts_json().unwrap();
+        let json = host.accounts_json(None).unwrap();
         // Migration 0003 seeds the implicit local account.
         assert!(json.contains("\"adapter_kind\":\"local\""), "got: {json}");
     }
@@ -9666,7 +9717,7 @@ mod tests {
         assert!(created.contains("\"display_name\":\"Work CalDAV\""));
 
         // The account is listed.
-        let listed = host.accounts_json().unwrap();
+        let listed = host.accounts_json(None).unwrap();
         assert!(listed.contains("Work CalDAV"));
 
         // The secret reached the keychain bridge under the password slot.
@@ -9769,7 +9820,7 @@ mod tests {
             .any(|(_, slot)| slot == "api_token"));
 
         host.delete_account(account_id.clone()).unwrap();
-        let listed = host.accounts_json().unwrap();
+        let listed = host.accounts_json(None).unwrap();
         assert!(!listed.contains("Tasks"));
         // Secrets cleared for the account.
         assert!(kc
@@ -9808,7 +9859,7 @@ mod tests {
             renamed.contains("\"display_name\":\"New Name\""),
             "name is trimmed + persisted",
         );
-        assert!(host.accounts_json().unwrap().contains("New Name"));
+        assert!(host.accounts_json(None).unwrap().contains("New Name"));
 
         // Empty name → InvalidField.
         assert!(matches!(
@@ -9836,7 +9887,8 @@ mod tests {
 
         // With its password present, the account is NOT flagged.
         let missing: serde_json::Value =
-            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+            serde_json::from_str(&host.list_accounts_missing_credentials_json(None).unwrap())
+                .unwrap();
         assert!(missing.as_array().unwrap().is_empty());
 
         // Simulate the keychain losing the secret (token expiry / a row synced
@@ -9846,7 +9898,8 @@ mod tests {
             .unwrap()
             .remove(&(account_id.clone(), "password".to_string()));
         let missing: serde_json::Value =
-            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+            serde_json::from_str(&host.list_accounts_missing_credentials_json(None).unwrap())
+                .unwrap();
         assert!(missing
             .as_array()
             .unwrap()
@@ -9863,7 +9916,8 @@ mod tests {
             .iter()
             .any(|((acc, slot), v)| acc == &account_id && slot == "password" && v == "newpw"));
         let missing: serde_json::Value =
-            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+            serde_json::from_str(&host.list_accounts_missing_credentials_json(None).unwrap())
+                .unwrap();
         assert!(missing.as_array().unwrap().is_empty());
     }
 
@@ -10523,7 +10577,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let host = open_named(&dir, "select");
 
-        let before = host.accounts_json().unwrap();
+        let before = host.accounts_json(None).unwrap();
 
         // The connect path, with the built-in store's own declared field. No
         // account is created: `sync_target::connect` finds the implicit row.
@@ -10538,7 +10592,7 @@ mod tests {
         )
         .unwrap();
 
-        let after = host.accounts_json().unwrap();
+        let after = host.accounts_json(None).unwrap();
         assert_eq!(
             serde_json::from_str::<Vec<serde_json::Value>>(&before)
                 .unwrap()

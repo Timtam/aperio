@@ -126,7 +126,7 @@ export function SyncTargetAccountPicker({
   active,
   onChanged,
 }: SyncTargetAccountPickerProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const messageForError = useSyncErrorMessage();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
@@ -176,7 +176,7 @@ export function SyncTargetAccountPicker({
     try {
       const [accs, kinds] = await Promise.all([
         listAccounts(),
-        listAdapterKinds(),
+        listAdapterKinds(i18n.language),
       ]);
       setAccounts(accs);
       setSyncKinds(kinds.filter((k) => k.can_sync));
@@ -201,7 +201,9 @@ export function SyncTargetAccountPicker({
     } finally {
       setLoaded(true);
     }
-  }, []);
+    // Re-run when the language changes: each adapter names its own kinds,
+    // so the answer is only in the language it was asked for.
+  }, [i18n.language]);
 
   // Re-read on every focus, not just on mount: the "no accounts yet" route
   // below sends the user to the accounts screen to add one, and coming back is
@@ -247,13 +249,11 @@ export function SyncTargetAccountPicker({
       syncKinds
         .map((kind) => ({
           id: kind.kind,
-          label: t(`dialogs.accounts.kindName.${kind.kind}`, {
-            defaultValue: kind.name,
-          }),
+          label: kind.name,
           items: accounts.filter((a) => a.adapter_kind === kind.kind),
         }))
         .filter((group) => group.items.length > 0),
-    [accounts, syncKinds, t],
+    [accounts, syncKinds],
   );
 
   const currentAccount =

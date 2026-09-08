@@ -280,8 +280,8 @@ class CalFfiModule : Module() {
     // via the keychain bridge, and registers the adapter; a thrown
     // StoreException rejects the JS promise.
 
-    AsyncFunction("accountsJson") {
-      host.accountsJson()
+    AsyncFunction("accountsJson") { lang: String? ->
+      host.accountsJson(lang)
     }
 
     AsyncFunction("createAccountJson") { requestJson: String ->
@@ -323,8 +323,8 @@ class CalFfiModule : Module() {
       host.resetAccountSync(accountId)
     }
 
-    AsyncFunction("listAccountsMissingCredentialsJson") {
-      host.listAccountsMissingCredentialsJson()
+    AsyncFunction("listAccountsMissingCredentialsJson") { lang: String? ->
+      host.listAccountsMissingCredentialsJson(lang)
     }
 
     AsyncFunction("setAccountSecret") { accountId: String, secret: String ->
@@ -914,8 +914,8 @@ class CalFfiModule : Module() {
       host.eventMeetingJson(eventId, calendarId)
     }
 
-    AsyncFunction("listAdapterKindsJson") {
-      host.listAdapterKindsJson()
+    AsyncFunction("listAdapterKindsJson") { lang: String? ->
+      host.listAdapterKindsJson(lang)
     }
 
     AsyncFunction("accountFormSpecJson") { adapterKind: String, lang: String? ->

@@ -77,7 +77,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   // task bridge; each rejects with the store's typed error message on failure.
 
   /** All persisted accounts as a JSON `Account[]` (the desktop wire shape). */
-  accountsJson(): Promise<string>;
+  accountsJson(lang: string | null): Promise<string>;
   /**
    * Create an account from a JSON request (`adapter_kind`, `display_name`,
    * `config_json`, optional `secret`); persists the row, stores the secret via
@@ -115,7 +115,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   ): Promise<boolean>;
   /** External accounts whose required keychain secret is absent (the
    *  credential-repair banner data), as a JSON `Account[]`. */
-  listAccountsMissingCredentialsJson(): Promise<string>;
+  listAccountsMissingCredentialsJson(lang: string | null): Promise<string>;
   /** (Re-)store the secret half of a NON-OAuth account's credentials (CalDAV/EWS
    *  password or Vikunja/Todoist API token) and re-register its adapter. Rejects
    *  the local account, OAuth accounts (they must reconnect via OAuth), and an
@@ -564,7 +564,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The meeting Aperio created for this event, if any, as JSON. */
   eventMeetingJson(eventId: string, calendarId: string | null): Promise<string>;
 
-  listAdapterKindsJson(): Promise<string>;
+  listAdapterKindsJson(lang: string | null): Promise<string>;
   accountFormSpecJson(adapterKind: string, lang: string | null): Promise<string>;
   /** Begin a schema-driven OAuth sign-in. `valuesJson` is the form as filled so
    *  far, keyed by the schema's field keys; the host reads the credential pair

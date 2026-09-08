@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled read-only calendar adapter for .ics-feed URLs — public calendars, hosted .ics files, share links from Google/Apple/iCloud.",
   "adapter_kind": "ical",
+  "kind_names": {
+    "ical": {
+      "name": "iCal (URL / file)",
+      "name_key": "kind.ical.name",
+      "short_name": "iCal",
+      "short_name_key": "kind.ical.short"
+    }
+  },
   "signed": false,
   "account": {
     "fields": [
@@ -46,7 +54,9 @@
       "account.password.hint": "Leave blank unless the feed asks for one. Stored only in your operating system's credential store.",
       "account.password.label": "Password (optional)",
       "account.username.hint": "Only fill in if the feed requires HTTP Basic auth. Public feeds stay anonymous.",
-      "account.username.label": "Username (optional)"
+      "account.username.label": "Username (optional)",
+      "kind.ical.name": "iCal (URL / file)",
+      "kind.ical.short": "iCal"
     },
     "de": {
       "account.feed_url.hint": "Öffentliche .ics-Adresse. Lesezugriff — Termine aus diesem Feed können in Aperio nicht bearbeitet werden.",
@@ -54,7 +64,9 @@
       "account.password.hint": "Leer lassen, wenn der Feed keines verlangt. Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
       "account.password.label": "Passwort (optional)",
       "account.username.hint": "Nur ausfüllen, wenn der Feed Basic-Auth verlangt. Öffentliche Feeds bleiben anonym.",
-      "account.username.label": "Benutzername (optional)"
+      "account.username.label": "Benutzername (optional)",
+      "kind.ical.name": "iCal (URL / Datei)",
+      "kind.ical.short": "iCal"
     }
   }
 }

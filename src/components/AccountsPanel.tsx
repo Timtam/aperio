@@ -185,7 +185,7 @@ export function AccountsPanel() {
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    listAccounts()
+    listAccounts(i18n.language)
       .then(setAccounts)
       .catch((err) => {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
@@ -195,7 +195,7 @@ export function AccountsPanel() {
     // Re-probe the missing-credentials set in parallel. Failures
     // are logged but don't tank the panel — the banner is purely
     // additive, the list of accounts itself is what matters.
-    listAccountsMissingCredentials()
+    listAccountsMissingCredentials(i18n.language)
       .then((missing) =>
         setMissingIds(new Set(missing.map((acc) => acc.id))),
       )
@@ -204,7 +204,9 @@ export function AccountsPanel() {
         console.warn('list_accounts_missing_credentials failed', err);
         setMissingIds(new Set());
       });
-  }, []);
+    // The language is part of the request: each row carries its own
+    // adapter's name, resolved by the backend in the language asked for.
+  }, [i18n.language]);
 
   // The panel mounts when the user lands on its tab, so "on mount" is
   // the right moment to fetch — no need to gate on an `isOpen` flag any
@@ -218,7 +220,7 @@ export function AccountsPanel() {
   // disabling a plugin in Settings changes the answer.
   useEffect(() => {
     let cancelled = false;
-    listAdapterKinds()
+    listAdapterKinds(i18n.language)
       .then((kinds) => {
         if (cancelled) return;
         // Everything the host knows, including the storage backends. A sync
@@ -248,7 +250,7 @@ export function AccountsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [dataVersion]);
+  }, [dataVersion, i18n.language]);
 
   // Fetch the selected adapter's own connect form. Deferred to the moment a
   // kind is picked rather than fetched on mount: it is a question about one
@@ -924,7 +926,7 @@ export function AccountsPanel() {
                     aria-label={
                       t(rowLabelKey, {
                         name: acc.display_name,
-                        kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
+                        kind: acc.kind_name || acc.adapter_kind,
                       }) +
                       (errorsByAccount.has(acc.id)
                         ? ' ' +
@@ -981,7 +983,7 @@ export function AccountsPanel() {
                       </span>
                     )}
                     <span className="accounts-list__kind">
-                      {t(`dialogs.accounts.kindName.${acc.adapter_kind}`)}
+                      {acc.kind_name || acc.adapter_kind}
                     </span>
                     {needsPlugin && (
                       <span
@@ -1175,14 +1177,11 @@ export function AccountsPanel() {
                 value={kind}
                 onChange={(e) => setKind(e.target.value as AdapterKind)}
               >
-                {/* Whatever the host reported. A bundled adapter gets its
-                    translated name; anything else falls back to the plugin's
-                    own, which beats a missing-key marker. */}
+                {/* Whatever the host reported, named by the adapter that
+                    owns the kind — including one Aperio has never heard of. */}
                 {offeredKinds.map((entry) => (
                   <option key={entry.kind} value={entry.kind}>
-                    {t(`dialogs.accounts.kindName.${entry.kind}`, {
-                      defaultValue: entry.name,
-                    })}
+                    {entry.name}
                   </option>
                 ))}
               </select>

@@ -41,6 +41,16 @@ export interface Account {
    *  the UI knowing any provider names. Absent on rows that did not come from
    *  the account listing. */
   is_videoconference?: boolean;
+  /** What the adapter behind this row calls itself, resolved by the backend in
+   *  the language asked for.
+   *
+   *  On the ROW rather than looked up from the adapter-kind listing: that
+   *  listing arrives after the rows, can fail, and hides disabled plugins, and
+   *  a row drawn without a name reads out its kind string. See the desktop
+   *  twin. Absent on rows that did not come from the account listing. */
+  kind_name?: string;
+  /** The compact form of {@link kind_name}. */
+  kind_short_name?: string;
 }
 
 /** Create-account request — the desktop `CreateAccountRequest` wire shape. */
@@ -55,8 +65,8 @@ export interface CreateAccountRequest {
 }
 
 /** All persisted accounts, in creation order. */
-export const listAccounts = async (): Promise<Account[]> =>
-  JSON.parse(await CalFfi.accountsJson()) as Account[];
+export const listAccounts = async (lang?: string): Promise<Account[]> =>
+  JSON.parse(await CalFfi.accountsJson(lang ?? null)) as Account[];
 
 /** Create an account: persists the row, stores the secret via the keychain
  *  bridge, and registers the adapter. Rejects (typed store error) for OAuth
@@ -122,8 +132,12 @@ export const renameAccount = async (
  *  expired, or a row synced from another device without its device-local
  *  secret. The data behind the "reconnect" banner. (iCal feeds + the local
  *  account are never flagged.) */
-export const listAccountsMissingCredentials = async (): Promise<Account[]> =>
-  JSON.parse(await CalFfi.listAccountsMissingCredentialsJson()) as Account[];
+export const listAccountsMissingCredentials = async (
+  lang?: string,
+): Promise<Account[]> =>
+  JSON.parse(
+    await CalFfi.listAccountsMissingCredentialsJson(lang ?? null),
+  ) as Account[];
 
 /** (Re-)enter the secret for a NON-OAuth account — the CalDAV/EWS password or
  *  the Vikunja/Todoist API token — then re-register its adapter so it's live
@@ -197,9 +211,16 @@ export interface AdapterKindInfo {
    *  one storage backend needing no account created first — would drop out of
    *  the sync form, and "a folder on this device" would stop being an answer. */
   implicit: boolean;
-  /** The plugin's own display name — the label when the app has no translation
-   *  for this kind, which is the normal case for a third-party plugin. */
+  /** What to call this kind, resolved in the language asked for.
+   *
+   *  From the owning adapter's manifest — it names every kind it claims — and
+   *  from the plugin's own name when it does not. Either way it is text a
+   *  person can read: no surface holds a table of kind strings, and no adapter
+   *  needs an entry in Aperio's translation files to be nameable. */
   name: string;
+  /** The compact form of {@link name}, for surfaces showing many accounts at
+   *  once. Equal to `name` unless the manifest declares a shorter one. */
+  short_name: string;
   plugin_id: string;
   owns_containers: boolean;
   /** See the desktop twin. `holds_data` answers the Add-account picker's
@@ -216,10 +237,16 @@ export interface AdapterKindInfo {
 /** Every adapter this build can connect an account for.
  *
  *  Asked of the host rather than written into the UI: which adapters exist is
- *  decided by which plugins are embedded. Host-internal kinds (the local store,
- *  the device calendar) are not included — the screen adds those itself. */
-export const listAdapterKinds = async (): Promise<AdapterKindInfo[]> =>
-  JSON.parse(await CalFfi.listAdapterKindsJson()) as AdapterKindInfo[];
+ *  decided by which plugins are embedded. The built-in store and the phone's own
+ *  device store ARE included: an account row is not named from this list, but a
+ *  picker still has to be able to describe them.
+ *
+ *  `lang` names the kinds. Each adapter names its own, so the answer is only as
+ *  good as the language it was asked in — pass `i18n.language`. */
+export const listAdapterKinds = async (
+  lang?: string,
+): Promise<AdapterKindInfo[]> =>
+  JSON.parse(await CalFfi.listAdapterKindsJson(lang ?? null)) as AdapterKindInfo[];
 
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind

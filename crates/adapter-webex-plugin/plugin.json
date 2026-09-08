@@ -9,6 +9,12 @@
   "author": "Aperio Contributors",
   "description": "Generate Cisco WebEx meeting links via the WebEx Meetings REST API. Uses a separate WebEx OAuth flow per account.",
   "adapter_kind": "webex",
+  "kind_names": {
+    "webex": {
+      "name": "Cisco Webex",
+      "name_key": "kind.webex.name"
+    }
+  },
   "signed": false,
   "account": {
     "fields": [
@@ -60,7 +66,8 @@
       "join.password.phone": "Password for phones and video systems",
       "join.phone": "Join by phone",
       "join.phone.more": "Global call-in numbers",
-      "join.video": "Join from a video system or application"
+      "join.video": "Join from a video system or application",
+      "kind.webex.name": "Cisco Webex"
     },
     "de": {
       "account.client_id.hint": "Aus deiner Integration auf developer.webex.com. Als Redirect-URI muss dort http://127.0.0.1:8080/oauth/webex hinterlegt sein.",
@@ -75,7 +82,8 @@
       "join.password.phone": "Passwort für Telefon- und Videosysteme",
       "join.phone": "Über Telefon beitreten",
       "join.phone.more": "Globale Einwahlnummern",
-      "join.video": "Über Videogerät oder -anwendung beitreten"
+      "join.video": "Über Videogerät oder -anwendung beitreten",
+      "kind.webex.name": "Cisco Webex"
     }
   }
 }

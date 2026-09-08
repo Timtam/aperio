@@ -1352,7 +1352,7 @@ external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_values_json(`pt
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_account_form_spec_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1508,9 +1508,9 @@ external fun uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(`ptr`: Lon
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_is_device_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(`ptr`: Long,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1929,7 +1929,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 15758.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 39337.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 28282.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 38156.toShort()) {
@@ -2163,10 +2163,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_is_device_account() != 47677.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 51455.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 29136.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 10914.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827.toShort()) {
@@ -4356,8 +4356,13 @@ public interface HostInterface {
      * the editor's "create meeting" control without a change here or in the
      * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
      * same on both platforms.
+     *
+     * `kind_name` rides on the row rather than being looked up from the
+     * adapter-kind listing: that listing arrives later than the rows, can
+     * fail, and hides disabled plugins, and a row drawn without a name reads
+     * out its kind string instead. Empty `lang` means English.
      */
-    fun `accountsJson`(): kotlin.String
+    fun `accountsJson`(`lang`: kotlin.String?): kotlin.String
     
     /**
      * Append one occurrence's date to a recurring event's EXDATE list so the
@@ -5027,8 +5032,12 @@ public interface HostInterface {
      * errs toward letting the user re-authenticate). The local account and
      * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
      * Mirrors the desktop `list_accounts_missing_credentials`.
+     *
+     * Each row carries `kind_name`, like the account listing: these rows are
+     * drawn one per account in the reconnect dialog the restore flow opens,
+     * and a row without a name reads out its kind string.
      */
-    fun `listAccountsMissingCredentialsJson`(): kotlin.String
+    fun `listAccountsMissingCredentialsJson`(`lang`: kotlin.String?): kotlin.String
     
     /**
      * Every adapter this build knows, as JSON.
@@ -5041,8 +5050,13 @@ public interface HostInterface {
      * [`host_core::builtin_adapters`]. The device calendar does not: it exists
      * only where the native bridge does and is added by granting a permission,
      * so the accounts screen offers it on its own terms.
+     *
+     * `lang` names the kinds: an adapter names its own now
+     * (`PluginManifest::kind_names`), so the answer is only as good as the
+     * language it was asked in. `None` means English, the same arrangement
+     * `account_form_spec_json` next door uses.
      */
-    fun `listAdapterKindsJson`(): kotlin.String
+    fun `listAdapterKindsJson`(`lang`: kotlin.String?): kotlin.String
     
     /**
      * All calendars (local + external + synthetic birthday layers) as a JSON
@@ -5954,14 +5968,19 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * the editor's "create meeting" control without a change here or in the
      * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
      * same on both platforms.
+     *
+     * `kind_name` rides on the row rather than being looked up from the
+     * adapter-kind listing: that listing arrives later than the rows, can
+     * fail, and hides disabled plugins, and a row drawn without a name reads
+     * out its kind string instead. Empty `lang` means English.
      */
-    @Throws(StoreException::class)override fun `accountsJson`(): kotlin.String {
+    @Throws(StoreException::class)override fun `accountsJson`(`lang`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_accounts_json(
         it,
-        _status)
+        FfiConverterOptionalString.lower(`lang`),_status)
 }
     }
     )
@@ -7534,14 +7553,18 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * errs toward letting the user re-authenticate). The local account and
      * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
      * Mirrors the desktop `list_accounts_missing_credentials`.
+     *
+     * Each row carries `kind_name`, like the account listing: these rows are
+     * drawn one per account in the reconnect dialog the restore flow opens,
+     * and a row without a name reads out its kind string.
      */
-    @Throws(StoreException::class)override fun `listAccountsMissingCredentialsJson`(): kotlin.String {
+    @Throws(StoreException::class)override fun `listAccountsMissingCredentialsJson`(`lang`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(
         it,
-        _status)
+        FfiConverterOptionalString.lower(`lang`),_status)
 }
     }
     )
@@ -7560,14 +7583,19 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * [`host_core::builtin_adapters`]. The device calendar does not: it exists
      * only where the native bridge does and is added by granting a permission,
      * so the accounts screen offers it on its own terms.
+     *
+     * `lang` names the kinds: an adapter names its own now
+     * (`PluginManifest::kind_names`), so the answer is only as good as the
+     * language it was asked in. `None` means English, the same arrangement
+     * `account_form_spec_json` next door uses.
      */
-    @Throws(StoreException::class)override fun `listAdapterKindsJson`(): kotlin.String {
+    @Throws(StoreException::class)override fun `listAdapterKindsJson`(`lang`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(
         it,
-        _status)
+        FfiConverterOptionalString.lower(`lang`),_status)
 }
     }
     )

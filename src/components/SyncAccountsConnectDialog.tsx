@@ -74,14 +74,17 @@ type RowStatus =
  *  it off each adapter's declared schema, rather than named here. An adapter
  *  that signs in cannot be repaired with a pasted password, so this decides
  *  which of the two affordances a row offers. */
-function useOAuthKinds(): { kinds: Set<AdapterKind>; ready: boolean } {
+function useOAuthKinds(lang: string): {
+  kinds: Set<AdapterKind>;
+  ready: boolean;
+} {
   const [state, setState] = useState<{
     kinds: Set<AdapterKind>;
     ready: boolean;
   }>({ kinds: new Set(), ready: false });
   useEffect(() => {
     let cancelled = false;
-    void listAdapterKinds()
+    void listAdapterKinds(lang)
       .then((list) => {
         if (cancelled) return;
         setState({
@@ -97,7 +100,9 @@ function useOAuthKinds(): { kinds: Set<AdapterKind>; ready: boolean } {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-fetched when the language changes: each adapter names its own kinds,
+    // so the answer is in whatever language it was asked for.
+  }, [lang]);
   return state;
 }
 
@@ -107,7 +112,7 @@ export function SyncAccountsConnectDialog({
   accounts: initialAccounts,
   reason = 'restore',
 }: SyncAccountsConnectDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   // Local working copy: rows disappear from the list once their
   // reconnect succeeds. Seeded from the prop on mount; subsequent
@@ -119,7 +124,7 @@ export function SyncAccountsConnectDialog({
   // the rows are not rendered at all: a row drawn on the assumption "not OAuth"
   // offers a password field, and a password typed into it for a Google account
   // is a wasted attempt that ends in an error message.
-  const { kinds: oauthKinds, ready: kindsReady } = useOAuthKinds();
+  const { kinds: oauthKinds, ready: kindsReady } = useOAuthKinds(i18n.language);
   // Per-row password input state. Keyed by account id so each
   // row keeps its own value while the user types.
   const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>(
@@ -338,6 +343,9 @@ export function SyncAccountsConnectDialog({
               onSavePassword={() => void onSavePassword(account)}
               onOAuthSignIn={() => void onOAuthSignIn(account)}
               isOAuth={oauthKinds.has(account.adapter_kind)}
+              kindLabel={
+                account.kind_short_name || account.kind_name || account.adapter_kind
+              }
               needsClientSecret={secretNeeded[account.id] === true}
             />
           ))}
@@ -368,10 +376,15 @@ interface RowProps {
    *  sign-in needs it typed first. Set from the backend's own refusal — never
    *  guessed here. */
   needsClientSecret: boolean;
+  /** What the adapter that owns this kind calls itself, in its compact form.
+   *  Resolved by the parent from the host's answer — this row holds no table of
+   *  provider names, and neither does the app. */
+  kindLabel: string;
 }
 
 function SyncAccountsConnectRow({
   account,
+  kindLabel,
   status,
   password,
   onPasswordChange,
@@ -383,12 +396,6 @@ function SyncAccountsConnectRow({
   const { t } = useTranslation();
   const inputId = useId();
   const isBusy = status.kind === 'busy';
-
-  const kindLabel = useMemo(() => {
-    return t(`syncAccountsConnect.kind.${account.adapter_kind}`, {
-      defaultValue: account.adapter_kind,
-    });
-  }, [account.adapter_kind, t]);
 
   const secretLabel = useMemo(() => {
     // Token vs password is purely a UI distinction; both go to

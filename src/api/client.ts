@@ -496,7 +496,8 @@ export const listUpcomingReminders = () =>
 
 // ── Accounts ───────────────────────────────────────────────────────────────
 
-export const listAccounts = () => invoke<Account[]>('list_accounts');
+export const listAccounts = (lang?: string) =>
+  invoke<Account[]>('list_accounts', { lang });
 
 /** §19.11 step 8 — accounts whose keychain credentials are
  *  absent on this device. After `accept_remote_dataset` on a
@@ -504,8 +505,8 @@ export const listAccounts = () => invoke<Account[]>('list_accounts');
  *  table but the OS keychain is empty for every entry (secrets
  *  are device-local). The wizard reads this to drive the
  *  "Konten verbinden" prompt. Local account always excluded. */
-export const listAccountsMissingCredentials = () =>
-  invoke<Account[]>('list_accounts_missing_credentials');
+export const listAccountsMissingCredentials = (lang?: string) =>
+  invoke<Account[]>('list_accounts_missing_credentials', { lang });
 
 /** Attach a password / API token to an existing account row
  *  pulled in via the snapshot. Used by the onboarding wizard
@@ -746,10 +747,16 @@ export interface AdapterKindInfo {
    *  one storage backend needing no account created first — would drop out of
    *  the sync form, and "a folder on this device" would stop being an answer. */
   implicit: boolean;
-  /** The plugin's own display name — the label to use when the app has no
-   *  translation for this kind, which is the normal case for a third-party
-   *  plugin. */
+  /** What to call this kind, resolved in the language asked for.
+   *
+   *  From the owning adapter's manifest — it names every kind it claims — and
+   *  from the plugin's own name when it does not. Either way it is text a
+   *  person can read: no surface holds a table of kind strings, and no adapter
+   *  needs an entry in Aperio's translation files to be nameable. */
   name: string;
+  /** The compact form of {@link name}, for surfaces showing many accounts at
+   *  once. Equal to `name` unless the manifest declares a shorter one. */
+  short_name: string;
   plugin_id: string;
   /** Whether accounts of this adapter own calendars and task lists. */
   owns_containers: boolean;
@@ -773,11 +780,14 @@ export interface AdapterKindInfo {
  *
  *  Asked of the host rather than written into the UI: which adapters exist is
  *  decided by which plugins are installed, and that can change without the
- *  frontend being rebuilt. Host-internal kinds (the local store, the device
- *  calendar) are not included — each frontend adds those itself where they
- *  make sense. */
-export const listAdapterKinds = () =>
-  invoke<AdapterKindInfo[]>('list_adapter_kinds');
+ *  frontend being rebuilt. The built-in store is included; the device calendar
+ *  is not — it exists only where the phone's bridge does, so the mobile host
+ *  adds it to its own answer.
+ *
+ *  `lang` names the kinds. Each adapter names its own, so the answer is only as
+ *  good as the language it was asked in — pass `i18n.language`. */
+export const listAdapterKinds = (lang?: string) =>
+  invoke<AdapterKindInfo[]>('list_adapter_kinds', { lang });
 
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind

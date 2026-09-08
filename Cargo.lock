@@ -3057,6 +3057,7 @@ dependencies = [
 name = "host-core"
 version = "0.1.0"
 dependencies = [
+ "adapter-caldav-plugin",
  "adapter-device-calendar",
  "adapter-dropbox-plugin",
  "adapter-ftp-plugin",

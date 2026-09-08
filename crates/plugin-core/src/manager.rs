@@ -59,7 +59,7 @@ use crate::abi::{
 };
 use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
-use crate::manifest::{AdapterKindInfo, PluginManifest, MANIFEST_FILENAME};
+use crate::manifest::{resolve_kind_name, AdapterKindInfo, PluginManifest, MANIFEST_FILENAME};
 use crate::plugin_type::PluginType;
 use crate::strings::StringCatalogue;
 use crate::version::check_abi_version;
@@ -1244,7 +1244,7 @@ impl PluginManager {
     /// left them out would make a working sync target vanish from the picker
     /// instead of saying anything. Creating a NEW account of such a kind is
     /// what [`AdapterKindInfo::offered`] forbids.
-    pub fn adapter_kinds(&self) -> Vec<AdapterKindInfo> {
+    pub fn adapter_kinds(&self, lang: &str) -> Vec<AdapterKindInfo> {
         let inner = self.inner.read().expect("manager poisoned");
         let mut kinds: Vec<AdapterKindInfo> = inner
             .plugins
@@ -1257,37 +1257,47 @@ impl PluginManager {
                     .adopts_adapter_kinds
                     .iter()
                     .map(|k| (k.clone(), false));
+                // Resolved once per plugin, not once per kind: `strings_for`
+                // may cross the FFI boundary the first time a language is
+                // asked for, and a plugin with two kinds would otherwise pay
+                // for it twice.
+                let strings = Self::strings_for(p, lang);
                 own.chain(adopted)
-                    .map(|(kind, offered)| AdapterKindInfo {
-                        kind,
-                        offered,
-                        // A plugin's accounts are made by the user, one or
-                        // many. Only the host provides one that is simply
-                        // there.
-                        implicit: false,
-                        name: p.manifest.name.clone(),
-                        plugin_id: p.manifest.id.clone(),
-                        owns_containers: p.manifest.has_data_family(),
-                        declares_account_schema: p.manifest.account.is_some(),
-                        declares_oauth: p
-                            .manifest
-                            .account
-                            .as_ref()
-                            .is_some_and(|a| a.oauth.is_some()),
-                        // Decided here rather than in two frontends, because it
-                        // is read off the capability list and the frontends must
-                        // not grow one. `holds_data` is deliberately "anything
-                        // but sync" rather than `has_data_family()`: a meeting
-                        // provider has no calendars and still needs an account.
-                        holds_data: p
-                            .manifest
-                            .capabilities
-                            .iter()
-                            .any(|c| *c != crate::capability::Capability::Sync),
-                        can_sync: p
-                            .manifest
-                            .capabilities
-                            .contains(&crate::capability::Capability::Sync),
+                    .map(|(kind, offered)| {
+                        let (name, short_name) =
+                            resolve_kind_name(&p.manifest, &strings, &kind, lang);
+                        AdapterKindInfo {
+                            kind,
+                            offered,
+                            // A plugin's accounts are made by the user, one or
+                            // many. Only the host provides one that is simply
+                            // there.
+                            implicit: false,
+                            name,
+                            short_name,
+                            plugin_id: p.manifest.id.clone(),
+                            owns_containers: p.manifest.has_data_family(),
+                            declares_account_schema: p.manifest.account.is_some(),
+                            declares_oauth: p
+                                .manifest
+                                .account
+                                .as_ref()
+                                .is_some_and(|a| a.oauth.is_some()),
+                            // Decided here rather than in two frontends, because it
+                            // is read off the capability list and the frontends must
+                            // not grow one. `holds_data` is deliberately "anything
+                            // but sync" rather than `has_data_family()`: a meeting
+                            // provider has no calendars and still needs an account.
+                            holds_data: p
+                                .manifest
+                                .capabilities
+                                .iter()
+                                .any(|c| *c != crate::capability::Capability::Sync),
+                            can_sync: p
+                                .manifest
+                                .capabilities
+                                .contains(&crate::capability::Capability::Sync),
+                        }
                     })
                     .collect::<Vec<_>>()
             })
@@ -2038,6 +2048,7 @@ mod tests {
             account: None,
             adapter_kind: None,
             adopts_adapter_kinds: Vec::new(),
+            kind_names: Default::default(),
             strings: Default::default(),
         }
     }
@@ -2177,7 +2188,7 @@ mod tests {
         mgr.insert_stub_for_tests("test.merged", merged);
 
         let listed: Vec<(String, bool)> = mgr
-            .adapter_kinds()
+            .adapter_kinds("en")
             .into_iter()
             .map(|k| (k.kind, k.offered))
             .collect();
@@ -2191,7 +2202,7 @@ mod tests {
         // The adopted entry describes the plugin that serves it, so a group
         // built from it carries that plugin's name and capabilities.
         let adopted = mgr
-            .adapter_kinds()
+            .adapter_kinds("en")
             .into_iter()
             .find(|k| k.kind == "googledrive")
             .expect("listed");
@@ -2206,7 +2217,7 @@ mod tests {
         for legacy_first in [true, false] {
             let mgr = merged_and_legacy(legacy_first);
             let listed: Vec<_> = mgr
-                .adapter_kinds()
+                .adapter_kinds("en")
                 .into_iter()
                 .filter(|k| k.kind == "googledrive")
                 .collect();

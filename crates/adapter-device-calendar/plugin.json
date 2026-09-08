@@ -9,6 +9,12 @@
   "author": "Aperio Contributors",
   "description": "The calendars and reminders the phone itself keeps — iOS EventKit, Android CalendarProvider. Everything here belongs to the device and never travels to your other ones.",
   "adapter_kind": "device_calendar",
+  "kind_names": {
+    "device_calendar": {
+      "name": "This device",
+      "name_key": "kind.device_calendar.name"
+    }
+  },
   "signed": false,
   "tasks": {
     "nested_projects": false,
@@ -22,9 +28,11 @@
   },
   "strings": {
     "en": {
+      "kind.device_calendar.name": "This device",
       "kind.name": "This device"
     },
     "de": {
+      "kind.device_calendar.name": "Dieses Gerät",
       "kind.name": "Dieses Gerät"
     }
   }

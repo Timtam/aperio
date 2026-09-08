@@ -9,6 +9,14 @@
   "author": "Aperio Contributors",
   "description": "Bundled CalDAV + CardDAV adapter — Nextcloud, iCloud, Fastmail, Radicale, Baikal and other generic CalDAV/CardDAV servers.",
   "adapter_kind": "caldav",
+  "kind_names": {
+    "caldav": {
+      "name": "CalDAV (iCloud, Nextcloud, …)",
+      "name_key": "kind.caldav.name",
+      "short_name": "CalDAV",
+      "short_name_key": "kind.caldav.short"
+    }
+  },
   "signed": false,
   "tasks": {
     "task_span": true,
@@ -50,14 +58,18 @@
       "account.secret.label": "Password",
       "account.server_url.hint": "Hostname or full URL. The app discovers the CalDAV root automatically (RFC 6764).",
       "account.server_url.label": "Server URL",
-      "account.username.label": "Username"
+      "account.username.label": "Username",
+      "kind.caldav.name": "CalDAV (iCloud, Nextcloud, …)",
+      "kind.caldav.short": "CalDAV"
     },
     "de": {
       "account.secret.hint": "Verwende ein App-spezifisches Passwort, wo der Anbieter eines anbietet (iCloud, Fastmail, …). Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
       "account.secret.label": "Passwort",
       "account.server_url.hint": "Hostname oder vollständige URL. Aperio findet das CalDAV-Stammverzeichnis automatisch (RFC 6764).",
       "account.server_url.label": "Server-Adresse",
-      "account.username.label": "Benutzername"
+      "account.username.label": "Benutzername",
+      "kind.caldav.name": "CalDAV (iCloud, Nextcloud, …)",
+      "kind.caldav.short": "CalDAV"
     }
   }
 }
