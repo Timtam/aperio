@@ -1,8 +1,17 @@
 name: Deploy documentation
 
+# Also on pull_request, and not only to be thorough: the link check below is
+# the one gate the docs have, and until it ran here it ran nowhere — `npm run
+# check:links` existed in web/package.json and no workflow called it. A broken
+# cross-reference reached main and then Pages, and the only way to find out was
+# to click it.
 on:
   push:
     branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
     paths:
       - 'web/**'
       - '.github/workflows/docs.yml'
@@ -13,9 +22,10 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deploy at a time; cancel superseded in-progress runs.
+# Only one Pages deploy at a time; cancel superseded in-progress runs. Keyed by
+# ref so a PR's check run cannot cancel main's deploy.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -41,6 +51,14 @@ jobs:
         run: npm run build
         working-directory: web
 
+      # After the build, because it reads web/dist. Every internal link on
+      # every built page, both languages — Starlight pairs translations by
+      # path, so a renamed page silently orphans its German twin and nothing
+      # else in the tree notices.
+      - name: Check internal links
+        run: npm run check:links
+        working-directory: web
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -48,6 +66,9 @@ jobs:
 
   deploy:
     needs: build
+    # Only main deploys. A pull request builds the site and checks its links —
+    # that is the point of running here — and stops there.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
