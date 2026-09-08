@@ -119,25 +119,30 @@ const WALK_ANCHORS: [&str; 2] = ["crates/host-plugins/src/lib.rs", "src-tauri/sr
 /// wherever the crate does; a file reaching `../../../shared/` is reading
 /// something only this checkout's layout puts there.
 ///
-/// Arguments that are not a plain string literal are skipped: the sanctioned
-/// form is `concat!(env!("CARGO_MANIFEST_DIR"), "/plugin.json")`, which is
-/// anchored at the crate root by construction and cannot escape.
-fn escapes_its_crate(source: &Path, arg: &str) -> bool {
-    let Some(literal) = arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')) else {
-        return false;
-    };
+/// Both spellings are resolved, because both can escape:
+///
+/// - A plain literal, resolved from the source file's own directory, which is
+///   where the compiler resolves it from.
+/// - `concat!(env!("CARGO_MANIFEST_DIR"), "/…")`, resolved from the crate root.
+///   This is the sanctioned form for reading a crate's OWN file and it is used
+///   fourteen times for `plugin.json` — which is exactly why it must be checked
+///   rather than trusted. `concat!(env!("CARGO_MANIFEST_DIR"), "/../../shared/x")`
+///   compiles, reads the same out-of-crate file as the relative spelling, and an
+///   earlier version of this function waved it through while its own doc comment
+///   claimed it "cannot escape". It can.
+fn escapes_its_crate(source: &Path, arg: &str) -> Verdict {
     let Some(crate_root) = crate_root_of(source) else {
-        return false;
+        return Verdict::Unreadable;
     };
-    let Some(dir) = source.parent() else {
-        return false;
+    let Some((anchor, relative)) = include_target(source, arg, &crate_root) else {
+        return Verdict::Unreadable;
     };
 
     // Resolved lexically, without touching the filesystem: the file being
     // included may legitimately not exist yet on a branch, and a missing file
     // is the other test's business, not this one's.
-    let mut resolved = dir.to_path_buf();
-    for part in literal.split(['/', '\\']) {
+    let mut resolved = anchor;
+    for part in relative.split(['/', '\\']) {
         match part {
             "" | "." => {}
             ".." => {
@@ -146,7 +151,66 @@ fn escapes_its_crate(source: &Path, arg: &str) -> bool {
             other => resolved.push(other),
         }
     }
-    !resolved.starts_with(&crate_root)
+    if resolved.starts_with(&crate_root) {
+        Verdict::InsideItsCrate
+    } else {
+        Verdict::Escapes
+    }
+}
+
+/// What this test could work out about one include.
+///
+/// `Unreadable` exists so that "the scanner could not parse this argument" and
+/// "the scanner checked it and it was fine" stop being the same answer. The
+/// difference matters here more than usual: this test's whole subject is guards
+/// that pass by not looking.
+#[derive(PartialEq)]
+enum Verdict {
+    InsideItsCrate,
+    Escapes,
+    Unreadable,
+}
+
+/// Where an include argument starts from, and what it appends.
+///
+/// `None` for an argument this cannot read — an `include_str!(SOME_CONST)`, a
+/// macro that builds a path at compile time. The caller turns that into
+/// [`Verdict::Unreadable`] and FAILS on it, because "the guard could not read
+/// it" and "the guard found nothing wrong" must not look alike.
+fn include_target(source: &Path, arg: &str, crate_root: &Path) -> Option<(PathBuf, String)> {
+    let literals = string_literals(arg);
+    if arg.contains("CARGO_MANIFEST_DIR") {
+        // Anchored at the crate root; everything else in the `concat!` is the
+        // path appended to it.
+        return Some((crate_root.to_path_buf(), literals.join("")));
+    }
+    if literals.len() == 1 && arg.trim() == format!("\"{}\"", literals[0]) {
+        // A bare literal, resolved relative to the file that wrote it.
+        return Some((source.parent()?.to_path_buf(), literals[0].clone()));
+    }
+    None
+}
+
+/// Every double-quoted literal in an argument, in order, with escapes left
+/// alone — a path with an escape in it is not a case this repository has, and
+/// pretending to handle it would be the more dishonest option.
+fn string_literals(arg: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut chars = arg.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '"' {
+            continue;
+        }
+        let mut literal = String::new();
+        for ch in chars.by_ref() {
+            if ch == '"' {
+                break;
+            }
+            literal.push(ch);
+        }
+        found.push(literal);
+    }
+    found
 }
 
 /// The nearest ancestor holding a `Cargo.toml` — the crate a source file
@@ -181,6 +245,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 
     let mut offenders = Vec::new();
     let mut known = Vec::new();
+    let mut unreadable = Vec::new();
     for path in &sources {
         // This file quotes the shape it forbids, in the module docs above.
         if path.ends_with("manifest_reach.rs") {
@@ -193,12 +258,22 @@ fn no_crate_embeds_a_file_from_outside_itself() {
             while let Some(hit) = text[at..].find(macro_name) {
                 let start = at + hit + macro_name.len();
                 if let Some(arg) = include_arg(&text, start) {
-                    if escapes_its_crate(path, &arg) {
-                        let site = format!("{}: {macro_name}({arg})", path.display());
-                        if KNOWN_REACHES
-                            .iter()
-                            .any(|k| site.replace('\\', "/").contains(k))
-                        {
+                    let verdict = escapes_its_crate(path, &arg);
+                    let file = path.display().to_string().replace('\\', "/");
+                    let site = format!("{file}: {macro_name}({arg})");
+                    if verdict == Verdict::Unreadable {
+                        unreadable.push(site);
+                    } else if verdict == Verdict::Escapes {
+                        // Matched on the PAIR, not on the file. Excusing a file
+                        // would exempt it forever and for anything — the three
+                        // named readers could then embed whatever they liked
+                        // from outside their crate with this test still green,
+                        // and the disappearance check below would be satisfied
+                        // by any one reach standing in for the named one.
+                        let excused = KNOWN_REACHES.iter().any(|(known_file, target)| {
+                            file.ends_with(known_file) && arg.contains(target)
+                        });
+                        if excused {
                             known.push(site);
                         } else {
                             offenders.push(site);
@@ -226,24 +301,39 @@ fn no_crate_embeds_a_file_from_outside_itself() {
         offenders.join("\n  "),
     );
 
+    // An argument this scanner cannot resolve is not a pass. Today there are
+    // none, and that is the point: the day someone writes an include whose path
+    // is computed, this fails and says so, instead of quietly deciding the
+    // include must have been fine because it could not be read.
+    assert!(
+        unreadable.is_empty(),
+        "this guard could not work out where these includes point, so it did \
+         not check them. Either spell the path as a literal (or as \
+         `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/…\")`), or teach \
+         `include_target` the new shape:\n  {}",
+        unreadable.join("\n  "),
+    );
+
     // The named exceptions have to actually turn up. Without this, a mistyped
     // path or a scanner that stopped reading would empty both lists and the
     // test would pass by finding nothing at all — which is the failure this
     // whole file exists to make impossible.
-    for expected in KNOWN_REACHES {
+    for (file, target) in KNOWN_REACHES {
         assert!(
-            known
-                .iter()
-                .any(|k| k.replace('\\', "/").contains(expected)),
-            "the known reach at {expected} was not found. Either it is gone — \
-             delete it from KNOWN_REACHES, and this guard gets stricter for \
-             free — or the scan is no longer reading what it thinks it is",
+            known.iter().any(|k| k.contains(file) && k.contains(target)),
+            "the known reach in {file} to {target} was not found. Either it is \
+             gone — delete it from KNOWN_REACHES, and this guard gets stricter \
+             for free — or the scan is no longer reading what it thinks it is",
         );
     }
 }
 
-/// Reaches that exist on purpose, each with the reason it is allowed and what
-/// would end it. Named individually: a count would let a new one hide.
+/// Reaches that exist on purpose, as (file, what it reaches for) — each with
+/// the reason it is allowed and what would end it.
+///
+/// The PAIR, not the file. Excusing a file would exempt it forever and for
+/// anything, which is an allowlist that quietly widens itself every time one of
+/// those files grows a second include.
 ///
 /// All three read `shared/contracts/`, the directory holding the wire contracts
 /// that BOTH languages check themselves against. Two of them are the app
@@ -257,16 +347,25 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [&str; 3] = [
+const KNOWN_REACHES: [(&str, &str); 3] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
-    "crates/host-core/src/reminders.rs",
+    (
+        "crates/host-core/src/reminders.rs",
+        "shared/contracts/calendarDefaultReminders.json",
+    ),
     // The same hop on the phone, where the Host applies the calendar's policy.
-    "crates/cal-ffi/src/host.rs",
+    (
+        "crates/cal-ffi/src/host.rs",
+        "shared/contracts/calendarDefaultReminders.json",
+    ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by
     // an adapter that is meant to leave this repository.
-    "crates/adapter-caldav/src/mapping.rs",
+    (
+        "crates/adapter-caldav/src/mapping.rs",
+        "shared/contracts/calendarDefaultReminders.json",
+    ),
 ];
 
 #[test]
