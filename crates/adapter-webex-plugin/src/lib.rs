@@ -114,7 +114,9 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
 /// # Safety
 /// FFI export.
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
-    PluginInstance::<WebexAdapter>::drop_handle(handle);
+    plugin_sdk::guarded_void("close_instance", || {
+        PluginInstance::<WebexAdapter>::drop_handle(handle);
+    })
 }
 
 unsafe extern "C" fn ffi_test_connection(

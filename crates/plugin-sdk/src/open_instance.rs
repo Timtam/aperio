@@ -24,6 +24,7 @@ use plugin_core::abi::{OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INVALID_C
 use plugin_core::ffi::PluginBytes;
 
 use crate::instance::PluginInstance;
+use crate::panic_guard::catching_panics_into;
 
 /// Build an [`OpenInstanceResult`] from a closure that takes the
 /// raw config JSON and returns the adapter value (or an error
@@ -51,29 +52,42 @@ pub unsafe fn open_instance_with<T, F>(config_json: *const c_char, build: F) -> 
 where
     F: FnOnce(&str) -> Result<T, String>,
 {
-    let json_str: &str = if config_json.is_null() {
-        ""
-    } else {
-        match CStr::from_ptr(config_json).to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                return error_result(PLUGIN_ERR_INVALID_CONFIG, "config_json is not valid UTF-8")
+    // The author's `build` closure runs in here, and it is the likeliest
+    // place for an adapter to panic: it parses the account config and
+    // constructs the client. A panic escaping `open_instance` would abort
+    // Aperio while the user was adding an account.
+    catching_panics_into(
+        "open_instance",
+        |text| error_result(PLUGIN_ERR_INIT, &format!("the adapter panicked: {text}")),
+        || {
+            let json_str: &str = if config_json.is_null() {
+                ""
+            } else {
+                match CStr::from_ptr(config_json).to_str() {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return error_result(
+                            PLUGIN_ERR_INVALID_CONFIG,
+                            "config_json is not valid UTF-8",
+                        )
+                    }
+                }
+            };
+            let adapter = match build(json_str) {
+                Ok(a) => a,
+                Err(msg) => return error_result(PLUGIN_ERR_INVALID_CONFIG, &msg),
+            };
+            let instance = match PluginInstance::new(adapter) {
+                Ok(i) => i,
+                Err(e) => return error_result(PLUGIN_ERR_INIT, &format!("{e}")),
+            };
+            OpenInstanceResult {
+                instance: instance.into_raw_handle(),
+                status: PLUGIN_OK,
+                error: PluginBytes::empty(),
             }
-        }
-    };
-    let adapter = match build(json_str) {
-        Ok(a) => a,
-        Err(msg) => return error_result(PLUGIN_ERR_INVALID_CONFIG, &msg),
-    };
-    let instance = match PluginInstance::new(adapter) {
-        Ok(i) => i,
-        Err(e) => return error_result(PLUGIN_ERR_INIT, &format!("{e}")),
-    };
-    OpenInstanceResult {
-        instance: instance.into_raw_handle(),
-        status: PLUGIN_OK,
-        error: PluginBytes::empty(),
-    }
+        },
+    )
 }
 
 /// Build a NULL-handle [`OpenInstanceResult`] with the given

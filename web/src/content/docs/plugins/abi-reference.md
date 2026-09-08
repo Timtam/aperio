@@ -136,21 +136,33 @@ Report a failure as a status code instead: a non-zero `APERIO_PLUGIN_CALL_ERR_*`
 with a message. The host is built for that — the account shows an error and
 everything else keeps working.
 
-**Rust plugins get this for free.** `plugin-sdk`'s dispatch helpers wrap every
-call, so a panic in your adapter comes back as
-`APERIO_PLUGIN_CALL_ERR_INTERNAL` carrying the panic's own message, and the
-instance stays usable for the next call. You still want to avoid panicking —
-the message is a clue, not a diagnosis — but a bug in one method costs that
-method.
+**Rust plugins get this for free.** Every entry point `plugin-sdk` emits or
+wraps catches: the async vtable slots through its dispatch helpers, the
+synchronous ones through `plugin_sdk::guarded`, `open_instance` /
+`close_instance` / `discover` / `interactive_auth` / `probe_host_key` /
+`strings` inside the SDK, and `aperio_plugin_create` / `destroy` / `set_log` /
+`set_host_channel` in the macro that emits them. A panic comes back as
+`APERIO_PLUGIN_CALL_ERR_INTERNAL` carrying its own message, and the instance
+stays usable for the next call. If you hand-write a vtable slot that does not
+go through a dispatch helper, wrap its body in `plugin_sdk::guarded` — a test
+in the Aperio tree fails on one that does not.
+
+You still want to avoid panicking: the message is a clue, not a diagnosis, and
+the adapter's own state after a caught panic is whatever the panic left behind.
+But a bug in one method costs that method.
 
 **C and C++ plugins catch at the boundary themselves.** Every entry point the
 host calls: `aperio_plugin_create`, the lifecycle hooks, every vtable slot,
 every named export.
 
-Aperio's own bundled plugins additionally build with `panic = "abort"`. That is
-a property of Aperio's workspace release profile and **does not travel** to a
-plugin built in its own repository — where cargo's default is to unwind. Do not
-rely on it.
+**One caveat, and it is the opposite of what it looks like.** Aperio's own
+bundled plugins build with `panic = "abort"`, so in a shipped Aperio build
+there is no unwinding for the catch to catch — the abort happens first, and the
+protection above is *not* in force. It is in force in a debug build, and in any
+plugin built outside Aperio's workspace, because a cargo profile belongs to the
+workspace that declares it and **does not travel**. So: this protects YOUR
+plugin, built YOUR way. It does not make Aperio's own bundled adapters
+crash-proof, and it is not a reason to relax about panicking.
 
 ## Versioning & compatibility
 

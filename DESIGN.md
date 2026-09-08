@@ -3214,13 +3214,25 @@ Ein `unwrap` auf ein Feld, das ein Server nicht mehr schickt, genügt. Gemeldet
 wird stattdessen ein Statuscode, den der Host ohnehin überall behandelt: das
 Konto zeigt einen Fehler, der Rest läuft weiter.
 
-Rust-Adapter bekommen das geschenkt: die Dispatch-Helfer in `plugin-sdk` fangen
-jede Panik und machen `PLUGIN_CALL_ERR_INTERNAL` daraus, mit der Meldung der
-Panik als Text — die Instanz bleibt benutzbar. C-Adapter fangen selbst. Dass
-Aperios eigene Plugins zusätzlich mit `panic = "abort"` gebaut werden, ist eine
-Eigenschaft des Release-Profils **dieses** Workspaces und reist nicht mit einem
-Adapter mit, der in seinem eigenen Repository gebaut wird — dort ist Abwickeln
-cargos Voreinstellung. Ergebnis-
+Rust-Adapter bekommen das geschenkt, und zwar an **jedem** Eintrittspunkt, den
+`plugin-sdk` erzeugt oder umschließt: die asynchronen Vtable-Slots über die
+Dispatch-Helfer, die synchronen über `plugin_sdk::guarded`, dazu
+`open_instance`, `close_instance`, `discover`, `interactive_auth`,
+`probe_host_key`, `strings` und die vier Makro-Exporte. Aus einer Panik wird
+`PLUGIN_CALL_ERR_INTERNAL` mit ihrer eigenen Meldung, die Instanz bleibt
+benutzbar. `crates/host-plugins/tests/panic_boundary.rs` lässt keinen neuen
+Eintrittspunkt durch, der das nicht tut — die erste Fassung dieser Absicherung
+umschloss sechs Helfer, während Header und Doku „jeden Slot“ versprachen, und
+17 handgeschriebene Slots brachen weiterhin ab.
+
+C-Adapter fangen selbst, an jedem dieser Punkte.
+
+**Ein Vorbehalt, und er läuft anders herum als man denkt:** Aperios eigene
+Plugins werden mit `panic = "abort"` gebaut, es gibt dort also gar kein
+Abwickeln zu fangen — der Abbruch kommt zuerst, und der Schutz oben ist im
+ausgelieferten Build **nicht** wirksam. Wirksam ist er im Debug-Build und in
+jedem Plugin, das außerhalb dieses Workspaces gebaut wird, denn ein
+cargo-Profil gehört dem Workspace, der es deklariert, und reist nicht mit. Ergebnis-
 puffer allokiert das Plugin und liefert seinen eigenen `free`-Funktionszeiger
 mit, sodass kein Allokator geteilt wird. Fehler reisen als `int32`-Status aus
 einer festen Tabelle (`APERIO_PLUGIN_CALL_ERR_*`) plus UTF-8-Meldung. Es gibt
@@ -3637,12 +3649,15 @@ zuläuft: Ein Adapter, der den Workspace *verlässt*, existiert für
 `cargo metadata` nicht mehr. Der xtask fände elf statt zwölf, stagete elf und
 meldete Erfolg — das Release-Artefakt käme ohne diesen Adapter heraus, mit
 grünen Toren. Deshalb wird die Antwort gegen eine Liste geprüft, die **nicht**
-aus der Workspace-Mitgliedschaft stammt: die Adapter-Features von
-`host-plugins`, mit denen der Mobile-Host seine zwölf statisch linkt. Diese
-Liste ist keine Zählung für diese Prüfung, sie trägt ohnehin (§20.6), kann also
-nicht still veralten. Nebenbei erzwingt sie, dass beide Plattformen dieselben
-Adapter führen: was auf einer Seite dazukommt und auf der anderen vergessen
-wird, fällt namentlich auf, in welcher Richtung auch immer.
+aus der Workspace-Mitgliedschaft stammt: die `static`-Feature-Liste von
+`host-plugins` (§20.6). Sie ist keine Zählung für diese Prüfung, sondern der
+Schirm, unter dem die Einzel-Features des Crates zusammenlaufen, kann also
+nicht still veralten.
+
+Sie sagt „dieser Adapter existiert“, nicht „beide Plattformen liefern ihn aus“ —
+Letzteres wäre falsch, weil Mobile einen Adapter bewusst weglassen darf. Für
+`pack-plugins` gilt dieselbe Prüfung aus demselben Grund: auch das fragt den
+Workspace.
 
 Auf mobilen Plattformen (iOS, Android) ist dynamisches Nachladen nicht erlaubt,
 also werden die gebundelten Adapter dort **statisch einkompiliert**.
@@ -3660,11 +3675,16 @@ Modus, den ein Host umschaltet, sondern *welcher Host es ist*:
   App mitkompiliert**.
 
 Die Feature-Liste `static` in `crates/host-plugins/Cargo.toml` ist damit die
-einzige geschriebene Aufzählung der zwölf gebundelten Adapter — und sie ist
-nicht bloß eine Aufzählung, sondern trägt: Mobile lässt einen Adapter weg,
-indem es sein Feature nicht einschaltet. `cargo xtask stage-plugins` prüft die
-Desktop-Seite gegen genau diese Liste, sodass ein Adapter, der auf einer Seite
-dazukommt oder verschwindet, auf der anderen nicht still fehlt (siehe unten).
+geschriebene Aufzählung der zwölf Adapter, die **existieren**, und
+`cargo xtask stage-plugins` prüft dagegen: verschwindet ein Adapter aus dem
+Workspace, fällt das namentlich auf, statt dass elf gestaget und als Erfolg
+gemeldet werden.
+
+Was diese Prüfung ausdrücklich **nicht** sagt, ist, ob Mobile alle zwölf
+ausliefert. `cal-ffi` schaltet die Features einzeln ein, gerade **damit** es
+einen Adapter weglassen kann, den es nicht anbietet — das ist eine gewollte
+Möglichkeit, kein Fehler. Die Liste beantwortet also „gibt es diesen Adapter
+noch“, nicht „führen ihn beide Plattformen“.
 
 `adapter-local` taucht in dieser Liste bewusst nicht auf — er ist host-intern (siehe Hinweis in §20.2) und wird direkt von src-tauri als gewöhnliche Bibliothek genutzt, nicht über den Plugin-Manager. Auf Mobile gilt dasselbe wie auf Desktop: der `LocalAdapter` ist Teil der App-Binary, nicht ein zu ladendes Artefakt.
 

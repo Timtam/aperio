@@ -102,7 +102,9 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
 /// FFI export; `handle` must be the pointer returned by
 /// [`plugin_open_instance`].
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
-    PluginInstance::<MicrosoftGraphAdapter>::drop_handle(handle);
+    plugin_sdk::guarded_void("close_instance", || {
+        PluginInstance::<MicrosoftGraphAdapter>::drop_handle(handle);
+    })
 }
 
 // ── Adapter base ───────────────────────────────────────────
@@ -122,12 +124,14 @@ unsafe extern "C" fn ffi_capabilities(
     _a: *const u8,
     _l: usize,
 ) -> PluginCallResult {
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
-    ok_response(&caps)
+    plugin_sdk::guarded(|| {
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
+        ok_response(&caps)
+    })
 }
 
 // ── CalendarFeature ────────────────────────────────────────
@@ -242,16 +246,18 @@ unsafe extern "C" fn ffi_calendar_color(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let calendar_id: String = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let color = inst.plugin().calendar_color(&calendar_id);
-    ok_response(&color)
+    plugin_sdk::guarded(|| {
+        let calendar_id: String = match decode_args(a, l) {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        let color = inst.plugin().calendar_color(&calendar_id);
+        ok_response(&color)
+    })
 }
 
 #[derive(Debug, Deserialize)]

@@ -73,7 +73,9 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
 /// # Safety
 /// FFI export.
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
-    PluginInstance::<DropboxSyncAdapter>::drop_handle(handle);
+    plugin_sdk::guarded_void("close_instance", || {
+        PluginInstance::<DropboxSyncAdapter>::drop_handle(handle);
+    })
 }
 
 unsafe extern "C" fn ffi_test_connection(
@@ -184,28 +186,30 @@ unsafe extern "C" fn ffi_fetch_sound_asset(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let args: FetchSoundAssetArgs = match decode_args(a, l) {
-        Ok(a) => a,
-        Err(r) => return r,
-    };
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let p: &'static DropboxSyncAdapter = unsafe {
-        std::mem::transmute::<&DropboxSyncAdapter, &'static DropboxSyncAdapter>(inst.plugin())
-    };
-    let outcome = inst
-        .runtime()
-        .block_on(async move { p.fetch_sound_asset(&args.hash, &args.extension).await });
-    match outcome {
-        Ok(None) => ok_response(&Option::<String>::None),
-        Ok(Some(bytes)) => {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-            ok_response(&Some(b64))
+    plugin_sdk::guarded(|| {
+        let args: FetchSoundAssetArgs = match decode_args(a, l) {
+            Ok(a) => a,
+            Err(r) => return r,
+        };
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        let p: &'static DropboxSyncAdapter = unsafe {
+            std::mem::transmute::<&DropboxSyncAdapter, &'static DropboxSyncAdapter>(inst.plugin())
+        };
+        let outcome = inst
+            .runtime()
+            .block_on(async move { p.fetch_sound_asset(&args.hash, &args.extension).await });
+        match outcome {
+            Ok(None) => ok_response(&Option::<String>::None),
+            Ok(Some(bytes)) => {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                ok_response(&Some(b64))
+            }
+            Err(err) => sync_error_to_response(err),
         }
-        Err(err) => sync_error_to_response(err),
-    }
+    })
 }
 
 pub static SYNC_VTABLE: SyncVtable = SyncVtable {

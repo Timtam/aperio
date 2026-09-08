@@ -61,13 +61,22 @@
  * host is built for — the account shows an error, and everything
  * else keeps working.
  *
- * C and C++ authors: catch at the boundary yourself. Rust authors
- * using `plugin-sdk` get this for free — its dispatch helpers wrap
- * every call, so a panic becomes `APERIO_PLUGIN_CALL_ERR_INTERNAL`
- * carrying the panic's own message. Note that Aperio's own bundled
- * plugins are additionally built with `panic = "abort"`, which is a
- * property of THIS workspace's release profile and does not travel
- * to a plugin built anywhere else.
+ * C and C++ authors: catch at the boundary yourself, at every entry
+ * point listed above. Rust authors using `plugin-sdk` get it for
+ * free — every entry point it emits or wraps catches, so a panic
+ * becomes `APERIO_PLUGIN_CALL_ERR_INTERNAL` carrying the panic's own
+ * message and the instance stays usable. A test in the Aperio tree
+ * fails if a plugin ever grows an entry point that does not.
+ *
+ * One caveat, and it cuts the other way from what you would expect:
+ * Aperio's own bundled plugins are built with `panic = "abort"`,
+ * which means there is no unwinding for that catch to catch. In a
+ * shipped Aperio build the protection is therefore NOT active — the
+ * abort happens first. It is active in a debug build, and in any
+ * plugin built outside Aperio's workspace, because a cargo profile
+ * belongs to the workspace that declares it and does not travel.
+ * If you build your plugin with `panic = "abort"` too, catch
+ * nothing and expect an abort.
  */
 
 #ifndef APERIO_PLUGIN_H

@@ -114,6 +114,7 @@ pub mod interactive_auth;
 pub mod log_forward;
 pub mod macros;
 pub mod open_instance;
+pub mod panic_guard;
 pub mod probe_host_key;
 pub mod response;
 pub mod runtime;
@@ -121,6 +122,7 @@ pub mod strings;
 
 // Plugin authors import everything they need from the SDK so
 // they don't have to add plugin-core to their own Cargo.toml.
+pub use panic_guard::{guarded, guarded_void};
 pub use plugin_core;
 
 pub use args::decode_args;

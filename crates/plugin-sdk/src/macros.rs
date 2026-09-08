@@ -656,7 +656,14 @@ macro_rules! declare_cdylib_exports {
         #[no_mangle]
         pub unsafe extern "C" fn aperio_plugin_create(
         ) -> *mut $crate::plugin_core::AperioPlugin {
-            $plugin::build_descriptor()
+            // A panic here would abort the host during `dlopen`. Null is the
+            // answer the loader already understands for "this plugin did not
+            // produce a descriptor".
+            $crate::panic_guard::catching_panics_into(
+                "aperio_plugin_create",
+                |_| ::core::ptr::null_mut(),
+                || $plugin::build_descriptor(),
+            )
         }
 
         /// `aperio_plugin_destroy` (DESIGN.md §20.3).
@@ -669,7 +676,7 @@ macro_rules! declare_cdylib_exports {
         pub unsafe extern "C" fn aperio_plugin_destroy(
             plugin: *mut $crate::plugin_core::AperioPlugin,
         ) {
-            ($plugin::DESTROY_FN)(plugin)
+            $crate::guarded_void("aperio_plugin_destroy", || ($plugin::DESTROY_FN)(plugin))
         }
 
         /// `aperio_plugin_set_log` — hand the plugin a host log sink.
@@ -687,7 +694,9 @@ macro_rules! declare_cdylib_exports {
         pub unsafe extern "C" fn aperio_plugin_set_log(
             log: $crate::plugin_core::AperioLogFn,
         ) {
-            $crate::log_forward::install_log_forwarding(log)
+            $crate::guarded_void("aperio_plugin_set_log", || {
+                $crate::log_forward::install_log_forwarding(log)
+            })
         }
 
         /// `aperio_plugin_set_host_channel` — hand the plugin a sink for
@@ -706,7 +715,9 @@ macro_rules! declare_cdylib_exports {
         pub unsafe extern "C" fn aperio_plugin_set_host_channel(
             sink: $crate::plugin_core::abi::AperioHostChannelFn,
         ) {
-            $crate::host_channel::install_host_channel(sink)
+            $crate::guarded_void("aperio_plugin_set_host_channel", || {
+                $crate::host_channel::install_host_channel(sink)
+            })
         }
 
         $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?

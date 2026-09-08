@@ -30,87 +30,11 @@ use std::future::Future;
 use std::os::raw::c_void;
 
 use plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
-use tracing::error;
 
 use crate::error_map::{cal_error_to_response, sync_error_to_response, vc_error_to_response};
 use crate::instance::PluginInstance;
+use crate::panic_guard::guarded;
 use crate::response::{error_response, ok_empty_response, ok_response};
-
-/// Run one plugin call, and let a panic in it cost the CALL rather than the app.
-///
-/// An `extern "C"` function that unwinds is a process abort — Rust inserts the
-/// abort itself rather than letting the unwind cross the boundary. So a panic
-/// anywhere in a vtable method takes the whole of Aperio down: every other
-/// account, mid-sentence, with nothing on screen and nothing in the log saying
-/// which adapter did it. An `unwrap` on a field a server stopped sending is
-/// enough.
-///
-/// Caught here it becomes one call returning `PLUGIN_CALL_ERR_INTERNAL`, which
-/// is a state the host already handles everywhere — the account reports an
-/// error and the rest of the app carries on.
-///
-/// # What it costs, honestly
-///
-/// The adapter's own state may be inconsistent afterwards. That is the price of
-/// not aborting, and it is the trade Rust's own FFI guidance makes: the
-/// instance stays alive and the user can reconnect that one account. Aborting
-/// would have taken the same inconsistent state down along with eleven adapters
-/// that were fine.
-///
-/// # Why the SDK and not the plugin author
-///
-/// "Do not panic" is not a contract anyone can audit their way into keeping.
-/// The boundary is the one place the rule can actually be enforced, and it is
-/// the same rule the host already applies to its own callback in the other
-/// direction (`plugin_core`'s `forward_host_event`).
-///
-/// # In a release build of a bundled plugin this does nothing
-///
-/// The workspace sets `panic = "abort"` in `[profile.release]`, so there is no
-/// unwinding left to catch. It earns its keep exactly where that profile does
-/// not reach: a debug build, and an adapter built in its OWN repository — where
-/// a workspace profile does not travel and unwind is cargo's default.
-fn catching_panics(call: impl FnOnce() -> PluginCallResult) -> PluginCallResult {
-    // AssertUnwindSafe: the closure holds a borrow of the adapter and the
-    // runtime, neither of which is read again on this path once the panic is
-    // caught — the response is built from the payload alone and the call is
-    // over. The state the assertion waives is the adapter's own, and the
-    // paragraph above is the decision about it.
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
-        Ok(response) => response,
-        Err(payload) => {
-            // `&*payload`, not `&payload`. A `Box<dyn Any + Send>` is itself a
-            // concrete `Any`, so `&payload` unsize-coerces the BOX and every
-            // downcast below misses — which reads as "no message" for every
-            // panic there has ever been, losing the one clue to where it
-            // happened. The test asserts the text for this reason.
-            let what = panic_text(&*payload);
-            // Into the host log, not just stderr: on the desktop the plugin's
-            // tracing is forwarded to `aperio.log`, and a log line is how this
-            // is diagnosed by someone who cannot see a console.
-            error!(panic = %what, "adapter panicked during a plugin call");
-            error_response(
-                PLUGIN_CALL_ERR_INTERNAL,
-                &format!("the adapter panicked: {what}"),
-            )
-        }
-    }
-}
-
-/// What a caught panic said, for the message the user's log will carry.
-///
-/// `panic!("…")` with a literal boxes a `&str`; with arguments, a `String`.
-/// Anything else is a payload no formatter can read, and saying so beats an
-/// empty message.
-fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "no message".to_string()
-    }
-}
 
 /// Borrow the per-instance handle, returning a typed
 /// [`PluginInstance`] reference or an internal error response
@@ -150,7 +74,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => cal_error_to_response(e),
     })
@@ -168,7 +92,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => cal_error_to_response(e),
     })
@@ -189,7 +113,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => sync_error_to_response(e),
     })
@@ -207,7 +131,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => sync_error_to_response(e),
     })
@@ -228,7 +152,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => vc_error_to_response(e),
     })
@@ -246,7 +170,7 @@ where
         Err(r) => return r,
     };
     let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
-    catching_panics(|| match inst.runtime().block_on(call(p_static)) {
+    guarded(|| match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => vc_error_to_response(e),
     })

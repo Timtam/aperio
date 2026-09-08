@@ -34,6 +34,7 @@ use plugin_core::ffi::{
     PLUGIN_CALL_OK,
 };
 
+use crate::panic_guard::guarded;
 use crate::response::{bytes_to_response, error_response};
 use crate::runtime::PluginRuntime;
 
@@ -68,38 +69,43 @@ where
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Vec<u8>, String>>,
 {
-    let args_bytes: &[u8] = if args_ptr.is_null() || args_len == 0 {
-        &[]
-    } else {
-        // SAFETY: host contract — pointer is valid for `args_len`
-        // bytes for the duration of the call.
-        std::slice::from_raw_parts(args_ptr, args_len)
-    };
-    // Copy into an owned String before handing to the handler.
-    // Passing `&str` here would force the async closure's
-    // returned future to borrow from a stack-local — Rust's
-    // lifetime checker can't see through the FnOnce + Future
-    // combination, so the cleanest API is just to give the
-    // handler ownership.
-    let json_str = match std::str::from_utf8(args_bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            return error_response(
-                PLUGIN_CALL_ERR_INVALID,
-                "interactive_auth args are not valid UTF-8",
-            )
+    // The WHOLE body, author closure and argument decoding alike, runs
+    // inside the catch: a panic before the handler is reached aborts just
+    // as hard as one inside it.
+    guarded(|| {
+        let args_bytes: &[u8] = if args_ptr.is_null() || args_len == 0 {
+            &[]
+        } else {
+            // SAFETY: host contract — pointer is valid for `args_len`
+            // bytes for the duration of the call.
+            std::slice::from_raw_parts(args_ptr, args_len)
+        };
+        // Copy into an owned String before handing to the handler.
+        // Passing `&str` here would force the async closure's
+        // returned future to borrow from a stack-local — Rust's
+        // lifetime checker can't see through the FnOnce + Future
+        // combination, so the cleanest API is just to give the
+        // handler ownership.
+        let json_str = match std::str::from_utf8(args_bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                return error_response(
+                    PLUGIN_CALL_ERR_INVALID,
+                    "interactive_auth args are not valid UTF-8",
+                )
+            }
+        };
+        let runtime = match PluginRuntime::new() {
+            Ok(r) => r,
+            Err(err) => {
+                return error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("build runtime: {err}"))
+            }
+        };
+        match runtime.block_on(handler(json_str)) {
+            Ok(blob) => bytes_to_response(PLUGIN_CALL_OK, blob),
+            Err(msg) => error_response(PLUGIN_CALL_ERR_AUTH, &msg),
         }
-    };
-    let runtime = match PluginRuntime::new() {
-        Ok(r) => r,
-        Err(err) => {
-            return error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("build runtime: {err}"))
-        }
-    };
-    match runtime.block_on(handler(json_str)) {
-        Ok(blob) => bytes_to_response(PLUGIN_CALL_OK, blob),
-        Err(msg) => error_response(PLUGIN_CALL_ERR_AUTH, &msg),
-    }
+    })
 }
 
 #[cfg(test)]

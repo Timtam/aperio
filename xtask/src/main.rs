@@ -170,7 +170,7 @@ fn stage_plugins(args: &[String]) -> Result<String, String> {
             workspace_root.display(),
         ));
     }
-    check_against_what_mobile_links(&bundled, &metadata)?;
+    check_against_what_the_repo_declares(&bundled, &metadata)?;
 
     let profile_dir = match &target {
         Some(triple) => target_dir.join(triple),
@@ -297,7 +297,7 @@ fn pack_plugins(args: &[String]) -> Result<String, String> {
     // Same blind spot, same check: this task asks the workspace too, so an
     // adapter that left it would be quietly absent from the archives as well as
     // from the staging tree.
-    check_against_what_mobile_links(&bundled, &metadata)?;
+    check_against_what_the_repo_declares(&bundled, &metadata)?;
 
     let profile_dir = match &target {
         Some(triple) => target_dir.join(triple),
@@ -568,7 +568,7 @@ fn cdylib_extension() -> &'static str {
 /// Using it here buys a second thing beyond the blind spot: the two platforms
 /// are made to agree. An adapter added to one side and forgotten on the other
 /// now fails, by name, in whichever direction it happened.
-fn check_against_what_mobile_links(
+fn check_against_what_the_repo_declares(
     bundled: &[Bundled],
     metadata: &serde_json::Value,
 ) -> Result<(), String> {
@@ -583,7 +583,7 @@ fn check_against_what_mobile_links(
     // `static = ["caldav", "ical", …]`, and each of those is
     // `caldav = ["registry", "dep:adapter-caldav-plugin"]`. The `dep:` entry is
     // the plugin crate, which is the name discovery works in too.
-    let linked: BTreeSet<String> = features["static"]
+    let declared: BTreeSet<String> = features["static"]
         .as_array()
         .ok_or("`host-plugins` has no `static` feature; the mobile host no longer declares its adapters in the place this check reads")?
         .iter()
@@ -599,7 +599,7 @@ fn check_against_what_mobile_links(
                 .collect::<Vec<_>>()
         })
         .collect();
-    if linked.is_empty() {
+    if declared.is_empty() {
         return Err("`host-plugins`' `static` feature names no adapter crates; this check would pass on anything".to_string());
     }
 
@@ -614,24 +614,24 @@ fn check_against_what_mobile_links(
         })
         .collect();
 
-    let mobile_only: Vec<&String> = linked.difference(&staged).collect();
-    let desktop_only: Vec<&String> = staged.difference(&linked).collect();
-    if mobile_only.is_empty() && desktop_only.is_empty() {
+    let declared_only: Vec<&String> = declared.difference(&staged).collect();
+    let staged_only: Vec<&String> = staged.difference(&declared).collect();
+    if declared_only.is_empty() && staged_only.is_empty() {
         return Ok(());
     }
 
-    let mut message = String::from("desktop and mobile disagree about which adapters Aperio ships");
-    for name in mobile_only {
+    let mut message = String::from("the workspace and the declared adapter list disagree");
+    for name in declared_only {
         message.push_str(&format!(
-            "\n  {name}: linked into the mobile host, but no workspace cdylib stages it for the desktop. \
-             If this adapter moved to its own repository, stage-plugins has to be taught where to find \
-             it — leaving it out here would ship a desktop build without it, quietly"
+            "\n  {name}: declared by `host-plugins`' `static` feature, but no workspace cdylib \
+             stages it. If this adapter moved to its own repository, stage-plugins has to be \
+             taught where to find it — leaving it out would ship a build without it, quietly"
         ));
     }
-    for name in desktop_only {
+    for name in staged_only {
         message.push_str(&format!(
-            "\n  {name}: staged for the desktop, but `host-plugins`' `static` feature does not link it \
-             into the mobile host. The phone would not have this adapter"
+            "\n  {name}: staged from the workspace, but `host-plugins`' `static` feature does not \
+             name it. Either add it there, or it is an adapter nothing declares"
         ));
     }
     Err(message)

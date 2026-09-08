@@ -136,6 +136,14 @@ plugin_sdk::declare_lifecycle! {
   true as of ABI 4 and was not before it: the host had no way to tell how long
   your vtable was, so it refused anything built against an older revision
   outright. The SDK stamps the `struct_size` that makes it work.
+- **A panic costs the call, not the app:** every entry point the SDK emits or
+  wraps catches, so an `unwrap` that goes wrong comes back as
+  `PLUGIN_CALL_ERR_INTERNAL` with the panic's own message instead of aborting
+  Aperio. If you hand-write a vtable slot that does not go through a dispatch
+  helper, wrap its body in `plugin_sdk::guarded` — see
+  [the ABI reference](/plugins/abi-reference/#nothing-may-unwind-across-the-boundary),
+  including the caveat that Aperio's own bundled builds use `panic = "abort"`
+  and so do not get this.
 - **Logging:** your `tracing` / `log` output is forwarded to the host log
   automatically — the SDK exports `aperio_plugin_set_log` and installs a
   forwarding subscriber, so `warn!`/`info!`/… land in `aperio.log` with no

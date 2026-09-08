@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 
 use plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_OK};
 
+use crate::panic_guard::guarded;
 use crate::response::{bytes_to_response, error_response};
 
 /// Answer one language's strings and marshal the map back across the boundary.
@@ -45,20 +46,25 @@ pub unsafe fn strings_with<F>(args_ptr: *const u8, args_len: usize, handler: F) 
 where
     F: FnOnce(&str) -> BTreeMap<String, String>,
 {
-    // SAFETY: forwarded from the caller's own contract, which the host upholds
-    // for every named-export invocation.
-    let args: StringsArgs = match unsafe { crate::args::decode_args(args_ptr, args_len) } {
-        Ok(parsed) => parsed,
-        Err(response) => return response,
-    };
-    let map = handler(&args.lang);
-    match serde_json::to_vec(&map) {
-        Ok(bytes) => bytes_to_response(PLUGIN_CALL_OK, bytes),
-        Err(err) => error_response(
-            PLUGIN_CALL_ERR_INVALID,
-            &format!("could not serialise strings: {err}"),
-        ),
-    }
+    // The WHOLE body, author closure and argument decoding alike, runs
+    // inside the catch: a panic before the handler is reached aborts just
+    // as hard as one inside it.
+    guarded(|| {
+        // SAFETY: forwarded from the caller's own contract, which the host upholds
+        // for every named-export invocation.
+        let args: StringsArgs = match unsafe { crate::args::decode_args(args_ptr, args_len) } {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        };
+        let map = handler(&args.lang);
+        match serde_json::to_vec(&map) {
+            Ok(bytes) => bytes_to_response(PLUGIN_CALL_OK, bytes),
+            Err(err) => error_response(
+                PLUGIN_CALL_ERR_INVALID,
+                &format!("could not serialise strings: {err}"),
+            ),
+        }
+    })
 }
 
 #[derive(serde::Deserialize)]

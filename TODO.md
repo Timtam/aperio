@@ -605,6 +605,23 @@ auch falls nie ein Repo entsteht.
   bei genau dem Commit übersprungen, der ihn ändert), und die toten Features
   `dynamic-plugins`/`static-plugins` sind weg — kein `cfg` hat sie je gelesen,
   DESIGN §20.6 beschrieb sie trotzdem als den Desktop/Mobile-Schalter.
+
+  Der Review des Branches fand danach drei weitere, zwei davon in genau dieser
+  Arbeit: (a) der verbreiterte Reach-Wächter las nur nackte String-Literale,
+  liess also `concat!(env!("CARGO_MANIFEST_DIR"), "/../../shared/…")` durch —
+  ausgerechnet die Schreibweise, die dieses Repo 14-mal benutzt — und behauptete
+  im Doc-Kommentar, sie koenne gar nicht entkommen; (b) `KNOWN_REACHES`
+  entschuldigte eine DATEI statt eines Zugriffs, die drei genannten Leser
+  durften also alles einbinden, und die Verschwinde-Pruefung war mit
+  irgendeinem Zugriff zufrieden. (c) Und das Versprechen „Rust-Plugins bekommen
+  das Panik-Fangen geschenkt" galt fuer sechs Dispatch-Helfer, waehrend Header
+  und Doku „jeden Slot, jeden Export" sagten — 39 Eintrittspunkte, davon 17
+  lebende Vtable-Slots, brachen weiter ab. Jetzt faengt jeder, und
+  `panic_boundary.rs` laesst keinen neuen durch.
+- [ ] OFFEN aus demselben Review, nicht in diesem Branch: **kein CI-Job prueft
+  `mobile/`** (ein Mobile-only-Commit meldet drei gruene Checks und hat nichts
+  ausgefuehrt), und **`locales/**` steht in keinem Paths-Filter**, obwohl ein
+  Rust-Test, `tsc`, vitest und das ausgelieferte Bundle es lesen.
 - [ ] Danach erst: Versionierung der fünf Vertragskisten, `adapter-caldav`s
   Zugriff auf `shared/contracts/` auflösen — und ein erster Umzug mit **einem**
   Adapter als Probe. **Vikunja, nicht webdav**: `host-core` greift an sechs

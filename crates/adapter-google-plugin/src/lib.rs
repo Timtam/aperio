@@ -251,7 +251,9 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
 /// FFI export; `handle` must be the pointer returned by
 /// [`plugin_open_instance`].
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
-    PluginInstance::<GoogleAccount>::drop_handle(handle);
+    plugin_sdk::guarded_void("close_instance", || {
+        PluginInstance::<GoogleAccount>::drop_handle(handle);
+    })
 }
 
 // ── Adapter base ───────────────────────────────────────────
@@ -271,19 +273,21 @@ unsafe extern "C" fn ffi_capabilities(
     _a: *const u8,
     _l: usize,
 ) -> PluginCallResult {
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    // Synchronous, so it cannot go through `dispatch`; the same projection by
-    // hand. An account with no calendar half declares no calendar capability,
-    // which is the truthful answer rather than an error — the caller is asking
-    // what this account can do, and the reply is "none of this".
-    let caps: Vec<Capability> = match inst.plugin().cal.as_ref() {
-        Some(cal) => cal_core::Adapter::capabilities(cal).to_vec(),
-        None => Vec::new(),
-    };
-    ok_response(&caps)
+    plugin_sdk::guarded(|| {
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        // Synchronous, so it cannot go through `dispatch`; the same projection by
+        // hand. An account with no calendar half declares no calendar capability,
+        // which is the truthful answer rather than an error — the caller is asking
+        // what this account can do, and the reply is "none of this".
+        let caps: Vec<Capability> = match inst.plugin().cal.as_ref() {
+            Some(cal) => cal_core::Adapter::capabilities(cal).to_vec(),
+            None => Vec::new(),
+        };
+        ok_response(&caps)
+    })
 }
 
 // ── CalendarFeature ────────────────────────────────────────
@@ -398,22 +402,24 @@ unsafe extern "C" fn ffi_calendar_color(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let calendar_id: String = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    // Also synchronous. No calendar half means no cached colour, which is the
-    // same answer this returns for a calendar it has not listed yet.
-    let color = inst
-        .plugin()
-        .cal
-        .as_ref()
-        .and_then(|cal| cal.calendar_color(&calendar_id));
-    ok_response(&color)
+    plugin_sdk::guarded(|| {
+        let calendar_id: String = match decode_args(a, l) {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        // Also synchronous. No calendar half means no cached colour, which is the
+        // same answer this returns for a calendar it has not listed yet.
+        let color = inst
+            .plugin()
+            .cal
+            .as_ref()
+            .and_then(|cal| cal.calendar_color(&calendar_id));
+        ok_response(&color)
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -936,32 +942,34 @@ unsafe extern "C" fn ffi_fetch_sound_asset(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let args: FetchSoundAssetArgs = match decode_args(a, l) {
-        Ok(a) => a,
-        Err(r) => return r,
-    };
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    // Hand-rolled rather than through `sync_dispatch`: the payload is bytes and
-    // has to be base64'd on the way out, which the generic marshaller does not
-    // do. Same shape as the retired plugin's.
-    let account: &'static GoogleAccount =
-        unsafe { std::mem::transmute::<&GoogleAccount, &'static GoogleAccount>(inst.plugin()) };
-    let outcome = inst.runtime().block_on(async move {
-        drive_half(account)?
-            .fetch_sound_asset(&args.hash, &args.extension)
-            .await
-    });
-    match outcome {
-        Ok(None) => ok_response(&Option::<String>::None),
-        Ok(Some(bytes)) => {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-            ok_response(&Some(b64))
+    plugin_sdk::guarded(|| {
+        let args: FetchSoundAssetArgs = match decode_args(a, l) {
+            Ok(a) => a,
+            Err(r) => return r,
+        };
+        let inst = match instance(h) {
+            Ok(i) => i,
+            Err(r) => return r,
+        };
+        // Hand-rolled rather than through `sync_dispatch`: the payload is bytes and
+        // has to be base64'd on the way out, which the generic marshaller does not
+        // do. Same shape as the retired plugin's.
+        let account: &'static GoogleAccount =
+            unsafe { std::mem::transmute::<&GoogleAccount, &'static GoogleAccount>(inst.plugin()) };
+        let outcome = inst.runtime().block_on(async move {
+            drive_half(account)?
+                .fetch_sound_asset(&args.hash, &args.extension)
+                .await
+        });
+        match outcome {
+            Ok(None) => ok_response(&Option::<String>::None),
+            Ok(Some(bytes)) => {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                ok_response(&Some(b64))
+            }
+            Err(err) => sync_error_to_response(err),
         }
-        Err(err) => sync_error_to_response(err),
-    }
+    })
 }
 
 pub static SYNC_VTABLE: SyncVtable = SyncVtable {
