@@ -3205,7 +3205,22 @@ typedef PluginCallResult (*AperioVtableMethodFn)(
 
 Alle Fachdaten queren die Grenze als **JSON**; die Argumentschlüssel spiegeln
 die Rust-Parameternamen. Ein NULL-Slot bedeutet „nicht unterstützt“ und wird
-vom Host in den `Unsupported`-Fehler der jeweiligen Domäne übersetzt. Ergebnis-
+vom Host in den `Unsupported`-Fehler der jeweiligen Domäne übersetzt.
+
+**Über diese Grenze darf nichts abwickeln (unwinden), in keiner Richtung.** Eine
+Panik, die aus einer `extern "C"`-Funktion entkommt, beendet den Prozess — nicht
+den Adapter, sondern Aperio, samt jedem anderen Konto, das der Nutzer offen hat.
+Ein `unwrap` auf ein Feld, das ein Server nicht mehr schickt, genügt. Gemeldet
+wird stattdessen ein Statuscode, den der Host ohnehin überall behandelt: das
+Konto zeigt einen Fehler, der Rest läuft weiter.
+
+Rust-Adapter bekommen das geschenkt: die Dispatch-Helfer in `plugin-sdk` fangen
+jede Panik und machen `PLUGIN_CALL_ERR_INTERNAL` daraus, mit der Meldung der
+Panik als Text — die Instanz bleibt benutzbar. C-Adapter fangen selbst. Dass
+Aperios eigene Plugins zusätzlich mit `panic = "abort"` gebaut werden, ist eine
+Eigenschaft des Release-Profils **dieses** Workspaces und reist nicht mit einem
+Adapter mit, der in seinem eigenen Repository gebaut wird — dort ist Abwickeln
+cargos Voreinstellung. Ergebnis-
 puffer allokiert das Plugin und liefert seinen eigenen `free`-Funktionszeiger
 mit, sodass kein Allokator geteilt wird. Fehler reisen als `int32`-Status aus
 einer festen Tabelle (`APERIO_PLUGIN_CALL_ERR_*`) plus UTF-8-Meldung. Es gibt

@@ -125,6 +125,33 @@ plugin already shares the host's logging, so the host never calls it.)
 code. **C / other-language plugins** implement the export themselves and call
 the supplied function pointer for each line they want forwarded.
 
+## Nothing may unwind across the boundary
+
+In either direction, and it is not a style rule. An exception or panic escaping
+a function on this boundary **terminates Aperio** — not your adapter, the whole
+app, with every other account the user had open, at a moment your code chose.
+A single `unwrap` on a field a server stopped sending is enough.
+
+Report a failure as a status code instead: a non-zero `APERIO_PLUGIN_CALL_ERR_*`
+with a message. The host is built for that — the account shows an error and
+everything else keeps working.
+
+**Rust plugins get this for free.** `plugin-sdk`'s dispatch helpers wrap every
+call, so a panic in your adapter comes back as
+`APERIO_PLUGIN_CALL_ERR_INTERNAL` carrying the panic's own message, and the
+instance stays usable for the next call. You still want to avoid panicking —
+the message is a clue, not a diagnosis — but a bug in one method costs that
+method.
+
+**C and C++ plugins catch at the boundary themselves.** Every entry point the
+host calls: `aperio_plugin_create`, the lifecycle hooks, every vtable slot,
+every named export.
+
+Aperio's own bundled plugins additionally build with `panic = "abort"`. That is
+a property of Aperio's workspace release profile and **does not travel** to a
+plugin built in its own repository — where cargo's default is to unwind. Do not
+rely on it.
+
 ## Versioning & compatibility
 
 Every vtable starts with the same two `u32`s: `vtable_version` (= `ABI_VERSION`)

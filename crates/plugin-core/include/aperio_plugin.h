@@ -45,6 +45,29 @@
  * Aperio threads — the host doesn't serialise calls across
  * different instances (or across different methods on the same
  * instance).
+ *
+ * Unwinding
+ * ─────────
+ * NOTHING may unwind across this boundary, in either direction. The
+ * two callbacks the host hands you say so where they are declared;
+ * the same rule holds for every function the host calls in you —
+ * `aperio_plugin_create`, the lifecycle hooks, every vtable slot,
+ * every named export. An exception or panic escaping one of them
+ * terminates Aperio, and with it every other account the user has
+ * open, at a moment your own code chose.
+ *
+ * Report a failure as a status code instead: a non-zero
+ * `APERIO_PLUGIN_CALL_ERR_*` with a message. That is a state the
+ * host is built for — the account shows an error, and everything
+ * else keeps working.
+ *
+ * C and C++ authors: catch at the boundary yourself. Rust authors
+ * using `plugin-sdk` get this for free — its dispatch helpers wrap
+ * every call, so a panic becomes `APERIO_PLUGIN_CALL_ERR_INTERNAL`
+ * carrying the panic's own message. Note that Aperio's own bundled
+ * plugins are additionally built with `panic = "abort"`, which is a
+ * property of THIS workspace's release profile and does not travel
+ * to a plugin built anywhere else.
  */
 
 #ifndef APERIO_PLUGIN_H
