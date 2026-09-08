@@ -164,13 +164,15 @@ The committed `cal_ffi.kt` and the local `.so` must come from the same
 `cal-ffi` source, or JNA fails to resolve symbols at call time.
 
 **`npm run check:bindings` catches step 1 being skipped**, and `npm run android`
-runs it first. Nothing else does: `tsc` and ESLint never look at Kotlin, so a
-stale binding file surfaces only as `:cal-ffi:compileReleaseKotlin` failing
-minutes into an EAS build. That is how the whole event-group API and the whole
-day-marker API sat unbuildable on Android for weeks — the vendoring step
+runs it first. Nothing else does: `tsc` and ESLint never look at Kotlin or
+Swift, so a stale binding file surfaces only as `:cal-ffi:compileReleaseKotlin`
+failing minutes into an EAS build. That is how the whole event-group API and the
+whole day-marker API sat unbuildable on Android for weeks — the vendoring step
 refreshed the `.so` and left the bindings behind.
 
-> iOS parity is deferred: `ios/CalFfiModule.swift` still exposes only
-> `parseAttendee`. Bringing the tasks API to iOS means regenerating the Swift
-> bindings, rebuilding the XCFramework on the macOS CI runner, and extending
-> the Swift bridge — done in the iOS/VoiceOver phase.
+It compares ARITY, not just names, in three directions — Rust ↔ committed
+bindings, bindings ↔ Kotlin bridge, Rust ↔ Swift bridge. The name-only version
+missed a change where three methods gained a parameter, the Kotlin bridge was
+updated to pass it, and the regeneration silently did not run: every name still
+matched. The Swift direction matters most, because nothing on this machine ever
+compiles Swift — that mistake is only visible after an XCFramework build.

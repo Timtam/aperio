@@ -168,6 +168,14 @@ jobs:
         working-directory: mobile
         run: npm ci
 
+      # Before anything expensive: the committed UniFFI bindings and the two
+      # native bridges have to agree with crates/cal-ffi about every method and
+      # its arity. A mismatch otherwise surfaces minutes in, as a Kotlin or
+      # Swift compile failure, with the build already paid for.
+      - name: FFI bridges agree with the Rust host
+        working-directory: mobile
+        run: node scripts/check-ffi-bridges.mjs
+
       - name: Install eas-cli
         run: npm i -g eas-cli
 
