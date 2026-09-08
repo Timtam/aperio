@@ -47,6 +47,12 @@ jobs:
             rust:
               - 'crates/**'
               - 'src-tauri/**'
+              # Staging moved out of src-tauri/build.rs and into here, so this
+              # is now the crate that decides whether any adapter reaches a
+              # build. Without it an xtask-only commit sets rust=false, every
+              # step of the job is skipped, and the whole thing reports green
+              # having compiled nothing.
+              - 'xtask/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain*'
@@ -127,28 +133,21 @@ jobs:
         if: needs.changes.outputs.rust == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Build the workspace BEFORE testing so the plugin
-      # cdylibs (workspace members, but not cargo deps of
-      # aperio — they're loaded via dlopen) land in
-      # target/<profile>/ and src-tauri/build.rs stages them
-      # into target/<profile>/plugins/bundled/<id>/. Without
-      # this step the integration test
-      # `scan_bundled_loads_every_expected_plugin_when_staged`
-      # silently skips and the end-to-end dlopen path is
-      # never verified on CI.
+      # Build the workspace BEFORE testing so the plugin cdylibs (workspace
+      # members, but not cargo deps of aperio — they are loaded via dlopen)
+      # exist, then stage them where the host scans. Without this the
+      # integration test `every_staged_plugin_loads` skips itself and the
+      # end-to-end dlopen path is never exercised on CI.
       #
-      # Two build invocations are needed: the first produces
-      # the cdylibs alongside aperio in parallel (aperio's
-      # build.rs runs but the cdylibs may not exist yet —
-      # there's no dep edge to enforce ordering, by design).
-      # The second triggers aperio's build.rs to re-run via
-      # `cargo:rerun-if-changed=<cdylib_src>` so the now-
-      # present cdylibs get staged into plugins/bundled/.
+      # Two invocations, and now for an honest reason: the build makes the
+      # libraries, the xtask copies them. It used to be two BUILDS, the second
+      # existing only to make a build script rerun once the first had finished
+      # producing what it needed — which it silently tolerated not finding.
       - name: cargo build (workspace + stage plugins)
         if: needs.changes.outputs.rust == 'true'
         run: |
           cargo build --workspace
-          cargo build -p aperio
+          cargo xtask stage-plugins
 
       - name: cargo test
         if: needs.changes.outputs.rust == 'true'

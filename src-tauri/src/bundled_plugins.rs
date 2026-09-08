@@ -22,46 +22,36 @@
 //!
 //! ## Dev workflow
 //!
-//! `cargo build --workspace` builds every plugin cdylib;
-//! `build.rs` stages them into
-//! `target/<profile>/plugins/bundled/<id>/`. A subsequent
-//! `cargo run -p aperio` scans that directory + loads each
-//! plugin via `libloading`.
+//! Two commands, in this order:
 //!
-//! ### The two-build race
+//! 1. `cargo build --workspace` — produces every plugin cdylib.
+//! 2. `cargo xtask stage-plugins` — copies each one, with its
+//!    `plugin.json`, into `target/<profile>/plugins/bundled/<id>/`.
 //!
-//! On a fresh `target/` (e.g. after `cargo clean`), a SINGLE
-//! `cargo build --workspace` is not enough. The plugin
-//! crates and `aperio` have NO cargo-dep edges between them
-//! (by design — adding them would link 17×`#[no_mangle]
-//! aperio_plugin_create` into the host binary + collide at
-//! link time). Cargo therefore schedules them in parallel.
-//! `aperio`'s `build.rs` runs at some non-deterministic
-//! point during the workspace build and may see an empty
-//! target dir if the cdylibs haven't landed yet. Its
-//! `cargo:rerun-if-changed=<cdylib_src>` would re-fire the
-//! staging next time, but in a single-invocation build
-//! "next time" never comes.
+//! A subsequent `cargo run -p aperio` scans that directory and loads each
+//! plugin via `libloading`. `cargo tauri dev` and `cargo tauri build` run both
+//! steps themselves, through `tauri.conf.json`'s `beforeDevCommand` /
+//! `beforeBuildCommand`.
 //!
-//! The fix is two cargo invocations chained:
+//! Running `cargo run -p aperio` without step 2 leaves the bundled-plugins dir
+//! empty: aperio starts, and every external calendar/sync/vc adapter surfaces
+//! as "plugin missing".
 //!
-//! 1. `cargo build --workspace` — produces every cdylib.
-//!    aperio's build.rs may not stage anything this round.
-//! 2. `cargo build -p aperio` — cargo sees the cdylibs are
-//!    now present where they were absent before;
-//!    rerun-if-changed fires; build.rs stages.
+//! ### Why it takes a second command
 //!
-//! `cargo tauri dev` + `cargo tauri build` automate this
-//! via `tauri.conf.json`'s `beforeDevCommand` /
-//! `beforeBuildCommand` (both chain the two-build sequence
-//! ahead of the frontend build). On a warm tree both builds
-//! collapse to ~1 s of up-to-date checks.
+//! The plugin crates and `aperio` have NO cargo-dep edges between them, by
+//! design — adding them would link twelve copies of `#[no_mangle]
+//! aperio_plugin_create` into the host binary and collide. So cargo schedules
+//! them in parallel, and nothing during the build can be sure the cdylibs
+//! exist yet.
 //!
-//! Running `cargo run -p aperio` directly (bypassing tauri)
-//! ALONE leaves the bundled-plugins dir empty; aperio still
-//! starts but every external calendar/sync/vc adapter
-//! surfaces as "plugin missing" until the two-build chain
-//! has run at least once.
+//! Staging used to live in `aperio`'s own `build.rs`, which meant it ran at
+//! some non-deterministic point in the middle of that and frequently found
+//! nothing. The workaround was to build the app TWICE — the second pass
+//! existing only so `cargo:rerun-if-changed` would fire once the libraries had
+//! landed — and a cdylib still missing was a `cargo:warning` the build
+//! ignored. Copying after the build removes the race instead of racing it, and
+//! a missing cdylib is now an error. See `xtask/src/main.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -158,57 +148,6 @@ mod tests {
         assert_eq!(manager.len(), 0);
     }
 
-    /// The release workflow derives "how many plugins should be staged" by
-    /// reading `build.rs`, and it has to read the same number this build
-    /// stages.
-    ///
-    /// It is a shell one-liner over a Rust file, which is exactly as fragile as
-    /// it sounds — and it broke: `build.rs` grew a helper that filters stale
-    /// directories on the `com.aperio.` PREFIX, one string literal in a
-    /// function that stages nothing, and the count went up by one. Every
-    /// artifact build then failed against a tree that was perfectly fine, and
-    /// nothing said so until a thirty-minute CI run came back red.
-    ///
-    /// So the derivation is pinned here, where `cargo test` finds a mismatch in
-    /// seconds. The extraction below mirrors the workflow's: take the
-    /// `const PLUGINS` block, count the `"com.aperio.` lines in it.
-    #[test]
-    fn the_workflow_derives_the_same_plugin_count_this_build_stages() {
-        let build_rs = include_str!("../build.rs");
-        let table = build_rs
-            .split_once("\nconst PLUGINS")
-            .expect("build.rs declares a PLUGINS table")
-            .1
-            .split_once("\n];")
-            .expect("the PLUGINS table is terminated")
-            .0;
-        let derived = table
-            .lines()
-            .filter(|line| line.contains("\"com.aperio."))
-            .count();
-
-        // The entry count, measured a DIFFERENT way — off each tuple's first
-        // field, the cdylib crate name. Counting the ids again would just
-        // restate the line above and assert nothing.
-        let entries = table
-            .lines()
-            .filter(|line| line.trim_end().ends_with("-cdylib\","))
-            .count();
-
-        assert_eq!(
-            derived, entries,
-            "the workflow's `sed '/^const PLUGINS/,/^];/p' | grep -c '\"com\\.aperio\\.'` \
-             sees {derived} plugins but the table has {entries} entries — the \
-             artifact build will fail against a healthy tree. Something inside the \
-             table carries a `\"com.aperio.` literal that is not an entry's id.",
-        );
-        assert!(
-            entries >= 12,
-            "only {entries} plugins in the table; if an adapter was unplugged on \
-             purpose, lower this floor deliberately rather than by accident",
-        );
-    }
-
     /// `bundled_dir()` returns a path under the dir of the
     /// currently-running test binary. The path may or may not
     /// exist depending on whether `cargo build --workspace`
@@ -233,8 +172,8 @@ mod tests {
     ///
     /// `bundled_dir()` resolves beside `current_exe`, which in a shipped app is
     /// right. Under `cargo test` the exe is `target/<profile>/deps/…`, while
-    /// `build.rs` stages into `target/<profile>/plugins/bundled` — one level
-    /// further up.
+    /// `cargo xtask stage-plugins` writes to `target/<profile>/plugins/bundled`
+    /// — one level further up.
     ///
     /// Getting that arithmetic wrong is not a harmless test-only slip: it makes
     /// every test built on this silently SKIP, which reads as green. The
@@ -272,7 +211,10 @@ mod tests {
     #[test]
     fn a_plugin_that_declares_oauth_actually_exports_its_auth_entry_point() {
         let Some(scan_dir) = staged_plugins_dir() else {
-            eprintln!("skipping: no staged plugins dir — run `cargo build --workspace` first");
+            eprintln!(
+                "skipping: no staged plugins dir — run `cargo build --workspace` and \
+                 then `cargo xtask stage-plugins`",
+            );
             return;
         };
         let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
@@ -319,9 +261,12 @@ mod tests {
     }
 
     #[test]
-    fn scan_bundled_loads_every_expected_plugin_when_staged() {
+    fn every_staged_plugin_loads() {
         let Some(scan_dir) = staged_plugins_dir() else {
-            eprintln!("skipping: no staged plugins dir — run `cargo build --workspace` first");
+            eprintln!(
+                "skipping: no staged plugins dir — run `cargo build --workspace` and \
+                 then `cargo xtask stage-plugins`",
+            );
             return;
         };
 
@@ -332,37 +277,40 @@ mod tests {
             "scan_dir against staged plugins should report no errors, got {errors:?}",
         );
 
-        // Every plugin the workspace produces should be present.
-        // Mirrors the list in build.rs::PLUGINS.
+        // What is on disk is what `cargo xtask stage-plugins` put there, and it
+        // verifies its own work — that every plugin the workspace declares
+        // arrived with both halves, and that nothing of ours is there that the
+        // workspace does not declare. So the question left for this test is the
+        // one only the host can answer: can it actually LOAD them.
         //
-        // The count below is derived from this list rather than written out
-        // again. It used to be a separate literal, which is how it came to say
-        // 17 while the list said 14: unplugging an adapter edits the list, and
-        // a number somewhere underneath it does not follow.
-        const EXPECTED: &[&str] = &[
-            "com.aperio.cal-adapter-caldav",
-            "com.aperio.cal-adapter-ical",
-            "com.aperio.cal-adapter-google",
-            "com.aperio.cal-adapter-microsoft-graph",
-            "com.aperio.cal-adapter-ews",
-            "com.aperio.cal-adapter-vikunja",
-            "com.aperio.cal-adapter-todoist",
-            "com.aperio.sync-adapter-webdav",
-            "com.aperio.sync-adapter-ftp",
-            "com.aperio.sync-adapter-sftp",
-            "com.aperio.sync-adapter-dropbox",
-            "com.aperio.vc-adapter-webex",
-        ];
-        for id in EXPECTED {
-            assert!(
-                manager.get(id).is_some(),
-                "plugin {id} not loaded — check that build.rs staged it",
-            );
-        }
+        // Deliberately no list of ids. There used to be one here and another in
+        // `build.rs`, and a third derivation in the release workflow; keeping
+        // three copies in step is what put a `17` under a list of fourteen.
+        let staged = fs::read_dir(&scan_dir)
+            .expect("the staged dir was found above")
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .count();
         assert_eq!(
             manager.len(),
-            EXPECTED.len(),
-            "a staged plugin nobody expected, or an expected one missing",
+            staged,
+            "every staged plugin should load: {} of {staged} did",
+            manager.len(),
+        );
+
+        // Named rather than counted, because the number is the thing that
+        // changes when an adapter is retired on purpose. The built-in store is
+        // not among them — it is linked, not loaded — so the anchor is the
+        // adapter every desktop install has a use for.
+        assert!(
+            manager.get("com.aperio.cal-adapter-caldav").is_some(),
+            "CalDAV did not load from {}; staged: {:?}",
+            scan_dir.display(),
+            manager
+                .all()
+                .iter()
+                .map(|p| p.manifest.id.clone())
+                .collect::<Vec<_>>(),
         );
     }
 }

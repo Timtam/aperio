@@ -78,11 +78,11 @@ plugin-core.workspace = true
 # Plugins are loaded via dlopen from `plugins/bundled/` at
 # runtime (DESIGN.md §20.5 + §22.2). Listing them as deps would
 # force the host to link the plugin rlibs, which would collide
-# on `#[no_mangle] aperio_plugin_create` across all 13 plugins.
-# `build.rs` stages the cdylibs into `target/<profile>/plugins/
-# bundled/<id>/` so `cargo run -p aperio` can find them at
-# startup — but `cargo build --workspace` must have run first
-# to actually produce those cdylibs.
+# on `#[no_mangle] aperio_plugin_create` across every plugin.
+# `cargo xtask stage-plugins` copies the cdylibs into
+# `target/<profile>/plugins/bundled/<id>/` so `cargo run -p aperio`
+# can find them at startup — run it after `cargo build --workspace`,
+# which is what produces those cdylibs.
 
 base64 = "0.22"
 # Custom notification-sound playback (§14.4). The notification plugin

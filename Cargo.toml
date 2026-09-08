@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    # Repository automation, run as `cargo xtask <task>`. A workspace member so
+    # it builds with the tree it operates on; never a dependency of anything.
+    "xtask",
+
     # Kern-Bibliotheken
     "crates/aperio-db",
     "crates/builtin-oauth",

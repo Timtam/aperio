@@ -1,0 +1,20 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — repository automation run as `cargo xtask <task>`; today it stages the bundled plugin cdylibs a desktop build has to find (DESIGN.md section 20.6)."
+publish = false
+
+[dependencies]
+# The workspace is the source of truth for which plugins exist, and
+# `cargo metadata` is how you ask it. Parsed with serde_json rather than the
+# `cargo_metadata` crate: three fields are needed, and a build tool earns its
+# dependencies the same way anything else does.
+serde_json.workspace = true
+
+[lints]
+workspace = true

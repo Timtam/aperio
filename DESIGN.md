@@ -3538,6 +3538,30 @@ fn load_plugin(path: &Path) -> Result<LoadedPlugin> {
 
 Nativ gebundelte Plugins (alle in diesem Dokument spezifizierten Adapter) werden als shared libraries mit der App ausgeliefert und beim Start automatisch geladen – kein Nutzereingriff nötig. Sie landen in einem `plugins/bundled/`-Verzeichnis relativ zur App-Binary.
 
+#### Wie sie dorthin kommen
+
+`cargo xtask stage-plugins`, **nach** `cargo build --workspace`. Der Build
+erzeugt die cdylibs, der xtask kopiert jede samt ihrer `plugin.json` nach
+`target/<profile>/plugins/bundled/<plugin-id>/`.
+
+Zwei Schritte, und zwar aus einem Grund: Kopieren kann erst, wenn die
+Bibliotheken existieren. Vorher stand das Kopieren im Build-Skript von
+`src-tauri` — also *während* des Builds, in dem cargo die Workspace-Mitglieder
+parallel übersetzt. Die cdylibs waren oft noch nicht da. Umgangen wurde das,
+indem `tauri.conf.json` die App **zweimal** baute, den zweiten Durchlauf allein
+dafür, das Skript erneut laufen zu lassen. Eine fehlende cdylib war eine
+`cargo:warning` und der Build lief weiter — eine Release-Binary, die startet und
+sich mit nichts verbinden kann. Jetzt ist eine fehlende cdylib ein Fehler.
+
+**Welche Plugins gebundelt werden, steht nirgends geschrieben.** Es war eine
+Tabelle aus zwölf Tripeln in `build.rs`, gelesen von vier weiteren Stellen —
+zwei `sed`/`grep`-Schritten im Release-Workflow und einem Rust-Test, der
+`build.rs` per `include_str!` abgriff. Der xtask fragt stattdessen
+`cargo metadata`: ein gebundeltes Plugin ist genau ein Workspace-Mitglied, das
+eine `cdylib` erzeugt und von einer `*-plugin`-Kiste abhängt. `cal-ffi` ist
+ebenfalls eine cdylib, hängt aber von keinem Adapter direkt ab und ist deshalb
+korrekt keines.
+
 Für mobile Plattformen (iOS, Android), wo dynamisches Nachladen von Bibliotheken nicht erlaubt ist, werden gebundelte Plugins **statisch einkompiliert** – über ein Feature-Flag im Build-System:
 
 ```toml

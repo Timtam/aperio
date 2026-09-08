@@ -550,9 +550,15 @@ auch falls nie ein Repo entsteht.
   jeder Sprache seines Adapters benannt (Eigenschaft EINES Manifests), die App
   trägt keine Adapternamen mehr, und ein deaktiviertes Plugin behält den Namen
   seiner Konten.
-- [ ] **Paket 4 — Staging aus `build.rs` in ein xtask** (`cargo metadata` statt
-  `<workspace>/crates/<name>`); killt zugleich den `include_str!("../build.rs")`-
-  Scrape in `src-tauri/src/bundled_plugins.rs` und das Zwei-Build-Rennen.
+- [x] **Paket 4 — Staging aus `build.rs` in ein xtask.**  
+  ↳ `cargo xtask stage-plugins`, nach dem Workspace-Build statt während. Damit
+  ist das Zwei-Build-Rennen weg (auch der zweite `cargo build -p aperio` in
+  `tauri.conf.json`), eine fehlende cdylib ist ein Fehler statt einer
+  `cargo:warning`, und die Plugin-Liste ist abgeleitet: ein Mitglied, das eine
+  cdylib erzeugt und von einer `*-plugin`-Kiste abhängt. Vier Ableitungen
+  derselben Zahl sind auf eine geschrumpft — die Tabelle in `build.rs`, drei
+  `sed`/`grep`-Stellen in den Workflows und der
+  `include_str!("../build.rs")`-Scrape sind alle weg.
 - [ ] **Paket 5 — `.aperio`-Packer.** Der Installer liest das Format, gebaut wird
   es nirgends (die einzige Stelle, die je ein Archiv schreibt, ist ein
   Test-Helfer in `plugin-core/src/archive.rs`). Solange die zwölf Adapter noch

@@ -41,7 +41,7 @@ jobs:
   # Each target builds on a runner whose host arch matches the
   # artefact arch, so `cargo build --workspace` produces the
   # aperio binary AND every plugin cdylib for that arch in
-  # one pass, and src-tauri/build.rs stages them under
+  # one pass, and `cargo xtask stage-plugins` puts them under
   # target/release/plugins/bundled/. macOS is handled by the
   # separate `build-macos` job below (universal = two arches
   # lipo'd together, which this uniform flow can't express).
@@ -110,7 +110,8 @@ jobs:
       # (repo-root `target/`, not `src-tauri/target/`). The
       # beforeBuildCommand chains `cargo build --workspace
       # --release` so every plugin cdylib lands in
-      # target/release/ + src-tauri/build.rs stages them under
+      # target/release/, then `cargo xtask stage-plugins
+      # --release` copies each into
       # target/release/plugins/bundled/<id>/.
       - name: tauri build
         env:
@@ -134,40 +135,16 @@ jobs:
       # Sanity-check the staging step worked: the release zip is
       # useless without the plugin cdylibs. Counts immediate
       # subdirectories of plugins/bundled/ and compares against
-      # build.rs's PLUGINS table. `shell: bash` keeps the
-      # find-based count portable across Windows.
+      # what the workspace declares.
+      # The release zip is useless without the plugin cdylibs, so prove they
+      # are there before packaging one. `--check` changes nothing: it compares
+      # what is on disk against what the workspace declares, and the workspace
+      # is the only place that says so. This used to `sed` the plugin table out
+      # of build.rs and `grep -c` it, a shell one-liner over a Rust file that
+      # went red the day the file grew a `com.aperio.` literal in a function
+      # staging nothing.
       - name: Verify every bundled plugin is staged
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The expected number is DERIVED from build.rs, which is the table that
-          # decides what gets staged. It used to be the literal 17, written out at
-          # three places in this file plus once more in a Rust test — so unplugging
-          # an adapter turned a correct build into a red one.
-          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
-          # literal anywhere else in build.rs inflates this — which is exactly
-          # what happened the day it grew a helper filtering on that prefix:
-          # one string, in a function that stages nothing, and every artifact
-          # build went red against a tree that was fine.
-          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
-          if [ "$expected" -lt 1 ]; then
-            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
-            exit 1
-          fi
-          echo "build.rs stages $expected plugins"
-          STAGED_DIR="target/release/plugins/bundled"
-          if [ ! -d "$STAGED_DIR" ]; then
-            echo "::error::Staged plugins dir missing: $STAGED_DIR"
-            exit 1
-          fi
-          count=$(find "$STAGED_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          echo "Staged plugin count: $count"
-          if [ "$count" -ne "$expected" ]; then
-            echo "::error::Expected $expected staged plugins, found $count"
-            echo "Contents of $STAGED_DIR:"
-            ls -la "$STAGED_DIR" || true
-            exit 1
-          fi
+        run: cargo xtask stage-plugins --release --check
 
       # Tag builds pass the tag (minus `v`); CI / PR builds pass
       # nothing and fall back to the short commit SHA.
@@ -262,14 +239,10 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      # Build aperio + every plugin cdylib for both arches.
-      # TWO passes per arch (mirrors the CI `rust` job + tauri's
-      # beforeBuildCommand): the first builds aperio and the cdylibs
-      # in parallel, but aperio's build.rs runs before the cdylibs
-      # land (there's no dep edge, by design) so nothing is staged
-      # yet; the second `-p aperio` pass re-triggers build.rs via
-      # `cargo:rerun-if-changed=<cdylib>` so the now-present cdylibs
-      # get staged into target/<triple>/release/plugins/bundled/<id>/.
+      # Build aperio + every plugin cdylib for both arches, then stage each
+      # arch's plugins beside its binary. Build, then copy — the same two steps
+      # as the CI `rust` job and tauri's beforeBuildCommand, and for the same
+      # reason: the copying cannot happen until the libraries exist.
       - name: Build workspace for both macOS arches
         env:
           # Same reason as the mobile workflows: `builtin-oauth`'s build.rs bakes
@@ -289,38 +262,17 @@ jobs:
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
         run: |
           cargo build --workspace --release --target x86_64-apple-darwin
-          cargo build -p aperio --release --target x86_64-apple-darwin
+          cargo xtask stage-plugins --release --target x86_64-apple-darwin
           cargo build --workspace --release --target aarch64-apple-darwin
-          cargo build -p aperio --release --target aarch64-apple-darwin
+          cargo xtask stage-plugins --release --target aarch64-apple-darwin
 
+      # Both arches, each against what the workspace declares. The lipo step
+      # below fuses the two binaries; the plugins are copied per arch, so a
+      # gap in either is a shipped universal build that is half-equipped.
       - name: Verify every plugin is staged, per arch
-        shell: bash
         run: |
-          set -euo pipefail
-          # The expected number is DERIVED from build.rs, which is the table that
-          # decides what gets staged. It used to be the literal 17, written out at
-          # three places in this file plus once more in a Rust test — so unplugging
-          # an adapter turned a correct build into a red one.
-          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
-          # literal anywhere else in build.rs inflates this — which is exactly
-          # what happened the day it grew a helper filtering on that prefix:
-          # one string, in a function that stages nothing, and every artifact
-          # build went red against a tree that was fine.
-          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
-          if [ "$expected" -lt 1 ]; then
-            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
-            exit 1
-          fi
-          echo "build.rs stages $expected plugins"
-          for triple in x86_64-apple-darwin aarch64-apple-darwin; do
-            d="target/$triple/release/plugins/bundled"
-            count=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-            echo "$triple: $count plugins staged"
-            if [ "$count" -ne "$expected" ]; then
-              echo "::error::$triple staged $count plugins, expected $expected"
-              exit 1
-            fi
-          done
+          cargo xtask stage-plugins --release --target x86_64-apple-darwin --check
+          cargo xtask stage-plugins --release --target aarch64-apple-darwin --check
 
       - name: Resolve version
         id: version
@@ -364,21 +316,10 @@ jobs:
             cp "$ARM/plugins/bundled/$id/plugin.json" "$out/plugin.json"
           done
 
-          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
-          # literal anywhere else in build.rs inflates this — which is exactly
-          # what happened the day it grew a helper filtering on that prefix:
-          # one string, in a function that stages nothing, and every artifact
-          # build went red against a tree that was fine.
-          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
-          if [ "$expected" -lt 1 ]; then
-            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
-            exit 1
-          fi
-          count=$(find "$STAGE_DIR/plugins/bundled" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          if [ "$count" -ne "$expected" ]; then
-            echo "::error::universal layout has $count plugins, expected $expected"
-            exit 1
-          fi
+          # The fused layout, against what the workspace declares. This is a
+          # tree the shell above assembled, not one under target/, so the check
+          # is pointed at it.
+          cargo xtask stage-plugins --check --dir "$STAGE_DIR/plugins/bundled"
 
           archs="$(lipo -archs "$STAGE_DIR/aperio")"
           echo "universal binary archs: $archs"

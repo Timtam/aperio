@@ -1,0 +1,7 @@
+# `cargo xtask <task>` — the conventional alias for repository automation that
+# lives in the tree rather than in a shell script somebody has to find.
+#
+# The alias is what makes `cargo xtask stage-plugins` work from anywhere in the
+# workspace, and what lets CI and `tauri.conf.json` name the same command.
+[alias]
+xtask = "run --package xtask --"
