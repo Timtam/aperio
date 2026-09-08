@@ -618,10 +618,23 @@ auch falls nie ein Repo entsteht.
   und Doku „jeden Slot, jeden Export" sagten — 39 Eintrittspunkte, davon 17
   lebende Vtable-Slots, brachen weiter ab. Jetzt faengt jeder, und
   `panic_boundary.rs` laesst keinen neuen durch.
-- [ ] OFFEN aus demselben Review, nicht in diesem Branch: **kein CI-Job prueft
-  `mobile/`** (ein Mobile-only-Commit meldet drei gruene Checks und hat nichts
-  ausgefuehrt), und **`locales/**` steht in keinem Paths-Filter**, obwohl ein
-  Rust-Test, `tsc`, vitest und das ausgelieferte Bundle es lesen.
+- [x] **Zwei blinde Flecken in CI geschlossen.**
+  ↳ `locales/**` steht jetzt im `rust`- UND im `frontend`-Filter: der Wächter
+  `the_app_no_longer_carries_names_for_adapters` LIEST
+  `locales/{en,de}/translation.json` zur Laufzeit, und `src/i18n.ts` importiert
+  dieselben Dateien ins ausgelieferte Bundle. Ein Commit, der nur eine
+  Übersetzung ändert, kompilierte vorher gar nichts.
+  ↳ Neuer `mobile`-Job mit `tsc --noEmit`. Der eigentliche Befund war schärfer
+  als der Review-Vorwurf: das Root-`tsconfig.json` schließt `src`, `locales`,
+  `shared` ein — **`mobile` nicht**. Mobiles TypeScript war also auf KEINEM
+  Commit je typgeprüft, nicht bloß auf mobile-only-Commits. Der Job braucht
+  BEIDE `npm ci` (Root für `shared/`s `rrule`/`linkify-it`, dann mobile), sonst
+  meldet tsc vier Fehler in Dateien, die in Ordnung sind.
+  ↳ Ehrlich dazu: gemessen hat **keines** der beiden Löcher je gefeuert — in
+  der ganzen Historie gibt es null locales-only- und null mobile-only-Commits,
+  weil die Desktop-Mobile-Parität dafür sorgt, dass nie eine Seite allein
+  wandert. Es waren Löcher, keine Wunden. Der Mobile-Typcheck dagegen fehlte
+  wirklich immer.
 - [x] **Probe-Umzug einmal komplett durchgespielt** (vikunja, 2026-09-08,
   danach restlos abgebaut). Es geht, und es fällt überall LAUT aus: Pfad-Deps
   überleben keine git-Konsumtion; ohne `[patch]` zwei `plugin-core` und E0308 an

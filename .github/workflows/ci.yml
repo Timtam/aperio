@@ -38,6 +38,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       frontend: ${{ steps.filter.outputs.frontend }}
       ffi: ${{ steps.filter.outputs.ffi }}
+      mobile: ${{ steps.filter.outputs.mobile }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -60,6 +61,11 @@ jobs:
               # commit they exist to catch, while the TypeScript twin runs and
               # reports green. Same shape as the xtask hole above.
               - 'shared/contracts/**'
+              # `the_app_no_longer_carries_names_for_adapters` READS
+              # locales/{en,de}/translation.json at run time and panics on
+              # invalid JSON. It is the guard that keeps adapter names out of
+              # the app, and a locale-only commit skipped it entirely.
+              - 'locales/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain*'
@@ -71,6 +77,18 @@ jobs:
             # step with the bindings — and nothing else in CI reads Kotlin or
             # Swift. The check is a plain node script with no dependencies, so
             # it costs seconds and needs no install.
+            # The React Native app. Nothing in CI compiled it: ~45k lines of
+            # TypeScript with a `mobile/tsconfig.json` sitting right there,
+            # and a mobile-only commit reported three green checks having run
+            # nothing. `shared/` and `locales/` are in here too because mobile
+            # resolves both through its own tsconfig `paths`, under its own
+            # `strict` and its own Expo types — the desktop's check does not
+            # answer for them.
+            mobile:
+              - 'mobile/**'
+              - 'shared/**'
+              - 'locales/**'
+              - '.github/workflows/ci.yml'
             ffi:
               - 'crates/cal-ffi/**'
               - 'mobile/modules/cal-ffi/**'
@@ -78,6 +96,11 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'src/**'
+              # `src/i18n.ts` imports these JSON files directly, so they are
+              # type-checked, tested and embedded in the shipped desktop
+              # bundle. Editing a translation and nothing else used to compile
+              # nothing at all.
+              - 'locales/**'
               # Shared, platform-agnostic frontend TS the desktop compiles in
               # (tsconfig `include`), lints (`eslint .`) and tests. A change
               # here affects the desktop build, so it must run the frontend job.
@@ -174,6 +197,54 @@ jobs:
       - name: Rust, bindings and bridges agree
         if: needs.changes.outputs.ffi == 'true'
         run: node mobile/scripts/check-ffi-bridges.mjs
+
+  # The React Native app's own type check — which is to say, the FIRST one.
+  # The root `tsconfig.json` includes `src`, `locales`, `shared` and
+  # `vite.config.ts`; `mobile` is not in it, so mobile's TypeScript has never
+  # been type-checked by CI on any commit, not merely on mobile-only ones.
+  #
+  # Its own job rather than a step in `frontend`, because it answers a
+  # different question: mobile has its own tsconfig — Expo's base, `strict`,
+  # and `paths` that map `@aperio/shared` and `@aperio/locales` — so the
+  # desktop passing says nothing about it.
+  #
+  # No lint step: the root `eslint .` already walks `mobile/` (it is not in
+  # `.eslintrc.cjs`'s ignore list), so adding one here would run it twice. No
+  # test step: mobile has no test runner yet, and a job that pretends to test
+  # would be worse than one that says what it does.
+  mobile:
+    name: Mobile
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.mobile == 'true'
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+
+      # BOTH installs, and the root one is not optional: `shared/*.ts` imports
+      # `rrule` and `linkify-it`, which are declared at the repository root.
+      # With only mobile's own install, tsc cannot resolve them and reports
+      # four errors in files that are perfectly fine.
+      - name: npm ci (root, for shared/)
+        if: needs.changes.outputs.mobile == 'true'
+        run: npm ci
+
+      - name: npm ci (mobile)
+        if: needs.changes.outputs.mobile == 'true'
+        run: npm ci
+        working-directory: mobile
+
+      - name: TypeScript check
+        if: needs.changes.outputs.mobile == 'true'
+        run: npx tsc --noEmit
+        working-directory: mobile
 
   frontend:
     name: Frontend
