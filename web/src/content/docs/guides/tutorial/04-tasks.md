@@ -207,6 +207,13 @@ holds the final deadline and stays out of your way until the work is finished.
 Like events, tasks can recur (daily, weekly, monthly, yearly). When you
 check off a recurring task, Aperio automatically creates the next due date.
 
+> **When the series ends:** a repeat can end **never**, stop **after a number**
+> of turns, or run **until a date**. "After count" existed only for events; the
+> task editor did not have it. A series that arrived from a provider as "ends
+> after ten times" therefore became endless, silently, on the next save — at
+> the provider too. That is fixed. As with the other fields, an end mode is
+> only offered where the list can store it.
+
 > **When you have missed days:** the next turn is the **last one that was
 > due** — not the next of the days you missed, and not the first one still
 > ahead. A daily task left for a week is therefore back in step after **one**
