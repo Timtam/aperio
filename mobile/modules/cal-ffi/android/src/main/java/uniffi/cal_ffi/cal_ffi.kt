@@ -818,7 +818,13 @@ internal object IntegrityCheckingUniffiLib {
 ): Short
 external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_is_important_priority(
+): Short
+external fun uniffi_cal_ffi_checksum_func_normal_priority(
+): Short
 external fun uniffi_cal_ffi_checksum_func_parse_attendee(
+): Short
+external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(
 ): Short
@@ -1686,8 +1692,14 @@ external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: R
 ): Int
 external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Int
 external fun uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(`rrule`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_recurrence_to_rrule(`recurrence`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1817,7 +1829,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_compare_titles() != 57834.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_normal_priority() != 55182.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_parse_attendee() != 55709.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_priority_rank() != 622.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence() != 23397.toShort()) {
@@ -1940,7 +1961,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_values_json() != 40519.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 15758.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 10110.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 28282.toShort()) {
@@ -4381,6 +4402,20 @@ public interface HostInterface {
      * The `builtin` flag inside the OAuth block is resolved HERE rather than
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
+     * The connect form for an adapter kind, as JSON, or `"null"`.
+     *
+     * Built by `host_core::account_form`, which the desktop's Tauri command
+     * also calls. It used to be assembled here by hand with `serde_json::json!`
+     * and it had drifted from the desktop's copy in both directions: no
+     * `options`, `default_bool`, `default_text` or `device_local` — so
+     * `AccountSchemaForm` dereferenced `undefined` and took the form down on
+     * the FTP and SFTP plugins, both of which declare a `choice` field — and an
+     * `app_redirect_uri` on the OAuth block that no frontend reads.
+     *
+     * The parse on the other side is a bare `as AccountFormSpec` cast, which is
+     * why nothing caught it. The shape is now generated from the Rust
+     * (`shared/generated/AccountFormSpec.ts`), so the cast describes something
+     * a machine derived rather than something a person typed twice.
      */
     fun `accountFormSpecJson`(`adapterKind`: kotlin.String, `lang`: kotlin.String?): kotlin.String
     
@@ -5982,6 +6017,20 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * The `builtin` flag inside the OAuth block is resolved HERE rather than
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
+     * The connect form for an adapter kind, as JSON, or `"null"`.
+     *
+     * Built by `host_core::account_form`, which the desktop's Tauri command
+     * also calls. It used to be assembled here by hand with `serde_json::json!`
+     * and it had drifted from the desktop's copy in both directions: no
+     * `options`, `default_bool`, `default_text` or `device_local` — so
+     * `AccountSchemaForm` dereferenced `undefined` and took the form down on
+     * the FTP and SFTP plugins, both of which declare a `choice` field — and an
+     * `app_redirect_uri` on the OAuth block that no frontend reads.
+     *
+     * The parse on the other side is a bare `as AccountFormSpec` cast, which is
+     * why nothing caught it. The shape is now generated from the Rust
+     * (`shared/generated/AccountFormSpec.ts`), so the cast describes something
+     * a machine derived rather than something a person typed twice.
      */
     @Throws(StoreException::class)override fun `accountFormSpecJson`(`adapterKind`: kotlin.String, `lang`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
@@ -12860,6 +12909,37 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     
 
         /**
+         * Whether a priority is the TOP one — "important" in the two-level system.
+         * See `cal_core::TaskPriority::is_important`.
+         */
+    @Throws(StoreException::class) fun `isImportantPriority`(`priority`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_is_important_priority(
+    
+        FfiConverterString.lower(`priority`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The priority a task gets when "important" is cleared: what it already had,
+         * unless that was the top one. An empty string means "nothing before".
+         * See `cal_core::normal_priority`.
+         */
+    @Throws(StoreException::class) fun `normalPriority`(`previous`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_normal_priority(
+    
+        FfiConverterString.lower(`previous`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Parse a calendar attendee entry into its display name and email.
          *
          * Accepts `"Display Name <email@host>"` or a bare `"email@host"`, delegating
@@ -12871,6 +12951,23 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_parse_attendee(
     
         FfiConverterString.lower(`entry`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The sort rank of a priority under a scale; 0 sorts first.
+         *
+         * `scale` is `"three"` or `"two"`; `priority` is `"low"`, `"medium"` or
+         * `"high"`. See `cal_core::priority_rank`.
+         */
+    @Throws(StoreException::class) fun `priorityRank`(`priority`: kotlin.String, `scale`: kotlin.String): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_priority_rank(
+    
+        FfiConverterString.lower(`priority`),FfiConverterString.lower(`scale`),_status)
 }
     )
     }

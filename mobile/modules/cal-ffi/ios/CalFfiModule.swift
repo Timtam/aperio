@@ -181,6 +181,27 @@ public class CalFfiModule: Module {
       compareTitles(a: a, b: b, languageTag: languageTag)
     }
 
+    // ─── Task priority (synchronous, and that is the point) ───
+    // The ranking every task list sorts by, from `cal_core::task_priority`.
+    // `Function`, not `AsyncFunction`: the callers are `Array.prototype.sort`
+    // comparators, which cannot await.
+    //
+    // Until these existed the rule was reachable from the DESKTOP only — it
+    // lived in `crates/cal-core-wasm`, the desktop's own binding — so this app
+    // ran the TypeScript copy while the desktop ran Rust. Two devices showing
+    // one task list have to put the same task first.
+    Function("priorityRank") { (priority: String, scale: String) -> UInt32 in
+      try priorityRank(priority: priority, scale: scale)
+    }
+
+    Function("isImportantPriority") { (priority: String) -> Bool in
+      try isImportantPriority(priority: priority)
+    }
+
+    Function("normalPriority") { (previous: String) -> String in
+      try normalPriority(previous: previous)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

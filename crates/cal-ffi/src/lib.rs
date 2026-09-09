@@ -93,6 +93,86 @@ fn ordering_to_i32(ordering: std::cmp::Ordering) -> i32 {
     }
 }
 
+// ──────────────────────────── Task priority ─────────────────────────────────
+//
+// The ranking every task list sorts by, from `cal_core::task_priority`. It
+// crosses SYNCHRONOUSLY (Expo `Function`, not `AsyncFunction`) because its
+// callers are `Array.prototype.sort` comparators, which cannot await — the
+// same reason the desktop reaches it through WebAssembly.
+//
+// Until this existed the rule was reachable from the desktop ONLY: it lived in
+// `crates/cal-core-wasm`, the desktop's own binding, so mobile went on running
+// the TypeScript copy. Two devices showing one task list have to put the same
+// task first.
+//
+// The scale and the priority cross as the lowercase strings serde already
+// writes for them everywhere else in this app. An unknown value is an ERROR
+// rather than a default: answering confidently for a value nobody wrote is how
+// a list quietly sorts wrong.
+
+/// The sort rank of a priority under a scale; 0 sorts first.
+///
+/// `scale` is `"three"` or `"two"`; `priority` is `"low"`, `"medium"` or
+/// `"high"`. See `cal_core::priority_rank`.
+#[uniffi::export]
+pub fn priority_rank(priority: String, scale: String) -> Result<u32, StoreError> {
+    Ok(cal_core::priority_rank(
+        parse_priority(&priority)?,
+        parse_scale(&scale)?,
+    ))
+}
+
+/// Whether a priority is the TOP one — "important" in the two-level system.
+/// See `cal_core::TaskPriority::is_important`.
+#[uniffi::export]
+pub fn is_important_priority(priority: String) -> Result<bool, StoreError> {
+    Ok(parse_priority(&priority)?.is_important())
+}
+
+/// The priority a task gets when "important" is cleared: what it already had,
+/// unless that was the top one. An empty string means "nothing before".
+/// See `cal_core::normal_priority`.
+#[uniffi::export]
+pub fn normal_priority(previous: String) -> Result<String, StoreError> {
+    let kept = if previous.is_empty() {
+        None
+    } else {
+        Some(parse_priority(&previous)?)
+    };
+    Ok(priority_to_wire(cal_core::normal_priority(kept)).to_string())
+}
+
+fn parse_priority(value: &str) -> Result<cal_core::TaskPriority, StoreError> {
+    match value {
+        "low" => Ok(cal_core::TaskPriority::Low),
+        "medium" => Ok(cal_core::TaskPriority::Medium),
+        "high" => Ok(cal_core::TaskPriority::High),
+        other => Err(StoreError::InvalidField {
+            field: "priority".into(),
+            detail: format!("unknown priority {other:?}; expected low, medium or high"),
+        }),
+    }
+}
+
+fn parse_scale(value: &str) -> Result<cal_core::PriorityScale, StoreError> {
+    match value {
+        "two" => Ok(cal_core::PriorityScale::Two),
+        "three" => Ok(cal_core::PriorityScale::Three),
+        other => Err(StoreError::InvalidField {
+            field: "scale".into(),
+            detail: format!("unknown priority scale {other:?}; expected two or three"),
+        }),
+    }
+}
+
+fn priority_to_wire(priority: cal_core::TaskPriority) -> &'static str {
+    match priority {
+        cal_core::TaskPriority::Low => "low",
+        cal_core::TaskPriority::Medium => "medium",
+        cal_core::TaskPriority::High => "high",
+    }
+}
+
 // ───────────────────────── Task recurrence ⇄ RRULE ──────────────────────────
 
 /// How often a recurring task repeats. Mirrors [`cal_core::RecurrenceFrequency`].

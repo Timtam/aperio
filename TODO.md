@@ -837,6 +837,34 @@ Siehe DESIGN §4.2.
   ZUSTAND zurück, jede Oberfläche wählt ihr Zeichen — eine e-ink-Anzeige will
   plausibel andere. Damit ist auch klar, wie `taskStatus` zerfällt: die acht
   reinen Funktionen können in den Kern, die Marken-Funktionen nicht.
+- [x] **Die Prioritäts-Regel liegt im Kern** (2026-09-09), erster Umzug unter
+  der Linie „`cal-core` ist DER Kern". `cal_core::task_priority` hält
+  `priority_rank`, `normal_priority`, `TaskPriority::is_important` und die
+  erzeugte `PriorityScale`.
+  ↳ **Der Ausgangszustand war schlechter als er aussah:** die Regel lag in
+  `crates/cal-core-wasm` — der Kiste des DESKTOPS. Erreichbar von genau einer
+  Oberfläche, während Mobile und `shared/taskGrouping.ts` die TypeScript-Kopie
+  fuhren. Drei Implementierungen einer Reihenfolge, die sich nicht
+  unterscheiden darf.
+  ↳ Beide Türen gebaut: `#[wasm_bindgen]` für den Desktop (delegiert jetzt,
+  statt selbst zu rechnen), drei `#[uniffi::export]`-freie Funktionen plus neu
+  erzeugte Kotlin-Bindungen und beide Expo-Brücken für Mobile.
+  `shared/taskStatus.ts` hält die Tür (`installTaskPriorityRules`), die
+  TS-Kopie ist weg, und `src/intl/taskStatus.ts` ist wieder ein nacktes
+  `export *`.
+  ↳ **Der FFI-Wächter hat sich selbst bewährt:** kaum standen die drei freien
+  Funktionen, meldete er von sich aus rot („the bindings are stale, and the
+  Android build will fail on it") — genau die Lücke, die heute früh noch GRÜN
+  gemeldet hätte. Er nennt jetzt acht freie Funktionen statt fünf.
+  ↳ **Ein Test gelöscht statt angepasst:** `coreRules.parity.test.ts` fragte
+  „antwortet Rust dasselbe wie TypeScript?". Mit einer Implementierung hätte er
+  Rust gegen Rust verglichen. Ersetzt durch `src/intl/taskPriority.test.ts`,
+  das die Ränge AUSGESCHRIEBEN prüft; rot bewiesen an der verdrehten
+  Zwei-Stufen-Rangfolge (die wichtige Aufgabe landet hinten).
+  ↳ Nebenbei: die TS-Fassung tolerierte eine Aufgabe OHNE Priorität still
+  (`undefined - undefined` = NaN, `NaN || …` fällt durch); Rust wirft. Kein
+  Produktionspfad kann das erzeugen — `priority` ist auf `Task` Pflicht —, aber
+  ein Test-Fixture konnte es, und der lautere Fehler hat es gefunden.
 - [x] **Die Textordnung liegt im Kern** (Toni: „zieh icu in den kern, das wiegt
   nicht so schwer", 2026-09-09). `cal_core::collation` bietet genau zwei
   Regeln — `compare_names` (Namen von Dingen: Konten, Behälter, Kontakte,

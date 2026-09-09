@@ -552,17 +552,39 @@ menschenlesbaren Listen im Plugin-Bereich ihr `localeCompare`: heutige Plugin-Id
 sind zufällig alle klein, aber ein Fremd-Plugin mit einem Großbuchstaben würde
 sonst über allem anderen einsortiert.
 
-**Was heute umgestellt ist:** `priorityRank`, `isImportantPriority` und
+**Was zuerst umgestellt wurde:** `priorityRank`, `isImportantPriority` und
 `normalPriority` — keine i18n-Schlüssel, keine Glyphen, weil beides offene
-Fragen sind und ein Prototyp sie nicht nebenbei beantworten soll. Der Schalter
-sitzt in `src/intl/taskStatus.ts`: der Shim exportiert die drei explizit und
-überschattet damit sein `export *`, also wechseln alle Aufrufstellen auf einmal.
+Fragen waren und ein Prototyp sie nicht nebenbei beantworten sollte.
 
-**Die TypeScript-Originale bleiben vorerst**, weil `shared/taskGrouping.ts`
-`priorityRank` paketintern aufruft und die mobile App denselben Code fährt. Das
-ist ein Übergangs-, kein Endzustand: die TS-Kopie geht, sobald Mobile dieselbe
-Tür bekommt — sein Expo-Modul kann synchrone Funktionen bereits, der Weg
-existiert also. Bis dahin hält der Paritätstest die beiden zusammen.
+Der Übergangszustand ist inzwischen aufgelöst, und die Auflösung ist lehrreich
+genug, um sie aufzuschreiben. Die drei Regeln lagen zunächst in
+`crates/cal-core-wasm` — der Kiste des **Desktops**. Sie waren damit von genau
+EINER Oberfläche erreichbar, während Mobile und `shared/taskGrouping.ts` weiter
+die TypeScript-Kopie fuhren: drei Implementierungen einer Reihenfolge, die sich
+nicht unterscheiden darf. Zwei Geräte, die dieselbe Aufgabenliste zeigen, müssen
+dieselbe Aufgabe zuerst zeigen.
+
+Jetzt liegen sie in `cal_core::task_priority`, und beide Oberflächen kommen
+durch ihre eigene Tür — genau wie bei der Kollation (§4.4). `shared/taskStatus.ts`
+hält die Tür (`installTaskPriorityRules`); die TypeScript-Kopie ist weg.
+
+**Der Paritätstest wurde gelöscht, nicht angepasst.** Er fragte „antwortet Rust
+dasselbe wie TypeScript?" — die richtige Frage, solange es beide gab. Mit einer
+Implementierung hätte er Rust gegen Rust verglichen und wäre aus dem falschen
+Grund grün geblieben. An seiner Stelle steht `src/intl/taskPriority.test.ts`,
+das die Ränge **ausgeschrieben** prüft: eine Änderung an der Rust-Regel meldet
+sich dort als falsche Zahl, nicht als zwei Seiten, die sich auf etwas Neues
+geeinigt haben. Rot bewiesen an der verdrehten Zwei-Stufen-Rangfolge — die
+wichtige Aufgabe landet dann hinten.
+
+**Nebenbei aufgedeckt:** die TypeScript-Fassung tolerierte eine Aufgabe **ohne**
+Priorität still — ein `switch` ohne passenden Fall gibt `undefined`,
+`undefined - undefined` ist NaN, und `NaN || …` fällt auf den Titelvergleich
+durch. Die Rust-Regel wirft. Kein Produktionspfad kann das erzeugen (`priority`
+ist auf `Task` Pflicht und der Host schickt es immer), aber ein Test-Fixture
+konnte es, und der lautere Fehler hat es gefunden. Ein Vergleicher, der
+stillschweigend umsortiert, ist die Fehlerklasse, um die es hier die ganze Zeit
+geht.
 
 ### 4.4 Textordnung liegt im Kern — eine Kollation für alle Oberflächen
 

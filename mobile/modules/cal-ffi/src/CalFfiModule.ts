@@ -26,6 +26,18 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  See `cal_core::compare_titles`. */
   compareTitles(a: string, b: string, languageTag: string): number;
 
+  /** Sort rank of a priority under a scale; 0 sorts first. Synchronous: safe
+   *  inside an `Array.sort` comparator. See `cal_core::priority_rank`. */
+  priorityRank(priority: string, scale: string): number;
+
+  /** Whether a priority is the TOP one. See
+   *  `cal_core::TaskPriority::is_important`. */
+  isImportantPriority(priority: string): boolean;
+
+  /** What "important" clears to; `''` means the task carried nothing before.
+   *  See `cal_core::normal_priority`. */
+  normalPriority(previous: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

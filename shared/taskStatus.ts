@@ -60,14 +60,64 @@ export function statusMarker(status: TaskStatus): string {
  * folded into these three by their adapter, and this folds two of the three
  * into one for reading.
  */
-export type PriorityScale = 'three' | 'two';
+export type { PriorityScale } from './generated/PriorityScale';
+import type { PriorityScale } from './generated/PriorityScale';
+
+/**
+ * The priority RULES — installed by the surface, not implemented here.
+ *
+ * They live in `cal_core::task_priority`. What differs per surface is only how
+ * Rust is reached: the desktop through WebAssembly compiled into its webview,
+ * mobile through a synchronous Expo `Function`, a future native frontend by
+ * linking it. Each installs its own door at startup and everything in this
+ * package then ranks the same way.
+ *
+ * They were written here first, then copied into `crates/cal-core-wasm` when
+ * the desktop needed a synchronous road into Rust — which left the rule
+ * reachable from ONE surface while the other two ran this file. Two devices
+ * showing one task list have to put the same task first, so the copy is gone
+ * and this is the door.
+ *
+ * Note what did NOT move: the glyphs and the i18n keys below. The core answers
+ * with an order and a state; each surface picks its own characters, because an
+ * e-ink display plausibly wants different ones.
+ */
+export interface TaskPriorityRules {
+  /** Sort rank; 0 sorts first. */
+  priorityRank(priority: TaskPriority, scale: PriorityScale): number;
+  /** The TOP priority — "important" in the two-level system. */
+  isImportantPriority(priority: TaskPriority): boolean;
+  /** What "important" clears to: what the task had, unless that was the top. */
+  normalPriority(previous?: TaskPriority | null): TaskPriority;
+}
+
+let installedPriority: TaskPriorityRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installTaskPriorityRules(rules: TaskPriorityRules): void {
+  installedPriority = rules;
+}
+
+function priorityRules(): TaskPriorityRules {
+  if (installedPriority === null) {
+    // Loud, not a local fallback. A fallback here would be a fourth copy of
+    // the ranking, and the failure it produces — one device ordering a list
+    // differently from another — is exactly what nobody reports and everybody
+    // trips over.
+    throw new Error(
+      'task priority rules used before installTaskPriorityRules() — the ' +
+        'surface must install its door into cal-core during startup',
+    );
+  }
+  return installedPriority;
+}
 
 /**
  * Whether the task carries the TOP priority — the one level that survives in
  * the two-level system, where it is called "important" rather than "high".
  */
 export function isImportantPriority(priority: TaskPriority): boolean {
-  return priority === 'high';
+  return priorityRules().isImportantPriority(priority);
 }
 
 /**
@@ -81,7 +131,7 @@ export function isImportantPriority(priority: TaskPriority): boolean {
  * was marked important; `medium` is the neutral answer when there is none.
  */
 export function normalPriority(previous?: TaskPriority | null): TaskPriority {
-  return previous && !isImportantPriority(previous) ? previous : 'medium';
+  return priorityRules().normalPriority(previous);
 }
 
 /**
@@ -128,17 +178,13 @@ export function priorityMarker(
  */
 export function priorityRank(
   priority: TaskPriority,
+  // Defaulted here rather than in the core, because the default is about THIS
+  // boundary: the callers are comparators handed straight to `Array.sort`, and
+  // one that omits the scale should sort exactly as it always did rather than
+  // fail to compile.
   scale: PriorityScale = 'three',
 ): number {
-  if (scale === 'two') return isImportantPriority(priority) ? 0 : 1;
-  switch (priority) {
-    case 'high':
-      return 0;
-    case 'medium':
-      return 1;
-    case 'low':
-      return 2;
-  }
+  return priorityRules().priorityRank(priority, scale);
 }
 
 /**

@@ -22,6 +22,7 @@ pub mod reminder;
 pub mod spawn;
 pub mod suggestion_decline;
 pub mod task_assignment;
+pub mod task_priority;
 pub mod types;
 
 pub use adapter::{
@@ -44,6 +45,7 @@ pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use task_assignment::is_mine_or_unassigned;
+pub use task_priority::{normal_priority, priority_rank, PriorityScale};
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     ContactValue, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember,

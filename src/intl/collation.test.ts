@@ -50,8 +50,15 @@ describe('text ordering comes from the core', () => {
   });
 
   it('orders a task list by priority band, then naturally by title', () => {
+    // `priority` is REQUIRED on `Task`, and this fixture omitted it — the
+    // `as Task` cast hid that. It went unnoticed while the ranking was
+    // TypeScript, because a `switch` with no matching case returned
+    // `undefined`, `undefined - undefined` is NaN, and `NaN || …` fell through
+    // to the title compare. The Rust rule throws instead, which is how the
+    // gap surfaced: a comparator that silently reorders is the failure mode
+    // this whole exercise keeps finding.
     const task = (id: string, title: string): Task =>
-      ({ id, list_id: 'L1', title, status: 'open' }) as Task;
+      ({ id, list_id: 'L1', title, status: 'open', priority: 'medium' }) as Task;
     const sorted = [
       task('c', 'Übung 10'),
       task('a', 'Übung 2'),
