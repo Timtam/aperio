@@ -107,10 +107,30 @@ fn include_arg(text: &str, start: usize) -> Option<String> {
     Some(arg.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-/// One source file per walked root that must turn up, so a root that goes dark
-/// fails loudly instead of contributing nothing. Named files rather than a
-/// count: the number of crates is exactly what the extraction changes.
-const WALK_ANCHORS: [&str; 2] = ["crates/host-plugins/src/lib.rs", "src-tauri/src/lib.rs"];
+/// Files that must turn up in the walk, so a root that goes dark fails loudly
+/// instead of contributing nothing. Named files rather than a count: the number
+/// of crates is exactly what the extraction changes.
+///
+/// The first two prove each walked ROOT is alive. The third proves an ADAPTER
+/// is, and it is here because the first two do not.
+///
+/// That gap was found by moving the vikunja triple out of `crates/` for an
+/// afternoon. `one_door.rs` failed by name — "the walk missed
+/// adapter-vikunja-plugin" — and `panic_boundary.rs` would have, since both
+/// anchor on an adapter. This file passed, while no longer scanning the adapter
+/// that had moved: its roots were both still there, so nothing was wrong as far
+/// as it could tell. A guard whose whole subject is passing by scanning nothing
+/// had exactly that shape.
+///
+/// CalDAV rather than one of the twelve that may leave first: it is the adapter
+/// whose reach into `shared/contracts/` this file already records below, so an
+/// anchor that goes missing here and a `KNOWN_REACHES` entry that goes missing
+/// there are the same event, reported twice.
+const WALK_ANCHORS: [&str; 3] = [
+    "crates/host-plugins/src/lib.rs",
+    "src-tauri/src/lib.rs",
+    "crates/adapter-caldav/src/mapping.rs",
+];
 
 /// Does this include reach outside the crate that contains the source file?
 ///
