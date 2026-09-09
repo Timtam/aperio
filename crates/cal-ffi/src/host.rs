@@ -7968,111 +7968,33 @@ impl Host {
     /// The `builtin` flag inside the OAuth block is resolved HERE rather than
     /// in the UI: it is a question about what this build carries, which the
     /// frontend cannot see and should never be handed.
+    /// The connect form for an adapter kind, as JSON, or `"null"`.
+    ///
+    /// Built by `host_core::account_form`, which the desktop's Tauri command
+    /// also calls. It used to be assembled here by hand with `serde_json::json!`
+    /// and it had drifted from the desktop's copy in both directions: no
+    /// `options`, `default_bool`, `default_text` or `device_local` — so
+    /// `AccountSchemaForm` dereferenced `undefined` and took the form down on
+    /// the FTP and SFTP plugins, both of which declare a `choice` field — and an
+    /// `app_redirect_uri` on the OAuth block that no frontend reads.
+    ///
+    /// The parse on the other side is a bare `as AccountFormSpec` cast, which is
+    /// why nothing caught it. The shape is now generated from the Rust
+    /// (`shared/generated/AccountFormSpec.ts`), so the cast describes something
+    /// a machine derived rather than something a person typed twice.
     pub fn account_form_spec_json(
         &self,
         adapter_kind: String,
         lang: Option<String>,
     ) -> Result<String, StoreError> {
-        // No "unknown kind" branch: which kinds exist is a fact about which
-        // plugins are loaded, so an unrecognised one is simply a plugin that
-        // declares no form — the same answer as an adapter still on the older
-        // per-kind path.
-        let Some(plugin) = self.plugin_manager.plugin_for_adapter_kind(&adapter_kind) else {
-            return Ok("null".to_string());
-        };
-        let plugin_id = plugin.manifest.id.clone();
-        let Some(schema) = plugin.manifest.account.clone() else {
-            return Ok("null".to_string());
-        };
-        // Labels resolved HERE, in the language the caller named, against the
-        // plugin's own catalogue. The frontend renders what it is given and
-        // never looks a plugin's key up in the app's translations — the app
-        // carries no word about somebody else's provider.
-        let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
-        let strings = plugin_core::manager::PluginManager::strings_for(&plugin, lang);
-        let fields: Vec<serde_json::Value> = schema
-            .fields
-            .iter()
-            .map(|f| {
-                let label = plugin_core::resolve_label(
-                    Some(&strings),
-                    f.label_key.as_deref(),
-                    &f.label,
-                    lang,
-                );
-                let hint = f
-                    .hint
-                    .as_deref()
-                    .or(f.hint_key.as_deref().map(|_| ""))
-                    .map(|verbatim| {
-                        plugin_core::resolve_label(
-                            Some(&strings),
-                            f.hint_key.as_deref(),
-                            verbatim,
-                            lang,
-                        )
-                    })
-                    .filter(|hint| !hint.is_empty());
-                serde_json::json!({
-                    "key": f.key,
-                    "kind": f.kind,
-                    "label": label,
-                    "hint": hint,
-                    "required": f.required,
-                    "secret_slot": f.secret_slot,
-                    "default": f.default,
-                })
-            })
-            .collect();
-        let resolve = |key: Option<&str>, verbatim: &str| {
-            plugin_core::resolve_label(Some(&strings), key, verbatim, lang).to_string()
-        };
-        let optional = |value: Option<&String>, key: Option<&str>| {
-            value
-                .map(String::as_str)
-                .or(key.map(|_| ""))
-                .map(|verbatim| resolve(key, verbatim))
-                .filter(|s| !s.is_empty())
-        };
-        let actions: Vec<serde_json::Value> = schema
-            .actions
-            .iter()
-            .map(|a| {
-                serde_json::json!({
-                    "key": a.key,
-                    "label": resolve(a.label_key.as_deref(), &a.label),
-                    "busy_label": optional(a.busy_label.as_ref(), a.busy_label_key.as_deref()),
-                    "success": optional(a.success.as_ref(), a.success_key.as_deref()),
-                    "hint": optional(a.hint.as_ref(), a.hint_key.as_deref()),
-                    "requires": a.requires.iter().map(|r| serde_json::json!({
-                        "field": r.field,
-                        "message": resolve(r.message_key.as_deref(), &r.message),
-                    })).collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-        let spec = serde_json::json!({
-            "plugin_id": plugin_id,
-            "fields": fields,
-            "actions": actions,
-            "oauth": schema.oauth.as_ref().map(|o| serde_json::json!({
-                "builtin": host_core::account_setup::has_builtin_client(o),
-                "client_id_field": o.client_id_field,
-                "client_secret_field": o.client_secret_field,
-                "app_redirect_uri": o.app_redirect_uri,
-            })),
-            // Derived from the plugin's declared TYPE, so a frontend can skip
-            // the catalog refresh for an adapter that owns no containers
-            // without keeping its own list of which adapters those are.
-            "owns_containers":
-                plugin.manifest.has_data_family(),
-            // Whether "test connection" can mean anything before the account
-            // exists. Answered HERE rather than re-derived in each frontend, so
-            // the button and the probe cannot disagree about it.
-            "supports_credential_test":
-                host_core::account_setup::supports_credential_test(&schema),
-        });
-        Ok(spec.to_string())
+        let spec = host_core::account_form::account_form_spec(
+            &self.plugin_manager,
+            &adapter_kind,
+            lang.as_deref(),
+        );
+        serde_json::to_string(&spec).map_err(|e| StoreError::Storage {
+            detail: format!("could not serialise the account form: {e}"),
+        })
     }
 
     // ── Meetings ─────────────────────────────────────────────────────────────

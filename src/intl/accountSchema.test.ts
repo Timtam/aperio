@@ -34,6 +34,10 @@ const OAUTH_SPEC: AccountFormSpec = {
     field('site_url'),
     field('use_personal_room', { kind: 'bool', default_bool: false }),
   ],
+  // Required, not optional: `AccountFormSpec` is generated from Rust now, and
+  // serde always writes the array — an adapter with no extra buttons publishes
+  // `[]`, never an absent key.
+  actions: [],
   oauth: {
     builtin: false,
     client_id_field: 'client_id',
@@ -50,6 +54,7 @@ const BASIC_SPEC: AccountFormSpec = {
     field('username', { required: true }),
     field('password', { kind: 'secret', required: true }),
   ],
+  actions: [],
   oauth: null,
   owns_containers: true,
   supports_credential_test: true,

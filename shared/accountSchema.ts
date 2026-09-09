@@ -6,124 +6,28 @@
  * left this blank" means. They ask different hosts (a Tauri command / the
  * cal-ffi bridge) but both hosts answer with this shape, and both frontends
  * render it without knowing what any field means.
- */
-
-/** One thing the connect form asks for, or one setting it offers. */
-/** One entry of a `choice` field. */
-export interface AccountFormOption {
-  value: string;
-  /** Already in the reader's language, like every other label here. */
-  label: string;
-}
-
-export interface AccountFormField {
-  key: string;
-  /**
-   * `choice` is a closed set the adapter declares — several adapters do NOT
-   * reject a value outside their set (the FTPS plugin falls through to
-   * explicit), so a free-text box would let a typo pick a different transport
-   * in silence.
-   *
-   * `directory` and `file` are paths on THIS machine. They differ only in which
-   * picker to open, and where there is none they are a plain text field.
-   *
-   * `number` still travels as a string — every control here produces text —
-   * and the host converts it before the adapter sees it. What the kind buys is
-   * the right control: a numeric keyboard on the phone, and a spinner rather
-   * than a text box on the desktop.
-   */
-  kind:
-    | 'text'
-    | 'url'
-    | 'secret'
-    | 'bool'
-    | 'choice'
-    | 'directory'
-    | 'file'
-    | 'number';
-  /**
-   * Already in the reader's language.
-   *
-   * The host resolved it against the PLUGIN's own catalogue before sending it,
-   * so there is nothing here to translate: the app carries no word about
-   * somebody else's provider, and a third-party adapter with no catalogue
-   * arrives as the literal its author wrote — which beats a missing-key marker.
-   */
-  label: string;
-  hint: string | null;
-  required: boolean;
-  default_bool: boolean | null;
-  default_text: string | null;
-  /** The choices, for `kind === 'choice'`. Empty otherwise. */
-  options: AccountFormOption[];
-  /**
-   * Whether this value means anything only on the device that entered it — a
-   * filesystem path, typically.
-   *
-   * Only the adapter can answer it: a host cannot tell a path from a URL by
-   * looking, and guessing wrong either makes the user retype settings on every
-   * device or lets one machine's paths overwrite another's.
-   */
-  device_local: boolean;
-}
-
-/**
- * A button the adapter's form offers besides "add" — a lookup it can do for the
- * user, like asking Autodiscover for an Exchange endpoint.
  *
- * Everything here arrives in the reader's language and names no adapter: the
- * host resolved it from the manifest, and the frontend renders a button per
- * entry without knowing what any of them do.
+ * The SHAPES are no longer written here. `host_core::account_form` builds the
+ * spec once for both hosts and `cargo xtask ts-types` generates the
+ * declarations from it, so this file is the door and the logic below it.
+ *
+ * That is not tidiness. The two hosts used to build the spec separately, and
+ * they had drifted: the mobile one emitted no `options`, so
+ * `AccountSchemaForm` mapped over `undefined` and took the form down on the FTP
+ * and SFTP plugins — both of which declare a `choice` field. The hand-written
+ * type said `options` was there, the mobile side parses the bridge's answer
+ * with a bare cast, and nothing in between could notice.
  */
-export interface AccountFormAction {
-  key: string;
-  label: string;
-  /** Shown while it runs, so the button says it is working. */
-  busy_label: string | null;
-  /** Announced when it succeeds. */
-  success: string | null;
-  /** Description the button points at, for saying what will happen first. */
-  hint: string | null;
-  /** Fields that must be filled, each with what to say when it is not. */
-  requires: { field: string; message: string }[];
-}
+export type { AccountFieldKind } from './generated/AccountFieldKind';
+export type { AccountFormOption } from './generated/AccountFormOption';
+export type { AccountFormField } from './generated/AccountFormField';
+export type { AccountFormRequirement } from './generated/AccountFormRequirement';
+export type { AccountFormAction } from './generated/AccountFormAction';
+export type { AccountFormOauth } from './generated/AccountFormOauth';
+export type { AccountFormSpec } from './generated/AccountFormSpec';
 
-/** The OAuth half, when the adapter signs in that way. */
-export interface AccountFormOauth {
-  /** True when this build carries credentials for the provider, so the two
-   *  client fields need not be shown or filled at all. */
-  builtin: boolean;
-  client_id_field: string;
-  client_secret_field: string | null;
-}
-
-/** Everything needed to render an adapter's connect form. */
-export interface AccountFormSpec {
-  plugin_id: string;
-  fields: AccountFormField[];
-  actions?: AccountFormAction[];
-  oauth: AccountFormOauth | null;
-  /** Whether accounts of this adapter own calendars and task lists. False for a
-   *  videoconference adapter, which owns neither — so a frontend can skip the
-   *  catalog refresh after connecting one without keeping its own list of which
-   *  adapters those are. */
-  owns_containers: boolean;
-  /**
-   * Whether "test connection" can mean anything before the account exists —
-   * whether to offer the button at all.
-   *
-   * Decided by the core, not re-derived here, because the same rule decides
-   * whether the probe will refuse: two copies could disagree, and the shape of
-   * the disagreement is a button that always fails. See
-   * `account_setup::supports_credential_test`.
-   *
-   * False for an adapter that signs in purely by OAuth: what it authenticates
-   * with is a token the browser dance produces, and the dance has not happened.
-   * True for a public iCal feed even though its password is optional — there
-   * the URL is what a test checks.
-   */
-  supports_credential_test: boolean;
-}
+import type { AccountFormField } from './generated/AccountFormField';
+import type { AccountFormSpec } from './generated/AccountFormSpec';
 
 /** Which fields the OAuth posture makes optional, if any. */
 function optionalUnderBuiltinCredentials(spec: AccountFormSpec): Set<string> {
