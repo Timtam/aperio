@@ -104,6 +104,18 @@ jobs:
       - name: Install Linux system dependencies (for Tauri)
         if: matrix.os == 'ubuntu-latest'
         run: |
+          # The GitHub runner image ships Google's Chrome apt source, and its
+          # index has been serving a bad hash — `Hash Sum mismatch` on
+          # dl.google.com. Nothing here installs from it, but a broken
+          # third-party index makes `apt-get update` exit 100 and takes the job
+          # down; it cost two pull requests a run each on 2026-09-09, and a
+          # re-run hit the same mirror.
+          #
+          # The source is REMOVED rather than the failure ignored. Ignoring it
+          # (`|| true`, or `-o APT::Update::Error-Mode=any`) would also swallow a
+          # failure of a repo these packages actually come from, which is the
+          # one thing that must stay fatal.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
