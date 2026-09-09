@@ -1,0 +1,36 @@
+[package]
+name = "cal-core-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — a synchronous WebAssembly door from the desktop webview into cal-core (see src/lib.rs for why the desktop needs one and the other surfaces do not)."
+
+[dependencies]
+cal-core.workspace = true
+wasm-bindgen = "0.2"
+
+[lib]
+# `cdylib` is what `wasm-pack` links into the .wasm module; `rlib` is what lets
+# `cargo test -p cal-core-wasm` run the rules on the host, where the
+# wasm-bindgen attributes are inert.
+#
+# NOT a plugin shell, despite also being a cdylib: `xtask`'s `discover()` asks
+# for a cdylib that depends on `plugin-sdk`, which this does not. That question
+# is asked positively on purpose, and `a_cdylib_from_a_dependency_is_not_
+# mistaken_for_a_shell` pins it.
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+# wasm-pack 0.15 ships a `binaryen` that predates bulk-memory being ON by
+# default in rustc's wasm32 target, so its `wasm-opt` refuses the `memory.copy`
+# the compiler now emits ("Bulk memory operations require bulk memory"). The
+# instructions are valid and every browser this app targets runs them; only the
+# bundled optimiser is behind. Telling it what it is looking at keeps the
+# optimisation rather than switching it off.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory"]

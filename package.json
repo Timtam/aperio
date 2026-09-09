@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build:wasm": "wasm-pack build crates/cal-core-wasm --target web --out-dir pkg",
+    "dev": "npm run build:wasm && vite",
+    "build": "npm run build:wasm && tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "vitest run",
+    "test": "npm run build:wasm && vitest run",
     "tauri": "tauri"
   },
   "dependencies": {

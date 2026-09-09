@@ -2,7 +2,9 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { isImportantPriority } from '@aperio/shared';
+// Through the shim, not straight from the package: on the desktop this comes
+// from `cal-core` via WebAssembly. See `src/intl/taskStatus.ts`.
+import { isImportantPriority } from '../intl/taskStatus';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';

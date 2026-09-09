@@ -24,3 +24,25 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     }),
   });
 }
+
+// The core rules the desktop calls during render live in `cal-core`, compiled
+// into the webview as WebAssembly. The app awaits `initCoreRules()` once in
+// `main.tsx` before the first render; the test environment does the equivalent
+// here, so any test that reaches a rule through `src/intl/taskStatus` finds it
+// ready.
+//
+// `initSync` rather than the async loader: Node has no limit on synchronous
+// module compilation (browsers do, which is why the app awaits), and a setup
+// file that cannot await keeps every existing test synchronous.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
+import { markCoreRulesReady } from './wasm/coreRules';
+
+initSync({
+  module: readFileSync(
+    resolve(process.cwd(), 'crates/cal-core-wasm/pkg/cal_core_wasm_bg.wasm'),
+  ),
+});
+markCoreRulesReady();
