@@ -690,6 +690,40 @@ describe('filterDeadlineCountdown', () => {
     vi.useRealTimers();
   });
 
+  it('treats an unparseable deadline as no deadline, not as NaN', () => {
+    // NaN passes every guard in this filter: `days == null` is false,
+    // `days < 1` is false, `days > window` is false. A task with a junk
+    // deadline would therefore be offered as a countdown reminder every single
+    // day and never age out of it — a notification that cannot be dismissed by
+    // time passing.
+    //
+    // Nothing produces such a value today: `Task.deadline_date` is
+    // `Option<NaiveDate>` in Rust, so a malformed one cannot cross serde. This
+    // pins the shared function's own behaviour, which takes a plain string and
+    // is exported from `@aperio/shared`.
+    // `'2026-13-99'` is the one that matters: it produces no NaN at all —
+    // JavaScript rolls it over into April 2027 — so a finiteness check waves it
+    // through and answers a confident, plausible 324 days. `'2026-02-30'` is
+    // the same trap one step smaller.
+    for (const junk of [
+      'tomorrow',
+      '2026-13-99',
+      '2026-02-30',
+      '',
+      '2026-05',
+      '2026-05-21T00:00:00Z',
+    ]) {
+      expect(
+        daysUntilDeadline({ ...baseTask, deadline_date: junk }, '2026-05-20'),
+      ).toBeNull();
+    }
+    const tasks: Task[] = [
+      { ...baseTask, id: 'junk', deadline_date: 'tomorrow' },
+      { ...baseTask, id: 'real', deadline_date: '2026-05-22' },
+    ];
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual(['real']);
+  });
+
   it('is CUMULATIVE — window 3 matches deadlines 3, 2 AND 1 days out (not 4, not today)', () => {
     const tasks: Task[] = [
       { ...baseTask, id: 'in4', deadline_date: '2026-05-24' }, // 4 days > window

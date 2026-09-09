@@ -621,7 +621,12 @@ export default function TaskEditorModal({
   // for a source that keeps none of them: the save reported success and the
   // server dropped the value.
   const recurrenceCaps = caps?.recurrence;
-  const canSection = caps?.sections ?? true;
+  // `?? false`, matching `plugin_core`'s `#[serde(default)] pub sections: bool`
+  // and this app's own `taskBehaviour.ts:425`. It read `?? true`, so an absent
+  // capability block made the editor offer sections while every other reader
+  // said the list has none — the two halves of one screen disagreeing about
+  // the same list.
+  const canSection = caps?.sections ?? false;
   // Colour binds to a LOCAL task on its own row; on an external task it would be
   // a host-local override (a later increment), so only offer it for local lists.
   const isLocalList = useMemo(
