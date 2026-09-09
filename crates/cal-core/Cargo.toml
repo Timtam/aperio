@@ -11,6 +11,12 @@ description = "Aperio — shared types, traits, and error definitions for all ad
 [dependencies]
 # TypeScript generation, pulled in only by the `ts-export` feature below.
 ts-rs = { workspace = true, optional = true }
+# Collation, see src/collation.rs. Optional and off by default: the baked
+# CLDR data weighs about a megabyte, and twelve adapter repositories
+# compile against this crate without ever sorting a list. Only the
+# frontend bindings switch it on.
+icu_collator = { workspace = true, optional = true }
+icu_locale_core = { workspace = true, optional = true }
 async-trait.workspace = true
 serde.workspace = true
 chrono.workspace = true
@@ -45,3 +51,6 @@ workspace = true
 # should pull a code generator into their graph. Only the generator turns it on.
 [features]
 ts-export = ["dep:ts-rs"]
+# Text ordering for the frontends. See the comment on the dependency
+# above, and DESIGN §4.4.
+collation = ["dep:icu_collator", "dep:icu_locale_core"]

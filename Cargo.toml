@@ -179,6 +179,14 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 ts-rs = { version = "12", features = ["chrono-impl"] }
 
+# Textordnung
+# Unicode collation for text a person reads (cal-core/src/collation.rs).
+# Reachable only through cal-core's `collation` feature, which is off by
+# default: the baked CLDR data weighs about a megabyte and twelve adapter
+# repositories compile against cal-core without ever sorting a list.
+icu_collator = { version = "2", features = ["compiled_data"] }
+icu_locale_core = "2"
+
 # HTTP / Protokolle
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 quick-xml = { version = "0.36", features = ["serialize"] }

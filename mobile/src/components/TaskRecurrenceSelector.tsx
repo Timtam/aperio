@@ -37,6 +37,37 @@ const FULL_CAPS: RecurrenceCapabilities = {
   until: true,
 };
 
+type EndMode = TaskRecurrenceValue['endMode'];
+
+/**
+ * The end modes to offer, in the order the desktop lists them.
+ *
+ * Unsupported modes are DROPPED here rather than shown greyed out — that is
+ * this editor's house style, and a picker with an untappable row is worse on a
+ * touch screen than one that simply does not offer it.
+ *
+ * The exception is the mode the task ALREADY carries. A rule that arrived from
+ * a provider whose capabilities later narrowed would otherwise leave the picker
+ * with a value it has no row for, and the button would announce nothing at all
+ * — the one outcome a screen-reader user cannot recover from. Offering it keeps
+ * the current state readable and lets the user change it away.
+ */
+function endModeOptions(
+  caps: RecurrenceCapabilities,
+  current: EndMode,
+  t: (key: string) => string,
+): { value: EndMode; label: string }[] {
+  const offer = (mode: EndMode, allowed: boolean) =>
+    allowed || current === mode
+      ? [{ value: mode, label: t(`dialogs.task.recurrence.end.${mode.toLowerCase()}`) }]
+      : [];
+  return [
+    ...offer('NEVER', true),
+    ...offer('COUNT', caps.count),
+    ...offer('UNTIL', caps.until),
+  ];
+}
+
 /** Lowercase a `TaskFreq` to the wire `RecurrenceFreq`; `NONE` → null. */
 function freqKey(freq: TaskFreq): RecurrenceFreq | null {
   return freq === 'NONE' ? null : (freq.toLowerCase() as RecurrenceFreq);
@@ -253,25 +284,29 @@ export function TaskRecurrenceSelector({
             onChange={(fixedDates) => update({ fixedDates })}
           />
 
-          <SelectFieldButton<'NEVER' | 'UNTIL'>
+          <SelectFieldButton<EndMode>
             label={t('dialogs.task.recurrence.endLabel')}
             value={value.endMode}
-            options={[
-              {
-                value: 'NEVER' as 'NEVER' | 'UNTIL',
-                label: t('dialogs.task.recurrence.end.never'),
-              },
-              ...(caps.until
-                ? [
-                    {
-                      value: 'UNTIL' as 'NEVER' | 'UNTIL',
-                      label: t('dialogs.task.recurrence.end.until'),
-                    },
-                  ]
-                : []),
-            ]}
+            options={endModeOptions(caps, value.endMode, t)}
             onChange={(endMode) => update({ endMode })}
           />
+
+          {value.endMode === 'COUNT' && (
+            <View style={styles.field}>
+              <Text style={styles.label}>
+                {t('dialogs.task.recurrence.countLabel')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={String(value.count)}
+                onChangeText={(raw) =>
+                  update({ count: Math.max(1, parseInt(raw, 10) || 1) })
+                }
+                keyboardType="number-pad"
+                accessibilityLabel={t('dialogs.task.recurrence.countLabel')}
+              />
+            </View>
+          )}
 
           {value.endMode === 'UNTIL' && (
             <View style={styles.field}>

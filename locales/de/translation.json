@@ -1732,9 +1732,11 @@
         "endLabel": "Ende",
         "end": {
           "never": "Nie",
+          "count": "Nach Anzahl",
           "until": "Bis Datum"
         },
         "untilLabel": "Ende-Datum",
+        "countLabel": "Anzahl Vorkommen",
         "dayOfMonthLabel": "Tag im Monat",
         "dayOfMonthPlaceholder": "Automatisch",
         "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende).",

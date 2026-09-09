@@ -1,3 +1,5 @@
+import { compareNames } from '@aperio/shared';
+
 import type {
   Account,
   Calendar,
@@ -252,28 +254,20 @@ export function buildSidebarTree(input: {
   const sortedAccounts = [...shown].sort((a, b) => {
     if (a.id === LOCAL_ACCOUNT_ID && b.id !== LOCAL_ACCOUNT_ID) return -1;
     if (b.id === LOCAL_ACCOUNT_ID && a.id !== LOCAL_ACCOUNT_ID) return 1;
-    return a.display_name.localeCompare(b.display_name, undefined, {
-      sensitivity: 'base',
-    });
+    return compareNames(a.display_name, b.display_name);
   });
 
   return sortedAccounts.map((acc): AccountNode => {
     const accountKey = `account:${acc.id}`;
     const cals = (calsByAccount.get(acc.id) ?? [])
       .slice()
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      );
+      .sort((a, b) => compareNames(a.name, b.name));
     const tls = (tlsByAccount.get(acc.id) ?? [])
       .slice()
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      );
+      .sort((a, b) => compareNames(a.name, b.name));
     const cbs = (cbsByAccount.get(acc.id) ?? [])
       .slice()
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      );
+      .sort((a, b) => compareNames(a.name, b.name));
 
     const sections: SectionNode[] = [];
     if (cals.length > 0) {

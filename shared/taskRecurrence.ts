@@ -38,7 +38,16 @@ export interface TaskRecurrenceValue {
   byDay: string[]; // ISO weekday short names, "MO".."SU"
   /** 1..31, only meaningful when freq = 'MONTHLY' and value > 0. */
   dayOfMonth: number;
-  endMode: 'NEVER' | 'UNTIL';
+  /**
+   * How the series ends. `'COUNT'` is spelled the way the EVENT editor
+   * spells it (`shared/rrule.ts`) rather than the way the backend does
+   * (`RecurrenceEnd::After`): the same person meets both editors, and one
+   * vocabulary across them is worth more than matching the wire name. The
+   * mapping happens in `toBackend`/`fromBackend` and nowhere else.
+   */
+  endMode: 'NEVER' | 'COUNT' | 'UNTIL';
+  /** >= 1, only meaningful when endMode = 'COUNT'. */
+  count: number;
   until: string; // YYYY-MM-DD, only meaningful when endMode = 'UNTIL'
   /** DESIGN §9.12: advance from the task's own date or from completion. */
   anchor: TaskAnchor;
@@ -56,6 +65,10 @@ export const TASK_RECURRENCE_DEFAULT: TaskRecurrenceValue = {
   byDay: [],
   dayOfMonth: 0,
   endMode: 'NEVER',
+  // A value to show the moment the user picks "after count"; it never
+  // reaches the backend unless that mode is chosen. Ten, as the event
+  // editor's default is.
+  count: 10,
   until: '',
   anchor: 'FROM_DATE',
   placement: 'SCHEDULE',
@@ -87,10 +100,7 @@ export function toBackend(
   value: TaskRecurrenceValue,
 ): TaskRecurrence | null {
   if (value.freq === 'NONE') return null;
-  const end: RecurrenceEnd =
-    value.endMode === 'UNTIL' && value.until
-      ? { type: 'on_date', date: value.until }
-      : { type: 'never' };
+  const end: RecurrenceEnd = endToBackend(value);
   const fixedDates = sanitizeFixedDates(value.fixedDates);
   return {
     frequency: value.freq.toLowerCase() as RecurrenceFrequency,
@@ -113,6 +123,45 @@ export function toBackend(
     placement: value.placement === 'BACKLOG' ? 'backlog' : 'schedule',
     fixed_dates: fixedDates.length > 0 ? fixedDates : null,
   };
+}
+
+/**
+ * The form's end mode as the backend spells it.
+ *
+ * Split out because it is the piece that was WRONG: the form knew only
+ * "never" and "on a date", while `cal_core::RecurrenceEnd` has carried an
+ * `After { occurrences }` variant all along and
+ * `crates/cal-core/src/recurrence.rs` both reads `COUNT=n` from an RRULE and
+ * writes it back. A CalDAV task with `RRULE:FREQ=WEEKLY;COUNT=10` therefore
+ * arrived intact, was flattened to "never" by the form, and was written back
+ * endless on the next save — silently, and at the provider too, because the
+ * task dialogs convert unconditionally on every save.
+ *
+ * An incomplete mode falls back to `never` rather than to a guess: a date
+ * field the user has not filled in yet, or a counter someone cleared, must
+ * not become a series end nobody chose.
+ */
+function endToBackend(value: TaskRecurrenceValue): RecurrenceEnd {
+  if (value.endMode === 'UNTIL' && value.until) {
+    return { type: 'on_date', date: value.until };
+  }
+  if (value.endMode === 'COUNT') {
+    return { type: 'after', occurrences: clampCount(value.count) };
+  }
+  return { type: 'never' };
+}
+
+/**
+ * At least one occurrence.
+ *
+ * Zero or a negative count would describe a series that never runs, which
+ * the backend cannot represent and no provider would store. Clamping keeps a
+ * half-typed number field from writing nonsense while the user is still
+ * typing it.
+ */
+function clampCount(raw: unknown): number {
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 1;
+  return Math.max(1, n);
 }
 
 /** Keep only well-formed (month 1..12, day 1..31) triggers. */
@@ -142,12 +191,16 @@ export function fromBackend(raw: unknown): TaskRecurrenceValue {
   const byDay = (r.day_of_week ?? [])
     .map((d) => WEEKDAY_FROM_BACKEND[d])
     .filter(Boolean);
-  let endMode: 'NEVER' | 'UNTIL' = 'NEVER';
+  let endMode: TaskRecurrenceValue['endMode'] = 'NEVER';
   let until = '';
+  let count = TASK_RECURRENCE_DEFAULT.count;
   if (r.end && typeof r.end === 'object' && 'type' in r.end) {
     if (r.end.type === 'on_date') {
       endMode = 'UNTIL';
       until = r.end.date;
+    } else if (r.end.type === 'after') {
+      endMode = 'COUNT';
+      count = clampCount(r.end.occurrences);
     }
   }
   const placement: TaskPlacement = r.placement === 'backlog' ? 'BACKLOG' : 'SCHEDULE';
@@ -165,6 +218,7 @@ export function fromBackend(raw: unknown): TaskRecurrenceValue {
     freq: validFreq,
     interval,
     byDay,
+    count,
     dayOfMonth:
       typeof r.day_of_month === 'number' && r.day_of_month >= 1 && r.day_of_month <= 31
         ? r.day_of_month

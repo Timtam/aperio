@@ -9,7 +9,10 @@ repository.workspace = true
 description = "Aperio — a synchronous WebAssembly door from the desktop webview into cal-core (see src/lib.rs for why the desktop needs one and the other surfaces do not)."
 
 [dependencies]
-cal-core.workspace = true
+# `collation` on: text ordering is one of the rules the desktop needs
+# SYNCHRONOUSLY during render. It costs roughly a megabyte of baked CLDR
+# data — the price was weighed and accepted (TODO A11, DESIGN §4.4).
+cal-core = { workspace = true, features = ["collation"] }
 wasm-bindgen = "0.2"
 
 [lib]

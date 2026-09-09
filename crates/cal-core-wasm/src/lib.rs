@@ -117,3 +117,28 @@ pub fn priority_rank(priority: &str, scale: &str) -> Result<u32, JsValue> {
 pub fn normal_priority(previous: Option<String>) -> Result<String, JsValue> {
     rules::normal_priority(previous.as_deref()).map_err(to_js)
 }
+
+/// Compare two NAMES — an account, a container, a contact, a day marker.
+///
+/// Case- and accent-insensitive: "Arbeit" and "arbeit" are one name to a
+/// person, and a list mixing them must not split into two blocks. Replaces
+/// `localeCompare(…, { sensitivity: 'base' })`.
+///
+/// `languageTag` is the language the USER chose in Aperio, not the one the
+/// operating system reports. Every call this replaces passed `undefined` and
+/// therefore followed the runtime — so someone reading Aperio in German on an
+/// English system got English ordering.
+#[wasm_bindgen(js_name = compareNames)]
+pub fn compare_names(a: &str, b: &str, language_tag: &str) -> i32 {
+    rules::names(a, b, language_tag)
+}
+
+/// Compare two TITLES — task titles, section names, anything the user typed.
+///
+/// Digit runs order by value ("Kapitel 2" before "Kapitel 10"), and case
+/// separates, unlike [`compare_names`]. Replaces the bare `localeCompare` and
+/// the `{ numeric: true }` one.
+#[wasm_bindgen(js_name = compareTitles)]
+pub fn compare_titles(a: &str, b: &str, language_tag: &str) -> i32 {
+    rules::titles(a, b, language_tag)
+}

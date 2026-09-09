@@ -231,6 +231,14 @@ Wie Termine können auch Aufgaben sich wiederholen (täglich, wöchentlich,
 monatlich, jährlich). Hakst du eine wiederkehrende Aufgabe ab, erzeugt
 Aperio automatisch die nächste Fälligkeit.
 
+> **Wann die Serie endet:** Eine Wiederholung kann **nie** enden, **nach einer
+> Anzahl** von Durchgängen aufhören, oder **bis zu einem Datum** laufen. „Nach
+> Anzahl" gab es bisher nur bei Terminen; im Aufgaben-Editor fehlte es. Eine
+> Serie, die vom Anbieter mit „endet nach zehn Malen" kam, wurde deshalb beim
+> nächsten Speichern still endlos — auch beim Anbieter. Das ist behoben. Wie
+> bei den übrigen Feldern wird ein Endmodus nur dort angeboten, wo die Liste
+> ihn auch speichern kann.
+
 > **Wenn du Tage übersprungen hast:** Die nächste Fälligkeit ist der **letzte
 > Durchgang, der fällig war** – nicht der nächste der versäumten Tage, und auch
 > nicht der erste künftige. Eine tägliche Aufgabe, die eine Woche liegen

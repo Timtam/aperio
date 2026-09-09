@@ -32,7 +32,10 @@ required-features = ["cli"]
 cli = ["uniffi/cli"]
 
 [dependencies]
-cal-core = { workspace = true }
+# `collation` on: text ordering is one of the rules the mobile UI needs
+# SYNCHRONOUSLY during render — the same reason as on the desktop, only
+# through the Expo bridge instead of WebAssembly.
+cal-core = { workspace = true, features = ["collation"] }
 # The on-device local store: the migrated SQLite schema (aperio-db) + the
 # shared local calendar/task adapter (adapter-local) the desktop uses,
 # so the mobile app reads and writes through the same engine, not a

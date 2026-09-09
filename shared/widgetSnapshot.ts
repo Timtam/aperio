@@ -24,6 +24,7 @@ import { collapseEventGroups } from './collapseEventGroups';
 import type { EventGroup } from './eventGroups';
 import { expandAll, seriesIdOf, type RecurringEventLike } from './recurrence';
 import { filterTasksOnDay, taskTimeOnDay } from './taskDay';
+import { compareTitles } from './ordering';
 import type { Task, TaskUser } from './types';
 
 /** Bumped when the shape changes incompatibly. The widget refuses a version it
@@ -475,7 +476,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
     // across refreshes rather than incidental.
     if (a.untimed !== b.untimed) return a.untimed ? 1 : -1;
     if (a.kind !== b.kind) return a.kind === 'event' ? -1 : 1;
-    return a.title.localeCompare(b.title);
+    return compareTitles(a.title, b.title);
   });
 
   return {

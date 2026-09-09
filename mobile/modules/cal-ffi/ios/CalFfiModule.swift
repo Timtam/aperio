@@ -162,6 +162,25 @@ public class CalFfiModule: Module {
       return ["name": parsed.name, "email": parsed.email]
     }
 
+    // ─── Text ordering (synchronous, and that is the point) ───
+    // The tiebreaker every list in this app ends in, from `cal_core::collation`
+    // via the Swift bindings. `Function`, not `AsyncFunction`: the callers are
+    // `Array.prototype.sort` comparators, which cannot await. Same reason the
+    // desktop reaches these through WebAssembly — see DESIGN §4.3 for the door,
+    // §4.4 for the rule that goes through it.
+    //
+    // `languageTag` is the language the USER chose in Aperio. Every
+    // `localeCompare` this replaces passed `undefined` and so followed the
+    // DEVICE, which meant German text ordered by English rules on an English
+    // phone.
+    Function("compareNames") { (a: String, b: String, languageTag: String) -> Int32 in
+      compareNames(a: a, b: b, languageTag: languageTag)
+    }
+
+    Function("compareTitles") { (a: String, b: String, languageTag: String) -> Int32 in
+      compareTitles(a: a, b: b, languageTag: languageTag)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

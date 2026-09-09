@@ -5,6 +5,11 @@
 
 pub mod adapter;
 pub mod attendee;
+// Behind the `collation` feature: it carries about a megabyte of baked ICU
+// data, and the twelve adapter repositories that compile this crate never
+// sort a list a person reads. Only the two frontend bindings switch it on.
+#[cfg(feature = "collation")]
+pub mod collation;
 pub mod color;
 pub mod conferencing;
 pub mod day_marker;
@@ -23,6 +28,8 @@ pub use adapter::{
     Adapter, AdapterSource, AuthToken, CalendarFeature, Capability, ChangeSet, ContactsFeature,
     Container, Credentials, Reminderable, TasksFeature,
 };
+#[cfg(feature = "collation")]
+pub use collation::{compare_names, compare_titles, CollationLanguage};
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};

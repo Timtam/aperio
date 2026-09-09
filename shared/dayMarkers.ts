@@ -9,6 +9,8 @@
  *  what they must agree on is which markers a day resolves to, and how that
  *  reads aloud. */
 
+import { compareNames } from './ordering';
+
 /** One entry in the vocabulary. Mirrors `cal_core::DayMarker`. */
 export interface DayMarker {
   id: string;
@@ -155,7 +157,7 @@ export function sortDayMarkers(markers: readonly DayMarker[]): DayMarker[] {
   return [...markers].sort(
     (a, b) =>
       (a.position ?? 0) - (b.position ?? 0) ||
-      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      compareNames(a.name, b.name),
   );
 }
 
