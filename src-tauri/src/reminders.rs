@@ -59,6 +59,38 @@ struct ExternalTriggerCache {
     triggers: Vec<Trigger>,
 }
 
+/// The words a notification body needs, pushed down from the frontend.
+///
+/// The host has no i18n — the same reason `set_tray_labels` exists — and
+/// reminders are the one place where that showed as a WRONG statement rather
+/// than an English one: `format_event_body` renders every body as `%H:%M`, and
+/// an all-day event starts at local midnight, so the desktop announced
+/// "00:00". Mobile has said "Ganztägig" since it shipped, and its
+/// `notificationBody` names this bug in its own doc comment.
+///
+/// `Trigger` has carried what is needed all along — `all_day`, `start` and
+/// `relevant_until`, whose own doc comment says they exist so a notification
+/// can say «Ganztägig · 24. Juni bis 26. Juni» instead of a meaningless
+/// "00:00". Only the words were missing.
+///
+/// Month names come from the frontend's `Intl`, and `day_month` carries the
+/// ORDER, because that is not the same in every language: "24. Juni" against
+/// "June 24". Deriving it here would mean a date-formatting library and a
+/// second answer to "which language is this" — the frontend already knows both.
+#[derive(Debug, Clone)]
+pub struct ReminderLabels {
+    /// `dialogs.reminders.allDay`.
+    pub all_day: String,
+    /// `dialogs.reminders.allDayRange`, with `{{from}}` and `{{to}}`.
+    pub all_day_range: String,
+    /// `dialogs.reminders.dayMonth`, with `{{day}}` and `{{month}}`.
+    pub day_month: String,
+    /// January … December, in the app's language. Twelve entries; a shorter
+    /// list makes the range fall back to the plain all-day line rather than
+    /// index out of bounds.
+    pub months: Vec<String>,
+}
+
 pub struct ReminderScheduler {
     db: SharedConn,
     registry: Arc<AdapterRegistry>,
@@ -75,11 +107,77 @@ pub struct ReminderScheduler {
     /// its reminders too. Empty until the frontend pushes; tasks are unaffected
     /// (a task list isn't a calendar).
     hidden_calendars: Arc<Mutex<HashSet<String>>>,
+    /// The notification wording, pushed from the frontend via
+    /// `set_reminder_labels` once i18n is up and on every language change —
+    /// exactly as `hidden_calendars` above is pushed. `None` until then, and a
+    /// body that would need words is then OMITTED rather than guessed: a
+    /// notification with only a title says less than it could, but it does not
+    /// say something false.
+    labels: Arc<Mutex<Option<ReminderLabels>>>,
     /// `<data_dir>/assets/sounds/` — where custom sound files live.
     /// Used by `fire` to resolve a `SoundSource::Custom` hash to a path.
     sounds_dir: PathBuf,
     /// Handle to the process-wide audio thread for custom-sound playback.
     audio: AudioPlayer,
+}
+
+/// What a notification should say under the title.
+///
+/// Free rather than a method so it can be tested without a database, a
+/// registry and an audio thread — the part that needs the world is one mutex
+/// read, and it stays in the caller.
+///
+/// `None` means "no body", and that is the honest answer for an all-day event
+/// before the frontend has pushed any words. The alternative is what this
+/// replaces: `t.body`, which for an all-day event is `"00:00"` — a time nobody
+/// set and the event does not have.
+fn notification_body(t: &Trigger, labels: Option<&ReminderLabels>) -> Option<String> {
+    if !t.all_day {
+        // A time, formatted from an instant. No words in it, so no language
+        // question — this is the one body the host can build alone.
+        return Some(t.body.clone());
+    }
+    let labels = labels?;
+    // Mirrors `allDayReminderDays` in `@aperio/shared`: the end is EXCLUSIVE
+    // (the next midnight), so a one-day event spans exactly one.
+    let days = (t.relevant_until - t.start).num_days().max(1);
+    if days <= 1 || labels.months.len() != 12 {
+        // A short month list is a frontend that pushed something unexpected.
+        // Falling back to the plain line says less than it could and nothing
+        // that is wrong, which is the trade this whole function makes.
+        return Some(labels.all_day.clone());
+    }
+    // Step back one day: the end is exclusive, the user reads the last day it
+    // actually covers.
+    let last = t.relevant_until - ChronoDuration::days(1);
+    Some(
+        labels
+            .all_day_range
+            .replace("{{from}}", &day_month(labels, t.start))
+            .replace("{{to}}", &day_month(labels, last)),
+    )
+}
+
+/// One date as the app's language writes it: "24. Juni", "June 24".
+///
+/// The ORDER comes from the template, not from here — that is the whole reason
+/// `day_month` is pushed down rather than assembled locally.
+///
+/// The instant is read in UTC on purpose. An all-day occurrence's `start` is
+/// local midnight already stored as UTC, so reading it back in UTC gives the
+/// day the user means; reading it in the machine's zone would be the core's
+/// device-zone question all over again (DESIGN §4.5), one layer up.
+fn day_month(labels: &ReminderLabels, at: DateTime<Utc>) -> String {
+    use chrono::Datelike;
+    let month = labels
+        .months
+        .get(at.month0() as usize)
+        .cloned()
+        .unwrap_or_default();
+    labels
+        .day_month
+        .replace("{{day}}", &at.day().to_string())
+        .replace("{{month}}", &month)
 }
 
 impl ReminderScheduler {
@@ -107,6 +205,7 @@ impl ReminderScheduler {
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
             hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
+            labels: Arc::new(Mutex::new(None)),
             sounds_dir,
             audio,
         });
@@ -156,6 +255,22 @@ impl ReminderScheduler {
             *guard = ids.into_iter().collect();
         }
         self.invalidate.notify_one();
+    }
+
+    /// Push the notification wording down from the frontend. Called once i18n
+    /// is up and again on every language change.
+    ///
+    /// Deliberately does NOT invalidate: the words change what a notification
+    /// SAYS, never which ones fire or when, and a language switch should not
+    /// cost a full re-scan.
+    pub fn set_labels(&self, labels: ReminderLabels) {
+        *self.labels.lock().expect("reminder labels poison") = Some(labels);
+    }
+
+    /// What the notification should say under the title.
+    fn notification_body(&self, t: &Trigger) -> Option<String> {
+        let guard = self.labels.lock().expect("reminder labels poison");
+        notification_body(t, guard.as_ref())
     }
 
     /// A clone of the hidden-calendar set, for filtering a trigger list without
@@ -325,7 +440,11 @@ impl ReminderScheduler {
             item_id = %t.item_id,
             "firing reminder"
         );
-        let builder = app.notification().builder().title(&t.title).body(&t.body);
+        let builder = app.notification().builder().title(&t.title);
+        let builder = match self.notification_body(t) {
+            Some(body) => builder.body(body),
+            None => builder,
+        };
         // §14.4 playback dispatch:
         //   - System → let the OS play its default notification sound.
         //   - Silent → suppress sound, visual only.
@@ -403,3 +522,186 @@ const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
 /// Thin alias for the shared scheduler handle that command modules pull out of
 /// `tauri::State`.
 pub type SchedulerHandle = Arc<ReminderScheduler>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cal_core::SoundConfig;
+    use host_core::reminders::ItemKind;
+
+    fn labels() -> ReminderLabels {
+        ReminderLabels {
+            all_day: "Ganztägig".into(),
+            all_day_range: "Ganztägig · {{from}} bis {{to}}".into(),
+            day_month: "{{day}}. {{month}}".into(),
+            months: [
+                "Januar",
+                "Februar",
+                "März",
+                "April",
+                "Mai",
+                "Juni",
+                "Juli",
+                "August",
+                "September",
+                "Oktober",
+                "November",
+                "Dezember",
+            ]
+            .iter()
+            .map(|m| (*m).to_string())
+            .collect(),
+        }
+    }
+
+    fn at(rfc3339: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(rfc3339)
+            .expect("a literal RFC-3339 instant")
+            .with_timezone(&Utc)
+    }
+
+    /// A trigger as the enumeration produces one. `body` is what
+    /// `format_event_body` writes — `%H:%M` of the start, which for an all-day
+    /// occurrence is midnight.
+    fn trigger(all_day: bool, start: &str, until: &str, body: &str) -> Trigger {
+        Trigger {
+            item_id: "e1".into(),
+            item_kind: ItemKind::Event,
+            container_id: "cal1".into(),
+            title: "Geburtstag von Kim".into(),
+            body: body.into(),
+            trigger_at: at(start),
+            relevant_until: at(until),
+            start: at(start),
+            all_day,
+            sound: SoundConfig {
+                source: cal_core::SoundSource::System,
+                volume: 100,
+            },
+        }
+    }
+
+    #[test]
+    fn a_timed_event_keeps_its_time() {
+        // The one body the host can build alone: no words in it, so no
+        // language question. It does not wait for the frontend either.
+        let t = trigger(
+            false,
+            "2026-06-24T12:30:00Z",
+            "2026-06-24T13:30:00Z",
+            "14:30",
+        );
+        assert_eq!(
+            notification_body(&t, None).as_deref(),
+            Some("14:30"),
+            "a timed reminder must not depend on pushed labels",
+        );
+    }
+
+    #[test]
+    fn an_all_day_event_says_all_day_and_never_a_time() {
+        // The bug. `body` is "00:00" because an all-day occurrence starts at
+        // local midnight, and the desktop announced exactly that — for a
+        // birthday, out loud, through a screen reader.
+        let t = trigger(
+            true,
+            "2026-06-24T00:00:00Z",
+            "2026-06-25T00:00:00Z",
+            "00:00",
+        );
+        assert_eq!(
+            notification_body(&t, Some(&labels())).as_deref(),
+            Some("Ganztägig"),
+        );
+    }
+
+    #[test]
+    fn a_multi_day_all_day_event_says_the_span_the_user_sees() {
+        // The end is EXCLUSIVE — the next midnight — so the last day a reader
+        // is told about is one step back from it. 24th through 26th inclusive
+        // ends at midnight on the 27th.
+        let t = trigger(
+            true,
+            "2026-06-24T00:00:00Z",
+            "2026-06-27T00:00:00Z",
+            "00:00",
+        );
+        assert_eq!(
+            notification_body(&t, Some(&labels())).as_deref(),
+            Some("Ganztägig · 24. Juni bis 26. Juni"),
+        );
+    }
+
+    #[test]
+    fn without_labels_an_all_day_event_gets_no_body_rather_than_a_wrong_one() {
+        // Before the frontend has pushed anything — the first seconds after a
+        // launch. Saying less beats saying "00:00".
+        let t = trigger(
+            true,
+            "2026-06-24T00:00:00Z",
+            "2026-06-25T00:00:00Z",
+            "00:00",
+        );
+        assert_eq!(notification_body(&t, None), None);
+    }
+
+    #[test]
+    fn a_short_month_list_falls_back_to_the_plain_line() {
+        // A frontend that pushed something unexpected. The range needs twelve
+        // names; anything else answers the line that needs none, rather than
+        // an empty month or a panic.
+        let mut broken = labels();
+        broken.months.truncate(5);
+        let t = trigger(
+            true,
+            "2026-06-24T00:00:00Z",
+            "2026-06-27T00:00:00Z",
+            "00:00",
+        );
+        assert_eq!(
+            notification_body(&t, Some(&broken)).as_deref(),
+            Some("Ganztägig"),
+        );
+    }
+
+    #[test]
+    fn the_day_month_order_comes_from_the_template() {
+        // Not a detail: "24. Juni" and "June 24" are the same date in two
+        // orders, and deriving that here would mean the host deciding
+        // something the frontend already knows.
+        let english = ReminderLabels {
+            all_day: "All day".into(),
+            all_day_range: "All day · {{from}} to {{to}}".into(),
+            day_month: "{{month}} {{day}}".into(),
+            months: labels()
+                .months
+                .iter()
+                .zip([
+                    "January",
+                    "February",
+                    "March",
+                    "April",
+                    "May",
+                    "June",
+                    "July",
+                    "August",
+                    "September",
+                    "October",
+                    "November",
+                    "December",
+                ])
+                .map(|(_, en)| en.to_string())
+                .collect(),
+        };
+        let t = trigger(
+            true,
+            "2026-06-24T00:00:00Z",
+            "2026-06-27T00:00:00Z",
+            "00:00",
+        );
+        assert_eq!(
+            notification_body(&t, Some(&english)).as_deref(),
+            Some("All day · June 24 to June 26"),
+        );
+    }
+}
