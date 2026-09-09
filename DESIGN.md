@@ -564,6 +564,84 @@ ist ein Übergangs-, kein Endzustand: die TS-Kopie geht, sobald Mobile dieselbe
 Tür bekommt — sein Expo-Modul kann synchrone Funktionen bereits, der Weg
 existiert also. Bis dahin hält der Paritätstest die beiden zusammen.
 
+### 4.5 Zwei Verträge, die vor jedem weiteren Umzug gelten
+
+§4.2 hat die Typen erzeugt, §4.3 die synchrone Tür gebaut, §4.4 die erste Regel
+hindurchgeschickt. Bevor mehr folgt, stehen hier die zwei Zusagen, die der Kern
+seinen Oberflächen macht. Sie sind aufgeschrieben, weil sie sich **nachträglich
+nicht durchsetzen lassen**: hat erst eine Regel fertigen Text geliefert oder die
+Uhr gelesen, hängen Aufrufstellen daran, und der Rückbau ist teurer als die
+Regel.
+
+#### (a) Der Kern antwortet mit einem SCHLÜSSEL, nie mit fertigem Text
+
+Vorbild ist `ConferenceProvider::i18n_key` in
+`crates/cal-core/src/conferencing.rs`: der Kern gibt `"webex"` zurück, und jede
+Oberfläche schlägt daraus ihre Beschriftung nach. Was der Kern liefert, ist ein
+**Zustand** oder ein **Schlüssel plus Variablen** — nie ein Satz.
+
+Der Grund ist derselbe wie bei den Glyphen (§4.4): der Kern weiß nicht, wer ihn
+fragt. Er wird heute in fünf verschiedene Umgebungen übersetzt, und eine
+reMarkable-Oberfläche wird eine sechste sein. Fertiger Text hätte dort die
+falsche Sprache, die falsche Länge, und im Zweifel die falsche Ansage.
+
+**Diese Zusage ist nicht maschinell prüfbar, und der Wächter behauptet es auch
+nicht.** Ein Schlüssel und ein Satz sind beide `String`. Dazu kommt eine echte
+Ausnahme: `cal_core::Error` trägt englische Sätze in `#[error(...)]`, und die
+erreichen über die Container-Fehleranzeige tatsächlich einen Menschen. Ein
+Wächter, der beides auseinanderhalten wollte, müsste **raten** — und ein
+ratender Wächter ist schlechter als keiner, weil er Sicherheit vortäuscht.
+
+Prüfbar ist die Abhängigkeitskante, und die wird geprüft: `cal-core` und
+`plugin-core` dürfen keine Lokalisierungs-Kiste einbinden. Wer in den Kern
+greift, um dort Text zu erzeugen, stolpert über den Test statt über einen
+Review. Alles Weitere entscheidet der Review, mit `i18n_key` als Vorlage.
+
+#### (b) Der Kern liest weder die Uhr noch die Zeitzone des Geräts
+
+Tagesschlüssel und UTC-Versätze sind **immer Parameter**. Wer den Kern ruft,
+weiß, welche Uhr und welche Zone er meint; der Kern weiß es nicht.
+
+Das wiegt hier schwerer, als es aussieht. `cal-core` wird in fünf Umgebungen
+übersetzt, die sich über „jetzt" nicht einig sind: den Desktop-Host-Prozess,
+die mobile App über `cal-ffi`, das Desktop-Webview über WebAssembly, eine
+iOS-Widget-Erweiterung — und zwölf Adapter-Repositories. Der Widget-Fall zeigt
+es am deutlichsten: die Erweiterung zeichnet aus einer **Stunden vorher**
+geschriebenen Momentaufnahme neu. Eine Kernfunktion, die dort `Utc::now()`
+liest, meint stillschweigend „jetzt, beim Zeichnen" statt „jetzt, beim
+Schreiben".
+
+Die Gerätezone ist der schlimmere Fall, weil sie unsichtbar ist.
+`chrono::Local` liest eine Umgebungseinstellung; im WASM-Bau gibt es keine
+sinnvolle, und auf dem Telefon ist es, worauf das Telefon eingestellt ist — was
+nicht die Zone sein muss, in der der betrachtete Kalender geschrieben ist.
+Aperios Tagesschlüssel sind **lokale** Tage (§9.x, `DayLog::day`), und auf
+welchen lokalen Tag ein UTC-Zeitpunkt fällt, ist genau die Frage, die eine
+Gerätezone falsch beantwortet.
+
+**Der Wächter:** `crates/cal-core/tests/core_contracts.rs` liest die Quellen von
+`cal-core` und `plugin-core` und nennt jede Stelle mit Datei und Zeile. Kein
+Zählwerk — er besteht darauf, benannte Dateien **gefunden** zu haben, und prüft
+zusätzlich an einer Probe, dass seine Nadeln überhaupt noch greifen. Vier
+Sabotagen rot bewiesen: falsche Wurzel, kaputte Nadel, wieder eingebaute
+Uhr, eingebundene Lokalisierungs-Kiste.
+
+Es gibt **keine Ausnahme für Tests.** Ein Test, der die Wanduhr liest, ist ein
+Test, der an einem Tag im Jahr fehlschlägt, und den Zeitpunkt festzunageln ist
+dieselbe eine Zeile.
+
+**Was der Wächter beim Aufschreiben gefunden hat:** genau eine Verletzung, und
+sie stand seit jeher da. `DayLog::empty` stempelte `Utc::now()` auf einen Tag,
+an dem **nichts** angehakt war — ein Zeitstempel, den niemand gesetzt hat, an
+einer Zeile, die zurück in den Speicher wandern kann. Der Zeitpunkt ist jetzt
+ein Parameter, und die Uhr liest die Schicht, die weiß, dass sie gerade eine
+Live-Anfrage beantwortet: der lokale Adapter.
+
+Der TypeScript-Zwilling `emptyDayLog` behält seinen Vorgabewert. Er ist heute
+Oberflächen-Code, seine vier Aufrufer sind Dialoge, die auf einem laufenden
+Bildschirm aufgehen — und der Vorgabewert fällt an dem Tag, an dem
+`shared/dayMarkers.ts` hinter die Grenze zieht. Die Abweichung steht an der
+Funktion, damit sie nicht als Versehen gelesen wird.
 ---
 
 ## 5. Ansichten

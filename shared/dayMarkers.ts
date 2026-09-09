@@ -37,7 +37,13 @@ export interface DayLog {
 
 /** An untouched day. Reads exactly like a stored day with nothing on it, so
  *  callers never branch on "was there a record" — including on the way BACK to
- *  the store, which is why this carries a timestamp it does not need. */
+ *  the store, which is why this carries a timestamp it does not need.
+ *
+ *  `now` defaults here and does NOT default in the Rust twin
+ *  (`cal_core::DayLog::empty`): the core may not read a clock at all
+ *  (DESIGN §4.5), while this function is frontend code whose four callers are
+ *  all dialogs opening on a live screen. The default goes the day this module
+ *  moves behind the boundary. */
 export function emptyDayLog(day: string, now = new Date()): DayLog {
   return { day, markers: [], updated_at: now.toISOString() };
 }
