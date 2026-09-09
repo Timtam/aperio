@@ -780,6 +780,23 @@ Siehe DESIGN §4.2.
   ↳ Damit müssen die „large"-Schätzungen der Messung neu gemacht werden: sieben
   von acht waren derselbe eine Befund („async ist die falsche Form"), und der
   ist jetzt aufgelöst. Siehe DESIGN §4.3.
+- [x] **Die drei offenen Fragen sind entschieden** (Toni, 2026-09-09):
+  ↳ **Sortierung: `icu_collator` in den Kern.** Damit verhält sich die Ordnung
+  überall wie heute, auch bei Umlauten und gemischten Zahlen — und
+  `taskGrouping`s untere Hälfte kann überhaupt erst umziehen, weil
+  `naturalCompare` ihr Tiebreaker ist. Preis bewusst in Kauf genommen: die
+  ICU-Daten wiegen auf Mobile. Beim Bauen prüfen, wie viel genau, und ob eine
+  gekürzte Datensammlung reicht.
+  ↳ **reMarkable bekommt den VOLLEN Wiederholungs-Editor.** Damit muss
+  `shared/rrule.ts` (256 Zeilen, kein Rust-Gegenstück — `cal-core`s
+  `recurrence.rs` lässt die relativen Wochentags-Achsen bewusst weg) in den
+  Kern, und die synchrone Bindung ist dort Pflicht, weil `parseRRule` pro
+  Tastendruck läuft. Das ist der grösste Einzelposten der Trennung, und er ist
+  jetzt eingeplant statt offen.
+  ↳ **Die Glyphen bleiben vorne** (`○ ◐ ● ⊘`, `★`, `!!!`). Der Kern gibt einen
+  ZUSTAND zurück, jede Oberfläche wählt ihr Zeichen — eine e-ink-Anzeige will
+  plausibel andere. Damit ist auch klar, wie `taskStatus` zerfällt: die acht
+  reinen Funktionen können in den Kern, die Marken-Funktionen nicht.
 - [ ] Zwei Verträge, die vor jedem Umzug festzuklopfen sind: (a) der Kern gibt
   **i18n-Schlüssel + Variablen** zurück, nie fertigen Text (Vorbild
   `cal-core/src/conferencing.rs:70`); (b) der Kern liest **nie** die Uhr oder
