@@ -183,7 +183,10 @@ impl LocalAdapter {
             .map_err(map_sql_err)?;
 
         let Some((markers, rating, updated)) = row else {
-            return Ok(DayLog::empty(day));
+            // The clock is read HERE, in the adapter, not in the core: this is
+            // the layer that knows it is answering a live request on this
+            // machine. See DESIGN §4.5.
+            return Ok(DayLog::empty(day, Utc::now()));
         };
         Ok(DayLog {
             day,
@@ -288,6 +291,15 @@ mod tests {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
 
+    /// A fixed instant. These tests never assert on it — they assert on what
+    /// was ticked — so reading the wall clock here would only make them able to
+    /// fail on one day of the year.
+    fn stamp() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-08-17T06:00:00Z")
+            .expect("a literal RFC-3339 instant")
+            .with_timezone(&Utc)
+    }
+
     #[test]
     fn the_snapshot_dump_carries_every_logged_day() {
         // This is the one read with no range, and it used to have one: MIN/MAX
@@ -344,7 +356,7 @@ mod tests {
         let sport = a.create_day_marker("Sport", Some("🏃"), None).unwrap();
         let read = a.create_day_marker("Gelesen", None, None).unwrap();
 
-        let mut log = DayLog::empty(day("2026-08-17"));
+        let mut log = DayLog::empty(day("2026-08-17"), stamp());
         log.markers = vec![sport.id.clone(), read.id.clone()];
         a.set_day_log(&log).unwrap();
 
@@ -359,7 +371,7 @@ mod tests {
         // statement; keeping both would grow a row per day ever opened.
         let a = adapter();
         let sport = a.create_day_marker("Sport", None, None).unwrap();
-        let mut log = DayLog::empty(day("2026-08-17"));
+        let mut log = DayLog::empty(day("2026-08-17"), stamp());
         log.markers = vec![sport.id];
         a.set_day_log(&log).unwrap();
 
@@ -377,7 +389,7 @@ mod tests {
         let a = adapter();
         let m = a.create_day_marker("Sport", None, None).unwrap();
         for d in ["2026-08-16", "2026-08-18", "2026-09-02"] {
-            let mut log = DayLog::empty(day(d));
+            let mut log = DayLog::empty(day(d), stamp());
             log.markers = vec![m.id.clone()];
             a.set_day_log(&log).unwrap();
         }
@@ -396,7 +408,7 @@ mod tests {
         // the marker simply stops resolving. No sweeping rewrite of history.
         let a = adapter();
         let m = a.create_day_marker("Sport", None, None).unwrap();
-        let mut log = DayLog::empty(day("2026-08-17"));
+        let mut log = DayLog::empty(day("2026-08-17"), stamp());
         log.markers = vec![m.id.clone()];
         a.set_day_log(&log).unwrap();
 

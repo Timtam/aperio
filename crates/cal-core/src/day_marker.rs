@@ -58,12 +58,25 @@ pub struct DayLog {
 impl DayLog {
     /// An untouched day. Reads exactly like a stored row with nothing ticked,
     /// so callers never branch on "was there a row".
-    pub fn empty(day: NaiveDate) -> Self {
+    ///
+    /// `now` is a PARAMETER because the core does not read the clock
+    /// (DESIGN §4.5, enforced by `tests/core_contracts.rs`). It was `Utc::now()`
+    /// here, which is the one place in the whole crate that ever reached for a
+    /// clock — and this crate is compiled into five places that disagree about
+    /// what "now" means, the iOS widget extension worst of all: it re-renders
+    /// from a snapshot written hours earlier, so a timestamp minted at render
+    /// would claim the day had just been touched.
+    ///
+    /// The stamp is carried at all because a log has to be able to travel back
+    /// to the store unchanged, not because an untouched day has an update time;
+    /// callers that write pass the same instant they write with. The TypeScript
+    /// twin, `emptyDayLog` in `shared/dayMarkers.ts`, takes it the same way.
+    pub fn empty(day: NaiveDate, now: DateTime<Utc>) -> Self {
         Self {
             day,
             markers: Vec::new(),
             rating: None,
-            updated_at: Utc::now(),
+            updated_at: now,
         }
     }
 

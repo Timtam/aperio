@@ -885,10 +885,28 @@ Siehe DESIGN §4.2.
   Zukunft entschärft (der Kern sortiert jetzt), aber falls Hermes es nicht tat,
   ändert sich mit dem nächsten Mobile-Build eine bestehende Reihenfolge sichtbar
   — das ist die Reparatur, nicht der Regress.
-- [ ] Zwei Verträge, die vor jedem Umzug festzuklopfen sind: (a) der Kern gibt
-  **i18n-Schlüssel + Variablen** zurück, nie fertigen Text (Vorbild
-  `cal-core/src/conferencing.rs:70`); (b) der Kern liest **nie** die Uhr oder
-  die Gerätezone — Tageschlüssel und Offset sind immer Parameter.
+- [x] **Die zwei Verträge stehen fest** (2026-09-09), siehe DESIGN §4.5.
+  (a) Der Kern antwortet mit einem **Schlüssel plus Variablen** oder einem
+  Zustand, nie mit fertigem Text (Vorbild `ConferenceProvider::i18n_key`).
+  (b) Der Kern liest **nie** die Uhr und **nie** die Gerätezone — Tagesschlüssel
+  und Offset sind immer Parameter.
+  ↳ **(b) ist ein Wächter**, `crates/cal-core/tests/core_contracts.rs`: er liest
+  die Quellen von `cal-core` und `plugin-core` und **nennt** Datei und Zeile.
+  Vier Sabotagen rot bewiesen (falsche Wurzel, kaputte Nadel, wieder eingebaute
+  Uhr, eingebundene Lokalisierungs-Kiste). Keine Ausnahme für Tests: ein Test,
+  der die Wanduhr liest, fällt an einem Tag im Jahr um.
+  ↳ **(a) ist NICHT maschinell prüfbar, und der Wächter tut auch nicht so.**
+  Ein Schlüssel und ein Satz sind beide `String`, und `cal_core::Error` trägt
+  legitim englische Sätze, die über die Container-Fehleranzeige einen Menschen
+  erreichen. Geprüft wird nur die Abhängigkeitskante: keine
+  Lokalisierungs-Kiste in `cal-core`/`plugin-core`. Der Rest ist Review-Sache,
+  mit `i18n_key` als Vorlage.
+  ↳ **Gefunden dabei:** genau EINE Verletzung, seit jeher da. `DayLog::empty`
+  stempelte `Utc::now()` auf einen Tag, an dem nichts angehakt war — ein
+  Zeitstempel, den niemand gesetzt hat, an einer Zeile, die zurück in den
+  Speicher wandern kann. Jetzt Parameter; die Uhr liest der lokale Adapter.
+  Der TS-Zwilling `emptyDayLog` behält seinen Vorgabewert (Oberflächen-Code,
+  vier Dialog-Aufrufer) — die Abweichung steht an der Funktion.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
