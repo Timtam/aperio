@@ -9,6 +9,8 @@ repository.workspace = true
 description = "Aperio — plugin ABI contract, manifest parser, manager runtime, FFI shims (DESIGN.md §20)."
 
 [dependencies]
+# TypeScript generation, pulled in only by the `ts-export` feature below.
+ts-rs = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -51,3 +53,12 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+# Generate the frontends' TypeScript types from these Rust ones. OFF by default.
+#
+# Optional and default-off on purpose: cargo unifies features globally and
+# twelve adapter repositories compile against these crates; nothing they build
+# should pull a code generator into their graph. Only `cargo xtask ts-types`
+# turns it on. See cal-core for the full reasoning.
+[features]
+ts-export = ["dep:ts-rs"]

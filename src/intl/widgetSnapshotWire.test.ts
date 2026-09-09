@@ -59,6 +59,7 @@ function fullSnapshot() {
     effort: 'medium',
     scheduled_date: '2026-08-04',
     scheduled_time: '09:00:00',
+    scheduled_end_time: null,
     deadline_date: null,
     deadline_time: null,
     deadline_reminder_days: null,

@@ -721,11 +721,20 @@ pub fn birthday_default_reminders() -> Vec<DefaultReminder> {
 /// fire would mean teaching the app-start collector about calendars, not
 /// widening this type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct DefaultReminder {
     #[serde(flatten)]
     pub reminder: Reminder,
     /// Written into new appointments as their own reminder.
+    ///
+    /// Optional in TypeScript, unlike every other generated field: the
+    /// desktop reads this list by `JSON.parse`ing the stored
+    /// `calendar.<id>.defaultReminders` pref DIRECTLY, without serde in
+    /// between, and a list written before the choice existed has no
+    /// `attach` key at all. `#[serde(default)]` covers the Rust reader;
+    /// `ts(optional)` covers the TypeScript one.
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(as = "Option<bool>", optional))]
     pub attach: bool,
 }
 

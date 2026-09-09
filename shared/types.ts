@@ -1,285 +1,105 @@
-// TypeScript counterparts to the cal-core types — the platform-agnostic task
-// domain shared by the desktop frontend and the mobile app.
+// The task domain, shared by the desktop frontend and the mobile app.
 //
-// The crate `cal-core` is the source of truth; if a field changes there, mirror
-// it here. These match the JSON the backend (Tauri on desktop, the cal-ffi
-// LocalStore on mobile) serialises, so both frontends parse the same shape.
+// These types are NOT written by hand any more. `shared/generated/` is produced
+// from the Rust definitions by ts-rs (`cargo xtask ts-types`), so a field that
+// changes in `cal-core` / `plugin-core` / `host-core` changes here in the same
+// commit or CI fails. This file is only the door: it decides which of the
+// generated declarations are part of `@aperio/shared`'s public surface, and it
+// carries the one shape that has no single Rust home (see `TaskList` below).
+//
+// The generated shapes describe what the backend SERIALISES — Tauri commands on
+// the desktop, the cal-ffi `LocalStore` on mobile. Both go through serde, so
+// both produce the same JSON, and a field with `#[serde(default)]` is therefore
+// always PRESENT here even though Rust would accept its absence.
+//
+// One path does not go through serde at all: a stored user pref that the
+// frontend `JSON.parse`s itself. There a value written before a field existed
+// really has no key, and the Rust declaration says so with `#[ts(optional)]` —
+// `DefaultReminder.attach` is the only one today.
 
-export interface ContainerColor {
-  hex: string;
-  source: 'native' | 'custom';
-}
+import type { RecurrenceCapabilities } from './generated/RecurrenceCapabilities';
+import type { TaskCapabilities } from './generated/TaskCapabilities';
+import type { TaskList as CoreTaskList } from './generated/TaskList';
 
-/** Which recurrence shapes the owning adapter can store. Mirrors
- *  `plugin_core::RecurrenceCapabilities`; stamped onto every Calendar/TaskList
- *  by the backend. The editors grey out options the source can't round-trip —
- *  e.g. EWS omits `"yearly"`. Local + unknown sources report full RFC-5545
- *  support. */
-export interface RecurrenceCapabilities {
-  frequencies: RecurrenceFreq[];
-  interval_frequencies: RecurrenceFreq[];
-  relative_monthly: boolean;
-  relative_yearly: boolean;
-  weekly_byday: boolean;
-  /** An explicit monthly day-of-month can be stored. Vikunja repeats monthly
-   *  on the task's due-date day implicitly, so it sets this false and the task
-   *  editor disables the "day of month" field. Calendar events always store
-   *  BYMONTHDAY → default true. */
-  monthly_day_of_month: boolean;
-  count: boolean;
-  until: boolean;
-}
+// Colors
+export type { ContainerColor } from './generated/ContainerColor';
+export type { ColorSource } from './generated/ColorSource';
+export type { ColorLabel } from './generated/ColorLabel';
+export type { ColorLabelId } from './generated/ColorLabelId';
 
-export type RecurrenceFreq = 'daily' | 'weekly' | 'monthly' | 'yearly';
+// Adapter capabilities, declared in each plugin's manifest
+export type { RecurrenceCapabilities } from './generated/RecurrenceCapabilities';
+export type { RecurrenceFreq } from './generated/RecurrenceFreq';
+export type { TaskCapabilities } from './generated/TaskCapabilities';
+export type { MemberAddMethod } from './generated/MemberAddMethod';
+export type { TaskAssignment } from './generated/TaskAssignment';
 
-/** Which task-organisation features the owning adapter supports. Mirrors
- *  `plugin_core::TaskCapabilities`; stamped onto every `TaskList` by the
- *  backend. The task UI gates affordances on these. Absent → cal-core-native
- *  default (flat lists, single-level subtasks, cross-list move). */
-export interface TaskCapabilities {
-  nested_projects: boolean;
-  subtasks: boolean;
-  /** `null` ⇒ unlimited nesting depth. */
-  max_subtask_depth: number | null;
-  sections: boolean;
-  /** The adapter can create / rename / delete sections at the source (Todoist
-   *  sections, Vikunja kanban buckets). Coloring a section is independent —
-   *  always a local override, offered wherever `sections` is true. */
-  manageable_sections: boolean;
-  multiple_labels: boolean;
-  task_recurrence: boolean;
-  /** Which recurrence shapes the adapter can store for tasks. Absent ⇒ full
-   *  support. */
-  recurrence?: RecurrenceCapabilities;
-  /** The source stores the "in progress" status as a distinct state. Backends
-   *  with only open/done set this false. Absent → true. */
-  supports_in_progress: boolean;
-  move_between_projects: boolean;
-  /** ONE occurrence of a repeating task can be moved to an arbitrary day and
-   *  stay there. Absent → true.
-   *
-   *  False where the source treats the due date as the SERIES anchor rather
-   *  than a property of the occurrence — iOS Reminders does, so an arbitrary
-   *  date written to a repeating reminder does not survive the round trip.
-   *  Callers that want to move a single occurrence advance the series by one
-   *  step instead, which is what the source can actually do. */
-  reschedule_single_occurrence?: boolean;
-  /** The source can store a TIME OF DAY on a task's dates, not just the day.
-   *  Absent → true.
-   *
-   *  False for Google Tasks (only date information is recorded), Microsoft To
-   *  Do (the time component is normalised to midnight) and Exchange (a task
-   *  date must be midnight). Where it is false the editor does not offer a
-   *  time — the write used to succeed, the server dropped the value, and the
-   *  next refresh returned a task with no time and no error anywhere. */
-  task_time_of_day?: boolean;
-  /** The source can store the END of a task's planned block, so a task can
-   *  occupy a span in the calendar rather than a point. Absent → false: only
-   *  the local store, CalDAV (`DURATION`), Vikunja (`end_date`) and Todoist
-   *  (`duration`) have anywhere to put one, and a source that says nothing is
-   *  taken at its word rather than credited with a field it would drop. */
-  task_span?: boolean;
-  /** The adapter can create new task lists (projects) at the source. */
-  create_lists: boolean;
-  /** The adapter can delete task lists at the source. */
-  delete_lists: boolean;
-  /** The adapter can manage a list's membership/sharing. */
-  manageable: boolean;
-  /** How members are added when `manageable`: directory search (Vikunja) or
-   *  raw-email invite (Todoist). */
-  member_add_by: MemberAddMethod;
-  /** How many people a task on this source can be assigned to. Absent ⇒
-   *  `none`, matching `TaskCapabilities::default()`. */
-  task_assignment?: TaskAssignment;
-}
+// Task lists and their people
+export type { Section } from './generated/Section';
+export type { TaskUser } from './generated/TaskUser';
+export type { MemberRight } from './generated/MemberRight';
+export type { TaskListShare } from './generated/TaskListShare';
 
-/** How members are added to a task list (DESIGN §9.7): pick from a user
- *  directory (Vikunja) or invite by raw email (Todoist). */
-export type MemberAddMethod = 'search' | 'email';
+// Reminders and sounds
+export type { Reminder } from './generated/Reminder';
+export type { ReminderKind } from './generated/ReminderKind';
+export type { SoundConfig } from './generated/SoundConfig';
+export type { SoundSource } from './generated/SoundSource';
+export type { DefaultReminder } from './generated/DefaultReminder';
 
-/** How many people a task can be assigned to on a given source (DESIGN §9.7).
- *  Mirrors `plugin_core::TaskAssignment`.
- *
- *  Declared rather than discovered, because the limit is otherwise invisible
- *  until it has cost something: Todoist keeps a single `assignee_id`, so a
- *  second person picked in the editor is dropped on write and the save still
- *  reports success. */
-export type TaskAssignment = 'none' | 'single' | 'multiple';
+// Tasks
+export type { Task } from './generated/Task';
+export type { TaskStatus } from './generated/TaskStatus';
+export type { TaskPriority } from './generated/TaskPriority';
+export type { TaskEffort } from './generated/TaskEffort';
 
-/** A sub-grouping of tasks within one list — a Vikunja bucket or a Todoist
- *  section. Mirrors `cal_core::Section`. */
-export interface Section {
-  id: string;
-  list_id: string;
-  name: string;
-  /** Optional color-label binding. Cascades to the section's tasks that carry
-   *  no color of their own (resolution chain task → section → list). `null` ⇒
-   *  no color. */
-  color_label: string | null;
-  /** Display order within the list; lower sorts first. */
-  order: number;
-}
+// Task recurrence (DESIGN §9.12)
+export type { TaskRecurrence } from './generated/TaskRecurrence';
+export type { RecurrenceFrequency } from './generated/RecurrenceFrequency';
+export type { RecurrenceEnd } from './generated/RecurrenceEnd';
+export type { RecurrenceAnchor } from './generated/RecurrenceAnchor';
+export type { RecurrencePlacement } from './generated/RecurrencePlacement';
+export type { MonthDay } from './generated/MonthDay';
+export type { Weekday } from './generated/Weekday';
 
-/** A user in the task domain — a task assignee, a member of a task list's
- *  collaborator pool, or the connected account's own identity ("me"). `id` is
- *  the provider-native user id. See DESIGN §9.7. */
-export interface TaskUser {
-  id: string;
-  name: string;
-  email: string | null;
-}
-
-/** Permission level on a task-list share (Vikunja). `null` on backends without
- *  per-share roles (Todoist). */
-export type MemberRight = 'read' | 'write' | 'admin';
-
-/** One editable membership/share of a task list (DESIGN §9.7). Distinct from
- *  the read-only assignee pool. */
-export interface TaskListShare {
-  user: TaskUser;
-  right: MemberRight | null;
-  /** Invitation not yet accepted (Todoist email invites). */
-  pending: boolean;
-}
-
-export interface SoundConfig {
-  source:
-    | { type: 'system' }
-    | { type: 'silent' }
-    | { type: 'custom'; sha256: string };
-  volume: number;
-}
-
-export interface Reminder {
-  kind:
-    | { type: 'relative'; minutes_before: number }
-    | { type: 'absolute'; at: string }
-    | { type: 'app_start' }
-    | { type: 'email'; minutes_before: number };
-  sound: SoundConfig | null;
-}
+// Grouping
+export type { SuggestionDecline } from './generated/SuggestionDecline';
 
 /**
- * One entry of a calendar's default-reminder list (the synced
- * `calendar.<id>.defaultReminders` pref): the reminder plus where it lives.
- * Without `attach` it stays in Aperio — the scheduler fires it for every event
- * of the calendar on top of the event's own reminders, and nothing is written
- * into any event. With `attach` the host writes it into every new appointment
- * created in the calendar as the appointment's own reminder, so other clients
- * of the calendar (the iOS Calendar app, a voice assistant) ring too. Lists
- * stored before the choice existed carry no flag and read as "in Aperio".
- */
-export interface DefaultReminder extends Reminder {
-  attach?: boolean;
-}
-
-export interface TaskList {
-  id: string;
-  name: string;
-  color: ContainerColor | null;
-  /** Bound color-label id — see `Calendar.color_label`. */
-  color_label: string | null;
-  default_sound: SoundConfig | null;
-  embedded_in_calendar: string | null;
-  read_only: boolean;
-  /** Account that owns this task list. */
-  account_id: string;
-  /** Parent project id for backends with nested projects (Vikunja, Todoist).
-   *  `null` for top-level lists and flat backends. Refers to another
-   *  `TaskList.id` owned by the same account. */
-  parent_id: string | null;
-  /** Task-organisation capabilities of the owning adapter. Optional in the wire
-   *  shape so a pre-capabilities snapshot still parses. Absent → cal-core
-   *  default. */
-  task_capabilities?: TaskCapabilities;
-  /** Recurrence capabilities of the owning adapter (frequencies, interval,
-   *  weekday/day-of-month, end modes). Optional so a pre-capabilities snapshot
-   *  still parses. Absent → full RFC-5545. */
-  recurrence_capabilities?: RecurrenceCapabilities;
-}
-
-export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
-export type TaskPriority = 'low' | 'medium' | 'high';
-/** Aperio-only effort estimate, modelled like `priority`. Drives a purely
- *  visual, toggleable tile size. Host-only: it rides the AperioExtras bag on
- *  external providers (no provider has a native effort field). */
-export type TaskEffort = 'small' | 'medium' | 'large';
-
-export interface Task {
-  id: string;
-  list_id: string;
-  title: string;
-  description: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  effort: TaskEffort;
-  /** The day the task is to be done. */
-  scheduled_date: string | null;
-  /** Optional time-of-day on `scheduled_date`. Requires `scheduled_date`; the
-   *  DB enforces this via a CHECK constraint. */
-  scheduled_time: string | null;
-  /** End of the planned block, `HH:MM:SS` on the scheduled day. Needs
-   *  `scheduled_time` and must be later than it. */
-  scheduled_end_time?: string | null;
-  /** The day BY which the task must be done (the surviving deadline semantic).
-   *  Until that day the task lives in the backlog and can be scheduled per-day
-   *  via `scheduled_date`. */
-  deadline_date: string | null;
-  deadline_time: string | null;
-  /** Aperio-only per-task override for the day-start deadline countdown:
-   *  remind this many days before `deadline_date`, overriding the global
-   *  `tasks.deadlineCountdownDays` for this task. `null` ⇒ use the global
-   *  default. Host-only: it rides the AperioExtras bag on external providers
-   *  (no provider has a native field for it). */
-  deadline_reminder_days: number | null;
-  recurrence: unknown;
-  /** DESIGN §9.12: a backlog task surfaces in the active backlog only on/after
-   *  this date (the recurrence "resurface" trigger). `null` ⇒ visible now;
-   *  until then it sits in the "Zukünftig" group. */
-  resurface_date: string | null;
-  /** DESIGN §9.12: stable id of the recurring series this instance belongs to.
-   *  `null` ⇒ not managed. */
-  series_id: string | null;
-  parent_id: string | null;
-  /** Section this task is filed under within its list. `null` ⇒ ungrouped, or
-   *  a backend with no sections. Refers to a `Section.id` whose
-   *  `list_id == this.list_id`. */
-  section_id: string | null;
-  color_label: string | null;
-  reminders: Reminder[];
-  sound: SoundConfig | null;
-  /** Users this task is assigned to (DESIGN §9.7). Empty ⇒ unassigned. */
-  assignees: TaskUser[];
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  etag: string | null;
-}
-
-export interface ColorLabel {
-  id: string;
-  name: string;
-  hex: string;
-  /** `true` for a hidden "ad-hoc" one-off color composed via the custom color
-   *  picker (name = hex, deduped by hex). Excluded from the palette UI, but
-   *  resolves like any label. Optional so older payloads default to named. */
-  ad_hoc?: boolean;
-}
-
-/** A pair the user has said is NOT one appointment (migration 0037).
+ * A task list as the frontends receive it when they LIST them:
+ * `cal_core::TaskList` plus the fields the host stamps on while listing.
  *
- *  Stored in a canonical order — the smaller (calendar, event) first as text —
- *  so "A and B" and "B and A" are one decision. Mirrors
- *  `cal_core::SuggestionDecline`. */
-export interface SuggestionDecline {
-  calendar_a: string;
-  event_a: string;
-  calendar_b: string;
-  event_b: string;
-  declined_at: string;
-  /** When the pair was last grouped BY HAND, if ever. Refused iff
-   *  `declined_at` is the later of the two — see migration 0038. The host
-   *  filters on it already; this is here so a row read from a snapshot keeps
-   *  its shape. */
-  cleared_at?: string | null;
-}
+ * This one is assembled here rather than generated, because it has no single
+ * Rust declaration to generate from — the desktop builds it in
+ * `src-tauri/src/commands/tasks.rs` (`TaskListRow`) and mobile in
+ * `crates/cal-ffi/src/host.rs` (`TaskListRow`), and the two structs are
+ * maintained separately. They do not currently agree:
+ * `recurrence_capabilities` is stamped on mobile only, which is why it is the
+ * one optional field here.
+ *
+ * Commands that return a task list WITHOUT the enrichment return
+ * [`TaskListCore`] instead — see `reparentTaskList`.
+ */
+export type TaskList = CoreTaskList & {
+  /** Account that owns this task list; `"local"` for the local store. */
+  account_id: string;
+  /** Task-organisation shapes the owning adapter supports, resolved from its
+   *  plugin manifest. */
+  task_capabilities: TaskCapabilities;
+  /** Recurrence shapes the owning adapter can store, from the plugin's
+   *  top-level `recurrence` — stamped by mobile only, so it is ALWAYS absent
+   *  on the desktop. The desktop task editor reads
+   *  `task_capabilities.recurrence` instead, which is a different manifest
+   *  field; see TODO A11. */
+  recurrence_capabilities?: RecurrenceCapabilities;
+};
+
+/**
+ * A task list exactly as `cal_core` declares it, with no host enrichment.
+ *
+ * `reparent_task_list` (both surfaces) answers with this shape — it hands back
+ * the row it just wrote rather than re-running the listing that stamps
+ * `account_id` and the capabilities on. Callers that need those re-read the
+ * listing; the two that exist today discard the answer entirely.
+ */
+export type TaskListCore = CoreTaskList;

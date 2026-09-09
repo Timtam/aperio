@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 /// `source` distinguishes provider-supplied colors from user overrides —
 /// relevant for writing changes back to the provider's API (section 6.5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ContainerColor {
     /// Hex color value including the leading `#`, e.g. `#4285f4`.
     pub hex: String,
@@ -18,6 +19,7 @@ pub struct ContainerColor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum ColorSource {
     /// Delivered by the provider via its API.
     Native,
@@ -42,8 +44,14 @@ impl ContainerColor {
 }
 
 /// Stable reference to a global color label (section 8).
+///
+/// ts-rs prints "failed to parse serde attribute" for the `transparent`
+/// below and ignores it. Harmless here and checked: a newtype over one
+/// unnamed field generates `type ColorLabelId = string` either way, which
+/// is exactly what transparent means.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ColorLabelId(pub String);
 
 impl ColorLabelId {
@@ -63,6 +71,7 @@ impl ColorLabelId {
 /// color when rendering — see `DESIGN.md` section 8.2 for the priority
 /// rules.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ColorLabel {
     pub id: ColorLabelId,
     pub name: String,

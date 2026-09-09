@@ -11,30 +11,12 @@
 // default (flat lists, single-level subtasks, cross-list move) so a
 // list from a pre-capabilities snapshot still behaves sensibly.
 
+import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
+
 import type { TaskCapabilities, TaskList } from '../api/types';
 
-/** cal-core-native defaults — mirror `TaskCapabilities::default()`. */
-const DEFAULT_CAPS: TaskCapabilities = {
-  nested_projects: false,
-  subtasks: true,
-  max_subtask_depth: null,
-  sections: false,
-  manageable_sections: false,
-  multiple_labels: false,
-  task_recurrence: true,
-  supports_in_progress: true,
-  move_between_projects: true,
-  task_time_of_day: true,
-  task_span: false,
-  create_lists: false,
-  delete_lists: false,
-  manageable: false,
-  member_add_by: 'search',
-  task_assignment: 'none',
-};
-
 export function capabilitiesOf(list: TaskList | undefined): TaskCapabilities {
-  return { ...DEFAULT_CAPS, ...(list?.task_capabilities ?? {}) };
+  return { ...DEFAULT_TASK_CAPABILITIES, ...(list?.task_capabilities ?? {}) };
 }
 
 /**

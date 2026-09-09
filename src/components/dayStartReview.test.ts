@@ -38,6 +38,7 @@ const baseTask: Task = {
   effort: 'medium',
   scheduled_date: null,
   scheduled_time: null,
+  scheduled_end_time: null,
   deadline_date: null,
   deadline_time: null,
   deadline_reminder_days: null,

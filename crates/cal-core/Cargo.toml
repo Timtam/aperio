@@ -9,6 +9,8 @@ repository.workspace = true
 description = "Aperio — shared types, traits, and error definitions for all adapters."
 
 [dependencies]
+# TypeScript generation, pulled in only by the `ts-export` feature below.
+ts-rs = { workspace = true, optional = true }
 async-trait.workspace = true
 serde.workspace = true
 chrono.workspace = true
@@ -30,3 +32,16 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+# Generate the frontends' TypeScript types from these Rust ones. OFF by default.
+#
+# `shared/types.ts` mirrors them by hand today, and says so in its own header:
+# "The crate cal-core is the source of truth; if a field changes there, mirror
+# it here." A mirror kept by hand drifts, and a frontend in a language that is
+# not TypeScript cannot use it at all.
+#
+# Optional and default-off on purpose. Cargo unifies features globally and
+# twelve adapter repositories compile against this crate; nothing they build
+# should pull a code generator into their graph. Only the generator turns it on.
+[features]
+ts-export = ["dep:ts-rs"]

@@ -55,6 +55,11 @@ Backend / workspace:
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings   # exactly what CI runs
 cargo fmt --all -- --check                              # CI's first gate
+
+# After changing a type in cal-core / plugin-core / host-core: regenerate the
+# TypeScript declarations the frontends parse. CI checks they are current.
+cargo xtask ts-types
+cargo xtask ts-types --check                            # what CI runs
 ```
 
 > **Match CI locally.** CI runs `clippy --workspace --all-targets -D

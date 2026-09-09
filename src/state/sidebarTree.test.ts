@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
+
 import type { Account, Calendar, TaskList } from '../api/types';
 import {
   accountTriState,
@@ -48,6 +50,7 @@ const makeTaskList = (
   read_only: false,
   account_id: accountId,
   parent_id: parentId,
+  task_capabilities: DEFAULT_TASK_CAPABILITIES,
 });
 
 describe('buildSidebarTree', () => {

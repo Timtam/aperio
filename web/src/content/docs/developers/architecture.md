@@ -67,6 +67,19 @@ Two directions, both standard Tauri:
    reacts (refetch, show a dialog). This drives the
    stale-while-revalidate cache refresh and sync status updates.
 
+### The domain types are generated, not mirrored
+
+The shapes both frontends parse are **generated from the Rust types**, not
+written twice. `cal-core`, `plugin-core` and `host-core` carry
+`#[derive(ts_rs::TS)]` behind an off-by-default `ts-export` feature;
+`cargo xtask ts-types` writes `shared/generated/`, and `shared/types.ts`
+re-exports from there. Run it after changing any of those types — CI runs
+`cargo xtask ts-types --check` and fails, naming the files, when the committed
+declarations no longer match the Rust.
+
+The feature is off by default on purpose: cargo unifies features across the
+whole graph, so turning it on would pull `ts-rs` into every adapter crate.
+
 ## The plugin host & the C ABI
 
 Adapters are loaded as **plugins** over a stable C ABI rather than linked

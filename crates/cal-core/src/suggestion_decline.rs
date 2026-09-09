@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// the same pair could be declined from one side and offered again from the
 /// other.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct SuggestionDecline {
     pub calendar_a: String,
     pub event_a: String,

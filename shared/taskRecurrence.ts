@@ -13,6 +13,13 @@
  * `toBackend` produces round-trips through both the desktop Tauri commands and
  * the mobile cal-ffi bridge unchanged.
  */
+import type {
+  RecurrenceEnd,
+  RecurrenceFrequency,
+  TaskRecurrence,
+  Weekday,
+} from './types';
+
 export type TaskFreq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 /** DESIGN §9.12: from when the next instance is computed. */
@@ -57,23 +64,12 @@ export const TASK_RECURRENCE_DEFAULT: TaskRecurrenceValue = {
 
 // ── Conversion between the form value and the backend struct ────────────────
 
-interface BackendRecurrence {
-  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
-  interval: number;
-  day_of_week: string[] | null;
-  day_of_month: number | null;
-  end: BackendEnd | null;
-  anchor: 'from_date' | 'from_completion';
-  placement: 'schedule' | 'backlog';
-  fixed_dates: TaskFixedDate[] | null;
-}
+// The backend shape is not restated here: `TaskRecurrence` and `RecurrenceEnd`
+// are generated from `cal_core::TaskRecurrence` / `cal_core::RecurrenceEnd`
+// (see `shared/generated/`), so a field added in Rust shows up as a type error
+// here instead of as a silently dropped value on the wire.
 
-type BackendEnd =
-  | { type: 'never' }
-  | { type: 'on_date'; date: string }
-  | { type: 'after'; occurrences: number };
-
-const WEEKDAY_TO_BACKEND: Record<string, string> = {
+const WEEKDAY_TO_BACKEND: Record<string, Weekday> = {
   MO: 'monday',
   TU: 'tuesday',
   WE: 'wednesday',
@@ -89,15 +85,15 @@ const WEEKDAY_FROM_BACKEND: Record<string, string> = Object.fromEntries(
 
 export function toBackend(
   value: TaskRecurrenceValue,
-): BackendRecurrence | null {
+): TaskRecurrence | null {
   if (value.freq === 'NONE') return null;
-  const end: BackendEnd | null =
+  const end: RecurrenceEnd =
     value.endMode === 'UNTIL' && value.until
       ? { type: 'on_date', date: value.until }
       : { type: 'never' };
   const fixedDates = sanitizeFixedDates(value.fixedDates);
   return {
-    frequency: value.freq.toLowerCase() as BackendRecurrence['frequency'],
+    frequency: value.freq.toLowerCase() as RecurrenceFrequency,
     // Backlog placement allows interval 0 (resurface immediately on
     // completion — the dishwasher case); scheduled rules stay ≥ 1.
     interval:
@@ -134,7 +130,7 @@ function sanitizeFixedDates(dates: TaskFixedDate[]): TaskFixedDate[] {
 
 export function fromBackend(raw: unknown): TaskRecurrenceValue {
   if (!raw || typeof raw !== 'object') return { ...TASK_RECURRENCE_DEFAULT };
-  const r = raw as Partial<BackendRecurrence>;
+  const r = raw as Partial<TaskRecurrence>;
   const freq = (r.frequency ?? '').toUpperCase();
   const validFreq: TaskFreq =
     freq === 'DAILY' ||

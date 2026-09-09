@@ -387,6 +387,75 @@ const events = await invoke<Event[]>('get_events', { start, end });
 
 ---
 
+### 4.2 Die Domänentypen werden erzeugt, nicht abgeschrieben
+
+Beide Frontends parsen dieselbe JSON-Form — der Desktop die Antworten der
+Tauri-Commands, Mobile die Rückgaben der `CalFfi.*Json`-Brücke. Beschrieben hat
+diese Form lange eine **Handschrift**: `shared/types.ts`, 285 Zeilen, mit dem
+eigenen Satz im Kopf „die Kiste `cal-core` ist die Quelle der Wahrheit; ändert
+sich dort ein Feld, spiegle es hier". Geprüft hat das nichts.
+
+Sie war abgedriftet, und zwar so, wie eine ungeprüfte Spiegelung abdriftet:
+
+- `Task.recurrence` stand als `unknown` — die Regel dahinter existierte
+  vollständig in Rust und war im Frontend aufgegeben worden.
+- `minutes_before` einer Erinnerung stand als `number`, während die Kiste `i64`
+  schickt (hier stimmt `number`, aber niemand hatte das entschieden).
+- Die Hälfte von `TaskCapabilities` war als optional markiert, obwohl der Host
+  jedes Feld immer mitschickt.
+- `shared/taskRecurrence.ts` führte still eine **zweite** Handkopie derselben
+  Struktur (`BackendRecurrence`), und `src/state/taskMoves.ts` eine dritte von
+  `TaskCapabilities::default()`.
+
+Erzeugt wird jetzt statt gespiegelt. Die Typen tragen in Rust
+`#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]`;
+`cargo xtask ts-types` schreibt daraus `shared/generated/`, und
+`shared/types.ts` ist nur noch die **Tür**: es entscheidet, welche der erzeugten
+Deklarationen zur öffentlichen Fläche von `@aperio/shared` gehören. Kein
+Konsument musste seinen Import ändern.
+
+**Das Feature ist absichtlich standardmäßig aus.** cargo vereinheitlicht
+Features über den ganzen Graphen — wäre `ts-export` an, zöge jede Adapter-Kiste
+`ts-rs` mit, auch die zwölf, die künftig in eigenen Repositories liegen. Aus
+demselben Grund ist die Kistenliste in der xtask **keine Liste**: erzeugt wird
+aus jedem Workspace-Mitglied, das ein `ts-export`-Feature deklariert. Deklariert
+es niemand mehr, ist das ein Fehler und kein stiller Erfolg über einem
+eingefrorenen Verzeichnis.
+
+**CI prüft es** (`cargo xtask ts-types --check`, im Rust-Job): erzeugt in ein
+Wegwerf-Verzeichnis und vergleicht. Ein Feld, das in Rust dazukommt und die
+Frontends nie erreicht, ist ein roter Build — kein Wert, der über die Leitung
+kommt und den nie jemand liest. Der Bericht **nennt** die Dateien
+(`missing:` / `outdated:` / `stale:`), er zählt sie nicht.
+
+**Was nicht erzeugt wird, und warum.** `TaskList` hat keine einzige
+Rust-Deklaration, aus der man es erzeugen könnte: was die Frontends beim
+Auflisten bekommen, ist `cal_core::TaskList` plus das, was der Host anstempelt —
+gebaut vom Desktop in `src-tauri/src/commands/tasks.rs` und von Mobile in
+`crates/cal-ffi/src/host.rs`, in **zwei getrennt gepflegten Strukturen**. Die
+beiden sind nicht einig: `recurrence_capabilities` stempelt nur Mobile an. Der
+Schnitt steht deshalb sichtbar in `shared/types.ts` statt versteckt in zwei
+`TaskListRow`s — und die Zusammenlegung ist eine eigene Aufgabe (TODO).
+
+Zwei Felder tragen aus einem echten Grund eine Ausnahme-Annotation:
+
+- `minutes_before` und `deadline_reminder_days` sind `i64`; ts-rs schriebe
+  dafür `bigint`, was `JSON.parse` niemals liefert. `#[ts(as = "i32")]` sagt,
+  was tatsächlich ankommt. Ein neues `i64`-Feld ohne diese Annotation erzeugt
+  `bigint` und **bricht** die TypeScript-Prüfung — laut, an genau dem Feld.
+- `DefaultReminder.attach` ist in TypeScript optional, als einziges erzeugtes
+  Feld. Der Desktop liest diese Liste per `JSON.parse` **direkt** aus der
+  gespeicherten Einstellung `calendar.<id>.defaultReminders`, ohne serde
+  dazwischen — und eine vor der Wahl gespeicherte Liste hat den Schlüssel gar
+  nicht.
+
+**Warum das mehr ist als Aufräumen.** Eine reMarkable-Oberfläche wird kein
+JavaScript sein und kann `shared/*.ts` nicht benutzen. Die Regel einmal in Rust
+zu deklarieren und die Sprachfassung daraus zu erzeugen, ist derselbe Schnitt,
+der Kern und Oberflächen trennt — nur von der Frontend-Seite aus.
+
+---
+
 ## 5. Ansichten
 
 ### 5.1 Übersicht aller Ansichten
