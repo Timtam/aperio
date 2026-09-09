@@ -473,6 +473,80 @@ der Kern und Oberflächen trennt — nur von der Frontend-Seite aus.
 
 ---
 
+### 4.3 Der Desktop ruft den Kern synchron — über WebAssembly
+
+Die Typen sind erzeugt (§4.2). Die **Regeln** sind die schwierigere Hälfte, und
+woran es hängt, ist nicht die Sprache, sondern **wann** eine Regel gebraucht
+wird.
+
+**Jede andere Oberfläche kann den Kern synchron rufen.** Mobile tut es schon:
+`Function("parseAttendee")` im Expo-Modul (statt `AsyncFunction`) ist ein
+direkter Aufruf, der einen Wert zurückgibt, kein Promise, und er ist
+ausgeliefert. Eine native Oberfläche — der geplante reMarkable-Port — bekommt
+dasselbe geschenkt, weil nativer Code Rust linkt und aufruft.
+
+**Der Desktop ist die einzige, die es nicht kann.** Sein UI läuft in einem
+Webview, und der einzige Weg vom Webview in den Tauri-Prozess ist `invoke` —
+Interprozesskommunikation, also immer asynchron.
+
+Das ist keine Geschwindigkeitsfrage. Eine React-Render-Funktion muss die
+fertige Oberfläche **in einem Zug** zurückgeben; `await` darin ist nicht
+langsam, sondern unmöglich (die Funktion gäbe ein Promise zurück statt
+Elementen). Wer trotzdem asynchron rechnet, rendert **zweimal**: einmal ohne
+Ergebnis, dann mit. Für einen Screenreader-Nutzer ist genau dieser
+Zwischenzustand das Problem, nicht die Millisekunden — die erste Runde sagt den
+blossen Titel an, die zweite ändert den zugänglichen Namen unter dem Fokus.
+
+Und manche Aufrufe können prinzipiell nicht warten: `priorityRank` steckt in
+`Array.prototype.sort`-Vergleichern (`src/components/BacklogRail.tsx`). Ein
+asynchroner Vergleicher liefert Promises, und Promises sind für `<` alle
+gleich — die Liste käme in beliebiger Reihenfolge heraus.
+
+**WebAssembly ist der fehlende Draht:** dasselbe Rust, in den Webview
+kompiliert statt in einem anderen Prozess. `crates/cal-core-wasm` ist diese Tür.
+
+- **Instanziieren ist einmalig asynchron**, beim App-Start (`main.tsx` wartet
+  auf `initCoreRules()`, bevor irgendetwas rendert). Danach ist **jeder** Aufruf
+  ein gewöhnlicher Funktionsaufruf. Browser verweigern synchrones Kompilieren
+  eines Moduls dieser Grösse im Haupt-Thread — deshalb das eine `await`, und es
+  fällt nicht auf, weil die App ohnehin gerade startet.
+- **Ein Fehlschlag ist tödlich und wird gesagt**, nicht verschluckt: eine
+  stille Rückfallebene wäre eine zweite Implementierung der Regel, also genau
+  das, was hier abgeschafft werden soll.
+- **Die Kiste ist reines Marshalling.** Strings rein, Werte raus, jeder Rumpf
+  ein `match`. Das ist eine Regel, keine Vorliebe: die Kiste zieht später ins
+  **Desktop-Repo** um (eine Tauri-App ist ohnehin eine Rust-Binärdatei), und
+  dabei darf **keine Domänenregel** den Kern verlassen. `cal-ffi` ist der
+  Gegenpol und der Grund für die Strenge — es heisst „mobile Bindung", enthält
+  aber den mobilen `Host` mit über 11.000 Zeilen Orchestrierung; es muss beim
+  Umzug **geteilt** werden, nicht verschoben.
+- **Das Modul wird gebaut, nicht eingecheckt** (`npm run build:wasm`, in CI im
+  Frontend-Job). Anders als die erzeugten TypeScript-Typen, die als **Text**
+  eingecheckt sind und im Diff lesbar bleiben, wären die `.wasm`-Bytes je
+  Plattform verschieden — eine eingecheckte Kopie liesse sich nicht gegen ihre
+  Quelle prüfen und könnte still veralten.
+
+**Der Wächter ist deshalb ein anderer als bei §4.2.** Nicht „ist das Artefakt
+aktuell?", sondern: **antwortet Rust dasselbe wie TypeScript?**
+`src/wasm/coreRules.parity.test.ts` vergleicht beide über den **vollständigen**
+Eingaberaum (drei Prioritäten × zwei Skalen, plus der ausgelassene Default und
+„nichts vorher") — keine Stichprobe, sondern die ganze Domäne, und das ist nur
+möglich, weil die drei Regeln bewusst ohne Politik gewählt wurden.
+
+**Was heute umgestellt ist:** `priorityRank`, `isImportantPriority` und
+`normalPriority` — keine i18n-Schlüssel, keine Glyphen, weil beides offene
+Fragen sind und ein Prototyp sie nicht nebenbei beantworten soll. Der Schalter
+sitzt in `src/intl/taskStatus.ts`: der Shim exportiert die drei explizit und
+überschattet damit sein `export *`, also wechseln alle Aufrufstellen auf einmal.
+
+**Die TypeScript-Originale bleiben vorerst**, weil `shared/taskGrouping.ts`
+`priorityRank` paketintern aufruft und die mobile App denselben Code fährt. Das
+ist ein Übergangs-, kein Endzustand: die TS-Kopie geht, sobald Mobile dieselbe
+Tür bekommt — sein Expo-Modul kann synchrone Funktionen bereits, der Weg
+existiert also. Bis dahin hält der Paritätstest die beiden zusammen.
+
+---
+
 ## 5. Ansichten
 
 ### 5.1 Übersicht aller Ansichten

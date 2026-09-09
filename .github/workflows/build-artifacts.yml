@@ -116,6 +116,20 @@ jobs:
             libasound2-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # See the wasm-pack note below.
+          targets: wasm32-unknown-unknown
+
+      # `npm run build` starts by building the core rules into WebAssembly
+      # (`crates/cal-core-wasm`) — the desktop's only SYNCHRONOUS road into
+      # cal-core, since Tauri's `invoke` is IPC and a React render cannot
+      # await. The module is a build artifact and is not committed, so every
+      # job that runs `npm run build` needs the toolchain that makes it. This
+      # job already carries Rust for the app itself; only wasm-pack and the
+      # wasm32 target are new.
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -259,7 +273,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          # wasm32 for the core rules; see the wasm-pack note below.
+          targets: x86_64-apple-darwin,aarch64-apple-darwin,wasm32-unknown-unknown
+
+      # `npm run build` starts by building the core rules into WebAssembly
+      # (`crates/cal-core-wasm`) — the desktop's only SYNCHRONOUS road into
+      # cal-core, since Tauri's `invoke` is IPC and a React render cannot
+      # await. The module is a build artifact and is not committed, so every
+      # job that runs `npm run build` needs the toolchain that makes it. This
+      # job already carries Rust for the app itself; only wasm-pack and the
+      # wasm32 target are new.
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
 
       - uses: Swatinem/rust-cache@v2
         with:

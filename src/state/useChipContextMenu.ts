@@ -4,11 +4,13 @@ import { invoke } from '@tauri-apps/api/core';
 
 import {
   detectConference,
-  isImportantPriority,
   isRecurringProjection,
-  normalPriority,
   parseDefaultDate,
 } from '@aperio/shared';
+
+// Through the shim, not straight from the package: on the desktop these two
+// come from `cal-core` via WebAssembly. See `src/intl/taskStatus.ts`.
+import { isImportantPriority, normalPriority } from '../intl/taskStatus';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { useDateFormat } from '../intl/dateFormat';

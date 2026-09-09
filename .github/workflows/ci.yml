@@ -112,6 +112,12 @@ jobs:
               # (tsconfig `include`), lints (`eslint .`) and tests. A change
               # here affects the desktop build, so it must run the frontend job.
               - 'shared/**'
+              # The Rust the desktop calls synchronously from render, compiled
+              # into the webview as WebAssembly. It is Rust, so the `rust`
+              # filter catches it too — but the frontend is where its .d.ts is
+              # type-checked and where the parity test proves it still answers
+              # what the TypeScript answers.
+              - 'crates/cal-core-wasm/**'
               - 'public/**'
               - 'index.html'
               - 'package.json'
@@ -284,6 +290,39 @@ jobs:
       - name: npm ci
         if: needs.changes.outputs.frontend == 'true'
         run: npm ci
+
+      # The core rules the desktop calls DURING render are compiled into the
+      # webview as WebAssembly (`crates/cal-core-wasm`), because Tauri's
+      # `invoke` is IPC and a React render cannot await. The module is a build
+      # artifact and is NOT committed — only its source is, so it has to be
+      # built here before anything can type-check against its .d.ts or run the
+      # parity test against its bytes.
+      #
+      # That is why this job carries a Rust toolchain at all. It is not a
+      # compromise: the desktop is a Tauri app, so its half of the tree needs
+      # Rust either way.
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.frontend == 'true'
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.frontend == 'true'
+        with:
+          # Its own cache key: this job builds ONE crate for wasm32, which
+          # shares almost nothing with the host-target build the `rust` job
+          # caches.
+          key: wasm
+          cache-on-failure: true
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        if: needs.changes.outputs.frontend == 'true'
+        with:
+          version: latest
+
+      - name: Build the core rules (WebAssembly)
+        if: needs.changes.outputs.frontend == 'true'
+        run: npm run build:wasm
 
       - name: TypeScript check
         if: needs.changes.outputs.frontend == 'true'

@@ -61,3 +61,11 @@ desktop.ini
 
 # Credential dumps from dev-secret-export. Never commit these.
 aperio-credentials*.txt
+
+# Built by `npm run build:wasm` (wasm-pack). NOT committed: the .wasm is a
+# binary whose bytes are only reproducible on one machine, so a committed copy
+# could not be checked against its source across platforms — and a stale one
+# would mean the app runs an old rule with nothing to notice. It is built where
+# it is needed instead, and `src/wasm/coreRules.parity.test.ts` proves the
+# freshly built module answers what the TypeScript answers.
+crates/cal-core-wasm/pkg/

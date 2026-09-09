@@ -9,6 +9,12 @@ members = [
     "crates/aperio-db",
     "crates/builtin-oauth",
     "crates/cal-core",
+    # The synchronous door from the DESKTOP webview into cal-core. Mobile calls
+    # Rust synchronously through its Expo module and a native frontend links it
+    # directly; the desktop's only road is Tauri's `invoke`, which is IPC and
+    # therefore always async — and a React render cannot await. See the crate's
+    # own docs. A cdylib, but NOT a plugin shell (it does not use plugin-sdk).
+    "crates/cal-core-wasm",
     "crates/plugin-core",
     "crates/plugin-sdk",
     "crates/sync-core",
@@ -125,6 +131,7 @@ type_complexity = "allow"
 # Aperio internal crates
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
+cal-core-wasm = { path = "crates/cal-core-wasm" }
 builtin-oauth = { path = "crates/builtin-oauth" }
 adapter-local = { path = "crates/adapter-local" }
 adapter-device-calendar = { path = "crates/adapter-device-calendar" }

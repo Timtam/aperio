@@ -4,6 +4,7 @@ import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
 import { applyUiScale, readUiScale } from './state/uiScale';
+import { initCoreRules } from './wasm/coreRules';
 import './i18n';
 import './styles.css';
 
@@ -21,8 +22,31 @@ applyUiScale(readUiScale());
 // <html data-theme> before anything renders, so the palette never flashes.
 applyThemeMode(readThemeMode());
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+// The core rules, compiled into this webview as WebAssembly, are the desktop's
+// only SYNCHRONOUS road into `cal-core` — Tauri's `invoke` is IPC and a React
+// render cannot await. Compiling the module is the one asynchronous step, and
+// it happens here, once, before the first render: afterwards every call is an
+// ordinary function call, including the ones inside `Array.sort` comparators.
+//
+// A failure is fatal and SAID, not swallowed. Rules that silently fall back to
+// a second implementation are the thing this exists to remove, and a blank
+// window would tell a screen-reader user nothing at all.
+initCoreRules()
+  .then(() => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>,
+    );
+  })
+  .catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error('the core rules failed to load', err);
+    const root = document.getElementById('root');
+    if (root) {
+      root.setAttribute('role', 'alert');
+      root.textContent = `Aperio konnte seine Kernregeln nicht laden: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+    }
+  });

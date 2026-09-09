@@ -766,10 +766,37 @@ Siehe DESIGN §4.2.
   wirklich passiert ist. Gilt schon jetzt für die Frontend-Kaskade (siehe
   DESIGN §9.1) und ist damit auch die Vorgabe, falls die Kaskade später in
   `update_task` wandert.
-- [ ] **Die Entscheidung, an der Schritt 2 hängt** (Tonis): bekommt `cal-core`
-  eine **synchrone**, in-process Bindung in die Frontends, oder bleibt
-  „nur await" die dauerhafte Form? Fünf Module kippen daran. WASM ist für
-  Mobile schon ausgeschlossen (Hermes kann kein WebAssembly).
+- [x] **Die Bindungsfrage ist beantwortet — es geht** (Toni: „lass uns das mit
+  wasm probieren", 2026-09-09). `crates/cal-core-wasm` ist gebaut und im echten
+  Renderpfad: 26,7 KB, 1,5 s inkrementeller Bau, und der Härtefall läuft — ein
+  `Array.sort`-Vergleicher ruft `priorityRank` synchron aus Rust.
+  ↳ Die Frage war **nur** die des Desktops. Mobile kann es längst
+  (`Function("parseAttendee")` statt `AsyncFunction`, ausgeliefert), eine
+  native reMarkable-Oberfläche bekommt es geschenkt. Hermes' fehlendes WASM ist
+  damit kein Blocker: eine Rust-Quelle, zwei Bindungen.
+  ↳ Gewächter durch `src/wasm/coreRules.parity.test.ts` — Rust gegen
+  TypeScript über den **vollständigen** Eingaberaum. Rot bewiesen: verdrehte
+  zweistufige Rangfolge in Rust → `priorityRank(low, two): expected +0 to be 1`.
+  ↳ Damit müssen die „large"-Schätzungen der Messung neu gemacht werden: sieben
+  von acht waren derselbe eine Befund („async ist die falsche Form"), und der
+  ist jetzt aufgelöst. Siehe DESIGN §4.3.
+- [x] **Die drei offenen Fragen sind entschieden** (Toni, 2026-09-09):
+  ↳ **Sortierung: `icu_collator` in den Kern.** Damit verhält sich die Ordnung
+  überall wie heute, auch bei Umlauten und gemischten Zahlen — und
+  `taskGrouping`s untere Hälfte kann überhaupt erst umziehen, weil
+  `naturalCompare` ihr Tiebreaker ist. Preis bewusst in Kauf genommen: die
+  ICU-Daten wiegen auf Mobile. Beim Bauen prüfen, wie viel genau, und ob eine
+  gekürzte Datensammlung reicht.
+  ↳ **reMarkable bekommt den VOLLEN Wiederholungs-Editor.** Damit muss
+  `shared/rrule.ts` (256 Zeilen, kein Rust-Gegenstück — `cal-core`s
+  `recurrence.rs` lässt die relativen Wochentags-Achsen bewusst weg) in den
+  Kern, und die synchrone Bindung ist dort Pflicht, weil `parseRRule` pro
+  Tastendruck läuft. Das ist der grösste Einzelposten der Trennung, und er ist
+  jetzt eingeplant statt offen.
+  ↳ **Die Glyphen bleiben vorne** (`○ ◐ ● ⊘`, `★`, `!!!`). Der Kern gibt einen
+  ZUSTAND zurück, jede Oberfläche wählt ihr Zeichen — eine e-ink-Anzeige will
+  plausibel andere. Damit ist auch klar, wie `taskStatus` zerfällt: die acht
+  reinen Funktionen können in den Kern, die Marken-Funktionen nicht.
 - [ ] Zwei Verträge, die vor jedem Umzug festzuklopfen sind: (a) der Kern gibt
   **i18n-Schlüssel + Variablen** zurück, nie fertigen Text (Vorbild
   `cal-core/src/conferencing.rs:70`); (b) der Kern liest **nie** die Uhr oder
