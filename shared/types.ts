@@ -4,8 +4,7 @@
 // from the Rust definitions by ts-rs (`cargo xtask ts-types`), so a field that
 // changes in `cal-core` / `plugin-core` / `host-core` changes here in the same
 // commit or CI fails. This file is only the door: it decides which of the
-// generated declarations are part of `@aperio/shared`'s public surface, and it
-// carries the one shape that has no single Rust home (see `TaskList` below).
+// generated declarations are part of `@aperio/shared`'s public surface.
 //
 // The generated shapes describe what the backend SERIALISES — Tauri commands on
 // the desktop, the cal-ffi `LocalStore` on mobile. Both go through serde, so
@@ -16,10 +15,6 @@
 // frontend `JSON.parse`s itself. There a value written before a field existed
 // really has no key, and the Rust declaration says so with `#[ts(optional)]` —
 // `DefaultReminder.attach` is the only one today.
-
-import type { RecurrenceCapabilities } from './generated/RecurrenceCapabilities';
-import type { TaskCapabilities } from './generated/TaskCapabilities';
-import type { TaskList as CoreTaskList } from './generated/TaskList';
 
 // Colors
 export type { ContainerColor } from './generated/ContainerColor';
@@ -66,33 +61,18 @@ export type { Weekday } from './generated/Weekday';
 export type { SuggestionDecline } from './generated/SuggestionDecline';
 
 /**
- * A task list as the frontends receive it when they LIST them:
- * `cal_core::TaskList` plus the fields the host stamps on while listing.
+ * A task list as the frontends receive it when they LIST them: the
+ * `cal_core::TaskList` fields plus what the host stamps on while listing.
  *
- * This one is assembled here rather than generated, because it has no single
- * Rust declaration to generate from — the desktop builds it in
- * `src-tauri/src/commands/tasks.rs` (`TaskListRow`) and mobile in
- * `crates/cal-ffi/src/host.rs` (`TaskListRow`), and the two structs are
- * maintained separately. They do not currently agree:
- * `recurrence_capabilities` is stamped on mobile only, which is why it is the
- * one optional field here.
+ * Generated, like everything else here, from `host_core::wire::TaskListRow` —
+ * ONE Rust declaration used by the desktop's Tauri command and the mobile
+ * bridge alike, so the two cannot answer with different fields. They used to,
+ * and it cost something: see that module's docs.
  *
- * Commands that return a task list WITHOUT the enrichment return
- * [`TaskListCore`] instead — see `reparentTaskList`.
+ * Commands that answer with a task list WITHOUT the enrichment return
+ * [`TaskListCore`] — see `reparentTaskList`.
  */
-export type TaskList = CoreTaskList & {
-  /** Account that owns this task list; `"local"` for the local store. */
-  account_id: string;
-  /** Task-organisation shapes the owning adapter supports, resolved from its
-   *  plugin manifest. */
-  task_capabilities: TaskCapabilities;
-  /** Recurrence shapes the owning adapter can store, from the plugin's
-   *  top-level `recurrence` — stamped by mobile only, so it is ALWAYS absent
-   *  on the desktop. The desktop task editor reads
-   *  `task_capabilities.recurrence` instead, which is a different manifest
-   *  field; see TODO A11. */
-  recurrence_capabilities?: RecurrenceCapabilities;
-};
+export type { TaskListRow as TaskList } from './generated/TaskListRow';
 
 /**
  * A task list exactly as `cal_core` declares it, with no host enrichment.
@@ -102,4 +82,4 @@ export type TaskList = CoreTaskList & {
  * `account_id` and the capabilities on. Callers that need those re-read the
  * listing; the two that exist today discard the answer entirely.
  */
-export type TaskListCore = CoreTaskList;
+export type { TaskList as TaskListCore } from './generated/TaskList';

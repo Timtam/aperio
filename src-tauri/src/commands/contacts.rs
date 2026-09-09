@@ -19,7 +19,7 @@
 
 use adapter_local::LocalAdapter;
 use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::warn;
@@ -33,19 +33,12 @@ use crate::contact_sync::{
     PREF_SYNC_INTERVAL_MINUTES,
 };
 use crate::db::DbHandle;
+// The row shape is declared once, in host-core, so the desktop and the mobile
+// bridge cannot answer with different fields — see `host_core::wire`.
+use host_core::wire::ContactListRow;
+
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::user_prefs::UserPrefsRepo;
-
-/// Wire-format `ContactList` enriched with the owning account id —
-/// same shape rationale as `CalendarRow` and `TaskListRow`. Lets
-/// the sidebar group containers by source without a second
-/// round-trip to the registry.
-#[derive(Debug, Serialize)]
-pub struct ContactListRow {
-    #[serde(flatten)]
-    pub inner: ContactList,
-    pub account_id: String,
-}
 
 #[tauri::command]
 pub async fn list_contact_lists(

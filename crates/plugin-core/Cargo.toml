@@ -61,4 +61,6 @@ workspace = true
 # should pull a code generator into their graph. Only `cargo xtask ts-types`
 # turns it on. See cal-core for the full reasoning.
 [features]
-ts-export = ["dep:ts-rs"]
+# Turns it on in the crates whose types these ones name — enabling it here
+# alone would otherwise fail to compile.
+ts-export = ["dep:ts-rs", "cal-core/ts-export"]
