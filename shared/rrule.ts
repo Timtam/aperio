@@ -87,19 +87,52 @@ function isInLastWeek(d: Date): boolean {
   return d.getDate() > daysInMonth(d) - 7;
 }
 
+/** Which monthly shapes the target source can store.
+ *
+ *  Both default to true — the permissive default the manifest itself uses, so
+ *  an adapter only spells out what it RESTRICTS.
+ *
+ *  Two axes rather than one because two different adapters restrict two
+ *  different things, and a single flag made one of them unrepresentable. */
+export interface MonthlyOptionSupport {
+  /** Relative weekday options ("third Wednesday") — `BYDAY=Nxx`. */
+  relative?: boolean;
+  /** An explicit day of the month — `BYMONTHDAY`. */
+  dayOfMonth?: boolean;
+}
+
 /** Compute the 2-3 monthly/yearly options for a given start date.
- *  `relativeAllowed` (default true) marks the relative weekday
- *  options disabled when the target source can't store them — they
- *  stay visible (greyed) so the user can see the option exists. */
+ *
+ *  Unsupported options come back marked `disabled` rather than missing, and it
+ *  is the SURFACE that decides what to do with that: the desktop greys them so
+ *  the user can see the option exists, the mobile picker drops them because an
+ *  untappable row is worse on a touch screen than an absent one.
+ *
+ *  Both axes are decided here, in one place, because they were decided in two
+ *  and each surface got a different half right. The desktop honoured
+ *  `disabled` and never looked at `monthly_day_of_month`; mobile filtered on
+ *  `monthly_day_of_month` and never looked at `disabled`. So a source that
+ *  cannot store "third Wednesday" still offered it on the phone, and a source
+ *  that cannot store "the 14th" still offered that on the desktop — in both
+ *  cases the editor accepted a repeat shape the provider would drop. */
 export function deriveMonthlyOptions(
   start: Date,
-  relativeAllowed = true,
+  support: MonthlyOptionSupport = {},
 ): MonthlyOption[] {
+  const relativeAllowed = support.relative ?? true;
+  const dayOfMonthAllowed = support.dayOfMonth ?? true;
   const day = start.getDate();
   const weekday = JS_DAY_TO_RRULE[start.getDay()];
   const ordinal = nthWeekdayOfMonth(start);
   const opts: MonthlyOption[] = [
-    { key: 'dom', mode: 'DAY_OF_MONTH', day, ordinal: 0, weekday: '' },
+    {
+      key: 'dom',
+      mode: 'DAY_OF_MONTH',
+      day,
+      ordinal: 0,
+      weekday: '',
+      disabled: !dayOfMonthAllowed,
+    },
     {
       key: 'nth',
       mode: 'WEEKDAY',

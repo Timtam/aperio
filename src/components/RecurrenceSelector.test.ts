@@ -186,11 +186,11 @@ describe('deriveMonthlyOptions', () => {
     expect(last).toMatchObject({ mode: 'WEEKDAY', ordinal: -1, weekday: 'FR' });
   });
 
-  it('marks relative options disabled when relativeAllowed is false', () => {
+  it('marks relative options disabled when the source cannot store them', () => {
     // A source that can't store relative recurrence (BYDAY=Nxx):
     // the day-of-month option stays enabled, the weekday options
     // are greyed (still visible) rather than removed.
-    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), false);
+    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), { relative: false });
     const dom = opts.find((o) => o.key === 'dom');
     const nth = opts.find((o) => o.key === 'nth');
     const last = opts.find((o) => o.key === 'last');
@@ -199,8 +199,35 @@ describe('deriveMonthlyOptions', () => {
     expect(last?.disabled).toBe(true);
   });
 
-  it('leaves relative options enabled by default (full support)', () => {
-    const opts = deriveMonthlyOptions(new Date(2024, 4, 15));
-    expect(opts.every((o) => !o.disabled)).toBe(true);
+  it('marks the day-of-month option disabled when the source cannot store one', () => {
+    // The other axis, and it had no answer at all: a source that repeats on
+    // the item's own day and cannot take a separate day number (Vikunja says
+    // so in its manifest) still had "on the 29th" offered on the desktop, and
+    // the value was accepted and dropped on save.
+    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), {
+      dayOfMonth: false,
+    });
+    expect(opts.find((o) => o.key === 'dom')?.disabled).toBe(true);
+    // The relative options are a different axis and stay untouched.
+    expect(opts.find((o) => o.key === 'nth')?.disabled).toBeFalsy();
+  });
+
+  it('can disable both axes at once', () => {
+    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), {
+      relative: false,
+      dayOfMonth: false,
+    });
+    expect(opts.every((o) => o.disabled)).toBe(true);
+  });
+
+  it('leaves every option enabled by default (full support)', () => {
+    // The permissive default the manifest itself uses: an adapter spells out
+    // only what it restricts, so an absent block must mean "everything".
+    expect(
+      deriveMonthlyOptions(new Date(2024, 4, 15)).every((o) => !o.disabled),
+    ).toBe(true);
+    expect(
+      deriveMonthlyOptions(new Date(2024, 4, 15), {}).every((o) => !o.disabled),
+    ).toBe(true);
   });
 });

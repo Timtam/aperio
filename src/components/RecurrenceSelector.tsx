@@ -133,8 +133,17 @@ export function RecurrenceSelector({
     rule.freq === 'YEARLY' ? caps.relative_yearly : caps.relative_monthly;
   const monthlyOptions = useMemo(
     () =>
-      isMonthlyish ? deriveMonthlyOptions(startDate, relativeAllowed) : [],
-    [isMonthlyish, startDate, relativeAllowed],
+      isMonthlyish
+        ? deriveMonthlyOptions(startDate, {
+            relative: relativeAllowed,
+            // Its own axis, and it was never asked: a source that repeats on
+            // the item's own day and cannot take a separate day number still
+            // had "on the 14th" offered here, and the value was accepted and
+            // dropped on save.
+            dayOfMonth: caps.monthly_day_of_month,
+          })
+        : [],
+    [isMonthlyish, startDate, relativeAllowed, caps.monthly_day_of_month],
   );
   const selectedOptionKey = monthlyOptionKey(rule);
   const intervalEnabled = intervalSupported(rule.freq, caps);

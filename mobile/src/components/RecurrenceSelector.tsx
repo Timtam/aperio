@@ -143,16 +143,34 @@ export function RecurrenceSelector({
   // day-of-month is gated by its own axis (Vikunja can't store one).
   const relativeAllowed =
     rule.freq === 'YEARLY' ? caps.relative_yearly : caps.relative_monthly;
+  const selectedOptionKey = monthlyOptionKey(rule);
   const monthlyOptions = useMemo(
     () =>
       isMonthlyish
-        ? deriveMonthlyOptions(startDate, relativeAllowed).filter(
-            (o) => o.mode !== 'DAY_OF_MONTH' || caps.monthly_day_of_month,
-          )
+        ? deriveMonthlyOptions(startDate, {
+            relative: relativeAllowed,
+            dayOfMonth: caps.monthly_day_of_month,
+          }).filter((o) => !o.disabled || o.key === selectedOptionKey)
         : [],
-    [isMonthlyish, startDate, relativeAllowed, caps.monthly_day_of_month],
+    // Dropped rather than greyed: this picker's house style, and an untappable
+    // row is worse on a touch screen than an absent one. It used to filter on
+    // `monthly_day_of_month` alone and never look at `disabled`, so a source
+    // that cannot store "third Wednesday" still offered it — and the value was
+    // accepted and dropped on save.
+    //
+    // The exception is the option the rule ALREADY uses. Filtering it away
+    // would leave the picker holding a value it has no row for, and the button
+    // would announce nothing at all — the one outcome a screen-reader user
+    // cannot recover from. Offering it keeps the state readable and lets the
+    // user change it away.
+    [
+      isMonthlyish,
+      startDate,
+      relativeAllowed,
+      caps.monthly_day_of_month,
+      selectedOptionKey,
+    ],
   );
-  const selectedOptionKey = monthlyOptionKey(rule);
 
   // Locale-aware names via Intl (no weekday/month dictionary in the i18n files).
   const monthName = intlMonthName(i18n.language, startDate);

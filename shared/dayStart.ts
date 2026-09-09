@@ -1,3 +1,4 @@
+import { parseDayKey } from './dateKey';
 import { isMineOrUnassigned } from './taskAssignment';
 import { todayIsoKey } from './taskDay';
 import type { Task, TaskUser } from './types';
@@ -211,11 +212,26 @@ export function daysUntilDeadline(
   fromDayKey: string = todayIsoKey(),
 ): number | null {
   if (!task.deadline_date) return null;
-  const [ty, tm, td] = fromDayKey.split('-').map(Number);
-  const [dy, dm, dd] = task.deadline_date.split('-').map(Number);
-  const todayMs = new Date(ty, tm - 1, td).getTime();
-  const deadlineMs = new Date(dy, dm - 1, dd).getTime();
-  return Math.round((deadlineMs - todayMs) / 86_400_000);
+  // A day key that is not one answers "no deadline", not a number.
+  //
+  // Two different wrong answers were possible here, and the second is the
+  // nastier one. `'tomorrow'` produces NaN, and NaN passes every guard in
+  // `filterDeadlineCountdown` — `days == null` is false, `days < 1` is false,
+  // `days > window` is false — so the task would be offered as a countdown
+  // reminder every single day and never age out of it. But `'2026-13-99'`
+  // produces no NaN at all: JavaScript rolls month 13 and day 99 over into
+  // April 2027 without complaint, so a finiteness check waves it through and
+  // the answer is a confident, plausible 324 days.
+  //
+  // Nothing produces such a value today: `Task.deadline_date` is
+  // `Option<NaiveDate>` in Rust, so a malformed one cannot cross serde. But
+  // this function is exported from `@aperio/shared` and takes a plain string,
+  // and "no caller can pass junk" is not a property a shared function should
+  // rest on.
+  const today = parseDayKey(fromDayKey);
+  const deadline = parseDayKey(task.deadline_date);
+  if (!today || !deadline) return null;
+  return Math.round((deadline.getTime() - today.getTime()) / 86_400_000);
 }
 
 /**
