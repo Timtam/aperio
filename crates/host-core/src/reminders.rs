@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cal_core::{
-    ContactsFeature, DateRange, Event, EventRecurrence, NewEvent, RecurrenceEnd,
-    RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence, TaskUser,
+    is_mine_or_unassigned, ContactsFeature, DateRange, Event, EventRecurrence, NewEvent,
+    RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -261,18 +261,6 @@ pub fn enumerate_local_triggers(
         }
     }
     acc
-}
-
-/// Mirror of the TS `isMineOrUnassigned` (shared/taskAssignment.ts): a task is
-/// "mine to be reminded about" when the account has no identity (`me` is `None`
-/// — local-style adapters), the task is unassigned, or I'm one of its assignees.
-/// A colleague's task in a shared list (Vikunja/Todoist) is NOT, so it produces
-/// no reminder — matching the day-start ownership filter and the calendar views.
-fn is_mine_or_unassigned(assignees: &[TaskUser], me: Option<&TaskUser>) -> bool {
-    match me {
-        None => true,
-        Some(me) => assignees.is_empty() || assignees.iter().any(|a| a.id == me.id),
-    }
 }
 
 /// Fan out across every registered external adapter and pull a snapshot of
@@ -2134,6 +2122,85 @@ mod tests {
                 "a cleared list must not read as 'never configured'"
             );
             assert!(calendar_default_reminders(&db, "cal").is_empty());
+        }
+    }
+
+    /// The Rust half of the task-ownership contract.
+    ///
+    /// Its TypeScript twin is `src/state/taskOwnership.contract.test.ts`, and
+    /// both read the SAME file. Unlike the wire contract above, this one pins a
+    /// DECISION rather than a format: each side answers "is this task mine?"
+    /// independently, on the same data, and neither can see the other's answer.
+    ///
+    /// That is what makes a disagreement expensive. Rust answers it before a
+    /// `Trigger` is ever built, so a wrong `true` rings the phone for a task the
+    /// app does not list as mine, and a wrong `false` silences one it does.
+    /// Nothing crashes, nothing logs; it would take days of noticing that one
+    /// surface disagrees with the other.
+    mod ownership_contract {
+        use cal_core::{is_mine_or_unassigned, TaskUser};
+
+        /// `include_str!` on purpose — see the note on the wire contract above.
+        const CONTRACT: &str = include_str!("../../../shared/contracts/taskOwnership.json");
+
+        fn user(id: &str) -> TaskUser {
+            TaskUser {
+                id: id.to_string(),
+                name: format!("name of {id}"),
+                email: None,
+            }
+        }
+
+        #[test]
+        fn every_case_in_the_contract_answers_the_same_here() {
+            let contract: serde_json::Value =
+                serde_json::from_str(CONTRACT).expect("the contract fixture is valid JSON");
+            let cases = contract["cases"]
+                .as_array()
+                .expect("the contract lists its cases");
+            // Name, don't count: a floor would pass on exactly the edit that
+            // empties this file, and every case below names itself on failure.
+            assert!(
+                !cases.is_empty(),
+                "the ownership contract has no cases — the fixture is there but says nothing"
+            );
+
+            for case in cases {
+                let name = case["name"].as_str().expect("every case is named");
+                let assignees: Vec<TaskUser> = case["assignees"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("case {name} lists its assignees"))
+                    .iter()
+                    .map(|id| user(id.as_str().expect("an assignee is a user id")))
+                    .collect();
+                let me = case["me"].as_str().map(user);
+                let expected = case["mine"]
+                    .as_bool()
+                    .unwrap_or_else(|| panic!("case {name} states the expected answer"));
+
+                assert_eq!(
+                    is_mine_or_unassigned(&assignees, me.as_ref()),
+                    expected,
+                    "case {name}: Rust disagrees with the contract both languages read"
+                );
+            }
+        }
+
+        /// The one case worth stating twice, because it is the only `false` and
+        /// the whole reason the rule exists.
+        #[test]
+        fn the_contract_still_contains_the_colleagues_task() {
+            let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
+            let has_a_false_case = contract["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["mine"].as_bool() == Some(false));
+            assert!(
+                has_a_false_case,
+                "every case now expects `true`, so the contract would pass against a rule \
+                 that answers `true` unconditionally — which is the bug it exists to catch"
+            );
         }
     }
 

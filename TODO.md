@@ -720,6 +720,21 @@ Siehe DESIGN §4.2.
   an, deren Typen es nennt. `cargo build -p host-core --features ts-export`
   allein war eine Wand aus „trait bound `X: TS` is not satisfied"; nur weil die
   xtask immer alle drei Features zusammen übergab, fiel es nicht auf.
+- [x] **Die Eigentums-Regel liegt im Kern.** „Ist das meine Aufgabe?" — die
+  einzige Regel im ganzen `shared/`-Satz, die schon zweimal geschrieben war:
+  in `shared/taskAssignment.ts` und **privat** in `host_core::reminders`, wo
+  Rust nicht einmal seine eigene Kopie wiederverwenden konnte. Jetzt
+  `cal_core::is_mine_or_unassigned`.
+  ↳ Die TypeScript-Hälfte bleibt (sie wird synchron im Render gebraucht), die
+  beiden sind daher gegeneinander festgenagelt durch
+  `shared/contracts/taskOwnership.json` — kein Wire-Format, sondern eine
+  **Entscheidung**, die beide Seiten unabhängig auf denselben Daten treffen.
+  Läuft sie auseinander, klingelt das Telefon für die Aufgabe einer Kollegin
+  oder eine eigene bleibt stumm; nichts stürzt ab, nichts protokolliert.
+  ↳ Vier Sabotagen rot bewiesen (Rust-Regel gebrochen, TS-Regel gebrochen,
+  Fixture geleert → beide Anti-Stille-Wächter), und der Reach-Wächter meldete
+  die neue `include_str!`-Zeile von sich aus, bevor sie in `KNOWN_REACHES`
+  stand.
 - [ ] **`reparent_task_list` antwortet mit der nackten `cal_core::TaskList`**,
   ohne `account_id` und ohne Fähigkeiten, während `list_task_lists` sie
   anstempelt. Beide Aufrufer (Desktop-Sidebar, mobiler Listeneditor) verwerfen
@@ -733,9 +748,9 @@ Siehe DESIGN §4.2.
   bei sechs von acht **nicht** die IPC-Runde, sondern das Fehlen einer
   **synchronen** Kern-Bindung; kein Umbau eines Befehls behebt das.
   Sieben von acht „large"-Schätzungen sind derselbe eine Befund.
-  ↳ Nur EINE echte Doppelung existiert heute: `is_mine_or_unassigned` liegt in
-  `crates/host-core/src/reminders.rs:271` (privat!) und in
-  `shared/taskAssignment.ts`.
+  ↳ Nur EINE echte Doppelung existierte: `is_mine_or_unassigned`, in
+  `host-core/src/reminders.rs` **privat** und in `shared/taskAssignment.ts`.
+  Erledigt — siehe den Eintrag oben.
   ↳ Echte Divergenz, unabhängig vom Umzug: `shared/recurrence.ts` und
   `host-core`s `expand_occurrences` dokumentieren **verschiedenes**
   DST-Randverhalten, und Rust deckelt bei `RRULESET_LIMIT=500`, JS gar nicht.

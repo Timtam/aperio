@@ -1,0 +1,76 @@
+{
+  "what": "The ownership rule for a task — 'is this mine to act on?' — as a table of cases both languages answer. Rust: cal_core::is_mine_or_unassigned. TypeScript: isMineOrUnassigned in shared/taskAssignment.ts. Both suites read THIS file, so the two cannot drift apart in silence.",
+  "why": "The rule is not a wire format, it is a DECISION, and both sides make it independently on the same data. Rust makes it when it decides whether a task rings: enumerate_external_triggers drops a colleague's task before a Trigger is ever built. TypeScript makes it when it decides what to offer in the day-start review and how to split 'Done — N by me, M by others'. Neither can see the other's answer. If they disagree, the failure is silent in the worst direction: a phone that rings for a task the app never shows as mine, or a task the app treats as mine that never rings. Nothing crashes, nothing logs, and finding it means noticing over days that one surface disagrees with the other.",
+  "writtenBy": [],
+  "readBy": [
+    "crates/cal-core/src/task_assignment.rs (is_mine_or_unassigned)",
+    "shared/taskAssignment.ts (isMineOrUnassigned)"
+  ],
+  "shape": {
+    "note": "Each case gives the task's assignee ids and the account's own identity, then the expected answer. Identity is compared by id ALONE — providers return the same person with different display names per endpoint, so matching on name or email would drop a real assignment.",
+    "assignees": "list of user ids assigned to the task; empty means nobody",
+    "me": "the account's own user id, or null when the adapter reports no identity at all",
+    "mine": "the expected answer"
+  },
+  "cases": [
+    {
+      "name": "personal-list-no-identity",
+      "note": "The local store and other personal-style adapters never report a 'me'. Answering false here would silence every reminder the user has, on the surface where they have the most.",
+      "assignees": [],
+      "me": null,
+      "mine": true
+    },
+    {
+      "name": "no-identity-but-someone-assigned",
+      "note": "Same, even when assignees arrived from elsewhere: with no identity there is nobody to compare against, so the rule must not guess.",
+      "assignees": [
+        "colleague"
+      ],
+      "me": null,
+      "mine": true
+    },
+    {
+      "name": "unassigned-in-a-shared-list",
+      "note": "Nobody has taken it, so it is everyone's — including mine. This is what keeps a shared Vikunja project usable before anyone claims anything.",
+      "assignees": [],
+      "me": "me",
+      "mine": true
+    },
+    {
+      "name": "assigned-to-me",
+      "assignees": [
+        "me"
+      ],
+      "me": "me",
+      "mine": true
+    },
+    {
+      "name": "assigned-to-me-and-a-colleague",
+      "note": "Multi-assignee sources (Vikunja) put several people on one task. Being one of them is enough.",
+      "assignees": [
+        "colleague",
+        "me"
+      ],
+      "me": "me",
+      "mine": true
+    },
+    {
+      "name": "assigned-only-to-a-colleague",
+      "note": "THE case the rule exists for, and the only false one. A colleague's task must not ring on my phone, must not be offered in my day-start review, and must not be counted among the things I finished. It stays VISIBLE — this decides ownership, not visibility.",
+      "assignees": [
+        "colleague"
+      ],
+      "me": "me",
+      "mine": false
+    },
+    {
+      "name": "assigned-only-to-several-colleagues",
+      "assignees": [
+        "colleague",
+        "other"
+      ],
+      "me": "me",
+      "mine": false
+    }
+  ]
+}
