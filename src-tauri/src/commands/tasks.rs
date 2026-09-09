@@ -4,12 +4,15 @@ use adapter_local::LocalAdapter;
 use cal_core::{
     MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser, TasksFeature,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::{AppHandle, State};
 
 use plugin_core::{PluginManager, TaskCapabilities};
+// The row shape is declared once, in host-core, so the desktop and the mobile
+// bridge cannot answer with different fields — see `host_core::wire`.
+use host_core::wire::TaskListRow;
 
 use super::cache_swr;
 use super::cache_swr::TauriCacheObserver;
@@ -173,26 +176,6 @@ fn replay_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
         tasks = tasks_n,
         "local-task backfill: replayed existing local lists + tasks",
     );
-}
-
-/// Wire-format TaskList enriched with the owning account id. Same
-/// shape + rationale as `CalendarRow` — the frontend uses it to
-/// group containers by source for the account-aware sidebar.
-///
-/// `inner` is `serde(flatten)`ed, so `TaskList.parent_id` rides along
-/// at the top level for free — the nested-project tree in the sidebar
-/// reads it without a second round-trip.
-#[derive(Debug, Serialize)]
-pub struct TaskListRow {
-    #[serde(flatten)]
-    pub inner: TaskList,
-    pub account_id: String,
-    /// Task-organisation shapes the owning adapter supports (nested
-    /// projects, sections, subtask depth, …), resolved from the
-    /// account's plugin manifest. The frontend gates affordances on
-    /// these — e.g. only shows "add section" where `sections` is true.
-    /// Local + unknown sources report [`TaskCapabilities::default`].
-    pub task_capabilities: TaskCapabilities,
 }
 
 /// The local SQLite store's task capabilities. Unlike a plugin-backed
