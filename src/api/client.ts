@@ -1286,6 +1286,16 @@ export const invalidateReminders = () =>
 export const setReminderHiddenCalendars = (hiddenCalendarIds: string[]) =>
   invoke<void>('set_reminder_hidden_calendars', { hiddenCalendarIds });
 
+/** Push the notification wording to the reminder scheduler. The host fires
+ *  reminders from Rust, with the window closed if need be, and has no i18n —
+ *  so the words come from here, like the tray's labels. */
+export const setReminderLabels = (labels: {
+  allDay: string;
+  allDayRange: string;
+  dayMonth: string;
+  months: string[];
+}) => invoke<void>('set_reminder_labels', labels);
+
 // ── Native context menu ──────────────────────────────────────────────────
 
 /** One entry in the native context menu. The shape supports four

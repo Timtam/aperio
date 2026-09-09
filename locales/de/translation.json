@@ -1944,7 +1944,8 @@
       "taskRow": "{{when}}: Aufgabe „{{title}}\"",
       "openHint": "Öffnet das zugehörige Element",
       "allDay": "Ganztägig",
-      "allDayRange": "Ganztägig · {{from}} bis {{to}}"
+      "allDayRange": "Ganztägig · {{from}} bis {{to}}",
+      "dayMonth": "{{day}}. {{month}}"
     },
     "search": {
       "title": "Suche",

@@ -2216,6 +2216,41 @@ Erinnerungen werden als native Systembenachrichtigungen zugestellt – unabhäng
 - **Aktionen:** "Öffnen" (springt zum Termin/zur Aufgabe in der App), "Snooze" (konfigurierbare Snooze-Dauer); bei Aufgaben zusätzlich "Erledigt" (markiert die Aufgabe direkt als abgeschlossen)
 - Screen Reader lesen den Benachrichtigungsinhalt vollständig vor (plattformseitig gewährleistet)
 
+#### Ganztägige Termine sagen keine Uhrzeit — und wie der Host an Wörter kommt
+
+Ein ganztägiger Termin beginnt um **lokale Mitternacht**. Der Untertitel wurde
+aber für jeden Termin als `%H:%M` gebaut, also sagte der Desktop bei einem
+Geburtstag „00:00" — eine Uhrzeit, die niemand gesetzt hat und die der Termin
+nicht besitzt. Für einen Screenreader-Nutzer ist das keine Kleinigkeit: die
+Benachrichtigung ist der ganze Kanal. Mobile sagt seit jeher „Ganztägig", und
+sein `notificationBody` benennt den Desktop-Fehler im eigenen Kommentar.
+
+Die Daten lagen bereit: `Trigger` trägt `all_day`, `start` und
+`relevant_until`, und der Doc-Kommentar an `start` sagt wörtlich, dass sie
+existieren, damit eine Benachrichtigung „Ganztägig · 24. Juni bis 26. Juni"
+sagen kann. Es fehlten nur die **Wörter**.
+
+**Der Host hat kein i18n**, und Erinnerungen feuern aus Rust — nach Zeitplan,
+auch bei geschlossenem Fenster. Die Oberfläche kann also nicht selbst
+übersetzen. Deshalb wird nach unten geschoben, genau wie bei den
+Tray-Beschriftungen (`set_tray_labels`) und wie bei den ausgeblendeten
+Kalendern im selben Scheduler (`set_hidden_calendars`): `set_reminder_labels`
+reicht die Formulierungen hinunter, sobald i18n bereit ist, und bei jedem
+Sprachwechsel erneut.
+
+Mitgeschickt werden auch die **Monatsnamen** — aus `Intl`, derselben Quelle,
+die der mobile Scheduler benutzt, damit beide Oberflächen den Juni gleich
+buchstabieren — und die **Reihenfolge** von Tag und Monat als eigener
+Schlüssel: „24. Juni" gegen „June 24" ist dieselbe Angabe in zwei Anordnungen,
+und sie im Host abzuleiten hieße, dort eine Datums-Bibliothek und eine zweite
+Antwort auf „welche Sprache ist das" zu halten.
+
+Solange nichts heruntergeschoben wurde — die ersten Sekunden nach dem Start —
+bekommt eine ganztägige Erinnerung **gar keinen Untertitel**. Weniger sagen ist
+besser als etwas Falsches sagen. Die Uhrzeit eines **getakteten** Termins
+braucht keine Wörter und wird deshalb weiterhin im Host gebaut, ohne auf
+irgendetwas zu warten.
+
 ### 14.4 Sound-Konfiguration
 
 Benachrichtigungssounds sind **hierarchisch konfigurierbar** – von der globalen Ebene bis zum einzelnen Termin bzw. zur einzelnen Aufgabe:

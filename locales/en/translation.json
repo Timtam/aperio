@@ -1944,7 +1944,8 @@
       "taskRow": "{{when}}: task \"{{title}}\"",
       "openHint": "Opens the linked item",
       "allDay": "All day",
-      "allDayRange": "All day · {{from}} to {{to}}"
+      "allDayRange": "All day · {{from}} to {{to}}",
+      "dayMonth": "{{month}} {{day}}"
     },
     "search": {
       "title": "Search",
