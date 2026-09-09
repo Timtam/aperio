@@ -1,13 +1,23 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import { installTextCollation } from '@aperio/shared';
+import {
+  installTaskPriorityRules,
+  installTextCollation,
+} from '@aperio/shared';
 
 import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
 import { applyUiScale, readUiScale } from './state/uiScale';
-import { compareNames, compareTitles, initCoreRules } from './wasm/coreRules';
+import {
+  compareNames,
+  compareTitles,
+  initCoreRules,
+  isImportantPriority,
+  normalPriority,
+  priorityRank,
+} from './wasm/coreRules';
 import i18n from './i18n';
 import './styles.css';
 
@@ -47,6 +57,14 @@ initCoreRules()
       });
     installCollation();
     i18n.on('languageChanged', installCollation);
+
+    // The priority ranking, from `cal_core::task_priority`. No language in it,
+    // so it is installed once and never re-bound — unlike the collation above.
+    installTaskPriorityRules({
+      priorityRank,
+      isImportantPriority,
+      normalPriority,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

@@ -1,6 +1,10 @@
 import { registerRootComponent } from 'expo';
 
-import { installTextCollation } from '@aperio/shared';
+import {
+  installTaskPriorityRules,
+  installTextCollation,
+  type TaskPriority,
+} from '@aperio/shared';
 
 // Initialise i18next (shared translations) before the app renders.
 import i18n from './i18n';
@@ -23,6 +27,22 @@ const installCollation = () =>
   });
 installCollation();
 i18n.on('languageChanged', installCollation);
+
+// The priority ranking, from `cal_core::task_priority` through the same
+// synchronous bridge. No language in it, so it is installed once and never
+// re-bound — unlike the collation above.
+//
+// Until this existed the rule was reachable from the DESKTOP only (it lived in
+// `crates/cal-core-wasm`), so this app ran the TypeScript copy while the
+// desktop ran Rust.
+installTaskPriorityRules({
+  priorityRank: (priority, scale) => CalFfi.priorityRank(priority, scale),
+  isImportantPriority: (priority) => CalFfi.isImportantPriority(priority),
+  // The bridge speaks strings — `''` is "nothing before", and the answer is
+  // one of the three the core knows. The cast is the boundary, not a guess.
+  normalPriority: (previous) =>
+    CalFfi.normalPriority(previous ?? '') as TaskPriority,
+});
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

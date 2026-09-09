@@ -26,6 +26,9 @@ import uniffi.cal_ffi.Host
 import uniffi.cal_ffi.StoreException
 import uniffi.cal_ffi.compareNames as uniffiCompareNames
 import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
+import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
+import uniffi.cal_ffi.normalPriority as uniffiNormalPriority
+import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 
 class CalFfiModule : Module() {
@@ -229,6 +232,27 @@ class CalFfiModule : Module() {
 
     Function("compareTitles") { a: String, b: String, languageTag: String ->
       uniffiCompareTitles(a, b, languageTag)
+    }
+
+    // ─── Task priority (synchronous, and that is the point) ───
+    // The ranking every task list sorts by, from `cal_core::task_priority`.
+    // `Function`, not `AsyncFunction`: the callers are `Array.prototype.sort`
+    // comparators, which cannot await.
+    //
+    // Until these existed the rule was reachable from the DESKTOP only — it
+    // lived in `crates/cal-core-wasm`, the desktop's own binding — so this app
+    // ran the TypeScript copy while the desktop ran Rust. Two devices showing
+    // one task list have to put the same task first.
+    Function("priorityRank") { priority: String, scale: String ->
+      uniffiPriorityRank(priority, scale)
+    }
+
+    Function("isImportantPriority") { priority: String ->
+      uniffiIsImportantPriority(priority)
+    }
+
+    Function("normalPriority") { previous: String ->
+      uniffiNormalPriority(previous)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

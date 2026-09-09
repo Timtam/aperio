@@ -37,13 +37,19 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { installTextCollation } from '@aperio/shared';
+import {
+  installTaskPriorityRules,
+  installTextCollation,
+} from '@aperio/shared';
 
 import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
 import {
   compareNames,
   compareTitles,
+  isImportantPriority,
   markCoreRulesReady,
+  normalPriority,
+  priorityRank,
 } from './wasm/coreRules';
 
 initSync({
@@ -59,4 +65,12 @@ markCoreRulesReady();
 installTextCollation({
   compareNames: (a, b) => compareNames(a, b, 'de'),
   compareTitles: (a, b) => compareTitles(a, b, 'de'),
+});
+
+// The same door the surface installs, for the same reason: the ranking lives
+// in `cal_core::task_priority` and the tests must exercise it, not a stand-in.
+installTaskPriorityRules({
+  priorityRank,
+  isImportantPriority,
+  normalPriority,
 });

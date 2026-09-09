@@ -14,7 +14,7 @@ use std::fmt;
 
 use core::cmp::Ordering;
 
-use cal_core::{compare_names, compare_titles, CollationLanguage, TaskPriority};
+use cal_core::{compare_names, compare_titles, CollationLanguage, PriorityScale, TaskPriority};
 
 /// A value that crossed the boundary and is not one this app writes.
 ///
@@ -67,23 +67,30 @@ fn priority_to_wire(priority: TaskPriority) -> &'static str {
     }
 }
 
+/// The wire spelling of a scale.
+///
+/// Parsed here rather than in the core for the same reason the priority is: an
+/// unknown value must be an ERROR the caller sees, not a default that answers
+/// confidently for a value nobody wrote.
+fn scale_from_wire(value: &str) -> Result<PriorityScale, WireError> {
+    match value {
+        "two" => Ok(PriorityScale::Two),
+        "three" => Ok(PriorityScale::Three),
+        other => Err(WireError::UnknownScale(other.to_string())),
+    }
+}
+
 /// See [`crate::is_important_priority`].
 pub fn is_important_priority(priority: &str) -> Result<bool, WireError> {
-    Ok(priority_from_wire(priority)? == TaskPriority::High)
+    Ok(priority_from_wire(priority)?.is_important())
 }
 
 /// See [`crate::priority_rank`].
 pub fn priority_rank(priority: &str, scale: &str) -> Result<u32, WireError> {
-    let priority = priority_from_wire(priority)?;
-    match scale {
-        "two" => Ok(u32::from(priority != TaskPriority::High)),
-        "three" => Ok(match priority {
-            TaskPriority::High => 0,
-            TaskPriority::Medium => 1,
-            TaskPriority::Low => 2,
-        }),
-        other => Err(WireError::UnknownScale(other.to_string())),
-    }
+    Ok(cal_core::priority_rank(
+        priority_from_wire(priority)?,
+        scale_from_wire(scale)?,
+    ))
 }
 
 /// See [`crate::normal_priority`].
@@ -92,11 +99,7 @@ pub fn normal_priority(previous: Option<&str>) -> Result<String, WireError> {
         None | Some("") => None,
         Some(value) => Some(priority_from_wire(value)?),
     };
-    let result = match kept {
-        Some(p) if p != TaskPriority::High => p,
-        _ => TaskPriority::Medium,
-    };
-    Ok(priority_to_wire(result).to_string())
+    Ok(priority_to_wire(cal_core::normal_priority(kept)).to_string())
 }
 
 /// A comparison as JavaScript wants it: negative, zero, positive.

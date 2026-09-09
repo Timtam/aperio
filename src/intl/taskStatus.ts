@@ -2,28 +2,11 @@
 // helpers moved into the shared `@aperio/shared` package so the mobile app
 // reuses them verbatim. This file stays as the desktop's stable import path
 // (`../intl/taskStatus`) — existing imports resolve unchanged.
+//
+// It used to shadow three of those exports with the WebAssembly versions,
+// because `@aperio/shared` still carried a TypeScript copy of the priority
+// rules and only the desktop could reach Rust. Both halves of that are gone:
+// the rule lives in `cal_core::task_priority`, and `@aperio/shared` reaches it
+// through a door each surface installs at startup. There is one implementation
+// now, so there is nothing left to shadow.
 export * from '@aperio/shared';
-
-// …except for the three rules the desktop now gets from `cal-core` itself,
-// compiled into this webview as WebAssembly. An explicit export shadows the
-// star above, so every call site through this path switches at once without
-// touching a line.
-//
-// These three were chosen for having no policy in them — no i18n keys, no
-// glyphs — so that moving them decides nothing that is still open. And
-// `priorityRank` in particular is the one that had to work: its callers are
-// `Array.prototype.sort` comparators (`src/components/BacklogRail.tsx`), which
-// are synchronous by construction and could never have awaited an `invoke`.
-//
-// The TypeScript originals are still in `@aperio/shared`, because
-// `shared/taskGrouping.ts` calls `priorityRank` from inside the package and
-// the mobile app runs that code too. That is a transitional state, not the end
-// one: the TS copy goes when mobile gets the same door — its Expo module
-// already exposes a synchronous `Function(...)`, so the road exists. Until
-// then `src/wasm/coreRules.parity.test.ts` proves the two answer the same for
-// every input there is.
-export {
-  isImportantPriority,
-  normalPriority,
-  priorityRank,
-} from '../wasm/coreRules';
