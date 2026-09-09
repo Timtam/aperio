@@ -355,9 +355,9 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All three read `shared/contracts/`, the directory holding the wire contracts
-/// that BOTH languages check themselves against. Two of them are the app
-/// reading its own file and are correct as they stand.
+/// All four read `shared/contracts/`, the directory holding the contracts that
+/// BOTH languages check themselves against. Three of them are the app reading
+/// its own file and are correct as they stand.
 ///
 /// The third is not, and is recorded here rather than fixed because fixing it
 /// costs different things depending on a decision that has not been made. If
@@ -367,12 +367,21 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 3] = [
+const KNOWN_REACHES: [(&str, &str); 4] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
         "crates/host-core/src/reminders.rs",
         "shared/contracts/calendarDefaultReminders.json",
+    ),
+    // The app reading its own file again, for a contract that pins a DECISION
+    // rather than a format: "is this task mine to act on?", which the reminder
+    // scheduler here and the frontends' `isMineOrUnassigned` answer separately
+    // on the same data. Same crate, same reason it is allowed — `host-core` is
+    // the host and never leaves this repository.
+    (
+        "crates/host-core/src/reminders.rs",
+        "shared/contracts/taskOwnership.json",
     ),
     // The same hop on the phone, where the Host applies the calendar's policy.
     (

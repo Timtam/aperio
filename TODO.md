@@ -709,6 +709,21 @@ Siehe DESIGN §4.2.
   das top-level `recurrence_capabilities` — zwei **verschiedene** Manifestfelder
   (`manifest.tasks.recurrence` gegen `manifest.recurrence`). Ob die pro Adapter
   dasselbe sagen, ist ungeprüft.
+- [x] **Die Eigentums-Regel liegt im Kern.** „Ist das meine Aufgabe?" — die
+  einzige Regel im ganzen `shared/`-Satz, die schon zweimal geschrieben war:
+  in `shared/taskAssignment.ts` und **privat** in `host_core::reminders`, wo
+  Rust nicht einmal seine eigene Kopie wiederverwenden konnte. Jetzt
+  `cal_core::is_mine_or_unassigned`.
+  ↳ Die TypeScript-Hälfte bleibt (sie wird synchron im Render gebraucht), die
+  beiden sind daher gegeneinander festgenagelt durch
+  `shared/contracts/taskOwnership.json` — kein Wire-Format, sondern eine
+  **Entscheidung**, die beide Seiten unabhängig auf denselben Daten treffen.
+  Läuft sie auseinander, klingelt das Telefon für die Aufgabe einer Kollegin
+  oder eine eigene bleibt stumm; nichts stürzt ab, nichts protokolliert.
+  ↳ Vier Sabotagen rot bewiesen (Rust-Regel gebrochen, TS-Regel gebrochen,
+  Fixture geleert → beide Anti-Stille-Wächter), und der Reach-Wächter meldete
+  die neue `include_str!`-Zeile von sich aus, bevor sie in `KNOWN_REACHES`
+  stand.
 - [ ] **`reparent_task_list` antwortet mit der nackten `cal_core::TaskList`**,
   ohne `account_id` und ohne Fähigkeiten, während `list_task_lists` sie
   anstempelt. Beide Aufrufer (Desktop-Sidebar, mobiler Listeneditor) verwerfen

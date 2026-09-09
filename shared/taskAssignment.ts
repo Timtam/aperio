@@ -36,6 +36,13 @@ export function selfAssignOnStatusChange(
  * OR I'm one of the assignees. False ONLY when it's assigned to concrete OTHER
  * users and not me. Shared by the Done-counter split and the day-start ownership
  * filter (a colleague's task is neither counted as mine nor offered to me).
+ *
+ * The same rule exists in Rust as `cal_core::is_mine_or_unassigned`, because the
+ * reminder scheduler decides it too — before a Trigger is ever built, where this
+ * code cannot reach. The two are pinned against each other by
+ * `shared/contracts/taskOwnership.json`, which both test suites read: a
+ * disagreement fails a test instead of quietly ringing the phone for a
+ * colleague's task, or silencing one of mine.
  */
 export function isMineOrUnassigned(assignees: TaskUser[], me: TaskUser | null): boolean {
   return !me || assignees.length === 0 || assignees.some((a) => a.id === me.id);

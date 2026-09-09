@@ -16,6 +16,7 @@ pub mod recurrence;
 pub mod reminder;
 pub mod spawn;
 pub mod suggestion_decline;
+pub mod task_assignment;
 pub mod types;
 
 pub use adapter::{
@@ -35,6 +36,7 @@ pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurre
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
+pub use task_assignment::is_mine_or_unassigned;
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     ContactValue, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember,
