@@ -80,6 +80,45 @@ declarations no longer match the Rust.
 The feature is off by default on purpose: cargo unifies features across the
 whole graph, so turning it on would pull `ts-rs` into every adapter crate.
 
+### Rules the UI needs during render come from the core, synchronously
+
+Some rules are needed *while React renders*, and `invoke` cannot serve them:
+IPC is asynchronous, a render function must return finished UI in one turn,
+and an `Array.prototype.sort` comparator cannot await at all. So the desktop
+reaches those rules through **WebAssembly** — `crates/cal-core-wasm`, compiled
+into the webview and instantiated once at startup (`main.tsx` awaits
+`initCoreRules()` before rendering). Mobile reaches the same Rust through a
+synchronous Expo `Function`, and a future native frontend links it directly.
+
+`cal-core-wasm` is **pure marshalling**: strings in, values out, every body a
+`match`. No rule may live there — it exists so rules can live in the core.
+
+What crosses today:
+
+- `priorityRank`, `isImportantPriority`, `normalPriority`;
+- **text ordering**, `cal_core::collation` — `compare_names` for names of
+  things (case- and accent-insensitive) and `compare_titles` for text the user
+  wrote (digit runs by value: "Kapitel 2" before "Kapitel 10").
+
+**Do not reach for `localeCompare`.** Use `compareNames` / `compareTitles`
+from `@aperio/shared` for text a person reads — each surface installs its own
+door into the core at startup (`installTextCollation`), bound to the language
+the *user* chose rather than the one the operating system reports. For machine
+strings (ISO day keys, RFC-3339 instants, ids) use `compareMachineStrings`,
+which is a plain codepoint compare and needs no collation at all.
+
+The collation data is a megabyte of baked CLDR, so `cal-core`'s `collation`
+feature is off by default for the same reason `ts-export` is: only the two
+frontend bindings switch it on.
+
+**A module behind an optional feature needs `#[cfg(feature = "…")]` on both
+the `pub mod` and its `pub use`.** `cargo build --workspace` will not tell you
+otherwise: cargo unifies features across everything in one build, so a
+frontend binding that switches a feature on switches it on for the whole
+workspace — while an adapter repository compiling the crate alone fails on the
+missing dependency. CI therefore also runs `cargo check -p cal-core`,
+`-p plugin-core` and `-p plugin-sdk` on their own.
+
 ## The plugin host & the C ABI
 
 Adapters are loaded as **plugins** over a stable C ABI rather than linked

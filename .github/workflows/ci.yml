@@ -118,6 +118,13 @@ jobs:
               # type-checked and where the parity test proves it still answers
               # what the TypeScript answers.
               - 'crates/cal-core-wasm/**'
+              # The core itself, because a rule the desktop calls through that
+              # module lives here, not in the marshalling shell:
+              # `cal_core::collation` decides how every list a person reads is
+              # ordered, and `src/intl/collation.test.ts` asserts the answer
+              # through the real WebAssembly module. Without this line a change
+              # to the ordering rule alone would run no frontend job at all.
+              - 'crates/cal-core/**'
               - 'public/**'
               - 'index.html'
               - 'package.json'
@@ -195,6 +202,26 @@ jobs:
       - name: cargo test
         if: needs.changes.outputs.rust == 'true'
         run: cargo test --workspace
+
+      # The crates an ADAPTER repository compiles, built the way it compiles
+      # them: alone, with their own default features. `cargo build --workspace`
+      # cannot answer this — cargo unifies features across everything in one
+      # build, so a frontend binding that switches on `cal-core/collation`
+      # switches it on for the whole workspace and hides a crate that does not
+      # compile without it.
+      #
+      # This is not hypothetical: `pub mod collation;` was declared
+      # unconditionally while its dependencies were optional, and every check
+      # in this file stayed green. The twelve adapter repositories would have
+      # failed on `unresolved import icu_collator`.
+      #
+      # One OS is enough; this is a resolver question, not a platform one.
+      - name: The contract crates compile on their own
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: |
+          cargo check -p cal-core
+          cargo check -p plugin-core
+          cargo check -p plugin-sdk
 
       # The frontends parse `shared/generated/`, which is produced from the
       # Rust types rather than mirrored by hand. A Rust field that never
@@ -315,10 +342,18 @@ jobs:
           key: wasm
           cache-on-failure: true
 
+      # Pinned, not `latest`, and for a measured reason: on 2026-09-09 the same
+      # `version: latest` resolved to 0.15.0 on the Linux runner and to **0.9.1**
+      # on the macOS one, minutes apart in the same workflow run. 0.9.1 predates
+      # cargo's workspace dependency inheritance entirely, so it answered
+      # `failed to parse manifest: crates/cal-core-wasm/Cargo.toml` and took the
+      # macOS artefact down while every other job was green. The action resolves
+      # "latest" over the GitHub API and falls back to an ancient default when
+      # that lookup fails, so `latest` here is a coin flip, not a policy.
       - uses: jetli/wasm-pack-action@v0.4.0
         if: needs.changes.outputs.frontend == 'true'
         with:
-          version: latest
+          version: v0.15.0
 
       - name: Build the core rules (WebAssembly)
         if: needs.changes.outputs.frontend == 'true'

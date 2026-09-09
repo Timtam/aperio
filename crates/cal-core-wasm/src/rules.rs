@@ -12,7 +12,9 @@
 
 use std::fmt;
 
-use cal_core::TaskPriority;
+use core::cmp::Ordering;
+
+use cal_core::{compare_names, compare_titles, CollationLanguage, TaskPriority};
 
 /// A value that crossed the boundary and is not one this app writes.
 ///
@@ -97,6 +99,37 @@ pub fn normal_priority(previous: Option<&str>) -> Result<String, WireError> {
     Ok(priority_to_wire(result).to_string())
 }
 
+/// A comparison as JavaScript wants it: negative, zero, positive.
+///
+/// `Array.prototype.sort` only reads the sign, so the exact numbers do not
+/// matter — but returning them rather than an `Ordering` keeps the boundary
+/// free of a type JavaScript has no notion of.
+fn to_js_ordering(ordering: Ordering) -> i32 {
+    match ordering {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    }
+}
+
+/// See [`crate::compare_names`].
+pub fn names(a: &str, b: &str, language_tag: &str) -> i32 {
+    to_js_ordering(compare_names(
+        a,
+        b,
+        CollationLanguage::from_tag(language_tag),
+    ))
+}
+
+/// See [`crate::compare_titles`].
+pub fn titles(a: &str, b: &str, language_tag: &str) -> i32 {
+    to_js_ordering(compare_titles(
+        a,
+        b,
+        CollationLanguage::from_tag(language_tag),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +189,20 @@ mod tests {
         let message = WireError::UnknownPriority("urgent".into()).to_string();
         assert!(message.contains("urgent"), "{message}");
         assert!(message.contains("high"), "{message}");
+    }
+
+    #[test]
+    fn the_collation_functions_answer_a_sign_and_read_the_tag() {
+        // What this layer owns is the translation: an `Ordering` becomes the
+        // negative/zero/positive `Array.prototype.sort` reads, and the language
+        // tag becomes a `CollationLanguage`. The ordering rules themselves are
+        // `cal_core::collation`'s and are tested there.
+        assert!(names("arbeit", "Zebra", "de") < 0);
+        assert_eq!(names("Arbeit", "arbeit", "de"), 0);
+        assert!(titles("Kapitel 2", "Kapitel 10", "de") < 0);
+        assert!(titles("Kapitel 10", "Kapitel 2", "de") > 0);
+        // An unreadable tag falls back rather than failing — a comparator has
+        // nowhere to report to.
+        assert!(titles("Kapitel 2", "Kapitel 10", "") < 0);
     }
 }

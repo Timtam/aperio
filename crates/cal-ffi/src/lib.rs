@@ -51,6 +51,48 @@ pub fn parse_attendee(entry: String) -> ParsedAttendee {
     ParsedAttendee { name, email }
 }
 
+// ───────────────────────────── Text ordering ────────────────────────────────
+//
+// The two rules every list on this app ends up in for its tiebreaker, from
+// `cal_core::collation`. They cross as SYNCHRONOUS bridge functions (Expo
+// `Function`, not `AsyncFunction`) because their callers are `Array.prototype
+// .sort` comparators, which cannot await — the same reason the desktop reaches
+// them through WebAssembly. See DESIGN §4.4.
+//
+// They answer -1/0/1 rather than an enum: a comparator is what consumes them,
+// and every extra shape on this boundary is one more thing the Swift and
+// Kotlin halves can spell differently.
+
+/// Compare two NAMES — an account, a container, a contact, a day marker.
+/// Case- and accent-insensitive. See `cal_core::compare_names`.
+#[uniffi::export]
+pub fn compare_names(a: String, b: String, language_tag: String) -> i32 {
+    ordering_to_i32(cal_core::compare_names(
+        &a,
+        &b,
+        cal_core::CollationLanguage::from_tag(&language_tag),
+    ))
+}
+
+/// Compare two TITLES — task titles, section names, anything the user typed.
+/// Digit runs order by value; case separates. See `cal_core::compare_titles`.
+#[uniffi::export]
+pub fn compare_titles(a: String, b: String, language_tag: String) -> i32 {
+    ordering_to_i32(cal_core::compare_titles(
+        &a,
+        &b,
+        cal_core::CollationLanguage::from_tag(&language_tag),
+    ))
+}
+
+fn ordering_to_i32(ordering: std::cmp::Ordering) -> i32 {
+    match ordering {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
 // ───────────────────────── Task recurrence ⇄ RRULE ──────────────────────────
 
 /// How often a recurring task repeats. Mirrors [`cal_core::RecurrenceFrequency`].

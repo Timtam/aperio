@@ -18,6 +18,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    */
   parseAttendee(entry: string): ParsedAttendee;
 
+  /** Compare two NAMES — case- and accent-insensitive. Synchronous: safe
+   *  inside an `Array.sort` comparator. See `cal_core::compare_names`. */
+  compareNames(a: string, b: string, languageTag: string): number;
+
+  /** Compare two TITLES — digit runs by value, case separates. Synchronous.
+   *  See `cal_core::compare_titles`. */
+  compareTitles(a: string, b: string, languageTag: string): number;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -5,6 +5,8 @@ import type { Contact } from '../api/types';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
 
+import { compareNames } from '@aperio/shared';
+
 /**
  * Pull contacts from every selected list and return the aggregated,
  * alphabetically-sorted list.
@@ -154,9 +156,7 @@ function contactOrder(a: Contact, b: Contact): number {
   // Case-insensitive sort on display_name. Numeric collation
   // doesn't help here — names rarely contain numbers, and when
   // they do the default lexical order is fine.
-  return a.display_name.localeCompare(b.display_name, undefined, {
-    sensitivity: 'base',
-  });
+  return compareNames(a.display_name, b.display_name);
 }
 
 /** Fast "same contacts after sort" check for the SWR path. We

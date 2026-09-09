@@ -37,8 +37,14 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { installTextCollation } from '@aperio/shared';
+
 import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
-import { markCoreRulesReady } from './wasm/coreRules';
+import {
+  compareNames,
+  compareTitles,
+  markCoreRulesReady,
+} from './wasm/coreRules';
 
 initSync({
   module: readFileSync(
@@ -46,3 +52,11 @@ initSync({
   ),
 });
 markCoreRulesReady();
+
+// The surface installs its door into `cal_core::collation` at startup; the
+// test environment installs the same one. German, because the suite asserts
+// the German UI.
+installTextCollation({
+  compareNames: (a, b) => compareNames(a, b, 'de'),
+  compareTitles: (a, b) => compareTitles(a, b, 'de'),
+});

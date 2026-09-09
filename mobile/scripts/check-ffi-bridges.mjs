@@ -48,6 +48,8 @@ const KOTLIN = join(
   'mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi/CalFfiModule.kt',
 );
 const SWIFT = join(root, 'mobile/modules/cal-ffi/ios/CalFfiModule.swift');
+/** Free functions live here, not in `host.rs` — see `rustFreeArity`. */
+const LIB = join(root, 'crates/cal-ffi/src/lib.rs');
 
 /** snake_case as Rust writes it → camelCase as UniFFI emits it. */
 const camel = (name) => name.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
@@ -186,8 +188,66 @@ function callArity(source, pattern) {
   return out;
 }
 
+/**
+ * The `#[uniffi::export]` FREE functions in `crates/cal-ffi/src/lib.rs`, by
+ * camelCase name → argument count.
+ *
+ * A second family, and until this was added an unwatched one. Everything above
+ * follows methods called on the host OBJECT (`host.foo(…)`); a free function is
+ * called by bare name on both bridges, so none of those patterns can see it.
+ * `parseAttendee` had been crossing that way since it was written, and the
+ * synchronous collation functions the frontends now sort with cross the same
+ * way — which is precisely the boundary this file exists to watch.
+ *
+ * What this half checks is Rust ↔ committed bindings. That is the failure that
+ * actually happens: the vendoring step refreshes the native library and NOT
+ * the checked-in bindings, so Rust grows a function, Kotlin calls it, and
+ * `:cal-ffi:compileReleaseKotlin` dies minutes into an EAS build.
+ *
+ * It does not try to find free-function CALLS in Swift. A bare call there is
+ * indistinguishable from any other function call, and a pattern loose enough
+ * to catch it would match half the file. Swift is covered the same way it is
+ * above — through the bindings, which both platforms generate from one source.
+ */
+function rustFreeArity(lib) {
+  const out = new Map();
+  for (const m of lib.matchAll(
+    /#\[uniffi::export\]\s*\n(?:\s*\/\/[^\n]*\n)*\s*pub (?:async )?fn\s+([a-z][a-z0-9_]*)\s*\(/g,
+  )) {
+    const args = balanced(lib, m.index + m[0].length - 1);
+    if (!args) continue;
+    out.set(camel(m[1]), splitTop(args.inner).length);
+  }
+  return out;
+}
+
+/**
+ * A free function as the bindings declare it, looked up BY NAME.
+ *
+ * Only the backtick-quoted form counts: UniFFI writes the public API that way
+ * (`` fun `parseAttendee`(…) ``) while its own plumbing is plain
+ * (`internal fun setValue(…)`), so the quoting is what separates the surface
+ * from the machinery. A name that appears more than once with different
+ * shapes is reported rather than resolved — picking one would be inventing an
+ * answer.
+ */
+function bindingFreeArity(bindings, name) {
+  const found = new Set();
+  for (const m of bindings.matchAll(
+    new RegExp('\\bfun\\s+`' + name + '`\\s*\\(', 'g'),
+  )) {
+    const args = balanced(bindings, m.index + m[0].length - 1);
+    if (args) found.add(splitTop(args.inner).length);
+  }
+  if (found.size === 0) return null;
+  if (found.size > 1) return 'ambiguous';
+  return [...found][0];
+}
+
 const rust = rustArity(readFileSync(RUST, 'utf8'));
-const declared = bindingArity(readFileSync(BINDINGS, 'utf8'));
+const bindingsText = readFileSync(BINDINGS, 'utf8');
+const declared = bindingArity(bindingsText);
+const rustFree = rustFreeArity(readFileSync(LIB, 'utf8'));
 const kotlin = callArity(
   readFileSync(KOTLIN, 'utf8'),
   /\bhost\.`?([A-Za-z][A-Za-z0-9_]*)`?\s*\(/g,
@@ -198,6 +258,31 @@ const swift = callArity(
 );
 
 const problems = [];
+
+for (const [name, count] of rustFree) {
+  const declaredFree = bindingFreeArity(bindingsText, name);
+  if (declaredFree === null) {
+    problems.push(
+      `crates/cal-ffi exports the free function ${name}(), which the committed ` +
+        'bindings do not declare — the bindings are stale, and the Android ' +
+        'build will fail on it',
+    );
+    continue;
+  }
+  if (declaredFree === 'ambiguous') {
+    problems.push(
+      `the committed bindings declare ${name}() more than once with different ` +
+        'shapes, so this check cannot say which one a bridge would reach',
+    );
+    continue;
+  }
+  if (declaredFree !== count) {
+    problems.push(
+      `the committed bindings declare ${name}() with ${declaredFree} argument(s), ` +
+        `but crates/cal-ffi declares ${count} — the bindings are stale`,
+    );
+  }
+}
 
 for (const [name, count] of kotlin) {
   if (!declared.has(name)) {
@@ -247,6 +332,9 @@ const floors = [
   ['declared bindings', declared.size, 100],
   ['Android bridge calls', kotlin.size, 100],
   ['iOS bridge calls', swift.size, 20],
+  // Free functions are few by nature; the floor only has to prove the
+  // parse found the family at all.
+  ['exported Rust free functions', rustFree.size, 3],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -277,5 +365,7 @@ if (problems.length > 0) {
 
 console.log(
   `FFI bridges OK — ${kotlin.size} Android and ${swift.size} iOS calls agree ` +
-    `with the committed bindings and with crates/cal-ffi.`,
+    `with the committed bindings and with crates/cal-ffi, and its ` +
+    `${rustFree.size} exported free functions ` +
+    `(${[...rustFree.keys()].sort().join(', ')}) are all declared there.`,
 );
