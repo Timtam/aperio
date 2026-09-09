@@ -61,6 +61,13 @@ jobs:
               # commit they exist to catch, while the TypeScript twin runs and
               # reports green. Same shape as the xtask hole above.
               - 'shared/contracts/**'
+              # The generated TypeScript declarations. `cargo xtask ts-types
+              # --check` regenerates them from the Rust types and compares, so
+              # a commit that edits one of these BY HAND — the very thing
+              # generation exists to stop — has to run the Rust job to be
+              # caught. Only the generated half: the rest of shared/ is
+              # ordinary frontend TypeScript.
+              - 'shared/generated/**'
               # `the_app_no_longer_carries_names_for_adapters` READS
               # locales/{en,de}/translation.json at run time and panics on
               # invalid JSON. It is the guard that keeps adapter names out of
@@ -182,6 +189,19 @@ jobs:
       - name: cargo test
         if: needs.changes.outputs.rust == 'true'
         run: cargo test --workspace
+
+      # The frontends parse `shared/generated/`, which is produced from the
+      # Rust types rather than mirrored by hand. A Rust field that never
+      # reached TypeScript is a red build here, not a value that arrives on
+      # the wire and is silently never read.
+      #
+      # One OS is enough — the generator reads Rust source and writes text,
+      # and the comparison normalises line endings, so all three would answer
+      # identically. It runs after the tests so a genuinely broken build
+      # reports as a broken build.
+      - name: TypeScript declarations are generated from the Rust
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: cargo xtask ts-types --check
 
   # The Rust host, the committed UniFFI bindings, and the Kotlin + Swift bridges
   # agree about every method and its arity. Deliberately its own job rather than

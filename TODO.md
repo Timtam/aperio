@@ -670,6 +670,59 @@ auch falls nie ein Repo entsteht.
   `-plugin`-Kisten? iOS verbietet dlopen, „eigenständig" kann dort nie mehr
   heißen als „gepinnte Quell-Revision".
 
+### A11 · Kern und Oberflächen trennen `[~]`
+
+Vorbereitung dafür, dass die UIs (Desktop, Mobile, später reMarkable) in
+eigenen Repositories liegen und ein Adapter **nur den Kern** anfordern kann.
+Siehe DESIGN §4.2.
+
+- [x] **Schritt 1: die Domänentypen werden erzeugt, nicht abgeschrieben.**
+  ↳ `shared/types.ts` war 285 Zeilen Handschrift mit dem Satz „die Kiste
+  `cal-core` ist die Quelle der Wahrheit; ändert sich dort ein Feld, spiegle es
+  hier" im eigenen Kopf — geprüft hat das nichts, und sie war abgedriftet.
+  Jetzt tragen 31 Typen in `cal-core`/`plugin-core`/`host-core` den ts-rs-Derive
+  hinter einem standardmäßig **ausgeschalteten** `ts-export`-Feature (cargo
+  vereinheitlicht Features global; zwölf Adapter-Repos übersetzen gegen diese
+  Kisten), `cargo xtask ts-types` schreibt `shared/generated/`, und
+  `shared/types.ts` ist nur noch die Tür. Kein Konsument musste seinen Import
+  ändern.
+  ↳ Nebenbei aufgelöst: `BackendRecurrence` in `shared/taskRecurrence.ts` (eine
+  zweite Handkopie von `TaskRecurrence`) und `DEFAULT_CAPS` in
+  `src/state/taskMoves.ts` (eine dritte von `TaskCapabilities::default()`, der
+  zwei Felder fehlten). `Task.recurrence` war `unknown` und ist jetzt der echte
+  Typ.
+  ↳ Der Wächter (`cargo xtask ts-types --check` im Rust-Job) wurde an drei
+  Sabotagen rot bewiesen: Handeditierung einer erzeugten Datei
+  (`outdated: Section.ts`), gelöschte + verwaiste Datei (`missing:` / `stale:`),
+  und ein umbenanntes `ts-export`-Feature. Er **nennt** die Dateien, er zählt
+  sie nicht.
+- [ ] **`TaskListRow` liegt zweimal in Rust und die zwei sind nicht einig.**
+  Der Desktop baut die Zeile in `src-tauri/src/commands/tasks.rs`, Mobile in
+  `crates/cal-ffi/src/host.rs` — beide `cal_core::TaskList` + `account_id` +
+  `task_capabilities`, aber `recurrence_capabilities` stempelt **nur Mobile**
+  an. Die alte Handschrift verdeckte das, indem sie beide als optional führte;
+  jetzt steht der Schnitt sichtbar in `shared/types.ts`. Eine Struktur in
+  `host-core`, von beiden benutzt, macht die Divergenz unmöglich und erzeugt
+  `TaskList` mit.
+  ↳ Direkte Folge, ebenfalls offen: der Desktop-Aufgabeneditor blendet
+  Wiederholungsformen über `task_capabilities.recurrence` aus, der mobile über
+  das top-level `recurrence_capabilities` — zwei **verschiedene** Manifestfelder
+  (`manifest.tasks.recurrence` gegen `manifest.recurrence`). Ob die pro Adapter
+  dasselbe sagen, ist ungeprüft.
+- [ ] **`reparent_task_list` antwortet mit der nackten `cal_core::TaskList`**,
+  ohne `account_id` und ohne Fähigkeiten, während `list_task_lists` sie
+  anstempelt. Beide Aufrufer (Desktop-Sidebar, mobiler Listeneditor) verwerfen
+  die Antwort, es ist also latent; der Typ heißt jetzt `TaskListCore` und sagt
+  die Wahrheit. Sauber wäre, die Zeile auch dort anzustempeln.
+- [ ] Schritt 2: die Rechenregeln (`taskGrouping`, `recurrence`,
+  `widgetSnapshot`, `dayStart`, `taskDay`, `taskCascade`,
+  `expandTaskOccurrences`, `taskStatus` — ~3.400 Zeilen) gehören hinter die
+  Grenze, nicht in ein JS-Paket.
+- [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
+  `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
+  Oberfläche und darf auseinanderlaufen.
+
+
 ---
 
 ## 🟠 B. Teilweise umgesetzt / kleinere Lücken

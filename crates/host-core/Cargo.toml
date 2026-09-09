@@ -9,6 +9,8 @@ repository.workspace = true
 description = "Aperio — Tauri-free host logic shared by the desktop backend and the mobile UniFFI host: SQLite handle, data paths, accounts, secrets, adapter registry, cache + sync stores (DESIGN.md section 22)."
 
 [dependencies]
+# TypeScript generation, pulled in only by the `ts-export` feature below.
+ts-rs = { workspace = true, optional = true }
 aperio-db.workspace = true
 # The E2E data key is stored base64-encoded in the keychain; the sync-target
 # restore decodes it here so the wrap happens in one place rather than two.
@@ -87,3 +89,12 @@ adapter-local = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
+
+# Generate the frontends' TypeScript types from these Rust ones. OFF by default.
+#
+# Optional and default-off on purpose: cargo unifies features globally and
+# twelve adapter repositories compile against these crates; nothing they build
+# should pull a code generator into their graph. Only `cargo xtask ts-types`
+# turns it on. See cal-core for the full reasoning.
+[features]
+ts-export = ["dep:ts-rs"]

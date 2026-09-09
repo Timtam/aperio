@@ -233,6 +233,7 @@ pub struct FreeBusySlot {
 // ────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct TaskList {
     pub id: String,
     pub name: String,
@@ -265,6 +266,7 @@ pub struct TaskList {
 /// local) simply return no sections from `TasksFeature::list_sections`
 /// and leave every task's `section_id` at `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct Section {
     pub id: String,
     /// The `TaskList.id` this section belongs to.
@@ -291,6 +293,7 @@ pub struct Section {
 /// `email` is best-effort (some providers omit it from the user listing).
 /// See DESIGN §9.7 "Aufgaben-Zuweisung an andere Nutzer".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct TaskUser {
     pub id: String,
     pub name: String,
@@ -303,6 +306,7 @@ pub struct TaskUser {
 /// See DESIGN §9.7 "Mitglieder-/Freigabe-Verwaltung".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum MemberRight {
     Read,
     Write,
@@ -315,6 +319,7 @@ pub enum MemberRight {
 /// accepted). Distinct from `TaskUser` in the assignee pool — this is
 /// the *editable* share list, not the effective members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct TaskListShare {
     pub user: TaskUser,
     #[serde(default)]
@@ -324,6 +329,7 @@ pub struct TaskListShare {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct Task {
     pub id: String,
     pub list_id: String,
@@ -388,6 +394,7 @@ pub struct Task {
     /// `#[serde(default)]` so task JSON synced before this field existed
     /// still deserializes (→ `None`).
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(as = "Option<i32>"))]
     pub deadline_reminder_days: Option<i64>,
 
     pub recurrence: Option<TaskRecurrence>,
@@ -465,6 +472,7 @@ pub struct NewTask {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum TaskStatus {
     Open,
     InProgress,
@@ -474,6 +482,7 @@ pub enum TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum TaskPriority {
     Low,
     Medium,
@@ -485,6 +494,7 @@ pub enum TaskPriority {
 /// fields and task JSON synced before this field existed resolve to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum TaskEffort {
     Small,
     #[default]
@@ -493,6 +503,7 @@ pub enum TaskEffort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct TaskRecurrence {
     pub frequency: RecurrenceFrequency,
     pub interval: u32,
@@ -515,6 +526,7 @@ pub struct TaskRecurrence {
 /// DESIGN §9.12: anchor for a recurring task's next occurrence.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RecurrenceAnchor {
     /// Advance from the task's own date (today's behavior).
     #[default]
@@ -526,6 +538,7 @@ pub enum RecurrenceAnchor {
 /// DESIGN §9.12: where a recurring task's next instance is placed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RecurrencePlacement {
     /// The next instance gets the computed date (today's behavior).
     #[default]
@@ -538,6 +551,7 @@ pub enum RecurrencePlacement {
 /// A yearless calendar anchor — e.g. `{ month: 4, day: 1 }` for "April 1".
 /// See DESIGN §9.12 (seasonal tasks with fixed dates).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct MonthDay {
     pub month: u8,
     pub day: u8,
@@ -545,6 +559,7 @@ pub struct MonthDay {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RecurrenceFrequency {
     Daily,
     Weekly,
@@ -554,6 +569,7 @@ pub enum RecurrenceFrequency {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum Weekday {
     Monday,
     Tuesday,
@@ -566,6 +582,7 @@ pub enum Weekday {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RecurrenceEnd {
     Never,
     After { occurrences: u32 },

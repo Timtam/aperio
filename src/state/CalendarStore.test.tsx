@@ -12,6 +12,7 @@ import { CalendarStoreProvider } from './CalendarStore';
 import { useCalendarStore } from './calendarStoreContext';
 import { buildTaskListForest } from './taskListForest';
 import type { TaskList } from '../api/types';
+import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
@@ -268,6 +269,7 @@ describe('buildTaskListForest', () => {
     embedded_in_calendar: null,
     read_only: false,
     account_id: 'acc',
+  task_capabilities: DEFAULT_TASK_CAPABILITIES,
     parent_id,
   });
 

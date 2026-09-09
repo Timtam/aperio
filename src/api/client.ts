@@ -35,6 +35,7 @@ import type {
   SoundConfig,
   Task,
   TaskList,
+  TaskListCore,
   TaskListShare,
   TaskUser,
   AccountRefreshErrors,
@@ -274,7 +275,7 @@ export const deleteTaskList = (id: string) =>
 /** Reparent a local task list under `parentId` (or to the top level
  *  when `null`). Local-store only — see the backend command. */
 export const reparentTaskList = (id: string, parentId: string | null) =>
-  invoke<TaskList>('reparent_task_list', { request: { id, parent_id: parentId } });
+  invoke<TaskListCore>('reparent_task_list', { request: { id, parent_id: parentId } });
 
 export const getTasks = (list_id: string) =>
   invoke<Task[]>('get_tasks', { listId: list_id });

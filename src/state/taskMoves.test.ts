@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
+
 import type { TaskCapabilities, TaskList } from '../api/types';
 import {
   canAssignSection,
@@ -27,18 +29,14 @@ const list = (
   read_only: false,
   account_id: accountId,
   parent_id: parentId,
+  // No `caps` ⇒ a list with NO capabilities block at all. The wire type says
+  // every listed task list carries one (both backends stamp it), so this is a
+  // deliberate lie to the compiler: it is the pre-capabilities snapshot shape
+  // `capabilitiesOf` exists to survive, and the assertions below are what
+  // "falls back to the cal-core default" means.
   task_capabilities: caps
-    ? ({
-        nested_projects: false,
-        subtasks: true,
-        max_subtask_depth: null,
-        sections: false,
-        multiple_labels: false,
-        task_recurrence: true,
-        move_between_projects: true,
-        ...caps,
-      } as TaskCapabilities)
-    : undefined,
+    ? { ...DEFAULT_TASK_CAPABILITIES, ...caps }
+    : (undefined as unknown as TaskCapabilities),
 });
 
 describe('capability predicates', () => {

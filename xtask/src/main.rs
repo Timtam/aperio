@@ -60,6 +60,7 @@ fn main() -> ExitCode {
     match task {
         Some("stage-plugins") => run(stage_plugins(&args[1..])),
         Some("pack-plugins") => run(pack_plugins(&args[1..])),
+        Some("ts-types") => run(ts_types(&args[1..])),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
@@ -106,7 +107,16 @@ Tasks:
         in the name because it is NOT in the archive: the installer picks a
         library by file extension alone, so a Windows arm64 build and a Windows
         x64 build produce archives that look alike and are not
-        interchangeable.";
+        interchangeable.
+
+  ts-types [--check]
+        Regenerate shared/generated/ — the TypeScript declarations both
+        frontends parse — from the Rust types carrying `#[derive(ts_rs::TS)]`.
+        Run it after changing any of them.
+
+        --check   generate into a scratch directory and compare, changing
+                  nothing. For CI, so a Rust field that never reached the
+                  frontends is a red build rather than a value nobody reads.";
 
 /// One bundled plugin, as the workspace describes it.
 struct Bundled {
@@ -383,6 +393,205 @@ fn metadata() -> Result<serde_json::Value, String> {
         ));
     }
     serde_json::from_slice(&out.stdout).map_err(|e| format!("parsing `cargo metadata`: {e}"))
+}
+
+/// `ts-types` — regenerate `shared/generated/` from the Rust declarations.
+///
+/// # Why the frontends do not restate the domain
+///
+/// `shared/types.ts` used to be 285 lines of hand-written TypeScript whose own
+/// header said "the crate `cal-core` is the source of truth; if a field changes
+/// there, mirror it here". Nothing checked that anyone did, and the mirror had
+/// drifted: a reminder's `minutes_before` was `number` where the wire carries an
+/// i64, `Task.recurrence` had given up and said `unknown`, and half of
+/// `TaskCapabilities` was optional for fields the backend always sends.
+///
+/// Now the shapes are generated, so a field added in Rust is a TypeScript
+/// compile error in the same commit rather than a value that arrives and is
+/// never read.
+///
+/// # Which crates
+///
+/// Not a list. Every workspace member that declares a `ts-export` feature is
+/// one — the feature exists for exactly this purpose, so a fourth crate joins
+/// by declaring it and nothing here has to remember. Zero of them is an error,
+/// not a quiet success.
+fn ts_types(args: &[String]) -> Result<String, String> {
+    let mut check = false;
+    for arg in args {
+        match arg.as_str() {
+            "--check" => check = true,
+            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+        }
+    }
+
+    let meta = metadata()?;
+    let root = PathBuf::from(
+        meta["workspace_root"]
+            .as_str()
+            .ok_or("`cargo metadata` printed no workspace_root")?,
+    );
+    let committed = root.join("shared").join("generated");
+    let crates = ts_export_members(&meta)?;
+
+    // Generated somewhere else first, always. Writing in place would leave the
+    // file of a type that has been RENAMED or removed sitting in the tree,
+    // still compiling, describing something that no longer exists.
+    let staging = env::temp_dir().join(format!("aperio-ts-types-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|e| format!("creating {}: {e}", staging.display()))?;
+
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(&root)
+        .env("TS_RS_EXPORT_DIR", &staging)
+        .arg("test");
+    for name in &crates {
+        cmd.args(["-p", name]);
+    }
+    cmd.arg("--features")
+        .arg(
+            crates
+                .iter()
+                .map(|c| format!("{c}/ts-export"))
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+        // The generator IS a test: `#[ts(export)]` emits one per type, and
+        // running it writes the file.
+        .arg("export_bindings");
+    let out = cmd
+        .output()
+        .map_err(|e| format!("running `cargo test … export_bindings`: {e}"))?;
+    if !out.status.success() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "generating the bindings failed:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim(),
+        ));
+    }
+
+    let fresh = read_ts_dir(&staging)?;
+    if fresh.is_empty() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "the generator wrote no files at all, from {} crate(s): {}. Every \
+             `#[derive(ts_rs::TS)]` needs `#[ts(export)]` beside it, or nothing is \
+             written and this task would report success over an empty tree.",
+            crates.len(),
+            crates.join(", "),
+        ));
+    }
+
+    if check {
+        let have = read_ts_dir(&committed)?;
+        let report = describe_drift(&have, &fresh);
+        let _ = fs::remove_dir_all(&staging);
+        return match report {
+            None => Ok(format!(
+                "shared/generated is current — {} type(s) from {}.",
+                fresh.len(),
+                crates.join(", "),
+            )),
+            Some(drift) => Err(format!(
+                "shared/generated does not match the Rust declarations:\n{drift}\n\nRun \
+                 `cargo xtask ts-types` and commit the result."
+            )),
+        };
+    }
+
+    let _ = fs::remove_dir_all(&committed);
+    fs::create_dir_all(&committed).map_err(|e| format!("creating {}: {e}", committed.display()))?;
+    for (name, body) in &fresh {
+        fs::write(committed.join(name), body)
+            .map_err(|e| format!("writing {}: {e}", committed.join(name).display()))?;
+    }
+    let _ = fs::remove_dir_all(&staging);
+    Ok(format!(
+        "shared/generated: {} type(s) written from {}.",
+        fresh.len(),
+        crates.join(", "),
+    ))
+}
+
+/// Workspace members that declare a `ts-export` feature.
+fn ts_export_members(meta: &serde_json::Value) -> Result<Vec<String>, String> {
+    let members: BTreeSet<&str> = meta["workspace_members"]
+        .as_array()
+        .ok_or("`cargo metadata` printed no workspace_members")?
+        .iter()
+        .filter_map(|m| m.as_str())
+        .collect();
+    let mut out: Vec<String> = meta["packages"]
+        .as_array()
+        .ok_or("`cargo metadata` printed no packages")?
+        .iter()
+        .filter(|p| p["id"].as_str().is_some_and(|id| members.contains(id)))
+        .filter(|p| p["features"].get("ts-export").is_some())
+        .filter_map(|p| p["name"].as_str().map(str::to_string))
+        .collect();
+    out.sort();
+    if out.is_empty() {
+        return Err(
+            "no workspace member declares a `ts-export` feature, so there is nothing \
+                    to generate. That feature is how a crate says it owns part of the \
+                    frontend domain; if one were renamed, this task would otherwise report \
+                    success and leave shared/generated frozen."
+                .to_string(),
+        );
+    }
+    Ok(out)
+}
+
+/// Every `.ts` file in `dir`, by name, with line endings normalised — a Windows
+/// checkout may carry CRLF where the generator writes LF, and that is not drift.
+fn read_ts_dir(dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(format!("reading {}: {e}", dir.display())),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("reading {}: {e}", dir.display()))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("ts") {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let body = fs::read_to_string(&path)
+            .map_err(|e| format!("reading {}: {e}", path.display()))?
+            .replace("\r\n", "\n");
+        out.push((name, body));
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// What changed, by NAME. A count would say "31 files, expected 32" and leave
+/// the reader to work out which one.
+fn describe_drift(have: &[(String, String)], fresh: &[(String, String)]) -> Option<String> {
+    let mut lines = Vec::new();
+    for (name, body) in fresh {
+        match have.iter().find(|(n, _)| n == name) {
+            None => lines.push(format!("  missing:  {name}")),
+            Some((_, old)) if old != body => lines.push(format!("  outdated: {name}")),
+            Some(_) => {}
+        }
+    }
+    for (name, _) in have {
+        if !fresh.iter().any(|(n, _)| n == name) {
+            lines.push(format!(
+                "  stale:    {name} (no Rust type generates it any more)"
+            ));
+        }
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        lines.sort();
+        Some(lines.join("\n"))
+    }
 }
 
 /// Every workspace member that produces a cdylib and depends on a `*-plugin`
@@ -748,6 +957,94 @@ fn verify(bundled: &[Bundled], bundled_dir: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn pair(name: &str, body: &str) -> (String, String) {
+        (name.to_string(), body.to_string())
+    }
+
+    /// The drift report NAMES what moved. A count ("31 files, expected 32")
+    /// leaves the reader to find which one, which is how a guard becomes a
+    /// thing people re-run until it goes green.
+    #[test]
+    fn drift_names_every_file_that_moved() {
+        let have = vec![
+            pair("Task.ts", "old"),
+            pair("Ghost.ts", "left over"),
+            pair("Section.ts", "same"),
+        ];
+        let fresh = vec![
+            pair("Task.ts", "new"),
+            pair("Section.ts", "same"),
+            pair("Weekday.ts", "added"),
+        ];
+        let report = describe_drift(&have, &fresh).expect("three of these differ");
+        assert!(report.contains("outdated: Task.ts"), "{report}");
+        assert!(report.contains("missing:  Weekday.ts"), "{report}");
+        assert!(report.contains("stale:    Ghost.ts"), "{report}");
+        assert!(
+            !report.contains("Section.ts"),
+            "an unchanged file has nothing to report: {report}"
+        );
+    }
+
+    #[test]
+    fn an_identical_tree_is_no_drift() {
+        let files = vec![pair("Task.ts", "x"), pair("Section.ts", "y")];
+        assert!(describe_drift(&files, &files).is_none());
+    }
+
+    /// Line endings are not drift. A Windows checkout can hand back CRLF where
+    /// the generator wrote LF; without normalising, every file would read as
+    /// outdated on every Windows run.
+    #[test]
+    fn crlf_in_the_checkout_is_not_drift() {
+        let dir = std::env::temp_dir().join(format!("aperio-ts-crlf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join("Task.ts"), "export type Task = {\r\n};\r\n").expect("write");
+        // A file that is not TypeScript is not part of the answer.
+        fs::write(dir.join("notes.txt"), "ignore me").expect("write");
+        let read = read_ts_dir(&dir).expect("read");
+        assert_eq!(read, vec![pair("Task.ts", "export type Task = {\n};\n")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A crate that declares `ts-export` is one of the sources; every other
+    /// workspace member is not, and a package outside the workspace never is.
+    #[test]
+    fn the_sources_are_the_crates_that_declare_the_feature() {
+        let meta = json!({
+            "workspace_members": ["cal-core 0.1.0 (path+file:///c)", "aperio-db 0.1.0 (path+file:///d)"],
+            "packages": [
+                {"id": "cal-core 0.1.0 (path+file:///c)", "name": "cal-core",
+                 "features": {"ts-export": ["dep:ts-rs"]}},
+                {"id": "aperio-db 0.1.0 (path+file:///d)", "name": "aperio-db",
+                 "features": {}},
+                // Not a member: a dependency that happens to have such a feature.
+                {"id": "elsewhere 1.0.0 (registry+…)", "name": "elsewhere",
+                 "features": {"ts-export": []}},
+            ]
+        });
+        assert_eq!(
+            ts_export_members(&meta).unwrap(),
+            vec!["cal-core".to_string()]
+        );
+    }
+
+    /// Nobody declaring it is an ERROR, not an empty success. Otherwise a
+    /// renamed feature leaves `shared/generated/` frozen while the check keeps
+    /// reporting that it is current.
+    #[test]
+    fn no_source_at_all_is_an_error() {
+        let meta = json!({
+            "workspace_members": ["aperio-db 0.1.0 (path+file:///d)"],
+            "packages": [
+                {"id": "aperio-db 0.1.0 (path+file:///d)", "name": "aperio-db", "features": {}},
+            ]
+        });
+        let err = ts_export_members(&meta).unwrap_err();
+        assert!(err.contains("ts-export"), "{err}");
+    }
 
     /// A crate directory with a `plugin.json` in it, as cargo would report.
     ///

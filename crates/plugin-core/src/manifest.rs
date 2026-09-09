@@ -56,6 +56,7 @@ pub const MANIFEST_FILENAME: &str = "plugin.json";
 /// which isn't a recurrence at all).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RecurrenceFreq {
     Daily,
     Weekly,
@@ -87,6 +88,7 @@ fn yes() -> bool {
 /// keeps the common case (full RFC-5545) zero-config and existing
 /// manifests working unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct RecurrenceCapabilities {
     /// Frequencies offered in the "Repeat" dropdown.
     #[serde(default = "all_frequencies")]
@@ -153,6 +155,7 @@ impl Default for RecurrenceCapabilities {
 /// (Todoist). Drives which control the members dialog renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum MemberAddMethod {
     /// Search the instance/workspace directory and pick a user.
     #[default]
@@ -175,6 +178,7 @@ pub enum MemberAddMethod {
 /// same rule `task_span` follows next door.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum TaskAssignment {
     /// The source has no notion of assigning a task to a person, or the
     /// adapter does not implement it. The picker is not offered at all.
@@ -188,6 +192,7 @@ pub enum TaskAssignment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct TaskCapabilities {
     /// Task lists (projects) nest into a tree. Flat backends leave
     /// this `false`; the UI then renders a depth-0 forest.

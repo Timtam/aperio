@@ -12,7 +12,7 @@ import {
   type TaskRecurrenceValue,
 } from '@aperio/shared';
 
-import type { Task } from '../api/types';
+import type { Task, TaskRecurrence } from '../api/types';
 
 const baseTask: Task = {
   id: 't1',
@@ -24,6 +24,7 @@ const baseTask: Task = {
   effort: 'medium',
   scheduled_date: null,
   scheduled_time: null,
+  scheduled_end_time: null,
   deadline_date: null,
   deadline_time: null,
   deadline_reminder_days: null,
@@ -43,7 +44,7 @@ const baseTask: Task = {
 };
 
 /** Backend recurrence JSON (what `Task.recurrence` holds) from a value patch. */
-function rule(patch: Partial<TaskRecurrenceValue>): unknown {
+function rule(patch: Partial<TaskRecurrenceValue>): TaskRecurrence | null {
   return toBackend({ ...TASK_RECURRENCE_DEFAULT, ...patch });
 }
 

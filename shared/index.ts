@@ -4,6 +4,7 @@
 export * from './types';
 export * from './reminderPrefs';
 export * from './taskStatus';
+export * from './taskCapabilities';
 export * from './taskGrouping';
 export * from './taskDay';
 export * from './dayGridLayout';

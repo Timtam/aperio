@@ -18,6 +18,7 @@ import type {
   Section,
   Task,
   TaskList,
+  TaskListCore,
   TaskListShare,
   TaskUser,
 } from '@aperio/shared';
@@ -88,10 +89,10 @@ export const createTaskList = async (
 export const reparentTaskList = async (
   id: string,
   parentId: string | null,
-): Promise<TaskList> => {
+): Promise<TaskListCore> => {
   const updated = JSON.parse(
     await CalFfi.reparentTaskListJson(id, parentId),
-  ) as TaskList;
+  ) as TaskListCore;
   scheduleBackgroundPush();
   return updated;
 };
