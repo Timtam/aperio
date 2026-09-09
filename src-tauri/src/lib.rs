@@ -752,6 +752,7 @@ pub fn run() {
             commands::list_upcoming_reminders,
             commands::invalidate_reminders,
             commands::set_reminder_hidden_calendars,
+            commands::set_reminder_labels,
             // Reminders Aperio keeps for one event and tells no provider
             // about (migration 0043).
             commands::list_event_local_reminders,

@@ -39,6 +39,39 @@ pub async fn invalidate_reminders(scheduler: State<'_, SchedulerHandle>) -> Comm
     Ok(())
 }
 
+/// Push the notification wording to the reminder scheduler.
+///
+/// The host has no i18n — the same reason `set_tray_labels` exists. Reminders
+/// are where that showed as a WRONG statement rather than an English one: every
+/// body was formatted `%H:%M`, and an all-day event starts at local midnight,
+/// so the desktop announced "00:00" for a birthday. Mobile has said "Ganztägig"
+/// since it shipped.
+///
+/// Month names come from the frontend's `Intl` and `day_month` carries the
+/// order ("24. Juni" against "June 24"), because deriving either here would
+/// mean a date-formatting library and a second answer to "which language is
+/// this" — and the frontend already holds both.
+///
+/// Called once i18n is ready and again on every language change, like
+/// `set_tray_labels`. Until it arrives an all-day body is omitted rather than
+/// guessed.
+#[tauri::command]
+pub async fn set_reminder_labels(
+    scheduler: State<'_, SchedulerHandle>,
+    all_day: String,
+    all_day_range: String,
+    day_month: String,
+    months: Vec<String>,
+) -> CommandResult<()> {
+    scheduler.set_labels(crate::reminders::ReminderLabels {
+        all_day,
+        all_day_range,
+        day_month,
+        months,
+    });
+    Ok(())
+}
+
 /// Push the set of hidden (sidebar-unchecked) calendar ids to the reminder
 /// scheduler so event reminders on those calendars are suppressed — hiding a
 /// calendar silences its reminders too. The frontend calls this on startup and

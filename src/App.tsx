@@ -20,6 +20,7 @@ import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { useStoredLanguage } from './intl/useStoredLanguage';
+import { useReminderLabels } from './intl/useReminderLabels';
 import { useTrayMenuLabels } from './intl/useTrayMenuLabels';
 import { CacheSyncListener } from './state/CacheSyncListener';
 import { CalendarStoreProvider } from './state/CalendarStore';
@@ -61,6 +62,9 @@ export function App() {
   useStoredLanguage();
   // Keep the system-tray menu labels in the app language.
   useTrayMenuLabels();
+  // The reminder notifications need words for the same reason the tray does:
+  // the host fires them from Rust and has no i18n.
+  useReminderLabels();
 
   return (
     <div
