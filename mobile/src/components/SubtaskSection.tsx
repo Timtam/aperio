@@ -19,6 +19,7 @@ import type {
 } from '@aperio/shared';
 import {
   effortSuffix,
+  errorMessage,
   isImportantPriority,
   normalPriority,
   prioritySuffix,
@@ -63,9 +64,6 @@ const STATUS_LABEL_KEY: Record<TaskStatus, string> = {
   cancelled: 'cancelled',
 };
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export function SubtaskSection({
   parentTask,

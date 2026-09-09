@@ -31,6 +31,13 @@ export async function applyStatusWrites(
   if (writes.length === 0) return;
   const byId = new Map(snapshot.map((t) => [t.id, t]));
   const nowIso = new Date().toISOString();
+  // The first rejection no longer ends the round. A cascade is N separate
+  // provider writes with no transaction behind them, so stopping early left an
+  // arbitrary prefix applied and the rest not — and which prefix depended on
+  // nothing the user could see. Every write is attempted; the first error is
+  // kept and thrown at the end, so each caller's existing `catch` still
+  // announces exactly as before.
+  let firstError: unknown;
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (target == null) continue;
@@ -43,15 +50,20 @@ export async function applyStatusWrites(
       me,
       autoSelfAssign,
     );
-    await updateTask({
-      ...target,
-      status: w.status,
-      completed_at: w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
-      assignees: nextAssignees ?? target.assignees,
-      scheduled_date:
-        w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
-    });
+    try {
+      await updateTask({
+        ...target,
+        status: w.status,
+        completed_at: w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
+        assignees: nextAssignees ?? target.assignees,
+        scheduled_date:
+          w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
+      });
+    } catch (err) {
+      firstError ??= err;
+    }
   }
+  if (firstError !== undefined) throw firstError;
 }
 
 /**

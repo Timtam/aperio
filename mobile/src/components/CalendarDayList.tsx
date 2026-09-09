@@ -61,6 +61,7 @@ import {
   daysCoveredKeys,
   effortSizeModifier,
   effortSuffix,
+  errorMessage,
   eventBlockFactor,
   eventSpanForDay,
   expandAll,
@@ -147,9 +148,6 @@ import { chrome } from '../theme/uiScale';
 // offer edit + delete; task rows complete (shared status cascade) / edit /
 // delete. The owning screen supplies the day window + the chrome (nav/header).
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Local Date at `key`'s `HH:MM[:SS]` time-of-day (for localized formatting). */
 function buildTimeDate(key: string, time: string): Date {
