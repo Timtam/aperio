@@ -1115,6 +1115,35 @@ pub enum TaskPriority { Low, Medium, High }
 
 **Konfigurierbar:** In welchen Ansichten `By`-Aufgaben erscheinen (Wochen-, Tages-, Monatsansicht etc.) ist unter `Einstellungen → Aufgaben → Ansichten` pro Ansichtstyp ein-/ausschaltbar.
 
+**Wenn eine Kaskade nur teilweise durchgeht.** Eine Status-Kaskade sind N
+einzelne Schreibvorgänge beim Anbieter, ohne Transaktion dahinter — der dritte
+kann scheitern, während die ersten zwei schon liegen. Ein „Rollback" wären zwei
+weitere Schreibvorgänge, die ihrerseits scheitern können. Deshalb gilt:
+**alles versuchen, dann berichten.**
+
+Kein Abbruch beim ersten Fehler — der ließ ein beliebiges Anfangsstück
+angewandt zurück, und WELCHES hing von nichts ab, das der Nutzer sehen konnte.
+Die Ansicht wird auch im Fehlerfall neu geladen, denn was gelandet ist, ist
+echt.
+
+Und es wird **immer** angesagt, weil die aria-live-Ansage auf dem Desktop die
+Rückmeldung IST:
+
+- Alles gelandet → wie bisher („Erledigt: X." plus „N weitere Aufgaben wurden
+  mit aktualisiert.").
+- Die fokussierte Zeile selbst abgelehnt → „„X" konnte nicht geändert werden:
+  {Grund}". Der Status hat sich nicht geändert, also darf die Ansage das auch
+  nicht behaupten.
+- Nur Teile der Familie abgelehnt → „Erledigt: X. 3 von 5 weiteren Aufgaben mit
+  aktualisiert, 2 fehlgeschlagen."
+
+Vorher antwortete der Desktop auf jeden Fehlschlag mit einem `console.warn` und
+sonst nichts: die Zeile war abgehakt, ein Teil der Familie im Speicher
+geändert, und die App schwieg. Auf der Oberfläche, auf der die Ansage die
+einzige Rückmeldung ist, ist Schweigen das schlechteste mögliche Ergebnis.
+Mobile hat den Fehler immer angesagt; seit derselben Änderung versucht es
+ebenfalls jeden Schreibvorgang und wirft den ersten Fehler erst am Ende.
+
 **Auto-Datum beim Start:** Wird eine Aufgabe auf `in_progress` („in Bearbeitung") gesetzt und hat noch keinen geplanten Tag (`scheduled_date`), wird sie automatisch auf **heute** eingeplant – die Arbeit hat begonnen, also gehört die Aufgabe in den heutigen Tag (und der Carry-over-/Verpasste-Aufgaben-Ablauf findet sie später wieder). Ein in derselben Bearbeitung explizit gesetztes Datum hat Vorrang. Pro Liste unter `Einstellungen → Aufgaben` ein-/ausschaltbar (Standard: an). Die Regel gilt einheitlich für den Status-Wechsel über das Kontextmenü **und** über den Aufgaben-Dialog sowie für Eltern-Aufgaben, die durch die Status-Kopplung (§9.1) auf `in_progress` abgeleitet werden. Implementiert als `autoDateOnStart` in `taskCascade.ts`.
 
 ### 9.3 Backlog

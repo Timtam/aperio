@@ -760,6 +760,12 @@ Siehe DESIGN §4.2.
   ↳ Messlücke, ehrlich benannt: `collapseEventGroups` (202), `dayGridLayout`
   (269), `taskRecurrence` (178) und `taskAssignment` (87) liegen INNERHALB der
   vermessenen Abhängigkeiten und wurden nicht vermessen.
+- [x] **Fehlersemantik einer Kaskade ENTSCHIEDEN** (Toni, 2026-09-09):
+  **alles versuchen, dann berichten.** Kein Abbruch beim ersten Fehler; die
+  Ansicht wird auch im Fehlerfall neu geladen; und es wird immer angesagt, was
+  wirklich passiert ist. Gilt schon jetzt für die Frontend-Kaskade (siehe
+  DESIGN §9.1) und ist damit auch die Vorgabe, falls die Kaskade später in
+  `update_task` wandert.
 - [ ] **Die Entscheidung, an der Schritt 2 hängt** (Tonis): bekommt `cal-core`
   eine **synchrone**, in-process Bindung in die Frontends, oder bleibt
   „nur await" die dauerhafte Form? Fünf Module kippen daran. WASM ist für

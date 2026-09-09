@@ -23,6 +23,7 @@ import {
   DONE_GROUP_ID,
   effortSizeModifier,
   effortSuffix,
+  errorMessage,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -880,9 +881,6 @@ export default function TasksScreen({
   );
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /**
  * The id of the next (or previous) VISIBLE task row to land screen-reader focus

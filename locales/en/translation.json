@@ -2250,7 +2250,10 @@
       "inProgressAnnounce": "Task \"{{title}}\" marked in progress.",
       "cancelledAnnounce": "Task \"{{title}}\" cancelled.",
       "cascadeSuffix_one": "1 related task also updated.",
-      "cascadeSuffix_other": "{{count}} related tasks also updated."
+      "cascadeSuffix_other": "{{count}} related tasks also updated.",
+      "statusChangeFailed": "Could not change \"{{title}}\": {{message}}",
+      "cascadePartial_one": "{{applied}} of {{total}} related tasks also updated, 1 failed.",
+      "cascadePartial_other": "{{applied}} of {{total}} related tasks also updated, {{failed}} failed."
     },
     "contacts": {
       "heading": "Contacts",
