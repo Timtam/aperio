@@ -1732,9 +1732,11 @@
         "endLabel": "End",
         "end": {
           "never": "Never",
+          "count": "After count",
           "until": "On date"
         },
         "untilLabel": "End date",
+        "countLabel": "Number of occurrences",
         "dayOfMonthLabel": "Day of month",
         "dayOfMonthPlaceholder": "Auto",
         "dayOfMonthHint": "Leave empty to use the completion day. Values past the end of a short month are clamped (e.g. 31 → February's last day).",

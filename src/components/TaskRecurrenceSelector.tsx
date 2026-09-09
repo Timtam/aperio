@@ -299,18 +299,45 @@ export function TaskRecurrenceSelector({
             <select
               value={value.endMode}
               onChange={(e) =>
-                update({ endMode: e.target.value as 'NEVER' | 'UNTIL' })
+                update({
+                  endMode: e.target
+                    .value as TaskRecurrenceValue['endMode'],
+                })
               }
             >
               <option value="NEVER">
                 {t('dialogs.task.recurrence.end.never')}
               </option>
+              {/* Gated on `caps.count` exactly as the date mode is gated on
+                  `caps.until`: an adapter that cannot store COUNT should grey
+                  it out rather than accept it and drop it. */}
+              <option value="COUNT" disabled={!caps.count}>
+                {t('dialogs.task.recurrence.end.count')}
+              </option>
               <option value="UNTIL" disabled={!caps.until}>
                 {t('dialogs.task.recurrence.end.until')}
               </option>
             </select>
+            {!caps.count && value.endMode === 'COUNT' && unsupportedHint}
             {!caps.until && value.endMode === 'UNTIL' && unsupportedHint}
           </label>
+
+          {value.endMode === 'COUNT' && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.recurrence.countLabel')}
+              </span>
+              <input
+                type="number"
+                min={1}
+                value={value.count}
+                disabled={!caps.count}
+                onChange={(e) =>
+                  update({ count: Math.max(1, Number(e.target.value) || 1) })
+                }
+              />
+            </label>
+          )}
 
           {value.endMode === 'UNTIL' && (
             <label className="form__field">

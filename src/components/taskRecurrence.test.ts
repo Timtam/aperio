@@ -87,6 +87,58 @@ describe('taskRecurrence §9.12 conversion', () => {
     expect(fromFull.fixedDates).toEqual([{ month: 10, day: 1 }]);
   });
 
+  /**
+   * The data-loss case. A CalDAV VTODO carrying `RRULE:FREQ=WEEKLY;COUNT=10`
+   * reaches the frontends as `{type:'after', occurrences:10}` — `cal-core`'s
+   * `RecurrenceEnd` has had that variant all along, and
+   * `crates/cal-core/src/recurrence.rs` both reads and writes it.
+   *
+   * The form model knew only "never" and "on a date". So opening such a task,
+   * changing the title and saving turned a ten-occurrence series into an
+   * endless one — silently, and at the provider too, because
+   * `TaskDialog.tsx` calls `recurrenceToBackend` on every save
+   * unconditionally. Several adapters declare `recurrence.count = true`, so
+   * the case is reachable rather than theoretical.
+   */
+  it('keeps a COUNT series end across the form round-trip', () => {
+    const restored = fromBackend({
+      frequency: 'weekly',
+      interval: 1,
+      day_of_week: null,
+      day_of_month: null,
+      end: { type: 'after', occurrences: 10 },
+      anchor: 'from_date',
+      placement: 'schedule',
+      fixed_dates: null,
+    });
+    expect(restored.endMode).toBe('COUNT');
+    expect(restored.count).toBe(10);
+    expect(toBackend(restored)?.end).toEqual({
+      type: 'after',
+      occurrences: 10,
+    });
+  });
+
+  it('does not invent a count when the series has another end', () => {
+    // The counter carries a default so the field has something to show the
+    // moment the user picks "after count". That default must not leak into a
+    // rule that ends never or on a date.
+    expect(toBackend(value({ freq: 'DAILY' }))?.end).toEqual({ type: 'never' });
+    expect(
+      toBackend(value({ freq: 'DAILY', endMode: 'UNTIL', until: '2026-12-31' }))
+        ?.end,
+    ).toEqual({ type: 'on_date', date: '2026-12-31' });
+  });
+
+  it('clamps a nonsensical count rather than writing it', () => {
+    // Zero or negative occurrences would be a series that never runs. The
+    // backend has no representation for that and neither should the form.
+    expect(
+      toBackend(value({ freq: 'DAILY', endMode: 'COUNT', count: 0 }))?.end,
+    ).toEqual({ type: 'after', occurrences: 1 });
+    expect(fromBackend({ frequency: 'daily', end: { type: 'after', occurrences: 0 } }).count).toBe(1);
+  });
+
   it('round-trips a seasonal backlog rule', () => {
     const original = value({
       freq: 'YEARLY',
