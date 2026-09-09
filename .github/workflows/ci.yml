@@ -342,10 +342,18 @@ jobs:
           key: wasm
           cache-on-failure: true
 
+      # Pinned, not `latest`, and for a measured reason: on 2026-09-09 the same
+      # `version: latest` resolved to 0.15.0 on the Linux runner and to **0.9.1**
+      # on the macOS one, minutes apart in the same workflow run. 0.9.1 predates
+      # cargo's workspace dependency inheritance entirely, so it answered
+      # `failed to parse manifest: crates/cal-core-wasm/Cargo.toml` and took the
+      # macOS artefact down while every other job was green. The action resolves
+      # "latest" over the GitHub API and falls back to an ancient default when
+      # that lookup fails, so `latest` here is a coin flip, not a policy.
       - uses: jetli/wasm-pack-action@v0.4.0
         if: needs.changes.outputs.frontend == 'true'
         with:
-          version: latest
+          version: v0.15.0
 
       - name: Build the core rules (WebAssembly)
         if: needs.changes.outputs.frontend == 'true'
