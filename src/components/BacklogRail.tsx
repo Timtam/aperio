@@ -8,7 +8,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { backlogWeeks, splitDeadlinesByWeek } from '@aperio/shared';
+import {
+  backlogWeeks,
+  compareMachineStrings,
+  splitDeadlinesByWeek,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
@@ -179,10 +183,12 @@ export function BacklogRail() {
         )
         .sort(
           (a, b) =>
-            (a.deadline_date ?? '').localeCompare(b.deadline_date ?? '') ||
+            // Deadline day and creation instant are machine strings; only the
+            // priority in between is a domain rule.
+            compareMachineStrings(a.deadline_date ?? '', b.deadline_date ?? '') ||
             priorityRank(a.priority, priorityScale) -
               priorityRank(b.priority, priorityScale) ||
-            a.created_at.localeCompare(b.created_at),
+            compareMachineStrings(a.created_at, b.created_at),
         ),
     [tasks, priorityScale],
   );

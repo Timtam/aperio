@@ -533,6 +533,25 @@ Eingaberaum (drei Prioritäten × zwei Skalen, plus der ausgelassene Default und
 „nichts vorher") — keine Stichprobe, sondern die ganze Domäne, und das ist nur
 möglich, weil die drei Regeln bewusst ohne Politik gewählt wurden.
 
+**Und eine Vorarbeit, die die Frage kleiner macht: Maschinen-Zeichenketten
+sind kein Text.** Von einundzwanzig `localeCompare`-Aufrufen in dieser App
+verglichen **zehn** gar keinen Menschentext, sondern ISO-Tagesschlüssel,
+RFC-3339-Zeitstempel und `created_at`. Dort ist eine sprachabhängige Kollation
+falsch — nicht sichtbar falsch, weil sie für feste Ziffernformate dasselbe
+liefert, aber sie macht die Reihenfolge einer Aufgabenliste von der Sprache des
+Lesers abhängig und kostet einen Kollations-Nachschlag pro Vergleich in Code,
+der in `Array.sort` während des Renders läuft. Sie gehen jetzt über
+`compareMachineStrings` (`shared/ordering.ts`).
+
+Der Unterschied entscheidet mit, wie viel der Ordnungsregel überhaupt umziehen
+muss. Wo Kollation und Codepunkt-Ordnung **auseinandergehen**, ist gemessen und
+nicht vermutet: nicht bei Interpunktion (`a-b` vor `ab` sagen beide), sondern
+bei der Gross-/Kleinschreibung — Codepunkte stellen jeden Grossbuchstaben vor
+jeden Kleinbuchstaben, eine Kollation verzahnt sie. Deshalb behalten die zwei
+menschenlesbaren Listen im Plugin-Bereich ihr `localeCompare`: heutige Plugin-Ids
+sind zufällig alle klein, aber ein Fremd-Plugin mit einem Grossbuchstaben würde
+sonst über allem anderen einsortiert.
+
 **Was heute umgestellt ist:** `priorityRank`, `isImportantPriority` und
 `normalPriority` — keine i18n-Schlüssel, keine Glyphen, weil beides offene
 Fragen sind und ein Prototyp sie nicht nebenbei beantworten soll. Der Schalter

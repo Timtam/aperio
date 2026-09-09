@@ -1,5 +1,7 @@
 import { RRule, rrulestr } from 'rrule';
 
+import { compareMachineStrings } from './ordering';
+
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
 // minimal `RecurringEventLike` so it needs neither side's full `CalendarEvent`
 // type (those still live per-app for now); any event with id/start/end + the
@@ -374,7 +376,8 @@ export function expandAll<E extends RecurringEventLike>(
       return iso == null || !replaced.has(new Date(iso).getTime());
     });
   });
-  out.sort((a, b) => a.start.localeCompare(b.start));
+  // `start` is an ISO instant — a machine string, not text.
+  out.sort((a, b) => compareMachineStrings(a.start, b.start));
   return out;
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { compareMachineStrings } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
 import { getTasks } from '../api/client';
@@ -150,7 +151,7 @@ function taskOrder(a: Task, b: Task): number {
 
   const dateA = a.scheduled_date ?? a.deadline_date ?? '';
   const dateB = b.scheduled_date ?? b.deadline_date ?? '';
-  if (dateA !== dateB) return dateA.localeCompare(dateB);
+  if (dateA !== dateB) return compareMachineStrings(dateA, dateB);
 
-  return a.created_at.localeCompare(b.created_at);
+  return compareMachineStrings(a.created_at, b.created_at);
 }
