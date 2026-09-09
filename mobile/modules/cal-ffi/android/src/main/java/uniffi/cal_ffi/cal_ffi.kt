@@ -814,7 +814,11 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_cal_ffi_checksum_func_parse_attendee(
+    external fun uniffi_cal_ffi_checksum_func_compare_names(
+): Short
+external fun uniffi_cal_ffi_checksum_func_compare_titles(
+): Short
+external fun uniffi_cal_ffi_checksum_func_parse_attendee(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(
 ): Short
@@ -1678,6 +1682,10 @@ external fun uniffi_cal_ffi_fn_method_keychainbridge_delete(`ptr`: Long,`account
 ): Unit
 external fun uniffi_cal_ffi_fn_method_keychainbridge_delete_all(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Int
 external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(`rrule`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1803,6 +1811,12 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_cal_ffi_checksum_func_compare_names() != 26485.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_compare_titles() != 57834.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_parse_attendee() != 55709.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2346,7 +2360,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_task_list_shares_json() != 10412.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_task_lists_json() != 64113.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_lists_json() != 15879.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_task_remove_member() != 37396.toShort()) {
@@ -2646,6 +2660,29 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
     }
 }
 
@@ -5613,8 +5650,9 @@ public interface HostInterface {
     fun `taskListSharesJson`(`listId`: kotlin.String): kotlin.String
     
     /**
-     * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
-     * wire shape: each `TaskList` flattened + its `account_id`). Primes the
+     * All task lists (local + external) as a JSON [`TaskListRow`][host_core::wire::TaskListRow]
+     * array — the ONE declaration the desktop's `list_task_lists` answers with
+     * too, so the two surfaces cannot disagree about the shape. Primes the
      * list→account route map for the following task/section ops, so call it
      * before them (the desktop invariant). External accounts are fetched live;
      * a dead account is skipped (its error swallowed), never blanking the list.
@@ -8839,8 +8877,9 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
-     * wire shape: each `TaskList` flattened + its `account_id`). Primes the
+     * All task lists (local + external) as a JSON [`TaskListRow`][host_core::wire::TaskListRow]
+     * array — the ONE declaration the desktop's `list_task_lists` answers with
+     * too, so the two surfaces cannot disagree about the shape. Primes the
      * list→account route map for the following task/section ops, so call it
      * before them (the desktop invariant). External accounts are fetched live;
      * a dead account is skipped (its error swallowed), never blanking the list.
@@ -12792,6 +12831,34 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
         }
     }
 }
+        /**
+         * Compare two NAMES — an account, a container, a contact, a day marker.
+         * Case- and accent-insensitive. See `cal_core::compare_names`.
+         */ fun `compareNames`(`a`: kotlin.String, `b`: kotlin.String, `languageTag`: kotlin.String): kotlin.Int {
+            return FfiConverterInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_compare_names(
+    
+        FfiConverterString.lower(`a`),FfiConverterString.lower(`b`),FfiConverterString.lower(`languageTag`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Compare two TITLES — task titles, section names, anything the user typed.
+         * Digit runs order by value; case separates. See `cal_core::compare_titles`.
+         */ fun `compareTitles`(`a`: kotlin.String, `b`: kotlin.String, `languageTag`: kotlin.String): kotlin.Int {
+            return FfiConverterInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_compare_titles(
+    
+        FfiConverterString.lower(`a`),FfiConverterString.lower(`b`),FfiConverterString.lower(`languageTag`),_status)
+}
+    )
+    }
+    
+
         /**
          * Parse a calendar attendee entry into its display name and email.
          *

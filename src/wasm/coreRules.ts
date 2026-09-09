@@ -24,6 +24,8 @@
  * which is the thing this exists to remove.
  */
 import init, {
+  compareNames as wasmCompareNames,
+  compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
   priorityRank as wasmPriorityRank,
@@ -81,4 +83,20 @@ export function normalPriority(
 ): TaskPriority {
   assertReady();
   return wasmNormalPriority(previous ?? undefined) as TaskPriority;
+}
+
+/** See `cal_core::compare_names`. Synchronous: safe inside a comparator. */
+export function compareNames(a: string, b: string, languageTag: string): number {
+  assertReady();
+  return wasmCompareNames(a, b, languageTag);
+}
+
+/** See `cal_core::compare_titles`. Synchronous: safe inside a comparator. */
+export function compareTitles(
+  a: string,
+  b: string,
+  languageTag: string,
+): number {
+  assertReady();
+  return wasmCompareTitles(a, b, languageTag);
 }

@@ -788,9 +788,11 @@ Siehe DESIGN §4.2.
   „jede Liste".
   ↳ **GEMESSEN, und die Zahl ist unangenehm:** `icu_collator` mit
   eingebackenen Daten kostet im WASM-Modul **1.139,7 KB** statt 26,7 KB —
-  Faktor 43. Ein auf de+en gekürzter Datensatz ist NICHT gemessen; Erwartung
+  Faktor 43 (die fertige Kiste mit beiden Vergleichsfunktionen:
+  1.154,3 KB). Ein auf de+en gekürzter Datensatz ist NICHT gemessen; Erwartung
   (keine Messung): bringt wenig, weil die CLDR-Wurzeltabelle für jede Sprache
-  gebraucht wird. 🚩 Tonis Entscheidung, ob der Preis recht ist.
+  gebraucht wird. Toni hat den Preis genommen („zieh icu in den kern, das
+  wiegt nicht so schwer") — siehe den Eintrag unten.
   ↳ Unbeantwortet und relevant: honoriert Hermes `{ numeric: true }` auf iOS
   UND Android? Falls nicht, sortiert die mobile Aufgabenliste **heute schon**
   anders als der Desktop — dann repariert ICU im Kern etwas Bestehendes statt
@@ -805,12 +807,60 @@ Siehe DESIGN §4.2.
   `shared/rrule.ts` (256 Zeilen, kein Rust-Gegenstück — `cal-core`s
   `recurrence.rs` lässt die relativen Wochentags-Achsen bewusst weg) in den
   Kern, und die synchrone Bindung ist dort Pflicht, weil `parseRRule` pro
-  Tastendruck läuft. Das ist der grösste Einzelposten der Trennung, und er ist
+  Tastendruck läuft. Das ist der größte Einzelposten der Trennung, und er ist
   jetzt eingeplant statt offen.
   ↳ **Die Glyphen bleiben vorne** (`○ ◐ ● ⊘`, `★`, `!!!`). Der Kern gibt einen
   ZUSTAND zurück, jede Oberfläche wählt ihr Zeichen — eine e-ink-Anzeige will
   plausibel andere. Damit ist auch klar, wie `taskStatus` zerfällt: die acht
   reinen Funktionen können in den Kern, die Marken-Funktionen nicht.
+- [x] **Die Textordnung liegt im Kern** (Toni: „zieh icu in den kern, das wiegt
+  nicht so schwer", 2026-09-09). `cal_core::collation` bietet genau zwei
+  Regeln — `compare_names` (Namen von Dingen: Konten, Behälter, Kontakte,
+  Tagesmarkierungen; Groß-/Kleinschreibung und Akzente trennen nicht) und
+  `compare_titles` (selbstgeschriebener Text; Ziffernläufe nach Wert, Fälle
+  trennen). Beide Oberflächen gehen durch ihre eigene Tür: der Desktop über
+  WebAssembly, Mobile über eine synchrone Expo-`Function`. In `shared/` ist
+  kein `localeCompare` mehr. Siehe DESIGN §4.4.
+  ↳ **Drei stille Fehler nebenbei behoben:** die Regel lag nur in JavaScript
+  (reMarkable hätte eine dritte Ordnung gebraucht); jeder Aufruf übergab
+  `undefined` als Locale und folgte damit dem BETRIEBSSYSTEM statt der in
+  Aperio gewählten Sprache; und Webview, Hermes/iOS und Hermes/Android bringen
+  je ihre eigene Kollation mit.
+  ↳ **Installiert statt durchgereicht:** `installTextCollation` in
+  `shared/ordering.ts`, von jeder Oberfläche beim Start gesetzt und beim
+  Sprachwechsel neu gebunden. `taskOrder`/`sectionOrder` werden aus neun
+  Schichten Ansichtscode gerufen — eine Sprache durchzufädeln hätte die Wahl
+  vor jeden künftigen Aufrufer gestellt. Ohne Installation wird laut gefehlt,
+  nicht auf Codepunkte zurückgefallen.
+  ↳ **Preis, gemessen:** das WASM-Modul geht von 26,7 KB auf **1.154,3 KB**.
+  `collation` ist wie `ts-export` ein standardmäßig AUSgeschaltetes Feature —
+  `cargo tree -p adapter-vikunja -e normal` bestätigt, dass `icu_collator`
+  im Adapter-Graphen nicht vorkommt (andere `icu_*` schon, die zieht
+  `url`/`idna` seit jeher).
+  ↳ **Beinahe-Unfall, der eine Prüflücke aufdeckte:** `pub mod collation;` stand
+  ungeschützt in `lib.rs`, während seine Abhängigkeiten optional waren. Alles
+  blieb grün, weil `cargo build --workspace` Features vereinheitlicht — die
+  zwölf Adapter-Repos, die `cal-core` ALLEIN übersetzen, wären an
+  `unresolved import icu_collator` gescheitert. Der Rust-Job prüft die
+  Vertragskisten jetzt einzeln (`cargo check -p cal-core|plugin-core|plugin-sdk`),
+  an genau diesem Fehler rot bewiesen.
+  ↳ **Drei Wächter, jeder rot bewiesen:** die Regeln in `cal_core::collation`;
+  die KETTE in `src/intl/collation.test.ts` (das Test-Setup installiert das
+  echte WASM-Modul, also läuft dort der Kern — `numeric_ordering` in Rust
+  abgeschaltet ⇒ „Übung 10" vor „Übung 2" im Desktop-Test); und die beiden
+  Türen über den FFI-Wächter.
+  ↳ **Wächter-Lücke gefunden und geschlossen:**
+  `mobile/scripts/check-ffi-bridges.mjs` las nur `host.rs` und verfolgte nur
+  `host.foo(…)`; `#[uniffi::export]`-**freie** Funktionen waren auf beiden
+  Seiten unsichtbar (`parseAttendee` kreuzte seit jeher so). Er meldete GRÜN,
+  während den eingecheckten Kotlin-Bindungen `compareNames`/`compareTitles`
+  fehlten — das wäre erst als `:cal-ffi:compileReleaseKotlin`-Fehler minutentief
+  in einem EAS-Bau aufgefallen. Erweitert und an genau diesem Fall rot
+  bewiesen.
+  ↳ Offen bleibt: honoriert Hermes `{ numeric: true }`? Die Frage ist für die
+  Zukunft entschärft (der Kern sortiert jetzt), aber falls Hermes es nicht tat,
+  ändert sich mit dem nächsten Mobile-Build eine bestehende Reihenfolge sichtbar
+  — das ist die Reparatur, nicht der Regress.
 - [ ] Zwei Verträge, die vor jedem Umzug festzuklopfen sind: (a) der Kern gibt
   **i18n-Schlüssel + Variablen** zurück, nie fertigen Text (Vorbild
   `cal-core/src/conferencing.rs:70`); (b) der Kern liest **nie** die Uhr oder

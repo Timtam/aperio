@@ -495,7 +495,7 @@ langsam, sondern unmöglich (die Funktion gäbe ein Promise zurück statt
 Elementen). Wer trotzdem asynchron rechnet, rendert **zweimal**: einmal ohne
 Ergebnis, dann mit. Für einen Screenreader-Nutzer ist genau dieser
 Zwischenzustand das Problem, nicht die Millisekunden — die erste Runde sagt den
-blossen Titel an, die zweite ändert den zugänglichen Namen unter dem Fokus.
+bloßen Titel an, die zweite ändert den zugänglichen Namen unter dem Fokus.
 
 Und manche Aufrufe können prinzipiell nicht warten: `priorityRank` steckt in
 `Array.prototype.sort`-Vergleichern (`src/components/BacklogRail.tsx`). Ein
@@ -508,7 +508,7 @@ kompiliert statt in einem anderen Prozess. `crates/cal-core-wasm` ist diese Tür
 - **Instanziieren ist einmalig asynchron**, beim App-Start (`main.tsx` wartet
   auf `initCoreRules()`, bevor irgendetwas rendert). Danach ist **jeder** Aufruf
   ein gewöhnlicher Funktionsaufruf. Browser verweigern synchrones Kompilieren
-  eines Moduls dieser Grösse im Haupt-Thread — deshalb das eine `await`, und es
+  eines Moduls dieser Größe im Haupt-Thread — deshalb das eine `await`, und es
   fällt nicht auf, weil die App ohnehin gerade startet.
 - **Ein Fehlschlag ist tödlich und wird gesagt**, nicht verschluckt: eine
   stille Rückfallebene wäre eine zweite Implementierung der Regel, also genau
@@ -517,7 +517,7 @@ kompiliert statt in einem anderen Prozess. `crates/cal-core-wasm` ist diese Tür
   ein `match`. Das ist eine Regel, keine Vorliebe: die Kiste zieht später ins
   **Desktop-Repo** um (eine Tauri-App ist ohnehin eine Rust-Binärdatei), und
   dabei darf **keine Domänenregel** den Kern verlassen. `cal-ffi` ist der
-  Gegenpol und der Grund für die Strenge — es heisst „mobile Bindung", enthält
+  Gegenpol und der Grund für die Strenge — es heißt „mobile Bindung", enthält
   aber den mobilen `Host` mit über 11.000 Zeilen Orchestrierung; es muss beim
   Umzug **geteilt** werden, nicht verschoben.
 - **Das Modul wird gebaut, nicht eingecheckt** (`npm run build:wasm`, in CI im
@@ -546,10 +546,10 @@ der in `Array.sort` während des Renders läuft. Sie gehen jetzt über
 Der Unterschied entscheidet mit, wie viel der Ordnungsregel überhaupt umziehen
 muss. Wo Kollation und Codepunkt-Ordnung **auseinandergehen**, ist gemessen und
 nicht vermutet: nicht bei Interpunktion (`a-b` vor `ab` sagen beide), sondern
-bei der Gross-/Kleinschreibung — Codepunkte stellen jeden Grossbuchstaben vor
+bei der Groß-/Kleinschreibung — Codepunkte stellen jeden Großbuchstaben vor
 jeden Kleinbuchstaben, eine Kollation verzahnt sie. Deshalb behalten die zwei
 menschenlesbaren Listen im Plugin-Bereich ihr `localeCompare`: heutige Plugin-Ids
-sind zufällig alle klein, aber ein Fremd-Plugin mit einem Grossbuchstaben würde
+sind zufällig alle klein, aber ein Fremd-Plugin mit einem Großbuchstaben würde
 sonst über allem anderen einsortiert.
 
 **Was heute umgestellt ist:** `priorityRank`, `isImportantPriority` und
@@ -563,6 +563,125 @@ sitzt in `src/intl/taskStatus.ts`: der Shim exportiert die drei explizit und
 ist ein Übergangs-, kein Endzustand: die TS-Kopie geht, sobald Mobile dieselbe
 Tür bekommt — sein Expo-Modul kann synchrone Funktionen bereits, der Weg
 existiert also. Bis dahin hält der Paritätstest die beiden zusammen.
+
+### 4.4 Textordnung liegt im Kern — eine Kollation für alle Oberflächen
+
+§4.3 hat die **Tür** gebaut. Die Sortierung von Text ist die erste echte
+Regel, die durch sie geht — und die erste, die durch **beide** Türen geht,
+denn Mobile hat seine eigene (`Function("compareNames")` im Expo-Modul).
+
+**Was vorher galt und was daran falsch war.** Namen und Titel wurden mit
+`localeCompare` verglichen. Drei Probleme, jedes für sich still:
+
+1. **Es lag nur in JavaScript.** Eine reMarkable-Oberfläche kann es nicht
+   ausleihen, hätte also eine dritte Ordnung implementiert. Eine Liste, die auf
+   einem Gerät anders sortiert, meldet niemand — man verliert nur, wo eine
+   Aufgabe hingekommen ist.
+2. **Es folgte der Sprache des SYSTEMS, nicht der App.** Jeder Aufruf übergab
+   `undefined` als Locale. Wer Aperio auf Deutsch liest, auf einem englischen
+   Windows, bekam englische Kollation. Jetzt entscheidet die Sprache, die in
+   Aperio gewählt ist, und die Oberfläche bindet sie beim Sprachwechsel neu.
+3. **Es war nicht dieselbe Kollation je Oberfläche.** Das Desktop-Webview,
+   Hermes auf iOS und Hermes auf Android bringen jeweils ihre eigene mit,
+   unterschiedlichen Alters — und ob Hermes `{ numeric: true }` überhaupt
+   honoriert, ist bis heute nicht auf einem Gerät nachgemessen. Ein einziger
+   in den Kern kompilierter Kollator ist überall derselbe.
+
+**Zwei Regeln, nicht ein Sack Optionen.** `cal_core::collation` bietet genau
+zwei, weil die Aufrufstellen genau zwei Fragen stellen:
+
+- `compare_names` für **Namen von Dingen** — Konten, Behälter, Kontakte,
+  Tagesmarkierungen. Groß-/Kleinschreibung und Akzente trennen nicht: „Arbeit"
+  und „arbeit" sind für einen Menschen ein Name, und eine Liste, die beide
+  enthält, darf nicht in zwei Blöcke zerfallen. (Das war
+  `sensitivity: 'base'`.)
+- `compare_titles` für **selbstgeschriebenen Text** — Aufgabentitel,
+  Abschnittsnamen. Ziffernfolgen ordnen nach Wert, „Kapitel 2" vor
+  „Kapitel 10"; Groß-/Kleinschreibung trennt hier sehr wohl, sonst hinge die
+  Reihenfolge zweier Titel davon ab, welcher zuerst gelesen wurde.
+
+Sie zu benennen ist der Punkt: sonst entscheidet die nächste Person, die einen
+Vergleicher schreibt, das pro Aufrufstelle neu — und genau so ist es
+auseinandergelaufen.
+
+**Installiert, nicht durchgereicht.** `shared/ordering.ts` hält eine
+`TextCollation`, die jede Oberfläche beim Start setzt (`installTextCollation`);
+`taskOrder` und `sectionOrder` rufen sie über `compareNames`/`compareTitles`.
+Der Grund ist praktisch: diese beiden werden aus neun Schichten Ansichtscode
+gerufen und aus `buildEntries`, das schon neun Parameter trägt. Eine Sprache
+durch all das zu fädeln hieße, die Wahl vor jeden künftigen Aufrufer zu
+stellen — und das ist, wie sie überhaupt erst gedriftet ist.
+
+Ist **nichts** installiert, wird laut gefehlt statt auf Codepunkte
+zurückzufallen. Eine Rückfallebene wäre eine zweite Ordnungsregel, die sich nur
+als „die Liste sieht auf einem Gerät komisch aus" zeigt — also genau das, was
+eine gemeinsame Regel abschaffen soll.
+
+**Der Preis, offen genannt.** `icu_collator` mit eingebackenen Daten macht das
+WASM-Modul des Desktops von **26,7 KB auf 1.154,3 KB** — Faktor 43. Das trägt
+die CLDR-Wurzeltabelle; eine auf de+en gekürzte Sammlung würde wenig helfen,
+weil jede Sprache die Wurzel braucht (nicht gemessen, aber der Grund ist
+strukturell). Auf Mobile landet dieselbe Datensammlung in der nativen
+Bibliothek — dort ist sie **nicht** nachgemessen, der Aufschlag ist also
+geschätzt, nicht belegt. Toni hat den Preis bewusst genommen: „zieh icu in den
+kern, das wiegt nicht so schwer."
+
+`collation` ist deshalb — wie `ts-export` in §4.2 — ein **standardmäßig
+ausgeschaltetes** Feature. Cargo vereinheitlicht Features global, und zwölf
+Adapter-Repositories übersetzen gegen `cal-core`, ohne je eine Liste zu
+sortieren; nur die beiden Frontend-Bindungen schalten es an. `cargo tree -p
+adapter-vikunja -e normal` bestätigt es: **`icu_collator` steht dort nicht**.
+(Andere `icu_*`-Kisten schon — die zieht `url`/`idna` seit jeher; es geht um
+den Kollator und seine eingebackenen Daten, nicht um ICU überhaupt.)
+
+**Und ein Fallstrick, der genau hier zugeschnappt ist:** `pub mod collation;`
+stand zuerst **ungeschützt** in `lib.rs`, während seine Abhängigkeiten optional
+waren. Jede Prüfung in diesem Repo blieb grün — weil `cargo build --workspace`
+die Features über alles vereinheitlicht und die Frontend-Bindung `collation`
+für den ganzen Workspace anschaltet. Die zwölf Adapter-Repositories, die
+`cal-core` **allein** übersetzen, wären an `unresolved import icu_collator`
+gescheitert. Der Rust-Job prüft die Vertragskisten deshalb jetzt zusätzlich
+einzeln (`cargo check -p cal-core`, `-p plugin-core`, `-p plugin-sdk`); an
+genau diesem Fehler rot bewiesen.
+
+**Was nicht durch diese Tür geht.** Maschinen-Zeichenketten — ISO-Tagesschlüssel,
+RFC-3339-Zeitstempel, `created_at`. Zehn der einundzwanzig `localeCompare`-Aufrufe
+waren solche und gehen über `compareMachineStrings` (§4.3). Und die zwei
+Plugin-Listen behalten ihr `localeCompare`, weil Codepunkt- und
+Kollationsordnung sich bei der Groß-/Kleinschreibung unterscheiden.
+
+**Der Wächter ist hier ein anderer als bei §4.2 und §4.3.** Ein Paritätstest
+gegen TypeScript ginge nicht — die TypeScript-Seite ist ja das, was ersetzt
+wurde, und ihre Antwort hängt von der Laufzeit ab; Rust an `localeCompare`
+festzunageln hieße, die App an die Kollation zu binden, die das Node der CI
+zufällig mitbringt. Stattdessen greifen drei:
+
+1. **Die Regeln selbst**, in `cal_core::collation` — Umlaute, Ziffernläufe,
+   Groß-/Kleinschreibung, und dass die Vergleichsfunktion ein sauberes
+   Ordnungsverhältnis ist.
+2. **Die Kette**, in `src/intl/collation.test.ts`: `src/test-setup.ts`
+   installiert das echte WebAssembly-Modul als `TextCollation`, also läuft dort
+   der Kern, keine Attrappe — und die zwei Listen, die ein Nutzer am meisten
+   liest (Aufgaben, Tagesmarkierungen) kommen in der Reihenfolge heraus, die
+   der Kern entschieden hat. Rot bewiesen: `numeric_ordering` in Rust
+   abgeschaltet → „Übung 10" vor „Übung 2" im Desktop-Test.
+3. **Die Türen**, durch `mobile/scripts/check-ffi-bridges.mjs`, das beide an
+   derselben Rust-Signatur festhält.
+
+Damit der zweite überhaupt läuft, musste der Frontend-Job der CI zusätzlich
+`crates/cal-core/**` beobachten: die Regel liegt im **Kern**, nicht in der
+Marshalling-Hülle, und eine Änderung nur an ihr hätte sonst gar keinen
+Frontend-Job ausgelöst.
+
+Dieser Wächter hatte dabei eine **Lücke, die diese Änderung aufgedeckt hat**: er
+las nur `host.rs` und verfolgte nur Methodenaufrufe am Host-Objekt
+(`host.foo(…)`). `#[uniffi::export]`-**freie** Funktionen waren auf beiden
+Seiten unsichtbar — `parseAttendee` kreuzte seit jeher so, und die neuen
+Kollationsfunktionen kreuzen genauso. Er meldete GRÜN, während den
+eingecheckten Kotlin-Bindungen `compareNames`/`compareTitles` schlicht fehlten;
+das wäre erst Minuten in einen EAS-Bau hinein als
+`:cal-ffi:compileReleaseKotlin`-Fehler aufgefallen. Er ist erweitert und **an
+genau diesem Fall rot bewiesen**.
 
 ---
 

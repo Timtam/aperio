@@ -1,5 +1,9 @@
 import type { Section, Task, TaskUser } from './types';
-import { compareMachineStrings } from './ordering';
+import {
+  compareMachineStrings,
+  compareNames,
+  compareTitles,
+} from './ordering';
 import { classifyDoneByMe } from './taskAssignment';
 import { priorityRank, type PriorityScale } from './taskStatus';
 
@@ -165,7 +169,11 @@ type GNode =
 /** Natural (numeric-aware) ascending title compare: "Aufgabe 2" sorts before
  *  "Aufgabe 10", not after. */
 function naturalCompare(a: string, b: string): number {
-  return a.localeCompare(b, undefined, { numeric: true });
+  // `cal_core::compare_titles` through the surface's door — see
+  // `installTextCollation`. Digit runs order by value, so "Kapitel 2" comes
+  // before "Kapitel 10", and umlauts sort with their base letter instead of
+  // behind every ASCII word.
+  return compareTitles(a, b);
 }
 
 /** Sibling order within a group / under a parent: high priority floats up
@@ -372,7 +380,7 @@ export function buildEntries(
   future.sort((a, b) => compareMachineStrings(futureDayOf(a), futureDayOf(b)));
 
   const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
-  const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
+  const byName = (a: string, b: string) => compareNames(nameOf(a), nameOf(b));
 
   // A list's tasks → [ungrouped task nodes] + a section group node per
   // non-empty section (in declared order). `idScope` keeps the synthetic

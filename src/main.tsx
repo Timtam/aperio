@@ -1,11 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+
+import { installTextCollation } from '@aperio/shared';
+
 import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
 import { applyUiScale, readUiScale } from './state/uiScale';
-import { initCoreRules } from './wasm/coreRules';
-import './i18n';
+import { compareNames, compareTitles, initCoreRules } from './wasm/coreRules';
+import i18n from './i18n';
 import './styles.css';
 
 // Mirror webview console output into the Rust log stream in EVERY build.
@@ -33,6 +36,18 @@ applyThemeMode(readThemeMode());
 // window would tell a screen-reader user nothing at all.
 initCoreRules()
   .then(() => {
+    // The core's ordering rule, bound to the language the USER chose — not the
+    // one the operating system reports, which is what `localeCompare` followed
+    // before. Re-bound on every language change, so a switch reorders the
+    // lists it should.
+    const installCollation = () =>
+      installTextCollation({
+        compareNames: (a, b) => compareNames(a, b, i18n.language),
+        compareTitles: (a, b) => compareTitles(a, b, i18n.language),
+      });
+    installCollation();
+    i18n.on('languageChanged', installCollation);
+
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <App />
