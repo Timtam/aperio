@@ -1,4 +1,5 @@
 import type { Section, Task, TaskUser } from './types';
+import { compareMachineStrings } from './ordering';
 import { classifyDoneByMe } from './taskAssignment';
 import { priorityRank, type PriorityScale } from './taskStatus';
 
@@ -367,7 +368,8 @@ export function buildEntries(
     (isTaskDeferred(task, today) ? task.resurface_date : task.scheduled_date) ??
     '';
   const future = [...deferred, ...futureScheduled];
-  future.sort((a, b) => futureDayOf(a).localeCompare(futureDayOf(b)));
+  // Day keys (`YYYY-MM-DD`) — machine strings.
+  future.sort((a, b) => compareMachineStrings(futureDayOf(a), futureDayOf(b)));
 
   const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
   const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
@@ -509,7 +511,10 @@ export function buildEntries(
 
   // Done group last, most-recently-completed first.
   if (doneTopLevel.length > 0) {
-    doneTopLevel.sort((a, b) => doneOrderKey(b).localeCompare(doneOrderKey(a)));
+    // `completed_at` / `updated_at` — RFC-3339 instants, machine strings.
+    doneTopLevel.sort((a, b) =>
+      compareMachineStrings(doneOrderKey(b), doneOrderKey(a)),
+    );
     // Split the count into mine (unassigned OR assigned to me) vs others
     // (assigned to a concrete other user) when at least one done task is
     // someone else's; otherwise a single count (personal lists never split).
@@ -537,7 +542,7 @@ export function buildEntries(
   // subtree.
   if (cancelledTopLevel.length > 0) {
     cancelledTopLevel.sort((a, b) =>
-      (b.updated_at ?? '').localeCompare(a.updated_at ?? ''),
+      compareMachineStrings(b.updated_at ?? '', a.updated_at ?? ''),
     );
     forest.push({
       t: 'group',

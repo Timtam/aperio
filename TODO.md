@@ -781,6 +781,20 @@ Siehe DESIGN §4.2.
   von acht waren derselbe eine Befund („async ist die falsche Form"), und der
   ist jetzt aufgelöst. Siehe DESIGN §4.3.
 - [x] **Die drei offenen Fragen sind entschieden** (Toni, 2026-09-09):
+  ↳ **Vorarbeit erledigt:** zehn der einundzwanzig `localeCompare`-Aufrufe
+  verglichen Maschinen-Zeichenketten (ISO-Tage, RFC-3339-Zeitstempel) und
+  brauchten nie eine Kollation; sie gehen jetzt über `compareMachineStrings`.
+  Damit ist die ICU-Fläche EINE Kollationsfunktion für ~10 Textstellen, nicht
+  „jede Liste".
+  ↳ **GEMESSEN, und die Zahl ist unangenehm:** `icu_collator` mit
+  eingebackenen Daten kostet im WASM-Modul **1.139,7 KB** statt 26,7 KB —
+  Faktor 43. Ein auf de+en gekürzter Datensatz ist NICHT gemessen; Erwartung
+  (keine Messung): bringt wenig, weil die CLDR-Wurzeltabelle für jede Sprache
+  gebraucht wird. 🚩 Tonis Entscheidung, ob der Preis recht ist.
+  ↳ Unbeantwortet und relevant: honoriert Hermes `{ numeric: true }` auf iOS
+  UND Android? Falls nicht, sortiert die mobile Aufgabenliste **heute schon**
+  anders als der Desktop — dann repariert ICU im Kern etwas Bestehendes statt
+  nur Zukunft abzusichern. Braucht einen Geräte-Test.
   ↳ **Sortierung: `icu_collator` in den Kern.** Damit verhält sich die Ordnung
   überall wie heute, auch bei Umlauten und gemischten Zahlen — und
   `taskGrouping`s untere Hälfte kann überhaupt erst umziehen, weil

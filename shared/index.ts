@@ -3,6 +3,7 @@
 // settings handlers, …); the task domain is what lives here first.
 export * from './types';
 export * from './errors';
+export * from './ordering';
 export * from './reminderPrefs';
 export * from './taskStatus';
 export * from './taskCapabilities';
