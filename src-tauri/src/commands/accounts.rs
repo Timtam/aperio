@@ -1,6 +1,7 @@
 //! Account management commands (DESIGN.md §6.2 + §6.4).
 
 use cal_core::{CalendarFeature, TasksFeature};
+use host_core::account_form::AccountFormSpec;
 use plugin_core::shim::{FfiCalendarAdapter, FfiTasksAdapter};
 use plugin_core::PluginManager;
 use serde::{Deserialize, Serialize};
@@ -1040,92 +1041,16 @@ pub struct ConnectMicrosoftRequest {
     pub display_name: String,
 }
 
-/// The account form for a plugin, as its manifest declares it.
-///
-/// A wire copy rather than the manifest type so the frontend sees exactly what
-/// it needs and nothing else — and so the built-in-credentials question is
-/// answered here, where the credentials live, rather than by asking the
-/// frontend to reason about a posture it cannot check.
-#[derive(Debug, Serialize)]
-pub struct AccountFormSpec {
-    pub plugin_id: String,
-    pub fields: Vec<AccountFormField>,
-    /// Buttons besides "add" that this adapter offers on its form.
-    #[serde(default)]
-    pub actions: Vec<AccountFormAction>,
-    /// Present when connecting runs an OAuth sign-in.
-    pub oauth: Option<AccountFormOauth>,
-    /// Whether accounts of this adapter own calendars and task lists. Derived
-    /// from the plugin's declared TYPE, so the frontend can skip the catalog
-    /// refresh after connecting a videoconference account — which owns neither,
-    /// and whose catalog calls have a blocking cold path — without keeping its
-    /// own list of which adapters those are.
-    pub owns_containers: bool,
-    /// Whether "test connection" can mean anything before the account exists.
-    /// Answered by the core rather than re-derived here, so the button and the
-    /// probe cannot disagree — see `account_setup::supports_credential_test`.
-    pub supports_credential_test: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AccountFormOption {
-    pub value: String,
-    /// Already in the caller's language, like every other label here.
-    pub label: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AccountFormField {
-    pub key: String,
-    /// `text` | `url` | `secret` | `bool` | `choice` | `directory` | `file`.
-    pub kind: String,
-    /// Already in the caller's language. The adapter names the field and its
-    /// own catalogue supplies the words; the frontend renders what it is given
-    /// and never looks a plugin's key up in the app's translations, because
-    /// the app has no business carrying a word about somebody else's provider.
-    pub label: String,
-    pub hint: Option<String>,
-    pub required: bool,
-    pub default_bool: Option<bool>,
-    pub default_text: Option<String>,
-    /// The choices, for `kind == "choice"`. Empty otherwise.
-    pub options: Vec<AccountFormOption>,
-    /// Whether this value belongs only to the device that entered it — a
-    /// filesystem path, typically. See `AccountField::device_local`.
-    pub device_local: bool,
-}
-
-/// One button the connect form should offer, everything already in the
-/// reader's language.
-#[derive(Debug, Serialize)]
-pub struct AccountFormAction {
-    pub key: String,
-    pub label: String,
-    pub busy_label: Option<String>,
-    pub success: Option<String>,
-    pub hint: Option<String>,
-    pub requires: Vec<AccountFormRequirement>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AccountFormRequirement {
-    pub field: String,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AccountFormOauth {
-    /// True when this build carries credentials for the provider, so the two
-    /// client fields may be left blank and the form need not show them at all.
-    pub builtin: bool,
-    pub client_id_field: String,
-    pub client_secret_field: Option<String>,
-}
-
 /// The account form a plugin declares, or `None` when it declares none.
 ///
 /// The frontend renders whatever comes back. It holds no per-adapter knowledge,
 /// and gains none when an adapter is added.
+///
+/// The spec is BUILT in `host_core::account_form`, not here: the mobile bridge
+/// needs the same answer, and the two hand-written builders this replaces had
+/// drifted in both directions — mobile's omitted `options` and crashed its own
+/// form on the FTP and SFTP plugins, and emitted an OAuth field the desktop
+/// never sent.
 #[tauri::command]
 pub fn account_form_spec(
     plugin_manager: State<'_, Arc<PluginManager>>,
@@ -1134,111 +1059,11 @@ pub fn account_form_spec(
     // reading them is the one at the keyboard. Absent means English.
     lang: Option<String>,
 ) -> CommandResult<Option<AccountFormSpec>> {
-    use plugin_core::account_schema::{AccountFieldDefault, AccountFieldKind};
-    let Some(plugin) = plugin_manager.plugin_for_adapter_kind(adapter_kind.as_str()) else {
-        return Ok(None);
-    };
-    let Some(schema) = plugin.manifest.account.clone() else {
-        return Ok(None);
-    };
-    let plugin_id = plugin.manifest.id.clone();
-    let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
-    let strings = PluginManager::strings_for(&plugin, lang);
-    let label_of = |key: Option<&str>, verbatim: &str| {
-        plugin_core::resolve_label(Some(&strings), key, verbatim, lang).to_string()
-    };
-    Ok(Some(AccountFormSpec {
-        plugin_id,
-        fields: schema
-            .fields
-            .iter()
-            .map(|f| AccountFormField {
-                key: f.key.clone(),
-                kind: match f.kind {
-                    AccountFieldKind::Text => "text",
-                    AccountFieldKind::Url => "url",
-                    AccountFieldKind::Secret => "secret",
-                    AccountFieldKind::Bool => "bool",
-                    AccountFieldKind::Choice => "choice",
-                    AccountFieldKind::Number => "number",
-                    // A directory and a file differ only in which picker the
-                    // frontend opens; both are a path in a text box where there
-                    // is no picker.
-                    AccountFieldKind::Directory => "directory",
-                    AccountFieldKind::File => "file",
-                }
-                .to_string(),
-                options: f
-                    .options
-                    .iter()
-                    .map(|o| AccountFormOption {
-                        value: o.value.clone(),
-                        label: label_of(o.label_key.as_deref(), &o.label),
-                    })
-                    .collect(),
-                // Passed through so a form can say so. Nothing renders on it
-                // yet; the split it describes lands with the account rows.
-                device_local: f.device_local,
-                label: label_of(f.label_key.as_deref(), &f.label),
-                hint: f
-                    .hint
-                    .as_deref()
-                    .or(f.hint_key.as_deref().map(|_| ""))
-                    .map(|verbatim| label_of(f.hint_key.as_deref(), verbatim))
-                    .filter(|hint| !hint.is_empty()),
-                required: f.required,
-                default_bool: match &f.default {
-                    Some(AccountFieldDefault::Bool(b)) => Some(*b),
-                    _ => None,
-                },
-                default_text: match &f.default {
-                    Some(AccountFieldDefault::Text(t)) => Some(t.clone()),
-                    _ => None,
-                },
-            })
-            .collect(),
-        actions: schema
-            .actions
-            .iter()
-            .map(|a| AccountFormAction {
-                key: a.key.clone(),
-                label: label_of(a.label_key.as_deref(), &a.label),
-                busy_label: a
-                    .busy_label
-                    .as_deref()
-                    .or(a.busy_label_key.as_deref().map(|_| ""))
-                    .map(|verbatim| label_of(a.busy_label_key.as_deref(), verbatim))
-                    .filter(|s| !s.is_empty()),
-                success: a
-                    .success
-                    .as_deref()
-                    .or(a.success_key.as_deref().map(|_| ""))
-                    .map(|verbatim| label_of(a.success_key.as_deref(), verbatim))
-                    .filter(|s| !s.is_empty()),
-                hint: a
-                    .hint
-                    .as_deref()
-                    .or(a.hint_key.as_deref().map(|_| ""))
-                    .map(|verbatim| label_of(a.hint_key.as_deref(), verbatim))
-                    .filter(|s| !s.is_empty()),
-                requires: a
-                    .requires
-                    .iter()
-                    .map(|r| AccountFormRequirement {
-                        field: r.field.clone(),
-                        message: label_of(r.message_key.as_deref(), &r.message),
-                    })
-                    .collect(),
-            })
-            .collect(),
-        oauth: schema.oauth.as_ref().map(|o| AccountFormOauth {
-            builtin: host_core::account_setup::has_builtin_client(o),
-            client_id_field: o.client_id_field.clone(),
-            client_secret_field: o.client_secret_field.clone(),
-        }),
-        owns_containers: plugin.manifest.has_data_family(),
-        supports_credential_test: host_core::account_setup::supports_credential_test(&schema),
-    }))
+    Ok(host_core::account_form::account_form_spec(
+        &plugin_manager,
+        adapter_kind.as_str(),
+        lang.as_deref(),
+    ))
 }
 
 /// Every adapter this build can connect an account for.

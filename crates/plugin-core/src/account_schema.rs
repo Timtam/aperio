@@ -85,6 +85,10 @@ impl AccountSecretSlot {
 /// is worth distinguishing from `Text`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+// Generated to TypeScript, so the union the two forms switch on is DERIVED from
+// this list rather than retyped beside it. Adding a kind here is a compile error
+// in both frontends until they handle it, which is the point.
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum AccountFieldKind {
     #[default]
     Text,

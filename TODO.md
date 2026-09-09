@@ -720,6 +720,30 @@ Siehe DESIGN §4.2.
   an, deren Typen es nennt. `cargo build -p host-core --features ts-export`
   allein war eine Wand aus „trait bound `X: TS` is not satisfied"; nur weil die
   xtask immer alle drei Features zusammen übergab, fiel es nicht auf.
+- [x] **Das Kontoformular wird einmal gebaut, in `host_core::account_form`.**
+  ↳ Zweiter Fall desselben Musters wie die Behälter-Zeilen: der Desktop baute
+  die Spec in `src-tauri/src/commands/accounts.rs`, `cal-ffi` baute sie
+  daneben von Hand mit `serde_json::json!` — und die beiden waren **in beide
+  Richtungen** auseinandergelaufen. Mobile fehlten `options`, `default_bool`,
+  `default_text` und `device_local`; Mobile schickte umgekehrt ein
+  `app_redirect_uri`, das der Desktop nie sendete und kein Frontend liest.
+  ↳ **Das war ein Absturz, kein Schönheitsfehler.**
+  `mobile/src/components/AccountSchemaForm.tsx:97` macht bei `kind === 'choice'`
+  ein `field.options.map(…)`, und **FTP und SFTP deklarieren choice-Felder** —
+  ein FTP-Konto auf dem Telefon anzulegen nahm das Formular mit. Gefunden von
+  der Neumessung (siehe unten), selbst nachgeprüft.
+  ↳ **Warum nichts es gefangen hat:** die mobile Seite parst die
+  Brücken-Antwort mit einem nackten `as AccountFormSpec`-Cast. Der
+  handgeschriebene TS-Typ sagte, der Schlüssel sei da, weil ein Mensch ihn dort
+  hingetippt hatte. Jetzt sind die Typen erzeugt, der Cast beschreibt also
+  etwas, das eine Maschine aus dem Rust abgeleitet hat.
+  ↳ Nebenbei: `kind` war beidseitig ein handgetippter String-Union. Die Zeile
+  trägt jetzt `plugin_core::AccountFieldKind` selbst; eine neue Feldart ist
+  damit ein Übersetzungsfehler in beiden Frontends, bis sie behandelt ist.
+  ↳ Wächter: `crates/host-plugins/tests/account_form_wire.rs`, rot bewiesen mit
+  `#[serde(skip)]` auf `options` — „field String("transport") has no `options`".
+  Das Fixture-Manifest steht IM Test, nicht in einer Nachbarkiste: der Test muss
+  den Adapter-Auszug überleben.
 - [x] **Die Eigentums-Regel liegt im Kern.** „Ist das meine Aufgabe?" — die
   einzige Regel im ganzen `shared/`-Satz, die schon zweimal geschrieben war:
   in `shared/taskAssignment.ts` und **privat** in `host_core::reminders`, wo
