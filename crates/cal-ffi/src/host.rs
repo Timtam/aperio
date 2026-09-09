@@ -61,6 +61,8 @@ use host_core::conflicts::{
 };
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
+// The container row shapes are declared once, in host-core, so the desktop and
+// this bridge cannot answer with different fields.
 use host_core::event_groups::{EventGroupsError, EventGroupsRepo, NewMember, Removal, Ungrouped};
 use host_core::event_log::OnboardingService;
 use host_core::meetings::{
@@ -76,6 +78,7 @@ use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
 use host_core::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use host_core::user_prefs::UserPrefsRepo;
+use host_core::wire::{CalendarRow, ContactListRow, TaskListRow};
 use host_core::DbHandle;
 use plugin_core::manifest::{RecurrenceCapabilities, TaskCapabilities};
 use plugin_core::shim::FfiSyncAdapter;
@@ -506,38 +509,6 @@ struct NewAccountRequest {
 
 fn default_config_json() -> String {
     "{}".into()
-}
-
-/// A calendar enriched with the owning `account_id`, matching the desktop
-/// `CalendarRow` wire shape the frontend groups by source. `Calendar`'s fields
-/// are flattened to the top level (so the JSON is `{id, name, …, account_id}`,
-/// not `{inner: {...}, account_id}`).
-///
-/// `recurrence_capabilities` is stamped from the owning adapter's plugin
-/// manifest (full RFC-5545 for the local store / any account whose plugin can't
-/// be resolved), so the event editor greys out recurrence options the backend
-/// can't store rather than offering one it silently drops. Mirrors the desktop
-/// `CalendarRow`.
-#[derive(serde::Serialize)]
-struct CalendarRow {
-    #[serde(flatten)]
-    inner: Calendar,
-    account_id: String,
-    recurrence_capabilities: RecurrenceCapabilities,
-}
-
-impl CalendarRow {
-    fn new(
-        inner: Calendar,
-        account_id: String,
-        recurrence_capabilities: RecurrenceCapabilities,
-    ) -> Self {
-        Self {
-            inner,
-            account_id,
-            recurrence_capabilities,
-        }
-    }
 }
 
 /// Create-calendar request (the desktop `CreateCalendarRequest` shape, minus
@@ -1759,30 +1730,6 @@ impl Host {
         }
         Ok(())
     }
-}
-
-/// A contact list enriched with its owning `account_id` — mirrors the desktop
-/// wire shape (and `TaskListRow`). Lets the UI tell local (deletable) from
-/// external (provider-managed) address books.
-#[derive(serde::Serialize)]
-struct ContactListRow {
-    #[serde(flatten)]
-    inner: ContactList,
-    account_id: String,
-}
-
-/// A task list enriched with its owning `account_id` + the adapter's
-/// `task_capabilities` — the desktop `TaskListRow` wire shape. The mobile UI
-/// gates affordances (recurrence, sections, …) on the capabilities, so an
-/// external list that can't store a recurrence rule no longer offers it then
-/// silently drops it on save.
-#[derive(serde::Serialize)]
-struct TaskListRow {
-    #[serde(flatten)]
-    inner: TaskList,
-    account_id: String,
-    task_capabilities: TaskCapabilities,
-    recurrence_capabilities: RecurrenceCapabilities,
 }
 
 /// The local SQLite store's task capabilities — it has no manifest, so hard-code
@@ -3656,8 +3603,9 @@ impl Host {
     // the external `update_task` branch), and external mutations invalidate the
     // SWR cache (`invalidate_*_cache`).
 
-    /// All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
-    /// wire shape: each `TaskList` flattened + its `account_id`). Primes the
+    /// All task lists (local + external) as a JSON [`TaskListRow`][host_core::wire::TaskListRow]
+    /// array — the ONE declaration the desktop's `list_task_lists` answers with
+    /// too, so the two surfaces cannot disagree about the shape. Primes the
     /// list→account route map for the following task/section ops, so call it
     /// before them (the desktop invariant). External accounts are fetched live;
     /// a dead account is skipped (its error swallowed), never blanking the list.
@@ -3739,14 +3687,10 @@ impl Host {
         // on the lists, then wrap. apply_* no-ops for local lists (own binding,
         // no override row).
         let mut lists: Vec<TaskList> = Vec::with_capacity(local.len() + external.len());
-        let mut meta: Vec<(String, TaskCapabilities, RecurrenceCapabilities)> =
+        let mut meta: Vec<(String, TaskCapabilities)> =
             Vec::with_capacity(local.len() + external.len());
         for l in local {
-            meta.push((
-                LOCAL_ID.to_string(),
-                local_task_capabilities(),
-                RecurrenceCapabilities::default(),
-            ));
+            meta.push((LOCAL_ID.to_string(), local_task_capabilities()));
             lists.push(l);
         }
         for l in external {
@@ -3755,9 +3699,7 @@ impl Host {
                 .account_for_task_list(&l.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
             let task_capabilities = self.task_caps_for_account(&account_id, &account_kinds);
-            let recurrence_capabilities =
-                self.recurrence_caps_for_account(&account_id, &account_kinds);
-            meta.push((account_id, task_capabilities, recurrence_capabilities));
+            meta.push((account_id, task_capabilities));
             lists.push(l);
         }
 
@@ -3770,14 +3712,11 @@ impl Host {
         let rows: Vec<TaskListRow> = lists
             .into_iter()
             .zip(meta)
-            .map(
-                |(inner, (account_id, task_capabilities, recurrence_capabilities))| TaskListRow {
-                    inner,
-                    account_id,
-                    task_capabilities,
-                    recurrence_capabilities,
-                },
-            )
+            .map(|(inner, (account_id, task_capabilities))| TaskListRow {
+                inner,
+                account_id,
+                task_capabilities,
+            })
             .collect();
         to_json(&rows)
     }

@@ -612,10 +612,15 @@ export default function TaskEditorModal({
         : { ...prev, assignees: trimmed };
     });
   }, [assignmentMode]);
-  const recurrenceCaps = useMemo(
-    () => taskLists.find((l) => l.id === form.listId)?.recurrence_capabilities,
-    [taskLists, form.listId],
-  );
+  // Which repeat SHAPES the source can keep, from the same capabilities block
+  // as everything else above. It used to read a `recurrence_capabilities` field
+  // the Host stamped from the plugin's TOP-LEVEL `recurrence` — which describes
+  // calendar EVENT recurrence, not task recurrence, and which the desktop never
+  // sent at all. Vikunja declares only `tasks.recurrence`, so this fell back to
+  // full RFC 5545 and offered weekday pickers, day-of-month, count and until
+  // for a source that keeps none of them: the save reported success and the
+  // server dropped the value.
+  const recurrenceCaps = caps?.recurrence;
   const canSection = caps?.sections ?? true;
   // Colour binds to a LOCAL task on its own row; on an external task it would be
   // a host-local override (a later increment), so only offer it for local lists.

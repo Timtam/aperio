@@ -428,14 +428,31 @@ Frontends nie erreicht, ist ein roter Build — kein Wert, der über die Leitung
 kommt und den nie jemand liest. Der Bericht **nennt** die Dateien
 (`missing:` / `outdated:` / `stale:`), er zählt sie nicht.
 
-**Was nicht erzeugt wird, und warum.** `TaskList` hat keine einzige
-Rust-Deklaration, aus der man es erzeugen könnte: was die Frontends beim
-Auflisten bekommen, ist `cal_core::TaskList` plus das, was der Host anstempelt —
-gebaut vom Desktop in `src-tauri/src/commands/tasks.rs` und von Mobile in
-`crates/cal-ffi/src/host.rs`, in **zwei getrennt gepflegten Strukturen**. Die
-beiden sind nicht einig: `recurrence_capabilities` stempelt nur Mobile an. Der
-Schnitt steht deshalb sichtbar in `shared/types.ts` statt versteckt in zwei
-`TaskListRow`s — und die Zusammenlegung ist eine eigene Aufgabe (TODO).
+**Die Zeilen, die der Host anstempelt, sind auch nur EINE Deklaration.** Was
+die Frontends beim Auflisten bekommen, ist nicht der nackte `cal_core`-Typ,
+sondern er plus das, was nur der Host weiß: welches Konto den Behälter besitzt
+und was der zuständige Adapter laut Manifest speichern kann. Diese Zeilen lagen
+zweimal da — einmal in `src-tauri/src/commands/` für die Tauri-Befehle, einmal
+in `crates/cal-ffi/src/host.rs` für die Mobile-Brücke —, von Hand in Schritt
+gehalten und mit Kommentaren „spiegelt den Desktop".
+
+Sie waren auseinandergelaufen, und es hat etwas gekostet. Die mobile
+`TaskListRow` trug ein `recurrence_capabilities`, das die des Desktops nicht
+hatte, also fragten die zwei Aufgaben-Editoren **verschiedene Manifestfelder**
+ab: der Desktop `tasks.recurrence`, Mobile das top-level `recurrence` — das
+Kalender-**Termin**-Wiederholungen beschreibt. Bei elf von zwölf Adaptern sagen
+die beiden dasselbe. Bei Vikunja nicht: es deklariert nur `tasks.recurrence`
+(kein Wochentagsraster, kein Monatstag, kein count, kein until), Mobile fiel auf
+volles RFC 5545 zurück und bot Wiederholungsformen an, die Vikunja nicht
+speichern kann — Speichern meldete Erfolg, der Server verwarf den Wert.
+
+`host_core::wire` hält jetzt `CalendarRow`, `TaskListRow` und `ContactListRow`
+je einmal; beide Oberflächen benutzen dieselbe Struktur. **Eine Deklaration kann
+sich nicht mit sich selbst uneinig sein** — das ist der Grund für das Modul, die
+entfernte Doppelung ist die Nebenwirkung. `TaskListRow` trägt den ts-rs-Derive
+und ist damit der erzeugte `TaskList`-Typ der Frontends; `recurrence_capabilities`
+gibt es dort bewusst nicht mehr, denn die Wiederholung einer Aufgabe steht in
+den `task_capabilities`.
 
 Zwei Felder tragen aus einem echten Grund eine Ausnahme-Annotation:
 

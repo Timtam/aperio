@@ -5,7 +5,7 @@ use cal_core::{
     AttendeeStatus, Calendar, CalendarFeature, ColorLabelId, DateRange, Event, FreeBusy, NewEvent,
 };
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::{AppHandle, State};
@@ -27,28 +27,12 @@ use crate::overrides::{
     apply_color_to_calendars, apply_color_to_events, apply_to_calendars, heal_event_color_anchors,
     OverridesRepo,
 };
+// The row shape is declared once, in host-core, so the desktop and the mobile
+// bridge cannot answer with different fields — see `host_core::wire`.
+use host_core::wire::CalendarRow;
+
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
-
-/// Wire-format Calendar enriched with the owning account id. Lets
-/// the frontend group containers by source without a second
-/// round-trip to fetch the registry's route map.
-///
-/// `serde(flatten)` writes every Calendar field at the top level so
-/// the existing TypeScript Calendar type only needs one new field
-/// (`account_id`) to consume this shape.
-#[derive(Debug, Serialize)]
-pub struct CalendarRow {
-    #[serde(flatten)]
-    pub inner: Calendar,
-    pub account_id: String,
-    /// Recurrence shapes the owning adapter can store, resolved
-    /// from the account's plugin manifest. The EventDialog greys
-    /// out options this source can't round-trip (e.g. EWS has no
-    /// yearly interval). Local + unknown sources report full
-    /// RFC-5545 support via [`RecurrenceCapabilities::default`].
-    pub recurrence_capabilities: RecurrenceCapabilities,
-}
 
 /// Resolve an account's recurrence capabilities from its plugin
 /// manifest. Local calendars (`account_id == LOCAL_ID`) and any

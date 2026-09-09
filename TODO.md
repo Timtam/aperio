@@ -696,19 +696,30 @@ Siehe DESIGN §4.2.
   (`outdated: Section.ts`), gelöschte + verwaiste Datei (`missing:` / `stale:`),
   und ein umbenanntes `ts-export`-Feature. Er **nennt** die Dateien, er zählt
   sie nicht.
-- [ ] **`TaskListRow` liegt zweimal in Rust und die zwei sind nicht einig.**
-  Der Desktop baut die Zeile in `src-tauri/src/commands/tasks.rs`, Mobile in
-  `crates/cal-ffi/src/host.rs` — beide `cal_core::TaskList` + `account_id` +
-  `task_capabilities`, aber `recurrence_capabilities` stempelt **nur Mobile**
-  an. Die alte Handschrift verdeckte das, indem sie beide als optional führte;
-  jetzt steht der Schnitt sichtbar in `shared/types.ts`. Eine Struktur in
-  `host-core`, von beiden benutzt, macht die Divergenz unmöglich und erzeugt
-  `TaskList` mit.
-  ↳ Direkte Folge, ebenfalls offen: der Desktop-Aufgabeneditor blendet
-  Wiederholungsformen über `task_capabilities.recurrence` aus, der mobile über
-  das top-level `recurrence_capabilities` — zwei **verschiedene** Manifestfelder
-  (`manifest.tasks.recurrence` gegen `manifest.recurrence`). Ob die pro Adapter
-  dasselbe sagen, ist ungeprüft.
+- [x] **Die Behälter-Zeilen liegen einmal, in `host_core::wire`.**
+  ↳ `CalendarRow`, `TaskListRow` und `ContactListRow` waren je zweimal
+  deklariert (Tauri-Befehle + cal-ffi), von Hand in Schritt gehalten. Die
+  Task-Zeile war auseinandergelaufen: Mobile trug ein `recurrence_capabilities`,
+  der Desktop nicht — also fragten die beiden Aufgaben-Editoren
+  **verschiedene** Manifestfelder ab (`tasks.recurrence` gegen das top-level
+  `recurrence`, das Termin-Wiederholungen beschreibt). Bei elf Adaptern sagen
+  die dasselbe; **bei Vikunja nicht**, und Mobile bot deshalb Wiederholungen an,
+  die Vikunja nicht speichern kann. Das Feld ist von der Aufgaben-Zeile weg (es
+  gehörte nie dorthin), Mobile liest `caps?.recurrence` wie der Desktop, und
+  `TaskListRow` wird jetzt mit nach TypeScript erzeugt — `shared/types.ts` setzt
+  `TaskList` nicht mehr von Hand zusammen.
+  ↳ Der Wächter für die Aufgaben-Zeile ist der Codegen-Check selbst: ein Feld
+  mehr oder weniger an `TaskListRow` macht `cargo xtask ts-types --check` rot,
+  bis es neu erzeugt ist, und die erzeugte TS-Datei steht dann im Diff.
+  `CalendarRow` und `ContactListRow` haben den nicht — `cal_core::Calendar` und
+  `ContactList` tragen noch keinen ts-rs-Derive. Sie mitzuerzeugen wäre der
+  natürliche nächste Codegen-Schritt und würde nebenbei den handgeschriebenen
+  `Calendar`-Typ in `src/api/types.ts` (559 Zeilen Handschrift, von Schritt 1
+  nicht angefasst) ablösen.
+  ↳ Nebenbei repariert: `ts-export` schaltete das Feature nicht in den Kisten
+  an, deren Typen es nennt. `cargo build -p host-core --features ts-export`
+  allein war eine Wand aus „trait bound `X: TS` is not satisfied"; nur weil die
+  xtask immer alle drei Features zusammen übergab, fiel es nicht auf.
 - [x] **Die Eigentums-Regel liegt im Kern.** „Ist das meine Aufgabe?" — die
   einzige Regel im ganzen `shared/`-Satz, die schon zweimal geschrieben war:
   in `shared/taskAssignment.ts` und **privat** in `host_core::reminders`, wo
@@ -729,10 +740,34 @@ Siehe DESIGN §4.2.
   anstempelt. Beide Aufrufer (Desktop-Sidebar, mobiler Listeneditor) verwerfen
   die Antwort, es ist also latent; der Typ heißt jetzt `TaskListCore` und sagt
   die Wahrheit. Sauber wäre, die Zeile auch dort anzustempeln.
-- [ ] Schritt 2: die Rechenregeln (`taskGrouping`, `recurrence`,
-  `widgetSnapshot`, `dayStart`, `taskDay`, `taskCascade`,
-  `expandTaskOccurrences`, `taskStatus` — ~3.400 Zeilen) gehören hinter die
-  Grenze, nicht in ein JS-Paket.
+- [~] **Schritt 2 vermessen (2026-09-09), und die Fragestellung war falsch.**
+  Acht Module wurden einzeln durchgemessen (Reinheit, jede Aufrufstelle,
+  Rust-Gegenstück, Kosten). Befund: **es gibt keine Einheit in Modulgröße, die
+  umziehen könnte** — jedes der acht zerfällt in eine Domänen-Hälfte, die in den
+  Kern gehört, und eine Ansichts-Hälfte, die nicht weg kann. Und der Blocker ist
+  bei sechs von acht **nicht** die IPC-Runde, sondern das Fehlen einer
+  **synchronen** Kern-Bindung; kein Umbau eines Befehls behebt das.
+  Sieben von acht „large"-Schätzungen sind derselbe eine Befund.
+  ↳ Nur EINE echte Doppelung existierte: `is_mine_or_unassigned`, in
+  `host-core/src/reminders.rs` **privat** und in `shared/taskAssignment.ts`.
+  Erledigt — siehe den Eintrag oben.
+  ↳ Echte Divergenz, unabhängig vom Umzug: `shared/recurrence.ts` und
+  `host-core`s `expand_occurrences` dokumentieren **verschiedenes**
+  DST-Randverhalten, und Rust deckelt bei `RRULESET_LIMIT=500`, JS gar nicht.
+  Braucht eine sprachübergreifende Fixture, bevor irgendetwas
+  Wiederholungs-Förmiges umzieht — und die läuft mangels Test-Runner nicht auf
+  Mobile.
+  ↳ Messlücke, ehrlich benannt: `collapseEventGroups` (202), `dayGridLayout`
+  (269), `taskRecurrence` (178) und `taskAssignment` (87) liegen INNERHALB der
+  vermessenen Abhängigkeiten und wurden nicht vermessen.
+- [ ] **Die Entscheidung, an der Schritt 2 hängt** (Tonis): bekommt `cal-core`
+  eine **synchrone**, in-process Bindung in die Frontends, oder bleibt
+  „nur await" die dauerhafte Form? Fünf Module kippen daran. WASM ist für
+  Mobile schon ausgeschlossen (Hermes kann kein WebAssembly).
+- [ ] Zwei Verträge, die vor jedem Umzug festzuklopfen sind: (a) der Kern gibt
+  **i18n-Schlüssel + Variablen** zurück, nie fertigen Text (Vorbild
+  `cal-core/src/conferencing.rs:70`); (b) der Kern liest **nie** die Uhr oder
+  die Gerätezone — Tageschlüssel und Offset sind immer Parameter.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
