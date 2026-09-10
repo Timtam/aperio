@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  groupForEvent,
+  eventGroupMemberKey,
   indexEventGroups,
   memberFromEvent,
-  otherMemberCount,
   type EventGroup,
 } from '@aperio/shared';
 
@@ -31,24 +30,26 @@ const group: EventGroup = {
 };
 
 describe('event groups', () => {
+  // Asked through `index.get(eventGroupMemberKey(...))` — the way every
+  // production caller asks — rather than through the `groupForEvent` wrapper
+  // that used to sit on top. The wrapper had no callers and is gone; the RULE
+  // it was testing is the key's, and that is what this pins.
   it('finds a row by calendar AND id, not by id alone', () => {
     const index = indexEventGroups([group]);
-    expect(groupForEvent(index, { calendar_id: 'work', id: 'ev-a' })?.id).toBe(
-      'g1',
-    );
+    expect(index.get(eventGroupMemberKey('work', 'ev-a'))?.id).toBe('g1');
     // The same event id in a calendar that is NOT a member. Provider ids are
     // only unique within a calendar, so keying on the id alone would claim a
     // stranger belongs to the group.
-    expect(
-      groupForEvent(index, { calendar_id: 'colleague', id: 'ev-a' }),
-    ).toBeUndefined();
-    expect(groupForEvent(index, { calendar_id: 'work', id: null })).toBeUndefined();
+    expect(index.get(eventGroupMemberKey('colleague', 'ev-a'))).toBeUndefined();
   });
 
-  it('counts the OTHERS, which is what a row announces', () => {
-    expect(otherMemberCount(group, { calendar_id: 'work', id: 'ev-a' })).toBe(1);
-    // An event that is not in the group at all sees every member as another.
-    expect(otherMemberCount(group, { calendar_id: 'x', id: 'ev-z' })).toBe(2);
+  it('keeps two members apart when a separator moves', () => {
+    // Why the key is JSON and not a joined string: a provider id may contain
+    // any character, so `("a b", "c")` and `("a", "b c")` must not collide. A
+    // collision here claims a stranger belongs to a group.
+    expect(eventGroupMemberKey('a b', 'c')).not.toBe(
+      eventGroupMemberKey('a', 'b c'),
+    );
   });
 
   it('takes the signature from the event as it is now', () => {
