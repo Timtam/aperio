@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   carryOnto,
+  futureCarryRow,
   occurrenceCarryRow,
   planCarry,
   worthCarrying,
@@ -197,5 +198,193 @@ describe('carrying an edit to the other copies', () => {
     );
     expect(row.start).toBe('2026-08-24T10:00:00.000Z');
     expect(row.end).toBe('2026-08-24T11:00:00.000Z');
+  });
+});
+
+/**
+ * "This and all following", carried to a copy.
+ *
+ * These cases did not exist. `futureCarryRow` was the only function in the
+ * module with no test at all — and it is the one whose own doc describes the
+ * bug it was written against: the head was truncated before the copy's own
+ * occurrence while the tail began at the anchor's, so the two halves did not
+ * meet, the copy lost a real appointment, gained one on a day it never had,
+ * and every occurrence after it fell out of phase.
+ *
+ * Every expectation below was MEASURED from the implementation as it stands,
+ * not chosen. They are here so the behaviour is pinned before the rule crosses
+ * into `cal-core`, where a mistranslation would be silent.
+ */
+describe('carrying "this and all following" to a copy', () => {
+  /** The copy's own master: a week later than the anchor's, an hour long. */
+  const copyMaster = () => ({
+    ...fields({ start: '2026-08-12T14:00:00Z', end: '2026-08-12T15:00:00Z' }),
+    reminders: ['-PT30M'],
+  });
+  /** The copy cuts at ITS own next occurrence, which is not the anchor's. */
+  const copyCut = '2026-08-12T14:00:00Z';
+
+  it('leaves the copy its own instants when only the title changed', () => {
+    const row = futureCarryRow(
+      copyMaster(),
+      copyCut,
+      fields(),
+      fields({ title: 'Neuer Name' }),
+      ['title'],
+    );
+    expect(row.start).toBe('2026-08-12T14:00:00.000Z');
+    expect(row.end).toBe('2026-08-12T15:00:00.000Z');
+    expect(row.title).toBe('Neuer Name');
+    // The reason this copy exists at all is untouched.
+    expect(row.reminders).toEqual(['-PT30M']);
+  });
+
+  it('carries the SHIFT, applied to the copy own cut point', () => {
+    // The user moved the anchor an hour later. The copy is cut a week on, at
+    // 14:00 — writing the anchor's new instant here would put the tail three
+    // days before the head.
+    const row = futureCarryRow(
+      copyMaster(),
+      copyCut,
+      fields(),
+      fields({ start: '2026-08-10T09:00:00Z', end: '2026-08-10T10:00:00Z' }),
+      ['start', 'end'],
+    );
+    expect(row.start).toBe('2026-08-12T15:00:00.000Z');
+    expect(row.end).toBe('2026-08-12T16:00:00.000Z');
+  });
+
+  it('carries a backward move the same way', () => {
+    const row = futureCarryRow(
+      copyMaster(),
+      copyCut,
+      fields(),
+      fields({ start: '2026-08-09T08:00:00Z', end: '2026-08-09T09:00:00Z' }),
+      ['start', 'end'],
+    );
+    expect(row.start).toBe('2026-08-11T14:00:00.000Z');
+    expect(row.end).toBe('2026-08-11T15:00:00.000Z');
+  });
+
+  it('adopts a new duration without a move', () => {
+    const row = futureCarryRow(
+      copyMaster(),
+      copyCut,
+      fields(),
+      fields({ end: '2026-08-10T11:00:00Z' }),
+      ['end'],
+    );
+    expect(row.start).toBe('2026-08-12T14:00:00.000Z');
+    expect(row.end).toBe('2026-08-12T17:00:00.000Z');
+  });
+
+  it('carries the other fields while deciding the instants itself', () => {
+    const row = futureCarryRow(
+      copyMaster(),
+      copyCut,
+      fields(),
+      fields({
+        location: 'Raum 3',
+        start: '2026-08-10T10:00:00Z',
+        end: '2026-08-10T11:30:00Z',
+      }),
+      ['location', 'start', 'end'],
+    );
+    expect(row.location).toBe('Raum 3');
+    expect(row.start).toBe('2026-08-12T16:00:00.000Z');
+    expect(row.end).toBe('2026-08-12T17:30:00.000Z');
+  });
+
+  const allDayCopy = () =>
+    fields({
+      start: '2026-08-12T00:00:00Z',
+      end: '2026-08-13T00:00:00Z',
+      all_day: true,
+    });
+
+  it('moves an ALL-DAY copy in whole days, whatever the anchor did to the minute', () => {
+    const row = futureCarryRow(
+      allDayCopy(),
+      '2026-08-12T00:00:00Z',
+      fields(),
+      fields({ start: '2026-08-10T20:00:00Z', end: '2026-08-10T21:00:00Z' }),
+      ['start', 'end'],
+    );
+    // Twelve hours, rounded to a day. A start that is not local midnight is
+    // not an all-day event.
+    expect(row.start).toBe('2026-08-13T00:00:00.000Z');
+    // And an hour-long edit must not shrink it to an hour: the two disagree
+    // about being all-day, so the copy keeps its own duration.
+    expect(row.end).toBe('2026-08-14T00:00:00.000Z');
+  });
+
+  /**
+   * The rounding is NOT symmetric, and that is measured rather than chosen.
+   *
+   * `Math.round` breaks a tie towards +∞, so exactly twelve hours forward is a
+   * day and exactly twelve hours back is nothing. Rust's `f64::round` breaks
+   * the same tie AWAY from zero, which would move a copy a whole day further
+   * back on every exact half-day rewind — silently. Pinned here so the port
+   * has to reproduce the tie rather than discover it.
+   */
+  it('breaks an exact half-day tie towards the future, in both directions', () => {
+    const back = futureCarryRow(
+      allDayCopy(),
+      '2026-08-12T00:00:00Z',
+      fields(),
+      fields({ start: '2026-08-09T20:00:00Z', end: '2026-08-09T21:00:00Z' }),
+      ['start', 'end'],
+    );
+    expect(back.start).toBe('2026-08-12T00:00:00.000Z');
+
+    const further = futureCarryRow(
+      allDayCopy(),
+      '2026-08-12T00:00:00Z',
+      fields(),
+      fields({ start: '2026-08-08T20:00:00Z', end: '2026-08-08T21:00:00Z' }),
+      ['start', 'end'],
+    );
+    expect(further.start).toBe('2026-08-11T00:00:00.000Z');
+  });
+
+  it('adopts the new duration when both agree about being all-day', () => {
+    const row = futureCarryRow(
+      allDayCopy(),
+      '2026-08-12T00:00:00Z',
+      fields({ all_day: true }),
+      fields({
+        start: '2026-08-10T00:00:00Z',
+        end: '2026-08-13T00:00:00Z',
+        all_day: true,
+      }),
+      ['start', 'end'],
+    );
+    expect(row.start).toBe('2026-08-12T00:00:00.000Z');
+    expect(row.end).toBe('2026-08-15T00:00:00.000Z');
+  });
+
+  /**
+   * A KNOWN LIMIT, written down rather than left to be met in production.
+   *
+   * An unreadable cut point makes `start` NaN, and `new Date(NaN).toISOString()`
+   * throws. Nothing produces one today — the cut point is an ISO instant taken
+   * from an event — but the throw lands in the middle of the loop that carries
+   * to each member, so one bad row would abandon the rest of the carry instead
+   * of skipping that copy.
+   *
+   * It is pinned rather than fixed because changing it is a decision, and the
+   * rule is about to cross into Rust where it cannot throw at all. The port has
+   * to answer this deliberately.
+   */
+  it('throws on an unreadable cut point', () => {
+    expect(() =>
+      futureCarryRow(
+        copyMaster(),
+        'irgendwann',
+        fields(),
+        fields({ start: '2026-08-10T09:00:00Z', end: '2026-08-10T10:00:00Z' }),
+        ['start', 'end'],
+      ),
+    ).toThrow(RangeError);
   });
 });
