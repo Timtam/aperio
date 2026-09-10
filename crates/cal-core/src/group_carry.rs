@@ -254,18 +254,29 @@ pub fn occurrence_carry_fields(
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// JavaScript's `Math.round`, which is NOT Rust's.
+/// How many whole days a shift of `ms` is, rounding a tie towards the FUTURE.
 ///
-/// Both round to the nearest whole number; they break a TIE differently.
-/// `Math.round` goes towards +∞ — `-0.5` is `-0` — while `f64::round` goes away
-/// from zero, so `-0.5` is `-1`. For an all-day copy that is a whole day: an
-/// anchor moved back by exactly twelve hours must not move the copy at all, and
-/// `f64::round` would move it a day.
+/// This is JavaScript's `Math.round`, which is NOT Rust's. Both round to the
+/// nearest whole number; they break a tie differently. `Math.round` goes
+/// towards +∞ — `-0.5` is `-0` — while `f64::round` goes away from zero, so
+/// `-0.5` is `-1`. For an all-day copy that is a whole day: an anchor moved
+/// back by exactly twelve hours must not move the copy at all, and `f64::round`
+/// would move it a day.
 ///
-/// The behaviour is pinned by `src/state/groupCarry.test.ts`, whose
-/// expectations were measured from the TypeScript this replaces.
-fn round_half_up(value: f64) -> f64 {
-    (value + 0.5).floor()
+/// Done in INTEGERS, and that is not only tidiness. Adding half a day and
+/// dividing with a floor is exactly `Math.round`'s tie rule, it is exact where
+/// a float divide is approximate — and the float version compiled to
+/// `i64.trunc_sat_f64_s`, a WebAssembly instruction from a feature `wasm-opt`
+/// is not run with here, so the desktop's module would not build at all.
+///
+/// `div_euclid` is floor division for a positive divisor, which `/` is not:
+/// `/` truncates towards zero, and that would break the tie the other way for
+/// every backward move.
+///
+/// Pinned by `src/state/groupCarry.test.ts`, whose expectations were measured
+/// from the TypeScript this replaces.
+fn whole_days(ms: i64) -> i64 {
+    (ms + DAY_MS / 2).div_euclid(DAY_MS)
 }
 
 /// The fields of the row a carried "this and all following" edit creates.
@@ -323,7 +334,7 @@ pub fn future_carry_fields(
         0
     };
     let shift = if master.all_day {
-        (round_half_up(moved_by as f64 / DAY_MS as f64) as i64) * DAY_MS
+        whole_days(moved_by) * DAY_MS
     } else {
         moved_by
     };
