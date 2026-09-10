@@ -192,7 +192,19 @@ pub fn detect_conference(sources: &ConferenceSources<'_>) -> Option<ConferenceLi
                 };
                 let better = match &best {
                     None => true,
-                    Some((current, _)) => url.len() > current.len(),
+                    // CHARACTERS, not bytes. `len()` is a byte count, and it
+                    // let a URL with one non-ASCII character outrank a longer
+                    // ASCII one — which is not what "the longest URL" means to
+                    // anyone. The TypeScript twin counted UTF-16 code units,
+                    // so the two picked DIFFERENT join urls for the same
+                    // description, and `join_url` is the one field both hosts
+                    // actually read: the Join button and the host's meeting
+                    // resolution could target different links.
+                    //
+                    // Scalar values agree with UTF-16 for every ASCII and
+                    // every BMP character, so this matches what the frontends
+                    // did, and differs only for astral characters in a URL.
+                    Some((current, _)) => url.chars().count() > current.chars().count(),
                 };
                 if better {
                     best = Some((url, provider));
@@ -573,7 +585,22 @@ fn extract_details(texts: &[&str]) -> Details {
     for text in texts {
         if details.sip_address.is_none() {
             if let Some(sip) = find_uri(text, "sip:") {
-                if let Some((user, _)) = sip.trim_start_matches("sip:").split_once('@') {
+                // ONE scheme, and matched without regard to case. Both halves
+                // of that were wrong before, in opposite directions:
+                //
+                // `trim_start_matches` strips the prefix REPEATEDLY, so a
+                // malformed `sip:sip:1234@host` was quietly cleaned up into a
+                // meeting number. That is guessing at a URI nobody wrote, and
+                // it was an accident of the combinator rather than a decision.
+                //
+                // And it matched case-SENSITIVELY, so `SIP:1234@host` — which
+                // RFC 3986 §3.1 says is the same URI, schemes being
+                // case-insensitive — yielded nothing at all.
+                let body = sip
+                    .get(.."sip:".len())
+                    .filter(|prefix| prefix.eq_ignore_ascii_case("sip:"))
+                    .map_or(sip.as_str(), |_| &sip["sip:".len()..]);
+                if let Some((user, _)) = body.split_once('@') {
                     if !user.is_empty() && user.chars().all(|c| c.is_ascii_digit()) {
                         details.meeting_number = Some(user.to_string());
                     }
@@ -627,9 +654,20 @@ fn parse_dtmf(tel: &str) -> (Option<String>, Option<String>) {
             // The LONGEST digit run in the part, not the first: the field is
             // wrapped in a `*01*` tone marker, and taking the first run would
             // stop at "01" and never reach the number behind it.
+            //
+            // On a TIE the FIRST maximal run wins, and the fold says so rather
+            // than leaving it to a combinator. `max_by_key` returns the LAST
+            // maximal element, which is not wrong so much as unstated — and it
+            // was the opposite of what the TypeScript twin did, so a payload
+            // with two equally long runs in one field announced a different
+            // meeting number depending on which surface a person was reading.
+            // First-wins is the answer that was already shipping.
             part.split(|c: char| !c.is_ascii_digit())
                 .filter(|run| !run.is_empty())
-                .max_by_key(|run| run.len())
+                .fold(None::<&str>, |best, run| match best {
+                    Some(b) if b.len() >= run.len() => Some(b),
+                    _ => Some(run),
+                })
                 .map(str::to_string)
         })
         .collect();
@@ -1116,5 +1154,168 @@ mod tests {
         // for the login page too. Deliberately unclassified rather than
         // wrongly claimed.
         assert_eq!(classify("https://webconf.vc.dfn.de/r/abc123/"), None);
+    }
+}
+
+/// The contract this rule answers, as a table rather than as code.
+///
+/// The rule was written TWICE — here and in `shared/conferencing.ts` — and
+/// nothing pinned the two to each other: each had its own hand-copied test
+/// list, and six places where they disagreed sat there unobserved because the
+/// two Rust callers read only `join_url` and every disagreement lived in the
+/// other fields. All six would have appeared at once, silently, the moment the
+/// TypeScript was deleted.
+///
+/// The fixture records each input, the answer this code gives, and — for the
+/// rows that had two answers — what the TypeScript said and why the surviving
+/// answer was chosen. It is a table a person can read, which is the point: the
+/// migration's behaviour change is written down BEFORE it happens instead of
+/// being discovered afterwards.
+///
+/// The file lives inside this crate rather than in `shared/contracts/`, where
+/// its two siblings sit. Those are read from `host-core`, which never leaves
+/// this repository; `cal-core` is compiled by twelve adapter repositories, and
+/// an `include_str!` reaching out of the crate would break the day it moves.
+#[cfg(test)]
+mod contract {
+    use super::*;
+    use serde_json::Value;
+
+    const CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/conferencing.json"
+    ));
+
+    fn opt<'a>(case: &'a Value, key: &str) -> Option<&'a str> {
+        case.get(key).and_then(Value::as_str)
+    }
+
+    /// What the fixture says a field should be, as the detected link spells it.
+    fn expected<'a>(expect: &'a Value, key: &str) -> Option<&'a str> {
+        expect.get(key).and_then(Value::as_str)
+    }
+
+    #[test]
+    fn every_case_in_the_contract_holds() {
+        let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let cases = doc["cases"].as_array().expect("cases is an array");
+
+        // Anti-silence: the file must actually carry cases, and it must carry
+        // the ones this test exists for. Named rather than counted — a floor
+        // would be the number of rows there are today, and adding a row is
+        // precisely the change it should survive.
+        for must in [
+            "webex-dtmf-canonical",
+            "dtmf-tie-in-the-meeting-number",
+            "sip-scheme-written-twice",
+            "sip-scheme-in-capitals",
+            "turkish-dotted-capital-i-before-a-uri",
+            "no-meeting-at-all",
+        ] {
+            assert!(
+                cases.iter().any(|c| c["name"] == must),
+                "the contract has no case named {must} — either it was removed \
+                 deliberately or this test is reading the wrong file",
+            );
+        }
+
+        for case in cases {
+            let name = case["name"].as_str().expect("every case is named");
+            let found = detect_conference(&ConferenceSources {
+                location: opt(case, "location"),
+                description: opt(case, "description"),
+                ..Default::default()
+            });
+
+            let expect = &case["expect"];
+            if expect.is_null() {
+                assert!(
+                    found.is_none(),
+                    "{name}: the contract says no meeting, but one was detected: {found:?}",
+                );
+                continue;
+            }
+            let Some(found) = found else {
+                panic!("{name}: the contract expects a meeting and none was detected");
+            };
+
+            assert_eq!(
+                found.join_url,
+                expect["join_url"]
+                    .as_str()
+                    .expect("every meeting has a join url"),
+                "{name}: join url",
+            );
+            assert_eq!(
+                serde_json::to_value(found.provider).expect("a provider serialises"),
+                expect["provider"],
+                "{name}: provider",
+            );
+            assert_eq!(
+                serde_json::to_value(found.source).expect("a source serialises"),
+                expect["source"],
+                "{name}: source",
+            );
+
+            // Absent from the fixture means absent from the answer. Spelling it
+            // that way round is what makes a row that gains a field fail here
+            // rather than pass in silence.
+            for (key, actual) in [
+                ("meeting_number", &found.meeting_number),
+                ("password", &found.password),
+                ("sip_address", &found.sip_address),
+                ("phone", &found.phone),
+            ] {
+                assert_eq!(actual.as_deref(), expected(expect, key), "{name}: {key}",);
+            }
+
+            let want: Vec<(String, String)> = expect
+                .get("labelled_details")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .map(|row| {
+                            (
+                                row[0].as_str().unwrap_or_default().to_string(),
+                                row[1].as_str().unwrap_or_default().to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert_eq!(found.labelled_details, want, "{name}: labelled details");
+        }
+    }
+
+    /// Every row that records a second answer says which one survived and why.
+    ///
+    /// Not decoration. A row whose `wasTypeScript` block loses its `chosen`
+    /// note becomes a behaviour change with no reason attached, which is the
+    /// state this whole exercise exists to get out of.
+    #[test]
+    fn every_divergence_says_why_it_was_settled() {
+        let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let mut settled = Vec::new();
+        for case in doc["cases"].as_array().expect("cases is an array") {
+            let Some(was) = case.get("wasTypeScript") else {
+                continue;
+            };
+            let name = case["name"].as_str().unwrap_or("<unnamed>");
+            for key in ["answer", "chosen"] {
+                assert!(
+                    was.get(key)
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.is_empty()),
+                    "{name}: its wasTypeScript block has no `{key}`",
+                );
+            }
+            settled.push(name);
+        }
+        assert!(
+            settled.len() >= 6,
+            "only {} divergences are recorded; six were found, so rows have been \
+             dropped: {settled:?}",
+            settled.len(),
+        );
     }
 }
