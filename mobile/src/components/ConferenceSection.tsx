@@ -9,7 +9,12 @@ import {
   View,
 } from 'react-native';
 
-import { ALLOWED_LINK_SCHEMES, detectConference, schemeOf } from '@aperio/shared';
+import {
+  ALLOWED_LINK_SCHEMES,
+  conferenceDetailRows,
+  detectConference,
+  schemeOf,
+} from '@aperio/shared';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -59,7 +64,8 @@ export function ConferenceSection({
       value: conference.password,
     },
   ].filter((d): d is { label: string; value: string } => !!d);
-  const details = derived.length > 0 ? derived : conference.labelledDetails;
+  // BOTH, derived first — see the desktop twin and `conferenceDetailRows`.
+  const details = conferenceDetailRows(derived, conference.labelledDetails);
 
   const open = async () => {
     // Re-validate the scheme: a description can come from an untrusted external

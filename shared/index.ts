@@ -34,6 +34,7 @@ export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';
 export * from './accountSchema';
+export * from './conferenceDetails';
 export * from './conferencing';
 export * from './meetingEvents';
 export * from './meetingLinkGrouping';
