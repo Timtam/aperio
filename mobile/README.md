@@ -137,7 +137,7 @@ but you cannot inspect the raw iOS accessibility tree on Windows.
 ## Tasks UI (M1 — offline, Android-first)
 
 `App.tsx` is now a minimal, accessibility-first **tasks screen** backed by the
-shared Rust core: the `cal-ffi` module exposes the on-device `LocalStore`
+shared Rust core: the `cal-ffi` module exposes the on-device `Host`
 (SQLite migrated by the same `aperio-db` runner the desktop uses) and the
 screen lists / creates / completes / renames / deletes tasks through it —
 real offline persistence, not mock state. Each task carries custom
