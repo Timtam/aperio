@@ -3092,6 +3092,15 @@ impl Host {
                     &events,
                     (range.start, range.end),
                 );
+                // And the group memberships (migration 0035) — the fourth
+                // table on those ids, and the last whose repair was still
+                // being recomputed in the frontend.
+                host_core::event_groups::heal_event_group_anchors(
+                    &host_core::event_groups::EventGroupsRepo::new(&shared),
+                    &req.calendar_id,
+                    &events,
+                    (range.start, range.end),
+                );
                 apply_color_to_events(&overrides, &mut events);
                 if event_self_warm_needed(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);
@@ -7047,22 +7056,6 @@ impl Host {
         Ok(())
     }
 
-    /// Write down what a member's event looks like now, so it can still be
-    /// found after the provider remints its id. Local and silent — see
-    /// `EventGroupsRepo::refresh_signature`.
-    pub fn refresh_event_group_signature(
-        &self,
-        calendar_id: String,
-        event_id: String,
-        title: String,
-        starts_at: String,
-    ) -> Result<(), StoreError> {
-        let shared = self.db.shared();
-        EventGroupsRepo::new(&shared)
-            .refresh_signature(&calendar_id, &event_id, &title, &starts_at)
-            .map_err(map_group_err)
-    }
-
     /// Record that two events are NOT the same appointment, so Aperio stops
     /// offering to group them. Takes the two refs as JSON `{calendar_id,
     /// event_id}` objects.
@@ -7188,28 +7181,6 @@ impl Host {
             .map_err(|err| StoreError::Storage {
                 detail: err.to_string(),
             })
-    }
-
-    /// One member, found again under the id its event carries now.
-    ///
-    /// Silent on purpose: it repairs Aperio's own bookkeeping and changes
-    /// nothing about which events mean the same appointment. See
-    /// `EventGroupsRepo::heal_member`.
-    pub fn heal_event_group_member(
-        &self,
-        group_id: String,
-        calendar_id: String,
-        old_event_id: String,
-        new_event_id: String,
-    ) -> Result<(), StoreError> {
-        let shared = self.db.shared();
-        // Local only: every device has the same evidence and repairs itself.
-        // See `EventGroupsRepo::heal_member` for why broadcasting it was
-        // harmful.
-        EventGroupsRepo::new(&shared)
-            .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
-            .map_err(map_group_err)?;
-        Ok(())
     }
 
     /// Every group any of these events belongs to, as a JSON `EventGroup[]`.

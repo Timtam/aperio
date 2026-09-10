@@ -62,24 +62,6 @@ export const eventGroupsForEvents = async (
     await CalFfi.eventGroupsForEventsJson(JSON.stringify(events)),
   ) as EventGroup[];
 
-/** Point one member at the id its event carries now.
- *
- *  A repair of Aperio's own bookkeeping — the same events mean the same
- *  appointment before and after — so it is applied silently by whichever view
- *  noticed, never announced as a change the user made. */
-export const healEventGroupMember = (payload: {
-  group_id: string;
-  calendar_id: string;
-  old_event_id: string;
-  new_event_id: string;
-}): Promise<void> =>
-  CalFfi.healEventGroupMember(
-    payload.group_id,
-    payload.calendar_id,
-    payload.old_event_id,
-    payload.new_event_id,
-  );
-
 /** Record that two events are NOT the same appointment.
  *
  *  Silences the OFFER only — grouping them by hand still works and never
@@ -94,17 +76,3 @@ export const declineGroupSuggestion = (
 export const groupSuggestionDeclines = async (): Promise<SuggestionDecline[]> =>
   JSON.parse(await CalFfi.groupSuggestionDeclinesJson()) as SuggestionDecline[];
 
-/** Write down what a member's event looks like now, so the group can still
- *  find it after the provider remints its id. Local and silent. */
-export const refreshEventGroupSignature = (payload: {
-  calendar_id: string;
-  event_id: string;
-  title: string;
-  starts_at: string;
-}): Promise<void> =>
-  CalFfi.refreshEventGroupSignature(
-    payload.calendar_id,
-    payload.event_id,
-    payload.title,
-    payload.starts_at,
-  );

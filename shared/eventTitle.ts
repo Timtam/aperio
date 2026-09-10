@@ -22,9 +22,13 @@
 // reading of "same", lost by another.
 //
 // This half is not a door into the core, unlike `taskStatus.ts` or
-// `collation.ts`, and that is deliberate: all three callers are themselves on
-// their way into `cal-core`, and they take this file with them when they go. A
-// door built for the one step in between would be thrown away on the next.
+// `collation.ts`, and that is deliberate: its callers are themselves on their
+// way into `cal-core`, and they take this file with them when they go. A door
+// built for the one step in between would be thrown away on the next.
+//
+// One of the three has already gone: `healEventGroups.ts` was deleted when the
+// host took over anchoring group membership, and its rule is now
+// `cal_core::event_anchor`.
 
 /**
  * Whether a character is a gap between words.

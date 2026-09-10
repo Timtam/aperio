@@ -1053,35 +1053,43 @@ Siehe DESIGN §4.2.
   ↳ Beide Richtungen rot bewiesen: ohne die Regel (der Zustand davor) findet
   die ganztägige Kopie sich nicht wieder; mit der Regel auf GETAKTETE Termine
   angewandt wird ein Termin eine Stunde später fälschlich derselbe.
-- [ ] **Anker Teil 3: die Gruppen werden im HOST geheilt** (Toni entschieden,
-  2026-09-10: „Im Host, wie die drei Schwestern").
-  ↳ `heal_event_group_anchors` neben `heal_event_color_anchors` und
-  `heal_event_meeting_anchors`, gerufen aus denselben zwei Stellen
-  (`src-tauri/.../calendars.rs` und `cal-ffi/src/host.rs`), wo die Events des
-  Kalenders ohnehin in der Hand sind. Der Modulkopf von `event_anchor` nennt
-  `event_groups` seit jeher als vierte Tabelle dieser Art — sie war die
-  einzige, die nicht über `plan_repairs` ging.
-  ↳ **Braucht GAR KEINE Tür.** Alle drei Aufrufer sind schon asynchron, und
-  heute macht jeder von ihnen EINE Host-Runde pro Befund; künftig keine.
-  ↳ Was dabei mitkommen muss, sonst geht es mit der gelöschten Datei verloren:
-  der **Kollisionsschutz**. `EventGroupsRepo::heal_member` hat keinen, und der
+- [x] **Anker Teil 3: die Gruppen werden im HOST geheilt** (Toni entschieden,
+  2026-09-10: „Im Host, wie die drei Schwestern"). Damit ist der Umzug fertig.
+  ↳ `host_core::event_groups::heal_event_group_anchors` steht jetzt neben
+  `heal_event_color_anchors` und `heal_event_meeting_anchors` und wird aus
+  denselben zwei Stellen gerufen (`src-tauri/.../calendars.rs` und
+  `cal-ffi/src/host.rs`), wo die Termine des Kalenders ohnehin in der Hand
+  sind. Der Modulkopf von `event_anchor` nannte `event_groups` seit jeher als
+  vierte Tabelle dieser Art — sie war die einzige, die nicht über
+  `plan_repairs` ging.
+  ↳ **Keine Tür gebaut, keine gebraucht.** Alle drei Aufrufer waren schon
+  asynchron. Und sie machten je EINE Host-Runde pro Befund — eine zum
+  Auffrischen jeder veralteten Signatur, eine zum Umhängen jedes Mitglieds,
+  danach noch eine zum Zurücklesen. Jetzt keine.
+  ↳ **Was gelöscht ist:** `shared/healEventGroups.ts` (187 Zeilen Regel),
+  `src/state/healEventGroups.test.ts`, die zwei Tauri-Befehle, die zwei
+  UniFFI-Methoden und ihre vier API-Hüllen. Der FFI-Wächter zählt jetzt 153
+  Brücken-Aufrufe statt 155 und hat die neu erzeugten Kotlin-Bindungen
+  angenommen.
+  ↳ **Der Kollisionsschutz ist mitgekommen**, sonst wäre er mit der Datei
+  verschwunden. `EventGroupsRepo::heal_member` hatte keinen, und der
   UNIQUE-Index `event_group_members(calendar_id, event_id)` sagt „ein Termin
   gehört zu höchstens einer Gruppe" — trägt eine Gruppe die veraltete UND die
-  schon geheilte Id, läuft das UPDATE in den Index, der Fehler wird vorn
-  verschluckt und beim nächsten Rendern wieder versucht (am Desktop bremst das
-  `attempted`-Ref, auf Mobile nichts).
-  ↳ **Bewusst NICHT übernommen:** `findStaleSignatures` vergleicht Titel
-  normalisiert, `Refresh` roh. Roh ist hier richtig — die Signatur soll
-  buchstäblich beschreiben, was dasteht; gesucht wird ohnehin normalisiert.
+  schon geheilte Id, lief das UPDATE in den Index. Rot bewiesen, mit genau dem
+  Constraint-Fehler. Der Schutz fragt jetzt tabellenweit, nicht nur innerhalb
+  der Gruppe: der Index ist global, also kollidiert ein Mitglied einer ANDEREN
+  Gruppe genauso hart, was die TypeScript-Fassung nicht abgedeckt hatte.
+  ↳ **Bewusst NICHT übernommen:** `findStaleSignatures` verglich Titel
+  normalisiert, `Repair::Refresh` vergleicht sie roh. Roh ist hier richtig —
+  die Signatur soll buchstäblich beschreiben, was dasteht; gesucht wird ohnehin
+  normalisiert. Und die calendar_id-Hälfte von `Refresh` läuft bei Gruppen ins
+  Leere, weil `refresh_signature` nur Titel und Start schreibt; das steht an
+  der Aufrufstelle, damit es nicht als Versehen gelesen wird.
   ↳ **Was sich sichtbar ändert:** die Signatur eines wiederkehrenden Mitglieds
-  wandert vom Start des VORKOMMENS auf den Start der Serie. `memberFromEvent`
-  speichert heute die Serien-Id zusammen mit dem Vorkommens-Start; das Mitglied
-  ist auf die Serie gebucht, also beschreibt es künftig die Serie — dieselbe
-  Entscheidung wie bei den privaten Erinnerungen.
-  ↳ Zu löschen: `shared/healEventGroups.ts`, `src/state/healEventGroups.test.ts`,
-  die zwei Tauri-Befehle und die zwei UniFFI-Methoden (`refresh_event_group_
-  signature`, `heal_event_group_member`) samt ihren vier API-Hüllen — nach dem
-  Umzug hat keine davon noch einen Aufrufer.
+  wandert vom Start des VORKOMMENS auf den der SERIE. `memberFromEvent`
+  speichert die Serien-Id zusammen mit dem Start des Vorkommens, das der Nutzer
+  offen hatte; das Mitglied ist auf die Serie gebucht, also beschreibt es
+  künftig die Serie — dieselbe Entscheidung wie bei den privaten Erinnerungen.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

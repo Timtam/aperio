@@ -392,26 +392,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    * including members outside the range asked about.
    */
   eventGroupsForEventsJson(eventsJson: string): Promise<string>;
-  /** Write down what a member's event looks like now. */
-  refreshEventGroupSignature(
-    calendarId: string,
-    eventId: string,
-    title: string,
-    startsAt: string,
-  ): Promise<void>;
   /** Record that two events are NOT the same appointment. Both refs are JSON
    *  `{calendar_id, event_id}` objects. */
   declineGroupSuggestionJson(firstJson: string, secondJson: string): Promise<void>;
   /** Every declined pair, as a JSON `SuggestionDecline[]`. */
   groupSuggestionDeclinesJson(): Promise<string>;
-  /** Point one member at the id its event carries now — a silent repair of
-   *  Aperio's own bookkeeping, not a change to the group. */
-  healEventGroupMember(
-    groupId: string,
-    calendarId: string,
-    oldEventId: string,
-    newEventId: string,
-  ): Promise<void>;
   /** Every row of reminders Aperio keeps for single events and tells no
    *  provider about, as a JSON `EventLocalReminders[]` (migration 0043). */
   eventLocalRemindersJson(): Promise<string>;

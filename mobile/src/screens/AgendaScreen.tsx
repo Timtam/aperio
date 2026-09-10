@@ -22,9 +22,7 @@ import {
   eventGroupMemberKey,
   eventInstanceKey,
   expandAll,
-  findHealableMembers,
   findMeetingLinkPairs,
-  findStaleSignatures,
   expandToDayOccurrences,
   indexEventGroups,
   localDateKey,
@@ -44,8 +42,6 @@ import {
   eventGroupsForEvents,
   groupEvents,
   groupSuggestionDeclines,
-  healEventGroupMember,
-  refreshEventGroupSignature,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
@@ -223,38 +219,18 @@ export default function AgendaScreen({
       // query per window; whole groups come back, so a copy in a switched-off
       // calendar still counts toward what a folded row says. A failure means
       // no folding this round — what the app did before groups existed.
-      eventGroupsForEvents(
-        visible.map((ev) => ({
-          calendar_id: ev.calendar_id,
-          event_id: seriesIdOf(ev),
-        })),
-      )
+      const refs = visible.map((ev) => ({
+        calendar_id: ev.calendar_id,
+        event_id: seriesIdOf(ev),
+      }));
+      eventGroupsForEvents(refs)
         .then(async (found) => {
           if (reqToken.current !== token) return;
-          // Keep the signatures describing the events as they ARE. Written
-          // once at joining, they went stale the moment the appointment moved
-          // — and the repair below searches by exactly them.
-          for (const stale of findStaleSignatures(found, visible, seriesIdOf)) {
-            await refreshEventGroupSignature(stale).catch(() => undefined);
-          }
-          if (reqToken.current !== token) return;
-          // Repair members whose provider id changed, while the range that
-          // proves it is in hand: a member whose stored start falls inside it
-          // and whose id resolves to nothing here has been re-minted, and the
-          // signature says which event it is now. Silent — the same events
-          // mean the same appointment before and after.
-          const healable = findHealableMembers(found, visible, range, seriesIdOf);
-          for (const member of healable) {
-            await healEventGroupMember(member).catch(() => undefined);
-          }
-          if (reqToken.current !== token) return;
-          const refs = visible.map((ev) => ({
-            calendar_id: ev.calendar_id,
-            event_id: seriesIdOf(ev),
-          }));
-          let fresh = healable.length
-            ? await eventGroupsForEvents(refs).catch(() => found)
-            : found;
+          // Members whose provider id changed were already repaired when
+          // these events were fetched — the host anchors group membership
+          // beside the colour and meeting bindings, so `found` already names
+          // the ids the events carry now.
+          let fresh = found;
           // Group a videoconference meeting with the appointment it belongs
           // to. Unlike the repairs above this WRITES a group, and it syncs —
           // it is a statement about what an appointment is. It rests on the

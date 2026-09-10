@@ -41,9 +41,7 @@ import {
   collapseEventGroups,
   eventGroupMemberKey,
   groupBadge,
-  findHealableMembers,
   findMeetingLinkPairs,
-  findStaleSignatures,
   indexEventGroups,
   memberFromEvent,
   seriesIdOf,
@@ -111,8 +109,6 @@ import {
   eventGroupsForEvents,
   groupEvents,
   groupSuggestionDeclines,
-  healEventGroupMember,
-  refreshEventGroupSignature,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { overrideNextPeriodAnnounce } from './periodAnnounce';
@@ -967,27 +963,12 @@ export function CalendarDayList({
     eventGroupsForEvents(refs)
       .then(async (found) => {
         if (cancelled) return;
-        // Keep the signatures describing the events as they ARE. Written once
-        // at joining, they went stale the moment the appointment moved — and
-        // the repair below searches by exactly them.
-        for (const stale of findStaleSignatures(found, visibleEvents, seriesIdOf)) {
-          await refreshEventGroupSignature(stale).catch(() => undefined);
-        }
-        if (cancelled) return;
-        // Repair members whose provider id changed, while the range that proves
-        // it is in hand: a member whose stored start falls inside it and whose
-        // id resolves to nothing here has been re-minted, and the signature
-        // says which event it is now. Silent — the same events mean the same
-        // appointment before and after (DESIGN-event-groups.md).
-        const healable = findHealableMembers(found, visibleEvents, range, seriesIdOf);
-        for (const member of healable) {
-          await healEventGroupMember(member).catch(() => undefined);
-        }
-        if (cancelled) return;
-        // Read back rather than patch locally: the stored group is the answer.
-        let fresh = healable.length
-          ? await eventGroupsForEvents(refs).catch(() => found)
-          : found;
+        // Members whose provider id changed were already repaired when these
+        // events were fetched — the host anchors group membership beside the
+        // colour and meeting bindings (host_core::event_groups::
+        // heal_event_group_anchors), so `found` already names the ids the
+        // events carry now.
+        let fresh = found;
         // Group a videoconference meeting with the appointment it belongs to.
         //
         // Unlike the two repairs above this WRITES a group, and the group

@@ -164,23 +164,6 @@ pub async fn event_groups_for_events(
         .map_err(map_group_err)
 }
 
-/// Write down what a member's event looks like now, so it can still be found
-/// after the provider remints its id. Local and silent — see
-/// `EventGroupsRepo::refresh_signature`.
-#[tauri::command]
-pub async fn refresh_event_group_signature(
-    db: State<'_, DbHandle>,
-    calendar_id: String,
-    event_id: String,
-    title: String,
-    starts_at: String,
-) -> CommandResult<()> {
-    let shared = db.shared();
-    EventGroupsRepo::new(&shared)
-        .refresh_signature(&calendar_id, &event_id, &title, &starts_at)
-        .map_err(map_group_err)
-}
-
 /// Record that two events are NOT the same appointment, so Aperio stops
 /// offering to group them.
 #[tauri::command]
@@ -210,30 +193,6 @@ pub async fn group_suggestion_declines(
     EventGroupsRepo::new(&shared)
         .declined_suggestions()
         .map_err(map_group_err)
-}
-
-/// One member, found again under the id its event carries now.
-///
-/// The frontend spots this while folding a range it has in hand: a member
-/// whose stored start falls inside the range, whose id resolves to nothing,
-/// and whose signature matches exactly one event there. Silent on purpose —
-/// it repairs Aperio's own bookkeeping and changes nothing about which events
-/// mean the same appointment.
-#[tauri::command]
-pub async fn heal_event_group_member(
-    db: State<'_, DbHandle>,
-    group_id: String,
-    calendar_id: String,
-    old_event_id: String,
-    new_event_id: String,
-) -> CommandResult<()> {
-    let shared = db.shared();
-    // Local only: every device has the same evidence and repairs itself. See
-    // `EventGroupsRepo::heal_member` for why broadcasting it was harmful.
-    EventGroupsRepo::new(&shared)
-        .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
-        .map_err(map_group_err)?;
-    Ok(())
 }
 
 /// Take a deleted event out of whatever group it was in, and tell the other

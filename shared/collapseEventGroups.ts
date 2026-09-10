@@ -56,8 +56,9 @@ export interface CollapsedRow<E> {
  *  raw strings made a series grouped with a single event permanently
  *  "diverged": it never folded, and BOTH copies announced "which is now at a
  *  different time" — every day, for two events at the identical instant. The
- *  sibling modules (`suggestGroupMate`, `groupSuggestions`, `healEventGroups`)
- *  all normalise for this reason; this one did not. */
+ *  sibling modules (`suggestGroupMate`, `groupSuggestions`) normalise for this
+ *  reason; this one did not. The third, `healEventGroups`, is gone — its rule
+ *  is `cal_core::event_anchor` and the host applies it. */
 function startKey(event: CollapsibleEvent): string {
   if (event.all_day) return `day:${(event.start ?? '').slice(0, 10)}`;
   const at = new Date(event.start ?? '').getTime();
