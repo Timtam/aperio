@@ -275,8 +275,8 @@ public class CalFfiModule: Module {
       try self.host.createTaskListJson(name: name)
     }
 
-    AsyncFunction("reparentTaskListJson") { (id: String, parentId: String?) -> String in
-      try self.host.reparentTaskListJson(id: id, parentId: parentId)
+    AsyncFunction("reparentTaskList") { (id: String, parentId: String?) in
+      try self.host.reparentTaskList(id: id, parentId: parentId)
     }
 
     AsyncFunction("deleteTaskList") { (id: String) in

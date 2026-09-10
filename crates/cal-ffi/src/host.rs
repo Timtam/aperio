@@ -3748,13 +3748,18 @@ impl Host {
         to_json(&list)
     }
 
-    /// Set or clear a list's parent (`parent_id = None` promotes to top level);
-    /// returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
-    pub fn reparent_task_list_json(
+    /// Set or clear a list's parent (`parent_id = None` promotes to top level)
+    /// and append `TaskListUpdated`.
+    ///
+    /// Answers with nothing, deliberately — see the desktop command of the same
+    /// name: the row it used to return was the bare `cal_core::TaskList`, which
+    /// says less about itself than every other list the app hands out, and no
+    /// caller ever read it.
+    pub fn reparent_task_list(
         &self,
         id: String,
         parent_id: Option<String>,
-    ) -> Result<String, StoreError> {
+    ) -> Result<(), StoreError> {
         if !self.is_local_task_list(&id) {
             return Err(external_reparent_unsupported());
         }
@@ -3768,7 +3773,7 @@ impl Host {
                 fields,
             }));
         }
-        to_json(&list)
+        Ok(())
     }
 
     /// Delete a task list (its tasks cascade away), routed by the list's account.

@@ -273,9 +273,13 @@ export const deleteTaskList = (id: string) =>
   invoke<void>('delete_task_list', { id });
 
 /** Reparent a local task list under `parentId` (or to the top level
- *  when `null`). Local-store only — see the backend command. */
+ *  when `null`). Local-store only — see the backend command.
+ *
+ *  Answers with nothing: the row it used to return was a bare `TaskListCore`,
+ *  without the `account_id` and capabilities every other list carries, and no
+ *  caller read it. Ask `listTaskLists` for a list that says the whole truth. */
 export const reparentTaskList = (id: string, parentId: string | null) =>
-  invoke<TaskListCore>('reparent_task_list', { request: { id, parent_id: parentId } });
+  invoke<void>('reparent_task_list', { request: { id, parent_id: parentId } });
 
 export const getTasks = (list_id: string) =>
   invoke<Task[]>('get_tasks', { listId: list_id });
