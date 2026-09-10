@@ -994,6 +994,88 @@ Siehe DESIGN §4.2.
   ↳ **Keine Tür, und das mit Absicht.** Die drei Aufrufer ziehen selbst noch in
   den Kern und nehmen die TypeScript-Hälfte dann mit; eine Tür nur für den
   Zwischenschritt wäre beim nächsten wieder wegzuwerfen.
+- [x] **Die Anker-Entscheidung liegt im Kern** (Toni: „du kannst sie
+  herunterziehen, ja", 2026-09-10), Teil 1 von 3.
+  ↳ „Welche Zeile, die einen fremden Termin benennt, findet ihn wieder — und
+  was tut man dagegen?" lag in `host-core`. Jetzt `cal_core::event_anchor` mit
+  `Anchored`, `Repair`, `plan_repairs` und `series_master_id`. Der Umzug ist
+  vertragsrein: keine Uhr, keine Gerätezone (`range` ist ein Parameter bis
+  hinauf zum Tauri-Befehl und zum UniFFI-DTO), kein Menschentext, und **keine
+  neue Abhängigkeit** in `cal-core` — chrono war längst da.
+  ↳ **Es war eine SECHSTE Kopie, nicht die fünfte.**
+  `reminders::heal_local_reminders_for_calendar` schrieb dieselbe Entscheidung
+  noch einmal von Hand aus. Sie geht jetzt durch `plan_repairs`; die drei
+  Unterschiede habe ich einzeln geprüft, zwei sind folgenlos (Kalender-Klausel
+  im Refresh greift nie, weil vorgefiltert wird; der Bereichs-Vorabbruch ist
+  eine Abkürzung, kein Sicherheitsnetz — ein Kandidat muss den Start ohnehin
+  exakt treffen).
+  ↳ **Der dritte war ein echter Fehler.** Die Handfassung nahm den ERSTEN
+  Termin im Stapel, dessen Serien-Id passte. Schickt der Anbieter die Ausnahme
+  eines Vorkommens vor ihrem Master, wurde die Zeile mit dem Start des
+  VORKOMMENS gestempelt — obwohl sie auf die Serie lautet. Der nächste Scan
+  sucht dann einen Master, der dann beginnt, findet nichts, und die Erinnerung
+  verstummt endgültig. Rot bewiesen (`a_series_row_is_refreshed_from_the_master_
+  not_an_override`, Sabotage: die alte „erster Treffer gewinnt"-Karte).
+  ↳ **Ein Schreibvorgang, den niemand wollte, nebenbei abgestellt.** Refresh
+  verglich Startzeiten als ZEICHENKETTE, und derselbe Zeitpunkt hat in diesem
+  Code drei Schreibweisen: `to_rfc3339()` sagt `+00:00`, serde sagt `Z`, ein
+  Frontend sagt `.000Z`. Eine Signatur schreibt aber, wer die Zeile zuletzt
+  angefasst hat — der Desktop schickt `Event.start` über serde nach vorn und
+  bekommt die `Z`-Form zurückgeschrieben. Jede so geschriebene Zeile las sich
+  beim ersten Scan als veraltet und wurde einmal grundlos neu geschrieben, auf
+  allen drei Tabellen. Jetzt wird der ZEITPUNKT verglichen; eine unlesbare
+  Signatur zählt weiter als abweichend, weil eine lesbare darüber die Reparatur
+  ist. Rot bewiesen mit vier Schreibweisen desselben Moments.
+  ↳ **Ein Doc-Kommentar korrigiert**, weil er in die Irre führt: an
+  `series_master_id` stand „Mirrors the frontend's `seriesIdOf`". Tut es nicht.
+  `seriesIdOf` beantwortet ZWEI Fälle, `series_master_id` nur einen — die
+  aufgefaltete Wiederholung trägt ein `series_id`-Feld, das `cal_core::Event`
+  gar nicht hat, weil Kern und Host nie auffalten. Der Unterschied ist tragend
+  und jetzt ausgeschrieben plus mit einem eigenen Test festgenagelt.
+- [ ] **Anker Teil 2: die Regel und ihr TypeScript-Zwilling.**
+  `shared/healEventGroups.ts` ist der Zwilling — `findHealableMembers` ist
+  `Repair::Repoint`, `findStaleSignatures` ist `Repair::Refresh` —, und die
+  beiden sind an mindestens sechs Stellen auseinander. Vermessen 2026-09-10,
+  jede Behauptung gegengeprüft; die Liste steht unten, weil sie einzeln
+  entschieden werden muss und nicht mechanisch übernommen werden kann:
+  ↳ **Der Bevölkerungsunterschied ist der Kern der Sache.** TypeScript bekommt
+  AUFGEFALTETE Vorkommen über ALLE Kalender in einem Aufruf; `plan_repairs`
+  bekommt die rohen Zwischenspeicher-Zeilen EINES Kalenders. Deshalb weigert
+  sich `findStaleSignatures` bei wiederkehrenden Mitgliedern (sonst schreiben
+  zwei Ansichten die Signatur aneinander vorbei) und `plan_repairs` nicht.
+  ↳ **Wo die Heilung künftig laufen soll, ist NOCH OFFEN**, und mein erster
+  Einwand gegen die Host-Variante war falsch. Ich hatte argumentiert, ein Host,
+  der nicht auffaltet, finde ein wiederkehrendes Mitglied nie wieder —
+  `memberFromEvent` speichert die Serien-Id zusammen mit dem Start des
+  VORKOMMENS. Nachgeprüft: ein wiederkehrender Master wird mit `end_utc` bis
+  zum Serienende zwischengespeichert (`cache::range_end_utc`), und
+  `read_events` fragt `start_utc < ende AND end_utc > anfang` — der Master
+  liegt also im Stapel, auch wenn sein DTSTART Monate früher ist. Das
+  Mitglied wird gefunden; es landet nur im Refresh- statt im Repoint-Zweig.
+  ↳ Damit sind die drei Einwände gegen die Host-Variante ENTSCHEIDUNGEN, keine
+  Wände: (1) sie würde die Signatur jedes wiederkehrenden Mitglieds vom
+  Vorkommens-Start auf den Master-Start umschreiben — dieselbe Frage, die bei
+  den privaten Erinnerungen oben zugunsten der Serie entschieden wurde;
+  (2) `EventGroupsRepo::refresh_signature` schreibt nur Titel und Start, kann
+  einen Kalender also gar nicht verschieben — die calendar_id-Hälfte von
+  `Refresh` liefe ins Leere, so wie sie es bei den Erinnerungen tut;
+  (3) Ganztags-Regel und Kollisionsschutz gäbe es dann nur noch in der
+  gelöschten TypeScript-Fassung. Dafür bräuchte es GAR KEINE Tür, was der
+  stärkste Punkt für sie ist: alle drei Aufrufer sind schon asynchron.
+  ↳ Zu entscheiden ist also: Regel in den Kern und die drei Aufrufer rufen
+  weiter vorn (eine Tür, gemessen ~+132 KB WASM), ODER heilen wie die drei
+  Schwestertabellen im Host (keine Tür, aber die Signaturen wandern auf die
+  Serie). Toni fragen.
+  ↳ Die weiteren Abweichungen, noch zu entscheiden: Refresh vergleicht Titel
+  ROH, `findStaleSignatures` NORMALISIERT; Mehrdeutigkeit zählt in TypeScript
+  ZEILEN und in Rust SERIEN; die Ganztags-Regel (Tagesgenauigkeit für
+  ganztägige Kandidaten) gibt es nur in TypeScript, und `cal_core::Event.start`
+  ist ein `DateTime<Utc>`, kann das nackte Datum also gar nicht tragen; der
+  Kollisionsschutz sitzt in verschiedenen Schichten — `EventGroupsRepo::heal_member`
+  hat gar keinen, bei einem UNIQUE-Index auf `(calendar_id, event_id)` (noch
+  ungeprüft, ob das erreichbar ist).
+- [ ] **Anker Teil 3:** `shared/healEventGroups.ts` wird zur Tür, die Regel
+  kommt aus dem Kern, die drei Aufrufer bleiben wo sie sind.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

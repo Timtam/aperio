@@ -14,6 +14,7 @@ pub mod color;
 pub mod conferencing;
 pub mod day_marker;
 pub mod error;
+pub mod event_anchor;
 pub mod event_group;
 pub mod event_local_reminders;
 pub mod extras;
@@ -34,6 +35,7 @@ pub use collation::{compare_names, compare_titles, CollationLanguage};
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};
+pub use event_anchor::{plan_repairs, series_master_id, Anchored, Repair};
 pub use event_group::{normalized_title, EventGroup, EventGroupMember};
 pub use event_local_reminders::EventLocalReminders;
 pub use extras::{

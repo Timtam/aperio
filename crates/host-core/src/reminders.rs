@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cal_core::{
-    is_mine_or_unassigned, ContactsFeature, DateRange, Event, EventRecurrence, NewEvent,
-    RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence,
+    is_mine_or_unassigned, series_master_id, ContactsFeature, DateRange, Event, EventRecurrence,
+    NewEvent, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task,
+    TaskRecurrence,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -346,7 +347,9 @@ pub async fn enumerate_external_triggers(
             // one a reminder could fire in — the moment to find rows whose
             // event the provider reminted. Whatever moved follows in the map
             // too, so a repaired reminder fires in this pass.
-            for (old_id, new_id) in heal_local_reminders_for_calendar(db, &cal.id, &events) {
+            for (old_id, new_id) in
+                heal_local_reminders_for_calendar(db, &cal.id, &events, (range.start, range.end))
+            {
                 if let Some(reminders) = event_local.remove(&(cal.id.clone(), old_id)) {
                     event_local.insert((cal.id.clone(), new_id), reminders);
                 }
@@ -740,20 +743,6 @@ pub fn attached_defaults(defaults: &[DefaultReminder]) -> Vec<Reminder> {
         .collect()
 }
 
-/// The id of the SERIES this event belongs to.
-///
-/// A provider-sent override for one modified occurrence carries the master's
-/// id in front of the marker; everything keyed per event — private reminders,
-/// colour overrides, group membership — is keyed by the master, because a
-/// recurring appointment is one appointment. Mirrors the frontend's
-/// `seriesIdOf`.
-pub fn series_master_id(event_id: &str) -> &str {
-    match event_id.find("::rid::") {
-        Some(idx) => &event_id[..idx],
-        None => event_id,
-    }
-}
-
 /// Every event's Aperio-only reminders, keyed by `(calendar_id, series id)`.
 pub type EventLocalReminderMap = HashMap<(String, String), Vec<Reminder>>;
 
@@ -788,67 +777,62 @@ fn heal_local_reminders_for_calendar(
     db: &SharedConn,
     calendar_id: &str,
     events: &[Event],
+    range: (DateTime<Utc>, DateTime<Utc>),
 ) -> Vec<(String, String)> {
     let repo = crate::event_reminders::EventRemindersRepo::new(db);
     let rows = match repo.list() {
         Ok(rows) => rows,
         Err(_) => return Vec::new(),
     };
+    // ONLY this calendar's rows, and that filter is the decision, not a
+    // shortcut. `plan_repairs` would otherwise re-anchor a row of another
+    // calendar onto an event that turned up here — right for a colour or a
+    // meeting binding, wrong for a private reminder: when an appointment moves
+    // between calendars the editor deliberately EMPTIES the old row and writes
+    // a new one, because an emptied list is the record of a decision and a
+    // peer holding the old one has to stop firing. Adopting the row instead
+    // would resurrect what the editor just retired.
+    let anchored: Vec<cal_core::Anchored> = rows
+        .iter()
+        .filter(|r| r.calendar_id == calendar_id)
+        .map(|row| cal_core::Anchored {
+            event_id: row.event_id.clone(),
+            calendar_id: row.calendar_id.clone(),
+            title: row.title.clone(),
+            starts_at: row.starts_at.clone(),
+        })
+        .collect();
     let mut moved = Vec::new();
-    // Same rule, same reason as in `event_anchor::plan_repairs` — see
-    // `cal_core::normalized_title`.
-    let normalize = cal_core::normalized_title;
-    for row in rows.iter().filter(|r| r.calendar_id == calendar_id) {
-        // The row is where it belongs. Write down what its event looks like
-        // NOW, so a rename or a move keeps it findable: a signature describing
-        // an appointment as it USED to be could never match again once the id
-        // is also reminted, and then the reminder would go quiet for good.
-        // Nothing else refreshes it — a drag onto another time, an edit in
-        // another app, a rename by the organiser all happen far from here.
-        if let Some(ev) = events
-            .iter()
-            .find(|ev| series_master_id(&ev.id) == row.event_id)
-        {
-            let start = ev.start.to_rfc3339();
-            if ev.title != row.title || start != row.starts_at {
-                if let Err(err) =
-                    repo.refresh_signature(calendar_id, &row.event_id, &ev.title, &start)
+    for repair in cal_core::plan_repairs(&anchored, calendar_id, events, range) {
+        match repair {
+            // Write down what the event looks like NOW, so a rename or a move
+            // keeps the row findable: a signature describing an appointment as
+            // it USED to be could never match again once the id is also
+            // reminted, and then the reminder would go quiet for good. Nothing
+            // else refreshes it — a drag onto another time, an edit in another
+            // app, a rename by the organiser all happen far from here.
+            cal_core::Repair::Refresh {
+                event_id,
+                title,
+                starts_at,
+                ..
+            } => {
+                if let Err(err) = repo.refresh_signature(calendar_id, &event_id, &title, &starts_at)
                 {
                     warn!(?err, "couldn't refresh a private reminder's signature");
                 }
             }
-            continue;
-        }
-        let wanted_title = normalize(&row.title);
-        if wanted_title.is_empty() {
-            continue;
-        }
-        let Ok(wanted_start) = row.starts_at.parse::<DateTime<Utc>>() else {
-            continue;
-        };
-        // Collapse to the SERIES before asking whether the answer is unique: a
-        // recurring master and a provider-sent override of its first
-        // occurrence are two rows for ONE appointment, and counting them as
-        // two would refuse a repair that is not ambiguous at all.
-        let mut candidates: Vec<&str> = events
-            .iter()
-            .filter(|ev| normalize(&ev.title) == wanted_title && ev.start == wanted_start)
-            .map(|ev| series_master_id(&ev.id))
-            .collect();
-        candidates.sort_unstable();
-        candidates.dedup();
-        let [new_id] = candidates.as_slice() else {
-            continue;
-        };
-        let new_id = *new_id;
-        match repo.heal(calendar_id, &row.event_id, new_id) {
-            Ok(true) => moved.push((row.event_id.clone(), new_id.to_string())),
-            Ok(false) => {}
-            Err(err) => warn!(
-                calendar_id = %calendar_id,
-                ?err,
-                "couldn't repoint a private reminder; it stays where it is",
-            ),
+            cal_core::Repair::Repoint { event_id, to } => {
+                match repo.heal(calendar_id, &event_id, &to) {
+                    Ok(true) => moved.push((event_id, to)),
+                    Ok(false) => {}
+                    Err(err) => warn!(
+                        calendar_id = %calendar_id,
+                        ?err,
+                        "couldn't repoint a private reminder; it stays where it is",
+                    ),
+                }
+            }
         }
     }
     moved
@@ -1753,6 +1737,16 @@ mod tests {
         );
     }
 
+    /// The window the scan fetched for. Wide enough to hold every event these
+    /// tests build, so what they measure is the repair rule and not the
+    /// window — which `cal_core::event_anchor` pins on its own.
+    fn scan_window() -> (DateTime<Utc>, DateTime<Utc>) {
+        (
+            Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 30, 0, 0, 0).unwrap(),
+        )
+    }
+
     fn event_named(id: &str, calendar_id: &str, title: &str, start: DateTime<Utc>) -> Event {
         let mut ev = make_event(Vec::new());
         ev.id = id.to_string();
@@ -1781,12 +1775,54 @@ mod tests {
         .unwrap();
 
         let events = vec![event_named("new-id", "cal", "  zahnarzt ", start)];
-        let moved = heal_local_reminders_for_calendar(&db, "cal", &events);
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events, scan_window());
         assert_eq!(moved, vec![("old-id".to_string(), "new-id".to_string())]);
         assert!(repo.get("cal", "old-id").unwrap().is_none());
         assert_eq!(
             repo.get("cal", "new-id").unwrap().unwrap().reminders,
             one_hour_before()
+        );
+    }
+
+    /// A row keyed by a series learns the SERIES' signature, not whichever of
+    /// its rows the provider happened to send first.
+    ///
+    /// This is the one place where going through `cal_core::plan_repairs`
+    /// changes an answer. The hand-written repair this replaced took the first
+    /// event in the batch whose master id matched — so when a provider-sent
+    /// override of one occurrence arrived ahead of its master, the row was
+    /// stamped with the OCCURRENCE's start. The row is keyed by the master, so
+    /// the next scan would look for a master starting then, find nothing, and
+    /// the reminder would go quiet exactly as if it had never been repaired.
+    #[test]
+    fn a_series_row_is_refreshed_from_the_master_not_an_override() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let master_start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        let override_start = Utc.with_ymd_and_hms(2026, 6, 22, 14, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "series",
+            &one_hour_before(),
+            "Alter Name",
+            &master_start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+
+        // The override FIRST, which is what made the old repair pick it.
+        let events = vec![
+            event_named("series::rid::2026-06-22", "cal", "Standup", override_start),
+            event_named("series", "cal", "Standup", master_start),
+        ];
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &events, scan_window()).is_empty());
+
+        let row = repo.get("cal", "series").unwrap().unwrap();
+        assert_eq!(row.title, "Standup");
+        assert_eq!(
+            row.starts_at,
+            master_start.to_rfc3339(),
+            "the row is keyed by the series, so its signature must describe the series",
         );
     }
 
@@ -1811,7 +1847,7 @@ mod tests {
             event_named("a", "cal", "Standup", start),
             event_named("b", "cal", "Standup", start),
         ];
-        assert!(heal_local_reminders_for_calendar(&db, "cal", &events).is_empty());
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &events, scan_window()).is_empty());
         assert!(repo.get("cal", "old-id").unwrap().is_some());
     }
 
@@ -1834,22 +1870,13 @@ mod tests {
         .unwrap();
         // Present under its own id, though renamed since: nothing to repair.
         let events = vec![event_named("here", "cal", "Zahnarzt, verlegt", start)];
-        assert!(heal_local_reminders_for_calendar(&db, "cal", &events).is_empty());
+        assert!(heal_local_reminders_for_calendar(&db, "cal", &events, scan_window()).is_empty());
         // Nothing that matches the signature: the row keeps waiting.
         let elsewhere = vec![event_named("other", "cal", "Etwas anderes", start)];
-        assert!(heal_local_reminders_for_calendar(&db, "cal", &elsewhere).is_empty());
-        assert!(repo.get("cal", "here").unwrap().is_some());
-    }
-
-    /// Everything keyed per event is keyed by the SERIES: a provider-sent
-    /// override for one occurrence is the same appointment.
-    #[test]
-    fn the_series_master_id_drops_an_occurrence_suffix() {
-        assert_eq!(series_master_id("abc"), "abc");
-        assert_eq!(
-            series_master_id("https://dav/e.ics|uid-1::rid::2026-06-15T09:00:00+00:00"),
-            "https://dav/e.ics|uid-1"
+        assert!(
+            heal_local_reminders_for_calendar(&db, "cal", &elsewhere, scan_window()).is_empty()
         );
+        assert!(repo.get("cal", "here").unwrap().is_some());
     }
 
     /// The stored shape is the one the settings UI writes, and a list written
