@@ -1130,7 +1130,7 @@ external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_rename_container(
 ): Short
-external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
+external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_request_device_calendar_access(
 ): Short
@@ -1580,8 +1580,8 @@ external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`:
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_reparent_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_request_device_calendar_access(`ptr`: Long,`events`: Byte,`reminders`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_method_host_reset_account_sync(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -2333,7 +2333,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 11246.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list() != 29027.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788.toShort()) {
@@ -5385,10 +5385,15 @@ public interface HostInterface {
     fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
     
     /**
-     * Set or clear a list's parent (`parent_id = None` promotes to top level);
-     * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
+     * Set or clear a list's parent (`parent_id = None` promotes to top level)
+     * and append `TaskListUpdated`.
+     *
+     * Answers with nothing, deliberately — see the desktop command of the same
+     * name: the row it used to return was the bare `cal_core::TaskList`, which
+     * says less about itself than every other list the app hands out, and no
+     * caller ever read it.
      */
-    fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
+    fun `reparentTaskList`(`id`: kotlin.String, `parentId`: kotlin.String?)
     
     /**
      * Run the OS permission prompt for the device calendar / reminders. Drives
@@ -8164,20 +8169,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Set or clear a list's parent (`parent_id = None` promotes to top level);
-     * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
+     * Set or clear a list's parent (`parent_id = None` promotes to top level)
+     * and append `TaskListUpdated`.
+     *
+     * Answers with nothing, deliberately — see the desktop command of the same
+     * name: the row it used to return was the bare `cal_core::TaskList`, which
+     * says less about itself than every other list the app hands out, and no
+     * caller ever read it.
      */
-    @Throws(StoreException::class)override fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String {
-            return FfiConverterString.lift(
+    @Throws(StoreException::class)override fun `reparentTaskList`(`id`: kotlin.String, `parentId`: kotlin.String?)
+        = 
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
-    UniffiLib.uniffi_cal_ffi_fn_method_host_reparent_task_list_json(
+    UniffiLib.uniffi_cal_ffi_fn_method_host_reparent_task_list(
         it,
         FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`parentId`),_status)
 }
     }
-    )
-    }
+    
     
 
     

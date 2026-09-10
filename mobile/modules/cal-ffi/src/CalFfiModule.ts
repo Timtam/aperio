@@ -102,7 +102,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   createTaskListJson(name: string): Promise<string>;
   /** Set or clear a list's parent (`null` promotes to top level); returns the
    *  updated `TaskList` as JSON. */
-  reparentTaskListJson(id: string, parentId: string | null): Promise<string>;
+  reparentTaskList(id: string, parentId: string | null): Promise<void>;
   /** Delete a list (its tasks cascade away). Rejects on unknown id. */
   deleteTaskList(id: string): Promise<void>;
   /** Tasks in a list as a JSON `Task[]`, ordered by date then creation time. */

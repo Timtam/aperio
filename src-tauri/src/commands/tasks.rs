@@ -480,7 +480,7 @@ pub async fn reparent_task_list(
     adapter: State<'_, LocalAdapter>,
     event_log: State<'_, Arc<EventLogWriter>>,
     request: ReparentTaskListRequest,
-) -> CommandResult<TaskList> {
+) -> CommandResult<()> {
     if let Some(parent) = &request.parent_id {
         if parent == &request.id {
             return Err(CommandError {
@@ -513,7 +513,18 @@ pub async fn reparent_task_list(
             fields,
         }));
     }
-    Ok(updated)
+    // Nothing comes back, deliberately.
+    //
+    // The row this used to answer with was the BARE `cal_core::TaskList` — no
+    // `account_id`, no capabilities — while `list_task_lists` stamps both onto
+    // every row it hands over. Two shapes for one thing, and the half-shaped one
+    // told a caller something that was not true about it.
+    //
+    // Neither caller ever read it (the desktop sidebar and the mobile list
+    // editor both refetch), so the honest fix is to stop answering rather than
+    // to stamp a row nobody wanted. A caller that one day needs the list back
+    // asks `list_task_lists`, which has always told the whole truth.
+    Ok(())
 }
 
 #[tauri::command]
