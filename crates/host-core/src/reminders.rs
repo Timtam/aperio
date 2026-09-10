@@ -795,7 +795,9 @@ fn heal_local_reminders_for_calendar(
         Err(_) => return Vec::new(),
     };
     let mut moved = Vec::new();
-    let normalize = |s: &str| s.trim().to_lowercase();
+    // Same rule, same reason as in `event_anchor::plan_repairs` — see
+    // `cal_core::normalized_title`.
+    let normalize = cal_core::normalized_title;
     for row in rows.iter().filter(|r| r.calendar_id == calendar_id) {
         // The row is where it belongs. Write down what its event looks like
         // NOW, so a rename or a move keeps it findable: a signature describing

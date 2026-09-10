@@ -10,6 +10,8 @@
 // commitment behind a copy of something else. So the rule here is precision
 // over recall, and what it produces is never applied, only offered.
 
+import { normalizedTitle } from './eventTitle';
+
 /** The minimum a row needs to be considered. */
 export interface SuggestableEvent {
   id: string;
@@ -17,11 +19,6 @@ export interface SuggestableEvent {
   title: string;
   start: string;
   all_day?: boolean;
-}
-
-/** Case, padding and inner spacing are not part of what a title says. */
-function normalizeTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /** All-day events agree on a DAY; timed ones on an instant. */
@@ -49,14 +46,14 @@ export function suggestGroupMate<E extends SuggestableEvent>(
   anchor: SuggestableEvent,
   candidates: readonly E[],
 ): E | null {
-  const title = normalizeTitle(anchor.title);
+  const title = normalizedTitle(anchor.title);
   if (title === '') return null;
   const when = whenKey(anchor);
   return (
     candidates.find(
       (candidate) =>
         candidate.calendar_id !== anchor.calendar_id &&
-        normalizeTitle(candidate.title) === title &&
+        normalizedTitle(candidate.title) === title &&
         whenKey(candidate) === when,
     ) ?? null
   );

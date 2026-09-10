@@ -34,7 +34,7 @@ pub use collation::{compare_names, compare_titles, CollationLanguage};
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};
-pub use event_group::{EventGroup, EventGroupMember};
+pub use event_group::{normalized_title, EventGroup, EventGroupMember};
 pub use event_local_reminders::EventLocalReminders;
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,

@@ -18,6 +18,7 @@
 
 import type { EventGroup, EventGroupMember } from './eventGroups';
 import { eventGroupMemberKey } from './eventGroups';
+import { normalizedTitle } from './eventTitle';
 
 /** The minimum a row needs to stand in for a lost member. */
 export interface HealableEvent {
@@ -45,10 +46,6 @@ export interface HealedMember {
   old_event_id: string;
   /** The id the same appointment carries now. */
   new_event_id: string;
-}
-
-function normalizeTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function whenKey(value: string, allDay: boolean | undefined): string {
@@ -93,7 +90,7 @@ export function findHealableMembers<E extends HealableEvent>(
     for (const member of group.members) {
       if (present.has(eventGroupMemberKey(member.calendar_id, member.event_id))) continue;
       if (!inRange(member)) continue;
-      const wantedTitle = normalizeTitle(member.title);
+      const wantedTitle = normalizedTitle(member.title);
       if (wantedTitle === '') continue;
       // Every candidate, not the first: a calendar can hold two events with
       // the same name at the same time, and picking one of them would send the
@@ -103,7 +100,7 @@ export function findHealableMembers<E extends HealableEvent>(
       // than gaining one that is wrong and is not.
       const matches = eventsInRange.filter((ev) => {
         if (ev.calendar_id !== member.calendar_id) return false;
-        if (normalizeTitle(ev.title) !== wantedTitle) return false;
+        if (normalizedTitle(ev.title) !== wantedTitle) return false;
         // Compared on the candidate's own footing: an all-day event agrees on
         // the DAY, a timed one on the instant.
         //
@@ -173,7 +170,7 @@ export function findStaleSignatures<E extends HealableEvent>(
     for (const member of group.members) {
       const ev = live.get(eventGroupMemberKey(member.calendar_id, member.event_id));
       if (!ev) continue;
-      const sameTitle = normalizeTitle(ev.title) === normalizeTitle(member.title);
+      const sameTitle = normalizedTitle(ev.title) === normalizedTitle(member.title);
       const sameStart =
         new Date(ev.start).getTime() === new Date(member.starts_at).getTime();
       if (sameTitle && sameStart) continue;

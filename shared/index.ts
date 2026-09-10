@@ -40,6 +40,7 @@ export * from './meetingEvents';
 export * from './meetingLinkGrouping';
 export * from './seriesSplit';
 export * from './titleSuggestions';
+export * from './eventTitle';
 export * from './eventGroups';
 export * from './collapseEventGroups';
 export * from './groupCarry';
