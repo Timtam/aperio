@@ -705,11 +705,12 @@ das wäre erst Minuten in einen EAS-Bau hinein als
 `:cal-ffi:compileReleaseKotlin`-Fehler aufgefallen. Er ist erweitert und **an
 genau diesem Fall rot bewiesen**.
 
-### 4.5 Zwei Verträge, die vor jedem weiteren Umzug gelten
+### 4.5 Drei Verträge, die vor jedem weiteren Umzug gelten
 
 §4.2 hat die Typen erzeugt, §4.3 die synchrone Tür gebaut, §4.4 die erste Regel
-hindurchgeschickt. Bevor mehr folgt, stehen hier die zwei Zusagen, die der Kern
-seinen Oberflächen macht. Sie sind aufgeschrieben, weil sie sich **nachträglich
+hindurchgeschickt. Bevor mehr folgt, stehen hier die Zusagen, die der Kern
+seinen Oberflächen macht — (a) und (b) von Anfang an, (c) nachgetragen, als der
+erste Zwilling sie brauchte. Sie sind aufgeschrieben, weil sie sich **nachträglich
 nicht durchsetzen lassen**: hat erst eine Regel fertigen Text geliefert oder die
 Uhr gelesen, hängen Aufrufstellen daran, und der Rückbau ist teurer als die
 Regel.
@@ -783,6 +784,40 @@ Oberflächen-Code, seine vier Aufrufer sind Dialoge, die auf einem laufenden
 Bildschirm aufgehen — und der Vorgabewert fällt an dem Tag, an dem
 `shared/dayMarkers.ts` hinter die Grenze zieht. Die Abweichung steht an der
 Funktion, damit sie nicht als Versehen gelesen wird.
+
+#### (c) Ein Zwilling lehnt sich an keine eingebaute Funktion
+
+Manche Regeln behalten für eine Weile zwei Implementierungen — eine im Kern und
+eine in `shared/` —, weil ihre Aufrufer noch nicht umgezogen sind. Solange das
+so ist, gilt: **was die Regel bedeutet, wird ausgeschrieben, nicht von der
+Sprache geliehen.**
+
+Der Grund ist gemessen, nicht befürchtet. „Leerraum" und „Kleinschreibung"
+klingen wie eine Frage mit einer Antwort, sind aber je nach Sprache zwei:
+
+- JavaScripts `\s` zählt **U+FEFF** (die Bytereihenfolge-Marke) mit und
+  **U+0085** (NEL) nicht. Rusts `char::is_whitespace` macht es genau
+  andersherum, und `String::trim` folgt ihm. Wer auf beiden Seiten „das
+  eingebaute Leerzeichen" nimmt, hat zwei verschiedene Mengen.
+- Kleinschreibung **pro Zeichen** beantwortet ein griechisches Schluss-Sigma
+  anders als Kleinschreibung der ganzen Zeichenkette: `"ΤΕΛΟΣ"` wird als Ganzes
+  zu `"τελος"` mit ς, Zeichen für Zeichen zu σ. Das gilt in **beiden** Sprachen
+  gleichermaßen — der Fehler entsteht erst, wenn die eine Hälfte das eine und
+  die andere das andere tut.
+
+`cal_core::normalized_title` und `shared/eventTitle.ts` schreiben deshalb beide
+aus, was eine Lücke ist (Unicode `White_Space`) und dass die Kleinschreibung die
+**ganze** zusammengefaltete Zeichenkette trifft. Die TypeScript-Hälfte formuliert
+die Menge als Korrektur an `\s` statt als `\p{White_Space}`, weil dieses
+Regex-Escape nicht auf jeder mobilen Laufzeit vorausgesetzt werden kann.
+
+**Der Wächter ist eine geteilte Tabelle**, nach dem Muster von
+`shared/contracts/taskOwnership.json`: eine Fixture-Datei, von beiden Seiten
+gelesen, mit einer Zeile pro Entscheidung und einer Notiz, warum die Zeile da
+ist. Nicht gezählt wird — benannt. Und die Zeilen, die eine Sprache
+allein nie hervorgebracht hätte, sind genau die wertvollen: NEL, die BOM und
+das Sigma haben in dieser Runde je eine echte Abweichung gefangen, zwei davon
+in Code, den dieselbe Änderung gerade erst geschrieben hatte.
 ---
 
 ## 5. Ansichten

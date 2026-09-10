@@ -18,6 +18,7 @@
 
 import type { EventGroup } from './eventGroups';
 import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
+import { normalizedTitle } from './eventTitle';
 import { isMeetingCalendarEvent } from './meetingEvents';
 import type { SuggestionDecline } from './types';
 
@@ -34,10 +35,6 @@ export interface SuggestibleEvent {
 export interface GroupSuggestion<E> {
   first: E;
   second: E;
-}
-
-function normalizeTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function whenKey(event: SuggestibleEvent): string {
@@ -119,7 +116,7 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
     const firstKey = eventGroupMemberKey(first.calendar_id, firstId);
     if (spokenFor.has(firstKey) || grouped.has(firstKey)) continue;
     if (!offerable(first)) continue;
-    const title = normalizeTitle(first.title);
+    const title = normalizedTitle(first.title);
     if (title === '') continue;
     const when = whenKey(first);
 
@@ -130,7 +127,7 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
       if (spokenFor.has(secondKey) || grouped.has(secondKey)) continue;
       if (!offerable(second)) continue;
       if (second.calendar_id === first.calendar_id) continue;
-      if (normalizeTitle(second.title) !== title) continue;
+      if (normalizedTitle(second.title) !== title) continue;
       if (whenKey(second) !== when) continue;
       if (
         declined.has(

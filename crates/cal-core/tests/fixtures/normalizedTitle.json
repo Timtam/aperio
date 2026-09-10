@@ -1,0 +1,81 @@
+{
+  "what": "When two event titles mean the same appointment — as a table of inputs and the answer `cal_core::normalized_title` gives. The TypeScript half, `normalizedTitle` in `shared/eventTitle.ts`, answers the same table.",
+  "why": "This rule was written FIVE times: three times in `shared/` (byte for byte identical, in `groupSuggestions.ts`, `suggestGroupMate.ts` and `healEventGroups.ts`) and twice in `host-core` (in `event_anchor::plan_repairs` and in the reminder scheduler's own anchor repair). The two languages spelled it differently — TypeScript collapsed inner runs of whitespace, Rust only trimmed the ends.\n\nEach copy was self-consistent, so no single comparison ever got two answers, and nothing looked wrong. What the difference bought was a CHAIN across the two: TypeScript offers to group two events because it reads their titles as the same, and if the inner spacing later changes, Rust's repair no longer re-finds the member and it drops out of the group in silence. Grouped by one reading of 'same', lost by another. Nothing crashes and nothing is logged.\n\nOne rule per language now, and this file is what keeps them from drifting again — until the TypeScript half goes, which happens when `findGroupSuggestions`, `suggestGroupMate` and `healEventGroups` cross into the core and take it with them.",
+  "writtenBy": [],
+  "readBy": [
+    "crates/cal-core/src/event_group.rs (the `contract` test module)",
+    "src/intl/eventTitle.test.ts"
+  ],
+  "shape": {
+    "title": "the title as it arrived",
+    "normalized": "what both languages must answer",
+    "note": "why the case is here"
+  },
+  "cases": [
+    {
+      "title": "Wochenplanung",
+      "normalized": "wochenplanung",
+      "note": "The ordinary case, and the one that must not move."
+    },
+    {
+      "title": "  Wochenplanung  ",
+      "normalized": "wochenplanung",
+      "note": "Padding. Both spellings already agreed on this half."
+    },
+    {
+      "title": "Wochen  planung",
+      "normalized": "wochen planung",
+      "note": "The half they did NOT agree on: a doubled inner space. Rust used to answer 'wochen  planung' and TypeScript 'wochen planung'. This is the whole divergence, in one row."
+    },
+    {
+      "title": "Wochen\tplanung",
+      "normalized": "wochen planung",
+      "note": "A tab is a gap like any other. Neither implementation said so out loud; TypeScript's whitespace-class regex covered it by accident and Rust did not cover it at all."
+    },
+    {
+      "title": "Wochen \n planung",
+      "normalized": "wochen planung",
+      "note": "A wrapped title. This is how a re-flowing provider produces the row above without anyone typing it."
+    },
+    {
+      "title": "Wochen\u0085planung",
+      "normalized": "wochen planung",
+      "note": "NEL (U+0085), a line break older systems still emit. Rust counts it as whitespace and JavaScript's `\\s` does not, so this row is what forces the TypeScript half to state the gap set instead of borrowing the regex class."
+    },
+    {
+      "title": "\uFEFFWochenplanung",
+      "normalized": "\uFEFFwochenplanung",
+      "note": "A byte-order mark is NOT a gap and does NOT get trimmed — the other direction of the same disagreement, since JavaScript's `\\s` and `trim()` both swallow U+FEFF and Rust's do not. Rust's answer wins because it is the one already stored in every group signature; a title arriving with a mark simply does not match one without, which is visible rather than silent."
+    },
+    {
+      "title": "WOCHENPLANUNG",
+      "normalized": "wochenplanung",
+      "note": "Case. A title shouted in one calendar and not in another is one appointment."
+    },
+    {
+      "title": "Jour Fixe Müller",
+      "normalized": "jour fixe müller",
+      "note": "Lowercasing is full Unicode on both sides, so an umlaut survives as itself rather than being dropped or ASCII-folded."
+    },
+    {
+      "title": "STRASSENFEST",
+      "normalized": "strassenfest",
+      "note": "German capital SS stays two letters. Written down because the other direction — ß lowercasing to itself — is where a naive fold would disagree between the languages."
+    },
+    {
+      "title": "ΤΕΛΟΣ ΕΤΟΥΣ",
+      "normalized": "τελος ετους",
+      "note": "A Greek capital sigma at the end of a word lowercases to ς, not σ — which depends on what FOLLOWS it, so it only comes out right if the whole string is lowercased at once. Lowercasing character by character answers σ in both languages. This row is here because the first draft of the Rust half did exactly that, and would have shipped a fresh disagreement inside the commit that removed the old one."
+    },
+    {
+      "title": "",
+      "normalized": "",
+      "note": "No title. Both anchor-repair sites check for empty AFTER normalising and give up, because there is nothing to match on — so this row is what keeps that check working."
+    },
+    {
+      "title": "   ",
+      "normalized": "",
+      "note": "Whitespace only, which must reduce to the empty case above rather than to a single space."
+    }
+  ]
+}

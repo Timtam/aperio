@@ -935,6 +935,65 @@ Siehe DESIGN §4.2.
   Speicher wandern kann. Jetzt Parameter; die Uhr liest der lokale Adapter.
   Der TS-Zwilling `emptyDayLog` behält seinen Vorgabewert (Oberflächen-Code,
   vier Dialog-Aufrufer) — die Abweichung steht an der Funktion.
+- [x] **Die Konferenz-Erkennung hat wieder eine Implementierung** (2026-09-09).
+  `shared/conferencing.ts` waren 384 Zeilen Regel, eine zweite Fassung von
+  `cal_core::conferencing`, das die ganze Zeit in Produktion lief. Die beiden
+  nebeneinander zu lesen förderte **sechs** auseinandergelaufene Stellen zutage;
+  drei davon wurden zugunsten der TypeScript-Antwort im Kern korrigiert (bei
+  gleichwertigen DTMF-Kandidaten gewinnt wieder der erste, nicht der letzte;
+  `sip:` wird EINMAL und ohne Rücksicht auf Groß-/Kleinschreibung abgeschnitten
+  statt wiederholt; die längere URL wird nach Zeichen gemessen, nicht nach
+  Bytes — ein Umlaut zählte doppelt). Die Datei ist jetzt eine Tür.
+  ↳ **Zuerst festgenagelt, dann gelöscht.** Der Vertrag
+  (`crates/cal-core/tests/fixtures/conferencing.json`) kam in einem eigenen
+  Commit VOR dem Löschen und hält pro Zeile fest, was die verschwundene
+  TypeScript-Seite antwortete und warum die überlebende Antwort gewählt wurde —
+  damit das Geänderte lesbar ist statt archäologisch.
+  ↳ `ConferenceDetail` trägt jetzt `{ label, value }` statt eines `(String,
+  String)`-Paares, und `src/intl/conferencing.test.ts` prüft die KETTE: das
+  Test-Setup installiert das echte WASM-Modul, jede Zeile kreuzt also dieselbe
+  JSON-Grenze wie die laufende App.
+  ↳ Nebenbei: `conferenceDetailRows` zeigt jetzt **beide** Quellen — die
+  hergeleiteten Zeilen zuerst, dann die Einladungszeilen ohne Dubletten,
+  entdoppelt auf dem getrimmten WERT statt auf der Beschriftung (Toni).
+- [x] **Die Termingruppen-Formen werden erzeugt** (2026-09-09). `EventGroup` und
+  `EventGroupMember` tragen den ts-rs-Derive; `shared/eventGroups.ts` fiel von
+  125 auf 87 Zeilen, und `groupForEvent`/`otherMemberCount` gingen ganz — sie
+  hatten keinen Aufrufer.
+- [x] **Die Titel-Regel liegt im Kern** (Toni: „mach das.", 2026-09-10).
+  „Meinen diese zwei Titel denselben Termin?" stand **fünfmal**: dreimal in
+  `shared/` (byte für byte gleich, in `groupSuggestions.ts`,
+  `suggestGroupMate.ts` und `healEventGroups.ts`) und zweimal in `host-core`
+  (`event_anchor::plan_repairs` und die Ankerreparatur des
+  Erinnerungs-Planers). Jetzt `cal_core::normalized_title` plus **eine**
+  TypeScript-Hälfte in `shared/eventTitle.ts`.
+  ↳ **Die zwei Sprachen waren sich uneinig**, und zwar genau um die inneren
+  Leerzeichen: TypeScript faltete Läufe zusammen, Rust trimmte nur die Enden.
+  Jede Kopie war für sich stimmig — sie schickt ja BEIDE Titel eines Vergleichs
+  durch sich selbst —, also bekam kein einzelner Vergleich je zwei Antworten.
+  Der Schaden war eine KETTE über die Sprachgrenze: TypeScript bietet eine
+  Gruppe an, weil es die Titel als gleich liest; ändern sich später die inneren
+  Abstände, findet Rusts Reparatur das Mitglied nicht wieder und es fällt
+  **still** aus der Gruppe. Gewählt hat die großzügigere Lesart, absichtlich:
+  sie irrt Richtung „Mitglied bleibt drin" statt Richtung „verschwindet
+  wortlos".
+  ↳ **Beide Hälften mussten ausgeschrieben werden, weil die eingebauten
+  Funktionen sich nicht einig sind** — siehe DESIGN §4.5 (c). „Leerraum" ist in
+  JavaScript und Rust nicht dieselbe Menge (`\s` zählt U+FEFF mit und U+0085
+  nicht, `char::is_whitespace` genau andersherum), und Kleinschreibung **pro
+  Zeichen** beantwortet das griechische Schluss-Sigma anders als
+  Kleinschreibung der ganzen Zeichenkette. Der erste Entwurf der Rust-Hälfte
+  tat Letzteres und hätte eine frische Uneinigkeit in genau dem Commit
+  ausgeliefert, der die alte abschafft.
+  ↳ **Der Wächter** ist `crates/cal-core/tests/fixtures/normalizedTitle.json`,
+  gelesen von Rust (`include_str!` aus der eigenen Kiste) und von
+  `src/intl/eventTitle.test.ts` — dieselbe Tabelle, zwei unabhängige
+  Implementierungen. Drei Sabotagen rot bewiesen: die alte trimm-nur-Fassung in
+  Rust, die alte naive Fassung in TypeScript (fiel über NEL UND die BOM), und
+  Kleinschreibung pro Zeichen (fiel über das Sigma).
+  ↳ **Keine Tür, und das mit Absicht.** Die drei Aufrufer ziehen selbst noch in
+  den Kern und nehmen die TypeScript-Hälfte dann mit; eine Tür nur für den
+  Zwischenschritt wäre beim nächsten wieder wegzuwerfen.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

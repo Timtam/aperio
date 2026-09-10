@@ -92,7 +92,12 @@ pub fn plan_repairs(
     if rows.is_empty() || events.is_empty() {
         return Vec::new();
     }
-    let normalize = |s: &str| s.trim().to_lowercase();
+    // One rule, in `cal_core`. This was a local closure that only trimmed the
+    // ends, while the frontends' copy also collapsed inner whitespace — so a
+    // title whose spacing changed after joining stopped being re-findable
+    // here while still reading as "the same" there. See
+    // `cal_core::normalized_title`.
+    let normalize = cal_core::normalized_title;
     let mut present: std::collections::HashMap<&str, &Event> = std::collections::HashMap::new();
     for ev in events {
         present.insert(ev.id.as_str(), ev);
