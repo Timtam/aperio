@@ -4,6 +4,7 @@ import {
   installConferenceDetector,
   installGroupSuggestionRules,
   installMeetingDuplicateFilter,
+  installMeetingLinkRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -69,6 +70,13 @@ installGroupSuggestionRules({
 installMeetingDuplicateFilter({
   withoutDuplicateMeetingsJson: (eventsJson) =>
     CalFfi.withoutDuplicateMeetings(eventsJson),
+});
+
+// Pairing a meeting with the appointment it belongs to, and the URL fold the
+// identity rests on.
+installMeetingLinkRules({
+  findMeetingLinkPairsJson: (inputJson) => CalFfi.findMeetingLinkPairs(inputJson),
+  normalizeJoinUrl: (url) => CalFfi.normalizeJoinUrl(url),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

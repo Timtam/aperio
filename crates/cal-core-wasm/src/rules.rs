@@ -168,6 +168,18 @@ pub fn without_duplicate_meetings(events_json: &str) -> Result<String, WireError
         .map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::findMeetingLinkPairs`].
+pub fn find_meeting_link_pairs(input_json: &str) -> Result<String, WireError> {
+    cal_core::find_meeting_link_pairs_json(input_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::normalizeJoinUrl`]. Infallible — an unparseable string comes
+/// back trimmed rather than mangled.
+pub fn normalize_join_url(url: &str) -> String {
+    cal_core::normalize_join_url(url)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

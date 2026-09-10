@@ -31,6 +31,15 @@ base64 = "0.22"
 # metadata bag to JSON before base64-ing it into a provider field, so
 # serde_json is a runtime dependency, not just a test one.
 serde_json.workspace = true
+# Folding two spellings of one join URL into the identity they share
+# (src/meeting_link_grouping.rs). A real parser rather than a hand-rolled
+# fold, because the fold has to resolve dot segments, drop a default port and
+# convert an internationalised host to punycode — `münchen.example.com` and
+# `xn--mnchen-3ya.example.com` are ONE host, and answering that they are two
+# would silently stop offering a group. Three adapters already depend on this
+# crate at the same major version.
+url = "2"
+
 
 [dev-dependencies]
 # (serde_json is now a regular dependency above — used by the extras

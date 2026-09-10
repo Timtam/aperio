@@ -106,31 +106,6 @@ function wireEvent(
 }
 
 /**
- * Whether a stored refusal is currently in force.
- *
- * The later statement wins, and a tie goes to the refusal — the same rule
- * `SuggestionDecline::is_declined` applies in the core and `read_declines`'
- * WHERE clause applies in SQL.
- *
- * A TWIN, and knowingly so: the core answers this for its own callers, and
- * this copy survives only because `meetingLinkGrouping.ts` still needs it
- * synchronously and has not crossed yet. It goes when that one does.
- */
-export function isDeclineInForce(d: SuggestionDecline): boolean {
-  return d.cleared_at == null || d.declined_at >= d.cleared_at;
-}
-
-/** The pair, in the canonical order the decline record uses, as one string. */
-export function suggestionPairKey(
-  a: { calendar_id: string; event_id: string },
-  b: { calendar_id: string; event_id: string },
-): string {
-  const first = JSON.stringify([a.calendar_id, a.event_id]);
-  const second = JSON.stringify([b.calendar_id, b.event_id]);
-  return first <= second ? `${first}\n${second}` : `${second}\n${first}`;
-}
-
-/**
  * The event that most looks like a copy of `anchor`, or `null`.
  *
  * Three conditions, all required: the same title ignoring case, padding and

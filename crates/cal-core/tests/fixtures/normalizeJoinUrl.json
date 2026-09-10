@@ -1,0 +1,108 @@
+{
+  "what": "Folding two spellings of one join URL into the identity they share — every input and the answer cal_core::normalize_join_url must give.",
+  "why": "These answers were MEASURED, not chosen. They are what `shared/meetingLinkGrouping.ts` produced with `new URL()` before the rule crossed into the core, so the table is the record of a behaviour that had to survive the move rather than a fresh opinion about what folding should do.\n\nFour rows are the whole reason a real parser is used instead of a hand-rolled fold: a default port that disappears, dot segments that resolve, and an internationalised host that becomes punycode from either spelling. A fold written by hand would answer that `münchen.example.com` and `xn--mnchen-3ya.example.com` are two hosts, and the failure is silent — a group simply stops being offered.",
+  "readBy": [
+    "crates/cal-core/src/meeting_link_grouping.rs (the `contract` test module)"
+  ],
+  "cases": [
+    {
+      "url": "https://example.webex.com/example/j.php?MTID=mabc123",
+      "normalized": "https://example.webex.com/example/j.php?MTID=mabc123",
+      "note": "The ordinary case, and the one that must not move."
+    },
+    {
+      "url": "HTTPS://Example.Webex.COM/example/j.php?MTID=mabc123",
+      "normalized": "https://example.webex.com/example/j.php?MTID=mabc123",
+      "note": "Scheme and host are case-insensitive; the path and query are not."
+    },
+    {
+      "url": "https://example.webex.com/example/j.php?MTID=mabc123/",
+      "normalized": "https://example.webex.com/example/j.php?MTID=mabc123/",
+      "note": "A trailing slash inside the QUERY stays. Only the path is stripped — a meeting id and password live in the query, and two links that differ there are two meetings."
+    },
+    {
+      "url": "https://example.webex.com/example/j.php?MTID=mabc123///",
+      "normalized": "https://example.webex.com/example/j.php?MTID=mabc123///",
+      "note": "Same, several times over."
+    },
+    {
+      "url": "  https://example.webex.com/meet/j.doe  ",
+      "normalized": "https://example.webex.com/meet/j.doe",
+      "note": "Surrounding space, which a copied link carries all the time."
+    },
+    {
+      "url": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%3a%22x%22%7d",
+      "normalized": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%3a%22x%22%7d",
+      "note": "Percent-encoding is left exactly as it stands; re-encoding it would change the identity."
+    },
+    {
+      "url": "https://us02web.zoom.us/j/1234567890?pwd=aBcDeF",
+      "normalized": "https://us02web.zoom.us/j/1234567890?pwd=aBcDeF"
+    },
+    {
+      "url": "https://meet.google.com/abc-defg-hij",
+      "normalized": "https://meet.google.com/abc-defg-hij"
+    },
+    {
+      "url": "https://conf.dfn.de/webapp/conference/9876543210",
+      "normalized": "https://conf.dfn.de/webapp/conference/9876543210"
+    },
+    {
+      "url": "https://webconf.vc.dfn.de/r12345",
+      "normalized": "https://webconf.vc.dfn.de/r12345"
+    },
+    {
+      "url": "https://meet.jit.si/AperioTest",
+      "normalized": "https://meet.jit.si/AperioTest"
+    },
+    {
+      "url": "https://bbb.example.org/b/abc-def-ghi-jkl",
+      "normalized": "https://bbb.example.org/b/abc-def-ghi-jkl"
+    },
+    {
+      "url": "https://example.webex.com:443/example/j.php?MTID=m1",
+      "normalized": "https://example.webex.com/example/j.php?MTID=m1",
+      "note": "The DEFAULT port disappears. A hand-rolled fold would keep it and read this as a different meeting from the row above."
+    },
+    {
+      "url": "https://example.webex.com",
+      "normalized": "https://example.webex.com",
+      "note": "No path at all."
+    },
+    {
+      "url": "https://example.webex.com/",
+      "normalized": "https://example.webex.com",
+      "note": "A bare slash folds to the same thing as no path."
+    },
+    {
+      "url": "https://EXAMPLE.webex.com/a/./b/../c?q=1",
+      "normalized": "https://example.webex.com/a/c?q=1",
+      "note": "Dot segments RESOLVE. A hand-rolled fold would not."
+    },
+    {
+      "url": "https://xn--mnchen-3ya.example.com/meet/x",
+      "normalized": "https://xn--mnchen-3ya.example.com/meet/x",
+      "note": "An internationalised host in its punycode spelling."
+    },
+    {
+      "url": "https://münchen.example.com/meet/x",
+      "normalized": "https://xn--mnchen-3ya.example.com/meet/x",
+      "note": "The SAME host spelled with the umlaut. One host, one identity — and the reason this crate takes a URL parser rather than folding by hand."
+    },
+    {
+      "url": "not a url at all",
+      "normalized": "not a url at all",
+      "note": "Nothing to parse: compared as it stands rather than inventing a normalisation. Two identical strings still match."
+    },
+    {
+      "url": "mailto:someone@example.com",
+      "normalized": "mailto://someone@example.com",
+      "note": "Not a join URL, and never will be. Written down so the odd shape the fold gives it is a recorded fact rather than a surprise."
+    },
+    {
+      "url": "",
+      "normalized": "",
+      "note": "No link at all."
+    }
+  ]
+}

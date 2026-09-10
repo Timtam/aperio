@@ -61,12 +61,21 @@ pub struct MeetingFilterEvent {
 /// meeting-link grouping never pairs — the duplicate gone with nothing to say
 /// where.
 pub fn meeting_join_url(event: &MeetingFilterEvent) -> Option<String> {
+    join_url_of(event.location.as_deref(), event.description.as_deref())
+}
+
+/// The same reading, by the two fields it actually looks at.
+///
+/// Separate from [`meeting_join_url`] so a sibling rule can ask without
+/// building a filter row it has no other use for — and so there is still only
+/// one place that decides what a row's link is.
+pub fn join_url_of(location: Option<&str>, description: Option<&str>) -> Option<String> {
     detect_conference(&ConferenceSources {
         provider_field: None,
         icalendar_conference: &[],
         vendor_properties: &[],
-        location: event.location.as_deref(),
-        description: event.description.as_deref(),
+        location,
+        description,
     })
     .map(|link| link.join_url)
 }

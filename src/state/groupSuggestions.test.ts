@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findGroupSuggestions,
-  suggestionPairKey,
   type EventGroup,
   type SuggestionDecline,
 } from '@aperio/shared';
@@ -135,9 +134,4 @@ describe('offering a group nobody asked for', () => {
     ).toEqual([]);
   });
 
-  it('builds the same pair key whichever way round it is asked', () => {
-    const a = { calendar_id: 'work', event_id: 'ev-a' };
-    const b = { calendar_id: 'private', event_id: 'ev-b' };
-    expect(suggestionPairKey(a, b)).toBe(suggestionPairKey(b, a));
-  });
 });

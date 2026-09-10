@@ -229,7 +229,18 @@ Angeboten wird nur auf den EINTÄGIGEN Oberflächen. In Woche und Monat würde d
 Frage einen Tag betreffen, den der Nutzer gerade nicht liest.
 
 **Stufe 4** — Die Meeting-Zeilen automatisch mit dem Termin gruppieren, zu dem
-sie gehören. **GEBAUT**, auf beiden Plattformen.
+sie gehören. **GEBAUT**, auf beiden Plattformen, und die Regel liegt seit
+2026-09-10 in `cal_core::meeting_link_grouping` — erreicht über die synchrone
+Tür, wie die Erkennung.
+
+Dazu gehört auch das **Falten der Beitritts-URL**: zwei Schreibweisen desselben
+Links müssen als eine gelesen werden. Das macht ein echter URL-Parser und keine
+Handarbeit, denn dazu gehört mehr als Kleinschreibung — ein Vorgabe-Port fällt
+weg, Punkt-Segmente lösen sich auf, und ein Umlaut-Host wird zu Punycode.
+`münchen.example.com` und `xn--mnchen-3ya.example.com` sind EIN Host; eine
+Faltung, die etwas anderes sagt, hörte still auf, eine Gruppe anzubieten. Was
+NICHT gefaltet wird, ist die Abfrage — dort stehen Meeting-Nummer und
+Kennwort.
 
 ### Das Problem, das vorher versteckt wurde
 
