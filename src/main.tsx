@@ -5,6 +5,7 @@ import {
   installConferenceDetector,
   installGroupSuggestionRules,
   installMeetingDuplicateFilter,
+  installMeetingLinkRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -20,6 +21,8 @@ import {
   findGroupSuggestionsJson,
   suggestGroupMateJson,
   withoutDuplicateMeetingsJson,
+  findMeetingLinkPairsJson,
+  normalizeJoinUrlThroughCore,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -83,6 +86,13 @@ initCoreRules()
 
     // Hiding a provider-side meeting that already has a calendar entry.
     installMeetingDuplicateFilter({ withoutDuplicateMeetingsJson });
+
+    // Pairing a meeting with the appointment it belongs to, and the URL fold
+    // the identity rests on.
+    installMeetingLinkRules({
+      findMeetingLinkPairsJson,
+      normalizeJoinUrl: normalizeJoinUrlThroughCore,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

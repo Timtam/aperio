@@ -29,6 +29,8 @@ import init, {
   findGroupSuggestions as wasmFindGroupSuggestions,
   suggestGroupMate as wasmSuggestGroupMate,
   withoutDuplicateMeetings as wasmWithoutDuplicateMeetings,
+  findMeetingLinkPairs as wasmFindMeetingLinkPairs,
+  normalizeJoinUrl as wasmNormalizeJoinUrl,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -130,4 +132,16 @@ export function suggestGroupMateJson(inputJson: string): string {
 export function withoutDuplicateMeetingsJson(eventsJson: string): string {
   assertReady();
   return wasmWithoutDuplicateMeetings(eventsJson);
+}
+
+/** See `cal_core::meeting_link_grouping::find_meeting_link_pairs_json`. */
+export function findMeetingLinkPairsJson(inputJson: string): string {
+  assertReady();
+  return wasmFindMeetingLinkPairs(inputJson);
+}
+
+/** See `cal_core::normalize_join_url`. */
+export function normalizeJoinUrlThroughCore(url: string): string {
+  assertReady();
+  return wasmNormalizeJoinUrl(url);
 }

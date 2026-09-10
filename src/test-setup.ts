@@ -41,6 +41,7 @@ import {
   installConferenceDetector,
   installGroupSuggestionRules,
   installMeetingDuplicateFilter,
+  installMeetingLinkRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -53,6 +54,8 @@ import {
   findGroupSuggestionsJson,
   suggestGroupMateJson,
   withoutDuplicateMeetingsJson,
+  findMeetingLinkPairsJson,
+  normalizeJoinUrlThroughCore,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -85,3 +88,7 @@ installTaskPriorityRules({
 installConferenceDetector({ detectConferenceJson });
 installGroupSuggestionRules({ findGroupSuggestionsJson, suggestGroupMateJson });
 installMeetingDuplicateFilter({ withoutDuplicateMeetingsJson });
+installMeetingLinkRules({
+  findMeetingLinkPairsJson,
+  normalizeJoinUrl: normalizeJoinUrlThroughCore,
+});

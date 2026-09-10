@@ -822,9 +822,13 @@ external fun uniffi_cal_ffi_checksum_func_detect_conference(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_find_group_suggestions(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(
+): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
+): Short
+external fun uniffi_cal_ffi_checksum_func_normalize_join_url(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_parse_attendee(
 ): Short
@@ -1696,9 +1700,13 @@ external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_group_suggestions(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_find_meeting_link_pairs(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_normalize_join_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1843,10 +1851,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 11457.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_find_meeting_link_pairs() != 33200.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_normal_priority() != 55182.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_normalize_join_url() != 65229.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_parse_attendee() != 55709.toShort()) {
@@ -1864,7 +1878,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_func_without_duplicate_meetings() != 64967.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_func_without_duplicate_meetings() != 42105.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_create_section_json() != 50434.toShort()) {
@@ -12905,6 +12919,17 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     }
     
 
+    @Throws(StoreException::class) fun `findMeetingLinkPairs`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_find_meeting_link_pairs(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
         /**
          * Whether a priority is the TOP one — "important" in the two-level system.
          * See `cal_core::TaskPriority::is_important`.
@@ -12931,6 +12956,28 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_normal_priority(
     
         FfiConverterString.lower(`previous`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Which rows of a window survive the meeting-duplicate filter, as JSON.
+         *
+         * `events_json` is a `[{calendar_id, location?, description?, grouped}]`
+         * array; the answer is the positions that stay. The whole window crosses at
+         * once — the rule this replaces asked per row.
+         * The (meeting, appointment) pairs that should become groups, as JSON.
+         *
+         * `input_json` is `{events[], groups[], declines[]}`; the answer is
+         * `[{meeting, event, join_url}]` with POSITIONS in `events`.
+         * Fold a join URL to what two spellings of the same link agree on.
+         */ fun `normalizeJoinUrl`(`url`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_normalize_join_url(
+    
+        FfiConverterString.lower(`url`),_status)
 }
     )
     }
@@ -13019,13 +13066,6 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     }
     
 
-        /**
-         * Which rows of a window survive the meeting-duplicate filter, as JSON.
-         *
-         * `events_json` is a `[{calendar_id, location?, description?, grouped}]`
-         * array; the answer is the positions that stay. The whole window crosses at
-         * once — the rule this replaces asked per row.
-         */
     @Throws(StoreException::class) fun `withoutDuplicateMeetings`(`eventsJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->

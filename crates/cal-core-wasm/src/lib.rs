@@ -190,3 +190,24 @@ pub fn suggest_group_mate(input_json: &str) -> Result<String, JsValue> {
 pub fn without_duplicate_meetings(events_json: &str) -> Result<String, JsValue> {
     rules::without_duplicate_meetings(events_json).map_err(to_js)
 }
+
+/// The (meeting, appointment) pairs that should become groups.
+///
+/// `{events[], groups[], declines[]}` in, `[{meeting, event, joinUrl}]` out,
+/// where `meeting` and `event` are POSITIONS in `events`. The join URL is
+/// folded here, by a real URL parser — see `cal_core::normalize_join_url` for
+/// what a hand-rolled fold would get wrong.
+#[wasm_bindgen(js_name = findMeetingLinkPairs)]
+pub fn find_meeting_link_pairs(input_json: &str) -> Result<String, JsValue> {
+    rules::find_meeting_link_pairs(input_json).map_err(to_js)
+}
+
+/// Fold a join URL to what two spellings of the same link agree on.
+///
+/// Exported on its own because the pairing above is not the only thing that
+/// may ever need the identity, and because a rule with no caller of its own is
+/// hard to test through a door.
+#[wasm_bindgen(js_name = normalizeJoinUrl)]
+pub fn normalize_join_url(url: &str) -> String {
+    rules::normalize_join_url(url)
+}

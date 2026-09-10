@@ -28,6 +28,8 @@ import uniffi.cal_ffi.compareNames as uniffiCompareNames
 import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
 import uniffi.cal_ffi.detectConference as uniffiDetectConference
 import uniffi.cal_ffi.findGroupSuggestions as uniffiFindGroupSuggestions
+import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
+import uniffi.cal_ffi.normalizeJoinUrl as uniffiNormalizeJoinUrl
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
 import uniffi.cal_ffi.normalPriority as uniffiNormalPriority
 import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
@@ -290,6 +292,16 @@ class CalFfiModule : Module() {
     // detection door twice per row.
     Function("withoutDuplicateMeetings") { eventsJson: String ->
       uniffiWithoutDuplicateMeetings(eventsJson)
+    }
+
+    // Pairing a meeting with its appointment, and the URL fold the identity
+    // rests on. Synchronous — the caller decides during a render pass.
+    Function("findMeetingLinkPairs") { inputJson: String ->
+      uniffiFindMeetingLinkPairs(inputJson)
+    }
+
+    Function("normalizeJoinUrl") { url: String ->
+      uniffiNormalizeJoinUrl(url)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

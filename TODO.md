@@ -1154,6 +1154,39 @@ Siehe DESIGN §4.2.
   Suffix-Test pro Zeile im Render eine Tür zu kreuzen wäre das Gegenteil
   dessen, was der Umzug gerade gebracht hat. Geht mit
   `meetingLinkGrouping.ts`.
+- [x] **Die Meeting-Verknüpfung liegt im Kern** (2026-09-10), inklusive der
+  URL-Faltung — Toni: „ich habe kein problem damit, wenn du hierfür ein
+  url-crate importierst".
+  ↳ `shared/meetingLinkGrouping.ts` waren 258 Zeilen sehr dicht begründeter
+  Regel (Serien zählen einmal, Gruppen zählen einmal, ein Meeting pro Konto pro
+  Termin, was eine Ablehnung abdeckt und was sie nicht überlebt). Jetzt
+  `cal_core::meeting_link_grouping`; die Datei ist eine Tür von 144 Zeilen.
+  ↳ **Erst gemessen, dann entschieden.** Ich wollte die Faltung draußen lassen,
+  weil `cal-core` bewusst keinen URL-Parser hat. Also ließ ich die HEUTIGE
+  JavaScript-Fassung über eine Tabelle echter Beitrittslinks laufen, statt zu
+  raten — und sie tut drei Dinge, die eine Nachbildung nicht kann: `:443` fällt
+  weg, `/a/./b/../c` wird zu `/a/c`, und `münchen.example.com` wird zu
+  `xn--mnchen-3ya.example.com`. Toni hat das Crate freigegeben, also zog die
+  Faltung mit.
+  ↳ **Die gemessene Tabelle ist jetzt der Wächter**
+  (`crates/cal-core/tests/fixtures/normalizeJoinUrl.json`): 21 Zeilen, deren
+  Erwartungen aus der abgelösten Implementierung STAMMEN statt gewählt zu sein.
+  Alle 21 stimmen.
+  ↳ **Preis, ehrlich gemessen:** das WASM-Modul geht von 1.362.793 auf
+  1.537.283 Bytes, also +170 KB (+12,8 %). Die erste Messung sagte +166 Bytes
+  und war wertlos — die Tür fehlte noch, also warf der Linker den Code weg.
+  ↳ **Ein Test, der eine falsche Eigenschaft behauptete, umgeschrieben statt
+  grün gebogen.** Volle Idempotenz gilt NICHT: `mailto:someone@example.com`
+  faltet zu `mailto://someone@example.com`, und ein zweiter Durchlauf liest
+  `someone` als Benutzerinfo und wirft es weg. Die TypeScript-Fassung tat
+  dasselbe. Gebraucht wird nur, dass ein Bucket-Schlüssel stabil ist — und der
+  Detektor liefert ohnehin nur http(s). Genau das prüft der Test jetzt.
+  ↳ **Drei Zwillinge sind damit frei geworden und gelöscht:**
+  `isDeclineInForce`, `suggestionPairKey` und `meetingJoinUrl`.
+  `isMeetingCalendarEvent` bleibt — `collapseEventGroups.ts` braucht es noch.
+  ↳ Die 23 bestehenden Testfälle blieben und prüfen jetzt die KETTE. Rot
+  bewiesen, indem ich im RUST-Kern die Regel strich, die ein bereits
+  gruppiertes Meeting in Ruhe lässt.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

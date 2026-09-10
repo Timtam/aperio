@@ -59,6 +59,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  during a render. See `cal_core::meeting_events`. */
   withoutDuplicateMeetings(eventsJson: string): string;
 
+  /** The (meeting, appointment) pairs that should become groups. `{events[],
+   *  groups[], declines[]}` in, `[{meeting, event, join_url}]` with positions
+   *  out. Synchronous. See `cal_core::meeting_link_grouping`. */
+  findMeetingLinkPairs(inputJson: string): string;
+
+  /** Fold a join URL to what two spellings of the same link agree on. */
+  normalizeJoinUrl(url: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

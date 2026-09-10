@@ -20,6 +20,7 @@ pub mod event_local_reminders;
 pub mod extras;
 pub mod group_suggestion;
 pub mod meeting_events;
+pub mod meeting_link_grouping;
 pub mod recurrence;
 pub mod reminder;
 pub mod spawn;
@@ -49,8 +50,12 @@ pub use group_suggestion::{
     suggest_group_mate_json, GroupSuggestion, SuggestibleEvent, MEETINGS_CALENDAR_SUFFIX,
 };
 pub use meeting_events::{
-    meeting_join_url, without_duplicate_meetings, without_duplicate_meetings_json,
+    join_url_of, meeting_join_url, without_duplicate_meetings, without_duplicate_meetings_json,
     MeetingFilterEvent,
+};
+pub use meeting_link_grouping::{
+    find_meeting_link_pairs, find_meeting_link_pairs_json, normalize_join_url, LinkableEvent,
+    MeetingLinkPair,
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};

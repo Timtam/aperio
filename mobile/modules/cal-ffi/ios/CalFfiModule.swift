@@ -230,6 +230,15 @@ public class CalFfiModule: Module {
       try withoutDuplicateMeetings(eventsJson: eventsJson)
     }
 
+    // Pairing a meeting with its appointment, and the URL fold behind it.
+    Function("findMeetingLinkPairs") { (inputJson: String) -> String in
+      try findMeetingLinkPairs(inputJson: inputJson)
+    }
+
+    Function("normalizeJoinUrl") { (url: String) -> String in
+      normalizeJoinUrl(url: url)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

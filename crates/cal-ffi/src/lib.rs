@@ -237,6 +237,24 @@ pub fn suggest_group_mate(input_json: String) -> Result<String, StoreError> {
 /// `events_json` is a `[{calendar_id, location?, description?, grouped}]`
 /// array; the answer is the positions that stay. The whole window crosses at
 /// once — the rule this replaces asked per row.
+/// The (meeting, appointment) pairs that should become groups, as JSON.
+///
+/// `input_json` is `{events[], groups[], declines[]}`; the answer is
+/// `[{meeting, event, join_url}]` with POSITIONS in `events`.
+/// Fold a join URL to what two spellings of the same link agree on.
+#[uniffi::export]
+pub fn normalize_join_url(url: String) -> String {
+    cal_core::normalize_join_url(&url)
+}
+
+#[uniffi::export]
+pub fn find_meeting_link_pairs(input_json: String) -> Result<String, StoreError> {
+    cal_core::find_meeting_link_pairs_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "meeting link input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn without_duplicate_meetings(events_json: String) -> Result<String, StoreError> {
     cal_core::without_duplicate_meetings_json(&events_json).map_err(|e| StoreError::InvalidField {

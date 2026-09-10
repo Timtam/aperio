@@ -1,5 +1,3 @@
-import { detectConference } from './conferencing';
-
 /**
  * Hiding a provider-side meeting that already has a calendar entry.
  *
@@ -38,26 +36,6 @@ export function isMeetingCalendarEvent(event: {
   calendar_id?: string | null;
 }): boolean {
   return (event.calendar_id ?? '').endsWith('::meetings');
-}
-
-/**
- * The join URL an event carries, or `null`.
- *
- * Exported because the automatic grouping (`meetingLinkGrouping`) has to read
- * the identity the SAME way this filter does. Two readers that disagree would
- * mean a row this drops and the grouping never pairs — the duplicate would be
- * gone with nothing to say where.
- */
-export function meetingJoinUrl(event: {
-  location?: string | null;
-  description?: string | null;
-}): string | null {
-  return (
-    detectConference({
-      location: event.location,
-      description: event.description,
-    })?.joinUrl ?? null
-  );
 }
 
 /**
