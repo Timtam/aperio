@@ -38,7 +38,7 @@ pub struct EventMeeting {
     /// it had, and the calendar it lives in — the SIGNATURE that lets the row
     /// find its event again after the provider remints the id (migration
     /// 0045). Empty until the event is first seen; see
-    /// [`crate::event_anchor`].
+    /// [`cal_core::event_anchor`].
     pub title: String,
     pub starts_at: String,
     pub calendar_id: String,
@@ -377,7 +377,7 @@ impl<'a> MeetingsRepo<'a> {
 ///
 /// A binding names its event by the provider's id, and ids change underneath
 /// us. What to repair — and, mostly, what to leave alone — is decided by
-/// [`crate::event_anchor::plan_repairs`], which every table of this kind
+/// [`cal_core::event_anchor::plan_repairs`], which every table of this kind
 /// shares; this only applies the answer.
 ///
 /// Losing a binding is quieter than losing a colour or a reminder: the Join
@@ -394,24 +394,24 @@ pub fn heal_event_meeting_anchors(
     let Ok(rows) = repo.list() else {
         return;
     };
-    let anchored: Vec<crate::event_anchor::Anchored> = rows
+    let anchored: Vec<cal_core::event_anchor::Anchored> = rows
         .iter()
-        .map(|row| crate::event_anchor::Anchored {
+        .map(|row| cal_core::event_anchor::Anchored {
             event_id: row.event_id.clone(),
             calendar_id: row.calendar_id.clone(),
             title: row.title.clone(),
             starts_at: row.starts_at.clone(),
         })
         .collect();
-    for repair in crate::event_anchor::plan_repairs(&anchored, calendar_id, events, range) {
+    for repair in cal_core::event_anchor::plan_repairs(&anchored, calendar_id, events, range) {
         let outcome = match repair {
-            crate::event_anchor::Repair::Refresh {
+            cal_core::event_anchor::Repair::Refresh {
                 event_id,
                 calendar_id,
                 title,
                 starts_at,
             } => repo.refresh_signature(&event_id, &calendar_id, &title, &starts_at),
-            crate::event_anchor::Repair::Repoint { event_id, to } => {
+            cal_core::event_anchor::Repair::Repoint { event_id, to } => {
                 repo.heal(&event_id, &to).map(|_| ())
             }
         };

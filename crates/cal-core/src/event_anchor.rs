@@ -20,9 +20,36 @@
 
 use chrono::{DateTime, Utc};
 
-use cal_core::Event;
+use crate::Event;
 
-use crate::reminders::series_master_id;
+/// The id of the SERIES this event belongs to.
+///
+/// A provider-sent override for one modified occurrence carries the master's
+/// id in front of the marker; everything keyed per event — private reminders,
+/// colour overrides, group membership — is keyed by the master, because a
+/// recurring appointment is one appointment. The marker is minted by the
+/// CalDAV adapter (`RECURRENCE_ID_MARKER` in `adapter-caldav`'s mapping).
+///
+/// # It is NOT the whole of the frontend's `seriesIdOf`
+///
+/// `shared/recurrence.ts` answers the same question for TWO kinds of row, and
+/// only one of them exists here. An EXPANDED OCCURRENCE — a synthetic row the
+/// frontend mints for each turn of a recurrence — carries a `series_id` field,
+/// and `seriesIdOf` reads it. [`crate::Event`] has no such field, because the
+/// core and the host never expand: their batches hold masters and
+/// provider-sent overrides, nothing else.
+///
+/// So this is the override half alone, and the difference is load-bearing
+/// rather than cosmetic. A stored signature that describes one OCCURRENCE of a
+/// series is findable in a frontend's expanded batch and is not findable in an
+/// unexpanded one — which is why anchoring a table of such signatures has to
+/// happen where the expansion is.
+pub fn series_master_id(event_id: &str) -> &str {
+    match event_id.find("::rid::") {
+        Some(idx) => &event_id[..idx],
+        None => event_id,
+    }
+}
 
 /// One stored row, reduced to what deciding needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,12 +119,12 @@ pub fn plan_repairs(
     if rows.is_empty() || events.is_empty() {
         return Vec::new();
     }
-    // One rule, in `cal_core`. This was a local closure that only trimmed the
-    // ends, while the frontends' copy also collapsed inner whitespace — so a
-    // title whose spacing changed after joining stopped being re-findable
-    // here while still reading as "the same" there. See
-    // `cal_core::normalized_title`.
-    let normalize = cal_core::normalized_title;
+    // One rule, next door in `event_group`. This was a local closure that only
+    // trimmed the ends, while the frontends' copy also collapsed inner
+    // whitespace — so a title whose spacing changed after joining stopped
+    // being re-findable here while still reading as "the same" there. See
+    // [`crate::normalized_title`].
+    let normalize = crate::normalized_title;
     let mut present: std::collections::HashMap<&str, &Event> = std::collections::HashMap::new();
     for ev in events {
         present.insert(ev.id.as_str(), ev);
@@ -114,8 +141,22 @@ pub fn plan_repairs(
     for row in rows {
         if let Some(ev) = present.get(row.event_id.as_str()) {
             let starts_at = ev.start.to_rfc3339();
-            if ev.title != row.title || starts_at != row.starts_at || row.calendar_id != calendar_id
-            {
+            // Compared as an INSTANT, never as text. One moment has three
+            // spellings in this codebase — chrono's `to_rfc3339` writes
+            // `…09:00:00+00:00`, serde's `DateTime` writes `…09:00:00Z`, and a
+            // frontend's `toISOString` writes `…09:00:00.000Z` — and a
+            // signature is written by whichever side last touched the row.
+            // Comparing the text therefore called every frontend-written row
+            // stale on sight and rewrote it, once per row, for no change at
+            // all.
+            //
+            // A signature that will not parse is not a signature: writing a
+            // readable one over it is the repair, so it counts as differing.
+            let start_matches = row
+                .starts_at
+                .parse::<DateTime<Utc>>()
+                .is_ok_and(|stored| stored == ev.start);
+            if ev.title != row.title || !start_matches || row.calendar_id != calendar_id {
                 out.push(Repair::Refresh {
                     event_id: row.event_id.clone(),
                     calendar_id: calendar_id.to_string(),
@@ -211,6 +252,40 @@ mod tests {
         (at(day) - Duration::days(1), at(day) + Duration::days(1))
     }
 
+    /// Everything keyed per event is keyed by the SERIES: a provider-sent
+    /// override for one occurrence is the same appointment.
+    #[test]
+    fn the_series_master_id_drops_an_occurrence_suffix() {
+        assert_eq!(series_master_id("abc"), "abc");
+        assert_eq!(
+            series_master_id("https://dav/e.ics|uid-1::rid::2026-06-15T09:00:00+00:00"),
+            "https://dav/e.ics|uid-1"
+        );
+    }
+
+    /// The half this function does NOT do, written down so the gap is a
+    /// decision rather than an oversight.
+    ///
+    /// The frontend's `seriesIdOf` answers for two kinds of row. The second is
+    /// an EXPANDED OCCURRENCE, which the frontend mints per turn of a
+    /// recurrence with an id of the form `master@<instant>` and a `series_id`
+    /// field. This function would hand such an id straight back — there is no
+    /// `::rid::` in it and no field to read — and that is correct here,
+    /// because no batch the core is ever handed contains one: the core and the
+    /// host do not expand.
+    ///
+    /// It is pinned because the consequence is silent. Feed an expanded batch
+    /// to [`plan_repairs`] and every occurrence reads as its own series, so a
+    /// recurring appointment's rows look like ambiguity and nothing is
+    /// repaired at all.
+    #[test]
+    fn an_expanded_occurrence_id_is_not_its_series() {
+        assert_eq!(
+            series_master_id("https://dav/e.ics|uid-1@2026-06-15T09:00:00.000Z"),
+            "https://dav/e.ics|uid-1@2026-06-15T09:00:00.000Z"
+        );
+    }
+
     #[test]
     fn a_present_row_is_refreshed_only_when_something_differs() {
         let start = at(1);
@@ -231,6 +306,62 @@ mod tests {
                 &events,
                 week_of(1)
             ),
+            vec![Repair::Refresh {
+                event_id: "ev".into(),
+                calendar_id: "cal".into(),
+                title: "Zahnarzt".into(),
+                starts_at: start.to_rfc3339(),
+            }],
+        );
+    }
+
+    /// The same moment, spelled the three ways this codebase spells it, is one
+    /// moment.
+    ///
+    /// A signature is written by whichever side last touched the row, and the
+    /// sides do not agree on the text: chrono's `to_rfc3339` writes `+00:00`,
+    /// serde's `DateTime` writes `Z`, and a frontend's `toISOString` writes
+    /// `.000Z`. Comparing the text called every frontend-written row stale the
+    /// first time it was looked at and rewrote it — a write nobody asked for,
+    /// on every table anchored this way.
+    #[test]
+    fn one_instant_spelled_three_ways_is_not_a_change() {
+        let start = at(1);
+        let events = [event("ev", "cal", "Zahnarzt", start)];
+        for spelling in [
+            "2026-06-01T09:00:00+00:00",
+            "2026-06-01T09:00:00Z",
+            "2026-06-01T09:00:00.000Z",
+            // Same moment, said in another zone. Still the same moment.
+            "2026-06-01T11:00:00+02:00",
+        ] {
+            let row = Anchored {
+                event_id: "ev".into(),
+                calendar_id: "cal".into(),
+                title: "Zahnarzt".into(),
+                starts_at: spelling.into(),
+            };
+            assert!(
+                plan_repairs(&[row], "cal", &events, week_of(1)).is_empty(),
+                "{spelling} is the event's own start and must not read as a change",
+            );
+        }
+    }
+
+    /// A signature that will not parse is not a signature. Writing a readable
+    /// one over it is the repair, not something to leave alone.
+    #[test]
+    fn an_unreadable_start_is_rewritten() {
+        let start = at(1);
+        let events = [event("ev", "cal", "Zahnarzt", start)];
+        let row = Anchored {
+            event_id: "ev".into(),
+            calendar_id: "cal".into(),
+            title: "Zahnarzt".into(),
+            starts_at: "irgendwann".into(),
+        };
+        assert_eq!(
+            plan_repairs(&[row], "cal", &events, week_of(1)),
             vec![Repair::Refresh {
                 event_id: "ev".into(),
                 calendar_id: "cal".into(),
