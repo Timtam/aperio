@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// One event's membership in a group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct EventGroupMember {
     pub calendar_id: String,
     /// Series master id — a recurring appointment is grouped as a series.
@@ -28,6 +29,7 @@ pub struct EventGroupMember {
 
 /// A set of events that mean one appointment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct EventGroup {
     pub id: String,
     pub created_at: String,

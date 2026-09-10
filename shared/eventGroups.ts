@@ -10,31 +10,19 @@
 // a group read differently on the phone than on the desktop is worse than no
 // group at all.
 
-/** One event in a group, plus the signature it carried when it joined. */
-export interface EventGroupMember {
-  calendar_id: string;
-  /** Series master id: a recurring appointment is grouped as a series. */
-  event_id: string;
-  /**
-   * Title and start AS OF JOINING — never for display.
-   *
-   * What the user reads always comes from the event itself, which may since
-   * have been renamed. These exist so a member whose provider id changed
-   * (a re-bootstrap, a move between calendars, Exchange doing it unprompted)
-   * can be found again instead of silently dropping out of the group.
-   */
-  title: string;
-  starts_at: string;
-  added_at: string;
-}
+// The two shapes are DECLARED IN RUST (`cal_core::event_group`) and generated
+// from there. They were written out here as well, in step with by hand and by a
+// comment saying so — the same arrangement that let the container rows drift
+// apart and offer a repeat shape Vikunja could not store.
+//
+// What stays below is not the domain: it is the JavaScript around it. A `Map`
+// is a JavaScript structure and a `Map` key is a JavaScript string, so the
+// indexing helpers belong on this side for the same reason `eventKey.ts` does
+// — moving them would ship React's and V8's requirements into `cal-core`.
+export type { EventGroup } from './generated/EventGroup';
+export type { EventGroupMember } from './generated/EventGroupMember';
 
-/** Several events, declared to mean one appointment. */
-export interface EventGroup {
-  id: string;
-  created_at: string;
-  updated_at: string;
-  members: EventGroupMember[];
-}
+import type { EventGroup } from './generated/EventGroup';
 
 /**
  * The key both frontends index members by.
@@ -70,32 +58,6 @@ export function indexEventGroups(
     }
   }
   return byMember;
-}
-
-/** The group this event belongs to, or `undefined`. */
-export function groupForEvent(
-  index: Map<string, EventGroup>,
-  event: { calendar_id?: string | null; id?: string | null },
-): EventGroup | undefined {
-  if (!event.calendar_id || !event.id) return undefined;
-  return index.get(eventGroupMemberKey(event.calendar_id, event.id));
-}
-
-/**
- * How many OTHER events this one is grouped with.
- *
- * The number a screen reader announces, and the reason the count is of the
- * others rather than of the group: "with 2 others" is what a user checks
- * against their own memory of how many copies they keep.
- */
-export function otherMemberCount(
-  group: EventGroup,
-  event: { calendar_id?: string | null; id?: string | null },
-): number {
-  const key = eventGroupMemberKey(event.calendar_id ?? '', event.id ?? '');
-  return group.members.filter(
-    (m) => eventGroupMemberKey(m.calendar_id, m.event_id) !== key,
-  ).length;
 }
 
 /**
