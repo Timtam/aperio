@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { detectConference } from '@aperio/shared';
+import { conferenceDetailRows, detectConference } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -58,7 +58,11 @@ export function ConferenceSection({
       value: conference.password,
     },
   ].filter((d): d is { label: string; value: string } => !!d);
-  const details = derived.length > 0 ? derived : conference.labelledDetails;
+  // BOTH, derived first — not one or the other. A derived value is parsed out
+  // of a tone sequence; a labelled one is what the sender typed. Showing only
+  // the derived one meant a mis-parse hid the correct line, with nothing to
+  // notice it against. See `conferenceDetailRows`.
+  const details = conferenceDetailRows(derived, conference.labelledDetails);
 
   const open = async () => {
     try {
