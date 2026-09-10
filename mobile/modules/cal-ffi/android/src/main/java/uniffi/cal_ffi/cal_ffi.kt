@@ -820,6 +820,8 @@ external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_detect_conference(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_find_group_suggestions(
+): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
@@ -829,6 +831,8 @@ external fun uniffi_cal_ffi_checksum_func_parse_attendee(
 external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(
+): Short
+external fun uniffi_cal_ffi_checksum_func_suggest_group_mate(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
 ): Short
@@ -1688,6 +1692,8 @@ external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: 
 ): Int
 external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_find_group_suggestions(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1697,6 +1703,8 @@ external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,u
 external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(`rrule`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_suggest_group_mate(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_recurrence_to_rrule(`recurrence`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1828,6 +1836,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_detect_conference() != 16331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 7552.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1841,6 +1852,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence() != 23397.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_suggest_group_mate() != 60991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991.toShort()) {
@@ -12866,6 +12880,24 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     
 
         /**
+         * Copies worth offering among one day's rows, as JSON.
+         *
+         * `input_json` is `{events[], groups[], declines[]}`, where each event is
+         * `{calendarId, seriesId, title, start, allDay}`. The answer is a
+         * `[{first, second}]` array of positions in `events`.
+         */
+    @Throws(StoreException::class) fun `findGroupSuggestions`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_find_group_suggestions(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Whether a priority is the TOP one — "important" in the two-level system.
          * See `cal_core::TaskPriority::is_important`.
          */
@@ -12940,6 +12972,23 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(
     
         FfiConverterString.lower(`rrule`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The row that most looks like a copy of an anchor, as JSON.
+         *
+         * `input_json` is `{anchor, candidates[]}`. The answer is the position in
+         * `candidates`, or `"null"` when nothing there is a copy.
+         */
+    @Throws(StoreException::class) fun `suggestGroupMate`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_suggest_group_mate(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }

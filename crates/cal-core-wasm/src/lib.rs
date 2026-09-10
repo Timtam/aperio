@@ -160,3 +160,22 @@ pub fn compare_titles(a: &str, b: &str, language_tag: &str) -> i32 {
 pub fn detect_conference(sources_json: &str) -> Result<String, JsValue> {
     rules::detect_conference(sources_json).map_err(to_js)
 }
+
+/// Copies worth offering among one day's rows.
+///
+/// `input_json` is `{events[], groups[], declines[]}`; the answer is a
+/// `[{first, second}]` array of POSITIONS in `events`, because the caller is
+/// already holding the rows and echoing them back would say nothing new.
+#[wasm_bindgen(js_name = findGroupSuggestions)]
+pub fn find_group_suggestions(input_json: &str) -> Result<String, JsValue> {
+    rules::find_group_suggestions(input_json).map_err(to_js)
+}
+
+/// The row that most looks like a copy of an anchor.
+///
+/// `input_json` is `{anchor, candidates[]}`; the answer is the position in
+/// `candidates`, or `"null"`.
+#[wasm_bindgen(js_name = suggestGroupMate)]
+pub fn suggest_group_mate(input_json: &str) -> Result<String, JsValue> {
+    rules::suggest_group_mate(input_json).map_err(to_js)
+}

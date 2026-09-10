@@ -1,25 +1,38 @@
-// Offering a group the user has not asked for yet
-// (DESIGN-event-groups.md, Stufe 3: „erkannt und VORGESCHLAGEN").
+// Recognising a copy (DESIGN-event-groups.md, Stufe 3) — this surface's door
+// into `cal_core::group_suggestion`.
 //
-// `suggestGroupMate` answers "which of these is a copy of THAT one" for a user
-// who already opened the grouping dialog. This answers the question nobody
-// asked: are there copies in this day at all?
+// The design lists three ways membership could come about and picks one:
+// detected and SUGGESTED, confirmed once, then remembered. Two questions live
+// behind this door, and they are deliberately not the same one:
 //
-// The difference matters, because this one speaks unprompted. Three rules keep
-// it from becoming noise:
+//   - `suggestGroupMate` answers "which of these is a copy of THAT one" for a
+//     user who has already opened the grouping dialog.
+//   - `findGroupSuggestions` answers the question nobody asked — are there
+//     copies in this day at all? — and is therefore far more careful, because
+//     it speaks unprompted. Three rules keep it from becoming noise: the same
+//     strict match, never about events already grouped, and never about a pair
+//     the user has DECLINED.
 //
-//   - the same strict match as everywhere else (same name, same start, another
-//     calendar) — a near miss offered every morning is worse than no offer;
-//   - never about events that are already grouped, which is the answer to the
-//     question already given;
-//   - never about a pair the user has DECLINED. That record is what turns a
-//     suggestion into a question asked once instead of a daily interruption,
-//     and it is why migration 0037 exists.
+// Automatic grouping was rejected for a concrete reason: an office full of
+// "Team meeting" at 10:00 would have two different meetings declared one
+// appointment, and a wrong group is worse than a missed one — it hides a real
+// commitment behind a copy of something else. So the rule is precision over
+// recall, and what it produces is never applied, only offered.
+//
+// # This used to be the rule, and now it carries it
+//
+// Both functions were TypeScript implementations of a decision the core also
+// had to make. They are one implementation now, and this file is what a
+// surface installs to reach it — the arrangement `collation.ts` and
+// `taskStatus.ts` already have, and for the same reason: both callers ask
+// during a RENDER (`useMemo` in the suggestion notice and in the grouping
+// dialog), so the door has to answer synchronously.
+//
+// The signatures are unchanged, deliberately. The door builds the request and
+// maps the answer back to the caller's own rows, so no caller had to learn
+// anything about JSON or about positions.
 
 import type { EventGroup } from './eventGroups';
-import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
-import { normalizedTitle } from './eventTitle';
-import { isMeetingCalendarEvent } from './meetingEvents';
 import type { SuggestionDecline } from './types';
 
 /** The minimum a row needs to take part. */
@@ -37,19 +50,71 @@ export interface GroupSuggestion<E> {
   second: E;
 }
 
-function whenKey(event: SuggestibleEvent): string {
-  return event.all_day ? event.start.slice(0, 10) : new Date(event.start).toISOString();
+/**
+ * This surface's door into `cal_core::group_suggestion`.
+ *
+ * JSON in, JSON out, both answers being POSITIONS in the input — the caller is
+ * holding the rows already, and echoing them back across the boundary would
+ * double the payload to say nothing new.
+ */
+export interface GroupSuggestionRules {
+  /** `{events[], groups[], declines[]}` in, `[{first, second}]` out. */
+  findGroupSuggestionsJson(inputJson: string): string;
+  /** `{anchor, candidates[]}` in, a position or the string `"null"` out. */
+  suggestGroupMateJson(inputJson: string): string;
+}
+
+let installedRules: GroupSuggestionRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installGroupSuggestionRules(rules: GroupSuggestionRules): void {
+  installedRules = rules;
+}
+
+function rules(): GroupSuggestionRules {
+  if (installedRules === null) {
+    // Loud, not a local fallback. A fallback here would be the second
+    // implementation all over again, and the failure it produces is quiet:
+    // one surface offering a group the other never mentions, which nobody
+    // reports because each device looks self-consistent.
+    throw new Error(
+      'group suggestions used before installGroupSuggestionRules() — the ' +
+        'surface must bind its door into cal_core::group_suggestion at startup',
+    );
+  }
+  return installedRules;
+}
+
+/** The wire shape of one row, built here so no caller has to know it. */
+function wireEvent(
+  event: SuggestibleEvent,
+  seriesId: string,
+): {
+  calendar_id: string;
+  series_id: string;
+  title: string;
+  start: string;
+  all_day: boolean;
+} {
+  return {
+    calendar_id: event.calendar_id,
+    series_id: seriesId,
+    title: event.title,
+    start: event.start,
+    all_day: event.all_day ?? false,
+  };
 }
 
 /**
  * Whether a stored refusal is currently in force.
  *
- * The later statement wins, and a tie goes to the refusal — the same rule the
- * host applies in `SuggestionDecline::is_declined` and in `read_declines`'
- * WHERE clause, stated once on this side of the FFI. The host already filters
- * before handing rows over, so for today's callers this is a defence: a future
- * caller feeding raw snapshot rows must not resurrect a refusal the user took
- * back.
+ * The later statement wins, and a tie goes to the refusal — the same rule
+ * `SuggestionDecline::is_declined` applies in the core and `read_declines`'
+ * WHERE clause applies in SQL.
+ *
+ * A TWIN, and knowingly so: the core answers this for its own callers, and
+ * this copy survives only because `meetingLinkGrouping.ts` still needs it
+ * synchronously and has not crossed yet. It goes when that one does.
  */
 export function isDeclineInForce(d: SuggestionDecline): boolean {
   return d.cleared_at == null || d.declined_at >= d.cleared_at;
@@ -60,16 +125,37 @@ export function suggestionPairKey(
   a: { calendar_id: string; event_id: string },
   b: { calendar_id: string; event_id: string },
 ): string {
-  const first = eventGroupMemberKey(a.calendar_id, a.event_id);
-  const second = eventGroupMemberKey(b.calendar_id, b.event_id);
+  const first = JSON.stringify([a.calendar_id, a.event_id]);
+  const second = JSON.stringify([b.calendar_id, b.event_id]);
   return first <= second ? `${first}\n${second}` : `${second}\n${first}`;
 }
 
 /**
- * Pairs in this day that look like one appointment and have never been
- * answered about.
+ * The event that most looks like a copy of `anchor`, or `null`.
  *
- * ONE DAY's rows, like the folding rule and for the same reason: a recurring
+ * Three conditions, all required: the same title ignoring case, padding and
+ * the width of the gaps between words; the same start (the same day for
+ * all-day rows); and a DIFFERENT calendar. Ties go to the first candidate in
+ * the order the caller supplied, which is the order the user sees.
+ */
+export function suggestGroupMate<E extends SuggestibleEvent>(
+  anchor: SuggestibleEvent,
+  candidates: readonly E[],
+): E | null {
+  const answer = rules().suggestGroupMateJson(
+    JSON.stringify({
+      anchor: wireEvent(anchor, anchor.id),
+      candidates: candidates.map((c) => wireEvent(c, c.id)),
+    }),
+  );
+  const at = JSON.parse(answer) as number | null;
+  return at == null ? null : (candidates[at] ?? null);
+}
+
+/**
+ * Copies worth offering, among the rows of ONE day.
+ *
+ * One day's rows, like the folding rule and for the same reason: a recurring
  * appointment renders a row per day, and across a range its own days would
  * pair up with each other.
  *
@@ -83,67 +169,16 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
   declines: readonly SuggestionDecline[],
   seriesId: (event: E) => string,
 ): GroupSuggestion<E>[] {
-  const grouped = indexEventGroups(groups);
-  const declined = new Set(
-    declines.filter(isDeclineInForce).map((d) =>
-      suggestionPairKey(
-        { calendar_id: d.calendar_a, event_id: d.event_a },
-        { calendar_id: d.calendar_b, event_id: d.event_b },
-      ),
-    ),
+  const answer = rules().findGroupSuggestionsJson(
+    JSON.stringify({
+      events: events.map((ev) => wireEvent(ev, seriesId(ev))),
+      groups,
+      declines,
+    }),
   );
-
-  const out: GroupSuggestion<E>[] = [];
-  const spokenFor = new Set<string>();
-  // A meeting row is never OFFERED on a resemblance.
-  //
-  // This whole function guesses from a name and a time, which is why its answer
-  // is an offer rather than a group. A videoconference meeting is the one row
-  // that does not need guessing: it carries the join URL its provider issued,
-  // and `findMeetingLinkPairs` pairs it on that identity. Offering it here put
-  // the two mechanisms in each other's way — Aperio writes the event's own
-  // title into the meeting it creates, so "same name, same time" is nearly
-  // guaranteed for the wrong reasons, and the office full of "Team meeting" at
-  // 10:00 that this module's own comment warns about is exactly where a meeting
-  // would be offered against a stranger.
-  //
-  // Answering that offer wrote a refusal NAMING the meeting, and a refusal is
-  // forever. The user was asked the wrong question and their answer was kept.
-  const offerable = (event: E) => !isMeetingCalendarEvent(event);
-  for (let i = 0; i < events.length; i += 1) {
-    const first = events[i];
-    const firstId = seriesId(first);
-    const firstKey = eventGroupMemberKey(first.calendar_id, firstId);
-    if (spokenFor.has(firstKey) || grouped.has(firstKey)) continue;
-    if (!offerable(first)) continue;
-    const title = normalizedTitle(first.title);
-    if (title === '') continue;
-    const when = whenKey(first);
-
-    for (let j = i + 1; j < events.length; j += 1) {
-      const second = events[j];
-      const secondId = seriesId(second);
-      const secondKey = eventGroupMemberKey(second.calendar_id, secondId);
-      if (spokenFor.has(secondKey) || grouped.has(secondKey)) continue;
-      if (!offerable(second)) continue;
-      if (second.calendar_id === first.calendar_id) continue;
-      if (normalizedTitle(second.title) !== title) continue;
-      if (whenKey(second) !== when) continue;
-      if (
-        declined.has(
-          suggestionPairKey(
-            { calendar_id: first.calendar_id, event_id: firstId },
-            { calendar_id: second.calendar_id, event_id: secondId },
-          ),
-        )
-      ) {
-        continue;
-      }
-      out.push({ first, second });
-      spokenFor.add(firstKey);
-      spokenFor.add(secondKey);
-      break;
-    }
-  }
-  return out;
+  const pairs = JSON.parse(answer) as { first: number; second: number }[];
+  return pairs.map(({ first, second }) => ({
+    first: events[first],
+    second: events[second],
+  }));
 }

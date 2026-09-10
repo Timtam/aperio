@@ -1090,6 +1090,44 @@ Siehe DESIGN §4.2.
   speichert die Serien-Id zusammen mit dem Start des Vorkommens, das der Nutzer
   offen hatte; das Mitglied ist auf die Serie gebucht, also beschreibt es
   künftig die Serie — dieselbe Entscheidung wie bei den privaten Erinnerungen.
+- [x] **Das Erkennen einer Kopie liegt im Kern** (2026-09-10).
+  `shared/groupSuggestions.ts` und `shared/suggestGroupMate.ts` waren zwei
+  TypeScript-Fassungen einer Entscheidung, die der Kern auch treffen muss.
+  Jetzt `cal_core::group_suggestion` mit `find_group_suggestions`,
+  `suggest_group_mate` und `is_meeting_calendar`; die zwei Dateien sind zu
+  EINER Tür geworden, `suggestGroupMate.ts` ist weg.
+  ↳ **Zwei Türen, synchron, und das ist der Punkt.** Beide Aufrufer fragen in
+  einem `useMemo` — die Vorschlags-Notiz und der Gruppierungs-Dialog, auf
+  beiden Oberflächen. Da kann nichts warten, also `Function` statt
+  `AsyncFunction`, wie bei der Kollation. Der FFI-Wächter meldete von sich aus
+  rot, kaum standen die zwei freien Funktionen da, und nennt jetzt elf.
+  ↳ **Die Signaturen sind unverändert.** Die Tür baut die Anfrage und bildet
+  die Antwort auf die Zeilen des Aufrufers zurück, also musste keine
+  Aufrufstelle etwas über JSON oder über Positionen lernen. Die Antwort sind
+  POSITIONEN in der Eingabe: der Aufrufer hält die Termine ohnehin, und sie
+  zurückzuschicken hätte die Nutzlast verdoppelt, um nichts Neues zu sagen.
+  ↳ **Die Serien-Id reist als DATUM mit**, nicht als Rückruf. Der Kern kann sie
+  nicht ausrechnen: eine aufgefaltete Wiederholung weiß als einzige, zu welcher
+  Serie sie gehört, und `series_master_id` beantwortet nur den Override-Fall.
+  Statt zu raten, fragt die Regel nach der Antwort.
+  ↳ **Noch eine Doppelung mitgelöst:** das Suffix `::meetings` stand als
+  Konstante in `host_core::vc_calendar` UND als Literal in
+  `shared/meetingEvents.ts`. Es liegt jetzt einmal im Kern — zwei Leser, die
+  es verschieden verstehen, hießen: eine Zeile, die der eine wegwirft und der
+  andere nie paart.
+  ↳ **Ein Fall, den TypeScript nie hatte:** ein Beginn, aus dem sich nichts
+  machen lässt. Der alte Schlüssel war `new Date(wert).toISOString()`, was bei
+  unlesbarer Eingabe WIRFT. Im Kern passt so ein Beginn jetzt auf NICHTS,
+  auch nicht auf einen zweiten unlesbaren — zwei Zeilen, die Aperio nicht
+  einordnen kann, sind kein Beleg dafür, dass sie dasselbe meinen.
+  ↳ **Die zwei Testdateien blieben und prüfen jetzt die KETTE**, nicht mehr
+  eine zweite Implementierung: `src/test-setup.ts` installiert das echte
+  WASM-Modul. Rot bewiesen, indem ich die Kalender-Bedingung im RUST-Kern
+  gestrichen habe — der Desktop-Test fiel um.
+  ↳ **Zwei Zwillinge bleiben vorerst**, benannt statt stillschweigend:
+  `isDeclineInForce` und `suggestionPairKey`. Ihr letzter Aufrufer ist
+  `shared/meetingLinkGrouping.ts`, das synchron ist und noch nicht umgezogen
+  ist; sie gehen mit ihm.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

@@ -26,6 +26,8 @@
 import init, {
   compareNames as wasmCompareNames,
   detectConference as wasmDetectConference,
+  findGroupSuggestions as wasmFindGroupSuggestions,
+  suggestGroupMate as wasmSuggestGroupMate,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -107,4 +109,17 @@ export function compareTitles(
 export function detectConferenceJson(sourcesJson: string): string {
   assertReady();
   return wasmDetectConference(sourcesJson);
+}
+
+/** See `cal_core::group_suggestion::find_group_suggestions_json`. JSON in,
+ *  positions out; synchronous, because the caller asks during a render. */
+export function findGroupSuggestionsJson(inputJson: string): string {
+  assertReady();
+  return wasmFindGroupSuggestions(inputJson);
+}
+
+/** See `cal_core::group_suggestion::suggest_group_mate_json`. */
+export function suggestGroupMateJson(inputJson: string): string {
+  assertReady();
+  return wasmSuggestGroupMate(inputJson);
 }

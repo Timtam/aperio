@@ -199,6 +199,39 @@ pub fn detect_conference(sources_json: String) -> Result<String, StoreError> {
     })
 }
 
+// ────────────────────────── Recognising a copy ──────────────────────────────
+//
+// Same arrangement, same reason: the marshalling is in the core and both doors
+// call it. These two answer with POSITIONS in the input rather than the rows
+// themselves — the caller is holding the events already, and echoing them back
+// would double the payload to say nothing new.
+
+/// Copies worth offering among one day's rows, as JSON.
+///
+/// `input_json` is `{events[], groups[], declines[]}`, where each event is
+/// `{calendar_id, series_id, title, start, all_day}` — the same casing the
+/// group and decline rows already travel in. The answer is a
+/// `[{first, second}]` array of positions in `events`.
+#[uniffi::export]
+pub fn find_group_suggestions(input_json: String) -> Result<String, StoreError> {
+    cal_core::find_group_suggestions_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "group suggestion input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The row that most looks like a copy of an anchor, as JSON.
+///
+/// `input_json` is `{anchor, candidates[]}`. The answer is the position in
+/// `candidates`, or `"null"` when nothing there is a copy.
+#[uniffi::export]
+pub fn suggest_group_mate(input_json: String) -> Result<String, StoreError> {
+    cal_core::suggest_group_mate_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "group mate input".into(),
+        detail: e.to_string(),
+    })
+}
+
 // ───────────────────────── Task recurrence ⇄ RRULE ──────────────────────────
 
 /// How often a recurring task repeats. Mirrors [`cal_core::RecurrenceFrequency`].

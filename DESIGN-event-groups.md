@@ -197,9 +197,10 @@ das, sagt der Dialog genau das — geschrieben ist trotzdem alles.
 **Stufe 3** — Erkennung und Vorschlag; das Meeting wandert an die Gruppe, die
 heutige Verknüpfungs-Rückfrage entfällt.
 
-Die **Erkennung** ist gebaut (`shared/suggestGroupMate.ts`): gleicher Name,
-gleicher Beginn (bei ganztägigen derselbe Tag), anderer Kalender — alle drei
-Bedingungen nötig. „Überlappend" hätte den Termin DAVOR angeboten, und ein
+Die **Erkennung** ist gebaut (`cal_core::group_suggestion`, erreicht über die
+synchrone Tür — WebAssembly am Desktop, Expo-`Function` auf Mobile, weil beide
+Aufrufer während eines Renders fragen): gleicher Name, gleicher Beginn (bei
+ganztägigen derselbe Tag), anderer Kalender — alle drei Bedingungen nötig. „Überlappend" hätte den Termin DAVOR angeboten, und ein
 Beinahe-Treffer beim Titel ist weit öfter etwas anderes als dieselbe Sache. Der
 Fund kommt als **Vorauswahl** in die Auswahlliste, mit einer Zeile, die sagt
 warum; angewendet wird nichts ohne Bestätigung.

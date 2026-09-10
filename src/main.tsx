@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 
 import {
   installConferenceDetector,
+  installGroupSuggestionRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -15,6 +16,8 @@ import {
   compareNames,
   compareTitles,
   detectConferenceJson,
+  findGroupSuggestionsJson,
+  suggestGroupMateJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -71,6 +74,10 @@ initCoreRules()
     // Finding the online meeting in an event. No language in it either, so it
     // is installed once — see `shared/conferencing.ts` for what it replaces.
     installConferenceDetector({ detectConferenceJson });
+
+    // Recognising a copy. Also installed once, and also synchronous — both
+    // callers ask inside a `useMemo`, where nothing can await.
+    installGroupSuggestionRules({ findGroupSuggestionsJson, suggestGroupMateJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
