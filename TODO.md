@@ -1043,12 +1043,29 @@ Siehe DESIGN §4.2.
   bekommt die rohen Zwischenspeicher-Zeilen EINES Kalenders. Deshalb weigert
   sich `findStaleSignatures` bei wiederkehrenden Mitgliedern (sonst schreiben
   zwei Ansichten die Signatur aneinander vorbei) und `plan_repairs` nicht.
-  ↳ **Und deshalb kann die Gruppen-Heilung NICHT in den Host wandern**, so
-  naheliegend das wäre — die drei Schwestertabellen (Farbe, Meeting, private
-  Erinnerung) werden genau dort geheilt, und der Modulkopf von `event_anchor`
-  nennt `event_groups` bereits als vierte. Aber `memberFromEvent` speichert die
-  Serien-Id MIT dem Start des Vorkommens, und ein Host, der nicht auffaltet,
-  findet den nie wieder. Also: Regel in den Kern, Aufruf bleibt vorn.
+  ↳ **Wo die Heilung künftig laufen soll, ist NOCH OFFEN**, und mein erster
+  Einwand gegen die Host-Variante war falsch. Ich hatte argumentiert, ein Host,
+  der nicht auffaltet, finde ein wiederkehrendes Mitglied nie wieder —
+  `memberFromEvent` speichert die Serien-Id zusammen mit dem Start des
+  VORKOMMENS. Nachgeprüft: ein wiederkehrender Master wird mit `end_utc` bis
+  zum Serienende zwischengespeichert (`cache::range_end_utc`), und
+  `read_events` fragt `start_utc < ende AND end_utc > anfang` — der Master
+  liegt also im Stapel, auch wenn sein DTSTART Monate früher ist. Das
+  Mitglied wird gefunden; es landet nur im Refresh- statt im Repoint-Zweig.
+  ↳ Damit sind die drei Einwände gegen die Host-Variante ENTSCHEIDUNGEN, keine
+  Wände: (1) sie würde die Signatur jedes wiederkehrenden Mitglieds vom
+  Vorkommens-Start auf den Master-Start umschreiben — dieselbe Frage, die bei
+  den privaten Erinnerungen oben zugunsten der Serie entschieden wurde;
+  (2) `EventGroupsRepo::refresh_signature` schreibt nur Titel und Start, kann
+  einen Kalender also gar nicht verschieben — die calendar_id-Hälfte von
+  `Refresh` liefe ins Leere, so wie sie es bei den Erinnerungen tut;
+  (3) Ganztags-Regel und Kollisionsschutz gäbe es dann nur noch in der
+  gelöschten TypeScript-Fassung. Dafür bräuchte es GAR KEINE Tür, was der
+  stärkste Punkt für sie ist: alle drei Aufrufer sind schon asynchron.
+  ↳ Zu entscheiden ist also: Regel in den Kern und die drei Aufrufer rufen
+  weiter vorn (eine Tür, gemessen ~+132 KB WASM), ODER heilen wie die drei
+  Schwestertabellen im Host (keine Tür, aber die Signaturen wandern auf die
+  Serie). Toni fragen.
   ↳ Die weiteren Abweichungen, noch zu entscheiden: Refresh vergleicht Titel
   ROH, `findStaleSignatures` NORMALISIERT; Mehrdeutigkeit zählt in TypeScript
   ZEILEN und in Rust SERIEN; die Ganztags-Regel (Tagesgenauigkeit für
