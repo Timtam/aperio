@@ -7,10 +7,14 @@ import { normalizedTitle } from '@aperio/shared';
  * The title rule, against the SAME table `cal_core::normalized_title` answers.
  *
  * Unlike conference detection, this rule still has two implementations. That is
- * not an oversight: the three callers that need it here — `findGroupSuggestions`,
- * `suggestGroupMate` and `healEventGroups` — are themselves on their way into
- * `cal-core`, and they take the TypeScript half with them when they go. A door
- * built for the one step in between would be thrown away on the next.
+ * not an oversight: the callers that need it here — `findGroupSuggestions` and
+ * `suggestGroupMate` — are themselves on their way into `cal-core`, and they
+ * take the TypeScript half with them when they go. A door built for the one
+ * step in between would be thrown away on the next.
+ *
+ * The third caller has already gone that way: `healEventGroups` was deleted
+ * when the host took over anchoring group membership, which is what this
+ * arrangement is for.
  *
  * So until then this file carries the whole weight. Two independent
  * implementations of one decision is exactly the arrangement that let five

@@ -90,20 +90,32 @@ Ein Mitglied braucht daher neben der Kennung eine **Signatur** — Titel und
 Startzeitpunkt —, mit der es sich wiederfinden lässt, wenn die Kennung nicht mehr
 auflöst. Selbstheilend statt baumelnd.
 
-**Gebaut** (`shared/healEventGroups.ts` + `EventGroupsRepo::heal_member`): Die
-Ansicht, die einen Bereich in der Hand hat, kann „das Mitglied liegt woanders"
-von „diese Kennung löst hier nichts auf" unterscheiden — nur Mitglieder, deren
-gespeicherter Beginn IN den Bereich fällt, werden überhaupt betrachtet. Gesucht
-wird mit derselben strengen Regel wie bei der Erkennung: gleicher Kalender,
-gleicher Titel, gleicher Beginn. Ein Beinahe-Treffer würde die Gruppe still auf
-den falschen Termin umbiegen, und das ist schlimmer als eine Gruppe, der ein
-Mitglied fehlt und die das sagt. Wird nichts gefunden, bleibt die Mitgliedschaft
-unangetastet — es könnte eine Kopie sein, die der Nutzer gelöscht hat, und sie
-auf Verdacht fallen zu lassen ändert etwas, worum niemand gebeten hat.
+**Gebaut** (`cal_core::event_anchor::plan_repairs` +
+`host_core::event_groups::heal_event_group_anchors`): Wer die Termine eines
+Kalenders für einen Bereich gerade geholt hat, kann „das Mitglied liegt
+woanders" von „diese Kennung löst hier nichts auf" unterscheiden — nur
+Mitglieder, deren gespeicherter Beginn IN den Bereich fällt, werden überhaupt
+betrachtet. Gesucht wird mit derselben strengen Regel wie bei der Erkennung:
+gleicher Kalender, gleicher Titel, gleicher Beginn (bei ganztägigen Terminen
+derselbe TAG, weil deren Zeitpunkt sich mit der Zeitzone verschiebt, ohne dass
+der Termin sich verschiebt). Ein Beinahe-Treffer würde die Gruppe still auf den
+falschen Termin umbiegen, und das ist schlimmer als eine Gruppe, der ein
+Mitglied fehlt und die das sagt. Wird nichts gefunden — oder mehr als eines —,
+bleibt die Mitgliedschaft unangetastet: es könnte eine Kopie sein, die der
+Nutzer gelöscht hat, und sie auf Verdacht fallen zu lassen ändert etwas, worum
+niemand gebeten hat.
 
 Die Reparatur läuft **still**: dieselben Termine meinen davor wie danach
-dieselbe Verabredung, es gibt dem Nutzer nichts zu melden. Sie läuft auf allen
-sechs Oberflächen — jede hat den Bereich, der den Beweis liefert.
+dieselbe Verabredung, es gibt dem Nutzer nichts zu melden.
+
+Sie läuft **im Host**, gleich neben den drei Schwestertabellen, die auf
+denselben Kennungen hängen: Farb-Überschreibungen (0026/0044), private
+Erinnerungen (0043) und Meeting-Bindungen (0034/0045). Alle vier teilen sich
+`cal_core::event_anchor` — dieselbe Entscheidung darüber, was zu erneuern, was
+umzuhängen und, meistens, was in Ruhe zu lassen ist. Bis 2026-09-10 war die
+Gruppen-Heilung die einzige, die stattdessen in TypeScript neu gerechnet wurde,
+bei jedem Rendern und mit einer Host-Runde pro Befund; die Regel stand damit
+zweimal da, und die zwei Fassungen waren an mehreren Stellen auseinander.
 
 Läuft eine Gruppe auseinander — ein Anbieter verschiebt ein Mitglied, die
 anderen nicht —, ist sie eine Behauptung, die nicht mehr stimmt. Sie wird dann

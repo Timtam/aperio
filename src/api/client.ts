@@ -925,21 +925,6 @@ export const ungroupEvent = (
 export const dissolveEventGroup = (group_id: string) =>
   invoke<void>('dissolve_event_group', { groupId: group_id });
 
-/** Write down what a member's event looks like now, so the group can still
- *  find it after the provider remints its id. Local and silent. */
-export const refreshEventGroupSignature = (payload: {
-  calendar_id: string;
-  event_id: string;
-  title: string;
-  starts_at: string;
-}) =>
-  invoke<void>('refresh_event_group_signature', {
-    calendarId: payload.calendar_id,
-    eventId: payload.event_id,
-    title: payload.title,
-    startsAt: payload.starts_at,
-  });
-
 /** Record that two events are NOT the same appointment.
  *
  *  Silences the OFFER only — grouping them by hand still works and never
@@ -952,24 +937,6 @@ export const declineGroupSuggestion = (
 /** Every pair the user has said is not one appointment. */
 export const groupSuggestionDeclines = () =>
   invoke<SuggestionDecline[]>('group_suggestion_declines');
-
-/** Point one member at the id its event carries now.
- *
- *  A repair of Aperio's own bookkeeping — the same events mean the same
- *  appointment before and after — so it is applied silently by whichever view
- *  noticed, never announced as a change the user made. */
-export const healEventGroupMember = (payload: {
-  group_id: string;
-  calendar_id: string;
-  old_event_id: string;
-  new_event_id: string;
-}) =>
-  invoke<void>('heal_event_group_member', {
-    groupId: payload.group_id,
-    calendarId: payload.calendar_id,
-    oldEventId: payload.old_event_id,
-    newEventId: payload.new_event_id,
-  });
 
 /**
  * Reminders Aperio keeps for ONE event and tells no provider about

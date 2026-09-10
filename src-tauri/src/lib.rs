@@ -744,8 +744,6 @@ pub fn run() {
             commands::ungroup_event,
             commands::dissolve_event_group,
             commands::event_groups_for_events,
-            commands::heal_event_group_member,
-            commands::refresh_event_group_signature,
             commands::decline_group_suggestion,
             commands::group_suggestion_declines,
             commands::search,

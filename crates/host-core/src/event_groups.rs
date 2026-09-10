@@ -16,7 +16,7 @@
 //! Grouping single occurrences is a different feature and deliberately not this
 //! one.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 
@@ -794,8 +794,23 @@ impl<'a> EventGroupsRepo<'a> {
     /// devices whose caches disagree about an id would heal each other back
     /// and forth without end.
     ///
-    /// Returns the group afterwards, or `None` when the old member was already
-    /// gone (two views healing the same thing at once is not an error).
+    /// Returns the group afterwards, or `None` when nothing moved — the old
+    /// member was already gone (two views healing the same thing at once is
+    /// not an error), or the id it would move to is already taken.
+    ///
+    /// THE TAKEN CASE IS NOT AN ERROR EITHER, and refusing it here is the
+    /// point. `event_group_members` carries a UNIQUE index on
+    /// `(calendar_id, event_id)` because an event belongs to at most one
+    /// group, so an `UPDATE` onto an id another member already holds does not
+    /// write a wrong row — it raises a constraint error. That error would then
+    /// travel up to a caller that can do nothing with it, and the next render
+    /// would try the same doomed write again, for as long as the app is open.
+    ///
+    /// The case is ordinary rather than exotic: a group can hold both a stale
+    /// id and the one it was already healed to, and then the stale row's
+    /// signature points at an event the group has under its new name. Leaving
+    /// it is right — a member that cannot be resolved is visible and fixable,
+    /// which is the same choice ambiguity gets.
     pub fn heal_member(
         &self,
         group_id: &str,
@@ -803,8 +818,25 @@ impl<'a> EventGroupsRepo<'a> {
         old_event_id: &str,
         new_event_id: &str,
     ) -> Result<Option<EventGroup>, EventGroupsError> {
+        if old_event_id == new_event_id {
+            return Ok(None);
+        }
         let mut conn = self.db.lock().expect("db mutex poisoned");
         let tx = conn.transaction()?;
+        // Any group, not just this one: the index is global, so a member of
+        // another group holding that id collides just as hard.
+        let taken: bool = tx.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM event_group_members
+                  WHERE calendar_id = ? AND event_id = ?
+             )",
+            params![calendar_id, new_event_id],
+            |row| row.get(0),
+        )?;
+        if taken {
+            tx.commit()?;
+            return Ok(None);
+        }
         let changed = tx.execute(
             "UPDATE event_group_members
                 SET event_id = ?
@@ -987,6 +1019,110 @@ impl<'a> EventGroupsRepo<'a> {
         tx.commit()?;
         Ok(Some(declines))
     }
+
+    /// Every membership stored against one calendar, with the group it is in.
+    ///
+    /// The shape the anchor repair needs, and nothing more:
+    /// [`cal_core::plan_repairs`] decides per row, and the group id is carried
+    /// alongside because [`Self::heal_member`] is keyed by it.
+    fn members_of_calendar(
+        &self,
+        calendar_id: &str,
+    ) -> Result<Vec<(String, cal_core::Anchored)>, EventGroupsError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT group_id, event_id, title, starts_at
+               FROM event_group_members
+              WHERE calendar_id = ?",
+        )?;
+        let rows = stmt.query_map(params![calendar_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                cal_core::Anchored {
+                    event_id: row.get::<_, String>(1)?,
+                    calendar_id: calendar_id.to_string(),
+                    title: row.get::<_, String>(2)?,
+                    starts_at: row.get::<_, String>(3)?,
+                },
+            ))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+/// Keep the group memberships of one calendar's events anchored, while the
+/// events that prove it are in hand.
+///
+/// The fourth table of this kind, and the last to be repaired here.
+/// `event_anchor`'s module doc has named `event_groups` (migration 0035) among
+/// them all along, but its repair lived in the frontend — recomputed on every
+/// render, in TypeScript, and applied one host round trip per finding. The
+/// decision was therefore written twice, and the two spellings had drifted
+/// apart.
+///
+/// Losing a member is the quietest failure of the four: the group still looks
+/// authoritative while being one limb short, so the copy that was going to be
+/// collapsed away shows up again as a separate appointment, or the carry stops
+/// reaching it. `DESIGN-event-groups.md` calls that the worst of the available
+/// failures, which is why membership stores a signature at all.
+///
+/// Silent and local, like the other three. Every device sees the same events
+/// and repairs its own copy; broadcasting a repair stamped "now" would outrank
+/// a dissolve another device had just made.
+pub fn heal_event_group_anchors(
+    repo: &EventGroupsRepo<'_>,
+    calendar_id: &str,
+    events: &[cal_core::Event],
+    range: (DateTime<Utc>, DateTime<Utc>),
+) {
+    let Ok(members) = repo.members_of_calendar(calendar_id) else {
+        return;
+    };
+    if members.is_empty() {
+        return;
+    }
+    // The group id per membership, so a repair can be applied to the row it
+    // came from. `(calendar_id, event_id)` is unique across the table, so one
+    // entry per event id is enough.
+    let group_of: std::collections::HashMap<&str, &str> = members
+        .iter()
+        .map(|(group_id, row)| (row.event_id.as_str(), group_id.as_str()))
+        .collect();
+    let anchored: Vec<cal_core::Anchored> = members.iter().map(|(_, row)| row.clone()).collect();
+
+    for repair in cal_core::plan_repairs(&anchored, calendar_id, events, range) {
+        match repair {
+            // Only the signature. `Repair` also offers to re-anchor a row into
+            // the calendar being rendered, and a membership cannot take that:
+            // `refresh_signature` writes title and start WHERE the calendar and
+            // event already match. Moving a member between calendars is not a
+            // repair anyway — it is a different membership, and the UNIQUE
+            // index would have to be argued with first.
+            cal_core::Repair::Refresh {
+                event_id,
+                title,
+                starts_at,
+                ..
+            } => {
+                if let Err(err) = repo.refresh_signature(calendar_id, &event_id, &title, &starts_at)
+                {
+                    tracing::warn!(?err, "couldn't refresh an event group's signature");
+                }
+            }
+            cal_core::Repair::Repoint { event_id, to } => {
+                let Some(group_id) = group_of.get(event_id.as_str()) else {
+                    continue;
+                };
+                if let Err(err) = repo.heal_member(group_id, calendar_id, &event_id, &to) {
+                    tracing::warn!(
+                        calendar_id = %calendar_id,
+                        ?err,
+                        "couldn't repoint an event group member; it stays where it is",
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1007,6 +1143,50 @@ mod tests {
             title: "Wochenplanung".into(),
             starts_at: "2026-08-10T08:00:00Z".into(),
         }
+    }
+
+    /// The instant every `member` above records, as the type the events carry.
+    fn signature_start() -> DateTime<Utc> {
+        "2026-08-10T08:00:00Z".parse().expect("a fixed instant")
+    }
+
+    fn live_event(
+        id: &str,
+        calendar_id: &str,
+        title: &str,
+        start: DateTime<Utc>,
+    ) -> cal_core::Event {
+        cal_core::Event {
+            id: id.into(),
+            calendar_id: calendar_id.into(),
+            title: title.into(),
+            description: None,
+            location: None,
+            start,
+            end: start + chrono::Duration::hours(1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: start,
+            updated_at: start,
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
+    }
+
+    fn day_around(start: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+        (
+            start - chrono::Duration::hours(12),
+            start + chrono::Duration::hours(12),
+        )
     }
 
     #[test]
@@ -1125,6 +1305,119 @@ mod tests {
                 .unwrap(),
             None,
         );
+    }
+
+    /// The whole repair, as the host runs it: a member whose id the provider
+    /// reminted is found again by its signature, while the events that prove
+    /// it are in hand.
+    ///
+    /// This is what used to be recomputed in the frontend on every render.
+    #[test]
+    fn a_member_whose_id_was_reminted_is_repaired_where_the_events_are() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        let group = repo
+            .group(&[member("work", "old-a"), member("private", "ev-b")])
+            .unwrap()
+            .group;
+
+        let start = signature_start();
+        // The work calendar's copy answers to a new id now; the private one is
+        // untouched and is not even in this batch.
+        heal_event_group_anchors(
+            &repo,
+            "work",
+            &[live_event("new-a", "work", "  wochenplanung ", start)],
+            day_around(start),
+        );
+
+        let after = repo.get(&group.id).unwrap().expect("the group stands");
+        assert!(
+            after.members.iter().any(|m| m.event_id == "new-a"),
+            "the member follows its event's new id",
+        );
+        assert!(!after.members.iter().any(|m| m.event_id == "old-a"));
+        assert!(
+            after.members.iter().any(|m| m.event_id == "ev-b"),
+            "a member of another calendar is not in this batch and is not touched",
+        );
+        assert_eq!(
+            after.members.len(),
+            2,
+            "a repair is not a membership change"
+        );
+    }
+
+    /// Ambiguity repairs nothing here either. Two events of one name at one
+    /// time leave the member where it is — unresolved is visible and fixable,
+    /// attached to the wrong appointment is neither.
+    #[test]
+    fn two_events_of_one_name_leave_the_member_alone() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        let group = repo
+            .group(&[member("work", "old-a"), member("private", "ev-b")])
+            .unwrap()
+            .group;
+
+        let start = signature_start();
+        heal_event_group_anchors(
+            &repo,
+            "work",
+            &[
+                live_event("candidate-1", "work", "Wochenplanung", start),
+                live_event("candidate-2", "work", "Wochenplanung", start),
+            ],
+            day_around(start),
+        );
+
+        let after = repo.get(&group.id).unwrap().unwrap();
+        assert!(after.members.iter().any(|m| m.event_id == "old-a"));
+    }
+
+    /// An id another member already holds is refused, not attempted.
+    ///
+    /// `event_group_members` has a UNIQUE index on `(calendar_id, event_id)`,
+    /// so the `UPDATE` would raise a constraint error rather than write a
+    /// wrong row — and the caller can do nothing with that error, so the next
+    /// render would try the same doomed write again. Leaving the member alone
+    /// is the same choice ambiguity gets: unresolved is visible and fixable,
+    /// wrong is neither.
+    #[test]
+    fn healing_onto_an_id_that_is_taken_changes_nothing() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        // The group holds a stale id AND the one it would be healed to.
+        let group = repo
+            .group(&[member("work", "stale"), member("work", "current")])
+            .unwrap()
+            .group;
+
+        assert_eq!(
+            repo.heal_member(&group.id, "work", "stale", "current")
+                .unwrap(),
+            None,
+            "the id is taken; nothing moves",
+        );
+        let after = repo.get(&group.id).unwrap().expect("the group stands");
+        assert_eq!(after.members.len(), 2);
+        assert!(after.members.iter().any(|m| m.event_id == "stale"));
+
+        // Taken by ANOTHER group counts too — the index is table-wide.
+        let other = repo
+            .group(&[member("work", "far-a"), member("private", "far-b")])
+            .unwrap()
+            .group;
+        assert_eq!(
+            repo.heal_member(&group.id, "work", "stale", "far-a")
+                .unwrap(),
+            None,
+            "another group holds it; still nothing moves",
+        );
+        assert_eq!(repo.get(&other.id).unwrap().unwrap().members.len(), 2);
     }
 
     #[test]

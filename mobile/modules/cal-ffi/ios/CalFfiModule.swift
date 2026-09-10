@@ -608,12 +608,6 @@ public class CalFfiModule: Module {
       try self.host.eventGroupsForEventsJson(eventsJson: eventsJson)
     }
 
-    AsyncFunction("refreshEventGroupSignature") {
-      (calendarId: String, eventId: String, title: String, startsAt: String) in
-      try self.host.refreshEventGroupSignature(
-        calendarId: calendarId, eventId: eventId, title: title, startsAt: startsAt)
-    }
-
     AsyncFunction("declineGroupSuggestionJson") { (firstJson: String, secondJson: String) in
       try self.host.declineGroupSuggestionJson(firstJson: firstJson, secondJson: secondJson)
     }
@@ -653,15 +647,6 @@ public class CalFfiModule: Module {
         eventId: eventId,
         title: title,
         startsAt: startsAt)
-    }
-
-    AsyncFunction("healEventGroupMember") {
-      (groupId: String, calendarId: String, oldEventId: String, newEventId: String) in
-      try self.host.healEventGroupMember(
-        groupId: groupId,
-        calendarId: calendarId,
-        oldEventId: oldEventId,
-        newEventId: newEventId)
     }
 
     AsyncFunction("setContainerColorLabel") { (containerId: String, kind: String, colorLabelId: String?) in

@@ -461,6 +461,16 @@ pub async fn get_events(
         &cached,
         (range.start, range.end),
     );
+    // And the group memberships, the fourth table anchored on those ids
+    // (migration 0035). This used to be recomputed in the frontend on every
+    // render and applied one round trip per finding; the decision lives in
+    // `cal_core::event_anchor` now and is applied here, where the evidence is.
+    host_core::event_groups::heal_event_group_anchors(
+        &host_core::event_groups::EventGroupsRepo::new(&shared),
+        &request.calendar_id,
+        &cached,
+        (range.start, range.end),
+    );
     apply_color_to_events(&overrides, &mut cached);
     tracing::info!(
         target: "aperio::cache",
