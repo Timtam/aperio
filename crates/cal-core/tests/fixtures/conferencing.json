@@ -1,0 +1,322 @@
+{
+  "what": "What Aperio reads out of an event when it looks for an online meeting — as a table of inputs and the answer `cal_core::conferencing::detect_conference` gives for each. Every row that once had a second answer records that too, under `wasTypeScript`.",
+  "why": "This rule was written TWICE: here in Rust, and in `shared/conferencing.ts` for the frontends. Both ran in production on the same job, and NOTHING pinned them to each other — each had its own hand-copied test list. Six places where they disagreed were found by reading them side by side, and none of the six could be observed, because the two Rust callers read only `join_url` and every disagreement lived in the other fields. Every one of them would have become visible the moment the TypeScript was deleted, silently, with no record of what changed. This file is that record, written BEFORE the deletion so the change can be reviewed rather than discovered.",
+  "writtenBy": [],
+  "readBy": [
+    "crates/cal-core/src/conferencing.rs (the `contract` test module)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, not in shared/contracts/ where taskOwnership.json and calendarDefaultReminders.json sit. Those are read from host-core, which — as the reach guard puts it — 'is the host and never leaves this repository'. cal-core is the opposite: twelve adapter repositories compile it, and an `include_str!` reaching out of the crate would break the day it moves. A crate reads its own files."
+  },
+  "shape": {
+    "location": "the event's location field, or null",
+    "description": "the event's description field, or null",
+    "expect": "the detected meeting, or null for 'no meeting here'. Fields absent from `expect` are asserted absent.",
+    "wasTypeScript": "present only on rows where shared/conferencing.ts answered differently; what it answered, and why the surviving answer was chosen. Absent means the two already agreed.",
+    "reach": "whether a real provider invitation can produce this input, or only hand-typed / hostile text"
+  },
+  "cases": [
+    {
+      "name": "webex-dtmf-canonical",
+      "note": "The shape both implementations' doc comments describe and every existing test uses. It agreed on both sides, which is exactly why the tie-break below was never noticed. Pinned first because it is the safety net: if this row moves, something is broken that no divergence explains.",
+      "reach": "real-provider-invitation",
+      "location": null,
+      "description": "Beitreten: https://example.webex.com/e/j.php?MTID=m1\nEinwahl: tel:+1-555-0100,,*01*25503113955%23626114%23*01*",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "25503113955",
+        "password": "626114",
+        "phone": "tel:+1-555-0100,,*01*25503113955%23626114%23*01*",
+        "labelled_details": [
+          [
+            "Einwahl",
+            "tel:+1-555-0100,,*01*25503113955%23626114%23*01*"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "dtmf-tie-in-the-meeting-number",
+      "note": "Two digit runs of equal length in one hash-delimited field. Neither implementation's comment says what happens on a tie — both only promise 'the longest run' — so the difference was accidental on both sides.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "Beitreten: https://example.webex.com/e/j.php?MTID=m1\nEinwahl: tel:+1-555-0100,,*01*2550-3113%23626114%23*01*",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "2550",
+        "password": "626114",
+        "phone": "tel:+1-555-0100,,*01*2550-3113%23626114%23*01*",
+        "labelled_details": [
+          [
+            "Einwahl",
+            "tel:+1-555-0100,,*01*2550-3113%23626114%23*01*"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "meeting_number 2550 — the same as the expectation above",
+        "wasRust": "meeting_number 3113, because `max_by_key` returns the LAST maximal element",
+        "chosen": "the TypeScript answer, and Rust changed to match. Neither is principled, so the tiebreaker is that first-wins is what was already shipping: adopting the other would have silently changed an announced meeting number for no reason anyone could point at."
+      }
+    },
+    {
+      "name": "dtmf-tie-in-the-password",
+      "note": "The same tie one field further along, because the two fields are read positionally and a change to one must not shift the other.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "Beitreten: https://example.webex.com/e/j.php?MTID=m1\nEinwahl: tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "25503113955",
+        "password": "626114",
+        "phone": "tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*",
+        "labelled_details": [
+          [
+            "Einwahl",
+            "tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "password 626114 — the same as the expectation above",
+        "wasRust": "password 999888",
+        "chosen": "the TypeScript answer, for the same reason as the row above."
+      }
+    },
+    {
+      "name": "sip-with-a-host",
+      "note": "The ordinary SIP line. Agreed on both sides; pinned so the strip below cannot break it.",
+      "reach": "real-provider-invitation",
+      "location": null,
+      "description": "https://example.webex.com/e/j.php?MTID=m1\nsip:25503113955@example.webex.com",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "25503113955",
+        "sip_address": "sip:25503113955@example.webex.com",
+        "labelled_details": [
+          [
+            "sip",
+            "25503113955@example.webex.com"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "sip-without-a-host",
+      "note": "A `sip:` value with no `@host`. That is not a SIP address, and reading a meeting number out of it means answering confidently about a string nobody wrote.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "https://example.webex.com/example/j.php?MTID=m1\nVideo: sip:25503113955",
+      "expect": {
+        "join_url": "https://example.webex.com/example/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "sip_address": "sip:25503113955",
+        "labelled_details": [
+          [
+            "Video",
+            "sip:25503113955"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "meeting_number 25503113955, from `sip.slice(4).split('@')[0]`, which tolerates a missing host",
+        "chosen": "the Rust answer. The invitation's own `Video:` line is still shown, so nothing is lost by declining to guess — and since PR #23 a derived value no longer suppresses that line, which is what made declining safe."
+      }
+    },
+    {
+      "name": "sip-scheme-written-twice",
+      "note": "A malformed URI. Recovering a meeting number from it was an accident of `trim_start_matches`, which strips a prefix REPEATEDLY.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "Video: sip:sip:25503113955@example.webex.com\nLink: https://example.webex.com/e/j.php?MTID=m1",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "sip_address": "sip:sip:25503113955@example.webex.com"
+      },
+      "wasTypeScript": {
+        "answer": "no meeting number — the same as the expectation above",
+        "wasRust": "meeting_number 25503113955, because the doubled scheme was silently cleaned up",
+        "chosen": "the TypeScript answer, and Rust now strips the scheme exactly once."
+      }
+    },
+    {
+      "name": "sip-scheme-in-capitals",
+      "note": "RFC 3986 §3.1: a URI scheme is case-insensitive, so this is the same address as the lowercase form.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "https://example.webex.com/e/j.php?MTID=m1\nSIP:25503113955@example.webex.com",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "25503113955",
+        "sip_address": "SIP:25503113955@example.webex.com",
+        "labelled_details": [
+          [
+            "SIP",
+            "25503113955@example.webex.com"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "meeting_number 25503113955 — the same as the expectation above",
+        "wasRust": "no meeting number, because the strip matched case-sensitively",
+        "chosen": "the TypeScript answer, and Rust now matches the scheme without regard to case. This is the one row where the RFC settles it rather than a preference."
+      }
+    },
+    {
+      "name": "turkish-dotted-capital-i-before-a-uri",
+      "note": "U+0130 is the only code point in Unicode whose `toLowerCase()` changes a string's length — it becomes 'i' plus U+0307. The TypeScript computed an index in a lowercased copy and applied it to the original, so every U+0130 before the match shifted the slice one unit late. Rust cannot have this bug: `to_ascii_lowercase` is byte-for-byte length-preserving, which is exactly why it is used and not a stylistic choice.",
+      "reach": "plausible-but-unproven",
+      "location": null,
+      "description": "İK Toplantısı\nhttps://example.webex.com/e/j.php?MTID=m1\nsip:25503113955@example.webex.com",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "meeting_number": "25503113955",
+        "sip_address": "sip:25503113955@example.webex.com",
+        "labelled_details": [
+          [
+            "sip",
+            "25503113955@example.webex.com"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "meeting_number 5503113955 — the leading digit lost — and sip_address 'ip:25503113955@example.webex.com', the scheme letter lost",
+        "chosen": "the Rust answer. This is not a difference of opinion: the TypeScript was wrong, and deleting it repairs a defect rather than changing behaviour."
+      }
+    },
+    {
+      "name": "label-with-a-non-ascii-character-in-the-bmp",
+      "note": "The control for the row below, and it carries a non-ASCII character on purpose. 'Passwort für Telefon- und Videosysteme' is a real Webex label; 'ü' is one UTF-16 code unit AND one scalar value, so it cannot diverge. That is what isolates the astral plane as the cause below, rather than 'non-ASCII' in general.",
+      "reach": "real-provider-invitation",
+      "location": null,
+      "description": "https://example.webex.com/e/j.php?MTID=m1\nPasswort für Telefon- und Videosysteme: 98476838",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "labelled_details": [
+          [
+            "Passwort für Telefon- und Videosysteme",
+            "98476838"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "label-with-an-astral-emoji-at-the-cap",
+      "note": "A label of 41 UTF-16 code units and 40 Unicode scalar values — the narrowest possible witness, one over the JavaScript cap and exactly at the Rust one. The difference is strictly one-directional: UTF-16 length is never below scalar count, so the TypeScript was always the more aggressive dropper and the move can only ADD detail rows, never remove one.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "Webex-Meeting beitreten\nhttps://example.webex.com/example/j.php?MTID=m0123456789abcdef\nEinwahl per Telefon (weltweite Listen) 📞: +49 30 1234567",
+      "expect": {
+        "join_url": "https://example.webex.com/example/j.php?MTID=m0123456789abcdef",
+        "provider": "webex",
+        "source": "description",
+        "labelled_details": [
+          [
+            "Einwahl per Telefon (weltweite Listen) 📞",
+            "+49 30 1234567"
+          ]
+        ]
+      },
+      "wasTypeScript": {
+        "answer": "no labelled details at all — the dial-in row was dropped",
+        "chosen": "the Rust answer. The cap is a heuristic about how much text a person reads; UTF-16 code units are an artifact of JavaScript's string representation, not a unit of text."
+      }
+    },
+    {
+      "name": "two-links-of-equal-length-all-ascii",
+      "note": "The control for the row below. Two classifiable links in one field is the ordinary case — the module exists to prefer the longer one because Webex's newer join links nest a shorter-looking URL in their query string. All-ASCII, equal length, so the first found holds; every way of measuring agrees and this row cannot move.",
+      "reach": "real-provider-invitation",
+      "location": null,
+      "description": "Alt: https://example.webex.com/e/j.php?MTID=mab\nNeu: https://example.webex.com/e/j.php?MTID=mcd",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=mab",
+        "provider": "webex",
+        "source": "description"
+      }
+    },
+    {
+      "name": "two-links-of-equal-length-one-with-an-umlaut",
+      "note": "The sixth divergence, and the only one of the six that touches `join_url` — the one field BOTH hosts read today, which makes it the only one that could already be inconsistent rather than merely latent: the Join button and the host's meeting resolution could target different links. Both candidates are 42 characters; the second is 43 BYTES.",
+      "reach": "hand-typed-only",
+      "location": null,
+      "description": "Alt: https://example.webex.com/e/j.php?MTID=mab\nNeu: https://example.webex.com/e/j.php?MTID=mäb",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=mab",
+        "provider": "webex",
+        "source": "description"
+      },
+      "wasTypeScript": {
+        "answer": "https://example.webex.com/e/j.php?MTID=mab — the same as the expectation above; it counted UTF-16 code units, and 42 is not greater than 42",
+        "wasRust": "https://example.webex.com/e/j.php?MTID=mäb, because `len()` is a BYTE count and 43 beats 42",
+        "chosen": "neither by inheritance: Rust now counts CHARACTERS. 'The longest URL' means the one with more characters, and a byte count let one non-ASCII character outrank a longer ASCII link. Scalar values agree with UTF-16 for every ASCII and every BMP character, so this also happens to match what the frontends did — the two differ now only for an astral character inside a URL."
+      }
+    },
+    {
+      "name": "webex-playback-is-not-a-meeting",
+      "note": "A recording, not a joinable meeting. Agreed on both sides; pinned because the exclusion is the only place in either `classify` whose match target contains the letter k, and the Kelvin-sign row below turns on exactly that.",
+      "reach": "real-provider-invitation",
+      "location": "https://example.webex.com/playback/j.php?MTID=m1",
+      "description": null,
+      "expect": null
+    },
+    {
+      "name": "kelvin-sign-in-a-playback-path",
+      "note": "U+212A lowercases to ASCII 'k' under full Unicode rules and not at all under ASCII rules. No provider emits it; it reaches this code only from crafted text. `/playbacK/` and `/playback/` are genuinely different paths on the server, so folding them together only ever helps a crafted URL impersonate a path marker.",
+      "reach": "hostile-input-only",
+      "location": "https://example.webex.com/playbacK/j.php?MTID=m1",
+      "description": null,
+      "expect": {
+        "join_url": "https://example.webex.com/playbacK/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "location"
+      },
+      "wasTypeScript": {
+        "answer": "no meeting at all — the lowercased copy contained '/playback/' and hit the recording exclusion",
+        "chosen": "the Rust answer, deliberately rather than by inheritance."
+      }
+    },
+    {
+      "name": "spaced-sip-label-is-not-a-uri",
+      "note": "A near miss that looks like a divergence and is not: with a space after the colon there is no URI on either side. Written down so nobody re-discovers it as a bug.",
+      "reach": "real-provider-invitation",
+      "location": null,
+      "description": "https://example.webex.com/e/j.php?MTID=m1\nSIP: 25503113955@example.webex.com",
+      "expect": {
+        "join_url": "https://example.webex.com/e/j.php?MTID=m1",
+        "provider": "webex",
+        "source": "description",
+        "labelled_details": [
+          [
+            "SIP",
+            "25503113955@example.webex.com"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "no-meeting-at-all",
+      "note": "The commonest input there is. A rule that finds a meeting in an ordinary appointment is worse than one that finds none in a meeting.",
+      "reach": "real-provider-invitation",
+      "location": "Raum 3.12",
+      "description": "Bitte die Unterlagen mitbringen.",
+      "expect": null
+    }
+  ]
+}
