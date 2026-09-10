@@ -220,3 +220,29 @@ pub fn normalize_join_url(url: &str) -> String {
 pub fn collapse_event_groups(input_json: &str) -> Result<String, JsValue> {
     rules::collapse_event_groups(input_json).map_err(to_js)
 }
+
+/// What carrying an edit to a group's other copies would do.
+#[wasm_bindgen(js_name = planCarry)]
+pub fn plan_carry(input_json: &str) -> Result<String, JsValue> {
+    rules::plan_carry(input_json).map_err(to_js)
+}
+
+/// The fields of the standalone row a carried OCCURRENCE edit creates, or
+/// `"null"` when the instant cannot be read.
+#[wasm_bindgen(js_name = occurrenceCarryFields)]
+pub fn occurrence_carry_fields(input_json: &str) -> Result<String, JsValue> {
+    rules::occurrence_carry_fields(input_json).map_err(to_js)
+}
+
+/// The fields of the row a carried "this and all following" edit creates, or
+/// `"null"` when the cut point cannot be read.
+#[wasm_bindgen(js_name = futureCarryFields)]
+pub fn future_carry_fields(input_json: &str) -> Result<String, JsValue> {
+    rules::future_carry_fields(input_json).map_err(to_js)
+}
+
+/// The carried fields laid over a member's own current values.
+#[wasm_bindgen(js_name = carryOntoFields)]
+pub fn carry_onto(input_json: &str) -> Result<String, JsValue> {
+    rules::carry_onto(input_json).map_err(to_js)
+}

@@ -244,6 +244,23 @@ public class CalFfiModule: Module {
       try collapseEventGroups(inputJson: inputJson)
     }
 
+    // Carrying a change to the other copies.
+    Function("planCarry") { (inputJson: String) -> String in
+      try planCarry(inputJson: inputJson)
+    }
+
+    Function("occurrenceCarryFields") { (inputJson: String) -> String in
+      try occurrenceCarryFields(inputJson: inputJson)
+    }
+
+    Function("futureCarryFields") { (inputJson: String) -> String in
+      try futureCarryFields(inputJson: inputJson)
+    }
+
+    Function("carryOntoFields") { (inputJson: String) -> String in
+      try carryOntoFields(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

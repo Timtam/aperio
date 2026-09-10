@@ -251,6 +251,44 @@ pub fn normalize_join_url(url: String) -> String {
 ///
 /// `input_json` is `{events[], groups[]}`; the answer is one row per surviving
 /// slot, each naming the POSITION of the event to draw.
+/// What carrying an edit to a group's other copies would do, as JSON.
+#[uniffi::export]
+pub fn plan_carry(input_json: String) -> Result<String, StoreError> {
+    cal_core::plan_carry_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "carry plan input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The fields of the standalone row a carried OCCURRENCE edit creates, or
+/// `"null"` when the instant cannot be read.
+#[uniffi::export]
+pub fn occurrence_carry_fields(input_json: String) -> Result<String, StoreError> {
+    cal_core::occurrence_carry_fields_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "carry row input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The fields of the row a carried "this and all following" edit creates, or
+/// `"null"` when the cut point cannot be read.
+#[uniffi::export]
+pub fn future_carry_fields(input_json: String) -> Result<String, StoreError> {
+    cal_core::future_carry_fields_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "carry row input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The carried fields laid over a member's own current values.
+#[uniffi::export]
+pub fn carry_onto_fields(input_json: String) -> Result<String, StoreError> {
+    cal_core::carry_onto_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "carry row input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

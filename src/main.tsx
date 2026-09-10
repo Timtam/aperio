@@ -7,6 +7,7 @@ import {
   installMeetingDuplicateFilter,
   installMeetingLinkRules,
   installEventGroupFold,
+  installGroupCarryRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -25,6 +26,10 @@ import {
   findMeetingLinkPairsJson,
   normalizeJoinUrlThroughCore,
   collapseEventGroupsJson,
+  planCarryJson,
+  occurrenceCarryFieldsJson,
+  futureCarryFieldsJson,
+  carryOntoFieldsJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -98,6 +103,14 @@ initCoreRules()
 
     // Folding a group into one row — what a day actually looks like.
     installEventGroupFold({ collapseEventGroupsJson });
+
+    // Carrying a change to the other copies.
+    installGroupCarryRules({
+      planCarryJson,
+      occurrenceCarryFieldsJson,
+      futureCarryFieldsJson,
+      carryOntoFieldsJson,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

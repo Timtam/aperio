@@ -19,6 +19,7 @@ pub mod event_group;
 pub mod event_group_fold;
 pub mod event_local_reminders;
 pub mod extras;
+pub mod group_carry;
 pub mod group_suggestion;
 pub mod meeting_events;
 pub mod meeting_link_grouping;
@@ -48,6 +49,11 @@ pub use event_local_reminders::EventLocalReminders;
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,
+};
+pub use group_carry::{
+    carry_onto, carry_onto_json, future_carry_fields, future_carry_fields_json,
+    occurrence_carry_fields, occurrence_carry_fields_json, plan_carry, plan_carry_json, CarryField,
+    CarryPlan, CarryTarget, CarryableFields,
 };
 pub use group_suggestion::{
     find_group_suggestions, find_group_suggestions_json, is_meeting_calendar, suggest_group_mate,

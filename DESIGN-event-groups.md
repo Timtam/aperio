@@ -166,6 +166,18 @@ was der Termin IST (Titel, wann, wo, Beschreibung); Erinnerungen, Farbe, Kalende
 und Teilnehmer gehören der Kopie. Nur-lese-Kalender werden VOR der Entscheidung
 genannt, nicht still übersprungen.
 
+Die Regel liegt seit 2026-09-10 in `cal_core::group_carry` — erreicht über die
+synchrone Tür, weil der Editor beim Speichern entscheidet, ob die Frage
+überhaupt gestellt wird. Der Kern antwortet mit FELDWERTEN, nie mit fertigen
+Zeilen: die Zeile einer Kopie trägt weit mehr als die sechs Felder, und was der
+Kern nicht kennt, kann er auch nicht überschreiben — das ist zugleich, was die
+Erinnerung einer Kopie unangetastet lässt.
+
+Und ein Schnittpunkt, der sich nicht lesen lässt, trägt jetzt NICHTS statt zu
+werfen: die betroffene Kopie wird gemeldet wie eine, die nach dem Schnitt nichts
+mehr hat. Vorher brach ein solcher Fall den ganzen Übertrag mitten in der
+Schleife ab.
+
 „**Nur dieses Vorkommen**" zieht ebenfalls mit, und zwar richtig: Was die
 Bearbeitung mit dem Ausgangstermin gemacht hat — Vorkommen per EXDATE aus der
 Serie schneiden und einen Einzeltermin an seine Stelle setzen —, geschieht mit

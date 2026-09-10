@@ -43,6 +43,7 @@ import {
   installMeetingDuplicateFilter,
   installMeetingLinkRules,
   installEventGroupFold,
+  installGroupCarryRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -58,6 +59,10 @@ import {
   findMeetingLinkPairsJson,
   normalizeJoinUrlThroughCore,
   collapseEventGroupsJson,
+  planCarryJson,
+  occurrenceCarryFieldsJson,
+  futureCarryFieldsJson,
+  carryOntoFieldsJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -95,3 +100,9 @@ installMeetingLinkRules({
   normalizeJoinUrl: normalizeJoinUrlThroughCore,
 });
 installEventGroupFold({ collapseEventGroupsJson });
+installGroupCarryRules({
+  planCarryJson,
+  occurrenceCarryFieldsJson,
+  futureCarryFieldsJson,
+  carryOntoFieldsJson,
+});

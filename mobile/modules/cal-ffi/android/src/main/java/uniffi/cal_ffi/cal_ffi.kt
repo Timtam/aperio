@@ -814,7 +814,9 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_cal_ffi_checksum_func_collapse_event_groups(
+    external fun uniffi_cal_ffi_checksum_func_carry_onto_fields(
+): Short
+external fun uniffi_cal_ffi_checksum_func_collapse_event_groups(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_compare_names(
 ): Short
@@ -826,13 +828,19 @@ external fun uniffi_cal_ffi_checksum_func_find_group_suggestions(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_future_carry_fields(
+): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normalize_join_url(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_occurrence_carry_fields(
+): Short
 external fun uniffi_cal_ffi_checksum_func_parse_attendee(
+): Short
+external fun uniffi_cal_ffi_checksum_func_plan_carry(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
@@ -1694,6 +1702,8 @@ external fun uniffi_cal_ffi_fn_method_keychainbridge_delete(`ptr`: Long,`account
 ): Unit
 external fun uniffi_cal_ffi_fn_method_keychainbridge_delete_all(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_func_carry_onto_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_collapse_event_groups(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1706,13 +1716,19 @@ external fun uniffi_cal_ffi_fn_func_find_group_suggestions(`inputJson`: RustBuff
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_meeting_link_pairs(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_future_carry_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_normalize_join_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_occurrence_carry_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_plan_carry(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
@@ -1843,7 +1859,10 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_cal_ffi_checksum_func_collapse_event_groups() != 32106.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_func_carry_onto_fields() != 62986.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_collapse_event_groups() != 10030.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_compare_names() != 26485.toShort()) {
@@ -1861,6 +1880,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_find_meeting_link_pairs() != 33200.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_future_carry_fields() != 52339.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1870,7 +1892,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_normalize_join_url() != 65229.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_occurrence_carry_fields() != 22714.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_parse_attendee() != 55709.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_plan_carry() != 50058.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_priority_rank() != 622.toShort()) {
@@ -12862,11 +12890,19 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     }
 }
         /**
-         * Fold each group's members into a single row, as JSON.
-         *
-         * `input_json` is `{events[], groups[]}`; the answer is one row per surviving
-         * slot, each naming the POSITION of the event to draw.
+         * The carried fields laid over a member's own current values.
          */
+    @Throws(StoreException::class) fun `carryOntoFields`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_carry_onto_fields(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
     @Throws(StoreException::class) fun `collapseEventGroups`(`inputJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
@@ -12955,6 +12991,21 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     
 
         /**
+         * The fields of the row a carried "this and all following" edit creates, or
+         * `"null"` when the cut point cannot be read.
+         */
+    @Throws(StoreException::class) fun `futureCarryFields`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_future_carry_fields(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Whether a priority is the TOP one — "important" in the two-level system.
          * See `cal_core::TaskPriority::is_important`.
          */
@@ -13008,6 +13059,21 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     
 
         /**
+         * The fields of the standalone row a carried OCCURRENCE edit creates, or
+         * `"null"` when the instant cannot be read.
+         */
+    @Throws(StoreException::class) fun `occurrenceCarryFields`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_occurrence_carry_fields(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Parse a calendar attendee entry into its display name and email.
          *
          * Accepts `"Display Name <email@host>"` or a bare `"email@host"`, delegating
@@ -13019,6 +13085,24 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_parse_attendee(
     
         FfiConverterString.lower(`entry`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Fold each group's members into a single row, as JSON.
+         *
+         * `input_json` is `{events[], groups[]}`; the answer is one row per surviving
+         * slot, each naming the POSITION of the event to draw.
+         * What carrying an edit to a group's other copies would do, as JSON.
+         */
+    @Throws(StoreException::class) fun `planCarry`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_plan_carry(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }

@@ -32,6 +32,10 @@ import init, {
   findMeetingLinkPairs as wasmFindMeetingLinkPairs,
   normalizeJoinUrl as wasmNormalizeJoinUrl,
   collapseEventGroups as wasmCollapseEventGroups,
+  planCarry as wasmPlanCarry,
+  occurrenceCarryFields as wasmOccurrenceCarryFields,
+  futureCarryFields as wasmFutureCarryFields,
+  carryOntoFields as wasmCarryOntoFields,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -151,4 +155,28 @@ export function normalizeJoinUrlThroughCore(url: string): string {
 export function collapseEventGroupsJson(inputJson: string): string {
   assertReady();
   return wasmCollapseEventGroups(inputJson);
+}
+
+/** See `cal_core::group_carry::plan_carry_json`. */
+export function planCarryJson(inputJson: string): string {
+  assertReady();
+  return wasmPlanCarry(inputJson);
+}
+
+/** See `cal_core::group_carry::occurrence_carry_fields_json`. */
+export function occurrenceCarryFieldsJson(inputJson: string): string {
+  assertReady();
+  return wasmOccurrenceCarryFields(inputJson);
+}
+
+/** See `cal_core::group_carry::future_carry_fields_json`. */
+export function futureCarryFieldsJson(inputJson: string): string {
+  assertReady();
+  return wasmFutureCarryFields(inputJson);
+}
+
+/** See `cal_core::group_carry::carry_onto_json`. */
+export function carryOntoFieldsJson(inputJson: string): string {
+  assertReady();
+  return wasmCarryOntoFields(inputJson);
 }
