@@ -110,6 +110,9 @@ pub enum Repair {
 /// a provider-sent override of one occurrence carries the master's in front of
 /// the marker. Recognising both keeps such a row where it is instead of
 /// quietly reclassifying it as a whole-series binding.
+///
+/// An ALL-DAY candidate answers on the day, a timed one on the instant — see
+/// [`starts_the_same`].
 pub fn plan_repairs(
     rows: &[Anchored],
     calendar_id: &str,
@@ -187,7 +190,7 @@ pub fn plan_repairs(
         // two rows for ONE appointment.
         let mut candidates: Vec<&str> = events
             .iter()
-            .filter(|ev| normalize(&ev.title) == wanted_title && ev.start == wanted_start)
+            .filter(|ev| normalize(&ev.title) == wanted_title && starts_the_same(ev, wanted_start))
             .map(|ev| series_master_id(&ev.id))
             .collect();
         candidates.sort_unstable();
@@ -201,6 +204,41 @@ pub fn plan_repairs(
         });
     }
     out
+}
+
+/// Whether this event starts when a stored signature says its appointment did.
+///
+/// An all-day event agrees on the DAY, a timed one on the instant. Without
+/// this, an all-day row stops being findable the moment anything shifts its
+/// stored instant — and something does: an all-day start is LOCAL midnight
+/// expressed as a UTC instant (`adapter-caldav`'s mapping says so at the top),
+/// so the same birthday is a different instant either side of a DST boundary
+/// or after the user moves country.
+///
+/// # Two things that look like bugs and are not
+///
+/// **The CANDIDATE's flag decides for both sides.** A signature is a title and
+/// a start; it cannot say whether the appointment it describes was all-day,
+/// because `starts_at` is an instant either way. So a timed row can in
+/// principle match an all-day event on the same day. The uniqueness rule
+/// contains it — that only bites when the day holds exactly one event of that
+/// name and it is all-day — and closing it properly means widening every
+/// signature, which is a migration for a case nobody has hit. The frontend
+/// half this was ported from carries the same limit, written down the same
+/// way.
+///
+/// **The day is the UTC day, which is not always the day the user sees.** For
+/// a reader east of UTC, local midnight on the 10th is the 9th at 22:00Z, so
+/// this compares "the 9th". That is correct here because it is used as a KEY,
+/// not as a date: both sides of the comparison are derived from stored
+/// instants the same way, so they agree. Deriving the calendar day the user
+/// sees would need the device's timezone, which the core may never read.
+fn starts_the_same(ev: &Event, wanted: DateTime<Utc>) -> bool {
+    if ev.all_day {
+        ev.start.date_naive() == wanted.date_naive()
+    } else {
+        ev.start == wanted
+    }
 }
 
 #[cfg(test)]
@@ -407,6 +445,83 @@ mod tests {
                 to: "new".into(),
             }],
         );
+    }
+
+    fn all_day_event(id: &str, calendar_id: &str, title: &str, start: DateTime<Utc>) -> Event {
+        let mut ev = event(id, calendar_id, title, start);
+        ev.all_day = true;
+        ev
+    }
+
+    /// An all-day appointment agrees on the DAY, because its instant moves
+    /// without the appointment moving.
+    ///
+    /// An all-day start is local midnight expressed as a UTC instant, so the
+    /// same birthday is a different instant either side of a DST boundary or
+    /// after the user moves country. Compared as instants, such a row simply
+    /// stops being findable the next time its id is reminted — silently, which
+    /// is the failure the signature exists to prevent.
+    #[test]
+    fn an_all_day_row_is_found_on_its_day() {
+        // Stored at 00:00, the event now says 01:00 — the same day, a
+        // different instant.
+        let stored = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let now_at = Utc.with_ymd_and_hms(2026, 6, 1, 1, 0, 0).unwrap();
+        assert_eq!(
+            plan_repairs(
+                &[row("old", "cal", "Geburtstag Anna", stored)],
+                "cal",
+                &[all_day_event("new", "cal", "Geburtstag Anna", now_at)],
+                week_of(1),
+            ),
+            vec![Repair::Repoint {
+                event_id: "old".into(),
+                to: "new".into(),
+            }],
+            "an all-day copy on the same day is the same appointment",
+        );
+    }
+
+    /// The day rule is for all-day events ONLY. A timed appointment an hour
+    /// later is a different appointment, and reading the two as one would
+    /// attach a row to something nobody pointed it at.
+    #[test]
+    fn a_timed_row_still_answers_only_to_its_instant() {
+        let stored = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let now_at = Utc.with_ymd_and_hms(2026, 6, 1, 1, 0, 0).unwrap();
+        assert!(
+            plan_repairs(
+                &[row("old", "cal", "Zahnarzt", stored)],
+                "cal",
+                &[event("new", "cal", "Zahnarzt", now_at)],
+                week_of(1),
+            )
+            .is_empty(),
+            "same day, different hour, not all-day: not the same appointment",
+        );
+    }
+
+    /// Widening to the day widens what can be ambiguous, and ambiguity still
+    /// repairs nothing. Two all-day events of one name on one day leave the
+    /// row where it is.
+    #[test]
+    fn two_all_day_copies_on_one_day_are_still_ambiguous() {
+        let stored = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        assert!(plan_repairs(
+            &[row("old", "cal", "Betriebsausflug", stored)],
+            "cal",
+            &[
+                all_day_event("a", "cal", "Betriebsausflug", stored),
+                all_day_event(
+                    "b",
+                    "cal",
+                    "Betriebsausflug",
+                    Utc.with_ymd_and_hms(2026, 6, 1, 2, 0, 0).unwrap()
+                ),
+            ],
+            week_of(1),
+        )
+        .is_empty());
     }
 
     /// The copy of one appointment in another calendar is a different event.

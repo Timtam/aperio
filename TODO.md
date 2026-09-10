@@ -1032,50 +1032,56 @@ Siehe DESIGN §4.2.
   aufgefaltete Wiederholung trägt ein `series_id`-Feld, das `cal_core::Event`
   gar nicht hat, weil Kern und Host nie auffalten. Der Unterschied ist tragend
   und jetzt ausgeschrieben plus mit einem eigenen Test festgenagelt.
-- [ ] **Anker Teil 2: die Regel und ihr TypeScript-Zwilling.**
-  `shared/healEventGroups.ts` ist der Zwilling — `findHealableMembers` ist
-  `Repair::Repoint`, `findStaleSignatures` ist `Repair::Refresh` —, und die
-  beiden sind an mindestens sechs Stellen auseinander. Vermessen 2026-09-10,
-  jede Behauptung gegengeprüft; die Liste steht unten, weil sie einzeln
-  entschieden werden muss und nicht mechanisch übernommen werden kann:
-  ↳ **Der Bevölkerungsunterschied ist der Kern der Sache.** TypeScript bekommt
-  AUFGEFALTETE Vorkommen über ALLE Kalender in einem Aufruf; `plan_repairs`
-  bekommt die rohen Zwischenspeicher-Zeilen EINES Kalenders. Deshalb weigert
-  sich `findStaleSignatures` bei wiederkehrenden Mitgliedern (sonst schreiben
-  zwei Ansichten die Signatur aneinander vorbei) und `plan_repairs` nicht.
-  ↳ **Wo die Heilung künftig laufen soll, ist NOCH OFFEN**, und mein erster
-  Einwand gegen die Host-Variante war falsch. Ich hatte argumentiert, ein Host,
-  der nicht auffaltet, finde ein wiederkehrendes Mitglied nie wieder —
-  `memberFromEvent` speichert die Serien-Id zusammen mit dem Start des
-  VORKOMMENS. Nachgeprüft: ein wiederkehrender Master wird mit `end_utc` bis
-  zum Serienende zwischengespeichert (`cache::range_end_utc`), und
-  `read_events` fragt `start_utc < ende AND end_utc > anfang` — der Master
-  liegt also im Stapel, auch wenn sein DTSTART Monate früher ist. Das
-  Mitglied wird gefunden; es landet nur im Refresh- statt im Repoint-Zweig.
-  ↳ Damit sind die drei Einwände gegen die Host-Variante ENTSCHEIDUNGEN, keine
-  Wände: (1) sie würde die Signatur jedes wiederkehrenden Mitglieds vom
-  Vorkommens-Start auf den Master-Start umschreiben — dieselbe Frage, die bei
-  den privaten Erinnerungen oben zugunsten der Serie entschieden wurde;
-  (2) `EventGroupsRepo::refresh_signature` schreibt nur Titel und Start, kann
-  einen Kalender also gar nicht verschieben — die calendar_id-Hälfte von
-  `Refresh` liefe ins Leere, so wie sie es bei den Erinnerungen tut;
-  (3) Ganztags-Regel und Kollisionsschutz gäbe es dann nur noch in der
-  gelöschten TypeScript-Fassung. Dafür bräuchte es GAR KEINE Tür, was der
-  stärkste Punkt für sie ist: alle drei Aufrufer sind schon asynchron.
-  ↳ Zu entscheiden ist also: Regel in den Kern und die drei Aufrufer rufen
-  weiter vorn (eine Tür, gemessen ~+132 KB WASM), ODER heilen wie die drei
-  Schwestertabellen im Host (keine Tür, aber die Signaturen wandern auf die
-  Serie). Toni fragen.
-  ↳ Die weiteren Abweichungen, noch zu entscheiden: Refresh vergleicht Titel
-  ROH, `findStaleSignatures` NORMALISIERT; Mehrdeutigkeit zählt in TypeScript
-  ZEILEN und in Rust SERIEN; die Ganztags-Regel (Tagesgenauigkeit für
-  ganztägige Kandidaten) gibt es nur in TypeScript, und `cal_core::Event.start`
-  ist ein `DateTime<Utc>`, kann das nackte Datum also gar nicht tragen; der
-  Kollisionsschutz sitzt in verschiedenen Schichten — `EventGroupsRepo::heal_member`
-  hat gar keinen, bei einem UNIQUE-Index auf `(calendar_id, event_id)` (noch
-  ungeprüft, ob das erreichbar ist).
-- [ ] **Anker Teil 3:** `shared/healEventGroups.ts` wird zur Tür, die Regel
-  kommt aus dem Kern, die drei Aufrufer bleiben wo sie sind.
+- [x] **Anker Teil 2: die Ganztags-Regel liegt jetzt auch im Kern** (2026-09-10).
+  `plan_repairs` verglich Startzeiten immer als Zeitpunkt. Ein GANZTÄGIGER
+  Termin beginnt aber um LOKALE Mitternacht, ausgedrückt als UTC-Zeitpunkt
+  (`adapter-caldav`s Mapping sagt es im Kopf: „DTSTART VALUE=DATE ->
+  all_day = true, LOCAL midnight as a UTC instant") — derselbe Geburtstag ist also diesseits und jenseits einer
+  Zeitumstellung ein anderer Zeitpunkt, und nach einem Umzug in eine andere
+  Zone erst recht. Als Zeitpunkt verglichen hörte so eine Zeile beim nächsten
+  Neu-Vergeben der Id einfach auf, auffindbar zu sein — still, also genau das
+  Versagen, gegen das die Signatur existiert. Ein ganztägiger Kandidat
+  antwortet jetzt auf den TAG, ein getakteter weiter auf den Zeitpunkt.
+  ↳ Portiert aus `shared/healEventGroups.ts`, wo die Regel als einzige der drei
+  Anker-Anwendungen schon stand — die drei Rust-Tabellen (Farbe, Meeting,
+  private Erinnerung) hatten sie NIE. Zwei mitgeschleppte Eigenheiten stehen
+  jetzt ausgeschrieben statt als Zufall da: der Kandidat entscheidet für
+  BEIDE Seiten (eine Signatur kann nicht sagen, ob SIE ganztägig war), und der
+  Tag ist der UTC-Tag, also nicht immer der, den der Nutzer sieht — er taugt
+  als SCHLÜSSEL, weil beide Seiten ihn gleich ableiten, und den echten
+  Kalendertag auszurechnen bräuchte die Gerätezone, die der Kern nie lesen darf.
+  ↳ Beide Richtungen rot bewiesen: ohne die Regel (der Zustand davor) findet
+  die ganztägige Kopie sich nicht wieder; mit der Regel auf GETAKTETE Termine
+  angewandt wird ein Termin eine Stunde später fälschlich derselbe.
+- [ ] **Anker Teil 3: die Gruppen werden im HOST geheilt** (Toni entschieden,
+  2026-09-10: „Im Host, wie die drei Schwestern").
+  ↳ `heal_event_group_anchors` neben `heal_event_color_anchors` und
+  `heal_event_meeting_anchors`, gerufen aus denselben zwei Stellen
+  (`src-tauri/.../calendars.rs` und `cal-ffi/src/host.rs`), wo die Events des
+  Kalenders ohnehin in der Hand sind. Der Modulkopf von `event_anchor` nennt
+  `event_groups` seit jeher als vierte Tabelle dieser Art — sie war die
+  einzige, die nicht über `plan_repairs` ging.
+  ↳ **Braucht GAR KEINE Tür.** Alle drei Aufrufer sind schon asynchron, und
+  heute macht jeder von ihnen EINE Host-Runde pro Befund; künftig keine.
+  ↳ Was dabei mitkommen muss, sonst geht es mit der gelöschten Datei verloren:
+  der **Kollisionsschutz**. `EventGroupsRepo::heal_member` hat keinen, und der
+  UNIQUE-Index `event_group_members(calendar_id, event_id)` sagt „ein Termin
+  gehört zu höchstens einer Gruppe" — trägt eine Gruppe die veraltete UND die
+  schon geheilte Id, läuft das UPDATE in den Index, der Fehler wird vorn
+  verschluckt und beim nächsten Rendern wieder versucht (am Desktop bremst das
+  `attempted`-Ref, auf Mobile nichts).
+  ↳ **Bewusst NICHT übernommen:** `findStaleSignatures` vergleicht Titel
+  normalisiert, `Refresh` roh. Roh ist hier richtig — die Signatur soll
+  buchstäblich beschreiben, was dasteht; gesucht wird ohnehin normalisiert.
+  ↳ **Was sich sichtbar ändert:** die Signatur eines wiederkehrenden Mitglieds
+  wandert vom Start des VORKOMMENS auf den Start der Serie. `memberFromEvent`
+  speichert heute die Serien-Id zusammen mit dem Vorkommens-Start; das Mitglied
+  ist auf die Serie gebucht, also beschreibt es künftig die Serie — dieselbe
+  Entscheidung wie bei den privaten Erinnerungen.
+  ↳ Zu löschen: `shared/healEventGroups.ts`, `src/state/healEventGroups.test.ts`,
+  die zwei Tauri-Befehle und die zwei UniFFI-Methoden (`refresh_event_group_
+  signature`, `heal_event_group_member`) samt ihren vier API-Hüllen — nach dem
+  Umzug hat keine davon noch einen Aufrufer.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
