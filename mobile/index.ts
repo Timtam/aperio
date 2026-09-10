@@ -1,6 +1,7 @@
 import { registerRootComponent } from 'expo';
 
 import {
+  installConferenceDetector,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -42,6 +43,13 @@ installTaskPriorityRules({
   // one of the three the core knows. The cast is the boundary, not a guess.
   normalPriority: (previous) =>
     CalFfi.normalPriority(previous ?? '') as TaskPriority,
+});
+
+// Finding the online meeting in an event — the same rule the desktop reaches
+// through WebAssembly, here over the bridge. See `shared/conferencing.ts` for
+// the 384 lines of TypeScript this replaces and the six ways the two had drifted.
+installConferenceDetector({
+  detectConferenceJson: (sourcesJson) => CalFfi.detectConference(sourcesJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

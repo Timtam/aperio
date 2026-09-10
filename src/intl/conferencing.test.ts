@@ -1,231 +1,89 @@
 import { describe, expect, it } from 'vitest';
 
-import { classify, detectConference, extractUrls } from '@aperio/shared';
+import contract from '../../crates/cal-core/tests/fixtures/conferencing.json';
+import { detectConference, type ConferenceLink } from '@aperio/shared';
 
 /**
- * A real German Webex invitation, as Exchange delivers it.
+ * Conference detection, exercised through the door the desktop actually uses.
  *
- * The SAME fixture the Rust twin uses (`crates/cal-core/src/conferencing.rs`),
- * deliberately: the two implementations are kept honest by both having to pass
- * the case that matters. Structure, wording and escaping are verbatim from a
- * captured `text/calendar` part; the names, site, MTID, meeting id and password
- * are invented.
+ * This replaces 231 lines that tested a TypeScript implementation of the rule.
+ * That implementation is gone: it was a second copy of `cal_core::conferencing`,
+ * which has been in production all along, and reading the two side by side
+ * turned up six places where they had drifted apart.
+ *
+ * What runs here is the real thing. `src/test-setup.ts` installs the real
+ * WebAssembly module as the surface's `ConferenceDetector`, so every case below
+ * crosses the same JSON boundary a running app crosses.
+ *
+ * The cases come from `crates/cal-core/tests/fixtures/conferencing.json` — the
+ * SAME file the Rust contract test reads. That is the point: a rule with one
+ * implementation still has two ways to reach it, and this is the one that proves
+ * the door carries every case intact. The Rust test proves the rule; this proves
+ * the crossing.
+ *
+ * The fixture also records, per row, what the deleted TypeScript answered and
+ * why the surviving answer was chosen — so the behaviour this migration changed
+ * is readable rather than archaeological.
  */
-const GERMAN_EXCHANGE_INVITATION = [
-  '                Hallo Leonie,',
-  '',
-  'wie vereinbart, hier der Regeltermin für die Abstimmung deiner Bachelorarbeit.',
-  '',
-  'Bis dahin!',
-  '',
-  'Mit lieben Grüßen.',
-  '',
-  'Toni',
-  '________________________________',
-  'Nehmen Sie an dieser Videokonferenz teil via https://example.webex.com/example/j.php?MTID=m0123456789abcdef0123456789abcdef',
-  '',
-  'Besprechungs-ID: 27401156686',
-  'Passwort: PteT3RSYi92',
-].join('\n');
+interface ContractCase {
+  name: string;
+  location: string | null;
+  description: string | null;
+  expect: Record<string, unknown> | null;
+}
 
-describe('detectConference', () => {
-  it('finds the join link in a real German invitation whose location is empty', () => {
-    // Exchange sends `LOCATION;LANGUAGE=de-DE:` — present and empty. A
-    // detector that only looked there would find no meeting at all.
-    const found = detectConference({
-      location: '',
-      description: GERMAN_EXCHANGE_INVITATION,
-    });
-    expect(found?.provider).toBe('webex');
-    expect(found?.source).toBe('description');
-    expect(found?.joinUrl).toBe(
-      'https://example.webex.com/example/j.php?MTID=m0123456789abcdef0123456789abcdef',
-    );
-  });
+describe('conference detection comes from the core', () => {
+  const cases = contract.cases as unknown as ContractCase[];
 
-  it('carries the details from the invitation own labels, knowing no German', () => {
-    const found = detectConference({ description: GERMAN_EXCHANGE_INVITATION });
-    // No tel:, no sip: in this invitation — so the machine-readable carriers
-    // find nothing, and its password is alphanumeric so no digit heuristic
-    // would have either.
-    expect(found?.meetingNumber).toBeUndefined();
-    expect(found?.password).toBeUndefined();
-    expect(found?.labelledDetails).toEqual([
-      { label: 'Besprechungs-ID', value: '27401156686' },
-      { label: 'Passwort', value: 'PteT3RSYi92' },
-    ]);
-  });
-
-  it('does not harvest the prose above the link as details', () => {
-    const found = detectConference({ description: GERMAN_EXCHANGE_INVITATION });
-    expect(found?.labelledDetails).toHaveLength(2);
-    expect(found?.labelledDetails.some((d) => d.label === 'Hallo Leonie')).toBe(
-      false,
-    );
-  });
-
-  it('yields English labels from an English invitation, with no branch', () => {
-    const found = detectConference({
-      description: [
-        'Join the meeting: https://example.webex.com/e/j.php?MTID=m1',
-        '',
-        'Meeting number (access code): 2550 311 3955',
-        'Meeting password: ocn114',
-      ].join('\n'),
-    });
-    expect(found?.labelledDetails).toEqual([
-      { label: 'Meeting number (access code)', value: '2550 311 3955' },
-      { label: 'Meeting password', value: 'ocn114' },
-    ]);
-  });
-
-  it('is indifferent to the language around the link', () => {
-    const url = 'https://example.webex.com/example/j.php?MTID=mabc';
-    for (const prose of [
-      `Join meeting: ${url}`,
-      `Meeting beitreten: ${url}`,
-      `Rejoindre la réunion : ${url}`,
-      `会議に参加する: ${url}`,
+  it('reads the same fixture the Rust contract test reads', () => {
+    // Anti-silence: an import that resolved to an empty object would make every
+    // case below vacuous, and the suite would stay green while proving nothing.
+    // Named rather than counted — adding a row is the change this must survive.
+    const names = cases.map((c) => c.name);
+    for (const must of [
+      'webex-dtmf-canonical',
+      'turkish-dotted-capital-i-before-a-uri',
+      'two-links-of-equal-length-one-with-an-umlaut',
+      'no-meeting-at-all',
     ]) {
-      expect(detectConference({ description: prose })?.joinUrl).toBe(url);
+      expect(names).toContain(must);
     }
   });
 
-  it('reads the location, because some invitations put the link only there', () => {
-    const found = detectConference({
-      location: 'https://example.webex.com/e/j.php?MTID=mxyz',
-    });
-    expect(found?.source).toBe('location');
-  });
+  it.each(cases.map((c) => [c.name, c] as const))(
+    'answers the contract for %s',
+    (_name, testCase) => {
+      const found = detectConference({
+        location: testCase.location,
+        description: testCase.description,
+      });
 
-  it("prefers a provider's own field over anything scraped", () => {
-    const found = detectConference({
-      providerField: 'https://meet.google.com/abc-defg-hij',
-      location: 'https://example.webex.com/e/j.php?MTID=m1',
-      description: 'https://example.zoom.us/j/123',
-    });
-    expect(found?.provider).toBe('googleMeet');
-    expect(found?.source).toBe('providerField');
-  });
+      if (testCase.expect === null) {
+        expect(found).toBeNull();
+        return;
+      }
+      expect(found).not.toBeNull();
+      const link = found as ConferenceLink;
 
-  it('recovers the number and password from a DTMF dial-in when there is one', () => {
-    const found = detectConference({
-      description: [
-        'Beitreten: https://example.webex.com/e/j.php?MTID=m1',
-        'Einwahl: tel:+49-555-0100,,*01*25503113955%23626114%23*01*',
-      ].join('\n'),
-    });
-    expect(found?.meetingNumber).toBe('25503113955');
-    expect(found?.password).toBe('626114');
-  });
+      expect(link.joinUrl).toBe(testCase.expect.join_url);
+      expect(link.provider).toBe(testCase.expect.provider);
+      expect(link.source).toBe(testCase.expect.source);
 
-  it('gathers details across fields, not only where the link was', () => {
-    const found = detectConference({
-      location: 'https://example.webex.com/e/j.php?MTID=m1',
-      description: 'tel:+49-555-0100,,*01*25503113955%23626114%23*01*',
-    });
-    expect(found?.source).toBe('location');
-    expect(found?.password).toBe('626114');
-  });
+      // Absent in the fixture means absent in the answer. Spelling it that way
+      // round is what makes a field that appears out of nowhere fail here
+      // rather than pass unnoticed.
+      for (const [fixtureKey, actual] of [
+        ['meeting_number', link.meetingNumber],
+        ['password', link.password],
+        ['sip_address', link.sipAddress],
+        ['phone', link.phone],
+      ] as const) {
+        expect(actual ?? null).toBe(testCase.expect[fixtureKey] ?? null);
+      }
 
-  it('offers nothing for links that are not meetings', () => {
-    for (const description of [
-      // Same host, same MTID parameter, entirely different page.
-      'https://example.webex.com/e/globalcallin.php?MTID=m99',
-      'https://example.webex.com/recordingservice/sites/e/recording/abc',
-      // The bare site root — the whole location of one real invitation.
-      'https://example.webex.com',
-      'https://teams.microsoft.com/l/channel/19%3aabc',
-      'Agenda: https://example.com/agenda.pdf',
-      '',
-    ]) {
-      expect(detectConference({ description })).toBeNull();
-    }
-  });
-
-  it('recognises the other providers too', () => {
-    const cases: Array<[string, string]> = [
-      ['https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc', 'teams'],
-      ['https://example.zoom.us/j/123456789', 'zoom'],
-      ['https://meet.google.com/abc-defg-hij', 'googleMeet'],
-      ['https://meet.jit.si/AperioTest', 'jitsi'],
-      ['https://whereby.com/aperio', 'whereby'],
-    ];
-    for (const [url, provider] of cases) {
-      expect(classify(url)).toBe(provider);
-    }
-  });
+      expect(link.labelledDetails).toEqual(
+        testCase.expect.labelled_details ?? [],
+      );
+    },
+  );
 });
-
-describe('extractUrls', () => {
-  it('never keeps the punctuation a sentence glued on', () => {
-    const cases: Array<[string, string]> = [
-      ['Join at https://x.webex.com/e/j.php?MTID=m1.', 'https://x.webex.com/e/j.php?MTID=m1'],
-      ['Join at <https://x.webex.com/e/j.php?MTID=m2>', 'https://x.webex.com/e/j.php?MTID=m2'],
-      ['Join at https://x.webex.com/e/j.php?MTID=m3%3E', 'https://x.webex.com/e/j.php?MTID=m3'],
-      ['(see https://x.webex.com/e/j.php?MTID=m4)', 'https://x.webex.com/e/j.php?MTID=m4'],
-    ];
-    for (const [text, want] of cases) {
-      expect(extractUrls(text)[0]).toBe(want);
-    }
-  });
-
-  it('takes the longest match in a source', () => {
-    // Webex's newer join link nests a shorter-looking URL in its query string.
-    const long =
-      'https://x.webex.com/wbxmjs/joinservice/sites/x/meeting/download/abc?siteurl=x&MTID=m1';
-    const found = detectConference({
-      description: `Alt: https://x.webex.com/e/j.php?MTID=m0 Neu: ${long}`,
-    });
-    expect(found?.joinUrl).toBe(long);
-  });
-});
-
-describe('DFNconf', () => {
-  it('recognises a Pexip room link', () => {
-    expect(
-      classify('https://conf.dfn.de/webapp/#/?conference=97912345'),
-    ).toBe('dfnconf');
-    expect(classify('https://conf.dfn.de/webapp/conference/97912345')).toBe(
-      'dfnconf',
-    );
-  });
-
-  it('does NOT offer Join for the documentation site', () => {
-    // The manual lives on www.conf.dfn.de and the app on conf.dfn.de. A
-    // colleague pasting "see the DFNconf instructions" into an invitation
-    // must not produce a Join button that opens a help page.
-    expect(
-      classify('https://www.conf.dfn.de/dfnconf/anleitungen-und-dokumentation/'),
-    ).toBeNull();
-  });
-
-  it('does not join the app itself', () => {
-    // `/webapp/` with no conference is the landing page.
-    expect(classify('https://conf.dfn.de/webapp/')).toBeNull();
-    expect(classify('https://conf.dfn.de/')).toBeNull();
-  });
-
-  it('leaves the Adobe Connect half alone', () => {
-    // DFNconf still runs Adobe Connect on its own host, but its meeting URLs
-    // carry no stable path marker — matching the host would offer Join for the
-    // login page too. Deliberately unclassified rather than wrongly claimed.
-    expect(classify('https://webconf.vc.dfn.de/r/abc123/')).toBeNull();
-  });
-
-  it('finds the room link in a real-shaped invitation', () => {
-    const found = detectConference({
-      location: null,
-      description: [
-        'Sie sind zu einer Videokonferenz eingeladen.',
-        '',
-        'Per Browser: https://conf.dfn.de/webapp/#/?conference=97912345',
-        'Per SIP: 97912345@conf.dfn.de',
-        'Per Telefon: +49 30 200 97912345',
-      ].join(String.fromCharCode(10)),
-    });
-    expect(found?.provider).toBe('dfnconf');
-    expect(found?.joinUrl).toBe('https://conf.dfn.de/webapp/#/?conference=97912345');
-  });
-});
-

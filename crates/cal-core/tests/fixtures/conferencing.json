@@ -11,7 +11,7 @@
   "shape": {
     "location": "the event's location field, or null",
     "description": "the event's description field, or null",
-    "expect": "the detected meeting, or null for 'no meeting here'. Fields absent from `expect` are asserted absent.",
+    "expect": "the detected meeting, or null for 'no meeting here'. Fields absent from `expect` are asserted absent; `labelled_details` is a list of {label, value} pairs, the label exactly as the invitation wrote it.",
     "wasTypeScript": "present only on rows where shared/conferencing.ts answered differently; what it answered, and why the surviving answer was chosen. Absent means the two already agreed.",
     "reach": "whether a real provider invitation can produce this input, or only hand-typed / hostile text"
   },
@@ -30,10 +30,10 @@
         "password": "626114",
         "phone": "tel:+1-555-0100,,*01*25503113955%23626114%23*01*",
         "labelled_details": [
-          [
-            "Einwahl",
-            "tel:+1-555-0100,,*01*25503113955%23626114%23*01*"
-          ]
+          {
+            "label": "Einwahl",
+            "value": "tel:+1-555-0100,,*01*25503113955%23626114%23*01*"
+          }
         ]
       }
     },
@@ -51,10 +51,10 @@
         "password": "626114",
         "phone": "tel:+1-555-0100,,*01*2550-3113%23626114%23*01*",
         "labelled_details": [
-          [
-            "Einwahl",
-            "tel:+1-555-0100,,*01*2550-3113%23626114%23*01*"
-          ]
+          {
+            "label": "Einwahl",
+            "value": "tel:+1-555-0100,,*01*2550-3113%23626114%23*01*"
+          }
         ]
       },
       "wasTypeScript": {
@@ -77,10 +77,10 @@
         "password": "626114",
         "phone": "tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*",
         "labelled_details": [
-          [
-            "Einwahl",
-            "tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*"
-          ]
+          {
+            "label": "Einwahl",
+            "value": "tel:+1-555-0100,,*01*25503113955%23626114*999888%23*01*"
+          }
         ]
       },
       "wasTypeScript": {
@@ -102,10 +102,10 @@
         "meeting_number": "25503113955",
         "sip_address": "sip:25503113955@example.webex.com",
         "labelled_details": [
-          [
-            "sip",
-            "25503113955@example.webex.com"
-          ]
+          {
+            "label": "sip",
+            "value": "25503113955@example.webex.com"
+          }
         ]
       }
     },
@@ -121,10 +121,10 @@
         "source": "description",
         "sip_address": "sip:25503113955",
         "labelled_details": [
-          [
-            "Video",
-            "sip:25503113955"
-          ]
+          {
+            "label": "Video",
+            "value": "sip:25503113955"
+          }
         ]
       },
       "wasTypeScript": {
@@ -163,10 +163,10 @@
         "meeting_number": "25503113955",
         "sip_address": "SIP:25503113955@example.webex.com",
         "labelled_details": [
-          [
-            "SIP",
-            "25503113955@example.webex.com"
-          ]
+          {
+            "label": "SIP",
+            "value": "25503113955@example.webex.com"
+          }
         ]
       },
       "wasTypeScript": {
@@ -188,10 +188,10 @@
         "meeting_number": "25503113955",
         "sip_address": "sip:25503113955@example.webex.com",
         "labelled_details": [
-          [
-            "sip",
-            "25503113955@example.webex.com"
-          ]
+          {
+            "label": "sip",
+            "value": "25503113955@example.webex.com"
+          }
         ]
       },
       "wasTypeScript": {
@@ -210,10 +210,10 @@
         "provider": "webex",
         "source": "description",
         "labelled_details": [
-          [
-            "Passwort für Telefon- und Videosysteme",
-            "98476838"
-          ]
+          {
+            "label": "Passwort für Telefon- und Videosysteme",
+            "value": "98476838"
+          }
         ]
       }
     },
@@ -228,10 +228,10 @@
         "provider": "webex",
         "source": "description",
         "labelled_details": [
-          [
-            "Einwahl per Telefon (weltweite Listen) 📞",
-            "+49 30 1234567"
-          ]
+          {
+            "label": "Einwahl per Telefon (weltweite Listen) 📞",
+            "value": "+49 30 1234567"
+          }
         ]
       },
       "wasTypeScript": {
@@ -303,10 +303,10 @@
         "provider": "webex",
         "source": "description",
         "labelled_details": [
-          [
-            "SIP",
-            "25503113955@example.webex.com"
-          ]
+          {
+            "label": "SIP",
+            "value": "25503113955@example.webex.com"
+          }
         ]
       }
     },
