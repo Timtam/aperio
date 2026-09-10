@@ -142,7 +142,11 @@ eine Dublette per Definition.
 
 **Stufe 1** — Zusammenfalten in den Ansichten. Eine Zeile, die ihre Kalender
 nennt. Der Alltagsgewinn. **GEBAUT** auf allen sechs Oberflächen (Desktop Tag,
-Woche, Monat, Agenda; mobil Tagesliste und Agenda). Gefaltet wird **pro Tag** —
+Woche, Monat, Agenda; mobil Tagesliste und Agenda), und die Regel liegt seit
+2026-09-10 in `cal_core::event_group_fold` — erreicht über die synchrone Tür,
+weil jede Ansicht sie beim Rendern fragt und der Widget-Schnappschuss aus einem
+Hintergrunddurchlauf. Die Marke (`groupBadge`) bleibt vorn: der Kern antwortet
+mit einem Zustand, nie mit fertigem Text (DESIGN §4.5 (a)). Gefaltet wird **pro Tag** —
 ein wiederkehrender Termin rendert eine Zeile pro Tag, über eine Woche gelesen
 sähen die eigenen Tage der Serie aus wie widersprüchliche Kopien. Und eine
 Gruppe, deren Kopien auseinandergelaufen sind, wird NICHT gefaltet: dann stimmt

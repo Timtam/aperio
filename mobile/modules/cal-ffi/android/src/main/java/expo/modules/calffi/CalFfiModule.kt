@@ -28,6 +28,7 @@ import uniffi.cal_ffi.compareNames as uniffiCompareNames
 import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
 import uniffi.cal_ffi.detectConference as uniffiDetectConference
 import uniffi.cal_ffi.findGroupSuggestions as uniffiFindGroupSuggestions
+import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
 import uniffi.cal_ffi.normalizeJoinUrl as uniffiNormalizeJoinUrl
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
@@ -302,6 +303,11 @@ class CalFfiModule : Module() {
 
     Function("normalizeJoinUrl") { url: String ->
       uniffiNormalizeJoinUrl(url)
+    }
+
+    // Folding a group into one row — what a day actually looks like.
+    Function("collapseEventGroups") { inputJson: String ->
+      uniffiCollapseEventGroups(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

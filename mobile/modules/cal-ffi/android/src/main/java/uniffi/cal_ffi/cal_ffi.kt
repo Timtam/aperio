@@ -814,7 +814,9 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_cal_ffi_checksum_func_compare_names(
+    external fun uniffi_cal_ffi_checksum_func_collapse_event_groups(
+): Short
+external fun uniffi_cal_ffi_checksum_func_compare_names(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
@@ -1692,6 +1694,8 @@ external fun uniffi_cal_ffi_fn_method_keychainbridge_delete(`ptr`: Long,`account
 ): Unit
 external fun uniffi_cal_ffi_fn_method_keychainbridge_delete_all(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_func_collapse_event_groups(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1839,6 +1843,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_cal_ffi_checksum_func_collapse_event_groups() != 32106.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_compare_names() != 26485.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -12854,6 +12861,23 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
         }
     }
 }
+        /**
+         * Fold each group's members into a single row, as JSON.
+         *
+         * `input_json` is `{events[], groups[]}`; the answer is one row per surviving
+         * slot, each naming the POSITION of the event to draw.
+         */
+    @Throws(StoreException::class) fun `collapseEventGroups`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_collapse_event_groups(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
         /**
          * Compare two NAMES — an account, a container, a contact, a day marker.
          * Case- and accent-insensitive. See `cal_core::compare_names`.

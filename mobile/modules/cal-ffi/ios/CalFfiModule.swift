@@ -239,6 +239,11 @@ public class CalFfiModule: Module {
       normalizeJoinUrl(url: url)
     }
 
+    // Folding a group into one row — what a day actually looks like.
+    Function("collapseEventGroups") { (inputJson: String) -> String in
+      try collapseEventGroups(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

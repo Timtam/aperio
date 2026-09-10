@@ -16,6 +16,7 @@ pub mod day_marker;
 pub mod error;
 pub mod event_anchor;
 pub mod event_group;
+pub mod event_group_fold;
 pub mod event_local_reminders;
 pub mod extras;
 pub mod group_suggestion;
@@ -40,6 +41,9 @@ pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};
 pub use event_anchor::{plan_repairs, series_master_id, Anchored, Repair};
 pub use event_group::{normalized_title, EventGroup, EventGroupMember};
+pub use event_group_fold::{
+    collapse_event_groups, collapse_event_groups_json, CollapsedRow, FoldableEvent,
+};
 pub use event_local_reminders::EventLocalReminders;
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
