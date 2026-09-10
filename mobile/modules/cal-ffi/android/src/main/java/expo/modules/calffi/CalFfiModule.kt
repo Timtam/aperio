@@ -26,6 +26,7 @@ import uniffi.cal_ffi.Host
 import uniffi.cal_ffi.StoreException
 import uniffi.cal_ffi.compareNames as uniffiCompareNames
 import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
+import uniffi.cal_ffi.detectConference as uniffiDetectConference
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
 import uniffi.cal_ffi.normalPriority as uniffiNormalPriority
 import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
@@ -253,6 +254,17 @@ class CalFfiModule : Module() {
 
     Function("normalPriority") { previous: String ->
       uniffiNormalPriority(previous)
+    }
+
+    // ─── Conference detection ───
+    // Finding the online meeting in an event, from `cal_core::conferencing`.
+    // JSON in, JSON out — the same shape the desktop's WebAssembly door uses.
+    //
+    // This replaces `shared/conferencing.ts`, a second implementation of the
+    // same rule that ran here in production with nothing pinning the two
+    // together.
+    Function("detectConference") { sourcesJson: String ->
+      uniffiDetectConference(sourcesJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

@@ -38,6 +38,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  See `cal_core::normal_priority`. */
   normalPriority(previous: string): string;
 
+  /** Find the online meeting in an event. `sourcesJson` in, a `ConferenceLink`
+   *  as JSON or the string `"null"` out. Synchronous. See
+   *  `cal_core::conferencing::detect_conference_json`. */
+  detectConference(sourcesJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

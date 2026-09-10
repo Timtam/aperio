@@ -38,6 +38,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  installConferenceDetector,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -46,6 +47,7 @@ import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
 import {
   compareNames,
   compareTitles,
+  detectConferenceJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -74,3 +76,5 @@ installTaskPriorityRules({
   isImportantPriority,
   normalPriority,
 });
+
+installConferenceDetector({ detectConferenceJson });

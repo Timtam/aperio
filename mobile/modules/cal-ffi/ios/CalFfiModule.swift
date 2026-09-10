@@ -202,6 +202,17 @@ public class CalFfiModule: Module {
       try normalPriority(previous: previous)
     }
 
+    // ─── Conference detection ───
+    // Finding the online meeting in an event, from `cal_core::conferencing`.
+    // JSON in, JSON out — the same shape the desktop's WebAssembly door uses.
+    //
+    // This replaces `shared/conferencing.ts`, a second implementation of the
+    // same rule that ran here in production with nothing pinning the two
+    // together.
+    Function("detectConference") { (sourcesJson: String) -> String in
+      try detectConference(sourcesJson: sourcesJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

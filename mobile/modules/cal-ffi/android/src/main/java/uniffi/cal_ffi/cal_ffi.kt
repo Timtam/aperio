@@ -818,6 +818,8 @@ internal object IntegrityCheckingUniffiLib {
 ): Short
 external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_detect_conference(
+): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
@@ -1692,6 +1694,8 @@ external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: R
 ): Int
 external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1827,6 +1831,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_compare_titles() != 57834.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_detect_conference() != 16331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
@@ -12903,6 +12910,24 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_compare_titles(
     
         FfiConverterString.lower(`a`),FfiConverterString.lower(`b`),FfiConverterString.lower(`languageTag`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Find the online meeting in an event, or answer `"null"`.
+         *
+         * `sources_json` is `{providerField?, icalendarConference[],
+         * vendorProperties[], location?, description?}`. The answer is a
+         * `ConferenceLink` as JSON, or `"null"` when there is none.
+         */
+    @Throws(StoreException::class) fun `detectConference`(`sourcesJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_detect_conference(
+    
+        FfiConverterString.lower(`sourcesJson`),_status)
 }
     )
     }

@@ -25,6 +25,7 @@
  */
 import init, {
   compareNames as wasmCompareNames,
+  detectConference as wasmDetectConference,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -99,4 +100,11 @@ export function compareTitles(
 ): number {
   assertReady();
   return wasmCompareTitles(a, b, languageTag);
+}
+
+/** See `cal_core::conferencing::detect_conference_json`. JSON in, JSON out;
+ *  synchronous, so a render can ask. */
+export function detectConferenceJson(sourcesJson: string): string {
+  assertReady();
+  return wasmDetectConference(sourcesJson);
 }

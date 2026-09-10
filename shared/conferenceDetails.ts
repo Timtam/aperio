@@ -31,11 +31,12 @@
  * confident enough to have named.
  */
 
-/** One row of the conference section: a label and the value under it. */
-export interface ConferenceDetail {
-  label: string;
-  value: string;
-}
+// One row of the conference section: a label and the value under it. Declared
+// in Rust and generated from there (`cal_core::conferencing::ConferenceDetail`),
+// because a detected meeting's own labelled lines arrive in exactly this shape
+// and two hand-kept copies of one pair is the disease this file's whole
+// neighbourhood is being treated for.
+import type { ConferenceDetail } from './generated/ConferenceDetail';
 
 /**
  * Derived rows first, then the invitation's own — minus any that repeats a

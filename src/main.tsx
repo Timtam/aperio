@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 
 import {
+  installConferenceDetector,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -13,6 +14,7 @@ import { applyUiScale, readUiScale } from './state/uiScale';
 import {
   compareNames,
   compareTitles,
+  detectConferenceJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -65,6 +67,10 @@ initCoreRules()
       isImportantPriority,
       normalPriority,
     });
+
+    // Finding the online meeting in an event. No language in it either, so it
+    // is installed once — see `shared/conferencing.ts` for what it replaces.
+    installConferenceDetector({ detectConferenceJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

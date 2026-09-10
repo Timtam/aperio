@@ -173,6 +173,32 @@ fn priority_to_wire(priority: cal_core::TaskPriority) -> &'static str {
     }
 }
 
+// ────────────────────────── Conference detection ────────────────────────────
+//
+// Finding the online meeting in an event, from `cal_core::conferencing`. It
+// crosses as JSON in both directions — the same shape the desktop's WebAssembly
+// door uses, and the same shape the task domain already crosses here.
+//
+// The marshalling is `detect_conference_json` in the core, not a copy on each
+// side. Two copies of a marshalling step is precisely how the detection RULE
+// came to exist twice — once here and once in `shared/conferencing.ts` — with
+// nothing pinning them together and six places where they had drifted apart.
+
+/// Find the online meeting in an event, or answer `"null"`.
+///
+/// `sources_json` is `{providerField?, icalendarConference[],
+/// vendorProperties[], location?, description?}`. The answer is a
+/// `ConferenceLink` as JSON, or `"null"` when there is none.
+#[uniffi::export]
+pub fn detect_conference(sources_json: String) -> Result<String, StoreError> {
+    cal_core::conferencing::detect_conference_json(&sources_json).map_err(|e| {
+        StoreError::InvalidField {
+            field: "conference sources".into(),
+            detail: e.to_string(),
+        }
+    })
+}
+
 // ───────────────────────── Task recurrence ⇄ RRULE ──────────────────────────
 
 /// How often a recurring task repeats. Mirrors [`cal_core::RecurrenceFrequency`].

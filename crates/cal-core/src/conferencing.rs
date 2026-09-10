@@ -50,7 +50,14 @@ use serde::{Deserialize, Serialize};
 /// extra details are worth pulling out. `Other` is a first-class answer: a link
 /// we cannot classify is still a link worth offering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+// camelCase, matching `i18n_key` below rather than the snake_case this used to
+// emit. The enum had TWO spellings of itself — `google_meet` on the wire and
+// `googleMeet` for the lookup — and the frontends' own type used the second.
+// Nothing consumed the serialised form, so aligning them cost nothing; leaving
+// them apart would have meant every i18n lookup missing the day the frontends
+// started reading this.
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum ConferenceProvider {
     Webex,
     Teams,
@@ -86,7 +93,8 @@ impl ConferenceProvider {
 /// Where a link was found. Kept so the UI can be honest about confidence and so
 /// a bug report says which field to look at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum ConferenceSource {
     /// A provider's own structured field — Google `conferenceData`, Graph
     /// `onlineMeeting`. The adapter passed it in; nothing was guessed.
@@ -103,6 +111,8 @@ pub enum ConferenceSource {
 
 /// An online meeting found in an event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ConferenceLink {
     pub join_url: String,
     pub provider: ConferenceProvider,
@@ -131,8 +141,22 @@ pub struct ConferenceLink {
     /// as DATA and handed on verbatim. A screen reader then reads
     /// "Besprechungs-ID, 27401156686" in the language the invitation actually
     /// arrived in, and Aperio never needed to know what the words mean.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub labelled_details: Vec<(String, String)>,
+    #[serde(default)]
+    pub labelled_details: Vec<ConferenceDetail>,
+}
+
+/// One `label: value` line, with the label exactly as the invitation wrote it.
+///
+/// A named pair rather than a tuple. Tuples are fine inside Rust and awkward
+/// everywhere else: they serialise as bare arrays, so a reader has to know that
+/// the first slot is the label, and UniFFI records cannot carry them at all.
+/// The frontends' own `ConferenceDetail` is this shape already.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct ConferenceDetail {
+    /// The sender's word, verbatim — this is DATA, not a key to look up.
+    pub label: String,
+    pub value: String,
 }
 
 /// The fields a detector looks at, in the order it prefers them.
@@ -151,6 +175,56 @@ pub struct ConferenceSources<'a> {
     pub vendor_properties: &'a [&'a str],
     pub location: Option<&'a str>,
     pub description: Option<&'a str>,
+}
+
+/// The fields a detector looks at, as a frontend hands them over.
+///
+/// [`ConferenceSources`] borrows, which a deserialiser cannot produce, so this
+/// is its owning twin — the shape that crosses a binding.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct ConferenceSourcesInput {
+    pub provider_field: Option<String>,
+    pub icalendar_conference: Vec<String>,
+    pub vendor_properties: Vec<String>,
+    pub location: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Detect a meeting from JSON, and answer with JSON.
+///
+/// The door both frontends come through — the desktop compiled into its webview
+/// as WebAssembly, mobile over the UniFFI bridge. It lives HERE rather than in
+/// each binding because two copies of a marshalling step is how the rule itself
+/// came to exist twice, and the point of the move is to stop that happening
+/// again.
+///
+/// JSON on both sides rather than a generated record: `cal-ffi` already carries
+/// the whole task domain that way, `serde_json` is already in both graphs (this
+/// crate needs it for the extras codec), and one shape for both doors means the
+/// two cannot drift in what they accept.
+///
+/// `"null"` is the answer for "no meeting here", which is what an ordinary
+/// appointment gets and therefore the commonest answer of all. A malformed
+/// input is an `Err`, not a `None`: the caller built that JSON, so it is a bug
+/// in the binding rather than a fact about the event.
+pub fn detect_conference_json(sources_json: &str) -> Result<String, serde_json::Error> {
+    let input: ConferenceSourcesInput = serde_json::from_str(sources_json)?;
+    let icalendar: Vec<&str> = input
+        .icalendar_conference
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let vendor: Vec<&str> = input.vendor_properties.iter().map(String::as_str).collect();
+    let found = detect_conference(&ConferenceSources {
+        provider_field: input.provider_field.as_deref(),
+        icalendar_conference: &icalendar,
+        vendor_properties: &vendor,
+        location: input.location.as_deref(),
+        description: input.description.as_deref(),
+    });
+    serde_json::to_string(&found)
 }
 
 /// Find the meeting, or decide there is none.
@@ -528,12 +602,12 @@ const MAX_VALUE_CHARS: usize = 60;
 /// from harvesting prose: a real label is short, a real value is short and on
 /// the same line, and a line whose value is a URL is the link itself rather
 /// than a detail.
-fn labelled_lines_near(description: &str, join_url: &str) -> Vec<(String, String)> {
+fn labelled_lines_near(description: &str, join_url: &str) -> Vec<ConferenceDetail> {
     let from = description
         .find(join_url)
         .map(|at| at + join_url.len())
         .unwrap_or(0);
-    let mut out: Vec<(String, String)> = Vec::new();
+    let mut out: Vec<ConferenceDetail> = Vec::new();
     for line in description[from..].lines() {
         if out.len() >= MAX_LABELLED {
             break;
@@ -558,7 +632,10 @@ fn labelled_lines_near(description: &str, join_url: &str) -> Vec<(String, String
         {
             continue;
         }
-        out.push((label.to_string(), value.to_string()));
+        out.push(ConferenceDetail {
+            label: label.to_string(),
+            value: value.to_string(),
+        });
     }
     out
 }
@@ -936,8 +1013,14 @@ mod tests {
         assert_eq!(
             found.labelled_details,
             vec![
-                ("Besprechungs-ID".to_string(), "27401156686".to_string()),
-                ("Passwort".to_string(), "PteT3RSYi92".to_string()),
+                ConferenceDetail {
+                    label: "Besprechungs-ID".to_string(),
+                    value: "27401156686".to_string(),
+                },
+                ConferenceDetail {
+                    label: "Passwort".to_string(),
+                    value: "PteT3RSYi92".to_string(),
+                },
             ]
         );
     }
@@ -955,7 +1038,7 @@ mod tests {
             found
                 .labelled_details
                 .iter()
-                .all(|(l, _)| l != "Hallo Leonie"),
+                .all(|d| d.label != "Hallo Leonie"),
             "picked up prose: {:?}",
             found.labelled_details
         );
@@ -975,11 +1058,14 @@ mod tests {
         assert_eq!(
             found.labelled_details,
             vec![
-                (
-                    "Meeting number (access code)".to_string(),
-                    "2550 311 3955".to_string()
-                ),
-                ("Meeting password".to_string(), "ocn114".to_string()),
+                ConferenceDetail {
+                    label: "Meeting number (access code)".to_string(),
+                    value: "2550 311 3955".to_string(),
+                },
+                ConferenceDetail {
+                    label: "Meeting password".to_string(),
+                    value: "ocn114".to_string(),
+                },
             ]
         );
     }
@@ -1035,10 +1121,7 @@ mod tests {
         })
         .expect("its own block must be detectable");
         assert_eq!(found.join_url, url);
-        assert!(found
-            .labelled_details
-            .iter()
-            .any(|(_, value)| value == "s3cr3t"));
+        assert!(found.labelled_details.iter().any(|d| d.value == "s3cr3t"));
     }
 
     #[test]
@@ -1269,16 +1352,14 @@ mod contract {
                 assert_eq!(actual.as_deref(), expected(expect, key), "{name}: {key}",);
             }
 
-            let want: Vec<(String, String)> = expect
+            let want: Vec<ConferenceDetail> = expect
                 .get("labelled_details")
                 .and_then(Value::as_array)
                 .map(|rows| {
                     rows.iter()
-                        .map(|row| {
-                            (
-                                row[0].as_str().unwrap_or_default().to_string(),
-                                row[1].as_str().unwrap_or_default().to_string(),
-                            )
+                        .map(|row| ConferenceDetail {
+                            label: row["label"].as_str().unwrap_or_default().to_string(),
+                            value: row["value"].as_str().unwrap_or_default().to_string(),
                         })
                         .collect()
                 })

@@ -28,6 +28,10 @@ pub enum WireError {
     UnknownPriority(String),
     /// Not `"three"` or `"two"`.
     UnknownScale(String),
+    /// The JSON a binding built could not be read. A bug in the binding, not a
+    /// fact about the event — which is why it is an error and not an absent
+    /// answer.
+    BadJson(String),
 }
 
 impl fmt::Display for WireError {
@@ -41,6 +45,9 @@ impl fmt::Display for WireError {
                 f,
                 "unknown priority scale {value:?} — expected \"three\" or \"two\""
             ),
+            WireError::BadJson(detail) => {
+                write!(f, "the conference sources were not readable JSON: {detail}")
+            }
         }
     }
 }
@@ -131,6 +138,18 @@ pub fn titles(a: &str, b: &str, language_tag: &str) -> i32 {
         b,
         CollationLanguage::from_tag(language_tag),
     ))
+}
+
+/// See [`crate::detect_conference`].
+///
+/// The first rule to cross this boundary as anything but a bare string, and it
+/// crosses as JSON — which is still a string, so the crate's own rule holds. The
+/// marshalling itself is `cal_core::conferencing::detect_conference_json`, not
+/// a copy here: both doors call one function, because two copies of a
+/// marshalling step is exactly how the detection rule came to exist twice.
+pub fn detect_conference(sources_json: &str) -> Result<String, WireError> {
+    cal_core::conferencing::detect_conference_json(sources_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
 }
 
 #[cfg(test)]

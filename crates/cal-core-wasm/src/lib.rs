@@ -142,3 +142,21 @@ pub fn compare_names(a: &str, b: &str, language_tag: &str) -> i32 {
 pub fn compare_titles(a: &str, b: &str, language_tag: &str) -> i32 {
     rules::titles(a, b, language_tag)
 }
+
+/// Find the online meeting in an event, or answer `"null"`.
+///
+/// `sourcesJson` is `{providerField?, icalendarConference[], vendorProperties[],
+/// location?, description?}` — the fields a detector looks at, in the order it
+/// prefers them. The answer is a `ConferenceLink` as JSON, or the string
+/// `"null"` when there is no meeting, which is what an ordinary appointment
+/// gets and therefore the commonest answer of all.
+///
+/// The first thing to cross this boundary that is not a bare value. It still
+/// crosses as a string: `serde_json` is already in this module's graph — the
+/// core needs it for the extras codec — so JSON costs nothing here and gives
+/// both doors one shape, which is what keeps them from drifting in what they
+/// accept.
+#[wasm_bindgen(js_name = detectConference)]
+pub fn detect_conference(sources_json: &str) -> Result<String, JsValue> {
+    rules::detect_conference(sources_json).map_err(to_js)
+}
