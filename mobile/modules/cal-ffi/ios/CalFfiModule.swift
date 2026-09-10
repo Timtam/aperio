@@ -225,6 +225,11 @@ public class CalFfiModule: Module {
       try suggestGroupMate(inputJson: inputJson)
     }
 
+    // Hiding a provider-side meeting that already has a calendar entry.
+    Function("withoutDuplicateMeetings") { (eventsJson: String) -> String in
+      try withoutDuplicateMeetings(eventsJson: eventsJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

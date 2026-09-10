@@ -836,6 +836,8 @@ external fun uniffi_cal_ffi_checksum_func_suggest_group_mate(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_without_duplicate_meetings(
+): Short
 external fun uniffi_cal_ffi_checksum_method_localstore_create_section_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_localstore_create_task(
@@ -1708,6 +1710,8 @@ external fun uniffi_cal_ffi_fn_func_suggest_group_mate(`inputJson`: RustBuffer.B
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_recurrence_to_rrule(`recurrence`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_without_duplicate_meetings(`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun ffi_cal_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun ffi_cal_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1836,7 +1840,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_detect_conference() != 16331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 7552.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 11457.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
@@ -1858,6 +1862,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_without_duplicate_meetings() != 64967.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_create_section_json() != 50434.toShort()) {
@@ -12883,7 +12890,8 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
          * Copies worth offering among one day's rows, as JSON.
          *
          * `input_json` is `{events[], groups[], declines[]}`, where each event is
-         * `{calendarId, seriesId, title, start, allDay}`. The answer is a
+         * `{calendar_id, series_id, title, start, all_day}` — the same casing the
+         * group and decline rows already travel in. The answer is a
          * `[{first, second}]` array of positions in `events`.
          */
     @Throws(StoreException::class) fun `findGroupSuggestions`(`inputJson`: kotlin.String): kotlin.String {
@@ -13006,6 +13014,24 @@ public object FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer<List<Weekd
     UniffiLib.uniffi_cal_ffi_fn_func_task_recurrence_to_rrule(
     
         FfiConverterTypeTaskRecurrence.lower(`recurrence`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Which rows of a window survive the meeting-duplicate filter, as JSON.
+         *
+         * `events_json` is a `[{calendar_id, location?, description?, grouped}]`
+         * array; the answer is the positions that stay. The whole window crosses at
+         * once — the rule this replaces asked per row.
+         */
+    @Throws(StoreException::class) fun `withoutDuplicateMeetings`(`eventsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_without_duplicate_meetings(
+    
+        FfiConverterString.lower(`eventsJson`),_status)
 }
     )
     }

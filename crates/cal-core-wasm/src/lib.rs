@@ -179,3 +179,14 @@ pub fn find_group_suggestions(input_json: &str) -> Result<String, JsValue> {
 pub fn suggest_group_mate(input_json: &str) -> Result<String, JsValue> {
     rules::suggest_group_mate(input_json).map_err(to_js)
 }
+
+/// Which rows of a window survive the meeting-duplicate filter.
+///
+/// The whole window crosses at once, and the answer is the POSITIONS that
+/// stay. The rule this replaces reached the detection once per row — twice, in
+/// fact — so a day view crossed this boundary forty times to answer one
+/// question about forty rows.
+#[wasm_bindgen(js_name = withoutDuplicateMeetings)]
+pub fn without_duplicate_meetings(events_json: &str) -> Result<String, JsValue> {
+    rules::without_duplicate_meetings(events_json).map_err(to_js)
+}

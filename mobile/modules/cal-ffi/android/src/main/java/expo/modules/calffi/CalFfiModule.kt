@@ -33,6 +33,7 @@ import uniffi.cal_ffi.normalPriority as uniffiNormalPriority
 import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 import uniffi.cal_ffi.suggestGroupMate as uniffiSuggestGroupMate
+import uniffi.cal_ffi.withoutDuplicateMeetings as uniffiWithoutDuplicateMeetings
 
 class CalFfiModule : Module() {
   // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
@@ -282,6 +283,13 @@ class CalFfiModule : Module() {
 
     Function("suggestGroupMate") { inputJson: String ->
       uniffiSuggestGroupMate(inputJson)
+    }
+
+    // Hiding a provider-side meeting that already has a calendar entry. The
+    // whole window crosses at once; the rule this replaces asked the
+    // detection door twice per row.
+    Function("withoutDuplicateMeetings") { eventsJson: String ->
+      uniffiWithoutDuplicateMeetings(eventsJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

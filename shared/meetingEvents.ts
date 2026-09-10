@@ -22,7 +22,18 @@ import { detectConference } from './conferencing';
  * and cannot know what the others hold.
  */
 
-/** Whether an event came from a videoconference account's meetings calendar. */
+/**
+ * Whether an event came from a videoconference account's meetings calendar.
+ *
+ * A TWIN of `cal_core::is_meeting_calendar`, and knowingly so. Crossing the
+ * door for a suffix test would cost a JSON round trip per row inside a render,
+ * which is the opposite of what moving the filter below just bought. It goes
+ * when its last TypeScript caller does — `meetingLinkGrouping.ts`, which has
+ * not crossed yet.
+ *
+ * The suffix itself is `cal_core::MEETINGS_CALENDAR_SUFFIX`, which is also
+ * what `host_core::vc_calendar` mints. Three readers, one string.
+ */
 export function isMeetingCalendarEvent(event: {
   calendar_id?: string | null;
 }): boolean {
@@ -50,12 +61,37 @@ export function meetingJoinUrl(event: {
 }
 
 /**
+ * This surface's door into `cal_core::meeting_events`.
+ *
+ * The whole window crosses at once and the answer is POSITIONS, because the
+ * caller is holding the rows already.
+ */
+export interface MeetingDuplicateFilter {
+  /** A `[{calendar_id, location?, description?, grouped}]` array in, the
+   *  positions that survive out. */
+  withoutDuplicateMeetingsJson(eventsJson: string): string;
+}
+
+let installedFilter: MeetingDuplicateFilter | null = null;
+
+/** Bind this surface's door into the core. */
+export function installMeetingDuplicateFilter(filter: MeetingDuplicateFilter): void {
+  installedFilter = filter;
+}
+
+/**
  * Drop meetings-calendar events whose meeting is already represented by a real
  * calendar event in the same set.
  *
  * Order-independent and stable: real events are never dropped, only the
  * synthesized ones, and only when something else in view already shows that
  * exact meeting.
+ *
+ * The rule is `cal_core::meeting_events::without_duplicate_meetings`. It used
+ * to be written out here, and it read each row's link through the detection
+ * door once on the way in and again on the way out — so a day view crossed
+ * that boundary twice per row to answer one question about the set. It crosses
+ * once now, with the same bytes.
  */
 export function withoutDuplicateMeetings<
   T extends {
@@ -79,20 +115,33 @@ export function withoutDuplicateMeetings<
    */
   isGrouped: (event: T) => boolean = () => false,
 ): T[] {
-  // Collect the links carried by REAL events first — a second synthesized
-  // event for the same meeting (two accounts on one site, say) must not
-  // suppress the first.
-  const claimed = new Set<string>();
-  for (const event of events) {
-    if (isMeetingCalendarEvent(event)) continue;
-    const url = meetingJoinUrl(event);
-    if (url) claimed.add(url);
+  if (installedFilter === null) {
+    // Loud, not a local fallback — a fallback would be the second
+    // implementation all over again, and its failure is silent: a meeting the
+    // user really has, vanishing with nothing to say so.
+    throw new Error(
+      'withoutDuplicateMeetings used before installMeetingDuplicateFilter() — ' +
+        'the surface must bind its door into cal_core::meeting_events at startup',
+    );
   }
-  if (claimed.size === 0) return events;
-  return events.filter((event) => {
-    if (!isMeetingCalendarEvent(event)) return true;
-    if (isGrouped(event)) return true;
-    const url = meetingJoinUrl(event);
-    return url == null || !claimed.has(url);
-  });
+  const answer = installedFilter.withoutDuplicateMeetingsJson(
+    JSON.stringify(
+      events.map((event) => ({
+        calendar_id: event.calendar_id ?? '',
+        location: event.location ?? null,
+        description: event.description ?? null,
+        grouped: isGrouped(event),
+      })),
+    ),
+  );
+  const keep = JSON.parse(answer) as number[];
+  // The SAME array back when nothing was dropped, which is the commonest case
+  // by far — most days hold no meeting row at all. Callers put this behind a
+  // `useMemo`, and a fresh array on every pass would make its identity useless
+  // to anything downstream that keys on it. The rule this replaces had the
+  // property in a narrower form (it returned early only when no link was
+  // claimed); keeping it whenever the answer is "all of them" is strictly
+  // friendlier and never says anything different.
+  if (keep.length === events.length) return events;
+  return keep.map((at) => events[at]);
 }

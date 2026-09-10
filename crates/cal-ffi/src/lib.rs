@@ -232,6 +232,19 @@ pub fn suggest_group_mate(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// Which rows of a window survive the meeting-duplicate filter, as JSON.
+///
+/// `events_json` is a `[{calendar_id, location?, description?, grouped}]`
+/// array; the answer is the positions that stay. The whole window crosses at
+/// once — the rule this replaces asked per row.
+#[uniffi::export]
+pub fn without_duplicate_meetings(events_json: String) -> Result<String, StoreError> {
+    cal_core::without_duplicate_meetings_json(&events_json).map_err(|e| StoreError::InvalidField {
+        field: "meeting filter input".into(),
+        detail: e.to_string(),
+    })
+}
+
 // ───────────────────────── Task recurrence ⇄ RRULE ──────────────────────────
 
 /// How often a recurring task repeats. Mirrors [`cal_core::RecurrenceFrequency`].

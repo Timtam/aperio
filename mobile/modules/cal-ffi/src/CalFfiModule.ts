@@ -54,6 +54,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  Synchronous. */
   suggestGroupMate(inputJson: string): string;
 
+  /** Which rows of a window survive the meeting-duplicate filter. The whole
+   *  window in, the positions that stay out. Synchronous — the caller asks
+   *  during a render. See `cal_core::meeting_events`. */
+  withoutDuplicateMeetings(eventsJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

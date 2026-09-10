@@ -3,6 +3,7 @@ import { registerRootComponent } from 'expo';
 import {
   installConferenceDetector,
   installGroupSuggestionRules,
+  installMeetingDuplicateFilter,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -60,6 +61,14 @@ installConferenceDetector({
 installGroupSuggestionRules({
   findGroupSuggestionsJson: (inputJson) => CalFfi.findGroupSuggestions(inputJson),
   suggestGroupMateJson: (inputJson) => CalFfi.suggestGroupMate(inputJson),
+});
+
+// Hiding a provider-side meeting that already has a calendar entry. The whole
+// window crosses at once — the rule this replaces asked the detection door
+// twice per row.
+installMeetingDuplicateFilter({
+  withoutDuplicateMeetingsJson: (eventsJson) =>
+    CalFfi.withoutDuplicateMeetings(eventsJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
