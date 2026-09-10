@@ -44,7 +44,6 @@ export * from './eventTitle';
 export * from './eventGroups';
 export * from './collapseEventGroups';
 export * from './groupCarry';
-export * from './suggestGroupMate';
 export * from './groupSuggestions';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';

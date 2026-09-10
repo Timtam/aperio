@@ -152,6 +152,16 @@ pub fn detect_conference(sources_json: &str) -> Result<String, WireError> {
         .map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::findGroupSuggestions`].
+pub fn find_group_suggestions(input_json: &str) -> Result<String, WireError> {
+    cal_core::find_group_suggestions_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::suggestGroupMate`].
+pub fn suggest_group_mate(input_json: &str) -> Result<String, WireError> {
+    cal_core::suggest_group_mate_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

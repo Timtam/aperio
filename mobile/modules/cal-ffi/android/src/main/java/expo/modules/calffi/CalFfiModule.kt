@@ -27,10 +27,12 @@ import uniffi.cal_ffi.StoreException
 import uniffi.cal_ffi.compareNames as uniffiCompareNames
 import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
 import uniffi.cal_ffi.detectConference as uniffiDetectConference
+import uniffi.cal_ffi.findGroupSuggestions as uniffiFindGroupSuggestions
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
 import uniffi.cal_ffi.normalPriority as uniffiNormalPriority
 import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
+import uniffi.cal_ffi.suggestGroupMate as uniffiSuggestGroupMate
 
 class CalFfiModule : Module() {
   // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
@@ -265,6 +267,21 @@ class CalFfiModule : Module() {
     // together.
     Function("detectConference") { sourcesJson: String ->
       uniffiDetectConference(sourcesJson)
+    }
+
+    // Recognising a copy — "these two rows look like one appointment".
+    //
+    // `Function`, not `AsyncFunction`, and that is the whole point: both
+    // callers ask during a render (`useMemo` in the suggestion notice and in
+    // the grouping modal), where nothing can await. This replaces
+    // `shared/groupSuggestions.ts` and `shared/suggestGroupMate.ts`, two
+    // second implementations of rules the core now holds once.
+    Function("findGroupSuggestions") { inputJson: String ->
+      uniffiFindGroupSuggestions(inputJson)
+    }
+
+    Function("suggestGroupMate") { inputJson: String ->
+      uniffiSuggestGroupMate(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

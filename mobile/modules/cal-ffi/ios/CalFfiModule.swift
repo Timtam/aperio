@@ -213,6 +213,18 @@ public class CalFfiModule: Module {
       try detectConference(sourcesJson: sourcesJson)
     }
 
+    // Recognising a copy — "these two rows look like one appointment".
+    //
+    // `Function`, not `AsyncFunction`, and that is the whole point: both
+    // callers ask during a render, where nothing can await.
+    Function("findGroupSuggestions") { (inputJson: String) -> String in
+      try findGroupSuggestions(inputJson: inputJson)
+    }
+
+    Function("suggestGroupMate") { (inputJson: String) -> String in
+      try suggestGroupMate(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

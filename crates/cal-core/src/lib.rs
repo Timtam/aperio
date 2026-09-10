@@ -18,6 +18,7 @@ pub mod event_anchor;
 pub mod event_group;
 pub mod event_local_reminders;
 pub mod extras;
+pub mod group_suggestion;
 pub mod recurrence;
 pub mod reminder;
 pub mod spawn;
@@ -41,6 +42,10 @@ pub use event_local_reminders::EventLocalReminders;
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,
+};
+pub use group_suggestion::{
+    find_group_suggestions, find_group_suggestions_json, is_meeting_calendar, suggest_group_mate,
+    suggest_group_mate_json, GroupSuggestion, SuggestibleEvent, MEETINGS_CALENDAR_SUFFIX,
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};

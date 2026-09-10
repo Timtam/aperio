@@ -12,6 +12,14 @@ const ev = (
 
 const anchor = ev('ev-a', 'work', 'Wochenplanung', '2026-08-10T08:00:00Z');
 
+/**
+ * Recognising a copy, exercised through the door the app uses.
+ *
+ * The TypeScript implementation these cases used to test is gone — it was a
+ * second copy of `cal_core::group_suggestion::suggest_group_mate`. The real
+ * WebAssembly module is installed by `src/test-setup.ts`, so what is proved
+ * here is that the door carries every case intact.
+ */
 describe('recognising a copy', () => {
   it('finds the same appointment in another calendar', () => {
     const found = suggestGroupMate(anchor, [

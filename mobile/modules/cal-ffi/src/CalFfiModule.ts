@@ -43,6 +43,17 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `cal_core::conferencing::detect_conference_json`. */
   detectConference(sourcesJson: string): string;
 
+  /** Copies worth offering among one day's rows. `{events[], groups[],
+   *  declines[]}` in, a `[{first, second}]` array of POSITIONS in `events`
+   *  out. Synchronous — the caller asks during a render. See
+   *  `cal_core::group_suggestion`. */
+  findGroupSuggestions(inputJson: string): string;
+
+  /** The row that most looks like a copy of an anchor. `{anchor,
+   *  candidates[]}` in, the position in `candidates` or `"null"` out.
+   *  Synchronous. */
+  suggestGroupMate(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -39,6 +39,7 @@ import { resolve } from 'node:path';
 
 import {
   installConferenceDetector,
+  installGroupSuggestionRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -48,6 +49,8 @@ import {
   compareNames,
   compareTitles,
   detectConferenceJson,
+  findGroupSuggestionsJson,
+  suggestGroupMateJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -78,3 +81,4 @@ installTaskPriorityRules({
 });
 
 installConferenceDetector({ detectConferenceJson });
+installGroupSuggestionRules({ findGroupSuggestionsJson, suggestGroupMateJson });

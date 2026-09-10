@@ -2,6 +2,7 @@ import { registerRootComponent } from 'expo';
 
 import {
   installConferenceDetector,
+  installGroupSuggestionRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -50,6 +51,15 @@ installTaskPriorityRules({
 // the 384 lines of TypeScript this replaces and the six ways the two had drifted.
 installConferenceDetector({
   detectConferenceJson: (sourcesJson) => CalFfi.detectConference(sourcesJson),
+});
+
+// Recognising a copy — "these two rows look like one appointment". Also
+// synchronous, and for the same reason as the collation: both callers ask
+// during a render (`useMemo`), where nothing can await. See
+// `shared/groupSuggestions.ts` for the two TypeScript rules this replaces.
+installGroupSuggestionRules({
+  findGroupSuggestionsJson: (inputJson) => CalFfi.findGroupSuggestions(inputJson),
+  suggestGroupMateJson: (inputJson) => CalFfi.suggestGroupMate(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

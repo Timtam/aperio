@@ -34,6 +34,20 @@ const day = [
   ev('ev-x', 'work', 'Zahnarzt', '2026-08-10T11:00:00Z'),
 ];
 
+/**
+ * Offering a group nobody asked for, exercised through the door the app uses.
+ *
+ * These cases used to test a TypeScript implementation of the rule. That
+ * implementation is gone: it was a second copy of
+ * `cal_core::group_suggestion`, and `shared/groupSuggestions.ts` is now the
+ * door into the one that remains.
+ *
+ * What runs here is the real thing. `src/test-setup.ts` installs the real
+ * WebAssembly module, so every case below crosses the same JSON boundary a
+ * running app crosses — the Rust tests prove the RULE, and these prove the
+ * CROSSING. Proved red by dropping the calendar condition in the core: the
+ * failure surfaces here.
+ */
 describe('offering a group nobody asked for', () => {
   it('never offers a videoconference meeting on a resemblance', () => {
     // A meeting carries the join URL its provider issued — an identity — and
