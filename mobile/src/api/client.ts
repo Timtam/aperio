@@ -18,7 +18,6 @@ import type {
   Section,
   Task,
   TaskList,
-  TaskListCore,
   TaskListShare,
   TaskUser,
 } from '@aperio/shared';

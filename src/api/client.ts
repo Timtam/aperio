@@ -35,7 +35,6 @@ import type {
   SoundConfig,
   Task,
   TaskList,
-  TaskListCore,
   TaskListShare,
   TaskUser,
   AccountRefreshErrors,
