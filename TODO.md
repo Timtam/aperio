@@ -1128,6 +1128,32 @@ Siehe DESIGN §4.2.
   `isDeclineInForce` und `suggestionPairKey`. Ihr letzter Aufrufer ist
   `shared/meetingLinkGrouping.ts`, das synchron ist und noch nicht umgezogen
   ist; sie gehen mit ihm.
+- [x] **Der Meeting-Dubletten-Filter liegt im Kern** (2026-09-10).
+  `withoutDuplicateMeetings` entschied in `shared/meetingEvents.ts`, welche
+  Zeilen eines Fensters übrig bleiben — eine Regel über eine MENGE, die eine
+  reMarkable-Oberfläche sonst neu schreiben müsste. Jetzt
+  `cal_core::meeting_events`.
+  ↳ **Das ganze Fenster kreuzt auf einmal.** Vorher las der Filter den Link
+  jeder Zeile durch die Erkennungs-Tür — einmal beim Sammeln, einmal beim
+  Filtern. Eine Tagesansicht mit vierzig Zeilen kreuzte die Grenze achtzigmal,
+  um eine Frage über vierzig Zeilen zu beantworten. Jetzt einmal, mit denselben
+  Bytes.
+  ↳ **Ein Test hat eine Eigenschaft gerettet, an die ich nicht gedacht hatte:**
+  die alte Fassung gab DASSELBE Array zurück, wenn nichts zu tun war, und
+  `toBe` hielt das fest. Die Aufrufer stecken das Ergebnis in ein `useMemo` —
+  ein frisches Array bei jedem Durchlauf hätte dessen Identität für alles
+  Nachgelagerte wertlos gemacht. Wiederhergestellt, und etwas großzügiger:
+  dasselbe Array, wann immer nichts wegfällt.
+  ↳ **Eine Lücke im Kettentest, aufgedeckt durch die Sabotage:** die
+  Gruppen-Ausnahme (`isGrouped`) kam in keinem Desktop-Fall vor — der Kern
+  wurde rot, die Kette blieb grün. Fall nachgetragen und selbst rot bewiesen.
+  ↳ **Und eine Falle beim Prüfen:** `npx vitest run` benutzt das ZULETZT
+  gebaute WASM-Modul. Wer Rust ändert und direkt vitest ruft, misst ein
+  veraltetes Modul. `npm test` baut vorher — der Direktaufruf nicht.
+  ↳ `isMeetingCalendarEvent` bleibt als benannter Zwilling: für einen
+  Suffix-Test pro Zeile im Render eine Tür zu kreuzen wäre das Gegenteil
+  dessen, was der Umzug gerade gebracht hat. Geht mit
+  `meetingLinkGrouping.ts`.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

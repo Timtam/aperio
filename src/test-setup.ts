@@ -40,6 +40,7 @@ import { resolve } from 'node:path';
 import {
   installConferenceDetector,
   installGroupSuggestionRules,
+  installMeetingDuplicateFilter,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -51,6 +52,7 @@ import {
   detectConferenceJson,
   findGroupSuggestionsJson,
   suggestGroupMateJson,
+  withoutDuplicateMeetingsJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -82,3 +84,4 @@ installTaskPriorityRules({
 
 installConferenceDetector({ detectConferenceJson });
 installGroupSuggestionRules({ findGroupSuggestionsJson, suggestGroupMateJson });
+installMeetingDuplicateFilter({ withoutDuplicateMeetingsJson });

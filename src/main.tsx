@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import {
   installConferenceDetector,
   installGroupSuggestionRules,
+  installMeetingDuplicateFilter,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -18,6 +19,7 @@ import {
   detectConferenceJson,
   findGroupSuggestionsJson,
   suggestGroupMateJson,
+  withoutDuplicateMeetingsJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -78,6 +80,9 @@ initCoreRules()
     // Recognising a copy. Also installed once, and also synchronous — both
     // callers ask inside a `useMemo`, where nothing can await.
     installGroupSuggestionRules({ findGroupSuggestionsJson, suggestGroupMateJson });
+
+    // Hiding a provider-side meeting that already has a calendar entry.
+    installMeetingDuplicateFilter({ withoutDuplicateMeetingsJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

@@ -68,6 +68,22 @@ describe('withoutDuplicateMeetings', () => {
     const plain = [{ calendar_id: 'cal-1', location: '', description: 'Lunch' }];
     expect(withoutDuplicateMeetings(plain)).toBe(plain);
   });
+
+  it('never drops a meeting that is already in a group', () => {
+    // The folding is what hides it then, and it hides it while COUNTING it —
+    // the row says "2×" and the group can be opened. Dropped here first, the
+    // count would be a lie about a row that is not there.
+    //
+    // This case reaches the core through the `grouped` flag on the wire, which
+    // is what the `isGrouped` callback becomes. Written because a sabotage
+    // proved the rest of this file could not see it: removing the exception in
+    // Rust turned the core's own test red and left every case here green.
+    const kept = withoutDuplicateMeetings(
+      [realEvent, synthesized],
+      (ev) => ev === synthesized,
+    );
+    expect(kept).toEqual([realEvent, synthesized]);
+  });
 });
 
 describe('isMeetingCalendarEvent', () => {

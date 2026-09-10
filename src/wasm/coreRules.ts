@@ -28,6 +28,7 @@ import init, {
   detectConference as wasmDetectConference,
   findGroupSuggestions as wasmFindGroupSuggestions,
   suggestGroupMate as wasmSuggestGroupMate,
+  withoutDuplicateMeetings as wasmWithoutDuplicateMeetings,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -122,4 +123,11 @@ export function findGroupSuggestionsJson(inputJson: string): string {
 export function suggestGroupMateJson(inputJson: string): string {
   assertReady();
   return wasmSuggestGroupMate(inputJson);
+}
+
+/** See `cal_core::meeting_events::without_duplicate_meetings_json`. The whole
+ *  window in, the positions that survive out. */
+export function withoutDuplicateMeetingsJson(eventsJson: string): string {
+  assertReady();
+  return wasmWithoutDuplicateMeetings(eventsJson);
 }

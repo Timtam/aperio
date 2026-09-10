@@ -162,6 +162,12 @@ pub fn suggest_group_mate(input_json: &str) -> Result<String, WireError> {
     cal_core::suggest_group_mate_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::withoutDuplicateMeetings`].
+pub fn without_duplicate_meetings(events_json: &str) -> Result<String, WireError> {
+    cal_core::without_duplicate_meetings_json(events_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
