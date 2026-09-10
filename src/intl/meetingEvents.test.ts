@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isMeetingCalendarEvent, withoutDuplicateMeetings } from '@aperio/shared';
+import { withoutDuplicateMeetings } from '@aperio/shared';
 
 const LINK = 'https://example.webex.com/example/j.php?MTID=mabc';
 
@@ -83,13 +83,5 @@ describe('withoutDuplicateMeetings', () => {
       (ev) => ev === synthesized,
     );
     expect(kept).toEqual([realEvent, synthesized]);
-  });
-});
-
-describe('isMeetingCalendarEvent', () => {
-  it('recognises the meetings calendar by its id suffix', () => {
-    expect(isMeetingCalendarEvent(synthesized)).toBe(true);
-    expect(isMeetingCalendarEvent(realEvent)).toBe(false);
-    expect(isMeetingCalendarEvent({ calendar_id: null })).toBe(false);
   });
 });

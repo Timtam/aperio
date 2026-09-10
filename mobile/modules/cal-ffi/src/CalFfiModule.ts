@@ -67,6 +67,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Fold a join URL to what two spellings of the same link agree on. */
   normalizeJoinUrl(url: string): string;
 
+  /** Fold each group's members into a single row. `{events[], groups[]}` in,
+   *  one row per surviving slot out. Synchronous. See
+   *  `cal_core::event_group_fold`. */
+  collapseEventGroups(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

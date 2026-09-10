@@ -5,6 +5,7 @@ import {
   installGroupSuggestionRules,
   installMeetingDuplicateFilter,
   installMeetingLinkRules,
+  installEventGroupFold,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -77,6 +78,13 @@ installMeetingDuplicateFilter({
 installMeetingLinkRules({
   findMeetingLinkPairsJson: (inputJson) => CalFfi.findMeetingLinkPairs(inputJson),
   normalizeJoinUrl: (url) => CalFfi.normalizeJoinUrl(url),
+});
+
+// Folding a group into one row — what a day actually looks like. Also
+// synchronous: every view asks while it renders, and the widget snapshot asks
+// from a background pass.
+installEventGroupFold({
+  collapseEventGroupsJson: (inputJson) => CalFfi.collapseEventGroups(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

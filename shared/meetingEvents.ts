@@ -21,24 +21,6 @@
  */
 
 /**
- * Whether an event came from a videoconference account's meetings calendar.
- *
- * A TWIN of `cal_core::is_meeting_calendar`, and knowingly so. Crossing the
- * door for a suffix test would cost a JSON round trip per row inside a render,
- * which is the opposite of what moving the filter below just bought. It goes
- * when its last TypeScript caller does — `meetingLinkGrouping.ts`, which has
- * not crossed yet.
- *
- * The suffix itself is `cal_core::MEETINGS_CALENDAR_SUFFIX`, which is also
- * what `host_core::vc_calendar` mints. Three readers, one string.
- */
-export function isMeetingCalendarEvent(event: {
-  calendar_id?: string | null;
-}): boolean {
-  return (event.calendar_id ?? '').endsWith('::meetings');
-}
-
-/**
  * This surface's door into `cal_core::meeting_events`.
  *
  * The whole window crosses at once and the answer is POSITIONS, because the

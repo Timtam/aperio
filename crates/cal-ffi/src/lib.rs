@@ -247,6 +247,18 @@ pub fn normalize_join_url(url: String) -> String {
     cal_core::normalize_join_url(&url)
 }
 
+/// Fold each group's members into a single row, as JSON.
+///
+/// `input_json` is `{events[], groups[]}`; the answer is one row per surviving
+/// slot, each naming the POSITION of the event to draw.
+#[uniffi::export]
+pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
+    cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "fold input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn find_meeting_link_pairs(input_json: String) -> Result<String, StoreError> {
     cal_core::find_meeting_link_pairs_json(&input_json).map_err(|e| StoreError::InvalidField {

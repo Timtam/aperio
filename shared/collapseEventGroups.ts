@@ -1,17 +1,17 @@
-// Folding a group into one row (DESIGN-event-groups.md, Stufe 1).
+// Folding a group into one row (DESIGN-event-groups.md, Stufe 1) — this
+// surface's door into `cal_core::event_group_fold`.
 //
-// A group says several events mean the same appointment. Until now it said so
-// only in a dialog; here it changes what a day looks like. Four rows that are
-// one commitment become one row that names the calendars it spans — the
-// largest everyday gain of the feature, and for a screen-reader user not a
-// cosmetic one: it is three fewer things to walk past every time.
+// A group says several events mean the same appointment. Here that changes what
+// a day looks like: four rows that are one commitment become one row that names
+// the calendars it spans — the largest everyday gain of the feature, and for a
+// screen-reader user not a cosmetic one: three fewer things to walk past, every
+// time.
 //
-// Shared, because a day that reads differently on the phone than on the
-// desktop would be worse than not folding at all.
+// A day that read differently on the phone than on the desktop would be worse
+// than not folding at all, which is why the decision is in the core and this is
+// only the way in.
 
 import type { EventGroup } from './eventGroups';
-import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
-import { isMeetingCalendarEvent } from './meetingEvents';
 
 /** The minimum a row has to carry to be foldable. */
 export interface CollapsibleEvent {
@@ -23,7 +23,7 @@ export interface CollapsibleEvent {
 
 /** One rendered row after folding. */
 export interface CollapsedRow<E> {
-  /** The row to draw. For a group, the member that stood first. */
+  /** The row to draw. For a group, the member chosen to stand for it. */
   event: E;
   /** The group this row stands for, when it stands for one. */
   group?: EventGroup;
@@ -47,30 +47,27 @@ export interface CollapsedRow<E> {
   diverged: boolean;
 }
 
-/** The moment, as an INSTANT rather than as the string it arrived in.
- *
- *  The same instant reaches this module spelled two ways: `expandAll` rewrites
- *  every recurring occurrence through `toISOString()` ("…T08:00:00.000Z")
- *  while a one-off passes through with the backend's own serialisation
- *  ("…T08:00:00Z"), and some providers add sub-second precision. Comparing the
- *  raw strings made a series grouped with a single event permanently
- *  "diverged": it never folded, and BOTH copies announced "which is now at a
- *  different time" — every day, for two events at the identical instant. The
- *  sibling modules (`suggestGroupMate`, `groupSuggestions`) normalise for this
- *  reason; this one did not. The third, `healEventGroups`, is gone — its rule
- *  is `cal_core::event_anchor` and the host applies it. */
-function startKey(event: CollapsibleEvent): string {
-  if (event.all_day) return `day:${(event.start ?? '').slice(0, 10)}`;
-  const at = new Date(event.start ?? '').getTime();
-  return `at:${Number.isFinite(at) ? at : (event.start ?? '')}`;
+/** This surface's door into `cal_core::event_group_fold`. */
+export interface EventGroupFold {
+  /** `{events[], groups[]}` in, one row per surviving slot out. */
+  collapseEventGroupsJson(inputJson: string): string;
+}
+
+let installedFold: EventGroupFold | null = null;
+
+/** Bind this surface's door into the core. */
+export function installEventGroupFold(fold: EventGroupFold): void {
+  installedFold = fold;
 }
 
 /**
  * Fold each group's members into a single row, keeping the input order.
  *
- * The representative is the member that comes FIRST in the list handed in —
- * i.e. in whatever order the view had already decided on. That keeps the day's
- * sorting intact: folding removes rows, it never moves one.
+ * The representative is chosen over the whole window before anything is
+ * emitted — the first member the user can ACT on, else the first at all —
+ * because the row that stands for the group has to be picked from all of its
+ * members and not from whichever came first. The SLOT is still the first
+ * member's: folding removes rows, it never moves one.
  *
  * ## Call this with ONE DAY's rows
  *
@@ -86,6 +83,7 @@ function startKey(event: CollapsibleEvent): string {
  * `seriesId` maps a rendered row back to the id membership is keyed by (the
  * series master). Every caller has one already; it is a parameter so this
  * module does not have to know how ids encode occurrences.
+ *
  */
 export function collapseEventGroups<E extends CollapsibleEvent>(
   events: readonly E[],
@@ -95,89 +93,51 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
    * Whether this row is one the user can ACT on — the tie-breaker for which
    * member a folded group shows.
    *
-   * Position alone decided it before, and position is not a property of the
-   * data: the members of a folded group are at the identical instant (a
-   * difference marks the group diverged and nothing folds), so the sort is a
-   * tie and the order falls through to whatever the calendar fan-out happened
-   * to produce — arrival order, or a HashMap's iteration order. The row could
-   * therefore be the read-only videoconference copy: no editor, no delete, no
-   * move, and on mobile not even a button. Which one won could differ between
-   * two launches with the same data.
-   *
-   * Worse for a screen reader, it changed UNDER the user: at first paint the
-   * meeting row is filtered out and the appointment is the row; a beat later
-   * the groups arrive, the meeting is re-admitted, and the row at the same
-   * index silently becomes a different event.
-   *
-   * The default answers for the only rows Aperio has that cannot be acted on.
-   * A caller that knows more — which calendars are read-only, say — passes its
-   * own.
+   * Omit it, and the CORE answers: the only rows Aperio has that cannot be
+   * acted on are the read-only videoconference copies, and it recognises
+   * those. Every caller in this repository omits it. A caller that knows more
+   * — which calendars are read-only, say — can still say so, which is why the
+   * hook survived the move into the core rather than being quietly dropped.
    */
-  actionable: (event: E) => boolean = (event) => !isMeetingCalendarEvent(event),
+  actionable?: (event: E) => boolean,
 ): CollapsedRow<E>[] {
-  if (groups.length === 0) {
-    return events.map((event) => ({ event, otherMembers: 0, calendarIds: [event.calendar_id], diverged: false }));
+  if (installedFold === null) {
+    // Loud, not a local fallback. A fallback would be the second
+    // implementation all over again, and the failure it produces is one a
+    // screen-reader user meets head on: a day that folds on one device and
+    // not on the other.
+    throw new Error(
+      'collapseEventGroups used before installEventGroupFold() — the surface ' +
+        'must bind its door into cal_core::event_group_fold at startup',
+    );
   }
-  const byMember = indexEventGroups(groups);
-
-  // First pass: which groups are represented in this range, and do their
-  // members here agree about when the appointment is. Divergence has to be
-  // known BEFORE the first member is folded, because it decides whether to
-  // fold at all.
-  const startsByGroup = new Map<string, Set<string>>();
-  for (const event of events) {
-    const group = byMember.get(eventGroupMemberKey(event.calendar_id, seriesId(event)));
-    if (!group) continue;
-    const seen = startsByGroup.get(group.id) ?? new Set<string>();
-    seen.add(startKey(event));
-    startsByGroup.set(group.id, seen);
-  }
-
-  // Which member each group SHOWS: the first actionable one, else the first at
-  // all. Decided over the whole window before anything is emitted, because the
-  // row that stands for the group has to be chosen from all of its members and
-  // not from the one that happened to come first.
-  const showFor = new Map<string, E>();
-  for (const event of events) {
-    const group = byMember.get(eventGroupMemberKey(event.calendar_id, seriesId(event)));
-    if (!group) continue;
-    const current = showFor.get(group.id);
-    if (current == null || (!actionable(current) && actionable(event))) {
-      showFor.set(group.id, event);
-    }
-  }
-
-  const represented = new Set<string>();
-  const out: CollapsedRow<E>[] = [];
-  for (const event of events) {
-    const group = byMember.get(eventGroupMemberKey(event.calendar_id, seriesId(event)));
-    if (!group) {
-      out.push({ event, otherMembers: 0, calendarIds: [event.calendar_id], diverged: false });
-      continue;
-    }
-    const diverged = (startsByGroup.get(group.id)?.size ?? 1) > 1;
-    // A group whose members have drifted apart is not folded: every copy stays
-    // visible, each marked, because that disagreement is the thing to act on.
-    if (!diverged && represented.has(group.id)) continue;
-    represented.add(group.id);
-    // The SLOT is this row's (folding removes rows, it never moves one); the
-    // row SHOWN is the group's chosen member. They are the same event unless
-    // an unactionable copy came first.
-    const shown = diverged ? event : (showFor.get(group.id) ?? event);
-    out.push({
-      event: shown,
-      group,
-      otherMembers: Math.max(0, group.members.length - 1),
-      calendarIds: [
-        shown.calendar_id,
-        ...group.members
-          .map((m) => m.calendar_id)
-          .filter((id) => id !== shown.calendar_id),
-      ].filter((id, i, all) => all.indexOf(id) === i),
-      diverged,
-    });
-  }
-  return out;
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  const answer = installedFold.collapseEventGroupsJson(
+    JSON.stringify({
+      events: events.map((ev) => ({
+        calendar_id: ev.calendar_id,
+        series_id: seriesId(ev),
+        start: ev.start ?? null,
+        all_day: ev.all_day ?? false,
+        actionable: actionable == null ? null : actionable(ev),
+      })),
+      groups,
+    }),
+  );
+  const rows = JSON.parse(answer) as {
+    event: number;
+    group_id?: string;
+    other_members: number;
+    calendar_ids: string[];
+    diverged: boolean;
+  }[];
+  return rows.map((row) => ({
+    event: events[row.event],
+    ...(row.group_id == null ? {} : { group: byId.get(row.group_id) }),
+    otherMembers: row.other_members,
+    calendarIds: row.calendar_ids,
+    diverged: row.diverged,
+  }));
 }
 
 /**

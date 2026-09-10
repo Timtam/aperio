@@ -180,6 +180,11 @@ pub fn normalize_join_url(url: &str) -> String {
     cal_core::normalize_join_url(url)
 }
 
+/// See [`crate::collapseEventGroups`].
+pub fn collapse_event_groups(input_json: &str) -> Result<String, WireError> {
+    cal_core::collapse_event_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

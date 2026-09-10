@@ -1187,6 +1187,29 @@ Siehe DESIGN §4.2.
   ↳ Die 23 bestehenden Testfälle blieben und prüfen jetzt die KETTE. Rot
   bewiesen, indem ich im RUST-Kern die Regel strich, die ein bereits
   gruppiertes Meeting in Ruhe lässt.
+- [x] **Die Faltung liegt im Kern** (2026-09-10). `collapseEventGroups` — was
+  eine Tagesansicht überhaupt zeigt, wenn eine Gruppe im Spiel ist — ist
+  `cal_core::event_group_fold`. Sieben Aufrufstellen, beide Oberflächen plus der
+  Widget-Schnappschuss; keine musste geändert werden.
+  ↳ **`groupBadge` bleibt vorn.** „3× ≠" ist Text fürs Auge, und der Kern
+  antwortet mit einem Zustand, nie mit fertigem Text (DESIGN §4.5 (a)). Der Kern
+  liefert `diverged` und `other_members`; die Marke baut die Oberfläche.
+  ↳ **Der `actionable`-Haken hat den Umzug überlebt**, obwohl ihn keine
+  Produktions-Aufrufstelle setzt — ein Test tut es. Ihn stillschweigend zu
+  streichen hätte eine geprüfte Fähigkeit entfernt. Er reist jetzt als
+  `Option<bool>` mit: fehlt er, antwortet der KERN (er erkennt die
+  Meetings-Kalender selbst), was jede Aufrufstelle will.
+  ↳ **Damit ist der letzte Zwilling weg.** `isMeetingCalendarEvent` hatte nur
+  noch die Faltung als Aufrufer; jetzt kennt allein
+  `cal_core::MEETINGS_CALENDAR_SUFFIX` das Suffix.
+  ↳ Die 13 bestehenden Testfälle blieben und prüfen die KETTE — dazu die 31
+  Widget-Schnappschuss-Fälle, die durch dieselbe Tür gehen. Rot bewiesen, indem
+  ich im RUST-Kern die Startzeiten wieder als TEXT vergleichen liess: genau der
+  Fehler, wegen dessen eine Serie früher dauerhaft „auseinandergelaufen" hiess.
+  ↳ **Nebenbei geprüft, statt angenommen:** der Widget- und Hintergrund-Pfad
+  hängt schon heute an einer installierten Tür (`buildWidgetSnapshot` ruft
+  `compareTitles`), eine weitere fügt dort also keine neue
+  Abhängigkeitsklasse hinzu.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

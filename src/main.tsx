@@ -6,6 +6,7 @@ import {
   installGroupSuggestionRules,
   installMeetingDuplicateFilter,
   installMeetingLinkRules,
+  installEventGroupFold,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -23,6 +24,7 @@ import {
   withoutDuplicateMeetingsJson,
   findMeetingLinkPairsJson,
   normalizeJoinUrlThroughCore,
+  collapseEventGroupsJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -93,6 +95,9 @@ initCoreRules()
       findMeetingLinkPairsJson,
       normalizeJoinUrl: normalizeJoinUrlThroughCore,
     });
+
+    // Folding a group into one row — what a day actually looks like.
+    installEventGroupFold({ collapseEventGroupsJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

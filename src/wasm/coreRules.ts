@@ -31,6 +31,7 @@ import init, {
   withoutDuplicateMeetings as wasmWithoutDuplicateMeetings,
   findMeetingLinkPairs as wasmFindMeetingLinkPairs,
   normalizeJoinUrl as wasmNormalizeJoinUrl,
+  collapseEventGroups as wasmCollapseEventGroups,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -144,4 +145,10 @@ export function findMeetingLinkPairsJson(inputJson: string): string {
 export function normalizeJoinUrlThroughCore(url: string): string {
   assertReady();
   return wasmNormalizeJoinUrl(url);
+}
+
+/** See `cal_core::event_group_fold::collapse_event_groups_json`. */
+export function collapseEventGroupsJson(inputJson: string): string {
+  assertReady();
+  return wasmCollapseEventGroups(inputJson);
 }

@@ -211,3 +211,12 @@ pub fn find_meeting_link_pairs(input_json: &str) -> Result<String, JsValue> {
 pub fn normalize_join_url(url: &str) -> String {
     rules::normalize_join_url(url)
 }
+
+/// Fold each group's members into a single row, keeping the input order.
+///
+/// `{events[], groups[]}` in, one row per surviving slot out — each naming the
+/// POSITION of the event to draw, which is not always the slot's own.
+#[wasm_bindgen(js_name = collapseEventGroups)]
+pub fn collapse_event_groups(input_json: &str) -> Result<String, JsValue> {
+    rules::collapse_event_groups(input_json).map_err(to_js)
+}
