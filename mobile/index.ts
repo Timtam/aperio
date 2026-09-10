@@ -6,6 +6,7 @@ import {
   installMeetingDuplicateFilter,
   installMeetingLinkRules,
   installEventGroupFold,
+  installGroupCarryRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -85,6 +86,15 @@ installMeetingLinkRules({
 // from a background pass.
 installEventGroupFold({
   collapseEventGroupsJson: (inputJson) => CalFfi.collapseEventGroups(inputJson),
+});
+
+// Carrying a change to the other copies. Synchronous: the editor decides
+// whether to ask the question while it is saving.
+installGroupCarryRules({
+  planCarryJson: (inputJson) => CalFfi.planCarry(inputJson),
+  occurrenceCarryFieldsJson: (inputJson) => CalFfi.occurrenceCarryFields(inputJson),
+  futureCarryFieldsJson: (inputJson) => CalFfi.futureCarryFields(inputJson),
+  carryOntoFieldsJson: (inputJson) => CalFfi.carryOntoFields(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

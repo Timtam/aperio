@@ -185,6 +185,27 @@ pub fn collapse_event_groups(input_json: &str) -> Result<String, WireError> {
     cal_core::collapse_event_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::planCarry`].
+pub fn plan_carry(input_json: &str) -> Result<String, WireError> {
+    cal_core::plan_carry_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::occurrenceCarryFields`].
+pub fn occurrence_carry_fields(input_json: &str) -> Result<String, WireError> {
+    cal_core::occurrence_carry_fields_json(input_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::futureCarryFields`].
+pub fn future_carry_fields(input_json: &str) -> Result<String, WireError> {
+    cal_core::future_carry_fields_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::carryOntoFields`].
+pub fn carry_onto(input_json: &str) -> Result<String, WireError> {
+    cal_core::carry_onto_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

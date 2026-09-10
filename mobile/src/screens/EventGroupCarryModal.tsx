@@ -189,6 +189,14 @@ export default function EventGroupCarryModal({
             after,
             plan.changed,
           );
+          if (row == null) {
+            // The instant this copy is cut at cannot be read, so there is no
+            // row to write — and inventing one would put an appointment where
+            // nobody put it. Reported, not counted as done, exactly like a copy
+            // with nothing left after the cutoff.
+            failed.push(target);
+            continue;
+          }
           await addEventExdate(target.event_id, occurrence, target.calendar_id);
           const standalone = await createEvent({
             calendar_id: target.calendar_id,
@@ -243,6 +251,14 @@ export default function EventGroupCarryModal({
             after,
             plan.changed,
           );
+          if (row == null) {
+            // The instant this copy is cut at cannot be read, so there is no
+            // row to write — and inventing one would put an appointment where
+            // nobody put it. Reported, not counted as done, exactly like a copy
+            // with nothing left after the cutoff.
+            failed.push(target);
+            continue;
+          }
           const splitPlan = planSeriesSplit(
             current as CalendarEvent & CarryableFields,
             anchorIso,

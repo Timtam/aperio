@@ -173,6 +173,7 @@ describe('carrying an edit to the other copies', () => {
       fields({ title: 'Wochenplanung kurz' }),
       ['title'],
     );
+    if (row == null) throw new Error('the occurrence instant is readable');
 
     expect(row.start).toBe('2026-08-24T08:00:00.000Z');
     expect(row.end).toBe('2026-08-24T09:00:00.000Z');
@@ -196,6 +197,7 @@ describe('carrying an edit to the other copies', () => {
       }),
       ['start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-24T10:00:00.000Z');
     expect(row.end).toBe('2026-08-24T11:00:00.000Z');
   });
@@ -232,6 +234,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ title: 'Neuer Name' }),
       ['title'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-12T14:00:00.000Z');
     expect(row.end).toBe('2026-08-12T15:00:00.000Z');
     expect(row.title).toBe('Neuer Name');
@@ -250,6 +253,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ start: '2026-08-10T09:00:00Z', end: '2026-08-10T10:00:00Z' }),
       ['start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-12T15:00:00.000Z');
     expect(row.end).toBe('2026-08-12T16:00:00.000Z');
   });
@@ -262,6 +266,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ start: '2026-08-09T08:00:00Z', end: '2026-08-09T09:00:00Z' }),
       ['start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-11T14:00:00.000Z');
     expect(row.end).toBe('2026-08-11T15:00:00.000Z');
   });
@@ -274,6 +279,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ end: '2026-08-10T11:00:00Z' }),
       ['end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-12T14:00:00.000Z');
     expect(row.end).toBe('2026-08-12T17:00:00.000Z');
   });
@@ -290,6 +296,7 @@ describe('carrying "this and all following" to a copy', () => {
       }),
       ['location', 'start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.location).toBe('Raum 3');
     expect(row.start).toBe('2026-08-12T16:00:00.000Z');
     expect(row.end).toBe('2026-08-12T17:30:00.000Z');
@@ -310,6 +317,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ start: '2026-08-10T20:00:00Z', end: '2026-08-10T21:00:00Z' }),
       ['start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     // Twelve hours, rounded to a day. A start that is not local midnight is
     // not an all-day event.
     expect(row.start).toBe('2026-08-13T00:00:00.000Z');
@@ -335,6 +343,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ start: '2026-08-09T20:00:00Z', end: '2026-08-09T21:00:00Z' }),
       ['start', 'end'],
     );
+    if (back == null) throw new Error('the fixture has a readable instant');
     expect(back.start).toBe('2026-08-12T00:00:00.000Z');
 
     const further = futureCarryRow(
@@ -344,6 +353,7 @@ describe('carrying "this and all following" to a copy', () => {
       fields({ start: '2026-08-08T20:00:00Z', end: '2026-08-08T21:00:00Z' }),
       ['start', 'end'],
     );
+    if (further == null) throw new Error('the fixture has a readable instant');
     expect(further.start).toBe('2026-08-11T00:00:00.000Z');
   });
 
@@ -359,25 +369,28 @@ describe('carrying "this and all following" to a copy', () => {
       }),
       ['start', 'end'],
     );
+    if (row == null) throw new Error('the fixture has a readable instant');
     expect(row.start).toBe('2026-08-12T00:00:00.000Z');
     expect(row.end).toBe('2026-08-15T00:00:00.000Z');
   });
 
   /**
-   * A KNOWN LIMIT, written down rather than left to be met in production.
+   * An unreadable cut point carries NOTHING, and says so.
    *
-   * An unreadable cut point makes `start` NaN, and `new Date(NaN).toISOString()`
-   * throws. Nothing produces one today — the cut point is an ISO instant taken
-   * from an event — but the throw lands in the middle of the loop that carries
-   * to each member, so one bad row would abandon the rest of the carry instead
-   * of skipping that copy.
+   * It used to THROW: `new Date(NaN).toISOString()` raises, in the middle of
+   * the loop that carries to each member, so one bad row abandoned the rest of
+   * the carry instead of reporting the one copy. The rule lives in
+   * `cal_core::group_carry` now, where it cannot throw at all, and the answer
+   * is the one the callers were already shaped for — they keep a list of
+   * members they could not write, because a copy that silently kept its old
+   * shape is the contradiction the group exists to prevent.
    *
-   * It is pinned rather than fixed because changing it is a decision, and the
-   * rule is about to cross into Rust where it cannot throw at all. The port has
-   * to answer this deliberately.
+   * Nothing produces an unreadable cut point today; it is the cut point of a
+   * real occurrence. The case is here so the shape is a decision rather than
+   * an accident.
    */
-  it('throws on an unreadable cut point', () => {
-    expect(() =>
+  it('carries nothing when the cut point cannot be read', () => {
+    expect(
       futureCarryRow(
         copyMaster(),
         'irgendwann',
@@ -385,6 +398,6 @@ describe('carrying "this and all following" to a copy', () => {
         fields({ start: '2026-08-10T09:00:00Z', end: '2026-08-10T10:00:00Z' }),
         ['start', 'end'],
       ),
-    ).toThrow(RangeError);
+    ).toBeNull();
   });
 });

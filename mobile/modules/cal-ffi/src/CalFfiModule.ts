@@ -72,6 +72,21 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `cal_core::event_group_fold`. */
   collapseEventGroups(inputJson: string): string;
 
+  /** What carrying an edit to a group's other copies would do. Synchronous —
+   *  the editor asks before it offers the question. */
+  planCarry(inputJson: string): string;
+
+  /** The fields of the row a carried OCCURRENCE edit creates, or `"null"` when
+   *  the instant cannot be read. */
+  occurrenceCarryFields(inputJson: string): string;
+
+  /** The fields of the row a carried "this and all following" edit creates, or
+   *  `"null"` when the cut point cannot be read. */
+  futureCarryFields(inputJson: string): string;
+
+  /** The carried fields laid over a member's own current values. */
+  carryOntoFields(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

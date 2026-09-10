@@ -1210,6 +1210,36 @@ Siehe DESIGN §4.2.
   hängt schon heute an einer installierten Tür (`buildWidgetSnapshot` ruft
   `compareTitles`), eine weitere fügt dort also keine neue
   Abhängigkeitsklasse hinzu.
+- [x] **Der Übertrag liegt im Kern** (2026-09-10), in zwei Schritten — erst
+  festnageln, dann umziehen, wie bei der Konferenzerkennung.
+  ↳ **Schritt 1 (PR #35): neun Testfälle für `futureCarryRow`**, das als
+  einzige Funktion im Modul gar keinen hatte — ausgerechnet die, deren Doc den
+  Fehler beschreibt, gegen den sie geschrieben wurde. Kein Produktionscode
+  angefasst; jede Erwartung GEMESSEN, nicht gewählt.
+  ↳ **Der Fund, der den Umzug gerettet hat:** ganztägige Kopien schieben in
+  ganzen Tagen, also muss eine Halbtags-Verschiebung gerundet werden.
+  JavaScripts `Math.round` bricht den Gleichstand Richtung PLUS UNENDLICH
+  (+12 h = +1 Tag, −12 h = 0 Tage, −36 h = −1 Tag); Rusts `f64::round` bricht
+  ihn VON DER NULL WEG. Eine geradlinige Portierung hätte jede exakte
+  Halbtags-Rückverschiebung einen Tag zu weit geschoben, lautlos. Im Kern steht
+  dafür `round_half_up`, und der Gleichstand ist auf beiden Seiten festgenagelt
+  und rot bewiesen.
+  ↳ **Schritt 2 (dieser PR): `cal_core::group_carry`.** Der Kern antwortet mit
+  FELDWERTEN, nie mit Zeilen — die Zeile einer Kopie trägt weit mehr als die
+  sechs Felder, und was der Kern nicht kennt, kann er auch nicht
+  überschreiben. Die Tür legt die Antwort über das, was der Aufrufer schon
+  hält.
+  ↳ **Der Wurf ist ENTSCHIEDEN worden statt geerbt.** Ein unlesbarer
+  Schnittpunkt ließ `new Date(NaN).toISOString()` werfen, mitten in der
+  Schleife — eine kaputte Zeile brach den ganzen Übertrag ab. Rust kann nicht
+  werfen, also ist die Antwort `None`, und die zwei Aufrufer melden die Kopie
+  über ihre `failed`-Liste. Genau das Muster stand dort schon für Kopien, die
+  nach dem Schnitt nichts mehr haben.
+  ↳ `worthCarrying` ist als Feld in den Plan gewandert statt als eigene Tür:
+  zwei Vergleiche, für die eine Überfahrt albern wäre — aber sie draußen
+  auszuschreiben wäre ein Zwilling gewesen.
+  ↳ `CarryScope` bleibt vorn: der Aufrufer entscheidet damit, WELCHE Regel er
+  fragt, das ist keine Regel.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

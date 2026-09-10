@@ -373,6 +373,9 @@ describe('carrying a future edit to another copy', () => {
     const anchorIso = firstOccurrenceFrom(current, cutoffIso);
     if (anchorIso == null) return null;
     const row = futureCarryRow(current, anchorIso, before, after, changed);
+    // These fixtures all carry readable instants; a null here would be the
+    // test's own mistake, not the rule's.
+    if (row == null) throw new Error('the fixture has an unreadable cut point');
     const plan = planSeriesSplit(current, anchorIso);
     if (plan == null) {
       return { anchorIso, row, split: false, headRule: null, tailRule: null };
