@@ -129,9 +129,9 @@ Ein Widget läuft in einem eigenen Prozess und kommt weder an die React-Native-
 Schicht noch an die App-Sandbox. URSPRÜNGLICH geplanter Weg: der Rust-Kern wird
 in die Extension mitgelinkt und liest die Datenbank direkt — dafür müsste sie aus
 `applicationSupportDirectory` in einen App-Group-Container umziehen. Beides ist
-in 2b/2c verworfen worden; was wirklich gebaut wurde, steht dort. Das
-`CalFfi.xcframework` liegt bereits versioniert im Repo, es muss nichts Neues
-gebaut werden.
+in 2b/2c verworfen worden; was wirklich gebaut wurde, steht dort. (Das
+`CalFfi.xcframework` liegt nicht im Repo; der iOS-Workflow baut es bei jedem
+Lauf frisch.)
 
 Reihenfolge nach RISIKO, nicht nach Interesse: jeder Schritt kostet einen
 EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
