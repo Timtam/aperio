@@ -7,7 +7,7 @@
 // generated declarations are part of `@aperio/shared`'s public surface.
 //
 // The generated shapes describe what the backend SERIALISES — Tauri commands on
-// the desktop, the cal-ffi `LocalStore` on mobile. Both go through serde, so
+// the desktop, the cal-ffi `Host` on mobile. Both go through serde, so
 // both produce the same JSON, and a field with `#[serde(default)]` is therefore
 // always PRESENT here even though Rust would accept its absence.
 //

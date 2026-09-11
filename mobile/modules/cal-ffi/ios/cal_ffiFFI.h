@@ -427,126 +427,6 @@ typedef struct UniffiVTableCallbackInterfaceKeychainBridge {
 } UniffiVTableCallbackInterfaceKeychainBridge;
 
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CLONE_LOCALSTORE
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CLONE_LOCALSTORE
-uint64_t uniffi_cal_ffi_fn_clone_localstore(uint64_t handle, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FREE_LOCALSTORE
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FREE_LOCALSTORE
-void uniffi_cal_ffi_fn_free_localstore(uint64_t handle, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CONSTRUCTOR_LOCALSTORE_OPEN
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CONSTRUCTOR_LOCALSTORE_OPEN
-uint64_t uniffi_cal_ffi_fn_constructor_localstore_open(RustBuffer db_path, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_SECTION_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_SECTION_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_create_section_json(uint64_t ptr, RustBuffer list_id, RustBuffer name, uint32_t position, RustBuffer color_label, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK
-RustBuffer uniffi_cal_ffi_fn_method_localstore_create_task(uint64_t ptr, RustBuffer list_id, RustBuffer task, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_create_task_json(uint64_t ptr, RustBuffer list_id, RustBuffer new_task_json, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_LIST
-RustBuffer uniffi_cal_ffi_fn_method_localstore_create_task_list(uint64_t ptr, RustBuffer name, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_CREATE_TASK_LIST_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_create_task_list_json(uint64_t ptr, RustBuffer name, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_SECTION
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_SECTION
-void uniffi_cal_ffi_fn_method_localstore_delete_section(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_TASK
-void uniffi_cal_ffi_fn_method_localstore_delete_task(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_DELETE_TASK_LIST
-void uniffi_cal_ffi_fn_method_localstore_delete_task_list(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_RENAME_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_RENAME_TASK_LIST
-void uniffi_cal_ffi_fn_method_localstore_rename_task_list(uint64_t ptr, RustBuffer id, RustBuffer new_name, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_REPARENT_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_REPARENT_TASK_LIST_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_reparent_task_list_json(uint64_t ptr, RustBuffer id, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_SECTIONS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_SECTIONS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_sections_json(uint64_t ptr, RustBuffer list_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK
-RustBuffer uniffi_cal_ffi_fn_method_localstore_task(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_task_json(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LIST
-RustBuffer uniffi_cal_ffi_fn_method_localstore_task_list(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LISTS
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LISTS
-RustBuffer uniffi_cal_ffi_fn_method_localstore_task_lists(uint64_t ptr, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LISTS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASK_LISTS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_task_lists_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASKS
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASKS
-RustBuffer uniffi_cal_ffi_fn_method_localstore_tasks(uint64_t ptr, RustBuffer list_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASKS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_TASKS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_tasks_json(uint64_t ptr, RustBuffer list_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_SECTION_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_SECTION_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_update_section_json(uint64_t ptr, RustBuffer section_json, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_TASK
-RustBuffer uniffi_cal_ffi_fn_method_localstore_update_task(uint64_t ptr, RustBuffer task, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_LOCALSTORE_UPDATE_TASK_JSON
-RustBuffer uniffi_cal_ffi_fn_method_localstore_update_task_json(uint64_t ptr, RustBuffer task_json, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CLONE_CACHEOBSERVERBRIDGE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_CLONE_CACHEOBSERVERBRIDGE
 uint64_t uniffi_cal_ffi_fn_clone_cacheobserverbridge(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -699,7 +579,7 @@ RustBuffer uniffi_cal_ffi_fn_method_host_account_form_spec_json(uint64_t ptr, Ru
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNTS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_accounts_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_cal_ffi_fn_method_host_accounts_json(uint64_t ptr, RustBuffer lang, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADD_EVENT_EXDATE_JSON
@@ -837,6 +717,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_create_contact_json(uint64_t ptr, RustB
 RustBuffer uniffi_cal_ffi_fn_method_host_create_contact_list_json(uint64_t ptr, RustBuffer name, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CREATE_DAY_MARKER_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CREATE_DAY_MARKER_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_create_day_marker_json(uint64_t ptr, RustBuffer name, RustBuffer symbol, RustBuffer color_label, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CREATE_EVENT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CREATE_EVENT_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_create_event_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
@@ -860,6 +745,21 @@ RustBuffer uniffi_cal_ffi_fn_method_host_create_task_list_json(uint64_t ptr, Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CUSTOM_SOUND_PATH
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CUSTOM_SOUND_PATH
 RustBuffer uniffi_cal_ffi_fn_method_host_custom_sound_path(uint64_t ptr, RustBuffer sha256, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DAY_LOG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DAY_LOG_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_day_log_json(uint64_t ptr, RustBuffer day, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DAY_LOGS_IN_RANGE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DAY_LOGS_IN_RANGE_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_day_logs_in_range_json(uint64_t ptr, RustBuffer from, RustBuffer to, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DECLINE_GROUP_SUGGESTION_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DECLINE_GROUP_SUGGESTION_JSON
+void uniffi_cal_ffi_fn_method_host_decline_group_suggestion_json(uint64_t ptr, RustBuffer first_json, RustBuffer second_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_ACCOUNT
@@ -895,6 +795,11 @@ void uniffi_cal_ffi_fn_method_host_delete_contact_photo(uint64_t ptr, RustBuffer
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_CUSTOM_SOUND
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_CUSTOM_SOUND
 void uniffi_cal_ffi_fn_method_host_delete_custom_sound(uint64_t ptr, RustBuffer sha256, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_DAY_MARKER
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_DAY_MARKER
+void uniffi_cal_ffi_fn_method_host_delete_day_marker(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DELETE_EVENT
@@ -942,14 +847,29 @@ void uniffi_cal_ffi_fn_method_host_disconnect_sync(uint64_t ptr, RustCallStatus 
 RustBuffer uniffi_cal_ffi_fn_method_host_discover_json(uint64_t ptr, RustBuffer plugin_id, RustBuffer args_json, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DISSOLVE_EVENT_GROUP
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DISSOLVE_EVENT_GROUP
+void uniffi_cal_ffi_fn_method_host_dissolve_event_group(uint64_t ptr, RustBuffer group_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_GROUPS_FOR_EVENTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_GROUPS_FOR_EVENTS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_event_groups_for_events_json(uint64_t ptr, RustBuffer events_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_LOCAL_REMINDERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_LOCAL_REMINDERS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_event_local_reminders_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_MEETING_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_MEETING_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_event_meeting_json(uint64_t ptr, RustBuffer event_id, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_cal_ffi_fn_method_host_event_meeting_json(uint64_t ptr, RustBuffer event_id, RustBuffer calendar_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_FORGET_SFTP_HOST_KEY
@@ -1012,6 +932,21 @@ RustBuffer uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(uint64_t 
 RustBuffer uniffi_cal_ffi_fn_method_host_get_user_pref(uint64_t ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GROUP_EVENTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GROUP_EVENTS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_group_events_json(uint64_t ptr, RustBuffer members_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GROUP_SUGGESTION_DECLINES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GROUP_SUGGESTION_DECLINES_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_group_suggestion_declines_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_HEAL_EVENT_LOCAL_REMINDERS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_HEAL_EVENT_LOCAL_REMINDERS
+int8_t uniffi_cal_ffi_fn_method_host_heal_event_local_reminders(uint64_t ptr, RustBuffer calendar_id, RustBuffer old_event_id, RustBuffer new_event_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IMPORT_SOUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IMPORT_SOUND_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_import_sound_json(uint64_t ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
@@ -1029,12 +964,12 @@ int8_t uniffi_cal_ffi_fn_method_host_is_device_account(uint64_t ptr, RustBuffer 
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(uint64_t ptr, RustBuffer lang, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ADAPTER_KINDS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ADAPTER_KINDS_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(uint64_t ptr, RustBuffer lang, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_CALENDARS_JSON
@@ -1052,6 +987,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_list_color_labels_json(uint64_t ptr, Ru
 RustBuffer uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_DAY_MARKERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_DAY_MARKERS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_list_day_markers_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -1065,6 +1005,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_list_sync_devices_json(uint64_t ptr, Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_LOG_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_LOG_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_list_sync_log_json(uint64_t ptr, uint32_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LOG_LINE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LOG_LINE
+void uniffi_cal_ffi_fn_method_host_log_line(uint64_t ptr, RustBuffer level, RustBuffer message, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LOGS_DIR_PATH
@@ -1112,6 +1057,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_query_free_busy_json(uint64_t ptr, Rust
 RustBuffer uniffi_cal_ffi_fn_method_host_refresh_errors_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_EVENT_LOCAL_REMINDER_SIGNATURE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_EVENT_LOCAL_REMINDER_SIGNATURE
+void uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(uint64_t ptr, RustBuffer calendar_id, RustBuffer event_id, RustBuffer title, RustBuffer starts_at, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_EXTERNAL_CACHE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_EXTERNAL_CACHE
 void uniffi_cal_ffi_fn_method_host_refresh_external_cache(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -1127,9 +1077,9 @@ RustBuffer uniffi_cal_ffi_fn_method_host_rename_account_json(uint64_t ptr, RustB
 void uniffi_cal_ffi_fn_method_host_rename_container(uint64_t ptr, RustBuffer container_id, RustBuffer kind, RustBuffer name, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REPARENT_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REPARENT_TASK_LIST_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_reparent_task_list_json(uint64_t ptr, RustBuffer id, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REPARENT_TASK_LIST
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REPARENT_TASK_LIST
+void uniffi_cal_ffi_fn_method_host_reparent_task_list(uint64_t ptr, RustBuffer id, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REQUEST_DEVICE_CALENDAR_ACCESS
@@ -1217,6 +1167,11 @@ uint32_t uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(uint64_t ptr, 
 void uniffi_cal_ffi_fn_method_host_set_container_color_label(uint64_t ptr, RustBuffer container_id, RustBuffer kind, RustBuffer color_label_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_DAY_LOG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_DAY_LOG_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_set_day_log_json(uint64_t ptr, RustBuffer log_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_DEVICE_EVENT_STORE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_DEVICE_EVENT_STORE
 void uniffi_cal_ffi_fn_method_host_set_device_event_store(uint64_t ptr, uint64_t bridge, RustCallStatus *_Nonnull out_status
@@ -1225,6 +1180,11 @@ void uniffi_cal_ffi_fn_method_host_set_device_event_store(uint64_t ptr, uint64_t
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_EVENT_COLOR
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_EVENT_COLOR
 void uniffi_cal_ffi_fn_method_host_set_event_color(uint64_t ptr, RustBuffer event_id, RustBuffer calendar_id, RustBuffer color_label_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_EVENT_LOCAL_REMINDERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_EVENT_LOCAL_REMINDERS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_set_event_local_reminders_json(uint64_t ptr, RustBuffer calendar_id, RustBuffer event_id, RustBuffer reminders_json, RustBuffer title, RustBuffer starts_at, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_LOG_LEVEL
@@ -1342,6 +1302,11 @@ void uniffi_cal_ffi_fn_method_host_test_account_values_json(uint64_t ptr, RustBu
 void uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(uint64_t ptr, RustBuffer host_port, RustBuffer fingerprint, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UNGROUP_EVENT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UNGROUP_EVENT_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_ungroup_event_json(uint64_t ptr, RustBuffer calendar_id, RustBuffer event_id, int8_t bookkeeping, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPCOMING_REMINDERS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPCOMING_REMINDERS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(uint64_t ptr, uint32_t horizon_minutes, RustCallStatus *_Nonnull out_status
@@ -1355,6 +1320,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_update_color_label_json(uint64_t ptr, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPDATE_CONTACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPDATE_CONTACT_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_update_contact_json(uint64_t ptr, RustBuffer contact_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPDATE_DAY_MARKER_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPDATE_DAY_MARKER_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_update_day_marker_json(uint64_t ptr, RustBuffer marker_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_UPDATE_EVENT_JSON
@@ -1412,9 +1382,79 @@ void uniffi_cal_ffi_fn_method_keychainbridge_delete(uint64_t ptr, RustBuffer acc
 void uniffi_cal_ffi_fn_method_keychainbridge_delete_all(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_CARRY_ONTO_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_CARRY_ONTO_FIELDS
+RustBuffer uniffi_cal_ffi_fn_func_carry_onto_fields(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COLLAPSE_EVENT_GROUPS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COLLAPSE_EVENT_GROUPS
+RustBuffer uniffi_cal_ffi_fn_func_collapse_event_groups(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COMPARE_NAMES
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COMPARE_NAMES
+int32_t uniffi_cal_ffi_fn_func_compare_names(RustBuffer a, RustBuffer b, RustBuffer language_tag, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COMPARE_TITLES
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_COMPARE_TITLES
+int32_t uniffi_cal_ffi_fn_func_compare_titles(RustBuffer a, RustBuffer b, RustBuffer language_tag, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_DETECT_CONFERENCE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_DETECT_CONFERENCE
+RustBuffer uniffi_cal_ffi_fn_func_detect_conference(RustBuffer sources_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FIND_GROUP_SUGGESTIONS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FIND_GROUP_SUGGESTIONS
+RustBuffer uniffi_cal_ffi_fn_func_find_group_suggestions(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FIND_MEETING_LINK_PAIRS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FIND_MEETING_LINK_PAIRS
+RustBuffer uniffi_cal_ffi_fn_func_find_meeting_link_pairs(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FUTURE_CARRY_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_FUTURE_CARRY_FIELDS
+RustBuffer uniffi_cal_ffi_fn_func_future_carry_fields(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_IS_IMPORTANT_PRIORITY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_IS_IMPORTANT_PRIORITY
+int8_t uniffi_cal_ffi_fn_func_is_important_priority(RustBuffer priority, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_NORMAL_PRIORITY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_NORMAL_PRIORITY
+RustBuffer uniffi_cal_ffi_fn_func_normal_priority(RustBuffer previous, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_NORMALIZE_JOIN_URL
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_NORMALIZE_JOIN_URL
+RustBuffer uniffi_cal_ffi_fn_func_normalize_join_url(RustBuffer url, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_OCCURRENCE_CARRY_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_OCCURRENCE_CARRY_FIELDS
+RustBuffer uniffi_cal_ffi_fn_func_occurrence_carry_fields(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PARSE_ATTENDEE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PARSE_ATTENDEE
 RustBuffer uniffi_cal_ffi_fn_func_parse_attendee(RustBuffer entry, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PLAN_CARRY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PLAN_CARRY
+RustBuffer uniffi_cal_ffi_fn_func_plan_carry(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PRIORITY_RANK
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_PRIORITY_RANK
+uint32_t uniffi_cal_ffi_fn_func_priority_rank(RustBuffer priority, RustBuffer scale, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_RRULE_TO_TASK_RECURRENCE
@@ -1422,9 +1462,19 @@ RustBuffer uniffi_cal_ffi_fn_func_parse_attendee(RustBuffer entry, RustCallStatu
 RustBuffer uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(RustBuffer rrule, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_SUGGEST_GROUP_MATE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_SUGGEST_GROUP_MATE
+RustBuffer uniffi_cal_ffi_fn_func_suggest_group_mate(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_TASK_RECURRENCE_TO_RRULE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_TASK_RECURRENCE_TO_RRULE
 RustBuffer uniffi_cal_ffi_fn_func_task_recurrence_to_rrule(RustBuffer recurrence, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_WITHOUT_DUPLICATE_MEETINGS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_FUNC_WITHOUT_DUPLICATE_MEETINGS
+RustBuffer uniffi_cal_ffi_fn_func_without_duplicate_meetings(RustBuffer events_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_CAL_FFI_RUSTBUFFER_ALLOC
@@ -1687,9 +1737,93 @@ void ffi_cal_ffi_rust_future_free_void(uint64_t handle
 void ffi_cal_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_CARRY_ONTO_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_CARRY_ONTO_FIELDS
+uint16_t uniffi_cal_ffi_checksum_func_carry_onto_fields(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COLLAPSE_EVENT_GROUPS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COLLAPSE_EVENT_GROUPS
+uint16_t uniffi_cal_ffi_checksum_func_collapse_event_groups(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COMPARE_NAMES
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COMPARE_NAMES
+uint16_t uniffi_cal_ffi_checksum_func_compare_names(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COMPARE_TITLES
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_COMPARE_TITLES
+uint16_t uniffi_cal_ffi_checksum_func_compare_titles(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_DETECT_CONFERENCE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_DETECT_CONFERENCE
+uint16_t uniffi_cal_ffi_checksum_func_detect_conference(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FIND_GROUP_SUGGESTIONS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FIND_GROUP_SUGGESTIONS
+uint16_t uniffi_cal_ffi_checksum_func_find_group_suggestions(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FIND_MEETING_LINK_PAIRS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FIND_MEETING_LINK_PAIRS
+uint16_t uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FUTURE_CARRY_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_FUTURE_CARRY_FIELDS
+uint16_t uniffi_cal_ffi_checksum_func_future_carry_fields(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_IS_IMPORTANT_PRIORITY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_IS_IMPORTANT_PRIORITY
+uint16_t uniffi_cal_ffi_checksum_func_is_important_priority(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_NORMAL_PRIORITY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_NORMAL_PRIORITY
+uint16_t uniffi_cal_ffi_checksum_func_normal_priority(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_NORMALIZE_JOIN_URL
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_NORMALIZE_JOIN_URL
+uint16_t uniffi_cal_ffi_checksum_func_normalize_join_url(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_OCCURRENCE_CARRY_FIELDS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_OCCURRENCE_CARRY_FIELDS
+uint16_t uniffi_cal_ffi_checksum_func_occurrence_carry_fields(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PARSE_ATTENDEE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PARSE_ATTENDEE
 uint16_t uniffi_cal_ffi_checksum_func_parse_attendee(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PLAN_CARRY
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PLAN_CARRY
+uint16_t uniffi_cal_ffi_checksum_func_plan_carry(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PRIORITY_RANK
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_PRIORITY_RANK
+uint16_t uniffi_cal_ffi_checksum_func_priority_rank(void
     
 );
 #endif
@@ -1699,135 +1833,21 @@ uint16_t uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_SUGGEST_GROUP_MATE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_SUGGEST_GROUP_MATE
+uint16_t uniffi_cal_ffi_checksum_func_suggest_group_mate(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_TASK_RECURRENCE_TO_RRULE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_TASK_RECURRENCE_TO_RRULE
 uint16_t uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_SECTION_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_SECTION_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_create_section_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK
-uint16_t uniffi_cal_ffi_checksum_method_localstore_create_task(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_create_task_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_LIST
-uint16_t uniffi_cal_ffi_checksum_method_localstore_create_task_list(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_CREATE_TASK_LIST_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_create_task_list_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_SECTION
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_SECTION
-uint16_t uniffi_cal_ffi_checksum_method_localstore_delete_section(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_TASK
-uint16_t uniffi_cal_ffi_checksum_method_localstore_delete_task(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_DELETE_TASK_LIST
-uint16_t uniffi_cal_ffi_checksum_method_localstore_delete_task_list(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_RENAME_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_RENAME_TASK_LIST
-uint16_t uniffi_cal_ffi_checksum_method_localstore_rename_task_list(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_REPARENT_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_REPARENT_TASK_LIST_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_SECTIONS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_SECTIONS_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_sections_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK
-uint16_t uniffi_cal_ffi_checksum_method_localstore_task(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_task_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LIST
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LIST
-uint16_t uniffi_cal_ffi_checksum_method_localstore_task_list(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LISTS
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LISTS
-uint16_t uniffi_cal_ffi_checksum_method_localstore_task_lists(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LISTS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASK_LISTS_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_task_lists_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASKS
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASKS
-uint16_t uniffi_cal_ffi_checksum_method_localstore_tasks(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASKS_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_TASKS_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_tasks_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_SECTION_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_SECTION_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_update_section_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_TASK
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_TASK
-uint16_t uniffi_cal_ffi_checksum_method_localstore_update_task(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_TASK_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_LOCALSTORE_UPDATE_TASK_JSON
-uint16_t uniffi_cal_ffi_checksum_method_localstore_update_task_json(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_WITHOUT_DUPLICATE_MEETINGS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_FUNC_WITHOUT_DUPLICATE_MEETINGS
+uint16_t uniffi_cal_ffi_checksum_func_without_duplicate_meetings(void
     
 );
 #endif
@@ -2107,6 +2127,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_create_contact_list_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CREATE_DAY_MARKER_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CREATE_DAY_MARKER_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_create_day_marker_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CREATE_EVENT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CREATE_EVENT_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_create_event_json(void
@@ -2134,6 +2160,24 @@ uint16_t uniffi_cal_ffi_checksum_method_host_create_task_list_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CUSTOM_SOUND_PATH
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CUSTOM_SOUND_PATH
 uint16_t uniffi_cal_ffi_checksum_method_host_custom_sound_path(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DAY_LOG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DAY_LOG_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_day_log_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DAY_LOGS_IN_RANGE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DAY_LOGS_IN_RANGE_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_day_logs_in_range_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DECLINE_GROUP_SUGGESTION_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DECLINE_GROUP_SUGGESTION_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_decline_group_suggestion_json(void
     
 );
 #endif
@@ -2176,6 +2220,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_delete_contact_photo(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DELETE_CUSTOM_SOUND
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DELETE_CUSTOM_SOUND
 uint16_t uniffi_cal_ffi_checksum_method_host_delete_custom_sound(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DELETE_DAY_MARKER
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DELETE_DAY_MARKER
+uint16_t uniffi_cal_ffi_checksum_method_host_delete_day_marker(void
     
 );
 #endif
@@ -2233,9 +2283,27 @@ uint16_t uniffi_cal_ffi_checksum_method_host_discover_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DISSOLVE_EVENT_GROUP
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DISSOLVE_EVENT_GROUP
+uint16_t uniffi_cal_ffi_checksum_method_host_dissolve_event_group(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_GROUPS_FOR_EVENTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_GROUPS_FOR_EVENTS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_event_groups_for_events_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_LOCAL_REMINDERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_LOCAL_REMINDERS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_event_local_reminders_json(void
     
 );
 #endif
@@ -2317,6 +2385,24 @@ uint16_t uniffi_cal_ffi_checksum_method_host_get_user_pref(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GROUP_EVENTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GROUP_EVENTS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_group_events_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GROUP_SUGGESTION_DECLINES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GROUP_SUGGESTION_DECLINES_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_group_suggestion_declines_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_HEAL_EVENT_LOCAL_REMINDERS
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_HEAL_EVENT_LOCAL_REMINDERS
+uint16_t uniffi_cal_ffi_checksum_method_host_heal_event_local_reminders(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IMPORT_SOUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IMPORT_SOUND_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_import_sound_json(void
@@ -2365,6 +2451,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_DAY_MARKERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_DAY_MARKERS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_list_day_markers_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(void
@@ -2380,6 +2472,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_list_sync_devices_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_LOG_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_LOG_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_list_sync_log_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LOG_LINE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LOG_LINE
+uint16_t uniffi_cal_ffi_checksum_method_host_log_line(void
     
 );
 #endif
@@ -2437,6 +2535,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_refresh_errors_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_EVENT_LOCAL_REMINDER_SIGNATURE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_EVENT_LOCAL_REMINDER_SIGNATURE
+uint16_t uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_signature(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_EXTERNAL_CACHE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_EXTERNAL_CACHE
 uint16_t uniffi_cal_ffi_checksum_method_host_refresh_external_cache(void
@@ -2455,9 +2559,9 @@ uint16_t uniffi_cal_ffi_checksum_method_host_rename_container(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REPARENT_TASK_LIST_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REPARENT_TASK_LIST_JSON
-uint16_t uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REPARENT_TASK_LIST
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REPARENT_TASK_LIST
+uint16_t uniffi_cal_ffi_checksum_method_host_reparent_task_list(void
     
 );
 #endif
@@ -2563,6 +2667,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_set_container_color_label(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_DAY_LOG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_DAY_LOG_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_set_day_log_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_DEVICE_EVENT_STORE
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_DEVICE_EVENT_STORE
 uint16_t uniffi_cal_ffi_checksum_method_host_set_device_event_store(void
@@ -2572,6 +2682,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_set_device_event_store(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_EVENT_COLOR
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_EVENT_COLOR
 uint16_t uniffi_cal_ffi_checksum_method_host_set_event_color(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_EVENT_LOCAL_REMINDERS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_EVENT_LOCAL_REMINDERS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_set_event_local_reminders_json(void
     
 );
 #endif
@@ -2713,6 +2829,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UNGROUP_EVENT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UNGROUP_EVENT_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_ungroup_event_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPCOMING_REMINDERS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPCOMING_REMINDERS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(void
@@ -2728,6 +2850,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_update_color_label_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPDATE_CONTACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPDATE_CONTACT_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_update_contact_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPDATE_DAY_MARKER_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_UPDATE_DAY_MARKER_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_update_day_marker_json(void
     
 );
 #endif
@@ -2776,12 +2904,6 @@ uint16_t uniffi_cal_ffi_checksum_method_keychainbridge_delete(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_KEYCHAINBRIDGE_DELETE_ALL
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_KEYCHAINBRIDGE_DELETE_ALL
 uint16_t uniffi_cal_ffi_checksum_method_keychainbridge_delete_all(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_CONSTRUCTOR_LOCALSTORE_OPEN
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_CONSTRUCTOR_LOCALSTORE_OPEN
-uint16_t uniffi_cal_ffi_checksum_constructor_localstore_open(void
     
 );
 #endif

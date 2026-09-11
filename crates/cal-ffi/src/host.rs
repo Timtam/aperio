@@ -1,7 +1,6 @@
 //! The mobile `Host` — the on-device counterpart to the desktop
 //! `src-tauri` backend, assembled from the shared `host-core` crate.
 //!
-//! Where [`crate::LocalStore`] serves only the local SQLite task store,
 //! `Host` owns the full account + adapter surface: it opens the same
 //! migrated database, statically links + registers all 14 bundled
 //! adapter plugins (no dlopen — iOS forbids it; see `host-plugins`),
@@ -34,8 +33,7 @@
 //! SWR read cache + cache-updated callback; colour resolution, overrides,
 //! birthday calendars, cross-calendar event moves, free/busy + RSVP; the
 //! SyncProgressBridge live-progress push callback + the E2E `wrap_if_encrypted`
-//! branch; task/list/section sync (those live on
-//! the separate `LocalStore`, which folds into this Host later). External
+//! branch; task/list/section sync. External
 //! event paths are wired like local but hit the provider live (no cache),
 //! exercised on-device, not in unit tests.
 
@@ -3584,12 +3582,12 @@ impl Host {
 
     // ── Tasks / lists / sections (JSON bridge, sync-logged) ───────────────────
     //
-    // The faithful tasks port lives on the Host (folded in from the original
-    // `LocalStore`). READS route local + external (the desktop
-    // `account_for_task_list` split, like the event `route()`): `task_lists_json`
-    // merges local lists with every external task account's, `tasks_json` /
-    // `sections_json` route by the list's owning account. So a Vikunja/Todoist/
-    // CalDAV-tasks account's lists + tasks + sections are now VISIBLE on mobile.
+    // The faithful tasks port lives on the Host. READS route local + external
+    // (the desktop `account_for_task_list` split, like the event `route()`):
+    // `task_lists_json` merges local lists with every external task account's,
+    // `tasks_json` / `sections_json` route by the list's owning account. So a
+    // Vikunja/Todoist/CalDAV-tasks account's lists + tasks + sections are now
+    // VISIBLE on mobile.
     //
     // WRITES route too (mirroring `commands::tasks`): a LOCAL mutation hits the
     // store and appends the matching `SyncEvent` (`EventPayload { id,
@@ -12297,6 +12295,31 @@ mod tests {
             .unwrap()
             .iter()
             .all(|t| t["id"] != serde_json::json!(task_id)));
+    }
+
+    #[test]
+    fn malformed_task_json_surfaces_invalid_field_not_a_panic() {
+        // The bridge hands whatever the phone sends straight to serde, on both
+        // the create and the update path. A parse failure has to come back as a
+        // typed InvalidField naming the field — an unwrap here would take the
+        // whole app down instead of surfacing one rejected edit.
+        let (_dir, host, _kc) = open_host();
+        let list = serde_json::from_str::<serde_json::Value>(
+            &host.create_task_list_json("Inbox".to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert!(matches!(
+            host.create_task_json(list, "{not json}".to_string()),
+            Err(StoreError::InvalidField { ref field, .. }) if field == "task"
+        ));
+        assert!(matches!(
+            host.update_task_json("{not json}".to_string(), None),
+            Err(StoreError::InvalidField { ref field, .. }) if field == "task"
+        ));
     }
 
     #[test]
