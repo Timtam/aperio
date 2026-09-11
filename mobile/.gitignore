@@ -46,6 +46,17 @@ yarn-error.*
 # cal-ffi native libs are built by cargo-ndk (regenerable; not committed)
 /modules/cal-ffi/android/src/main/jniLibs/
 
+# cal-ffi iOS: the XCFramework and the UniFFI Swift bindings are built fresh by
+# the mobile-ios-testflight workflow on a macOS runner (regenerable; not
+# committed — a committed copy can only be stale). The two header files are
+# bindgen output the framework already carries inside its Headers/; a top-level
+# copy is a stray. The workflow strips the first two rules before eas-cli
+# archives the working tree, so keep them spelled exactly like this.
+/modules/cal-ffi/ios/CalFfi.xcframework/
+/modules/cal-ffi/ios/cal_ffi.swift
+/modules/cal-ffi/ios/cal_ffiFFI.h
+/modules/cal-ffi/ios/cal_ffiFFI.modulemap
+
 # Gradle build output for local native modules (regenerable; never commit)
 /modules/*/android/build/
 /modules/*/android/.cxx/

@@ -7,9 +7,12 @@ name: Mobile iOS TestFlight
 # secrets are stored here.
 #
 # This replaces the local "vendor the >100MB libs -> commit-locally -> eas build
-# -> soft-reset" dance: CI rebuilds the framework fresh every run, so the binary
-# never needs to live in git, and there is no committed-tree skew between the
-# Swift bindings and the static lib.
+# -> soft-reset" dance: CI rebuilds the framework fresh every run, so neither
+# the static libs nor the generated Swift bindings live in git. Both are
+# gitignored under mobile/modules/cal-ffi/ios/ and arrive from the xcframework
+# job below. A committed copy could only ever be stale — the last one lagged
+# the Rust by some forty symbols for months, and nothing noticed, because no
+# build ever read it.
 #
 # Trigger: manual only. From GitHub → Actions → "Mobile iOS TestFlight" → Run
 # workflow, pick the branch to build. NOTE: the "Run workflow" button only shows
@@ -130,19 +133,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Drop the stale committed framework
-        run: rm -rf mobile/modules/cal-ffi/ios/CalFfi.xcframework mobile/modules/cal-ffi/ios/cal_ffi.swift
-
       - name: Fetch the fresh framework artifact
         uses: actions/download-artifact@v4
         with:
           name: cal-ffi-ios
           path: mobile/modules/cal-ffi/ios
 
-      - name: Ephemeral commit so EAS captures the fresh framework
+      # eas-cli never reads the git index. It clones with `--no-checkout` and
+      # copies the WORKING TREE, filtered by the `.gitignore` files it finds
+      # from the git root — the Android pipeline shipped an AAB without its
+      # native library twice before that was understood (mobile-android-play.yml
+      # tells the story). The framework and the Swift bindings are gitignored
+      # on purpose, because a committed copy can only ever be stale, so their
+      # rules have to leave before the archive is built — and loudly if they
+      # do not.
+      - name: Let the fresh framework into the EAS archive
         run: |
-          git -c user.email=ci@aperio.local -c user.name="Aperio CI" add mobile/modules/cal-ffi/ios
-          git -c user.email=ci@aperio.local -c user.name="Aperio CI" commit -m "ci: vendor fresh cal-ffi xcframework [not pushed]" || echo "nothing to commit"
+          # Fixed strings, not a regex: the rules carry slashes and dots.
+          grep -vFx \
+            -e '/modules/cal-ffi/ios/CalFfi.xcframework/' \
+            -e '/modules/cal-ffi/ios/cal_ffi.swift' \
+            mobile/.gitignore > mobile/.gitignore.new
+          mv mobile/.gitignore.new mobile/.gitignore
+          if grep -qE '^/modules/cal-ffi/ios/(CalFfi\.xcframework/|cal_ffi\.swift)$' mobile/.gitignore; then
+            echo "an iOS artifact rule survived; the archive would ship without the framework" >&2
+            exit 1
+          fi
+
+      - name: Ephemeral commit so the fresh framework is what eas-cli sees
+        run: |
+          git config user.email "ci@aperio.local"
+          git config user.name "Aperio CI"
+          # -f past the rules the step above removed from the copy eas-cli
+          # reads. The index is not what ships; a commit naming both static
+          # libs and the bindings is proof the artifact arrived whole, and
+          # `--error-unmatch` fails on the first piece missing.
+          git add -f mobile/modules/cal-ffi/ios
+          git commit -m "ci: vendor fresh cal-ffi xcframework [not pushed]"
+          git ls-files --error-unmatch \
+            mobile/modules/cal-ffi/ios/cal_ffi.swift \
+            mobile/modules/cal-ffi/ios/CalFfi.xcframework/ios-arm64/libcal_ffi.a \
+            mobile/modules/cal-ffi/ios/CalFfi.xcframework/ios-arm64_x86_64-simulator/libcal_ffi.a \
+            > /dev/null
 
       - uses: actions/setup-node@v4
         with:
@@ -196,5 +228,26 @@ jobs:
           if [ "${{ github.event.inputs.submit }}" != "false" ] && [ "$PROFILE" = "production" ]; then
             SUBMIT="--auto-submit"
           fi
+          # Ask eas-cli for the archive it WOULD upload and look inside it —
+          # the same code path as the build, so this cannot pass while the
+          # build ships something else. The index check above only proves the
+          # artifact arrived; this proves it survives the .gitignore filtering
+          # eas-cli applies to the working tree. `build:inspect` takes
+          # platform, profile, stage, output, force and verbose — and nothing
+          # else; `--non-interactive` belongs to `build` and aborts this one.
+          eas build:inspect --platform ios --profile "$PROFILE" \
+            --stage archive --output "$RUNNER_TEMP/eas-archive" \
+            --force
+          for f in \
+            cal_ffi.swift \
+            CalFfi.xcframework/ios-arm64/libcal_ffi.a \
+            CalFfi.xcframework/ios-arm64_x86_64-simulator/libcal_ffi.a; do
+            path="$RUNNER_TEMP/eas-archive/mobile/modules/cal-ffi/ios/$f"
+            if [ ! -s "$path" ]; then
+              echo "$f is missing from the archive EAS would upload" >&2
+              exit 1
+            fi
+            echo "archive carries $f: $(stat -c%s "$path") bytes"
+          done
           echo "eas build --platform ios --profile $PROFILE $SUBMIT --non-interactive"
           eas build --platform ios --profile "$PROFILE" $SUBMIT --non-interactive

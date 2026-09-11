@@ -163,6 +163,13 @@ VoiceOver pass.
 The committed `cal_ffi.kt` and the local `.so` must come from the same
 `cal-ffi` source, or JNA fails to resolve symbols at call time.
 
+iOS needs none of this by hand. `mobile-ios-testflight.yml` builds the
+XCFramework and generates the Swift bindings fresh on every dispatch, and
+neither is committed: `modules/cal-ffi/ios/CalFfi.xcframework/` and
+`modules/cal-ffi/ios/cal_ffi.swift` are gitignored. A committed copy could only
+ever be stale — the last one lagged the Rust by some forty symbols for months,
+and nothing noticed, because no build ever read it.
+
 **`npm run check:bindings` catches step 1 being skipped**, and `npm run android`
 runs it first. Nothing else does: `tsc` and ESLint never look at Kotlin or
 Swift, so a stale binding file surfaces only as `:cal-ffi:compileReleaseKotlin`
