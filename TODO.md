@@ -1240,6 +1240,45 @@ Siehe DESIGN §4.2.
   auszuschreiben wäre ein Zwilling gewesen.
   ↳ `CarryScope` bleibt vorn: der Aufrufer entscheidet damit, WELCHE Regel er
   fragt, das ist keine Regel.
+- [x] **Tote FFI-Fläche abgetragen** (2026-09-10/11), bevor der nächste Bogen
+  auf ihr aufsetzt. `LocalStore` (PR #38): 22 Methoden, drei DTOs, sieben
+  Wert-Typen, zwölf Tests — elf davon Zeile für Zeile Doppelungen der Tests in
+  `adapter-local` und am Host; die eine Behauptung, die nur er machte
+  (kaputtes Aufgaben-JSON wird ein getippter Fehler, kein Absturz), lebt jetzt
+  am Host. Die eingecheckten iOS-Artefakte (PR #39): `cal_ffi.swift` lag 40
+  Symbole hinter dem Rust, und nichts merkte es, weil kein Bau sie las und der
+  Wächter nur Rust und Kotlin liest. Jetzt gitignored; der eas-Job streift die
+  Regel vor dem Archiv ab und schaut INS Archiv, bevor er zahlt — das
+  Android-Muster, denn eas-cli liest nie den Index, sondern den Arbeitsbaum
+  durch `.gitignore`. Das rrule-Paar (PR #40): exportiert, deklariert, von
+  keiner Brücke gerufen; der Wächter duldet das mit Absicht.
+- [~] **Die Aufgaben-Gruppierung zieht in den Kern** (Tonis Wahl 2026-09-10),
+  in denselben zwei Schritten wie der Übertrag.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.** `buildEntries` (611 Zeilen, auf
+  BEIDEN Oberflächen aus `useMemo` gerufen — die Modul-Suche zeigte nur den
+  Desktop, weil Mobile über das Barrel importiert) hatte 41 Desktop-Tests und
+  keine Fixture, die Rust lesen könnte. Jetzt steht
+  `crates/cal-core/tests/fixtures/taskGrouping.json`: 46 Fälle, GEMESSEN durch
+  Ausführen des heutigen TypeScripts, dazu die Zeilen, die die 41 Tests nie
+  hatten (Zwei-Stufen-Skala, Listenordnung nach Name, ein eingeklappter Task,
+  eine eingeklappte Liste, eine Liste ohne Namen, „alles auf einmal").
+  `taskGrouping.contract.test.ts` spielt sie zurück; rot bewiesen, indem
+  „heute" für einen Lauf zu „überfällig" gemacht wurde.
+  ↳ **Was die Fixture festnagelt, ist die ENTSCHEIDUNG, nicht die Wortwahl:**
+  eine Kopfzeile trägt Art, Zähler und die Ids, auf die sie zeigt — nie den
+  Titel. „Erledigt (3)" baut der Aufrufer; `mine`/`others` erscheinen nur beim
+  Split. Genau der Schnitt, den der Kern braucht, weil er `t` nicht halten
+  kann (DESIGN §4.5 a).
+  ↳ **Die synthetischen Kopfzeilen-Ids sind Teil des Vertrags:**
+  `grp:bl:list:L1`, `grp:sec:bl:L1:s1`, `__aperio_done_group__` … sind die
+  Klapp-Schlüssel, die beide Oberflächen persistieren. Ein Umzug, der sie
+  ändert, klappt beim Nutzer still alles wieder auf.
+  ↳ Schritt 2 (offen): `cal_core::task_grouping` antwortet mit dem Wald aus
+  Schlüsseln, Zählern und Positionen; die Türen sind synchron (WASM,
+  `Function`); die Hülle in `shared/taskGrouping.ts` hydratisiert die Zeilen
+  aus dem, was sie hält. Nebenbefund für danach: `useTasks.ts` hat auf Desktop
+  UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
+  Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

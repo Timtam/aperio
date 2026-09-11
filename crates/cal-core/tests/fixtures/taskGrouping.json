@@ -1,0 +1,3692 @@
+{
+  "what": "How the task view groups, orders and nests its rows — as a table of inputs and the answer `buildEntries` gives for each. A header row carries its kind, its count(s) and the ids it points at, never its title: the wording is the caller’s, the decision is the rule’s.",
+  "why": "This rule lives in `shared/taskGrouping.ts` and is asked on both surfaces while rendering. It is moving into cal-core, where a Rust implementation has to give the same answer; while both exist this file is what keeps them together, and once the TypeScript goes it is the record of what the rule did on the day it moved. Written by running the TypeScript BEFORE the port, so the port is measured against what is, not against what the port thinks it should be.",
+  "writtenBy": [
+    "src/components/views/taskGrouping.measure.test.ts — a one-off, run once and deleted; its table mirrors src/components/views/taskGrouping.test.ts plus the rows the port needs that that file never exercised (the two-level priority scale, list-name ordering, a task-level and a list-level collapse, a list missing from the name map, one case with everything at once)."
+  ],
+  "readBy": [
+    "src/components/views/taskGrouping.contract.test.ts",
+    "crates/cal-core/src/task_grouping.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like normalizedTitle.json and normalizeJoinUrl.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves. A crate reads its own files."
+  },
+  "shape": {
+    "baseTask": "the Task every case starts from; a case’s `tasks` entries are overrides merged over it",
+    "input": {
+      "tasks": "overrides over baseTask, in arrival order (arrival order must not matter)",
+      "lists": "list id → display name; a list absent here is named and ordered by its id",
+      "sections": "list id → Section[] as the store holds them (arrival order must not matter)",
+      "today": "YYYY-MM-DD; the deferred gate compares against it",
+      "currentUserByList": "list id → the connected user, for the Done mine/others split; absent = personal list",
+      "groupBy": "\"state\" (default) or \"list\"",
+      "scale": "the priority system: \"three\" (default) or \"two\"",
+      "collapsed": "ids whose children are hidden; task ids and synthetic header ids alike"
+    },
+    "expect": {
+      "rows": "DFS order. {id, depth, hidden, hasChildren} for every row; header rows add `group`: {kind, parentId, listId?, sectionId?, count, mine?, others?}. `mine`/`others` appear only when Done splits. `parentId` is the enclosing header’s id (null at the top). The synthetic header ids are collapse keys persisted by the UIs and must not change."
+    },
+    "deferred": "rows for isTaskDeferred: {resurface_date, today} → deferred",
+    "language": "the app language tag the answers were measured under (the collation of titles, section names and list names depends on it); the TypeScript side binds it through installTextCollation, the Rust side takes it as a parameter"
+  },
+  "language": "de",
+  "baseTask": {
+    "id": "x",
+    "list_id": "L1",
+    "title": "x",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "cases": [
+    {
+      "name": "done-split-when-someone-else-owns-one",
+      "note": "One done task assigned to another user → the Done header splits into mine / others.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": []
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": [
+              {
+                "id": "u1",
+                "name": "Me",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "c",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": [
+              {
+                "id": "u2",
+                "name": "Other",
+                "email": null
+              }
+            ]
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "currentUserByList": {
+          "L1": {
+            "id": "u1",
+            "name": "Me",
+            "email": null
+          }
+        }
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "mine": 2,
+              "others": 1,
+              "count": 3
+            }
+          },
+          {
+            "id": "a",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "c",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-single-count-when-all-mine-or-unassigned",
+      "note": "Unassigned counts as mine; no split without a foreign owner.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": []
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": [
+              {
+                "id": "u1",
+                "name": "Me",
+                "email": null
+              }
+            ]
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "currentUserByList": {
+          "L1": {
+            "id": "u1",
+            "name": "Me",
+            "email": null
+          }
+        }
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "a",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-single-count-without-an-identity",
+      "note": "No connected user for the list → everything is mine → one count, even for a task assigned to someone.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": [
+              {
+                "id": "u2",
+                "name": "Other",
+                "email": null
+              }
+            ]
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "list-mode-folds-every-open-task-into-its-list",
+      "note": "Backlog, scheduled and deferred all sit in their list; only Done stays separate. Lists by name.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "list_id": "L1",
+            "scheduled_date": null
+          },
+          {
+            "id": "b",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "resurface_date": "2099-01-01"
+          },
+          {
+            "id": "d",
+            "list_id": "L1",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox",
+          "L2": "Work"
+        },
+        "today": "2026-05-21",
+        "groupBy": "list"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "grp:list:L1",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": null,
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "a",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:list:L2",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": null,
+              "listId": "L2",
+              "count": 1
+            }
+          },
+          {
+            "id": "c",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "d",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "sections-by-name-not-by-order",
+      "note": "`Section.order` is creation order wearing the name of a preference; sections read A→Z. The orders are the REVERSE of the alphabet so the old rule cannot pass.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          },
+          {
+            "id": "b",
+            "section_id": "s2"
+          },
+          {
+            "id": "c",
+            "section_id": "s3"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "Zuletzt",
+              "color_label": null,
+              "order": 0
+            },
+            {
+              "id": "s2",
+              "list_id": "L1",
+              "name": "Anfang",
+              "color_label": null,
+              "order": 1
+            },
+            {
+              "id": "s3",
+              "list_id": "L1",
+              "name": "Mitte",
+              "color_label": null,
+              "order": 2
+            }
+          ]
+        },
+        "today": "2026-05-21",
+        "groupBy": "list"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "grp:list:L1",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": null,
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:sec:ls:L1:s2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s2",
+              "count": 1
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:ls:L1:s3",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s3",
+              "count": 1
+            }
+          },
+          {
+            "id": "c",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:ls:L1:s1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "sections-compare-numbers-like-a-human",
+      "note": "\"Sprint 2\" before \"Sprint 10\" — natural, not lexicographic.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          },
+          {
+            "id": "b",
+            "section_id": "s2"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "Sprint 10",
+              "color_label": null,
+              "order": 0
+            },
+            {
+              "id": "s2",
+              "list_id": "L1",
+              "name": "Sprint 2",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21",
+        "groupBy": "list"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "grp:list:L1",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": null,
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:sec:ls:L1:s2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s2",
+              "count": 1
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:ls:L1:s1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-groups-in-order",
+      "note": "Überfällig → Heute → Backlog (→ its list) → Zukünftig. Future-scheduled and deferred share Zukünftig.",
+      "input": {
+        "tasks": [
+          {
+            "id": "past",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "today",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "future",
+            "scheduled_date": "2026-05-22"
+          },
+          {
+            "id": "defer",
+            "resurface_date": "2026-06-01"
+          },
+          {
+            "id": "bl"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_overdue_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "overdue",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "past",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_today_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "today",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "today",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "bl",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "future",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "defer",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "zukuenftig-soonest-effective-day-first",
+      "note": "A scheduled day and a resurface day compete on the same axis: near (05-25) < defer (06-15) < far (08-01).",
+      "input": {
+        "tasks": [
+          {
+            "id": "far",
+            "scheduled_date": "2026-08-01"
+          },
+          {
+            "id": "defer",
+            "resurface_date": "2026-06-15"
+          },
+          {
+            "id": "near",
+            "scheduled_date": "2026-05-25"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "near",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "defer",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "far",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-groups-stay-flat",
+      "note": "Sections are ignored inside Überfällig and Heute.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-21",
+            "section_id": "s1"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-21",
+            "section_id": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "Bucket",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_today_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "today",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "a",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-groups-count-the-whole-subtree",
+      "note": "parent + two subtasks = 3 on the Heute header, like Backlog.",
+      "input": {
+        "tasks": [
+          {
+            "id": "parent",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "c1",
+            "parent_id": "parent",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "c2",
+            "parent_id": "parent",
+            "scheduled_date": "2026-05-21"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_today_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "today",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "parent",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "c1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "c2",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "cancelled-gets-its-own-group-after-done",
+      "note": "A cancelled task with a past day must NOT land in Überfällig.",
+      "input": {
+        "tasks": [
+          {
+            "id": "today",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "cx",
+            "status": "cancelled",
+            "scheduled_date": "2026-05-10",
+            "updated_at": "2026-05-19T00:00:00Z"
+          },
+          {
+            "id": "done",
+            "status": "completed",
+            "completed_at": "2026-05-20T00:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_today_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "today",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "today",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "done",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_cancelled_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "cancelled",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "cx",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "cancelled-most-recently-changed-first",
+      "note": "No cancelled_at exists; updated_at stands in.",
+      "input": {
+        "tasks": [
+          {
+            "id": "old",
+            "status": "cancelled",
+            "updated_at": "2026-05-10T00:00:00Z"
+          },
+          {
+            "id": "new",
+            "status": "cancelled",
+            "updated_at": "2026-05-20T00:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_cancelled_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "cancelled",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "new",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "old",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "backlog-sections-alphabetical-ungrouped-first",
+      "note": "Backlog(0) → Inbox(1) → Doing(2), To Do(2); the ungrouped task follows the list head directly.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s2"
+          },
+          {
+            "id": "b",
+            "section_id": "s1"
+          },
+          {
+            "id": "c",
+            "section_id": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            },
+            {
+              "id": "s2",
+              "list_id": "L1",
+              "name": "Doing",
+              "color_label": null,
+              "order": 2
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "c",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:bl:L1:s2",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s2",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "b",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "headers-count-the-contained-subtree",
+      "note": "a + b + b1 = 3 on both the list and the section header.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          },
+          {
+            "id": "b",
+            "section_id": "s1"
+          },
+          {
+            "id": "b1",
+            "parent_id": "b",
+            "section_id": "s1"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 3
+            }
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "b1",
+            "depth": 4,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-sections-get-no-header",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            },
+            {
+              "id": "s2",
+              "list_id": "L1",
+              "name": "Empty",
+              "color_label": null,
+              "order": 2
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-sections-means-flat-under-the-list",
+      "note": "A section_id pointing nowhere is ignored when the list has no sections.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-parent-expanded",
+      "note": "Completed top-level tasks under a synthetic Done header, most recent first, visible while expanded.",
+      "input": {
+        "tasks": [
+          {
+            "id": "open",
+            "status": "open"
+          },
+          {
+            "id": "done1",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z"
+          },
+          {
+            "id": "done2",
+            "status": "completed",
+            "completed_at": "2026-05-21T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "open",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "done2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "done1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-parent-collapsed",
+      "note": "The header stays visible, its children hide; the index space is unchanged.",
+      "input": {
+        "tasks": [
+          {
+            "id": "open",
+            "status": "open"
+          },
+          {
+            "id": "done1",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z"
+          },
+          {
+            "id": "done2",
+            "status": "completed",
+            "completed_at": "2026-05-21T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "collapsed": [
+          "__aperio_done_group__"
+        ]
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "open",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "done2",
+            "depth": 1,
+            "hidden": true,
+            "hasChildren": false
+          },
+          {
+            "id": "done1",
+            "depth": 1,
+            "hidden": true,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-subtask-stays-under-its-open-parent",
+      "note": "No Done group: the only completed task is a subtask.",
+      "input": {
+        "tasks": [
+          {
+            "id": "parent",
+            "status": "open"
+          },
+          {
+            "id": "child",
+            "parent_id": "parent",
+            "status": "completed"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "parent",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "child",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "list-with-only-completed-tasks-has-no-list-header",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "done",
+            "status": "completed"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "done",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "subtask-follows-its-parent-regardless-of-section",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "parent",
+            "section_id": "s1"
+          },
+          {
+            "id": "child",
+            "parent_id": "parent",
+            "section_id": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 2
+            }
+          },
+          {
+            "id": "parent",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "child",
+            "depth": 4,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "backlog-groups-by-list-then-section",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": null,
+            "section_id": "s1"
+          },
+          {
+            "id": "b",
+            "scheduled_date": null,
+            "section_id": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "backlog-list-header-even-without-sections",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "dfs-chain-is-strictly-nested",
+      "note": "Backlog(0) → Inbox(1) → To Do(2) → p(3) → c(4).",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": null,
+            "section_id": "s1"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": null,
+            "section_id": null
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 2
+            }
+          },
+          {
+            "id": "p",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "c",
+            "depth": 4,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "titles-sort-naturally-within-a-section",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1",
+            "title": "Aufgabe 10"
+          },
+          {
+            "id": "b",
+            "section_id": "s1",
+            "title": "Aufgabe 2"
+          },
+          {
+            "id": "c",
+            "section_id": "s1",
+            "title": "Aufgabe 1"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 3
+            }
+          },
+          {
+            "id": "c",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "higher-priority-floats-above-natural-order",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1",
+            "title": "Apple",
+            "priority": "medium"
+          },
+          {
+            "id": "b",
+            "section_id": "s1",
+            "title": "Zebra",
+            "priority": "high"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 2
+            }
+          },
+          {
+            "id": "b",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "three-level-scale-has-three-bands",
+      "note": "high → medium → low, A→Z inside each band.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "Apple",
+            "priority": "medium"
+          },
+          {
+            "id": "b",
+            "title": "Zebra",
+            "priority": "high"
+          },
+          {
+            "id": "c",
+            "title": "Aardvark",
+            "priority": "low"
+          },
+          {
+            "id": "d",
+            "title": "Mango",
+            "priority": "medium"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "scale": "three"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 4
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 4
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "d",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "c",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "two-level-scale-has-two-bands",
+      "note": "In the two-level system only \"important\" floats; medium and low are one A→Z run.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "Apple",
+            "priority": "medium"
+          },
+          {
+            "id": "b",
+            "title": "Zebra",
+            "priority": "high"
+          },
+          {
+            "id": "c",
+            "title": "Aardvark",
+            "priority": "low"
+          },
+          {
+            "id": "d",
+            "title": "Mango",
+            "priority": "medium"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "scale": "two"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 4
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 4
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "c",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "d",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "ungrouped-backlog-sorts-naturally",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": null,
+            "title": "Item 10"
+          },
+          {
+            "id": "b",
+            "scheduled_date": null,
+            "title": "Item 2"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "subtask-siblings-sort-naturally",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "title": "Parent"
+          },
+          {
+            "id": "c10",
+            "parent_id": "p",
+            "title": "Step 10"
+          },
+          {
+            "id": "c2",
+            "parent_id": "p",
+            "title": "Step 2"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "p",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "c2",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "c10",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "parent-cycle-surfaces-instead-of-vanishing",
+      "note": "a→b→a: one member is promoted to the top, the other nests beneath it.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "A",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "title": "B",
+            "parent_id": "a"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-tree-hanging-off-a-cycle-stays-attached",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "A",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "title": "B",
+            "parent_id": "a"
+          },
+          {
+            "id": "leaf",
+            "title": "Leaf",
+            "parent_id": "b"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "leaf",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "ordinary-trees-and-orphans-untouched",
+      "note": "An orphan (parent not in the snapshot) surfaces at top level.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "title": "Parent"
+          },
+          {
+            "id": "c",
+            "title": "Child",
+            "parent_id": "p"
+          },
+          {
+            "id": "o",
+            "title": "Orphan",
+            "parent_id": "missing"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "o",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "p",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "c",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "future-resurface-is-held-in-zukuenftig",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "now",
+            "scheduled_date": null
+          },
+          {
+            "id": "later",
+            "scheduled_date": null,
+            "resurface_date": "2026-10-01"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "now",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "later",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "resurface-today-or-past-is-visible-now",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "today",
+            "scheduled_date": null,
+            "resurface_date": "2026-05-21"
+          },
+          {
+            "id": "past",
+            "scheduled_date": null,
+            "resurface_date": "2026-01-01"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "today",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "past",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "deferred-soonest-resurface-first",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "oct",
+            "scheduled_date": null,
+            "resurface_date": "2026-10-01"
+          },
+          {
+            "id": "jun",
+            "scheduled_date": null,
+            "resurface_date": "2026-06-01"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "jun",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "oct",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "zukuenftig-collapsed-hides-its-children",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "later",
+            "scheduled_date": null,
+            "resurface_date": "2026-10-01"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "collapsed": [
+          "__aperio_deferred_group__"
+        ]
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "later",
+            "depth": 1,
+            "hidden": true,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-most-recently-completed-first",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "older",
+            "status": "completed",
+            "completed_at": "2026-05-19T10:00:00Z"
+          },
+          {
+            "id": "newer",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "newer",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "older",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-falls-back-to-updated-at",
+      "note": "A completion record created already-done (Vikunja) has no completed_at; updated_at is its completion moment.",
+      "input": {
+        "tasks": [
+          {
+            "id": "stamped",
+            "status": "completed",
+            "completed_at": "2026-05-18T10:00:00Z",
+            "updated_at": "2026-05-18T10:00:00Z"
+          },
+          {
+            "id": "just-recorded",
+            "status": "completed",
+            "completed_at": null,
+            "updated_at": "2026-05-20T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "just-recorded",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "stamped",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-timestamp-does-not-jump-a-newer-completion",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "newest",
+            "status": "completed",
+            "completed_at": "2026-05-21T10:00:00Z"
+          },
+          {
+            "id": "undated",
+            "status": "completed",
+            "completed_at": null,
+            "updated_at": "2026-05-20T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "newest",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "undated",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "backlog-lists-order-by-name",
+      "note": "Two lists in the backlog read by list NAME, not by id or arrival.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "list_id": "L1"
+          },
+          {
+            "id": "b",
+            "list_id": "L2"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox",
+          "L2": "Arbeit"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L2",
+              "count": 1
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-list-falls-back-to-its-id",
+      "note": "A list missing from the name map is named by its id — and ORDERED by it.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "list_id": "L1"
+          },
+          {
+            "id": "b",
+            "list_id": "zzz"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:bl:list:zzz",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "zzz",
+              "count": 1
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "collapsing-a-task-hides-its-subtree-only",
+      "note": "A task-level collapse: the parent stays, its children hide, its siblings do not.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "title": "Parent"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "title": "Child"
+          },
+          {
+            "id": "g",
+            "parent_id": "c",
+            "title": "Grandchild"
+          },
+          {
+            "id": "s",
+            "title": "Sibling"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-21",
+        "collapsed": [
+          "p"
+        ]
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 4
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 4
+            }
+          },
+          {
+            "id": "p",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "c",
+            "depth": 3,
+            "hidden": true,
+            "hasChildren": true
+          },
+          {
+            "id": "g",
+            "depth": 4,
+            "hidden": true,
+            "hasChildren": false
+          },
+          {
+            "id": "s",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "collapsing-a-list-hides-its-sections-and-tasks",
+      "note": "Collapse keys are the synthetic header ids; they must survive the port unchanged.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21",
+        "collapsed": [
+          "grp:bl:list:L1"
+        ]
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": true,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": true,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 1
+            }
+          },
+          {
+            "id": "a",
+            "depth": 3,
+            "hidden": true,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "list-mode-with-sections-and-done",
+      "note": "Section ids in list mode carry the `ls:` scope, in the backlog the `bl:` scope.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "section_id": "s1",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "b",
+            "section_id": "s1"
+          },
+          {
+            "id": "c"
+          },
+          {
+            "id": "d",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21",
+        "groupBy": "list"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "grp:list:L1",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": null,
+              "listId": "L1",
+              "count": 3
+            }
+          },
+          {
+            "id": "c",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:sec:ls:L1:s1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 2
+            }
+          },
+          {
+            "id": "a",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "b",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "d",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "everything-at-once",
+      "note": "One of each group, two lists, sections, subtasks, a deferred task, a done split, a cancelled task.",
+      "input": {
+        "tasks": [
+          {
+            "id": "od",
+            "list_id": "L2",
+            "scheduled_date": "2026-05-01",
+            "title": "Overdue"
+          },
+          {
+            "id": "td",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-21",
+            "title": "Today",
+            "priority": "high"
+          },
+          {
+            "id": "td2",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-21",
+            "title": "Also today"
+          },
+          {
+            "id": "bl1",
+            "list_id": "L1",
+            "section_id": "s1",
+            "title": "Backlog in section"
+          },
+          {
+            "id": "bl1c",
+            "list_id": "L1",
+            "parent_id": "bl1",
+            "title": "Its subtask"
+          },
+          {
+            "id": "bl2",
+            "list_id": "L2",
+            "title": "Backlog loose"
+          },
+          {
+            "id": "fut",
+            "list_id": "L1",
+            "scheduled_date": "2026-07-01",
+            "title": "Future"
+          },
+          {
+            "id": "def",
+            "list_id": "L2",
+            "resurface_date": "2026-06-10",
+            "title": "Deferred"
+          },
+          {
+            "id": "dn1",
+            "list_id": "L1",
+            "status": "completed",
+            "completed_at": "2026-05-20T10:00:00Z",
+            "assignees": [
+              {
+                "id": "u2",
+                "name": "Other",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "dn2",
+            "list_id": "L2",
+            "status": "completed",
+            "completed_at": "2026-05-21T10:00:00Z"
+          },
+          {
+            "id": "cx",
+            "list_id": "L1",
+            "status": "cancelled",
+            "updated_at": "2026-05-15T00:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox",
+          "L2": "Arbeit"
+        },
+        "sections": {
+          "L1": [
+            {
+              "id": "s1",
+              "list_id": "L1",
+              "name": "To Do",
+              "color_label": null,
+              "order": 1
+            }
+          ]
+        },
+        "today": "2026-05-21",
+        "currentUserByList": {
+          "L1": {
+            "id": "u1",
+            "name": "Me",
+            "email": null
+          }
+        }
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_overdue_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "overdue",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "od",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_today_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "today",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "td",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "td2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_backlog_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "backlog",
+              "parentId": null,
+              "count": 3
+            }
+          },
+          {
+            "id": "grp:bl:list:L2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L2",
+              "count": 1
+            }
+          },
+          {
+            "id": "bl2",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "grp:bl:list:L1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "list",
+              "parentId": "__aperio_backlog_group__",
+              "listId": "L1",
+              "count": 2
+            }
+          },
+          {
+            "id": "grp:sec:bl:L1:s1",
+            "depth": 2,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "section",
+              "parentId": "grp:bl:list:L1",
+              "listId": "L1",
+              "sectionId": "s1",
+              "count": 2
+            }
+          },
+          {
+            "id": "bl1",
+            "depth": 3,
+            "hidden": false,
+            "hasChildren": true
+          },
+          {
+            "id": "bl1c",
+            "depth": 4,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_deferred_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "deferred",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "def",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "fut",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "mine": 1,
+              "others": 1,
+              "count": 2
+            }
+          },
+          {
+            "id": "dn2",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "dn1",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_cancelled_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "cancelled",
+              "parentId": null,
+              "count": 1
+            }
+          },
+          {
+            "id": "cx",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    }
+  ],
+  "deferred": [
+    {
+      "resurface_date": "2026-10-01",
+      "today": "2026-05-21",
+      "note": "future → deferred",
+      "deferred": true
+    },
+    {
+      "resurface_date": "2026-05-21",
+      "today": "2026-05-21",
+      "note": "today → visible now",
+      "deferred": false
+    },
+    {
+      "resurface_date": "2026-01-01",
+      "today": "2026-05-21",
+      "note": "past → visible now",
+      "deferred": false
+    },
+    {
+      "resurface_date": null,
+      "today": "2026-05-21",
+      "note": "none → never deferred",
+      "deferred": false
+    }
+  ]
+}
