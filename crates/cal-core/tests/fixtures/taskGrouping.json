@@ -26,8 +26,10 @@
     "expect": {
       "rows": "DFS order. {id, depth, hidden, hasChildren} for every row; header rows add `group`: {kind, parentId, listId?, sectionId?, count, mine?, others?}. `mine`/`others` appear only when Done splits. `parentId` is the enclosing header’s id (null at the top). The synthetic header ids are collapse keys persisted by the UIs and must not change."
     },
-    "deferred": "rows for isTaskDeferred: {resurface_date, today} → deferred"
+    "deferred": "rows for isTaskDeferred: {resurface_date, today} → deferred",
+    "language": "the app language tag the answers were measured under (the collation of titles, section names and list names depends on it); the TypeScript side binds it through installTextCollation, the Rust side takes it as a parameter"
   },
+  "language": "de",
   "baseTask": {
     "id": "x",
     "list_id": "L1",
