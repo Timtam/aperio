@@ -289,6 +289,16 @@ pub fn carry_onto_fields(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The task view's rows: which group each task lands in, in which order,
+/// under which header, at what depth. Asked while rendering, so synchronous.
+#[uniffi::export]
+pub fn group_tasks(input_json: String) -> Result<String, StoreError> {
+    cal_core::group_tasks_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "grouping input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

@@ -7,6 +7,7 @@ import {
   installMeetingLinkRules,
   installEventGroupFold,
   installGroupCarryRules,
+  installTaskGroupingRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -95,6 +96,13 @@ installGroupCarryRules({
   occurrenceCarryFieldsJson: (inputJson) => CalFfi.occurrenceCarryFields(inputJson),
   futureCarryFieldsJson: (inputJson) => CalFfi.futureCarryFields(inputJson),
   carryOntoFieldsJson: (inputJson) => CalFfi.carryOntoFields(inputJson),
+});
+
+// Grouping the task view. Synchronous: the screen asks inside `useMemo`
+// while it renders.
+installTaskGroupingRules({
+  groupTasksJson: (inputJson) => CalFfi.groupTasks(inputJson),
+  languageTag: () => i18n.language,
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

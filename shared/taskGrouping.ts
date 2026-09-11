@@ -1,37 +1,23 @@
+// The task view's grouping — this surface's door into
+// `cal_core::task_grouping`.
+//
+// Which group a task lands in, in which order, under which header, at what
+// depth, and whether a collapse hides it: that decision lives in the core now,
+// and both surfaces ask it while rendering. What stays here is the shell —
+// turning the core's answer (ids, kinds, counts, positions) back into the
+// `Entry` rows the views render, and wording the headers with `t`, which the
+// core cannot hold and must not (DESIGN §4.5 a).
+//
+// Pinned by `crates/cal-core/tests/fixtures/taskGrouping.json`, measured from
+// the TypeScript this replaced; `taskGrouping.contract.test.ts` replays it
+// through this door, and the core's own contract test reads the same file.
+
 import type { Section, Task, TaskUser } from './types';
-import {
-  compareMachineStrings,
-  compareNames,
-  compareTitles,
-} from './ordering';
-import { classifyDoneByMe } from './taskAssignment';
+import { compareTitles } from './ordering';
 import { priorityRank, type PriorityScale } from './taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" group row. */
 export const DONE_GROUP_ID = '__aperio_done_group__';
-
-/**
- * What a done task sorts by inside the Done group.
- *
- * `completed_at` when the provider gave one, and `updated_at` when it did not —
- * NOT the empty string, which is what this used to fall back to. An empty key
- * sorts to the very end of a descending comparison, so a task with no
- * completion time was filed as the oldest thing in the list no matter when it
- * was actually ticked off.
- *
- * That is not a hypothetical. Vikunja stamps its `done_at` when a task FLIPS to
- * done, so a task created already-done — which is exactly what a completion
- * record for a repeating task is — never gets one. Those turned up at the
- * bottom of "Erledigt" seconds after being completed, while ordinarily ticked
- * tasks sorted correctly, which is what made it look arbitrary.
- *
- * `updated_at` is a proxy, and an honest one: for a task that was just created
- * done it IS the completion moment. A done task edited later would drift
- * upwards, which is a far smaller error than being pinned to the end.
- */
-function doneOrderKey(task: Task): string {
-  return task.completed_at ?? task.updated_at ?? '';
-}
 /** Sentinel id of the synthetic "Backlog" group row. */
 export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
 /** Sentinel id of the synthetic "Zukünftig (N)" group row — tasks waiting for a
@@ -59,9 +45,11 @@ export type TaskGroupBy = 'state' | 'list';
 /**
  * A backlog task is **deferred** when its `resurface_date` is strictly after
  * `today` (`YYYY-MM-DD`): it's waiting to come back and must be held out of
- * the active backlog (DESIGN §9.3 / §9.12). The single source of truth for
- * every backlog surface — the task view's grouping AND the week/month backlog
- * rail — so they can't drift apart and show the same task in two places.
+ * the active backlog (DESIGN §9.3 / §9.12). The week/month backlog rail asks
+ * this directly; the task view's grouping asks the core, whose
+ * `is_task_deferred` is the same comparison. The two are pinned against each
+ * other by the `deferred` rows of `taskGrouping.json`, read by both contract
+ * tests.
  */
 export function isTaskDeferred(task: Task, today: string): boolean {
   return task.resurface_date != null && task.resurface_date > today;
@@ -154,18 +142,6 @@ function groupTask(
   };
 }
 
-/** A node in the group forest built below: either a collapsible group header
- *  or a real task (whose own subtasks are resolved at emit time). */
-type GNode =
-  | {
-      t: 'group';
-      id: string;
-      title: string;
-      meta: GroupMeta;
-      children: GNode[];
-    }
-  | { t: 'task'; task: Task };
-
 /** Natural (numeric-aware) ascending title compare: "Aufgabe 2" sorts before
  *  "Aufgabe 10", not after. */
 function naturalCompare(a: string, b: string): number {
@@ -176,11 +152,11 @@ function naturalCompare(a: string, b: string): number {
   return compareTitles(a, b);
 }
 
-/** Sibling order within a group / under a parent: high priority floats up
- *  (unchanged), then natural ascending title — replacing the old insertion-order
- *  tiebreaker so each group reads A→Z within a priority band. Exported as THE
- *  task ordering: the calendar day surfaces (`filterTasksOnDay`) sort a day's
- *  tasks with the same comparator so the planner reads like the task list.
+/** Sibling order within a group / under a parent: high priority floats up,
+ *  then natural ascending title. The task view no longer sorts here — the core
+ *  does, with the same two doors — but the calendar day surfaces
+ *  (`filterTasksOnDay`) still sort a day's tasks with this comparator so the
+ *  planner reads like the task list. It goes when `taskDay` moves.
  *
  *  `scale` is the user's priority system (see `PriorityScale`); in the
  *  two-level one there are two bands instead of three, so everything that is
@@ -224,6 +200,145 @@ export function sortSections<T extends { name: string }>(sections: T[]): T[] {
   return [...sections].sort(sectionOrder);
 }
 
+// ─────────────────────────────── The door ───────────────────────────────────
+
+/** What the rule reads of a task, and nothing else. Sent instead of the whole
+ *  row: a task carries twice as many fields, and the core has no business
+ *  knowing about the rest. */
+interface GroupableTask {
+  id: string;
+  list_id: string;
+  title: string;
+  status: Task['status'];
+  priority: Task['priority'];
+  scheduled_date: string | null;
+  resurface_date: string | null;
+  parent_id: string | null;
+  section_id: string | null;
+  assignees: TaskUser[];
+  updated_at: string;
+  completed_at: string | null;
+}
+
+function onlyGroupable(task: Task): GroupableTask {
+  return {
+    id: task.id,
+    list_id: task.list_id,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    scheduled_date: task.scheduled_date,
+    resurface_date: task.resurface_date,
+    parent_id: task.parent_id,
+    section_id: task.section_id,
+    assignees: task.assignees,
+    updated_at: task.updated_at,
+    completed_at: task.completed_at,
+  };
+}
+
+/** `cal_core::task_grouping::GroupingInput`. */
+interface GroupingInput {
+  tasks: GroupableTask[];
+  lists: Record<string, string>;
+  sections: Record<string, Section[]>;
+  today: string;
+  currentUserByList: Record<string, TaskUser | null>;
+  groupBy: TaskGroupBy;
+  scale: PriorityScale;
+  collapsed: string[];
+  language: string;
+}
+
+/** One row of the core's answer — `cal_core::task_grouping::Row`. A task by
+ *  id, or a header with what it takes to word it. */
+interface GroupingRow {
+  id: string;
+  depth: number;
+  hidden: boolean;
+  hasChildren: boolean;
+  group?: {
+    kind: GroupMeta['kind'];
+    parentId: string | null;
+    listId?: string;
+    sectionId?: string;
+    count: number;
+    mine?: number;
+    others?: number;
+  };
+}
+
+/** This surface's door into `cal_core::task_grouping`. */
+export interface TaskGroupingRules {
+  groupTasksJson(inputJson: string): string;
+  /** The app's language tag, read when the view asks: the collation of
+   *  titles, section names and list names depends on it, and the user can
+   *  change it while the app runs. */
+  languageTag(): string;
+}
+
+let installedRules: TaskGroupingRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installTaskGroupingRules(rules: TaskGroupingRules): void {
+  installedRules = rules;
+}
+
+function rules(): TaskGroupingRules {
+  if (installedRules === null) {
+    // Loud, not a local fallback. A fallback here would be the second
+    // implementation all over again — and this one is asked on every render
+    // of the task list, on both surfaces, so a quiet divergence would be the
+    // most visible kind there is and still nobody would know which side is
+    // right.
+    throw new Error(
+      'task grouping used before installTaskGroupingRules() — the surface must ' +
+        'bind its door into cal_core::task_grouping at startup',
+    );
+  }
+  return installedRules;
+}
+
+/** The words for a header, from what the core answered. The only place the
+ *  grouping meets `t`. */
+function headerTitle(
+  head: NonNullable<GroupingRow['group']>,
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  nameOf: (listId: string) => string,
+  section: Section | undefined,
+): string {
+  switch (head.kind) {
+    case 'backlog':
+      return `${t('views.tasks.backlog')} (${head.count})`;
+    case 'list':
+      return `${nameOf(head.listId ?? '')} (${head.count})`;
+    case 'section':
+      return `${section?.name ?? head.sectionId ?? ''} (${head.count})`;
+    case 'done':
+      // Split into mine (unassigned OR assigned to me) vs others (assigned to
+      // a concrete other user) when at least one done task is someone else's;
+      // otherwise a single count (personal lists never split).
+      return head.others !== undefined && head.others > 0
+        ? t('views.tasks.doneSplit', { mine: head.mine, others: head.others })
+        : t('views.tasks.done', { count: head.count });
+    case 'deferred':
+      return t('views.tasks.deferred', { count: head.count });
+    case 'overdue':
+      return t('views.tasks.overdue', { count: head.count });
+    case 'today':
+      return t('views.tasks.today', { count: head.count });
+    case 'cancelled':
+      return t('views.tasks.cancelled', { count: head.count });
+  }
+}
+
+/**
+ * The rows the task view renders, in depth-first order, with every group
+ * header as a real tree row.
+ *
+ * The core decides; this lays its answer over the tasks the caller holds
+ * (positions, not rows — see the module comment) and words the headers.
+ */
 export function buildEntries(
   tasks: Task[],
   taskListById: Map<string, { name: string }>,
@@ -244,368 +359,74 @@ export function buildEntries(
    *  has (see {@link taskOrder}). Defaults to the three-level original. */
   scale: PriorityScale = 'three',
 ): { entries: Entry[]; flatTasks: Task[] } {
-  const order = (a: Task, b: Task) => taskOrder(a, b, scale);
-  // Bucket children under their parent for O(1) subtask lookup. Tasks whose
-  // parent_id points at a missing row are orphans → surfaced at top level.
-  const childrenByParent = new Map<string, Task[]>();
-  const allIds = new Set<string>();
-  tasks.forEach((task) => allIds.add(task.id));
-  const topLevel: Task[] = [];
-  tasks.forEach((task) => {
-    if (task.parent_id && allIds.has(task.parent_id)) {
-      const bucket = childrenByParent.get(task.parent_id) ?? [];
-      bucket.push(task);
-      childrenByParent.set(task.parent_id, bucket);
-    } else {
-      topLevel.push(task);
-    }
-  });
-  // Subtask siblings sort the same way as top-level tasks (priority band, then
-  // natural title) — so a parent's children also read A→Z, not add-order.
-  childrenByParent.forEach((bucket) => bucket.sort(order));
-
-  // Cycle guard: parent links can come from external providers (e.g. two
-  // Vikunja tasks each carrying a `parenttask` relation onto the other), and
-  // a parent CYCLE has no top-level member — without this, every task in the
-  // cycle (plus its subtree) would silently vanish from the view, and
-  // emitting one would recurse forever. Chase each unreachable task's parent
-  // chain onto its cycle and promote that member to top level, cutting its
-  // parent edge in the LOCAL buckets only (the task object itself is shared
-  // state and stays untouched) so the whole cluster renders as a tree again.
-  const reachable = new Set<string>();
-  const markReachable = (task: Task) => {
-    if (reachable.has(task.id)) return;
-    reachable.add(task.id);
-    (childrenByParent.get(task.id) ?? []).forEach(markReachable);
+  const door = rules();
+  const input: GroupingInput = {
+    tasks: tasks.map(onlyGroupable),
+    lists: Object.fromEntries(
+      Array.from(taskListById, ([id, list]) => [id, list.name] as const),
+    ),
+    sections: sectionsByList,
+    today,
+    currentUserByList,
+    groupBy,
+    scale,
+    collapsed: Array.from(collapsed),
+    language: door.languageTag(),
   };
-  topLevel.forEach(markReachable);
-  if (reachable.size < tasks.length) {
-    const byId = new Map(tasks.map((task) => [task.id, task]));
-    tasks.forEach((task) => {
-      if (reachable.has(task.id)) return;
-      // Walk up until the next parent would revisit the chain — `member` is
-      // then on the cycle. (Every parent exists here: a missing parent would
-      // have put the task in `topLevel` and made the cluster reachable.)
-      let member = task;
-      const walked = new Set<string>([member.id]);
-      while (member.parent_id) {
-        const parent = byId.get(member.parent_id);
-        if (!parent || walked.has(parent.id)) break;
-        walked.add(parent.id);
-        member = parent;
-      }
-      const parentId = member.parent_id;
-      if (parentId) {
-        const bucket = childrenByParent.get(parentId) ?? [];
-        childrenByParent.set(
-          parentId,
-          bucket.filter((child) => child.id !== member.id),
-        );
-      }
-      topLevel.push(member);
-      markReachable(member);
-    });
-  }
+  const rows = JSON.parse(door.groupTasksJson(JSON.stringify(input))) as GroupingRow[];
 
-  // Total tasks contained under one task (its whole subtask subtree) and under
-  // a list of tasks (each task + its subtree) — drives the "(N)" count
-  // indicators on group headers and tasks-with-subtasks, matching the existing
-  // Done / Zukünftig group counts.
-  const countSubtasks = (taskId: string): number =>
-    (childrenByParent.get(taskId) ?? []).reduce(
-      (n, s) => n + 1 + countSubtasks(s.id),
-      0,
-    );
-  const totalUnder = (items: Task[]): number =>
-    items.reduce((n, task) => n + 1 + countSubtasks(task.id), 0);
-
-  // Terminal top-level tasks (with their subtree) collapse into their own
-  // end-of-list groups so the active groups show only open work: completed →
-  // "Done", cancelled → "Abgebrochen". A terminal *subtask* under an open parent
-  // stays inline. (Splitting cancelled out here also keeps a cancelled task with
-  // a past scheduled day OUT of "Überfällig".)
-  const doneTopLevel: Task[] = [];
-  const cancelledTopLevel: Task[] = [];
-  const openTopLevel: Task[] = [];
-  topLevel.forEach((task) => {
-    if (task.status === 'completed') doneTopLevel.push(task);
-    else if (task.status === 'cancelled') cancelledTopLevel.push(task);
-    else openTopLevel.push(task);
-  });
-
-  // High priority floats up, low sinks; within a band, natural ascending title
-  // (`taskOrder`) — so each group reads A→Z instead of add-order. Every
-  // downstream bucket is filled by walking `openTopLevel` in order, so this one
-  // sort covers backlog + scheduled lists + sections + ungrouped alike.
-  openTopLevel.sort(order);
-
-  // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in the
-  // future is held out of the active groups. It joins the fixed-future-scheduled
-  // tasks under "Zukünftig" below. The same gate doubles as the §9.3 backlog
-  // filter (see `isTaskDeferred`).
-  const deferred: Task[] = [];
-  const active: Task[] = [];
-  openTopLevel.forEach((task) => {
-    if (isTaskDeferred(task, today)) deferred.push(task);
-    else active.push(task);
-  });
-
-  // Split the active (non-deferred) open tasks by their planned day relative to
-  // `today`: OVERDUE (a fixed day already past), TODAY, FUTURE (a fixed day still
-  // to come), or BACKLOG (no planned day). Overdue + Today become flat time
-  // groups; Future joins the deferred tasks in "Zukünftig"; only Backlog keeps
-  // the per-list → section structure. `active` is already in taskOrder, so each
-  // bucket inherits it.
-  const backlog: Task[] = [];
-  const overdue: Task[] = [];
-  const todayTasks: Task[] = [];
-  const futureScheduled: Task[] = [];
-  active.forEach((task) => {
-    const day = task.scheduled_date;
-    if (!day) backlog.push(task);
-    else if (day < today) overdue.push(task);
-    else if (day === today) todayTasks.push(task);
-    else futureScheduled.push(task);
-  });
-
-  // "Zukünftig" = everything waiting for a future day: backlog tasks resurfacing
-  // later (ordered by resurface_date) + tasks scheduled on a fixed future day
-  // (ordered by scheduled_date). Sorted by that effective future date — soonest
-  // first — so the group reads as a countdown.
-  const futureDayOf = (task: Task): string =>
-    (isTaskDeferred(task, today) ? task.resurface_date : task.scheduled_date) ??
-    '';
-  const future = [...deferred, ...futureScheduled];
-  // Day keys (`YYYY-MM-DD`) — machine strings.
-  future.sort((a, b) => compareMachineStrings(futureDayOf(a), futureDayOf(b)));
-
+  const byId = new Map(tasks.map((task) => [task.id, task]));
   const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
-  const byName = (a: string, b: string) => compareNames(nameOf(a), nameOf(b));
 
-  // A list's tasks → [ungrouped task nodes] + a section group node per
-  // non-empty section (in declared order). `idScope` keeps the synthetic
-  // section ids unique between a list's backlog and scheduled appearances.
-  const listChildren = (
-    listId: string,
-    items: Task[],
-    idScope: string,
-  ): GNode[] => {
-    const sections = sectionsByList[listId] ?? [];
-    if (sections.length === 0) {
-      return items.map((task) => ({ t: 'task', task }) as GNode);
-    }
-    const sectionIds = new Set(sections.map((s) => s.id));
-    const bySection = new Map<string, Task[]>();
-    const ungrouped: Task[] = [];
-    items.forEach((task) => {
-      if (task.section_id && sectionIds.has(task.section_id)) {
-        const arr = bySection.get(task.section_id) ?? [];
-        arr.push(task);
-        bySection.set(task.section_id, arr);
-      } else {
-        ungrouped.push(task);
-      }
-    });
-    const out: GNode[] = ungrouped.map((task) => ({ t: 'task', task }) as GNode);
-    // By NAME, like the tasks inside them — see `sectionOrder`. This used to
-    // sort on `Section.order`, which reads like a preference and is not one:
-    // nothing lets a section be moved, so it was the order they happened to be
-    // created in.
-    sortSections(sections).forEach((section) => {
-        const secTasks = bySection.get(section.id);
-        if (!secTasks || secTasks.length === 0) return;
-        out.push({
-          t: 'group',
-          id: `grp:sec:${idScope}:${section.id}`,
-          title: `${section.name} (${totalUnder(secTasks)})`,
-          meta: { kind: 'section', sectionId: section.id, listId, section },
-          children: secTasks.map((task) => ({ t: 'task', task }) as GNode),
-        });
-      });
-    return out;
-  };
-
-  const forest: GNode[] = [];
-
-  // 'list' mode: every non-completed task in its own list (+ sections),
-  // regardless of backlog/scheduled/deferred state — only Done stays separate
-  // (appended below, same as the state grouping). `openTopLevel` is already the
-  // full non-completed set (the deferred/backlog split happened after it), so
-  // grouping it by list folds Backlog + scheduled + Zukünftig into one list row.
-  if (groupBy === 'list') {
-    const byListAll = new Map<string, Task[]>();
-    openTopLevel.forEach((task) => {
-      const arr = byListAll.get(task.list_id) ?? [];
-      arr.push(task);
-      byListAll.set(task.list_id, arr);
-    });
-    Array.from(byListAll.entries())
-      .sort(([a], [b]) => byName(a, b))
-      .forEach(([listId, items]) => {
-        forest.push({
-          t: 'group',
-          id: `grp:list:${listId}`,
-          title: `${nameOf(listId)} (${totalUnder(items)})`,
-          meta: { kind: 'list', listId },
-          children: listChildren(listId, items, `ls:${listId}`),
-        });
-      });
-  }
-
-  // "Überfällig" — open tasks whose fixed day is already past. Surfaced FIRST as
-  // the most pressing. Flat (all lists together), in taskOrder. State mode only.
-  if (groupBy === 'state' && overdue.length > 0) {
-    forest.push({
-      t: 'group',
-      id: OVERDUE_GROUP_ID,
-      title: t('views.tasks.overdue', { count: totalUnder(overdue) }),
-      meta: { kind: 'overdue' },
-      children: overdue.map((task) => ({ t: 'task', task }) as GNode),
-    });
-  }
-
-  // "Heute" — open tasks planned for today. Flat, in taskOrder. State mode only.
-  if (groupBy === 'state' && todayTasks.length > 0) {
-    forest.push({
-      t: 'group',
-      id: TODAY_GROUP_ID,
-      title: t('views.tasks.today', { count: totalUnder(todayTasks) }),
-      meta: { kind: 'today' },
-      children: todayTasks.map((task) => ({ t: 'task', task }) as GNode),
-    });
-  }
-
-  // Backlog → list → section. Grouping the backlog (not just the scheduled
-  // tasks) is what makes e.g. a Vikunja project's buckets visible even when
-  // nothing is scheduled.
-  if (groupBy === 'state' && backlog.length > 0) {
-    const backlogByList = new Map<string, Task[]>();
-    backlog.forEach((task) => {
-      const arr = backlogByList.get(task.list_id) ?? [];
-      arr.push(task);
-      backlogByList.set(task.list_id, arr);
-    });
-    const listNodes: GNode[] = Array.from(backlogByList.entries())
-      .sort(([a], [b]) => byName(a, b))
-      .map(([listId, items]) => ({
-        t: 'group',
-        id: `grp:bl:list:${listId}`,
-        title: `${nameOf(listId)} (${totalUnder(items)})`,
-        meta: { kind: 'list', listId },
-        children: listChildren(listId, items, `bl:${listId}`),
-      }));
-    forest.push({
-      t: 'group',
-      id: BACKLOG_GROUP_ID,
-      title: `${t('views.tasks.backlog')} (${totalUnder(backlog)})`,
-      meta: { kind: 'backlog' },
-      children: listNodes,
-    });
-  }
-
-  // "Zukünftig" group: tasks waiting for a future day (deferred backlog + fixed
-  // future scheduled), soonest first (`future` is pre-sorted by that day). Sits
-  // between Backlog and Done — all end-of-list, navigable, collapsible. (State
-  // mode only — in list mode these live in their list group above.)
-  if (groupBy === 'state' && future.length > 0) {
-    forest.push({
-      t: 'group',
-      id: DEFERRED_GROUP_ID,
-      title: t('views.tasks.deferred', { count: totalUnder(future) }),
-      meta: { kind: 'deferred' },
-      children: future.map((task) => ({ t: 'task', task }) as GNode),
-    });
-  }
-
-  // Done group last, most-recently-completed first.
-  if (doneTopLevel.length > 0) {
-    // `completed_at` / `updated_at` — RFC-3339 instants, machine strings.
-    doneTopLevel.sort((a, b) =>
-      compareMachineStrings(doneOrderKey(b), doneOrderKey(a)),
-    );
-    // Split the count into mine (unassigned OR assigned to me) vs others
-    // (assigned to a concrete other user) when at least one done task is
-    // someone else's; otherwise a single count (personal lists never split).
-    const mineCount = doneTopLevel.filter(
-      (task) =>
-        classifyDoneByMe(task.assignees, currentUserByList[task.list_id] ?? null) ===
-        'me',
-    ).length;
-    const othersCount = doneTopLevel.length - mineCount;
-    forest.push({
-      t: 'group',
-      id: DONE_GROUP_ID,
-      title:
-        othersCount > 0
-          ? t('views.tasks.doneSplit', { mine: mineCount, others: othersCount })
-          : t('views.tasks.done', { count: doneTopLevel.length }),
-      meta: { kind: 'done' },
-      children: doneTopLevel.map((task) => ({ t: 'task', task }) as GNode),
-    });
-  }
-
-  // "Abgebrochen" group at the very end — cancelled tasks, most-recently-changed
-  // first (there's no cancelled_at, so `updated_at` stands in). A terminal group
-  // like Done, so it counts its top-level items (`.length`) rather than the whole
-  // subtree.
-  if (cancelledTopLevel.length > 0) {
-    cancelledTopLevel.sort((a, b) =>
-      compareMachineStrings(b.updated_at ?? '', a.updated_at ?? ''),
-    );
-    forest.push({
-      t: 'group',
-      id: CANCELLED_GROUP_ID,
-      title: t('views.tasks.cancelled', { count: cancelledTopLevel.length }),
-      meta: { kind: 'cancelled' },
-      children: cancelledTopLevel.map((task) => ({ t: 'task', task }) as GNode),
-    });
-  }
-
-  // Depth-first emit. Hidden rows still join `flatTasks` so the index space
-  // stays stable across collapse; the renderer skips them.
   const entries: Entry[] = [];
   const flatTasks: Task[] = [];
-
-  const emitTask = (task: Task, depth: number, hidden: boolean) => {
-    const subtasks = childrenByParent.get(task.id) ?? [];
-    entries.push({
-      kind: 'task',
-      task,
-      listName: nameOf(task.list_id),
-      index: flatTasks.length,
-      depth,
-      hasChildren: subtasks.length > 0,
-      hidden,
-    });
-    flatTasks.push(task);
-    const childHidden = hidden || collapsed.has(task.id);
-    subtasks.forEach((child) => emitTask(child, depth + 1, childHidden));
-  };
-
-  const emitNode = (node: GNode, depth: number, hidden: boolean, parentId: string | null) => {
-    if (node.t === 'task') {
-      emitTask(node.task, depth, hidden);
+  rows.forEach((row, index) => {
+    if (!row.group) {
+      const task = byId.get(row.id);
+      if (!task) {
+        // Cannot happen: the core answers with the ids it was given. If it
+        // ever does, a silent skip would drop a task from the view.
+        throw new Error(`task grouping answered with a task this view does not hold: ${row.id}`);
+      }
+      entries.push({
+        kind: 'task',
+        task,
+        listName: nameOf(task.list_id),
+        index,
+        depth: row.depth,
+        hasChildren: row.hasChildren,
+        hidden: row.hidden,
+      });
+      flatTasks.push(task);
       return;
     }
-    const synthetic = groupTask(node.id, node.title, node.meta.listId ?? '', parentId);
+    const head = row.group;
+    const meta: GroupMeta = { kind: head.kind };
+    if (head.listId !== undefined) meta.listId = head.listId;
+    if (head.sectionId !== undefined) {
+      meta.sectionId = head.sectionId;
+      meta.section = (sectionsByList[head.listId ?? ''] ?? []).find(
+        (section) => section.id === head.sectionId,
+      );
+    }
+    const synthetic = groupTask(
+      row.id,
+      headerTitle(head, t, nameOf, meta.section),
+      head.listId ?? '',
+      head.parentId,
+    );
     entries.push({
       kind: 'task',
       task: synthetic,
       listName: '',
-      index: flatTasks.length,
-      depth,
-      hasChildren: node.children.length > 0,
-      hidden,
-      group: node.meta,
+      index,
+      depth: row.depth,
+      hasChildren: row.hasChildren,
+      hidden: row.hidden,
+      group: meta,
     });
     flatTasks.push(synthetic);
-    const childHidden = hidden || collapsed.has(node.id);
-    node.children.forEach((child) =>
-      emitNode(child, depth + 1, childHidden, node.id),
-    );
-  };
-
-  forest.forEach((root) => emitNode(root, 0, false, null));
+  });
 
   return { entries, flatTasks };
 }

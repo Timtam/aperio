@@ -206,6 +206,11 @@ pub fn carry_onto(input_json: &str) -> Result<String, WireError> {
     cal_core::carry_onto_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::groupTasks`].
+pub fn group_tasks(input_json: &str) -> Result<String, WireError> {
+    cal_core::group_tasks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

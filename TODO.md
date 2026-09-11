@@ -1273,10 +1273,14 @@ Siehe DESIGN §4.2.
   `grp:bl:list:L1`, `grp:sec:bl:L1:s1`, `__aperio_done_group__` … sind die
   Klapp-Schlüssel, die beide Oberflächen persistieren. Ein Umzug, der sie
   ändert, klappt beim Nutzer still alles wieder auf.
-  ↳ Schritt 2 (offen): `cal_core::task_grouping` antwortet mit dem Wald aus
+  ↳ **Schritt 2 (dieser PR): `cal_core::task_grouping`.** Antwortet mit dem Wald aus
   Schlüsseln, Zählern und Positionen; die Türen sind synchron (WASM,
   `Function`); die Hülle in `shared/taskGrouping.ts` hydratisiert die Zeilen
-  aus dem, was sie hält. Nebenbefund für danach: `useTasks.ts` hat auf Desktop
+  aus dem, was sie hält, und wortet die Köpfe mit `t`. Die Portierung bestand
+  alle 46 Fälle der Fixture beim ERSTEN Lauf — das ist, was die Tabelle
+  vorher wert war. Die Sprache reist im Eingang mit (`languageTag()` am
+  Installationsort, pro Aufruf gelesen); der Kern liest keine Gerätesprache.
+  Nebenbefund für danach: `useTasks.ts` hat auf Desktop
   UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
