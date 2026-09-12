@@ -1,0 +1,1675 @@
+{
+  "what": "The parent/subtask status coupling of shared/taskCascade.ts, as a table: the status a parent derives from its children, the writes a status change plans (root, then descendants, then ancestors, IN ORDER), the writes a re-derivation after a subtask was created or deleted plans, and the \"started → pin to today\" companion date. Measured from the TypeScript before the port.",
+  "why": "A check-off on the phone and the same check-off on the desktop must plan the same writes in the same order, and a frontend that is not JavaScript has to plan them too. The core answers WRITES (ids and states, never wording) and reads no clock: today travels in as `todayKey`.",
+  "writtenBy": [
+    "src/state/taskCascade.measure.test.ts — a one-off, run once and deleted; its cases mirror src/state/taskCascade.test.ts plus the rows the port needs that those never had (the exact write order, the unchanged-level stop of the cascade versus the climb-through of the recompute, an absent root, an orphan parent, the empty parent id, the empty today key, the empty scheduled date, every presence set of the four states)."
+  ],
+  "readBy": [
+    "src/state/taskCascade.contract.test.ts",
+    "crates/cal-core/src/task_cascade.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like taskStatus.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves."
+  },
+  "notInThisTable": {
+    "todayIsoKey": "the clock stays on the surface; the core takes `todayKey` as a parameter (tests/core_contracts.rs)",
+    "canStoreInProgress_effectiveForList": "whether a provider can hold in_progress and which per-list setting applies decide WHETHER the caller passes a today key and the coupling flag — the surface’s",
+    "filter(w => w.taskId !== taskId)": "the editor and the mobile toggle drop the root write because they write the root themselves — the caller’s, not the planner’s",
+    "applyStatusWrites_applyCascade": "persisting the writes and announcing the outcome (DESIGN §9.1, \"alles versuchen, dann berichten\") — the surface’s",
+    "collectDescendants": "a different function in TaskDialog and taskToggle, not this module"
+  },
+  "shape": {
+    "autoDate": "{newStatus, currentScheduledDate, todayKey} → the day to pin or null. `null` in the input means omitted.",
+    "derive": "{children: [status…]} → the derived parent status or null (no children). One child per entry.",
+    "cascade": "{tasks, taskId, newStatus, options?} → [{taskId, status, scheduledDate?}…] in application order: the root, its descendants, its ancestors nearest first.",
+    "recompute": "{tasks, parentId, options?} → the same writes for a re-derivation starting at parentId, climbing to the root.",
+    "options": "{cascadeEnabled?: boolean (absent = true), todayKey?: \"YYYY-MM-DD\" (absent = the auto-date setting is off)}",
+    "baseTask": "the Task every case’s `tasks` entries are overrides over"
+  },
+  "baseTask": {
+    "id": "x",
+    "list_id": "list",
+    "title": "t",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "autoDate": [
+    {
+      "name": "a-dateless-task-entering-in-progress-gets-today",
+      "note": "The one case the rule fires: in_progress, a today key, no scheduled day.",
+      "input": {
+        "newStatus": "in_progress",
+        "currentScheduledDate": null,
+        "todayKey": "2026-06-06"
+      },
+      "expect": "2026-06-06"
+    },
+    {
+      "name": "a-dated-task-keeps-its-day",
+      "note": "A day the user chose is never moved.",
+      "input": {
+        "newStatus": "in_progress",
+        "currentScheduledDate": "2026-06-01",
+        "todayKey": "2026-06-06"
+      },
+      "expect": null
+    },
+    {
+      "name": "only-in-progress-fires-not-open",
+      "note": "Starting work is the only transition that pins a day.",
+      "input": {
+        "newStatus": "open",
+        "currentScheduledDate": null,
+        "todayKey": "2026-06-06"
+      },
+      "expect": null
+    },
+    {
+      "name": "only-in-progress-fires-not-completed",
+      "note": "Starting work is the only transition that pins a day.",
+      "input": {
+        "newStatus": "completed",
+        "currentScheduledDate": null,
+        "todayKey": "2026-06-06"
+      },
+      "expect": null
+    },
+    {
+      "name": "only-in-progress-fires-not-cancelled",
+      "note": "Starting work is the only transition that pins a day.",
+      "input": {
+        "newStatus": "cancelled",
+        "currentScheduledDate": null,
+        "todayKey": "2026-06-06"
+      },
+      "expect": null
+    },
+    {
+      "name": "no-today-key-means-the-setting-is-off",
+      "note": "The caller omits the key when the auto-date setting is off, or the provider cannot store in_progress.",
+      "input": {
+        "newStatus": "in_progress",
+        "currentScheduledDate": null,
+        "todayKey": null
+      },
+      "expect": null
+    },
+    {
+      "name": "an-empty-today-key-is-no-today",
+      "note": "A JS truthiness test in the TypeScript: \"\" reads as no key. Pinned as it is.",
+      "input": {
+        "newStatus": "in_progress",
+        "currentScheduledDate": null,
+        "todayKey": ""
+      },
+      "expect": null
+    },
+    {
+      "name": "an-empty-scheduled-date-counts-as-dated",
+      "note": "The TypeScript tests `!== null`, so \"\" is a day and nothing is pinned. No producer writes \"\" (the editor sends null), pinned so a port cannot silently decide otherwise.",
+      "input": {
+        "newStatus": "in_progress",
+        "currentScheduledDate": "",
+        "todayKey": "2026-06-06"
+      },
+      "expect": null
+    }
+  ],
+  "derive": [
+    {
+      "name": "no-children-no-derivation",
+      "note": "The caller keeps the parent as it is.",
+      "input": {
+        "children": []
+      },
+      "expect": null
+    },
+    {
+      "name": "presence-open",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open"
+        ]
+      },
+      "expect": "open"
+    },
+    {
+      "name": "presence-in_progress",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "in_progress"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-open+in_progress",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "in_progress"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-completed",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "completed"
+        ]
+      },
+      "expect": "completed"
+    },
+    {
+      "name": "presence-open+completed",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "completed"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-in_progress+completed",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "in_progress",
+          "completed"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-open+in_progress+completed",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "in_progress",
+          "completed"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "cancelled"
+        ]
+      },
+      "expect": "cancelled"
+    },
+    {
+      "name": "presence-open+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "cancelled"
+        ]
+      },
+      "expect": "open"
+    },
+    {
+      "name": "presence-in_progress+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "in_progress",
+          "cancelled"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-open+in_progress+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "in_progress",
+          "cancelled"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-completed+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "completed",
+          "cancelled"
+        ]
+      },
+      "expect": "completed"
+    },
+    {
+      "name": "presence-open+completed+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-in_progress+completed+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "in_progress",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "presence-open+in_progress+completed+cancelled",
+      "note": "Which states are present decides; how many of each does not.",
+      "input": {
+        "children": [
+          "open",
+          "in_progress",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "expect": "in_progress"
+    },
+    {
+      "name": "two-of-a-kind-count-like-one",
+      "note": "Presence, not count: two completed and one open is in_progress like one and one.",
+      "input": {
+        "children": [
+          "completed",
+          "completed",
+          "open"
+        ]
+      },
+      "expect": "in_progress"
+    }
+  ],
+  "cascade": [
+    {
+      "name": "a-root-alone-changes-only-itself",
+      "note": "No children, no parent: one write.",
+      "input": {
+        "tasks": [
+          {
+            "id": "root",
+            "status": "open",
+            "parent_id": null
+          }
+        ],
+        "taskId": "root",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "root",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "the-same-status-is-a-no-op",
+      "note": "Nothing to write, nothing to cascade.",
+      "input": {
+        "tasks": [
+          {
+            "id": "root",
+            "status": "completed",
+            "parent_id": null
+          }
+        ],
+        "taskId": "root",
+        "newStatus": "completed"
+      },
+      "expect": []
+    },
+    {
+      "name": "completing-a-parent-follows-every-non-cancelled-descendant",
+      "note": "Cancelled stays cancelled (the user dropped it); open and in_progress follow. Root first, then the children in walk order.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "cancelled",
+            "parent_id": "p"
+          },
+          {
+            "id": "c",
+            "status": "in_progress",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        },
+        {
+          "taskId": "a",
+          "status": "completed"
+        },
+        {
+          "taskId": "c",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "cancelling-a-parent-keeps-completed-descendants",
+      "note": "Completed stays completed (the work is done); open follows.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "cancelled"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "cancelled"
+        },
+        {
+          "taskId": "b",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "name": "the-last-open-subtask-completed-completes-the-parent",
+      "note": "Up-cascade: all non-cancelled children completed.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "in_progress",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "b",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "b",
+          "status": "completed"
+        },
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "reopening-a-subtask-of-a-completed-parent-makes-it-in-progress",
+      "note": "completed + open reads as in_progress: work started, not finished.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "completed",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "b",
+        "newStatus": "open"
+      },
+      "expect": [
+        {
+          "taskId": "b",
+          "status": "open"
+        },
+        {
+          "taskId": "p",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "one-subtask-in-progress-lifts-the-parent",
+      "note": "Any in_progress child wins.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress"
+        },
+        {
+          "taskId": "p",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "cancelling-one-subtask-leaves-the-parent-open",
+      "note": "open + cancelled is open: intent dropped, work not started. No parent write.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "cancelled"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "name": "cancelling-the-last-open-subtask-cancels-the-parent",
+      "note": "All children cancelled: the parent follows.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "cancelled",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "b",
+        "newStatus": "cancelled"
+      },
+      "expect": [
+        {
+          "taskId": "b",
+          "status": "cancelled"
+        },
+        {
+          "taskId": "p",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "name": "the-climb-reaches-every-ancestor-level",
+      "note": "Nearest ancestor first, then its parent, to the root.",
+      "input": {
+        "tasks": [
+          {
+            "id": "gp",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": "gp"
+          },
+          {
+            "id": "c",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "c",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "c",
+          "status": "completed"
+        },
+        {
+          "taskId": "p",
+          "status": "completed"
+        },
+        {
+          "taskId": "gp",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "completing-a-parent-reaches-grandchildren",
+      "note": "The down-walk is transitive.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "c",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "gc",
+            "status": "open",
+            "parent_id": "c"
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        },
+        {
+          "taskId": "c",
+          "status": "completed"
+        },
+        {
+          "taskId": "gc",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "descendants-come-depth-first-last-child-first",
+      "note": "The ORDER of the writes is the contract: the callers apply them in order. A stack walk: both children of the root, then the last child’s subtree, then the first child’s.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "a1",
+            "status": "open",
+            "parent_id": "a"
+          },
+          {
+            "id": "b1",
+            "status": "open",
+            "parent_id": "b"
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        },
+        {
+          "taskId": "a",
+          "status": "completed"
+        },
+        {
+          "taskId": "b",
+          "status": "completed"
+        },
+        {
+          "taskId": "b1",
+          "status": "completed"
+        },
+        {
+          "taskId": "a1",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "the-climb-stops-where-nothing-changes",
+      "note": "The parent derives to what it already is, so the climb ends there — even though the grandparent above is inconsistent with its child. The cascade repairs on the way, never beyond the first unchanged level.",
+      "input": {
+        "tasks": [
+          {
+            "id": "gp",
+            "status": "completed",
+            "parent_id": null
+          },
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": "gp"
+          },
+          {
+            "id": "c1",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "c2",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "c2",
+        "newStatus": "cancelled"
+      },
+      "expect": [
+        {
+          "taskId": "c2",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "name": "an-orphan-parent-id-stops-the-climb",
+      "note": "A parent that is not in the list (another list, not loaded): no derivation possible.",
+      "input": {
+        "tasks": [
+          {
+            "id": "c",
+            "status": "open",
+            "parent_id": "missing"
+          }
+        ],
+        "taskId": "c",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "c",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "a-root-absent-from-the-list-still-gets-its-write",
+      "note": "The root is looked up by id; when it is not in the list the write is still emitted (without a date, nothing to read it from), and its children in the list still follow.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "ghost"
+          }
+        ],
+        "taskId": "ghost",
+        "newStatus": "completed",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "ghost",
+          "status": "completed"
+        },
+        {
+          "taskId": "a",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "a-root-absent-with-coupling-off-writes-nothing",
+      "note": "Decoupled: the root’s current status is unknown, so there is no change to write.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "ghost"
+          }
+        ],
+        "taskId": "ghost",
+        "newStatus": "completed",
+        "options": {
+          "cascadeEnabled": false
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "an-empty-parent-id-is-no-parent-on-the-way-up",
+      "note": "The TypeScript tests the parent id for truthiness: \"\" is no parent, the climb does not start. Pinned as it is — the twin of the taskDay finding in #46.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "c",
+            "status": "open",
+            "parent_id": ""
+          }
+        ],
+        "taskId": "c",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "c",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "an-empty-parent-id-is-no-parent-on-the-way-down",
+      "note": "The same truthiness in the children index: a task with parent_id \"\" is nobody’s child.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "c",
+            "status": "open",
+            "parent_id": ""
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "cycle-down-two-tasks",
+      "note": "External providers can hand over a parent LOOP. Every node is expanded once; the walk ends.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "a"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "completed"
+        },
+        {
+          "taskId": "b",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "cycle-down-already-at-the-target",
+      "note": "The other member is already completed: nothing to write for it, and no re-visit.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "a"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "completed"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "cycle-up",
+      "note": "Reopening skips the down-walk and climbs; the climb stops when it re-reaches a visited node.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "a"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "open"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "open"
+        },
+        {
+          "taskId": "b",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "name": "autodate-pins-a-dateless-task-entering-in-progress",
+      "note": "The companion write: scheduledDate = today.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        }
+      ]
+    },
+    {
+      "name": "autodate-leaves-a-dated-task-alone",
+      "note": "A chosen day stays.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": "2026-05-19"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "autodate-does-not-fire-for-completed",
+      "note": "Only in_progress pins.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "completed",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "autodate-does-not-fire-for-cancelled",
+      "note": "Only in_progress pins.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "cancelled",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "name": "autodate-fires-on-reactivation",
+      "note": "completed → in_progress on a dateless task pins too: work resumed.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        }
+      ]
+    },
+    {
+      "name": "autodate-also-pins-a-dateless-parent-derived-to-in-progress",
+      "note": "The up-cascade’s own writes carry the date when the ancestor is dateless.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        },
+        {
+          "taskId": "p",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        }
+      ]
+    },
+    {
+      "name": "autodate-skips-a-dated-parent-derived-to-in-progress",
+      "note": "The ancestor has its own day: the status write carries no date.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": "2026-05-01"
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        },
+        {
+          "taskId": "p",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "autodate-still-fires-with-coupling-off",
+      "note": "An orthogonal feature: the single root write carries the date.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress",
+        "options": {
+          "cascadeEnabled": false,
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        }
+      ]
+    },
+    {
+      "name": "no-today-key-no-date",
+      "note": "The setting is off: the write is a status write only.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": null,
+            "scheduled_date": null
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "in_progress"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "decoupled-no-down-cascade",
+      "note": "Coupling off: only the root write, the children keep their status.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed",
+        "options": {
+          "cascadeEnabled": false
+        }
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "decoupled-no-up-cascade",
+      "note": "Coupling off: the parent is not re-derived.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "a",
+        "newStatus": "completed",
+        "options": {
+          "cascadeEnabled": false
+        }
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "decoupled-same-status-is-empty",
+      "note": "Nothing to write.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "completed",
+            "parent_id": null
+          }
+        ],
+        "taskId": "p",
+        "newStatus": "completed",
+        "options": {
+          "cascadeEnabled": false
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "coupling-explicitly-on-is-the-default",
+      "note": "`cascadeEnabled: true` behaves like an absent option.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "in_progress",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "taskId": "b",
+        "newStatus": "completed",
+        "options": {
+          "cascadeEnabled": true
+        }
+      },
+      "expect": [
+        {
+          "taskId": "b",
+          "status": "completed"
+        },
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    }
+  ],
+  "recompute": [
+    {
+      "name": "a-new-open-child-reopens-a-completed-parent-as-in-progress",
+      "note": "The snapshot already holds the created child.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "completed",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "name": "removing-the-last-open-child-completes-the-parent",
+      "note": "The snapshot is post-deletion.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "in_progress",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "no-op-when-the-parent-already-matches",
+      "note": "Nothing to write.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "in_progress",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "in_progress",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": []
+    },
+    {
+      "name": "the-recompute-climbs-to-the-root",
+      "note": "Each level sees the level below with the fresh status.",
+      "input": {
+        "tasks": [
+          {
+            "id": "gp",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": "gp"
+          },
+          {
+            "id": "c",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        },
+        {
+          "taskId": "gp",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "the-recompute-climbs-past-an-unchanged-level",
+      "note": "UNLIKE the cascade, an unchanged level does not end the climb: the parent derives to what it is (no write), and the inconsistent grandparent above is still repaired. A deliberate asymmetry, pinned.",
+      "input": {
+        "tasks": [
+          {
+            "id": "gp",
+            "status": "completed",
+            "parent_id": null
+          },
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": "gp"
+          },
+          {
+            "id": "c1",
+            "status": "open",
+            "parent_id": "p"
+          },
+          {
+            "id": "c2",
+            "status": "cancelled",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": [
+        {
+          "taskId": "gp",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "name": "autodate-pins-a-dateless-parent-newly-in-progress",
+      "note": "completed + open after a new subtask: in_progress, with today.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "completed",
+            "parent_id": null,
+            "scheduled_date": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "open",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p",
+        "options": {
+          "todayKey": "2026-05-21"
+        }
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "in_progress",
+          "scheduledDate": "2026-05-21"
+        }
+      ]
+    },
+    {
+      "name": "decoupled-is-a-no-op",
+      "note": "Coupling off: the parent does not depend on its children.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          },
+          {
+            "id": "a",
+            "status": "completed",
+            "parent_id": "p"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p",
+        "options": {
+          "cascadeEnabled": false
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "cycle",
+      "note": "Each member is recomputed at most once.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "status": "open",
+            "parent_id": "b"
+          },
+          {
+            "id": "b",
+            "status": "completed",
+            "parent_id": "a"
+          }
+        ],
+        "parentId": "a"
+      },
+      "expect": [
+        {
+          "taskId": "a",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "an-unknown-parent-is-a-no-op",
+      "note": "Not in the list: nothing to derive.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": null
+          }
+        ],
+        "parentId": "missing"
+      },
+      "expect": []
+    },
+    {
+      "name": "a-childless-parent-is-a-no-op",
+      "note": "No children, no derivation, and the climb does not continue above it.",
+      "input": {
+        "tasks": [
+          {
+            "id": "gp",
+            "status": "completed",
+            "parent_id": null
+          },
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": "gp"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": []
+    },
+    {
+      "name": "an-empty-parent-id-ends-the-climb",
+      "note": "Truthiness again: \"\" is no parent above.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p",
+            "status": "open",
+            "parent_id": ""
+          },
+          {
+            "id": "c",
+            "status": "completed",
+            "parent_id": "p"
+          }
+        ],
+        "parentId": "p"
+      },
+      "expect": [
+        {
+          "taskId": "p",
+          "status": "completed"
+        }
+      ]
+    }
+  ]
+}

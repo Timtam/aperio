@@ -1393,6 +1393,35 @@ Siehe DESIGN §4.2.
   drei der Namen, `__proto__` pinnt ein Unit-Test (als JSON-Literal-Schlüssel
   würde es den Prototyp setzen). Der dritte Gegenleser (Aufrufer, CI) fand
   nichts: jede Zeile fragt mit demselben Hook-Array, eine Überfahrt pro Liste.
+- [~] **Die Status-Kopplung zieht in den Kern** (`taskCascade`), in denselben
+  zwei Schritten. Vier Antworten: was ein Elternteil aus seinen Kindern ist
+  (`deriveStatusFromChildren`), welche Schreibvorgänge ein Statuswechsel
+  plant — Wurzel, Nachkommen, Vorfahren, IN DIESER REIHENFOLGE
+  (`planStatusCascade`), dieselben nach Anlegen/Löschen einer Unteraufgabe
+  (`planAncestorRecompute`), und das Begleitdatum „gestartet → heute"
+  (`autoDateOnStart`). Der Kern liest keine Uhr: `todayKey` reist als
+  Parameter; ob er überhaupt mitreist (Einstellung, Anbieter kann
+  `in_progress` halten, Listen-Regel) entscheidet die Oberfläche, genauso das
+  Anwenden und Ansagen der Schreibvorgänge.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.**
+  `crates/cal-core/tests/fixtures/taskCascade.json`, gemessen am heutigen
+  TypeScript: 8 Auto-Datum-Zeilen, 17 Ableitungen (JEDE Anwesenheitsmenge der
+  vier Zustände), 34 Kaskaden, 11 Nachberechnungen — die 42 Desktop-Tests
+  plus die Zeilen, die der Umzug braucht und die es nie gab: die exakte
+  Schreib-Reihenfolge (Tiefensuche, LETZTES Kind zuerst), der Halt der
+  Kaskade an der ersten unveränderten Ebene gegen das Durchsteigen der
+  Nachberechnung (eine absichtliche Asymmetrie, jetzt gepinnt), eine Wurzel,
+  die nicht in der Liste ist (bekommt ihren Schreibvorgang trotzdem), ein
+  verwaister Elternteil, die leere Eltern-Id (Wahrheitswert-Test: kein
+  Elternteil, in BEIDE Richtungen — der #46-Zwilling, diesmal vorab gepinnt),
+  der leere Heute-Schlüssel, das leere geplante Datum (zählt als datiert).
+  `taskCascade.contract.test.ts` spielt zurück (71 Tests); rot bewiesen (Regel
+  „abgebrochen bleibt abgebrochen" entfernt → die Kaskaden-Zeilen fallen).
+  ↳ Schritt 2 (offen): `cal_core::task_cascade` (ohne Feature-Gate), Türen
+  `planStatusCascade` + `planAncestorRecompute` (Antwort = Schreibvorgänge:
+  Ids und Zustände, `scheduled_date` als Begleiter); `deriveStatusFromChildren`
+  und `autoDateOnStart` werden im Kern gebraucht und bleiben als Türen
+  exportiert, weil der Aufgaben-Dialog das Datum der Wurzel selbst setzt.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
