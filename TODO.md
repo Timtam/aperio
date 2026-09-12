@@ -1308,6 +1308,28 @@ Siehe DESIGN §4.2.
   Nebenbefund für danach: `useTasks.ts` hat auf Desktop
   UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
+- [~] **Die Kalendertag-Regeln ziehen in den Kern** (`taskDay`), in denselben
+  zwei Schritten.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.** `filterTasksOnDay` & Co. (362
+  Zeilen, auf beiden Oberflächen aus `useMemo` gerufen) hatten 28 + 9 Tests
+  und keine Fixture. Jetzt steht `crates/cal-core/tests/fixtures/taskDay.json`:
+  24 Tages-, 7 Wochen- und 4 Aufteilungs-Fälle, GEMESSEN am heutigen
+  TypeScript, dazu die Zeilen, die die Tests nie hatten — der
+  Eigentümer-Filter `meFor` hatte GAR KEINEN Test, die Zwei-Stufen-Skala,
+  mehrere Tage in einem Aufruf, ein Erledigt-Tag auf einer Liste, die
+  Erledigtes verbirgt, eine Endzeit, eine Samstags-Woche.
+  `taskDay.contract.test.ts` spielt zurück; rot bewiesen (geplanter Termin
+  auch am Fälligkeitstag: 2 von 36 fallen).
+  ↳ **Drei Dinge bleiben mit Absicht draußen,** die Fixture sagt es unter
+  `notInThisTable`: `todayIsoKey` liest die Uhr; der LOKALE Erledigt-Tag wird
+  vom Aufrufer aufgelöst (Gerätezone) und reist als `completed_day` — der Kern
+  liest keine Zone (DESIGN §4.5 b); `mergeDayItems` baut Sortierschlüssel über
+  das lokale `Date` gegen Epoch-Zeiten des Aufrufers — Darstellung.
+  ↳ Schritt 2 (offen): `cal_core::task_day` antwortet pro Tag mit
+  {id, time, endTime, deadlineChip} — die vier Fragen einer Kachel in EINER
+  Überfahrt pro Tag statt einem Aufruf pro Kachel; die zwei Rückrufe reisen
+  als Daten (`completedVisible`, `currentUserByList`); `taskOrder` zieht mit
+  und verlässt `taskGrouping.ts`.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
