@@ -1,0 +1,1198 @@
+{
+  "what": "Which tasks a calendar day shows, in which order, with which time and which marker — and how the backlog rail cuts its weeks. A table of inputs and the answers shared/taskDay.ts gives for each.",
+  "why": "These rules are asked on both surfaces while rendering (the day, week and month views, the mobile day list, the backlog rail). They are moving into cal-core, where a Rust implementation has to give the same answers; while both exist this file is what keeps them together, and once the TypeScript goes it is the record of what the rules did on the day they moved. Written by running the TypeScript BEFORE the port.",
+  "writtenBy": [
+    "src/intl/taskDay.measure.test.ts — a one-off, run once and deleted; its tables mirror src/intl/taskDay.test.ts and src/state/backlogWeeks.test.ts plus the rows the port needs that those never had (the ownership filter, the two-level scale, several days in one ask, a completion day on a list that hides completed tasks, an end time, a Saturday week)."
+  ],
+  "readBy": [
+    "src/intl/taskDay.contract.test.ts",
+    "crates/cal-core/src/task_day.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like taskGrouping.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves."
+  },
+  "notInThisTable": {
+    "todayIsoKey": "reads the clock; stays on the calling side, which passes the day in",
+    "mergeDayItems": "sorts task times against event times the caller gives as epoch milliseconds, composed through the local Date — a rendering step, pinned by src/intl/taskDay.test.ts",
+    "localTimeZone": "the LOCAL day of completed_at is resolved by the caller (localDateKey, the device zone) and handed over as completed_day; the core reads no zone. The late-evening case lives in src/intl/taskDay.test.ts, where the machine zone is the point."
+  },
+  "shape": {
+    "language": "the app language tag the answers were measured under (the ordering within a day collates titles)",
+    "baseTask": "the Task every onDay case starts from; a case’s `tasks` entries are overrides merged over it",
+    "onDay": {
+      "input": {
+        "tasks": "overrides over baseTask; a completed task also carries `completed_day`, the local day of `completed_at` as the shell resolves it (noon UTC instants here, so every zone agrees)",
+        "days": "the days asked about, YYYY-MM-DD",
+        "completedVisible": "list ids whose completed tasks are shown (the per-list opt-in); absent means none",
+        "currentUserByList": "list id → the connected user, for the ownership filter; absent means no gating; null means a list with no identity, which keeps everything",
+        "scale": "\"three\" (default) or \"two\""
+      },
+      "expect": "day → rows in display order: {id, time, endTime, deadlineChip}"
+    },
+    "weeks": "{today, weekStartsOn (0 = Sunday … 6 = Saturday)} → {thisWeekStart, thisWeekEnd, nextWeekStart, nextWeekEnd}, inclusive day keys",
+    "deadlineSplit": "{deadlines: [{id, deadline_date}], weeks} → {thisWeek, nextWeek, later} as ids in input order; an overdue deadline goes with this week"
+  },
+  "language": "de",
+  "baseTask": {
+    "id": "t1",
+    "list_id": "list",
+    "title": "thing",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "onDay": [
+    {
+      "name": "scheduled-matches-its-day",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "sched",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "other",
+            "scheduled_date": "2026-05-21"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "sched",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "deadline-is-a-point-not-a-span",
+      "note": "A deadline puts the task on its deadline day only — not on every day until then.",
+      "input": {
+        "tasks": [
+          {
+            "id": "by",
+            "deadline_date": "2026-05-22"
+          }
+        ],
+        "days": [
+          "2026-05-21",
+          "2026-05-22",
+          "2026-05-23"
+        ]
+      },
+      "expect": {
+        "2026-05-21": [],
+        "2026-05-22": [
+          {
+            "id": "by",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ],
+        "2026-05-23": []
+      }
+    },
+    {
+      "name": "scheduled-and-due-shows-only-on-the-plan-day",
+      "note": "Scheduled Wed, due Fri: one chip on Wed (which announces the deadline), nothing on Fri.",
+      "input": {
+        "tasks": [
+          {
+            "id": "both",
+            "scheduled_date": "2026-05-20",
+            "deadline_date": "2026-05-22"
+          }
+        ],
+        "days": [
+          "2026-05-20",
+          "2026-05-21",
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "both",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-05-21": [],
+        "2026-05-22": []
+      }
+    },
+    {
+      "name": "scheduled-equals-deadline-once-and-the-schedule-wins",
+      "note": "Same day for both: one chip, and it is a plan chip, not a deadline chip.",
+      "input": {
+        "tasks": [
+          {
+            "id": "same",
+            "scheduled_date": "2026-05-22",
+            "deadline_date": "2026-05-22"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "same",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "subtask-only-with-its-own-date",
+      "note": "An undated subtask travels with its parent and stays hidden; a dated one is its own chip.",
+      "input": {
+        "tasks": [
+          {
+            "id": "parent",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "dated-child",
+            "parent_id": "parent",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "undated-child",
+            "parent_id": "parent"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "parent",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "dated-child",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-and-cancelled-hidden-by-default",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "done",
+            "scheduled_date": "2026-05-20",
+            "status": "completed",
+            "completed_at": "2026-05-20T12:00:00Z",
+            "completed_day": "2026-05-20"
+          },
+          {
+            "id": "cancelled",
+            "scheduled_date": "2026-05-20",
+            "status": "cancelled"
+          },
+          {
+            "id": "live",
+            "scheduled_date": "2026-05-20"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "live",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-shown-per-list-opt-in",
+      "note": "The sidebar setting is per list: A opted in, B did not.",
+      "input": {
+        "tasks": [
+          {
+            "id": "done-shown",
+            "list_id": "list-A",
+            "scheduled_date": "2026-05-20",
+            "status": "completed",
+            "completed_at": "2026-05-20T12:00:00Z",
+            "completed_day": "2026-05-20"
+          },
+          {
+            "id": "done-hidden",
+            "list_id": "list-B",
+            "scheduled_date": "2026-05-20",
+            "status": "completed",
+            "completed_at": "2026-05-20T12:00:00Z",
+            "completed_day": "2026-05-20"
+          },
+          {
+            "id": "live",
+            "list_id": "list-B",
+            "scheduled_date": "2026-05-20"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ],
+        "completedVisible": [
+          "list-A"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "done-shown",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "live",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "cancelled-hidden-even-with-opt-in",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "cancel",
+            "list_id": "list-A",
+            "scheduled_date": "2026-05-20",
+            "status": "cancelled"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ],
+        "completedVisible": [
+          "list-A"
+        ]
+      },
+      "expect": {
+        "2026-05-20": []
+      }
+    },
+    {
+      "name": "ordered-like-the-task-list",
+      "note": "Priority band first, then natural A→Z: high, then \"Aufgabe 2\" before \"Aufgabe 10\", then low.",
+      "input": {
+        "tasks": [
+          {
+            "id": "b10",
+            "title": "Aufgabe 10",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "b2",
+            "title": "Aufgabe 2",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "hi",
+            "title": "Zuletzt im Alphabet",
+            "priority": "high",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "lo",
+            "title": "Anfang",
+            "priority": "low",
+            "scheduled_date": "2026-05-20"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "hi",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "b2",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "b10",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "lo",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "two-level-scale-has-two-bands",
+      "note": "In the two-level system only \"important\" floats; medium and low are one A→Z run.",
+      "input": {
+        "tasks": [
+          {
+            "id": "b10",
+            "title": "Aufgabe 10",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "b2",
+            "title": "Aufgabe 2",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "hi",
+            "title": "Zuletzt im Alphabet",
+            "priority": "high",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "lo",
+            "title": "Anfang",
+            "priority": "low",
+            "scheduled_date": "2026-05-20"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ],
+        "scale": "two"
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "hi",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "lo",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "b2",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "b10",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "nothing-matches",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "bare"
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ]
+      },
+      "expect": {
+        "2026-05-20": []
+      }
+    },
+    {
+      "name": "deadline-chip-on-the-deadline-day",
+      "note": "A task here because of its deadline is a \"due here\" marker.",
+      "input": {
+        "tasks": [
+          {
+            "id": "by",
+            "deadline_date": "2026-05-22"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "by",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-from-the-scheduled-slot",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "sched",
+            "scheduled_date": "2026-05-22",
+            "scheduled_time": "14:30:00"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "sched",
+            "time": "14:30:00",
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-from-the-deadline-when-only-a-deadline-is-set",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "by",
+            "deadline_date": "2026-05-22",
+            "deadline_time": "17:00:00"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "by",
+            "time": "17:00:00",
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-scheduled-wins-over-deadline-on-the-same-day",
+      "note": "\"I plan to do it then\" beats \"must be done by then\".",
+      "input": {
+        "tasks": [
+          {
+            "id": "both",
+            "scheduled_date": "2026-05-22",
+            "scheduled_time": "09:00:00",
+            "deadline_date": "2026-05-22",
+            "deadline_time": "17:00:00"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "both",
+            "time": "09:00:00",
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-time-when-none-was-picked",
+      "note": "",
+      "input": {
+        "tasks": [
+          {
+            "id": "sched",
+            "scheduled_date": "2026-05-22",
+            "scheduled_time": null
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "sched",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "end-time-only-for-a-scheduled-block",
+      "note": "A deadline is a moment, never a block: no end time from a deadline_time.",
+      "input": {
+        "tasks": [
+          {
+            "id": "block",
+            "scheduled_date": "2026-05-22",
+            "scheduled_time": "09:00:00",
+            "scheduled_end_time": "10:00:00"
+          },
+          {
+            "id": "moment",
+            "deadline_date": "2026-05-22",
+            "deadline_time": "17:00:00"
+          },
+          {
+            "id": "end-without-start",
+            "scheduled_date": "2026-05-22",
+            "scheduled_time": null,
+            "scheduled_end_time": "10:00:00"
+          }
+        ],
+        "days": [
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-22": [
+          {
+            "id": "block",
+            "time": "09:00:00",
+            "endTime": "10:00:00",
+            "deadlineChip": false
+          },
+          {
+            "id": "moment",
+            "time": "17:00:00",
+            "endTime": null,
+            "deadlineChip": true
+          },
+          {
+            "id": "end-without-start",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-without-a-plan-day-sits-on-its-completion-day",
+      "note": "The Vikunja case: due on the 6th, never scheduled, ticked off on the 5th.",
+      "input": {
+        "tasks": [
+          {
+            "id": "abgehakt",
+            "deadline_date": "2026-08-06",
+            "status": "completed",
+            "completed_at": "2026-08-05T12:00:00Z",
+            "completed_day": "2026-08-05"
+          }
+        ],
+        "days": [
+          "2026-08-05",
+          "2026-08-06"
+        ],
+        "completedVisible": [
+          "list"
+        ]
+      },
+      "expect": {
+        "2026-08-05": [
+          {
+            "id": "abgehakt",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-08-06": []
+      }
+    },
+    {
+      "name": "completed-without-an-instant-falls-back-to-the-deadline-day",
+      "note": "An adapter that keeps no timestamp must not lose the task.",
+      "input": {
+        "tasks": [
+          {
+            "id": "ohne-zeitstempel",
+            "deadline_date": "2026-08-04",
+            "status": "completed",
+            "completed_at": null,
+            "completed_day": null
+          }
+        ],
+        "days": [
+          "2026-08-04"
+        ],
+        "completedVisible": [
+          "list"
+        ]
+      },
+      "expect": {
+        "2026-08-04": [
+          {
+            "id": "ohne-zeitstempel",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-keeps-the-day-it-was-planned-for",
+      "note": "Yesterday’s dose, ticked this morning, belongs to yesterday.",
+      "input": {
+        "tasks": [
+          {
+            "id": "tabletten-gestern",
+            "scheduled_date": "2026-08-11",
+            "status": "completed",
+            "completed_at": "2026-08-12T12:00:00Z",
+            "completed_day": "2026-08-12"
+          },
+          {
+            "id": "tabletten-heute",
+            "scheduled_date": "2026-08-12"
+          }
+        ],
+        "days": [
+          "2026-08-11",
+          "2026-08-12"
+        ],
+        "completedVisible": [
+          "list"
+        ]
+      },
+      "expect": {
+        "2026-08-11": [
+          {
+            "id": "tabletten-gestern",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-08-12": [
+          {
+            "id": "tabletten-heute",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-follows-the-editor",
+      "note": "Moving a finished task moves it.",
+      "input": {
+        "tasks": [
+          {
+            "id": "verschoben",
+            "scheduled_date": "2026-08-09",
+            "status": "completed",
+            "completed_at": "2026-08-12T12:00:00Z",
+            "completed_day": "2026-08-12"
+          }
+        ],
+        "days": [
+          "2026-08-09",
+          "2026-08-11",
+          "2026-08-12"
+        ],
+        "completedVisible": [
+          "list"
+        ]
+      },
+      "expect": {
+        "2026-08-09": [
+          {
+            "id": "verschoben",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-08-11": [],
+        "2026-08-12": []
+      }
+    },
+    {
+      "name": "completion-day-does-not-override-a-hidden-list",
+      "note": "The opt-in gate comes first: a completed task on a list that hides completed tasks shows nowhere, not even on its completion day.",
+      "input": {
+        "tasks": [
+          {
+            "id": "hidden-done",
+            "deadline_date": "2026-08-06",
+            "status": "completed",
+            "completed_at": "2026-08-05T12:00:00Z",
+            "completed_day": "2026-08-05"
+          }
+        ],
+        "days": [
+          "2026-08-05",
+          "2026-08-06"
+        ]
+      },
+      "expect": {
+        "2026-08-05": [],
+        "2026-08-06": []
+      }
+    },
+    {
+      "name": "owner-filter-hides-a-colleagues-task",
+      "note": "On a shared list a task assigned to a concrete other user is theirs; mine and unassigned stay. A list with no identity keeps everything.",
+      "input": {
+        "tasks": [
+          {
+            "id": "mine",
+            "list_id": "shared",
+            "scheduled_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "u1",
+                "name": "Me",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "nobodys",
+            "list_id": "shared",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "theirs",
+            "list_id": "shared",
+            "scheduled_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "u2",
+                "name": "Other",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "anonymous-list",
+            "list_id": "personal",
+            "scheduled_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "u2",
+                "name": "Other",
+                "email": null
+              }
+            ]
+          }
+        ],
+        "days": [
+          "2026-05-20"
+        ],
+        "currentUserByList": {
+          "shared": {
+            "id": "u1",
+            "name": "Me",
+            "email": null
+          },
+          "personal": null
+        }
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "mine",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "nobodys",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          },
+          {
+            "id": "anonymous-list",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "several-days-in-one-ask",
+      "note": "The week view asks for all its days at once; each day answers on its own.",
+      "input": {
+        "tasks": [
+          {
+            "id": "mon",
+            "scheduled_date": "2026-05-18"
+          },
+          {
+            "id": "wed",
+            "scheduled_date": "2026-05-20",
+            "scheduled_time": "10:00:00"
+          },
+          {
+            "id": "due-fri",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "both",
+            "scheduled_date": "2026-05-19",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "never"
+          }
+        ],
+        "days": [
+          "2026-05-18",
+          "2026-05-19",
+          "2026-05-20",
+          "2026-05-21",
+          "2026-05-22"
+        ]
+      },
+      "expect": {
+        "2026-05-18": [
+          {
+            "id": "mon",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-05-19": [
+          {
+            "id": "both",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-05-20": [
+          {
+            "id": "wed",
+            "time": "10:00:00",
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-05-21": [],
+        "2026-05-22": [
+          {
+            "id": "due-fri",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ]
+      }
+    }
+  ],
+  "weeks": [
+    {
+      "name": "monday-week-around-a-wednesday",
+      "note": "2026-08-12 is a Wednesday.",
+      "input": {
+        "today": "2026-08-12",
+        "weekStartsOn": 1
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-10",
+        "thisWeekEnd": "2026-08-16",
+        "nextWeekStart": "2026-08-17",
+        "nextWeekEnd": "2026-08-23"
+      }
+    },
+    {
+      "name": "sunday-week-around-the-same-wednesday",
+      "note": "Sunday the 16th now belongs to next week.",
+      "input": {
+        "today": "2026-08-12",
+        "weekStartsOn": 0
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-09",
+        "thisWeekEnd": "2026-08-15",
+        "nextWeekStart": "2026-08-16",
+        "nextWeekEnd": "2026-08-22"
+      }
+    },
+    {
+      "name": "the-first-day-is-in-its-own-week-monday",
+      "note": "On the start day the offset is zero.",
+      "input": {
+        "today": "2026-08-10",
+        "weekStartsOn": 1
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-10",
+        "thisWeekEnd": "2026-08-16",
+        "nextWeekStart": "2026-08-17",
+        "nextWeekEnd": "2026-08-23"
+      }
+    },
+    {
+      "name": "the-first-day-is-in-its-own-week-sunday",
+      "note": "",
+      "input": {
+        "today": "2026-08-09",
+        "weekStartsOn": 0
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-09",
+        "thisWeekEnd": "2026-08-15",
+        "nextWeekStart": "2026-08-16",
+        "nextWeekEnd": "2026-08-22"
+      }
+    },
+    {
+      "name": "crosses-month-and-year",
+      "note": "Thursday 2026-12-31: Mon 28 Dec to Sun 3 Jan.",
+      "input": {
+        "today": "2026-12-31",
+        "weekStartsOn": 1
+      },
+      "expect": {
+        "thisWeekStart": "2026-12-28",
+        "thisWeekEnd": "2027-01-03",
+        "nextWeekStart": "2027-01-04",
+        "nextWeekEnd": "2027-01-10"
+      }
+    },
+    {
+      "name": "a-calendar-week-not-seven-days",
+      "note": "Sunday of a Monday week: one day left.",
+      "input": {
+        "today": "2026-08-16",
+        "weekStartsOn": 1
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-10",
+        "thisWeekEnd": "2026-08-16",
+        "nextWeekStart": "2026-08-17",
+        "nextWeekEnd": "2026-08-23"
+      }
+    },
+    {
+      "name": "saturday-start",
+      "note": "Any setting works, not just Sunday and Monday.",
+      "input": {
+        "today": "2026-08-12",
+        "weekStartsOn": 6
+      },
+      "expect": {
+        "thisWeekStart": "2026-08-08",
+        "thisWeekEnd": "2026-08-14",
+        "nextWeekStart": "2026-08-15",
+        "nextWeekEnd": "2026-08-21"
+      }
+    }
+  ],
+  "deadlineSplit": [
+    {
+      "name": "each-deadline-into-its-week",
+      "note": "",
+      "input": {
+        "deadlines": [
+          {
+            "id": "a",
+            "deadline_date": "2026-08-16"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-08-17"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-08-23"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-08-24"
+          }
+        ],
+        "weeks": {
+          "thisWeekStart": "2026-08-10",
+          "thisWeekEnd": "2026-08-16",
+          "nextWeekStart": "2026-08-17",
+          "nextWeekEnd": "2026-08-23"
+        }
+      },
+      "expect": {
+        "thisWeek": [
+          "a"
+        ],
+        "nextWeek": [
+          "b",
+          "c"
+        ],
+        "later": [
+          "d"
+        ]
+      }
+    },
+    {
+      "name": "overdue-stays-with-this-week",
+      "note": "The most urgent thing the rail holds; the tail would bury it.",
+      "input": {
+        "deadlines": [
+          {
+            "id": "last-tuesday",
+            "deadline_date": "2026-08-04"
+          },
+          {
+            "id": "friday",
+            "deadline_date": "2026-08-14"
+          }
+        ],
+        "weeks": {
+          "thisWeekStart": "2026-08-10",
+          "thisWeekEnd": "2026-08-16",
+          "nextWeekStart": "2026-08-17",
+          "nextWeekEnd": "2026-08-23"
+        }
+      },
+      "expect": {
+        "thisWeek": [
+          "last-tuesday",
+          "friday"
+        ],
+        "nextWeek": [],
+        "later": []
+      }
+    },
+    {
+      "name": "order-is-preserved",
+      "note": "",
+      "input": {
+        "deadlines": [
+          {
+            "id": "first",
+            "deadline_date": "2026-08-12"
+          },
+          {
+            "id": "second",
+            "deadline_date": "2026-08-12"
+          }
+        ],
+        "weeks": {
+          "thisWeekStart": "2026-08-10",
+          "thisWeekEnd": "2026-08-16",
+          "nextWeekStart": "2026-08-17",
+          "nextWeekEnd": "2026-08-23"
+        }
+      },
+      "expect": {
+        "thisWeek": [
+          "first",
+          "second"
+        ],
+        "nextWeek": [],
+        "later": []
+      }
+    },
+    {
+      "name": "no-deadline-is-ignored",
+      "note": "",
+      "input": {
+        "deadlines": [
+          {
+            "id": "none",
+            "deadline_date": null
+          }
+        ],
+        "weeks": {
+          "thisWeekStart": "2026-08-10",
+          "thisWeekEnd": "2026-08-16",
+          "nextWeekStart": "2026-08-17",
+          "nextWeekEnd": "2026-08-23"
+        }
+      },
+      "expect": {
+        "thisWeek": [],
+        "nextWeek": [],
+        "later": []
+      }
+    }
+  ]
+}
