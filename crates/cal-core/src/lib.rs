@@ -31,6 +31,7 @@ pub mod task_assignment;
 // The grouping itself is behind the same feature (it orders titles, section
 // names and list names, and an adapter never builds a task view); the wire
 // types are not, so `cargo xtask ts-types` can generate them.
+pub mod task_day;
 pub mod task_grouping;
 // Anti-silence: `cargo test -p cal-core` without the feature compiles the
 // grouping out and would report green having run none of its pinned cases.
@@ -40,9 +41,12 @@ pub mod task_grouping;
 mod task_grouping_gate {
     #[test]
     fn the_grouping_contract_needs_the_collation_feature() {
-        panic!(
-            "cal_core::task_grouping and its fixture contract are behind the `collation` \n             feature and were not compiled: run `cargo test -p cal-core --features collation` \n             (or the workspace run, which enables it through cal-core-wasm and cal-ffi)"
-        );
+        panic!(concat!(
+            "cal_core::task_grouping, cal_core::task_day and their fixture contracts ",
+            "are behind the `collation` feature and were not compiled: run ",
+            "`cargo test -p cal-core --features collation` (or the workspace run, ",
+            "which enables it through cal-core-wasm and cal-ffi)"
+        ));
     }
 }
 pub mod task_priority;
@@ -89,6 +93,13 @@ pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use task_assignment::is_mine_or_unassigned;
+pub use task_day::{
+    backlog_weeks, backlog_weeks_json, end_time_on_day, is_deadline_chip, split_deadlines_by_week,
+    split_deadlines_by_week_json, time_on_day, BacklogWeeks, BacklogWeeksInput, DayInput, DayTask,
+    DayTaskRow, DeadlineSplit, DeadlineSplitInput,
+};
+#[cfg(feature = "collation")]
+pub use task_day::{tasks_on_days, tasks_on_days_json};
 #[cfg(feature = "collation")]
 pub use task_grouping::{group_tasks, group_tasks_json};
 pub use task_grouping::{

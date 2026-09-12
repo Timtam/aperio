@@ -68,6 +68,15 @@ export type { GroupingRow } from './generated/GroupingRow';
 export type { GroupHead } from './generated/GroupHead';
 export type { GroupKind } from './generated/GroupKind';
 export type { TaskGroupBy } from './generated/TaskGroupBy';
+// The calendar-day task rules, `cal_core::task_day`. The shell in
+// `shared/taskDay.ts` speaks these; nothing else builds them by hand.
+export type { DayTask } from './generated/DayTask';
+export type { DayInput } from './generated/DayInput';
+export type { DayTaskRow } from './generated/DayTaskRow';
+export type { BacklogWeeks } from './generated/BacklogWeeks';
+export type { BacklogWeeksInput } from './generated/BacklogWeeksInput';
+export type { DeadlineSplitInput } from './generated/DeadlineSplitInput';
+export type { DeadlineSplit } from './generated/DeadlineSplit';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

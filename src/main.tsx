@@ -9,6 +9,7 @@ import {
   installEventGroupFold,
   installGroupCarryRules,
   installTaskGroupingRules,
+  installTaskDayRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -32,6 +33,9 @@ import {
   futureCarryFieldsJson,
   carryOntoFieldsJson,
   groupTasksJson,
+  tasksOnDaysJson,
+  backlogWeeksJson,
+  splitDeadlinesByWeekJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -116,6 +120,14 @@ initCoreRules()
 
     // Grouping the task view.
     installTaskGroupingRules({ groupTasksJson, languageTag: () => i18n.language });
+
+    // The calendar-day task rules.
+    installTaskDayRules({
+      tasksOnDaysJson,
+      backlogWeeksJson,
+      splitDeadlinesByWeekJson,
+      languageTag: () => i18n.language,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

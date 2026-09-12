@@ -211,6 +211,20 @@ pub fn group_tasks(input_json: &str) -> Result<String, WireError> {
     cal_core::group_tasks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::tasksOnDays`].
+pub fn tasks_on_days(input_json: &str) -> Result<String, WireError> {
+    cal_core::tasks_on_days_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+/// See [`crate::backlogWeeks`].
+pub fn backlog_weeks(input_json: &str) -> Result<String, WireError> {
+    cal_core::backlog_weeks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+/// See [`crate::splitDeadlinesByWeek`].
+pub fn split_deadlines_by_week(input_json: &str) -> Result<String, WireError> {
+    cal_core::split_deadlines_by_week_json(input_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

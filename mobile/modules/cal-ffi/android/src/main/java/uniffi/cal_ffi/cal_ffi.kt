@@ -814,7 +814,9 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_cal_ffi_checksum_func_carry_onto_fields(
+    external fun uniffi_cal_ffi_checksum_func_backlog_weeks(
+): Short
+external fun uniffi_cal_ffi_checksum_func_carry_onto_fields(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_collapse_event_groups(
 ): Short
@@ -846,7 +848,11 @@ external fun uniffi_cal_ffi_checksum_func_plan_carry(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_split_deadlines_by_week(
+): Short
 external fun uniffi_cal_ffi_checksum_func_suggest_group_mate(
+): Short
+external fun uniffi_cal_ffi_checksum_func_tasks_on_days(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_without_duplicate_meetings(
 ): Short
@@ -1608,6 +1614,8 @@ external fun uniffi_cal_ffi_fn_method_keychainbridge_delete(`ptr`: Long,`account
 ): Unit
 external fun uniffi_cal_ffi_fn_method_keychainbridge_delete_all(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_func_backlog_weeks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_carry_onto_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_collapse_event_groups(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1640,7 +1648,11 @@ external fun uniffi_cal_ffi_fn_func_plan_carry(`inputJson`: RustBuffer.ByValue,u
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_func_split_deadlines_by_week(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_suggest_group_mate(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_tasks_on_days(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_without_duplicate_meetings(`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1763,6 +1775,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_cal_ffi_checksum_func_backlog_weeks() != 39931.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_carry_onto_fields() != 62986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1811,7 +1826,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_priority_rank() != 622.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_split_deadlines_by_week() != 58972.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_suggest_group_mate() != 60991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_tasks_on_days() != 23798.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_without_duplicate_meetings() != 42105.toShort()) {
@@ -10301,6 +10322,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     }
 }
         /**
+         * The two calendar weeks the backlog rail splits its deadlines into.
+         */
+    @Throws(StoreException::class) fun `backlogWeeks`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_backlog_weeks(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The carried fields laid over a member's own current values.
          */
     @Throws(StoreException::class) fun `carryOntoFields`(`inputJson`: kotlin.String): kotlin.String {
@@ -10552,6 +10587,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * Deadline-carrying items by week, as positions.
+         */
+    @Throws(StoreException::class) fun `splitDeadlinesByWeek`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_split_deadlines_by_week(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The row that most looks like a copy of an anchor, as JSON.
          *
          * `input_json` is `{anchor, candidates[]}`. The answer is the position in
@@ -10561,6 +10610,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_suggest_group_mate(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The tasks a calendar day shows, with what each chip carries. Asked inside `useMemo`, so synchronous.
+         */
+    @Throws(StoreException::class) fun `tasksOnDays`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_tasks_on_days(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

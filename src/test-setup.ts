@@ -45,6 +45,7 @@ import {
   installEventGroupFold,
   installGroupCarryRules,
   installTaskGroupingRules,
+  installTaskDayRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -65,6 +66,9 @@ import {
   futureCarryFieldsJson,
   carryOntoFieldsJson,
   groupTasksJson,
+  tasksOnDaysJson,
+  backlogWeeksJson,
+  splitDeadlinesByWeekJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -109,3 +113,9 @@ installGroupCarryRules({
   carryOntoFieldsJson,
 });
 installTaskGroupingRules({ groupTasksJson, languageTag: () => 'de' });
+installTaskDayRules({
+  tasksOnDaysJson,
+  backlogWeeksJson,
+  splitDeadlinesByWeekJson,
+  languageTag: () => 'de',
+});

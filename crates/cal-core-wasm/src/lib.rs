@@ -253,3 +253,19 @@ pub fn carry_onto(input_json: &str) -> Result<String, JsValue> {
 pub fn group_tasks(input_json: &str) -> Result<String, JsValue> {
     rules::group_tasks(input_json).map_err(to_js)
 }
+
+/// The tasks a calendar day shows, with what each chip carries. Asked inside `useMemo`, so synchronous.
+#[wasm_bindgen(js_name = tasksOnDays)]
+pub fn tasks_on_days(input_json: &str) -> Result<String, JsValue> {
+    rules::tasks_on_days(input_json).map_err(to_js)
+}
+/// The two calendar weeks the backlog rail splits its deadlines into.
+#[wasm_bindgen(js_name = backlogWeeks)]
+pub fn backlog_weeks(input_json: &str) -> Result<String, JsValue> {
+    rules::backlog_weeks(input_json).map_err(to_js)
+}
+/// Deadline-carrying items by week, as positions.
+#[wasm_bindgen(js_name = splitDeadlinesByWeek)]
+pub fn split_deadlines_by_week(input_json: &str) -> Result<String, JsValue> {
+    rules::split_deadlines_by_week(input_json).map_err(to_js)
+}

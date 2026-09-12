@@ -1310,7 +1310,7 @@ Siehe DESIGN §4.2.
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
 - [~] **Die Kalendertag-Regeln ziehen in den Kern** (`taskDay`), in denselben
   zwei Schritten.
-  ↳ **Schritt 1 (dieser PR): die Tabelle.** `filterTasksOnDay` & Co. (362
+  ↳ **Schritt 1 (PR #44): die Tabelle.** `filterTasksOnDay` & Co. (362
   Zeilen, auf beiden Oberflächen aus `useMemo` gerufen) hatten 28 + 9 Tests
   und keine Fixture. Jetzt steht `crates/cal-core/tests/fixtures/taskDay.json`:
   24 Tages-, 7 Wochen- und 4 Aufteilungs-Fälle, GEMESSEN am heutigen
@@ -1325,11 +1325,20 @@ Siehe DESIGN §4.2.
   vom Aufrufer aufgelöst (Gerätezone) und reist als `completed_day` — der Kern
   liest keine Zone (DESIGN §4.5 b); `mergeDayItems` baut Sortierschlüssel über
   das lokale `Date` gegen Epoch-Zeiten des Aufrufers — Darstellung.
-  ↳ Schritt 2 (offen): `cal_core::task_day` antwortet pro Tag mit
-  {id, time, endTime, deadlineChip} — die vier Fragen einer Kachel in EINER
-  Überfahrt pro Tag statt einem Aufruf pro Kachel; die zwei Rückrufe reisen
-  als Daten (`completedVisible`, `currentUserByList`); `taskOrder` zieht mit
-  und verlässt `taskGrouping.ts`.
+  ↳ **Schritt 2 (dieser PR): `cal_core::task_day`.** Antwortet pro Tag mit
+  Zeilen {task (Position), time, endTime, deadlineChip} — die vier Fragen
+  einer Kachel in EINER Überfahrt pro Tag statt einem Aufruf pro Kachel; die
+  Wochen-Grenzen und die Fälligkeits-Aufteilung gleich mit. Die zwei
+  Rückrufe wertet die Hülle einmal pro Liste aus und schickt sie als Daten
+  (`completedVisible`, `currentUserByList`); kein Aufrufer hat sich geändert.
+  `task_order` ist jetzt feldbasiert und `pub(crate)`, von Gruppierung UND
+  Kalendertag gefragt; der TypeScript-`taskOrder` ist weg, die zwei Tests, die
+  ihn direkt riefen, beobachten die Ordnung durch `filterTasksOnDay`. Die
+  drei Kachel-Helfer (`taskTimeOnDay`, `taskEndTimeOnDay`, `isDeadlineChip`)
+  bleiben vorerst als TypeScript-Zwillinge der Antwort-Felder, von derselben
+  Fixture auf beiden Seiten gepinnt — die Views rufen sie pro Kachel mit
+  (task, day); auf die Antwort-Zeilen umstellen ist ein eigener Schritt.
+  Wire-Typen erzeugt (7), Türen synchron auf beiden Oberflächen.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

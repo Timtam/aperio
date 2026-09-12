@@ -91,6 +91,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  under which header, at what depth. Asked while rendering, so synchronous. */
   groupTasks(inputJson: string): string;
 
+  /** The tasks a calendar day shows, with what each chip carries. Asked inside `useMemo`, so synchronous. */
+  tasksOnDays(inputJson: string): string;
+  /** The two calendar weeks the backlog rail splits its deadlines into. */
+  backlogWeeks(inputJson: string): string;
+  /** Deadline-carrying items by week, as positions. */
+  splitDeadlinesByWeek(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

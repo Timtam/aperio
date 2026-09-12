@@ -30,6 +30,9 @@ import uniffi.cal_ffi.detectConference as uniffiDetectConference
 import uniffi.cal_ffi.findGroupSuggestions as uniffiFindGroupSuggestions
 import uniffi.cal_ffi.carryOntoFields as uniffiCarryOntoFields
 import uniffi.cal_ffi.groupTasks as uniffiGroupTasks
+import uniffi.cal_ffi.tasksOnDays as uniffiTasksOnDays
+import uniffi.cal_ffi.backlogWeeks as uniffiBacklogWeeks
+import uniffi.cal_ffi.splitDeadlinesByWeek as uniffiSplitDeadlinesByWeek
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -336,6 +339,19 @@ class CalFfiModule : Module() {
     // Grouping the task view. Asked while rendering.
     Function("groupTasks") { inputJson: String ->
       uniffiGroupTasks(inputJson)
+    }
+
+    // The calendar-day task rules. Asked while rendering.
+    Function("tasksOnDays") { inputJson: String ->
+      uniffiTasksOnDays(inputJson)
+    }
+
+    Function("backlogWeeks") { inputJson: String ->
+      uniffiBacklogWeeks(inputJson)
+    }
+
+    Function("splitDeadlinesByWeek") { inputJson: String ->
+      uniffiSplitDeadlinesByWeek(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

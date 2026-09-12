@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   compareNames,
   compareTitles,
+  filterTasksOnDay,
   sortDayMarkers,
-  taskOrder,
   type DayMarker,
   type Task,
 } from '@aperio/shared';
@@ -57,15 +57,14 @@ describe('text ordering comes from the core', () => {
     // to the title compare. The Rust rule throws instead, which is how the
     // gap surfaced: a comparator that silently reorders is the failure mode
     // this whole exercise keeps finding.
+    const DAY = '2026-05-20';
     const task = (id: string, title: string): Task =>
-      ({ id, list_id: 'L1', title, status: 'open', priority: 'medium' }) as Task;
-    const sorted = [
-      task('c', 'Übung 10'),
-      task('a', 'Übung 2'),
-      task('b', 'Aufgabe'),
-    ]
-      .sort((a, b) => taskOrder(a, b))
-      .map((t) => t.title);
+      ({ id, list_id: 'L1', title, status: 'open', priority: 'medium', scheduled_date: DAY }) as Task;
+    // Through the calendar-day door: the ordering is the core's now.
+    const sorted = filterTasksOnDay(
+      [task('c', 'Übung 10'), task('a', 'Übung 2'), task('b', 'Aufgabe')],
+      DAY,
+    ).map((t) => t.title);
     expect(sorted).toEqual(['Aufgabe', 'Übung 2', 'Übung 10']);
   });
 

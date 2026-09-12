@@ -24,7 +24,7 @@ import type {
   TaskUser,
 } from './types';
 import { compareTitles } from './ordering';
-import { priorityRank, type PriorityScale } from './taskStatus';
+import type { PriorityScale } from './taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" group row. */
 export const DONE_GROUP_ID = '__aperio_done_group__';
@@ -149,22 +149,10 @@ function naturalCompare(a: string, b: string): number {
   return compareTitles(a, b);
 }
 
-/** Sibling order within a group / under a parent: high priority floats up,
- *  then natural ascending title. The task view no longer sorts here — the core
- *  does, with the same two doors — but the calendar day surfaces
- *  (`filterTasksOnDay`) still sort a day's tasks with this comparator so the
- *  planner reads like the task list. It goes when `taskDay` moves.
- *
- *  `scale` is the user's priority system (see `PriorityScale`); in the
- *  two-level one there are two bands instead of three, so everything that is
- *  not important reads A→Z as one run. It defaults to `'three'` so a bare
- *  `.sort(taskOrder)` still compiles and behaves as it always did. */
-export function taskOrder(a: Task, b: Task, scale: PriorityScale = 'three'): number {
-  return (
-    priorityRank(a.priority, scale) - priorityRank(b.priority, scale) ||
-    naturalCompare(a.title, b.title)
-  );
-}
+// `taskOrder` — priority band, then natural title — is the core's now:
+// `cal_core::task_grouping::task_order`, asked by the task view through
+// `buildEntries` and by the calendar days through `filterTasksOnDay`. The
+// TypeScript twin went with the last caller that used it directly.
 
 /**
  * THE section ordering: by name, the same natural compare the tasks inside

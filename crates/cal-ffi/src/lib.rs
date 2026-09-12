@@ -299,6 +299,31 @@ pub fn group_tasks(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The tasks a calendar day shows, with what each chip carries. Asked inside `useMemo`, so synchronous.
+#[uniffi::export]
+pub fn tasks_on_days(input_json: String) -> Result<String, StoreError> {
+    cal_core::tasks_on_days_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "task day input".into(),
+        detail: e.to_string(),
+    })
+}
+/// The two calendar weeks the backlog rail splits its deadlines into.
+#[uniffi::export]
+pub fn backlog_weeks(input_json: String) -> Result<String, StoreError> {
+    cal_core::backlog_weeks_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "task day input".into(),
+        detail: e.to_string(),
+    })
+}
+/// Deadline-carrying items by week, as positions.
+#[uniffi::export]
+pub fn split_deadlines_by_week(input_json: String) -> Result<String, StoreError> {
+    cal_core::split_deadlines_by_week_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "task day input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

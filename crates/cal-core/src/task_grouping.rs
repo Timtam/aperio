@@ -237,19 +237,24 @@ pub fn is_task_deferred(resurface_date: Option<NaiveDate>, today: NaiveDate) -> 
     resurface_date.is_some_and(|day| day > today)
 }
 
-/// Sibling order everywhere: priority band first (how many bands there are is
-/// the user's `scale`), then the title, natural — "Aufgabe 2" before
-/// "Aufgabe 10".
+/// THE task ordering: priority band first (how many bands there are is the
+/// user's `scale`), then the title, natural — "Aufgabe 2" before
+/// "Aufgabe 10". Sibling order in the task view, and the order a calendar
+/// day shows its tasks in (`task_day`), so a day's planned work reads like
+/// the list. On fields rather than a row type, because two modules ask it of
+/// two different rows.
 #[cfg(feature = "collation")]
-fn task_order(
-    a: &GroupableTask,
-    b: &GroupableTask,
+pub(crate) fn task_order(
+    a_priority: TaskPriority,
+    a_title: &str,
+    b_priority: TaskPriority,
+    b_title: &str,
     scale: PriorityScale,
     language: CollationLanguage,
 ) -> Ordering {
-    priority_rank(a.priority, scale)
-        .cmp(&priority_rank(b.priority, scale))
-        .then_with(|| compare_titles(&a.title, &b.title, language))
+    priority_rank(a_priority, scale)
+        .cmp(&priority_rank(b_priority, scale))
+        .then_with(|| compare_titles(a_title, b_title, language))
 }
 
 /// What a done task sorts by inside Erledigt: `completed_at` when the provider
@@ -514,7 +519,9 @@ pub fn group_tasks(input: &GroupingInput) -> Vec<GroupingRow> {
     let scale = input.scale;
     let today = input.today;
     let tasks = &input.tasks;
-    let order = |a: &&GroupableTask, b: &&GroupableTask| task_order(a, b, scale, language);
+    let order = |a: &&GroupableTask, b: &&GroupableTask| {
+        task_order(a.priority, &a.title, b.priority, &b.title, scale, language)
+    };
 
     // Bucket children under their parent. A parent_id pointing at a task not
     // in the snapshot is an orphan → top level.
