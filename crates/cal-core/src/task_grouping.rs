@@ -295,7 +295,11 @@ impl<'a> Grouping<'a> {
         let mut by_section: HashMap<&str, Vec<&'a GroupableTask>> = HashMap::new();
         let mut ungrouped: Vec<&'a GroupableTask> = Vec::new();
         for task in items {
-            match task.section_id.as_deref().filter(|s| section_ids.contains(s)) {
+            match task
+                .section_id
+                .as_deref()
+                .filter(|s| section_ids.contains(s))
+            {
                 Some(section) => by_section.entry(section).or_default().push(task),
                 None => ungrouped.push(task),
             }
@@ -339,7 +343,13 @@ impl<'a> Grouping<'a> {
     }
 
     /// A list header with its sections and tasks underneath.
-    fn list_group(&self, id: String, list_id: String, items: &[&'a GroupableTask], scope: &str) -> Node<'a> {
+    fn list_group(
+        &self,
+        id: String,
+        list_id: String,
+        items: &[&'a GroupableTask],
+        scope: &str,
+    ) -> Node<'a> {
         Node::Group {
             id,
             kind: GroupKind::List,
@@ -369,7 +379,11 @@ impl<'a> Grouping<'a> {
     // Depth-first emit. Hidden rows stay in the list so the index space is
     // stable across a collapse; the renderer skips them.
     fn emit_task(&self, task: &'a GroupableTask, depth: usize, hidden: bool, rows: &mut Vec<Row>) {
-        let kids = self.children.get(task.id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+        let kids = self
+            .children
+            .get(task.id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         rows.push(Row {
             id: task.id.clone(),
             depth,
@@ -751,7 +765,8 @@ mod contract {
             let input = input_of(&doc, case);
             let got = serde_json::to_value(group_tasks(&input)).expect("rows serialize");
             assert_eq!(
-                got, case["expect"]["rows"],
+                got,
+                case["expect"]["rows"],
                 "{name}: {}",
                 case["note"].as_str().unwrap_or(""),
             );
