@@ -115,6 +115,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The "started → pin to today" companion date, or null. */
   autoDateOnStart(inputJson: string): string;
 
+  /** The occurrences of recurring scheduled tasks inside a window: which
+   *  input task, on which day, real or projected. */
+  expandTaskOccurrences(inputJson: string): string;
+
+  /** The next occurrence of a repeating task after a day, or null. */
+  nextTaskOccurrence(inputJson: string): string;
+
+  /** What "move to this day" can be on a source that owns the date. */
+  occurrenceMoveTarget(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -3725,8 +3725,8 @@
       ]
     },
     {
-      "name": "an-empty-scheduled-date-vanishes",
-      "note": "A JS artifact: \"\" is not null, parses to an invalid date, and the walk ends with nothing emitted — the task is absent. No producer writes \"\" (API rows carry null); a port is free to read \"\" as undated and pass the task through, and must then change this row on purpose.",
+      "name": "an-empty-scheduled-date-is-undated",
+      "note": "CHANGED IN THE PORT, on purpose. The TypeScript let an empty scheduled_date make the task vanish (\"\" is not null, parsed to an invalid date, the walk ended with nothing). No producer writes \"\"; the shell now reads it as no date before it crosses, and an undated task passes through — as it does with null. The pin PR (#51) measured the old answer: [].",
       "wasTypeScript": true,
       "input": {
         "tasks": [
@@ -3749,7 +3749,13 @@
         "from": "2026-05-01",
         "to": "2026-05-03"
       },
-      "expect": []
+      "expect": [
+        {
+          "task": 0,
+          "day": null,
+          "projection": false
+        }
+      ]
     }
   ],
   "next": [

@@ -38,7 +38,9 @@ export function answerExpand(input: ExpandInput, baseTask: Task): OccurrenceRow[
       : expandScheduledRecurringTasks(tasks, input.from, input.to, input.maxPerTask);
   return out.map((row) => {
     const real = tasks.indexOf(row);
-    if (real >= 0) return { task: real, day: row.scheduled_date, projection: false };
+    // A pass-through keeps the caller's object; its day is the one it shows
+    // on, and an empty string is no day (the shell reads it that way too).
+    if (real >= 0) return { task: real, day: row.scheduled_date || null, projection: false };
     if (!isRecurringProjection(row)) throw new Error(`neither real nor projected: ${row.id}`);
     const series = recurringSeriesTaskId(row.id);
     const idx = tasks.findIndex((t) => t.id === series);

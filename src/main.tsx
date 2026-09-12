@@ -12,6 +12,7 @@ import {
   installTaskDayRules,
   installTaskStatusRules,
   installTaskCascadeRules,
+  installTaskOccurrenceRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -43,6 +44,9 @@ import {
   planStatusCascadeJson,
   planAncestorRecomputeJson,
   autoDateOnStartJson,
+  expandTaskOccurrencesJson,
+  nextTaskOccurrenceJson,
+  occurrenceMoveTargetJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -145,6 +149,13 @@ initCoreRules()
       planStatusCascadeJson,
       planAncestorRecomputeJson,
       autoDateOnStartJson,
+    });
+
+    // The recurring-task projection: the days a repeating task shows on.
+    installTaskOccurrenceRules({
+      expandTaskOccurrencesJson,
+      nextTaskOccurrenceJson,
+      occurrenceMoveTargetJson,
     });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(

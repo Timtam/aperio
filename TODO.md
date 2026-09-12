@@ -1463,13 +1463,33 @@ Siehe DESIGN §4.2.
   Zeile dann absichtlich. `expandTaskOccurrences.contract.test.ts` spielt zurück
   (63 Tests); rot bewiesen (Regel „erledigt projiziert nicht" entfernt →
   zwei Zeilen fallen).
-  ↳ Schritt 2 (offen): `cal_core::task_occurrences` (ohne Feature-Gate), die
-  Schrittfunktionen aus `spawn.rs` wiederverwenden (`advance`/`next_trigger`
-  sind dort schon Rust — der Projektor muss aber die VERWERFEN-Regel für
-  ungültige Feste Daten nachbilden, nicht das Klemmen); Türen
-  `expandTaskOccurrences` (Antwort = Zeilen `{task, day, projection}`),
-  `nextTaskOccurrence`, `occurrenceMoveTarget`; die Id-Kodierung bleibt in der
-  Hülle.
+  ↳ **Schritt 2 (Folge-PR auf #51): gebaut.** `cal_core::task_occurrences` —
+  ohne Feature-Gate — läuft auf den Schrittfunktionen des Spawners
+  (`spawn::next_trigger`, `spawn::recurrence_ended`, jetzt `pub(crate)`) und
+  liest die Regel vorher wie der Projektor: ungültige Feste Daten verworfen
+  (keine übrig = keine), Monatstag außerhalb 1..31 = keiner. Drei Türen auf
+  beiden Oberflächen (`expandTaskOccurrences` → Zeilen `{task, day,
+  projection}`, `nextTaskOccurrence`, `occurrenceMoveTarget`), sechs Wire-Typen
+  erzeugt. Die Hülle schickt drei Felder je Zeile (`status`, `scheduled_date`,
+  `recurrence` im Wire-Format), legt die Antwort über die eigenen Zeilen
+  (echte Aufgabe = das Objekt des Aufrufers, Projektion = Kopie mit
+  `<id> occ <tag>`) und behält die Id-Kodierung; `nextTaskOccurrence` nimmt
+  weiter den Formularwert und wandelt mit `toBackend`. Die
+  `wasTypeScript`-Zeile ist absichtlich geändert: ein leeres `scheduled_date`
+  liest die Hülle als undatiert, die Aufgabe wird durchgereicht statt zu
+  verschwinden (Zeile jetzt `an-empty-scheduled-date-is-undated`, im Rust-Test
+  dieselbe Normalisierung). Der Spawner selbst bleibt unverändert — sein Klemmen
+  ungültiger Fester Daten ist ein eigener Punkt (unten). Rust 4/4 beim ersten
+  Lauf (62 Zeilen + Draht), rot bewiesen (Verwerf-Regel entfernt → die
+  Tag-32-Zeile und die Alle-ungültig-Zeile fallen).
+- [ ] 🚩 **Spawner und Projektor lesen ungültige Feste Daten verschieden.**
+  `spawn::next_fixed_date_after` KLEMMT Tag 32 auf den Monatsletzten und Tag 0
+  auf den 1.; `fromBackend` (und jetzt `task_occurrences::projector_rule`)
+  VERWIRFT solche Einträge. Kein Editor schreibt sie (`toBackend` bereinigt),
+  ein Anbieter könnte. Entscheiden: eine Lesart für beide — vermutlich das
+  Verwerfen, weil ein Trigger, den niemand so gemeint hat, kein Datum erzeugen
+  sollte; dann `spawn.rs` anpassen und die Fixture-Zeile
+  `a-fixed-date-with-day-32-is-dropped` bleibt, wie sie ist.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
