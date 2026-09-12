@@ -1434,6 +1434,42 @@ Siehe DESIGN §4.2.
   das TypeScript, die Hülle schickt für die ersten zwei ohnehin `null`. Rust
   5/5 beim ersten Lauf (70 Zeilen + Draht), rot bewiesen (Asymmetrie der
   Nachberechnung entfernt → eine Zeile fällt).
+- [~] **Die Wiederholungs-Projektion zieht in den Kern**
+  (`expandTaskOccurrences`), das letzte Aufgaben-Modul des Bogens, in denselben
+  zwei Schritten. Drei Antworten: welche Vorkommen eine wiederkehrende
+  eingeplante Aufgabe in einem Fenster zeigt — die echte Aufgabe an ihrem
+  eigenen Tag, schreibgeschützte Projektionen an jedem anderen, alles andere
+  unverändert durchgereicht (`expandScheduledRecurringTasks`); ein Schritt
+  desselben Laufs (`nextTaskOccurrence`); was „auf diesen Tag verschieben" auf
+  einer Quelle sein kann, der das Datum gehört (`occurrenceMoveTarget`). Der
+  Kern antwortet mit POSITIONEN und TAGEN (welche Eingabe-Aufgabe, welcher Tag,
+  echt oder projiziert); die Kopie und ihre Id (`<id> occ <tag>`) baut die
+  Hülle, wie sie sie auch zurückliest.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.**
+  `crates/cal-core/tests/fixtures/taskOccurrences.json`, gemessen am heutigen
+  TypeScript: 41 Projektionen, 14 Schritte, 7 Verschiebungen — die 34
+  Desktop-Tests plus die Zeilen, die der Umzug braucht und die es nie gab: eine
+  Basis NACH dem Fenster (fehlt, wird nicht durchgereicht), ein leeres Fenster,
+  die Standard-Obergrenze 400, die Schritt-Obergrenze 100 000 (Basis 1700 kommt
+  nie an), Intervall 0 = 1, ein Zähl-Ende endet nicht, ungültige Feste Daten
+  werden VERWORFEN (Tag 32, Monat 13, Tag 0) — der Spawner klemmt stattdessen,
+  ein Unterschied zwischen Spawner und Projektor, gepinnt wie der Projektor
+  heute antwortet; monatlich ohne Monatstag schreitet vom geklemmten Tag weiter
+  (31. → 28. → 28.), eine Basis abseits ihres Wochentags zeigt sich trotzdem,
+  zwei Serien bleiben in Eingabe-Reihenfolge, `in_progress` projiziert. Eine
+  Zeile trägt `wasTypeScript`: ein leeres `scheduled_date` lässt die Aufgabe
+  VERSCHWINDEN (JS-Artefakt: "" ist nicht null, parst zu Invalid Date) — kein
+  Erzeuger schreibt es; der Port darf "" als undatiert lesen und ändert die
+  Zeile dann absichtlich. `expandTaskOccurrences.contract.test.ts` spielt zurück
+  (63 Tests); rot bewiesen (Regel „erledigt projiziert nicht" entfernt →
+  zwei Zeilen fallen).
+  ↳ Schritt 2 (offen): `cal_core::task_occurrences` (ohne Feature-Gate), die
+  Schrittfunktionen aus `spawn.rs` wiederverwenden (`advance`/`next_trigger`
+  sind dort schon Rust — der Projektor muss aber die VERWERFEN-Regel für
+  ungültige Feste Daten nachbilden, nicht das Klemmen); Türen
+  `expandTaskOccurrences` (Antwort = Zeilen `{task, day, projection}`),
+  `nextTaskOccurrence`, `occurrenceMoveTarget`; die Id-Kodierung bleibt in der
+  Hülle.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
