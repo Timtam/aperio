@@ -8,6 +8,7 @@ import {
   installEventGroupFold,
   installGroupCarryRules,
   installTaskGroupingRules,
+  installTaskDayRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -102,6 +103,15 @@ installGroupCarryRules({
 // while it renders.
 installTaskGroupingRules({
   groupTasksJson: (inputJson) => CalFfi.groupTasks(inputJson),
+  languageTag: () => i18n.language,
+});
+
+// The calendar-day task rules. Synchronous: the day list asks inside
+// `useMemo` while it renders.
+installTaskDayRules({
+  tasksOnDaysJson: (inputJson) => CalFfi.tasksOnDays(inputJson),
+  backlogWeeksJson: (inputJson) => CalFfi.backlogWeeks(inputJson),
+  splitDeadlinesByWeekJson: (inputJson) => CalFfi.splitDeadlinesByWeek(inputJson),
   languageTag: () => i18n.language,
 });
 

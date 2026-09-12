@@ -37,6 +37,9 @@ import init, {
   futureCarryFields as wasmFutureCarryFields,
   carryOntoFields as wasmCarryOntoFields,
   groupTasks as wasmGroupTasks,
+  tasksOnDays as wasmTasksOnDays,
+  backlogWeeks as wasmBacklogWeeks,
+  splitDeadlinesByWeek as wasmSplitDeadlinesByWeek,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -186,4 +189,20 @@ export function carryOntoFieldsJson(inputJson: string): string {
 export function groupTasksJson(inputJson: string): string {
   assertReady();
   return wasmGroupTasks(inputJson);
+}
+
+/** See `cal_core::task_day::tasks_on_days_json`. */
+export function tasksOnDaysJson(inputJson: string): string {
+  assertReady();
+  return wasmTasksOnDays(inputJson);
+}
+/** See `cal_core::task_day::backlog_weeks_json`. */
+export function backlogWeeksJson(inputJson: string): string {
+  assertReady();
+  return wasmBacklogWeeks(inputJson);
+}
+/** See `cal_core::task_day::split_deadlines_by_week_json`. */
+export function splitDeadlinesByWeekJson(inputJson: string): string {
+  assertReady();
+  return wasmSplitDeadlinesByWeek(inputJson);
 }

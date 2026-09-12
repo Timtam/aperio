@@ -2,7 +2,8 @@
   "what": "Which tasks a calendar day shows, in which order, with which time and which marker — and how the backlog rail cuts its weeks. A table of inputs and the answers shared/taskDay.ts gives for each.",
   "why": "These rules are asked on both surfaces while rendering (the day, week and month views, the mobile day list, the backlog rail). They are moving into cal-core, where a Rust implementation has to give the same answers; while both exist this file is what keeps them together, and once the TypeScript goes it is the record of what the rules did on the day they moved. Written by running the TypeScript BEFORE the port.",
   "writtenBy": [
-    "src/intl/taskDay.measure.test.ts — a one-off, run once and deleted; its tables mirror src/intl/taskDay.test.ts and src/state/backlogWeeks.test.ts plus the rows the port needs that those never had (the ownership filter, the two-level scale, several days in one ask, a completion day on a list that hides completed tasks, an end time, a Saturday week)."
+    "src/intl/taskDay.measure.test.ts — a one-off, run once and deleted; its tables mirror src/intl/taskDay.test.ts and src/state/backlogWeeks.test.ts plus the rows the port needs that those never had (the ownership filter, the two-level scale, several days in one ask, a completion day on a list that hides completed tasks, an end time, a Saturday week).",
+    "one case, an-empty-parent-id-is-no-parent, was written by hand after the port, from a divergence the review found; both sides answer it the same way."
   ],
   "readBy": [
     "src/intl/taskDay.contract.test.ts",
@@ -960,6 +961,50 @@
         "2026-05-22": [
           {
             "id": "due-fri",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "an-empty-parent-id-is-no-parent",
+      "note": "The TypeScript tested parent_id for truthiness, so \"\" was a top-level task; the core reads it the same way. Found by the review of the port: a differential run over random rows hit it nine times in three thousand. No producer writes it; pinned so none ever can silently.",
+      "input": {
+        "tasks": [
+          {
+            "id": "planned",
+            "parent_id": "",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "undated",
+            "parent_id": ""
+          },
+          {
+            "id": "due",
+            "parent_id": "",
+            "deadline_date": "2026-05-21"
+          }
+        ],
+        "days": [
+          "2026-05-20",
+          "2026-05-21"
+        ]
+      },
+      "expect": {
+        "2026-05-20": [
+          {
+            "id": "planned",
+            "time": null,
+            "endTime": null,
+            "deadlineChip": false
+          }
+        ],
+        "2026-05-21": [
+          {
+            "id": "due",
             "time": null,
             "endTime": null,
             "deadlineChip": true

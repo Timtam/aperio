@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   isImportantPriority,
   normalPriority,
+  filterTasksOnDay,
   priorityRank,
-  taskOrder,
   type PriorityScale,
   type Task,
   type TaskPriority,
@@ -76,16 +76,20 @@ describe('the priority ranking comes from the core', () => {
   });
 
   it('orders a task list by band, then A to Z inside it', () => {
+    // Observed through the calendar-day door: `filterTasksOnDay` asks the
+    // core for a day's tasks in the task list's order, the same
+    // `task_order` the task view uses.
+    const DAY = '2026-05-20';
     const task = (id: string, title: string, priority: TaskPriority): Task =>
-      ({ id, list_id: 'L1', title, priority, status: 'open' }) as Task;
+      ({ id, list_id: 'L1', title, priority, status: 'open', scheduled_date: DAY }) as Task;
     const order = (scale: PriorityScale) =>
-      [
-        task('c', 'Zebra', 'low'),
-        task('a', 'Apfel', 'medium'),
-        task('b', 'Brot', 'high'),
-      ]
-        .sort((x, y) => taskOrder(x, y, scale))
-        .map((t) => t.title);
+      filterTasksOnDay(
+        [task('c', 'Zebra', 'low'), task('a', 'Apfel', 'medium'), task('b', 'Brot', 'high')],
+        DAY,
+        undefined,
+        undefined,
+        scale,
+      ).map((t) => t.title);
 
     // Three bands: high, then medium, then low.
     expect(order('three')).toEqual(['Brot', 'Apfel', 'Zebra']);

@@ -266,6 +266,19 @@ public class CalFfiModule: Module {
       try groupTasks(inputJson: inputJson)
     }
 
+    // The calendar-day task rules. Asked while rendering.
+    Function("tasksOnDays") { (inputJson: String) -> String in
+      try tasksOnDays(inputJson: inputJson)
+    }
+
+    Function("backlogWeeks") { (inputJson: String) -> String in
+      try backlogWeeks(inputJson: inputJson)
+    }
+
+    Function("splitDeadlinesByWeek") { (inputJson: String) -> String in
+      try splitDeadlinesByWeek(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

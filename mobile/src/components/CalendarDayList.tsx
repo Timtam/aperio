@@ -64,7 +64,7 @@ import {
   eventSpanForDay,
   expandAll,
   expandScheduledRecurringTasks,
-  filterTasksOnDay,
+  groupTasksByDay,
   isDeadlineChip,
   isRecurringProjection,
   layoutDayColumn,
@@ -1057,6 +1057,16 @@ export function CalendarDayList({
   // a stale one outlive them.
   const { buckets, groupRows } = useMemo(() => {
     const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    // The whole window in one crossing into the core, not one per day: the
+    // day rule is `cal_core::task_day` now, and every ask goes over the
+    // native bridge with every task serialised.
+    const tasksByDay = groupTasksByDay(
+      expandedTasks,
+      dayKeys,
+      showCompletedForList,
+      meFor,
+      priorityScale,
+    );
     const built: DayBucket[] = days.map((date, i) => {
       const key = dayKeys[i];
       const allDay = renderEvents.filter(
@@ -1068,13 +1078,7 @@ export function CalendarDayList({
         // eventSpanForDay clamp each day's portion).
         (ev) => !ev.all_day && daysCoveredKeys(ev).includes(key),
       );
-      const dayTasks = filterTasksOnDay(
-        expandedTasks,
-        key,
-        showCompletedForList,
-        meFor,
-        priorityScale,
-      );
+      const dayTasks = tasksByDay.get(key) ?? [];
       // One row per appointment instead of one per copy, decided PER DAY —
       // the contract `collapseEventGroups` documents, because a recurring
       // appointment renders a row per day and across a week its own days

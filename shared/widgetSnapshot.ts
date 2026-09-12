@@ -23,7 +23,7 @@ import {
 import { collapseEventGroups } from './collapseEventGroups';
 import type { EventGroup } from './eventGroups';
 import { expandAll, seriesIdOf, type RecurringEventLike } from './recurrence';
-import { filterTasksOnDay, taskTimeOnDay } from './taskDay';
+import { groupTasksByDay, taskTimeOnDay } from './taskDay';
 import { compareTitles } from './ordering';
 import type { Task, TaskUser } from './types';
 
@@ -432,11 +432,13 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   // scheduled day is placed by filterTasksOnDay, but a projection walk can hand
   // the same task to two keys); one row per id keeps the widget honest.
   const seenTasks = new Set<string>();
+  // `() => false` — completed tasks never belong on a "what is next" surface,
+  // regardless of a list's show-completed setting. `meFor` applies the
+  // ownership rule the calendar views apply. One crossing for the whole
+  // horizon, the way the views ask.
+  const tasksByDay = groupTasksByDay(expandedTasks, dayKeys, () => false, meFor);
   for (const key of dayKeys) {
-    // `() => false` — completed tasks never belong on a "what is next" surface,
-    // regardless of a list's show-completed setting. `meFor` applies the
-    // ownership rule the calendar views apply.
-    for (const task of filterTasksOnDay(expandedTasks, key, () => false, meFor)) {
+    for (const task of tasksByDay.get(key) ?? []) {
       if (seenTasks.has(task.id)) continue;
       const time = taskTimeOnDay(task, key);
       const at = time ? atTimeOn(key, time) : dayStart(key);

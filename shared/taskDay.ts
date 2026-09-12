@@ -1,14 +1,30 @@
-import { localDateKey } from './dateKey';
-import { isMineOrUnassigned } from './taskAssignment';
-import { taskOrder } from './taskGrouping';
-import type { PriorityScale } from './taskStatus';
-import type { Task, TaskUser } from './types';
+// The calendar-day task rules — this surface's door into `cal_core::task_day`.
+//
+// Which tasks a day shows, in which order, and how the backlog rail cuts its
+// weeks: that decision lives in the core now, and both surfaces ask it while
+// rendering. What stays here is the shell — building the question from what a
+// caller holds, laying the answer (positions) back over the caller's own rows,
+// and the two things the core deliberately does not do: read the clock
+// (`todayIsoKey`) and resolve a UTC instant into a LOCAL day (the device zone,
+// `completionDayKey`), which travels in as `completed_day`.
+//
+// Pinned by `crates/cal-core/tests/fixtures/taskDay.json`, measured from the
+// TypeScript this replaced; `taskDay.contract.test.ts` replays it through this
+// door, and the core's own contract test reads the same file.
 
-// Pure date + calendar-bucketing helpers shared by the desktop and mobile
-// frontends. The Day/Week calendar views surface tasks alongside events; these
-// helpers decide which tasks land on which day, at which time, and how an
-// event+task lane sorts. Kept platform-agnostic (no date-fns, no React) so both
-// `src/` and `mobile/` import the one source of truth.
+import { localDateKey } from './dateKey';
+import type {
+  BacklogWeeks,
+  BacklogWeeksInput,
+  DayInput,
+  DayTask,
+  DayTaskRow,
+  DeadlineSplit,
+  DeadlineSplitInput,
+  Task,
+  TaskUser,
+} from './types';
+import type { PriorityScale } from './taskStatus';
 
 /**
  * Local `YYYY-MM-DD` for today.
@@ -17,6 +33,9 @@ import type { Task, TaskUser } from './types';
  * `toISOString().slice(0, 10)` — a UTC slice would roll the day over at the
  * wrong moment and mis-bucket the Upcoming/Deferred gate (DESIGN §9.12) and the
  * "resurfaces on" due text near midnight.
+ *
+ * The one clock reader of this module, and it stays on this side: the core
+ * takes the day as a parameter (`tests/core_contracts.rs`).
  */
 export function todayIsoKey(): string {
   const d = new Date();
@@ -24,6 +43,114 @@ export function todayIsoKey(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+// ─────────────────────────────── The door ───────────────────────────────────
+
+/** This surface's door into `cal_core::task_day`. */
+export interface TaskDayRules {
+  tasksOnDaysJson(inputJson: string): string;
+  backlogWeeksJson(inputJson: string): string;
+  splitDeadlinesByWeekJson(inputJson: string): string;
+  /** The app's language tag, read when the view asks: the order within a
+   *  day collates titles, and the user can change it while the app runs. */
+  languageTag(): string;
+}
+
+let installedRules: TaskDayRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installTaskDayRules(rules: TaskDayRules): void {
+  installedRules = rules;
+}
+
+function rules(): TaskDayRules {
+  if (installedRules === null) {
+    // Loud, not a local fallback. A fallback here would be the second
+    // implementation all over again, and its failure is one a screen-reader
+    // user meets head on: a task on one day on the phone and on another on
+    // the desktop.
+    throw new Error(
+      'task day rules used before installTaskDayRules() — the surface must ' +
+        'bind its door into cal_core::task_day at startup',
+    );
+  }
+  return installedRules;
+}
+
+/** The LOCAL day a task was completed on, or null when it carries no instant.
+ *
+ *  Local, not UTC, and that is the whole subtlety: `completed_at` is a UTC
+ *  instant, so a task finished at 23:30 in a positive offset reads as the NEXT
+ *  day if the date is taken off the raw string. The same trap already cost the
+ *  recurrence resurface a day.
+ *
+ *  Resolved HERE, with the zone this surface knows, and handed to the core as
+ *  a day key: the core reads no zone. */
+function completionDayKey(task: Task): string | null {
+  if (!task.completed_at) return null;
+  const at = new Date(task.completed_at);
+  return Number.isNaN(at.getTime()) ? null : localDateKey(at);
+}
+
+/** What the rule reads of a task, plus the one thing only this side knows.
+ *
+ *  An empty string is sent as `null`: the TypeScript this replaced tested these
+ *  fields for truthiness, so `''` meant "none" — no day, no time, no parent —
+ *  and the core, which parses dates and times, would reject it instead. No
+ *  producer in this repository writes one (every row is serde output of a
+ *  `Task`), but a door that turns an empty field into a thrown error inside a
+ *  `useMemo` would take the whole view down for a row the old code merely
+ *  filed as undated. */
+function wireTask(task: Task): DayTask {
+  return {
+    id: task.id,
+    list_id: task.list_id,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    scheduled_date: task.scheduled_date || null,
+    scheduled_time: task.scheduled_time || null,
+    scheduled_end_time: task.scheduled_end_time || null,
+    deadline_date: task.deadline_date || null,
+    deadline_time: task.deadline_time || null,
+    parent_id: task.parent_id || null,
+    assignees: task.assignees,
+    completed_day: completionDayKey(task),
+  };
+}
+
+/** One crossing for every day asked. The two callbacks are evaluated once
+ *  per list here and travel as data, so no caller had to learn the wire. */
+function tasksOnDays(
+  tasks: Task[],
+  days: string[],
+  isCompletedVisible: ((listId: string) => boolean) | undefined,
+  meFor: ((listId: string) => TaskUser | null) | undefined,
+  scale: PriorityScale,
+): Map<string, Task[]> {
+  const door = rules();
+  const listIds = Array.from(new Set(tasks.map((task) => task.list_id)));
+  const input: DayInput = {
+    tasks: tasks.map(wireTask),
+    days,
+    completedVisible: isCompletedVisible ? listIds.filter((id) => isCompletedVisible(id)) : [],
+    currentUserByList: meFor ? Object.fromEntries(listIds.map((id) => [id, meFor(id)])) : {},
+    scale,
+    language: door.languageTag(),
+  };
+  const answer = JSON.parse(door.tasksOnDaysJson(JSON.stringify(input))) as Record<
+    string,
+    DayTaskRow[]
+  >;
+  const out = new Map<string, Task[]>();
+  for (const day of days) {
+    out.set(
+      day,
+      (answer[day] ?? []).map((row) => tasks[row.task]),
+    );
+  }
+  return out;
 }
 
 /**
@@ -40,109 +167,31 @@ export function todayIsoKey(): string {
  *      not a Gantt-style strip across every day until then).
  *
  * A task that has BOTH a scheduled day and a deadline surfaces ONCE — on
- * its scheduled day. It does NOT also appear on the deadline day: the
- * plan is its home, and the chip announces its deadline there ("fällig
- * bis …"). Showing it on the deadline day too read as a duplicate / a
- * second task. (A scheduled task that slips past its day is still surfaced
- * by the day-start review + carry-over, so suppressing the deadline-day
- * marker doesn't lose it.)
+ * its scheduled day. A finished task with no planned day belongs to the day
+ * it was finished; a finished task the user planned onto a day keeps that
+ * day. Subtasks surface only with a date of their own. Cancelled tasks never
+ * appear; completed ones only where the caller opts a list in via
+ * `isCompletedVisible`. `meFor` gates by ownership: on a shared list a task
+ * assigned to a concrete OTHER user is hidden from my calendar (DESIGN §9.7).
  *
- * Subtasks (`parent_id` set) are hidden UNLESS they carry their OWN
- * `scheduled_date` or `deadline_date` — then the planned/due subtask
- * surfaces as its own chip on that day (the chip names its parent so it
- * reads in context). An undated subtask still travels with its parent and
- * stays hidden. Cancelled tasks never appear. Completed tasks are
- * hidden by default — they're done — but the caller can opt back in per
- * task-list via `isCompletedVisible`, the sidebar setting "Erledigte
- * Aufgaben in der Kalenderansicht anzeigen". When the callback is
- * omitted (tests, one-off callers) the historical "always hide" applies.
- *
- * `dayIsoKey` is the local `YYYY-MM-DD` key, matching `localDateKey()`
- * in `dateKey.ts`, so the Week/Day callers share one bucket loop.
- *
- * `meFor` (optional) gates by ownership: on a shared list a task assigned to a
- * concrete OTHER user is theirs to handle, so it's hidden from MY calendar
- * (mine + unassigned stay). A list with no known identity (`meFor` → null) keeps
- * everything; omitting `meFor` keeps the historical "show all". Mirrors the
- * day-start review's ownership filter (DESIGN §9.7).
+ * The decision is the core's (`cal_core::task_day`); this is the door.
+ * `dayIsoKey` is the local `YYYY-MM-DD` key, matching `localDateKey()`.
  */
-/** The LOCAL day a task was completed on, or null when it carries no instant.
- *
- *  Local, not UTC, and that is the whole subtlety: `completed_at` is a UTC
- *  instant, so a task finished at 23:30 in a positive offset reads as the NEXT
- *  day if the date is taken off the raw string. The same trap already cost the
- *  recurrence resurface a day. */
-function completionDayKey(task: Task): string | null {
-  if (!task.completed_at) return null;
-  const at = new Date(task.completed_at);
-  return Number.isNaN(at.getTime()) ? null : localDateKey(at);
-}
-
 export function filterTasksOnDay(
   tasks: Task[],
   dayIsoKey: string,
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
-  /** The user's priority system — how many bands the ordering below has.
-   *  Defaults to the three-level original (see {@link taskOrder}). */
+  /** The user's priority system — how many bands the ordering has. */
   scale: PriorityScale = 'three',
 ): Task[] {
-  const onDay = tasks.filter((task) => {
-    // A subtask surfaces only when it carries its own date — an undated subtask
-    // travels with its parent and stays hidden; a scheduled/deadline-bearing one
-    // becomes its own day chip (labelled as a subtask of its parent).
-    if (task.parent_id && !task.scheduled_date && !task.deadline_date) {
-      return false;
-    }
-    if (task.status === 'cancelled') return false;
-    if (task.status === 'completed') {
-      if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {
-        return false;
-      }
-    }
-    if (meFor && !isMineOrUnassigned(task.assignees, meFor(task.list_id))) {
-      return false;
-    }
-    // A finished task with NO day of its own belongs to the day it was
-    // finished. That is the Vikunja case this rule was written for: a deadline
-    // on the 6th, never scheduled, ticked off on the 5th — the 5th looked like
-    // nothing had happened and the 6th carried a tick for work already over.
-    //
-    // A task the user PLANNED onto a day keeps that day, and that half is not
-    // symmetric with the other. `scheduled_date` is the answer to "which day is
-    // this task's", and it stays the answer after the tick: yesterday's dose of
-    // a daily task, ticked this morning, belongs to yesterday — moving it here
-    // empties yesterday, puts two doses on today next to the one still to take,
-    // and makes a medication log read as if a day had been skipped and another
-    // doubled. It also silently overruled the editor: changing the date of a
-    // finished task moved nothing, because this line had already decided.
-    //
-    // Falls through when the completion instant is missing (an adapter that
-    // does not record one), because the planned day is a worse answer than the
-    // right one but a much better answer than none.
-    if (task.status === 'completed' && !task.scheduled_date) {
-      const finished = completionDayKey(task);
-      if (finished != null) return finished === dayIsoKey;
-    }
-    if (task.scheduled_date === dayIsoKey) return true;
-    // A deadline surfaces as its own day marker ONLY for a task with no
-    // scheduled day. A scheduled task lives on its scheduled day and
-    // announces its deadline there, so it does not also appear on the
-    // deadline day (that duplicate read as a second task / a recurrence).
-    if (!task.scheduled_date && task.deadline_date === dayIsoKey) return true;
-    return false;
-  });
-  // Same order as the task list (priority band, then natural A→Z title) so a
-  // day's planned work reads identically on every surface. Timed tasks are
-  // re-sorted chronologically by `mergeDayItems`; the untimed lane and the
-  // month cells keep this order. (`filter` returned a fresh array, so the
-  // in-place sort can't reorder the caller's snapshot.)
-  return onDay.sort((a, b) => taskOrder(a, b, scale));
+  return tasksOnDays(tasks, [dayIsoKey], isCompletedVisible, meFor, scale).get(dayIsoKey) ?? [];
 }
 
 /**
- * Bucket helper for week/day views. Returns a Map keyed by ISO day
- * string so the consumer can render each day independently.
+ * Bucket helper for week/day views: every day of `dayKeys` at once, one
+ * crossing, a Map keyed by ISO day string so the consumer can render each day
+ * independently.
  */
 export function groupTasksByDay(
   tasks: Task[],
@@ -153,12 +202,18 @@ export function groupTasksByDay(
    *  ordering (see {@link filterTasksOnDay}). */
   scale: PriorityScale = 'three',
 ): Map<string, Task[]> {
-  const out = new Map<string, Task[]>();
-  for (const key of dayKeys) {
-    out.set(key, filterTasksOnDay(tasks, key, isCompletedVisible, meFor, scale));
-  }
-  return out;
+  return tasksOnDays(tasks, dayKeys, isCompletedVisible, meFor, scale);
 }
+
+// ─────────────────────── What a chip carries (per task) ─────────────────────
+//
+// The core answers these three with every day row (`DayTaskRow`), and the
+// views still ask them per chip with (task, day) in hand. Until the views read
+// the rows, these stay as the TypeScript twins of `cal_core::task_day::
+// {time_on_day, end_time_on_day, is_deadline_chip}`, pinned against them by
+// the same fixture: the TypeScript contract test derives its chip facts from
+// these, the Rust contract test from the core's fields, and both must match
+// the table.
 
 /**
  * True when the task appears on `dayIsoKey` BECAUSE of its deadline,
@@ -179,30 +234,13 @@ export function isDeadlineChip(task: Task, dayIsoKey: string): boolean {
 /**
  * Effective time-of-day at which a task should slot into the timed
  * lane of `dayIsoKey`, or `null` when the task has no specific time
- * on that day.
- *
- * Two distinct slots can contribute a time:
- *
- *   - `scheduled_time` when `scheduled_date === dayIsoKey`. The user
- *     planned to work on the task at that minute on that day.
- *   - `deadline_time` when `deadline_date === dayIsoKey`. The user
- *     marked the deadline with a specific time-of-day.
- *
- * When both apply on the same day (the rare Plan + Soft-Deadline
- * configuration that happens to collide on one day) the scheduled
- * time wins — it's the "I plan to do it then" commitment, while the
- * deadline_time on the same day is the "must be done by then" cap.
- * Showing the schedule wins because it's the more action-oriented
- * marker for that day.
- *
- * Tasks scheduled to a day without a time and bare deadline-day tasks
- * without a `deadline_time` return `null` — there's no minute we can
- * honestly point at, so they keep their place in the untimed lane
- * below the day's grid items.
+ * on that day: `scheduled_time` when scheduled here, else `deadline_time`
+ * when due here. When both apply on the same day the scheduled time wins —
+ * it's the "I plan to do it then" commitment, while the deadline_time on the
+ * same day is the "must be done by then" cap.
  *
  * Returned shape is the raw `HH:MM[:SS]` string, which sorts
- * lexicographically the same way it sorts numerically — cheap and
- * matches how event start times are compared elsewhere.
+ * lexicographically the same way it sorts numerically.
  */
 export function taskTimeOnDay(
   task: Task,
@@ -219,12 +257,9 @@ export function taskTimeOnDay(
 
 /**
  * The END of a task's planned block on `dayIsoKey`, as `HH:MM[:SS]`, or `null`
- * when it has none there.
- *
- * The mirror of {@link taskTimeOnDay}, and deliberately narrower: only the
- * SCHEDULED slot can carry a block. A deadline is a moment — "by then" — and
- * giving it a length would draw a bar across the hours before something is
- * due, which is not what the user said.
+ * when it has none there. Only the SCHEDULED slot can carry a block: a
+ * deadline is a moment — "by then" — and giving it a length would draw a bar
+ * across the hours before something is due.
  */
 export function taskEndTimeOnDay(task: Task, dayIsoKey: string): string | null {
   if (
@@ -236,6 +271,8 @@ export function taskEndTimeOnDay(task: Task, dayIsoKey: string): string | null {
   }
   return null;
 }
+
+// ──────────────────────────── Rendering helpers ─────────────────────────────
 
 /**
  * Item types that can appear in a day's time-sorted grid lane. The
@@ -253,9 +290,10 @@ export type DayGridItem<TEvent, TTask> =
  * returned `null`) are returned in a second array so the caller can
  * render them in the existing untimed lane below the grid.
  *
- * `eventTime(event)` returns the event's start as epoch-ms — keeping
- * the helper generic over the project's event type means we can unit-
- * test it without importing the full CalendarEvent shape.
+ * `eventTime(event)` returns the event's start as epoch-ms. Composing a task's
+ * `HH:MM` on this day into the same scale goes through the local `Date`, so a
+ * daylight-saving jump still lands at the user's perceived local time — which
+ * is why this is rendering, on this side, and not a rule in the core.
  */
 export function mergeDayItems<TEvent, TTask extends Task>(
   events: TEvent[],
@@ -275,10 +313,6 @@ export function mergeDayItems<TEvent, TTask extends Task>(
       untimed.push(task);
       continue;
     }
-    // Compose an epoch-ms sort key from the day key + the
-    // `HH:MM[:SS]` time string so the comparison is uniform with the
-    // event start times. We parse via `Date` so a daylight-saving
-    // jump still lands at the user's perceived local time.
     const [hh, mm, ss] = time.split(':').map((n) => Number(n));
     const [y, mo, d] = dayIsoKey.split('-').map((n) => Number(n));
     const ms = new Date(y, mo - 1, d, hh ?? 0, mm ?? 0, ss ?? 0).getTime();
@@ -288,75 +322,35 @@ export function mergeDayItems<TEvent, TTask extends Task>(
   return { timed, untimed };
 }
 
-/** The two week windows the backlog rail splits its deadlines into. */
-export interface BacklogWeeks {
-  /** First day of the week `todayKey` falls in, as a `YYYY-MM-DD` key. */
-  thisWeekStart: string;
-  /** Last day of that week, inclusive. */
-  thisWeekEnd: string;
-  nextWeekStart: string;
-  /** Last day of the following week, inclusive. */
-  nextWeekEnd: string;
-}
+// ───────────────────────────── The backlog rail ─────────────────────────────
 
 /**
- * The current and following CALENDAR week, as inclusive day-key bounds.
- *
- * Calendar weeks, not rolling windows: "this week" ends on the week's last day
- * however near that is, so a Friday deadline stops being "this week" the moment
- * the week turns — which is what a plan for the week means. Seven days from now
- * would keep sliding and never tell the user where a week ends.
- *
- * `weekStartsOn` is the user's own setting (0 = Sunday … 6 = Saturday), so a
- * Sunday week runs Sunday–Saturday and a Monday week Monday–Sunday.
- *
- * All arithmetic is on LOCAL dates. A deadline is a day the user wrote down,
- * and reading it in UTC puts everyone west of Greenwich a day out.
+ * The current and following CALENDAR week, as inclusive day-key bounds —
+ * `cal_core::task_day::backlog_weeks`. Calendar weeks, not rolling windows:
+ * "this week" ends on the week's last day however near that is. `weekStartsOn`
+ * is the user's own setting (0 = Sunday … 6 = Saturday).
  */
 export function backlogWeeks(todayKey: string, weekStartsOn: number): BacklogWeeks {
-  const [y, m, d] = todayKey.split('-').map(Number);
-  const today = new Date(y, m - 1, d);
-  const start = new Date(today);
-  // How far back the week's first day lies. The +7 keeps the result positive
-  // for every combination of weekday and setting.
-  start.setDate(today.getDate() - ((today.getDay() - weekStartsOn + 7) % 7));
-  const dayAfter = (from: Date, days: number) => {
-    const out = new Date(from);
-    out.setDate(from.getDate() + days);
-    return out;
-  };
-  return {
-    thisWeekStart: localDateKey(start),
-    thisWeekEnd: localDateKey(dayAfter(start, 6)),
-    nextWeekStart: localDateKey(dayAfter(start, 7)),
-    nextWeekEnd: localDateKey(dayAfter(start, 13)),
-  };
+  // The setting is 0..6 on every surface that has one; the old arithmetic
+  // happened to tolerate anything, so keep that at the door.
+  const input: BacklogWeeksInput = { today: todayKey, weekStartsOn: ((weekStartsOn % 7) + 7) % 7 };
+  return JSON.parse(rules().backlogWeeksJson(JSON.stringify(input))) as BacklogWeeks;
 }
 
 /**
- * Split deadline-carrying tasks into this week, next week and everything after.
- *
- * The input keeps whatever order it arrives in — the rail sorts by date, then
- * priority, then creation, and every bucket preserves that.
- *
- * A deadline that has already passed goes in with THIS week rather than into
- * the tail: it is the most urgent thing the rail holds, the date sort puts it
- * at the very top of the first section, and burying last Tuesday's deadline
- * below everything else would be the one placement that helps nobody.
+ * Split deadline-carrying tasks into this week, next week and everything after
+ * — `cal_core::task_day::split_deadlines_by_week`. Every bucket keeps the
+ * order it was handed; a deadline that has already passed goes with THIS week.
  */
 export function splitDeadlinesByWeek<T extends { deadline_date?: string | null }>(
   tasks: readonly T[],
   weeks: BacklogWeeks,
 ): { thisWeek: T[]; nextWeek: T[]; later: T[] } {
-  const thisWeek: T[] = [];
-  const nextWeek: T[] = [];
-  const later: T[] = [];
-  for (const task of tasks) {
-    const due = task.deadline_date;
-    if (!due) continue;
-    if (due <= weeks.thisWeekEnd) thisWeek.push(task);
-    else if (due <= weeks.nextWeekEnd) nextWeek.push(task);
-    else later.push(task);
-  }
-  return { thisWeek, nextWeek, later };
+  const input: DeadlineSplitInput = {
+    deadlines: tasks.map((task) => task.deadline_date || null),
+    weeks,
+  };
+  const split = JSON.parse(rules().splitDeadlinesByWeekJson(JSON.stringify(input))) as DeadlineSplit;
+  const pick = (at: number[]): T[] => at.map((i) => tasks[i]);
+  return { thisWeek: pick(split.thisWeek), nextWeek: pick(split.nextWeek), later: pick(split.later) };
 }
