@@ -340,6 +340,34 @@ pub fn subtask_progress(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The writes a task's status change plans: the root, its descendants, its
+/// ancestors — in application order.
+#[uniffi::export]
+pub fn plan_status_cascade(input_json: String) -> Result<String, StoreError> {
+    cal_core::plan_status_cascade_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "status cascade input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The ancestors re-derived after a subtask was created or deleted.
+#[uniffi::export]
+pub fn plan_ancestor_recompute(input_json: String) -> Result<String, StoreError> {
+    cal_core::plan_ancestor_recompute_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "ancestor recompute input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The "started → pin to today" companion date, or null.
+#[uniffi::export]
+pub fn auto_date_on_start(input_json: String) -> Result<String, StoreError> {
+    cal_core::auto_date_on_start_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "auto-date input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

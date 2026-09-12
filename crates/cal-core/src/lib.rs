@@ -31,6 +31,7 @@ pub mod task_assignment;
 // The grouping itself is behind the same feature (it orders titles, section
 // names and list names, and an adapter never builds a task view); the wire
 // types are not, so `cargo xtask ts-types` can generate them.
+pub mod task_cascade;
 pub mod task_day;
 pub mod task_grouping;
 // Anti-silence: `cargo test -p cal-core` without the feature compiles the
@@ -94,6 +95,12 @@ pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use task_assignment::is_mine_or_unassigned;
+pub use task_cascade::{
+    auto_date_on_start, auto_date_on_start_json, derive_status_from_children,
+    plan_ancestor_recompute, plan_ancestor_recompute_json, plan_status_cascade,
+    plan_status_cascade_json, AutoDateInput, CascadeInput, CascadeOptions, CascadeTask,
+    RecomputeInput, StatusWrite,
+};
 pub use task_day::{
     backlog_weeks, backlog_weeks_json, end_time_on_day, is_deadline_chip, split_deadlines_by_week,
     split_deadlines_by_week_json, time_on_day, BacklogWeeks, BacklogWeeksInput, DayInput, DayTask,

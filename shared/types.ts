@@ -87,6 +87,14 @@ export type { PriorityKeysByScale } from './generated/PriorityKeysByScale';
 export type { ProgressTask } from './generated/ProgressTask';
 export type { SubtaskProgressInput } from './generated/SubtaskProgressInput';
 export type { SubtaskProgress } from './generated/SubtaskProgress';
+// The parent/subtask status coupling, `cal_core::task_cascade`. The shell in
+// `shared/taskCascade.ts` speaks these.
+export type { CascadeTask } from './generated/CascadeTask';
+export type { CascadeOptions as CascadeOptionsWire } from './generated/CascadeOptions';
+export type { CascadeInput } from './generated/CascadeInput';
+export type { RecomputeInput } from './generated/RecomputeInput';
+export type { AutoDateInput } from './generated/AutoDateInput';
+export type { StatusWrite as StatusWriteWire } from './generated/StatusWrite';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

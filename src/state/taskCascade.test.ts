@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import type { Task, TaskStatus } from '../api/types';
 import {
   autoDateOnStart,
-  deriveStatusFromChildren,
   planAncestorRecompute,
   planStatusCascade,
 } from './taskCascade';
@@ -63,79 +62,6 @@ describe('autoDateOnStart', () => {
 
   it('is a no-op when the auto-date setting is off (no todayKey)', () => {
     expect(autoDateOnStart('in_progress', null, undefined)).toBeUndefined();
-  });
-});
-
-describe('deriveStatusFromChildren', () => {
-  it('returns null when there are no children', () => {
-    expect(deriveStatusFromChildren([])).toBeNull();
-  });
-
-  it('any in_progress child wins', () => {
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'completed'),
-        child('b', 'p', 'in_progress'),
-      ]),
-    ).toBe('in_progress');
-  });
-
-  it('mixed completed + open with no in_progress → in_progress', () => {
-    // Some progress made but not finished.
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'completed'),
-        child('b', 'p', 'open'),
-      ]),
-    ).toBe('in_progress');
-  });
-
-  it('all completed → completed', () => {
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'completed'),
-        child('b', 'p', 'completed'),
-      ]),
-    ).toBe('completed');
-  });
-
-  it('all cancelled → cancelled', () => {
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'cancelled'),
-        child('b', 'p', 'cancelled'),
-      ]),
-    ).toBe('cancelled');
-  });
-
-  it('completed + cancelled (no open, no in_progress) → completed', () => {
-    // The non-cancelled work is done; cancelled siblings don't keep
-    // the parent unfinished.
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'completed'),
-        child('b', 'p', 'cancelled'),
-      ]),
-    ).toBe('completed');
-  });
-
-  it('open + cancelled (no progress) → open', () => {
-    // Some intent was dropped, but no work has actually started.
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'open'),
-        child('b', 'p', 'cancelled'),
-      ]),
-    ).toBe('open');
-  });
-
-  it('all open → open', () => {
-    expect(
-      deriveStatusFromChildren([
-        child('a', 'p', 'open'),
-        child('b', 'p', 'open'),
-      ]),
-    ).toBe('open');
   });
 });
 

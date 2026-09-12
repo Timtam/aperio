@@ -1417,11 +1417,23 @@ Siehe DESIGN §4.2.
   der leere Heute-Schlüssel, das leere geplante Datum (zählt als datiert).
   `taskCascade.contract.test.ts` spielt zurück (71 Tests); rot bewiesen (Regel
   „abgebrochen bleibt abgebrochen" entfernt → die Kaskaden-Zeilen fallen).
-  ↳ Schritt 2 (offen): `cal_core::task_cascade` (ohne Feature-Gate), Türen
-  `planStatusCascade` + `planAncestorRecompute` (Antwort = Schreibvorgänge:
-  Ids und Zustände, `scheduled_date` als Begleiter); `deriveStatusFromChildren`
-  und `autoDateOnStart` werden im Kern gebraucht und bleiben als Türen
-  exportiert, weil der Aufgaben-Dialog das Datum der Wurzel selbst setzt.
+  ↳ **Schritt 2 (Folge-PR auf #49): gebaut.** `cal_core::task_cascade` — ohne
+  Feature-Gate — plant die Schreibvorgänge (`plan_status_cascade_json`,
+  `plan_ancestor_recompute_json`; Antwort = `StatusWrite {task_id, status,
+  scheduled_date?}` in Anwendungsreihenfolge) und beantwortet das Begleitdatum
+  (`auto_date_on_start_json`), weil der Aufgaben-Dialog das Datum der Wurzel
+  selbst setzt. Drei Türen auf beiden Oberflächen, sechs Wire-Typen erzeugt.
+  Die Ableitung (`deriveStatusFromChildren`) hat KEINE eigene Tür — kein
+  Aufrufer braucht sie allein; die Fixture beobachtet sie durch die
+  Nachberechnung (Elternteil zweimal gefragt, als `open` und als `cancelled`),
+  ihre acht Desktop-Unit-Tests sind gestrichen (17 Anwesenheitsmengen liegen in
+  der Tabelle). Die Hülle schickt vier Felder je Zeile (`id`, `status`,
+  `parent_id`, `scheduled_date`) und gibt `StatusWrite`/`CascadeOptions` in der
+  alten Gestalt zurück — kein Aufrufer geändert. Die drei Wahrheitswert-Regeln
+  (leere Eltern-Id, leerer Heute-Schlüssel, leeres Datum) liest der Kern wie
+  das TypeScript, die Hülle schickt für die ersten zwei ohnehin `null`. Rust
+  5/5 beim ersten Lauf (70 Zeilen + Draht), rot bewiesen (Asymmetrie der
+  Nachberechnung entfernt → eine Zeile fällt).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

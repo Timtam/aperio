@@ -289,6 +289,20 @@ public class CalFfiModule: Module {
       try subtaskProgress(inputJson: inputJson)
     }
 
+    // The parent/subtask status coupling: the writes a status change plans,
+    // the ancestors re-derived after a subtask came or went, the auto-date.
+    Function("planStatusCascade") { (inputJson: String) -> String in
+      try planStatusCascade(inputJson: inputJson)
+    }
+
+    Function("planAncestorRecompute") { (inputJson: String) -> String in
+      try planAncestorRecompute(inputJson: inputJson)
+    }
+
+    Function("autoDateOnStart") { (inputJson: String) -> String in
+      try autoDateOnStart(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

@@ -105,6 +105,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** How far every parent's subtasks are, for a whole task list at once. */
   subtaskProgress(inputJson: string): string;
 
+  /** The writes a task's status change plans: the root, its descendants, its
+   *  ancestors — in application order. */
+  planStatusCascade(inputJson: string): string;
+
+  /** The ancestors re-derived after a subtask was created or deleted. */
+  planAncestorRecompute(inputJson: string): string;
+
+  /** The "started → pin to today" companion date, or null. */
+  autoDateOnStart(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

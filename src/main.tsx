@@ -11,6 +11,7 @@ import {
   installTaskGroupingRules,
   installTaskDayRules,
   installTaskStatusRules,
+  installTaskCascadeRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -39,6 +40,9 @@ import {
   splitDeadlinesByWeekJson,
   taskI18nKeysJson,
   subtaskProgressJson,
+  planStatusCascadeJson,
+  planAncestorRecomputeJson,
+  autoDateOnStartJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -135,6 +139,13 @@ initCoreRules()
     // The task vocabulary's i18n keys, read once here, and the subtask
     // progress.
     installTaskStatusRules({ taskI18nKeysJson, subtaskProgressJson });
+
+    // The parent/subtask status coupling: what a check-off writes, in order.
+    installTaskCascadeRules({
+      planStatusCascadeJson,
+      planAncestorRecomputeJson,
+      autoDateOnStartJson,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
