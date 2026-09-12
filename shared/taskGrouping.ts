@@ -295,7 +295,8 @@ export function buildEntries(
    *  existing callers keep the historical lifecycle grouping. */
   groupBy: TaskGroupBy = 'state',
   /** The user's priority system — decides how many bands the sibling ordering
-   *  has (see {@link taskOrder}). Defaults to the three-level original. */
+   *  has (`cal_core::task_grouping::task_order`). Defaults to the three-level
+   *  original. */
   scale: PriorityScale = 'three',
 ): { entries: Entry[]; flatTasks: Task[] } {
   const door = rules();

@@ -1339,6 +1339,18 @@ Siehe DESIGN §4.2.
   Fixture auf beiden Seiten gepinnt — die Views rufen sie pro Kachel mit
   (task, day); auf die Antwort-Zeilen umstellen ist ein eigener Schritt.
   Wire-Typen erzeugt (7), Türen synchron auf beiden Oberflächen.
+  ↳ **Von drei Gegenlesern gefunden, auf beiden Seiten behoben:** `parent_id: ""`
+  hieß im TypeScript „kein Elternteil" (Wahrheitswert-Test), im Rust „Unter-
+  aufgabe" (`is_some`) — eine undatierte Aufgabe mit leerer Eltern-Id
+  verschwand vom Tag. Kein Erzeuger im Repo schreibt sie; ein Differenz-Lauf
+  über Zufallszeilen traf sie neunmal in dreitausend. Der Kern liest die leere
+  Id jetzt als kein Elternteil, die Hülle schickt `null`, die Fixture pinnt den
+  Fall. Dazu: die Hülle bleibt TOTAL (leere Zeichenkette → `null` in fünf
+  Datums-/Zeitfeldern, `weekStartsOn` geklemmt), statt in einem `useMemo` die
+  ganze Ansicht zu werfen; und drei Aufrufer, die pro Tag eine Überfahrt
+  machten (Monatsraster: 42-mal, jede mit ALLEN Aufgaben serialisiert; mobile
+  Tagesliste über die native Brücke; Widget-Schnappschuss), fragen jetzt einmal
+  mit allen Tagesschlüsseln (`groupTasksByDay`).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

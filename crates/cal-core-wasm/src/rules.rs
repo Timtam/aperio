@@ -46,7 +46,7 @@ impl fmt::Display for WireError {
                 "unknown priority scale {value:?} — expected \"three\" or \"two\""
             ),
             WireError::BadJson(detail) => {
-                write!(f, "the conference sources were not readable JSON: {detail}")
+                write!(f, "the input was not readable JSON: {detail}")
             }
         }
     }

@@ -111,7 +111,8 @@ export function BacklogRail() {
   );
   const hiddenCount = offeredLists.filter((l) => hiddenLists.has(l.id)).length;
   // Two-level priority collapses low+medium into one band, so the rail's two
-  // priority sorts have to ask which system is on (see `taskOrder`).
+  // priority sorts have to ask which system is on (`priorityRank`, the
+  // same door `cal_core::task_grouping::task_order` ranks with).
   const { priorityScale } = useTaskCascadeEnabled();
   const headingId = useId();
   const { width, setWidth } = useBacklogWidth();

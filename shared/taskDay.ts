@@ -93,7 +93,15 @@ function completionDayKey(task: Task): string | null {
   return Number.isNaN(at.getTime()) ? null : localDateKey(at);
 }
 
-/** What the rule reads of a task, plus the one thing only this side knows. */
+/** What the rule reads of a task, plus the one thing only this side knows.
+ *
+ *  An empty string is sent as `null`: the TypeScript this replaced tested these
+ *  fields for truthiness, so `''` meant "none" — no day, no time, no parent —
+ *  and the core, which parses dates and times, would reject it instead. No
+ *  producer in this repository writes one (every row is serde output of a
+ *  `Task`), but a door that turns an empty field into a thrown error inside a
+ *  `useMemo` would take the whole view down for a row the old code merely
+ *  filed as undated. */
 function wireTask(task: Task): DayTask {
   return {
     id: task.id,
@@ -101,12 +109,12 @@ function wireTask(task: Task): DayTask {
     title: task.title,
     status: task.status,
     priority: task.priority,
-    scheduled_date: task.scheduled_date,
-    scheduled_time: task.scheduled_time,
-    scheduled_end_time: task.scheduled_end_time,
-    deadline_date: task.deadline_date,
-    deadline_time: task.deadline_time,
-    parent_id: task.parent_id,
+    scheduled_date: task.scheduled_date || null,
+    scheduled_time: task.scheduled_time || null,
+    scheduled_end_time: task.scheduled_end_time || null,
+    deadline_date: task.deadline_date || null,
+    deadline_time: task.deadline_time || null,
+    parent_id: task.parent_id || null,
     assignees: task.assignees,
     completed_day: completionDayKey(task),
   };
@@ -323,7 +331,9 @@ export function mergeDayItems<TEvent, TTask extends Task>(
  * is the user's own setting (0 = Sunday … 6 = Saturday).
  */
 export function backlogWeeks(todayKey: string, weekStartsOn: number): BacklogWeeks {
-  const input: BacklogWeeksInput = { today: todayKey, weekStartsOn };
+  // The setting is 0..6 on every surface that has one; the old arithmetic
+  // happened to tolerate anything, so keep that at the door.
+  const input: BacklogWeeksInput = { today: todayKey, weekStartsOn: ((weekStartsOn % 7) + 7) % 7 };
   return JSON.parse(rules().backlogWeeksJson(JSON.stringify(input))) as BacklogWeeks;
 }
 
@@ -337,7 +347,7 @@ export function splitDeadlinesByWeek<T extends { deadline_date?: string | null }
   weeks: BacklogWeeks,
 ): { thisWeek: T[]; nextWeek: T[]; later: T[] } {
   const input: DeadlineSplitInput = {
-    deadlines: tasks.map((task) => task.deadline_date ?? null),
+    deadlines: tasks.map((task) => task.deadline_date || null),
     weeks,
   };
   const split = JSON.parse(rules().splitDeadlinesByWeekJson(JSON.stringify(input))) as DeadlineSplit;

@@ -628,7 +628,8 @@ auseinandergelaufen.
 
 **Installiert, nicht durchgereicht.** `shared/ordering.ts` hält eine
 `TextCollation`, die jede Oberfläche beim Start setzt (`installTextCollation`);
-`taskOrder` und `sectionOrder` rufen sie über `compareNames`/`compareTitles`.
+`sectionOrder` ruft sie über `compareTitles`; die Aufgaben-Ordnung selbst
+(`task_order`: Prioritätsband, dann Titel) liegt im Kern.
 Der Grund ist praktisch: diese beiden werden aus neun Schichten Ansichtscode
 gerufen und aus `buildEntries`, das schon neun Parameter trägt. Eine Sprache
 durch all das zu fädeln hieße, die Wahl vor jeden künftigen Aufrufer zu

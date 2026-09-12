@@ -475,3 +475,22 @@ describe('filterTasksOnDay — where a finished task sits', () => {
     expect(filterTasksOnDay([moved], '2026-08-11', shown)).toEqual([]);
   });
 });
+
+describe('filterTasksOnDay — the door keeps the old tolerance', () => {
+  it('treats an empty string as no date, no time, no parent', () => {
+    // The core parses dates and times and would reject ''; the shell sends
+    // null instead, which is what the TypeScript's truthiness tests meant.
+    const odd: Task = {
+      ...baseTask,
+      id: 'odd',
+      parent_id: '',
+      scheduled_date: '2026-05-20',
+      scheduled_time: '',
+      scheduled_end_time: '',
+      deadline_date: '',
+      deadline_time: '',
+    };
+    expect(filterTasksOnDay([odd], '2026-05-20').map((t) => t.id)).toEqual(['odd']);
+    expect(taskTimeOnDay(odd, '2026-05-20')).toBeNull();
+  });
+});

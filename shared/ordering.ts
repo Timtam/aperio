@@ -37,7 +37,8 @@ export function compareMachineStrings(a: string, b: string): number {
  * startup, and everything in this package then compares the same way.
  *
  * Installed rather than passed as a parameter for a practical reason:
- * `taskOrder` and `sectionOrder` are called from nine layers of view code and
+ * `sectionOrder` (and, until they moved into the core, `taskOrder` and
+ * `buildEntries`) are called from nine layers of view code and
  * from `buildEntries`, which already carries nine parameters. Threading a
  * language through all of that would put the choice in front of every future
  * caller, which is how it drifted in the first place.

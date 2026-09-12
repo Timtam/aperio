@@ -47,7 +47,7 @@ import {
 } from '../../intl/multiDay';
 import {
   expandScheduledRecurringTasks,
-  filterTasksOnDay,
+  groupTasksByDay,
   isDeadlineChip,
   isRecurringProjection,
   recurringSeriesTaskId,
@@ -286,6 +286,16 @@ export function MonthView() {
   // WeekView's `DayItem` so Tab walks events *and* tasks in the month grid.
   const itemsByDay = useMemo(() => {
     const map = new Map<string, MonthDayItem[]>();
+    // The whole grid in one crossing into the core, not one per cell: the
+    // day rule is `cal_core::task_day` now, and 42 asks that each serialise
+    // every task are 41 too many.
+    const tasksByDay = groupTasksByDay(
+      expandedTasks,
+      cells.map(keyOf),
+      shouldShowCompletedForList,
+      meFor,
+      priorityScale,
+    );
     for (const cell of cells) {
       const key = keyOf(cell);
       const dayEvents = eventsByDay.get(key) ?? [];
@@ -295,13 +305,7 @@ export function MonthView() {
         title: event.title,
         event,
       });
-      const taskItems: MonthDayItem[] = filterTasksOnDay(
-        expandedTasks,
-        key,
-        shouldShowCompletedForList,
-        meFor,
-        priorityScale,
-      ).map((task) => ({
+      const taskItems: MonthDayItem[] = (tasksByDay.get(key) ?? []).map((task) => ({
         kind: 'task',
         id: `task-${task.id}`,
         title: task.title,

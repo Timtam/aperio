@@ -200,8 +200,11 @@ pub struct DeadlineSplit {
 #[cfg(feature = "collation")]
 fn shows_on(task: &DayTask, day: NaiveDate, input: &DayInput) -> bool {
     // A subtask surfaces only when it carries its own date — an undated
-    // subtask travels with its parent and stays hidden.
-    if task.parent_id.is_some() && task.scheduled_date.is_none() && task.deadline_date.is_none() {
+    // subtask travels with its parent and stays hidden. An EMPTY parent id is
+    // no parent: the TypeScript this replaced tested the field for truthiness,
+    // and a row with `""` here was a top-level task on every surface.
+    let has_parent = task.parent_id.as_deref().is_some_and(|id| !id.is_empty());
+    if has_parent && task.scheduled_date.is_none() && task.deadline_date.is_none() {
         return false;
     }
     if task.status == TaskStatus::Cancelled {
