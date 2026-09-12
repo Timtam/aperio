@@ -1351,6 +1351,27 @@ Siehe DESIGN §4.2.
   machten (Monatsraster: 42-mal, jede mit ALLEN Aufgaben serialisiert; mobile
   Tagesliste über die native Brücke; Widget-Schnappschuss), fragen jetzt einmal
   mit allen Tagesschlüsseln (`groupTasksByDay`).
+- [~] **Der Aufgaben-Zustand zieht in den Kern** (`taskStatus`), in denselben
+  zwei Schritten — mit dem Schnitt vom 2026-09-09: Zustand rein, Zeichen vorn.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.** Von den 18 Exporten des Moduls
+  sind drei schon Türen (`priorityRank`, `isImportantPriority`,
+  `normalPriority`), zwei sind Glyphen (bleiben), fünf sind Wortwahl über `t`
+  (bleiben), eines ein CSS-Token, eines ein Nachschlagen. Was umzieht: die drei
+  SCHLÜSSEL-Abbildungen (`statusI18nKey`, `effortI18nKey`, `priorityI18nKey`)
+  und `subtaskProgress`. `crates/cal-core/tests/fixtures/taskStatus.json` hält
+  die Schlüssel als EINE Tabelle (jeder Zustand, jeder Aufwand, jede Priorität
+  in beiden Skalen) und sechs Fortschritts-Fälle, gemessen am heutigen
+  TypeScript; `taskStatus.contract.test.ts` spielt zurück.
+  ↳ **Warum eine Tabelle und keine Tür pro Aufruf:** die Schlüssel werden pro
+  Kachel gefragt, auf dem Telefon über die native Brücke — der Kern
+  VERÖFFENTLICHT die Tabelle einmal beim Installieren, die Oberfläche schlägt
+  nach (Muster `ConferenceProvider::i18n_key`, DESIGN §4.5 a). Der Fortschritt
+  wird für alle Eltern einer Liste in EINER Überfahrt beantwortet; die Hülle
+  merkt sich die Antwort pro Aufgaben-Array (WeakMap), weil die Views pro Zeile
+  fragen.
+  ↳ Schritt 2 (offen): `cal_core::task_status` (ohne Feature-Gate — keine
+  Kollation), Türen `taskI18nKeys` + `subtaskProgress`, die drei Schlüssel-
+  Funktionen lesen die Tabelle, die Zwillinge verschwinden.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
