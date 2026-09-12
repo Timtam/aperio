@@ -1,6 +1,9 @@
 import type {
+  SubtaskProgress,
+  SubtaskProgressInput,
   Task,
   TaskEffort,
+  TaskI18nKeys,
   TaskPriority,
   TaskStatus,
   TaskUser,
@@ -78,9 +81,9 @@ import type { PriorityScale } from './generated/PriorityScale';
  * showing one task list have to put the same task first, so the copy is gone
  * and this is the door.
  *
- * Note what did NOT move: the glyphs and the i18n keys below. The core answers
- * with an order and a state; each surface picks its own characters, because an
- * e-ink display plausibly wants different ones.
+ * Note what did NOT move: the glyphs. The core answers with an order, a state
+ * or a KEY; each surface picks its own characters, because an e-ink display
+ * plausibly wants different ones.
  */
 export interface TaskPriorityRules {
   /** Sort rank; 0 sorts first. */
@@ -187,6 +190,67 @@ export function priorityRank(
   return priorityRules().priorityRank(priority, scale);
 }
 
+// ─────────────────── The state door: keys and progress ──────────────────────
+
+/**
+ * This surface's door into `cal_core::task_status`.
+ *
+ * Two answers cross it. The i18n KEY every state, effort and priority is
+ * announced with — as ONE table, because the views ask per chip and on the
+ * phone every ask is a trip across the native bridge for a word that never
+ * changes while the app runs; the core publishes the whole table and this
+ * shell reads it once. And how far a parent's subtasks are, answered for every
+ * parent of a list in one crossing, remembered here per task array because
+ * the views ask per row.
+ *
+ * Pinned by `crates/cal-core/tests/fixtures/taskStatus.json`, measured from
+ * the TypeScript this replaced; `taskStatus.contract.test.ts` replays it
+ * through this door, and the core's own contract test reads the same file.
+ */
+export interface TaskStatusRules {
+  /** The whole key table, `cal_core::task_status::TaskI18nKeys`. */
+  taskI18nKeysJson(): string;
+  /** Parent id → `{done, total}` for every parent with children that count. */
+  subtaskProgressJson(inputJson: string): string;
+}
+
+let installedStatus: TaskStatusRules | null = null;
+let keyTable: TaskI18nKeys | null = null;
+// A Map, not the parsed object: ids are free text (a CalDAV UID is the id),
+// and a plain-object lookup would find `Object.prototype` behind a childless
+// parent called `constructor`.
+let progressByList: WeakMap<readonly Task[], Map<string, SubtaskProgress>> =
+  new WeakMap();
+
+/** Bind this surface's door into the core. */
+export function installTaskStatusRules(rules: TaskStatusRules): void {
+  installedStatus = rules;
+  // A re-install (tests) must not serve the previous door's answers.
+  keyTable = null;
+  progressByList = new WeakMap();
+}
+
+function statusRules(): TaskStatusRules {
+  if (installedStatus === null) {
+    // Loud, not a local fallback. A fallback here would be the TypeScript
+    // twin all over again, and its failure is one a screen-reader user meets
+    // head on: one device announcing a state the other one does not.
+    throw new Error(
+      'task status rules used before installTaskStatusRules() — the surface ' +
+        'must bind its door into cal_core::task_status at startup',
+    );
+  }
+  return installedStatus;
+}
+
+/** The key table, read through the door on the first ask and kept. */
+function keys(): TaskI18nKeys {
+  if (keyTable === null) {
+    keyTable = JSON.parse(statusRules().taskI18nKeysJson()) as TaskI18nKeys;
+  }
+  return keyTable;
+}
+
 /**
  * i18n key for the SR-announced priority label, or `null` when there is nothing
  * to announce — `medium` in the three-level system, and everything below the
@@ -200,17 +264,7 @@ export function priorityI18nKey(
   priority: TaskPriority,
   scale: PriorityScale,
 ): string | null {
-  if (scale === 'two') {
-    return isImportantPriority(priority) ? 'views.tasks.priorityImportant' : null;
-  }
-  switch (priority) {
-    case 'high':
-      return 'views.tasks.priorityHigh';
-    case 'low':
-      return 'views.tasks.priorityLow';
-    case 'medium':
-      return null;
-  }
+  return keys().priority[scale][priority];
 }
 
 /**
@@ -233,14 +287,7 @@ export function prioritySuffix(
  * neutral default — no announcement, mirroring `priorityI18nKey`).
  */
 export function effortI18nKey(effort: TaskEffort): string | null {
-  switch (effort) {
-    case 'small':
-      return 'views.tasks.effortSmall';
-    case 'large':
-      return 'views.tasks.effortLarge';
-    case 'medium':
-      return null;
-  }
+  return keys().effort[effort];
 }
 
 /**
@@ -271,42 +318,45 @@ export function effortSizeModifier(effort: TaskEffort): string {
 
 /**
  * i18n key for the SR-announced state suffix. Keys live under
- * `views.tasks.state*`. Adding a new TaskStatus value? Extend both this switch
- * and the locale files — the exhaustive switch gives a type error if a case is
- * forgotten.
+ * `views.tasks.state*`. Adding a new TaskStatus value? The core's match is
+ * exhaustive, the published table grows a field, and this lookup stops
+ * compiling until the generated `StatusKeys` carries it — plus the locale
+ * files.
  */
 export function statusI18nKey(status: TaskStatus): string {
-  switch (status) {
-    case 'completed':
-      return 'views.tasks.stateDone';
-    case 'cancelled':
-      return 'views.tasks.stateCancelled';
-    case 'in_progress':
-      return 'views.tasks.stateInProgress';
-    case 'open':
-      return 'views.tasks.stateOpen';
-  }
+  return keys().status[status];
 }
 
 /**
  * Count completed children of `parentId` among `allTasks`. Returns `null` when
  * the parent has no children at all. "Done" means `completed`; `cancelled`
  * rows drop out of the total so the fraction reflects what's left to do.
+ *
+ * One crossing per task ARRAY, not per row: the core answers for every parent
+ * of the list at once, and the answer is kept as long as the array lives —
+ * the views hand the same list to every row they render.
  */
 export function subtaskProgress(
   parentId: string,
-  allTasks: Task[],
+  allTasks: readonly Task[],
 ): { done: number; total: number } | null {
-  let done = 0;
-  let total = 0;
-  for (const t of allTasks) {
-    if (t.parent_id !== parentId) continue;
-    if (t.status === 'cancelled') continue;
-    total += 1;
-    if (t.status === 'completed') done += 1;
+  let byParent = progressByList.get(allTasks);
+  if (byParent === undefined) {
+    // Only what the count reads crosses; a task carries far more.
+    const input: SubtaskProgressInput = {
+      tasks: allTasks.map((t) => ({
+        id: t.id,
+        status: t.status,
+        parent_id: t.parent_id ?? null,
+      })),
+    };
+    const answer = JSON.parse(
+      statusRules().subtaskProgressJson(JSON.stringify(input)),
+    ) as Record<string, SubtaskProgress>;
+    byParent = new Map(Object.entries(answer));
+    progressByList.set(allTasks, byParent);
   }
-  if (total === 0) return null;
-  return { done, total };
+  return byParent.get(parentId) ?? null;
 }
 
 /**
@@ -317,7 +367,7 @@ export function subtaskProgress(
 export function subtaskProgressSuffix(
   t: (key: string, vars?: Record<string, unknown>) => string,
   parentId: string,
-  allTasks: Task[],
+  allTasks: readonly Task[],
 ): string {
   const progress = subtaskProgress(parentId, allTasks);
   if (!progress) return '';

@@ -568,6 +568,18 @@ Jetzt liegen sie in `cal_core::task_priority`, und beide Oberflächen kommen
 durch ihre eigene Tür — genau wie bei der Kollation (§4.4). `shared/taskStatus.ts`
 hält die Tür (`installTaskPriorityRules`); die TypeScript-Kopie ist weg.
 
+**Die offene Frage nach den i18n-Schlüsseln ist inzwischen beantwortet,**
+und die Antwort folgt §4.5 (a): der Kern nennt den **Schlüssel**, nie das
+Wort und nie das Zeichen. `cal_core::task_status` veröffentlicht die Schlüssel
+für jeden Zustand, jeden Aufwand und jede Priorität in beiden Skalen als EINE
+Tabelle (`TaskI18nKeys`), die eine Oberfläche einmal liest — die Views fragen
+pro Kachel, und auf dem Telefon wäre jede Frage eine Überfahrt über die native
+Brücke für ein Wort, das sich zur Laufzeit nie ändert. Dazu zählt der Kern den
+Fortschritt der Unteraufgaben für alle Eltern einer Liste in einer Überfahrt.
+Die Glyphen (○ ◐ ● ⊘, `!`/`★`) bleiben pro Oberfläche, genauso jede mit `t`
+gebaute Endung: das ist die Entscheidung vom 2026-09-09, ein E-Ink-Gerät will
+plausibel andere Zeichen. `shared/taskStatus.ts` hält beide Türen.
+
 **Der Paritätstest wurde gelöscht, nicht angepasst.** Er fragte „antwortet Rust
 dasselbe wie TypeScript?" — die richtige Frage, solange es beide gab. Mit einer
 Implementierung hätte er Rust gegen Rust verglichen und wäre aus dem falschen

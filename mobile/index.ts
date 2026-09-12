@@ -9,6 +9,7 @@ import {
   installGroupCarryRules,
   installTaskGroupingRules,
   installTaskDayRules,
+  installTaskStatusRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -113,6 +114,13 @@ installTaskDayRules({
   backlogWeeksJson: (inputJson) => CalFfi.backlogWeeks(inputJson),
   splitDeadlinesByWeekJson: (inputJson) => CalFfi.splitDeadlinesByWeek(inputJson),
   languageTag: () => i18n.language,
+});
+
+// The task vocabulary's i18n keys, read ONCE here, and the subtask progress.
+// Synchronous, like the rest: the rows ask while they render.
+installTaskStatusRules({
+  taskI18nKeysJson: () => CalFfi.taskI18nKeys(),
+  subtaskProgressJson: (inputJson) => CalFfi.subtaskProgress(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

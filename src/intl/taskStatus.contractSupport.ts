@@ -55,7 +55,9 @@ export type ProgressAnswer = Record<string, { done: number; total: number } | nu
 
 export function answerProgress(input: ProgressInput, baseTask: Task): ProgressAnswer {
   const tasks = input.tasks.map((over) => ({ ...baseTask, ...over }) as Task);
-  const out: ProgressAnswer = {};
-  for (const parent of input.parents) out[parent] = subtaskProgress(parent, tasks);
-  return out;
+  // fromEntries, not `out[parent] = …`: an assignment to `__proto__` would set
+  // the prototype instead of writing a key.
+  return Object.fromEntries(
+    input.parents.map((parent) => [parent, subtaskProgress(parent, tasks)]),
+  );
 }

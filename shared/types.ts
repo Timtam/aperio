@@ -77,6 +77,16 @@ export type { BacklogWeeks } from './generated/BacklogWeeks';
 export type { BacklogWeeksInput } from './generated/BacklogWeeksInput';
 export type { DeadlineSplitInput } from './generated/DeadlineSplitInput';
 export type { DeadlineSplit } from './generated/DeadlineSplit';
+// The task vocabulary's i18n keys and the subtask progress,
+// `cal_core::task_status`. The shell in `shared/taskStatus.ts` speaks these.
+export type { TaskI18nKeys } from './generated/TaskI18nKeys';
+export type { StatusKeys } from './generated/StatusKeys';
+export type { EffortKeys } from './generated/EffortKeys';
+export type { PriorityKeys } from './generated/PriorityKeys';
+export type { PriorityKeysByScale } from './generated/PriorityKeysByScale';
+export type { ProgressTask } from './generated/ProgressTask';
+export type { SubtaskProgressInput } from './generated/SubtaskProgressInput';
+export type { SubtaskProgress } from './generated/SubtaskProgress';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

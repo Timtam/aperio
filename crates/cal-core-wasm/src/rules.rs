@@ -225,6 +225,16 @@ pub fn split_deadlines_by_week(input_json: &str) -> Result<String, WireError> {
         .map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::taskI18nKeys`].
+pub fn task_i18n_keys() -> String {
+    cal_core::task_i18n_keys_json()
+}
+
+/// See [`crate::subtaskProgress`].
+pub fn subtask_progress(input_json: &str) -> Result<String, WireError> {
+    cal_core::subtask_progress_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

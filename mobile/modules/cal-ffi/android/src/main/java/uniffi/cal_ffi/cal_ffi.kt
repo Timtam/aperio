@@ -850,7 +850,11 @@ external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_split_deadlines_by_week(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_subtask_progress(
+): Short
 external fun uniffi_cal_ffi_checksum_func_suggest_group_mate(
+): Short
+external fun uniffi_cal_ffi_checksum_func_task_i18n_keys(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_tasks_on_days(
 ): Short
@@ -1650,7 +1654,11 @@ external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue
 ): Int
 external fun uniffi_cal_ffi_fn_func_split_deadlines_by_week(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_subtask_progress(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_suggest_group_mate(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_task_i18n_keys(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_tasks_on_days(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1829,7 +1837,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_split_deadlines_by_week() != 58972.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_subtask_progress() != 39894.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_suggest_group_mate() != 60991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_task_i18n_keys() != 24750.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_tasks_on_days() != 23798.toShort()) {
@@ -10601,6 +10615,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * How far every parent's subtasks are, for a whole task list at once.
+         */
+    @Throws(StoreException::class) fun `subtaskProgress`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_subtask_progress(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The row that most looks like a copy of an anchor, as JSON.
          *
          * `input_json` is `{anchor, candidates[]}`. The answer is the position in
@@ -10612,6 +10640,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_suggest_group_mate(
     
         FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Every i18n key of the task vocabulary, as one table: read once at
+         * install, never asked per chip.
+         */ fun `taskI18nKeys`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_task_i18n_keys(
+    
+        _status)
 }
     )
     }

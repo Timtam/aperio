@@ -269,3 +269,16 @@ pub fn backlog_weeks(input_json: &str) -> Result<String, JsValue> {
 pub fn split_deadlines_by_week(input_json: &str) -> Result<String, JsValue> {
     rules::split_deadlines_by_week(input_json).map_err(to_js)
 }
+
+/// Every i18n key of the task vocabulary, as one table: read once at
+/// install, never asked per chip.
+#[wasm_bindgen(js_name = taskI18nKeys)]
+pub fn task_i18n_keys() -> String {
+    rules::task_i18n_keys()
+}
+
+/// How far every parent's subtasks are, for a whole task list at once.
+#[wasm_bindgen(js_name = subtaskProgress)]
+pub fn subtask_progress(input_json: &str) -> Result<String, JsValue> {
+    rules::subtask_progress(input_json).map_err(to_js)
+}

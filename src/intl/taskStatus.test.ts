@@ -180,3 +180,34 @@ describe('the two-level priority system', () => {
     expect(normalPriority(null)).toBe('medium');
   });
 });
+
+describe('subtaskProgress with ids that name Object.prototype members', () => {
+  // Ids are free text — a CalDAV UID is the id. The answer crosses the door as
+  // a JSON object, and a plain-object lookup would find `Object.prototype`
+  // behind a childless parent called `constructor`. The fixture pins three of
+  // them; `__proto__` cannot be an expect key in a JSON literal (it would set
+  // the prototype), so it is pinned here, built at runtime.
+  const at = (over: Partial<Task>): Task => ({ ...baseTask, ...over });
+  const tasks = [
+    at({ id: '__proto__', parent_id: null, status: 'open' }),
+    at({ id: 'constructor', parent_id: null, status: 'open' }),
+    at({ id: 'c', parent_id: 'p', status: 'completed' }),
+  ];
+
+  it('answers null for every childless parent, whatever it is called', () => {
+    for (const id of ['__proto__', 'constructor', 'toString', 'valueOf']) {
+      expect(subtaskProgress(id, tasks), id).toBeNull();
+      expect(subtaskProgressSuffix(() => 'spoken', id, tasks), id).toBe('');
+    }
+    expect(subtaskProgress('p', tasks)).toEqual({ done: 1, total: 1 });
+  });
+
+  it('counts children of a parent called __proto__', () => {
+    const rows = [
+      at({ id: '__proto__', parent_id: null, status: 'open' }),
+      at({ id: 'c1', parent_id: '__proto__', status: 'completed' }),
+      at({ id: 'c2', parent_id: '__proto__', status: 'open' }),
+    ];
+    expect(subtaskProgress('__proto__', rows)).toEqual({ done: 1, total: 2 });
+  });
+});
