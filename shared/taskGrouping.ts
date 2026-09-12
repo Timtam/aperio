@@ -12,7 +12,17 @@
 // the TypeScript this replaced; `taskGrouping.contract.test.ts` replays it
 // through this door, and the core's own contract test reads the same file.
 
-import type { Section, Task, TaskUser } from './types';
+import type {
+  GroupHead,
+  GroupKind,
+  GroupableTask,
+  GroupingInput,
+  GroupingRow,
+  Section,
+  Task,
+  TaskGroupBy,
+  TaskUser,
+} from './types';
 import { compareTitles } from './ordering';
 import { priorityRank, type PriorityScale } from './taskStatus';
 
@@ -33,14 +43,9 @@ export const TODAY_GROUP_ID = '__aperio_today_group__';
 /** Sentinel id of the synthetic "Abgebrochen (N)" group row — cancelled tasks. */
 export const CANCELLED_GROUP_ID = '__aperio_cancelled_group__';
 
-/**
- * How the task view groups its top level:
- *  - `'state'` — by lifecycle: Backlog → per-list scheduled groups → Zukünftig
- *    → Done (the historical grouping).
- *  - `'list'` — every NON-completed task in its own list (+ sections),
- *    regardless of backlog/scheduled/deferred state; only Done stays separate.
- */
-export type TaskGroupBy = 'state' | 'list';
+// `TaskGroupBy` (how the top level groups: 'state' by lifecycle, 'list' by
+// list) is generated from `cal_core::task_grouping::TaskGroupBy` and exported
+// by `./types`, like every other wire type of this door.
 
 /**
  * A backlog task is **deferred** when its `resurface_date` is strictly after
@@ -59,15 +64,7 @@ export function isTaskDeferred(task: Task, today: string): boolean {
  *  the synthetic Done or Deferred group). When `group` is set on an
  *  {@link Entry}, the row is a collapsible header rather than a real task. */
 export interface GroupMeta {
-  kind:
-    | 'backlog'
-    | 'list'
-    | 'section'
-    | 'done'
-    | 'deferred'
-    | 'overdue'
-    | 'today'
-    | 'cancelled';
+  kind: GroupKind;
   /** Section row id — present only for `kind: 'section'`; lets the header
    *  tint to the section colour and offer the ⋮ actions. */
   sectionId?: string;
@@ -202,24 +199,9 @@ export function sortSections<T extends { name: string }>(sections: T[]): T[] {
 
 // ─────────────────────────────── The door ───────────────────────────────────
 
-/** What the rule reads of a task, and nothing else. Sent instead of the whole
- *  row: a task carries twice as many fields, and the core has no business
- *  knowing about the rest. */
-interface GroupableTask {
-  id: string;
-  list_id: string;
-  title: string;
-  status: Task['status'];
-  priority: Task['priority'];
-  scheduled_date: string | null;
-  resurface_date: string | null;
-  parent_id: string | null;
-  section_id: string | null;
-  assignees: TaskUser[];
-  updated_at: string;
-  completed_at: string | null;
-}
-
+// What the rule reads of a task, and nothing else — `GroupableTask` from
+// `./types`. Sent instead of the whole row: a task carries twice as many
+// fields, and the core has no business knowing about the rest.
 function onlyGroupable(task: Task): GroupableTask {
   return {
     id: task.id,
@@ -234,37 +216,6 @@ function onlyGroupable(task: Task): GroupableTask {
     assignees: task.assignees,
     updated_at: task.updated_at,
     completed_at: task.completed_at,
-  };
-}
-
-/** `cal_core::task_grouping::GroupingInput`. */
-interface GroupingInput {
-  tasks: GroupableTask[];
-  lists: Record<string, string>;
-  sections: Record<string, Section[]>;
-  today: string;
-  currentUserByList: Record<string, TaskUser | null>;
-  groupBy: TaskGroupBy;
-  scale: PriorityScale;
-  collapsed: string[];
-  language: string;
-}
-
-/** One row of the core's answer — `cal_core::task_grouping::Row`. A task by
- *  id, or a header with what it takes to word it. */
-interface GroupingRow {
-  id: string;
-  depth: number;
-  hidden: boolean;
-  hasChildren: boolean;
-  group?: {
-    kind: GroupMeta['kind'];
-    parentId: string | null;
-    listId?: string;
-    sectionId?: string;
-    count: number;
-    mine?: number;
-    others?: number;
   };
 }
 
@@ -302,7 +253,7 @@ function rules(): TaskGroupingRules {
 /** The words for a header, from what the core answered. The only place the
  *  grouping meets `t`. */
 function headerTitle(
-  head: NonNullable<GroupingRow['group']>,
+  head: GroupHead,
   t: (key: string, vars?: Record<string, unknown>) => string,
   nameOf: (listId: string) => string,
   section: Section | undefined,
@@ -375,6 +326,9 @@ export function buildEntries(
   };
   const rows = JSON.parse(door.groupTasksJson(JSON.stringify(input))) as GroupingRow[];
 
+  // Ids are unique within a snapshot (they are the store's primary key, and
+  // the views already key their rows by them), so last-wins is never asked
+  // to choose; the core answers with the same rows either way.
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
 

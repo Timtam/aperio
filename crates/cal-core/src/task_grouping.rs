@@ -9,7 +9,7 @@
 //!
 //! # What the core answers, and what it deliberately does not
 //!
-//! The answer is a flat list of [`Row`]s in depth-first order: a real task by
+//! The answer is a flat list of [`GroupingRow`]s in depth-first order: a real task by
 //! its id, or a synthetic header carrying its [`GroupKind`], its count(s) and
 //! the ids it points at. It never carries a title. "Erledigt (3)" and
 //! "Inbox (2)" are the caller's to build from kind + count + ids — the core
@@ -34,20 +34,47 @@
 //! terminal subtask under an open parent stays inline rather than being
 //! hoisted.
 //!
+//! The wire types live outside the `collation` feature gate so that
+//! `cargo xtask ts-types` (which builds with `ts-export` alone) can generate
+//! their TypeScript declarations; only the grouping itself, which collates,
+//! is behind the feature.
+//!
 //! Every answer here is pinned by `tests/fixtures/taskGrouping.json`, measured
 //! by running the TypeScript this replaces; the `contract` module below reads
 //! it, and so does the TypeScript contract test on the other side of the
 //! boundary.
+//!
+//! # Where this deliberately differs from the TypeScript
+//!
+//! Erledigt and Abgebrochen order by the INSTANT of `completed_at` /
+//! `updated_at`, not by the spelling of the timestamp. The TypeScript compared
+//! the RFC-3339 strings, and for two stamps within one second — the local
+//! adapter writes a fraction, a provider writes whole seconds — a string
+//! compare puts `…00Z` after `…00.250Z`, the earlier instant first. That was
+//! an artefact, not a decision; the fixture pins the instant order under
+//! `done-orders-by-instant-not-by-spelling`, with what the TypeScript said.
+//!
+//! The input is strict where the TypeScript was tolerant: `updated_at` is
+//! required and every date must be a bare `YYYY-MM-DD`, so a malformed row
+//! is an error at the door rather than a row filed somewhere. No production
+//! path produces one — every task the views hold is serde output of `Task` —
+//! and the loud failure is the point: a silently mis-filed task is the kind of
+//! bug nobody reports.
 
+#[cfg(feature = "collation")]
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "collation")]
 use crate::collation::{compare_names, compare_titles, CollationLanguage};
+#[cfg(feature = "collation")]
 use crate::task_assignment::is_mine_or_unassigned;
-use crate::task_priority::{priority_rank, PriorityScale};
+#[cfg(feature = "collation")]
+use crate::task_priority::priority_rank;
+use crate::task_priority::PriorityScale;
 use crate::types::{Section, TaskPriority, TaskStatus, TaskUser};
 
 /// Sentinel id of the synthetic "Erledigt (N)" header.
@@ -66,6 +93,7 @@ pub const CANCELLED_GROUP_ID: &str = "__aperio_cancelled_group__";
 /// What the rule reads of a task — by the same field names as `Task`, so a
 /// full task's JSON deserializes into it and the caller may send either.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct GroupableTask {
     pub id: String,
     pub list_id: String,
@@ -89,8 +117,9 @@ pub struct GroupableTask {
 
 /// How the top level is grouped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "lowercase")]
-pub enum GroupBy {
+pub enum TaskGroupBy {
     /// By lifecycle: Überfällig → Heute → Backlog → Zukünftig → Erledigt →
     /// Abgebrochen. The historical grouping.
     #[default]
@@ -102,6 +131,7 @@ pub enum GroupBy {
 
 /// Everything the rule needs, and nothing it does not.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 pub struct GroupingInput {
     pub tasks: Vec<GroupableTask>,
@@ -121,7 +151,7 @@ pub struct GroupingInput {
     #[serde(default)]
     pub current_user_by_list: HashMap<String, Option<TaskUser>>,
     #[serde(default)]
-    pub group_by: GroupBy,
+    pub group_by: TaskGroupBy,
     /// The user's priority system — decides how many bands the sibling
     /// ordering has.
     #[serde(default)]
@@ -137,6 +167,7 @@ pub struct GroupingInput {
 
 /// What kind of header a synthetic row is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "lowercase")]
 pub enum GroupKind {
     Backlog,
@@ -151,6 +182,7 @@ pub enum GroupKind {
 
 /// What it takes to word a header — and to find it again.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 pub struct GroupHead {
     pub kind: GroupKind,
@@ -159,25 +191,30 @@ pub struct GroupHead {
     pub parent_id: Option<String>,
     /// The owning list, for list and section headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub list_id: Option<String>,
     /// The section row, for section headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub section_id: Option<String>,
     /// Tasks under this header. The whole subtree for the active groups; the
     /// top-level items only for the terminal ones (Erledigt, Abgebrochen).
     pub count: usize,
     /// Present only when Erledigt splits: done tasks that are mine or nobody's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub mine: Option<usize>,
     /// Present only when Erledigt splits: done tasks assigned to someone else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub others: Option<usize>,
 }
 
 /// One row of the flattened tree, in depth-first order.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
-pub struct Row {
+pub struct GroupingRow {
     /// A task id, or a synthetic header id.
     pub id: String,
     /// 0 at the top; +1 per nesting level.
@@ -188,6 +225,7 @@ pub struct Row {
     pub has_children: bool,
     /// Present when the row is a header rather than a task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub group: Option<GroupHead>,
 }
 
@@ -202,6 +240,7 @@ pub fn is_task_deferred(resurface_date: Option<NaiveDate>, today: NaiveDate) -> 
 /// Sibling order everywhere: priority band first (how many bands there are is
 /// the user's `scale`), then the title, natural — "Aufgabe 2" before
 /// "Aufgabe 10".
+#[cfg(feature = "collation")]
 fn task_order(
     a: &GroupableTask,
     b: &GroupableTask,
@@ -219,11 +258,13 @@ fn task_order(
 /// for a repeating task — never gets one; `updated_at` is its completion
 /// moment. The empty-key fallback this replaced filed those as the oldest
 /// thing in the list seconds after they were ticked off.
+#[cfg(feature = "collation")]
 fn done_order_key(task: &GroupableTask) -> DateTime<Utc> {
     task.completed_at.unwrap_or(task.updated_at)
 }
 
 /// A node of the grouping forest before it is flattened.
+#[cfg(feature = "collation")]
 enum Node<'a> {
     Task(&'a GroupableTask),
     Group {
@@ -240,12 +281,14 @@ enum Node<'a> {
 
 /// What every step of the grouping reads: the input, the resolved language,
 /// and the subtask buckets once the cycle guard has settled them.
+#[cfg(feature = "collation")]
 struct Grouping<'a> {
     input: &'a GroupingInput,
     language: CollationLanguage,
     children: HashMap<&'a str, Vec<&'a GroupableTask>>,
 }
 
+#[cfg(feature = "collation")]
 impl<'a> Grouping<'a> {
     /// Tasks contained under one task: its whole subtask subtree.
     fn count_subtasks(&self, id: &str) -> usize {
@@ -378,13 +421,19 @@ impl<'a> Grouping<'a> {
 
     // Depth-first emit. Hidden rows stay in the list so the index space is
     // stable across a collapse; the renderer skips them.
-    fn emit_task(&self, task: &'a GroupableTask, depth: usize, hidden: bool, rows: &mut Vec<Row>) {
+    fn emit_task(
+        &self,
+        task: &'a GroupableTask,
+        depth: usize,
+        hidden: bool,
+        rows: &mut Vec<GroupingRow>,
+    ) {
         let kids = self
             .children
             .get(task.id.as_str())
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        rows.push(Row {
+        rows.push(GroupingRow {
             id: task.id.clone(),
             depth,
             hidden,
@@ -403,7 +452,7 @@ impl<'a> Grouping<'a> {
         depth: usize,
         hidden: bool,
         parent_id: Option<&str>,
-        rows: &mut Vec<Row>,
+        rows: &mut Vec<GroupingRow>,
     ) {
         match node {
             Node::Task(task) => self.emit_task(task, depth, hidden, rows),
@@ -417,7 +466,7 @@ impl<'a> Grouping<'a> {
                 others,
                 children,
             } => {
-                rows.push(Row {
+                rows.push(GroupingRow {
                     id: id.clone(),
                     depth,
                     hidden,
@@ -441,6 +490,7 @@ impl<'a> Grouping<'a> {
     }
 }
 
+#[cfg(feature = "collation")]
 fn mark_reachable<'a>(
     task: &'a GroupableTask,
     children: &HashMap<&'a str, Vec<&'a GroupableTask>>,
@@ -458,7 +508,8 @@ fn mark_reachable<'a>(
 
 /// The task view's rows, in depth-first order. See the module doc for the
 /// shape; `tests/fixtures/taskGrouping.json` for every pinned answer.
-pub fn group_tasks(input: &GroupingInput) -> Vec<Row> {
+#[cfg(feature = "collation")]
+pub fn group_tasks(input: &GroupingInput) -> Vec<GroupingRow> {
     let language = CollationLanguage::from_tag(&input.language);
     let scale = input.scale;
     let today = input.today;
@@ -586,14 +637,14 @@ pub fn group_tasks(input: &GroupingInput) -> Vec<Row> {
 
     // List mode: every open task in its own list (+ sections), regardless of
     // state; the terminal groups follow below as in state mode.
-    if input.group_by == GroupBy::List {
+    if input.group_by == TaskGroupBy::List {
         for (list_id, items) in g.by_list(&open_top) {
             let scope = format!("ls:{list_id}");
             forest.push(g.list_group(format!("grp:list:{list_id}"), list_id, &items, &scope));
         }
     }
 
-    if input.group_by == GroupBy::State {
+    if input.group_by == TaskGroupBy::State {
         // Überfällig first, as the most pressing. Flat, all lists together.
         if !overdue.is_empty() {
             forest.push(g.flat_group(OVERDUE_GROUP_ID, GroupKind::Overdue, &overdue));
@@ -675,7 +726,7 @@ pub fn group_tasks(input: &GroupingInput) -> Vec<Row> {
         });
     }
 
-    let mut rows: Vec<Row> = Vec::new();
+    let mut rows: Vec<GroupingRow> = Vec::new();
     for root in forest {
         g.emit_node(root, 0, false, None, &mut rows);
     }
@@ -684,6 +735,7 @@ pub fn group_tasks(input: &GroupingInput) -> Vec<Row> {
 
 /// [`group_tasks`] over the wire: a [`GroupingInput`] as JSON in, the rows as
 /// JSON out. The shape every door speaks.
+#[cfg(feature = "collation")]
 pub fn group_tasks_json(input_json: &str) -> Result<String, serde_json::Error> {
     let input: GroupingInput = serde_json::from_str(input_json)?;
     serde_json::to_string(&group_tasks(&input))
@@ -695,7 +747,7 @@ pub fn group_tasks_json(input_json: &str) -> Result<String, serde_json::Error> {
 /// reading this same file. The fixture was written by running the TypeScript
 /// over the table BEFORE the port, so the port is measured against what was,
 /// not against what it thinks should be.
-#[cfg(test)]
+#[cfg(all(test, feature = "collation"))]
 mod contract {
     use super::*;
     use serde_json::{json, Value};
@@ -808,7 +860,7 @@ mod contract {
             }],
             "today": "2026-05-21"
         }"#;
-        let rows: Vec<Row> =
+        let rows: Vec<GroupingRow> =
             serde_json::from_str(&group_tasks_json(input).expect("the input is valid"))
                 .expect("rows round-trip");
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();

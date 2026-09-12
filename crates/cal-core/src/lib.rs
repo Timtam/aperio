@@ -28,10 +28,23 @@ pub mod reminder;
 pub mod spawn;
 pub mod suggestion_decline;
 pub mod task_assignment;
-// Behind the same feature: the grouping orders titles, section names and
-// list names, and an adapter never builds a task view.
-#[cfg(feature = "collation")]
+// The grouping itself is behind the same feature (it orders titles, section
+// names and list names, and an adapter never builds a task view); the wire
+// types are not, so `cargo xtask ts-types` can generate them.
 pub mod task_grouping;
+// Anti-silence: `cargo test -p cal-core` without the feature compiles the
+// grouping out and would report green having run none of its pinned cases.
+// Say so instead. (The workspace run has the feature through cal-core-wasm
+// and cal-ffi; CI runs that.)
+#[cfg(all(test, not(feature = "collation")))]
+mod task_grouping_gate {
+    #[test]
+    fn the_grouping_contract_needs_the_collation_feature() {
+        panic!(
+            "cal_core::task_grouping and its fixture contract are behind the `collation` \n             feature and were not compiled: run `cargo test -p cal-core --features collation` \n             (or the workspace run, which enables it through cal-core-wasm and cal-ffi)"
+        );
+    }
+}
 pub mod task_priority;
 pub mod types;
 
@@ -77,7 +90,10 @@ pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use task_assignment::is_mine_or_unassigned;
 #[cfg(feature = "collation")]
-pub use task_grouping::{group_tasks, group_tasks_json, is_task_deferred, GroupingInput};
+pub use task_grouping::{group_tasks, group_tasks_json};
+pub use task_grouping::{
+    is_task_deferred, GroupHead, GroupKind, GroupableTask, GroupingInput, GroupingRow, TaskGroupBy,
+};
 pub use task_priority::{normal_priority, priority_rank, PriorityScale};
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,

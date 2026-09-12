@@ -632,7 +632,12 @@ auseinandergelaufen.
 Der Grund ist praktisch: diese beiden werden aus neun Schichten Ansichtscode
 gerufen und aus `buildEntries`, das schon neun Parameter trägt. Eine Sprache
 durch all das zu fädeln hieße, die Wahl vor jeden künftigen Aufrufer zu
-stellen — und das ist, wie sie überhaupt erst gedriftet ist.
+stellen — und das ist, wie sie überhaupt erst gedriftet ist. (Seit die
+Gruppierung im Kern liegt, sortiert `buildEntries` selbst nicht mehr: es
+reicht die Sprache als `languageTag()` seines Installationsortes in
+`cal_core::task_grouping` hinein, und der Kern kollationiert. Über die
+installierte Tür gehen noch `taskOrder` und `sectionOrder`, die
+Kalender-Tagesflächen und die Stores.)
 
 Ist **nichts** installiert, wird laut gefehlt statt auf Codepunkte
 zurückzufallen. Eine Rückfallebene wäre eine zweite Ordnungsregel, die sich nur
