@@ -35,6 +35,9 @@ import uniffi.cal_ffi.backlogWeeks as uniffiBacklogWeeks
 import uniffi.cal_ffi.splitDeadlinesByWeek as uniffiSplitDeadlinesByWeek
 import uniffi.cal_ffi.taskI18nKeys as uniffiTaskI18nKeys
 import uniffi.cal_ffi.subtaskProgress as uniffiSubtaskProgress
+import uniffi.cal_ffi.planStatusCascade as uniffiPlanStatusCascade
+import uniffi.cal_ffi.planAncestorRecompute as uniffiPlanAncestorRecompute
+import uniffi.cal_ffi.autoDateOnStart as uniffiAutoDateOnStart
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -364,6 +367,20 @@ class CalFfiModule : Module() {
 
     Function("subtaskProgress") { inputJson: String ->
       uniffiSubtaskProgress(inputJson)
+    }
+
+    // The parent/subtask status coupling: the writes a status change plans,
+    // the ancestors re-derived after a subtask came or went, the auto-date.
+    Function("planStatusCascade") { inputJson: String ->
+      uniffiPlanStatusCascade(inputJson)
+    }
+
+    Function("planAncestorRecompute") { inputJson: String ->
+      uniffiPlanAncestorRecompute(inputJson)
+    }
+
+    Function("autoDateOnStart") { inputJson: String ->
+      uniffiAutoDateOnStart(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

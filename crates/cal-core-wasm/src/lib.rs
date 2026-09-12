@@ -282,3 +282,22 @@ pub fn task_i18n_keys() -> String {
 pub fn subtask_progress(input_json: &str) -> Result<String, JsValue> {
     rules::subtask_progress(input_json).map_err(to_js)
 }
+
+/// The writes a task's status change plans: the root, its descendants, its
+/// ancestors — in application order.
+#[wasm_bindgen(js_name = planStatusCascade)]
+pub fn plan_status_cascade(input_json: &str) -> Result<String, JsValue> {
+    rules::plan_status_cascade(input_json).map_err(to_js)
+}
+
+/// The ancestors re-derived after a subtask was created or deleted.
+#[wasm_bindgen(js_name = planAncestorRecompute)]
+pub fn plan_ancestor_recompute(input_json: &str) -> Result<String, JsValue> {
+    rules::plan_ancestor_recompute(input_json).map_err(to_js)
+}
+
+/// The "started → pin to today" companion date, or null.
+#[wasm_bindgen(js_name = autoDateOnStart)]
+pub fn auto_date_on_start(input_json: &str) -> Result<String, JsValue> {
+    rules::auto_date_on_start(input_json).map_err(to_js)
+}

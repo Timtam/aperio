@@ -5,7 +5,6 @@
 import type { Task, TaskStatus } from '../api/types';
 import {
   autoDateOnStart,
-  deriveStatusFromChildren,
   planAncestorRecompute,
   planStatusCascade,
   type StatusWrite,
@@ -33,15 +32,27 @@ export interface DeriveInput {
   children: TaskStatus[];
 }
 
+/**
+ * The derivation has no door of its own (no caller needs it alone), so it is
+ * observed through the recompute: a parent with these children, asked twice.
+ * Asked as `open`, the recompute writes the derived status unless that is
+ * `open` itself (or there are no children); asked as `cancelled`, it writes
+ * `open` when the derivation is `open`. Together the two answers name every
+ * derivation, and `null` falls out when neither writes.
+ */
 export function answerDerive(input: DeriveInput, baseTask: Task): TaskStatus | null {
-  return deriveStatusFromChildren(
-    input.children.map((status, i) => ({
+  const rows = (parent: TaskStatus): Task[] => [
+    { ...baseTask, id: 'p', parent_id: null, status: parent },
+    ...input.children.map((status, i) => ({
       ...baseTask,
       id: `c${i}`,
       parent_id: 'p',
       status,
     })),
-  );
+  ];
+  const writeFor = (parent: TaskStatus): TaskStatus | undefined =>
+    planAncestorRecompute('p', rows(parent))[0]?.status;
+  return writeFor('open') ?? writeFor('cancelled') ?? null;
 }
 
 export interface CascadeOptionsInput {

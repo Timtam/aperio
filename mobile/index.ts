@@ -10,6 +10,7 @@ import {
   installTaskGroupingRules,
   installTaskDayRules,
   installTaskStatusRules,
+  installTaskCascadeRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -121,6 +122,13 @@ installTaskDayRules({
 installTaskStatusRules({
   taskI18nKeysJson: () => CalFfi.taskI18nKeys(),
   subtaskProgressJson: (inputJson) => CalFfi.subtaskProgress(inputJson),
+});
+
+// The parent/subtask status coupling: what a check-off writes, in order.
+installTaskCascadeRules({
+  planStatusCascadeJson: (inputJson) => CalFfi.planStatusCascade(inputJson),
+  planAncestorRecomputeJson: (inputJson) => CalFfi.planAncestorRecompute(inputJson),
+  autoDateOnStartJson: (inputJson) => CalFfi.autoDateOnStart(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

@@ -47,6 +47,7 @@ import {
   installTaskGroupingRules,
   installTaskDayRules,
   installTaskStatusRules,
+  installTaskCascadeRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -72,6 +73,9 @@ import {
   splitDeadlinesByWeekJson,
   taskI18nKeysJson,
   subtaskProgressJson,
+  planStatusCascadeJson,
+  planAncestorRecomputeJson,
+  autoDateOnStartJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -123,3 +127,8 @@ installTaskDayRules({
   languageTag: () => 'de',
 });
 installTaskStatusRules({ taskI18nKeysJson, subtaskProgressJson });
+installTaskCascadeRules({
+  planStatusCascadeJson,
+  planAncestorRecomputeJson,
+  autoDateOnStartJson,
+});

@@ -42,6 +42,9 @@ import init, {
   splitDeadlinesByWeek as wasmSplitDeadlinesByWeek,
   taskI18nKeys as wasmTaskI18nKeys,
   subtaskProgress as wasmSubtaskProgress,
+  planStatusCascade as wasmPlanStatusCascade,
+  planAncestorRecompute as wasmPlanAncestorRecompute,
+  autoDateOnStart as wasmAutoDateOnStart,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -219,4 +222,22 @@ export function taskI18nKeysJson(): string {
 export function subtaskProgressJson(inputJson: string): string {
   assertReady();
   return wasmSubtaskProgress(inputJson);
+}
+
+/** See `cal_core::task_cascade::plan_status_cascade_json`. */
+export function planStatusCascadeJson(inputJson: string): string {
+  assertReady();
+  return wasmPlanStatusCascade(inputJson);
+}
+
+/** See `cal_core::task_cascade::plan_ancestor_recompute_json`. */
+export function planAncestorRecomputeJson(inputJson: string): string {
+  assertReady();
+  return wasmPlanAncestorRecompute(inputJson);
+}
+
+/** See `cal_core::task_cascade::auto_date_on_start_json`. */
+export function autoDateOnStartJson(inputJson: string): string {
+  assertReady();
+  return wasmAutoDateOnStart(inputJson);
 }

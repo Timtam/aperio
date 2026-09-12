@@ -235,6 +235,22 @@ pub fn subtask_progress(input_json: &str) -> Result<String, WireError> {
     cal_core::subtask_progress_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::planStatusCascade`].
+pub fn plan_status_cascade(input_json: &str) -> Result<String, WireError> {
+    cal_core::plan_status_cascade_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::planAncestorRecompute`].
+pub fn plan_ancestor_recompute(input_json: &str) -> Result<String, WireError> {
+    cal_core::plan_ancestor_recompute_json(input_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::autoDateOnStart`].
+pub fn auto_date_on_start(input_json: &str) -> Result<String, WireError> {
+    cal_core::auto_date_on_start_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
