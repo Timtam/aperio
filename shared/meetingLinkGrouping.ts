@@ -33,6 +33,12 @@
 
 import type { EventGroup } from './eventGroups';
 import type { SuggestionDecline } from './types';
+// What crosses the door, generated from `cal_core::meeting_link_grouping`.
+// The caller-side `LinkableEvent` below is the least a row needs; the wire
+// row carries the resolved series id and a `recurs` flag instead of the
+// rule, and the answer is positions — hence the aliases.
+import type { LinkableEvent as LinkableEventWire } from './generated/LinkableEvent';
+import type { MeetingLinkPair as MeetingLinkPairWire } from './generated/MeetingLinkPair';
 
 /** The least an event needs for this. */
 export interface LinkableEvent {
@@ -119,7 +125,7 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
 ): MeetingLinkPair<E>[] {
   const answer = rules().findMeetingLinkPairsJson(
     JSON.stringify({
-      events: events.map((ev) => ({
+      events: events.map((ev): LinkableEventWire => ({
         calendar_id: ev.calendar_id,
         series_id: seriesId(ev),
         location: ev.location ?? null,
@@ -130,11 +136,7 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
       declines,
     }),
   );
-  const pairs = JSON.parse(answer) as {
-    meeting: number;
-    event: number;
-    join_url: string;
-  }[];
+  const pairs = JSON.parse(answer) as MeetingLinkPairWire[];
   return pairs.map(({ meeting, event, join_url }) => ({
     meeting: events[meeting],
     event: events[event],

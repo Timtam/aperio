@@ -40,6 +40,7 @@ export type { ConferenceProvider } from './generated/ConferenceProvider';
 export type { ConferenceSource } from './generated/ConferenceSource';
 export type { ConferenceLink } from './generated/ConferenceLink';
 export type { ConferenceDetail } from './generated/ConferenceDetail';
+import type { ConferenceSourcesInput } from './generated/ConferenceSourcesInput';
 
 import type { ConferenceLink } from './generated/ConferenceLink';
 
@@ -109,14 +110,13 @@ export function detectConference(
   // defaults them either way, but writing them out means the payload always has
   // the same shape, which is one less thing to wonder about when a detection
   // goes wrong.
-  const answer = detector().detectConferenceJson(
-    JSON.stringify({
-      providerField: sources.providerField ?? null,
-      icalendarConference: sources.icalendarConference ?? [],
-      vendorProperties: sources.vendorProperties ?? [],
-      location: sources.location ?? null,
-      description: sources.description ?? null,
-    }),
-  );
+  const input: ConferenceSourcesInput = {
+    providerField: sources.providerField ?? null,
+    icalendarConference: sources.icalendarConference ?? [],
+    vendorProperties: sources.vendorProperties ?? [],
+    location: sources.location ?? null,
+    description: sources.description ?? null,
+  };
+  const answer = detector().detectConferenceJson(JSON.stringify(input));
   return JSON.parse(answer) as ConferenceLink | null;
 }

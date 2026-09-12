@@ -1295,12 +1295,16 @@ Siehe DESIGN §4.2.
   exportiert; die Hülle importiert sie. Dafür liegen die Typen AUSSERHALB des
   `collation`-Gates (der xtask baut nur mit `ts-export`), gegatet ist nur die
   Gruppierung selbst.
-- [ ] **Nachzug für die älteren Türen:** Übertrag, Faltung und Vorschläge
-  annotieren ihre Rust-Typen zwar für ts-rs (`shared/generated/CarryPlan.ts`
-  & Co. existieren), aber `shared/groupCarry.ts`, `collapseEventGroups.ts`
-  und `groupSuggestions.ts` deklarieren weiter eigene Interfaces und
-  importieren die erzeugten nie — der `ts-types --check` prüft dort ins Leere.
-  Gleicher Schnitt wie bei der Gruppierung, eine Tür nach der anderen.
+- [x] **Nachzug für die älteren Türen (PR #43):** sechs Türen — Übertrag,
+  Faltung, Vorschläge, Meeting-Filter, Meeting-Link-Paarung, Konferenz —
+  bauten ihre Anfragen und parsten ihre Antworten mit handgeschriebenen
+  Formen, während `shared/generated/CarryPlan.ts` & Co. ungenutzt daneben
+  lagen; der `ts-types --check` prüfte dort ins Leere. Jetzt ist alles, was
+  über die Leitung geht, mit dem erzeugten Typ typisiert. Wo der Name von
+  der hydratisierten Hüllen-Form (`CollapsedRow<E>`, `GroupSuggestion<E>`,
+  `MeetingLinkPair<E>`) oder vom Aufrufer-Minimum (`SuggestibleEvent`,
+  `LinkableEvent`) belegt ist, trägt der Wire-Typ den Alias `…Wire`; kein
+  öffentlicher Name bewegt sich. Reine Typänderung.
   Nebenbefund für danach: `useTasks.ts` hat auf Desktop
   UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.

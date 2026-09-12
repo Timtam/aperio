@@ -12,6 +12,11 @@
 // only the way in.
 
 import type { EventGroup } from './eventGroups';
+// What crosses the door, generated from `cal_core::event_group_fold`. The
+// answer is positions; `CollapsedRow<E>` below is the same row hydrated with
+// the caller's own event, hence the alias.
+import type { CollapsedRow as CollapsedRowWire } from './generated/CollapsedRow';
+import type { FoldableEvent } from './generated/FoldableEvent';
 
 /** The minimum a row has to carry to be foldable. */
 export interface CollapsibleEvent {
@@ -114,7 +119,7 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
   const byId = new Map(groups.map((group) => [group.id, group]));
   const answer = installedFold.collapseEventGroupsJson(
     JSON.stringify({
-      events: events.map((ev) => ({
+      events: events.map((ev): FoldableEvent => ({
         calendar_id: ev.calendar_id,
         series_id: seriesId(ev),
         start: ev.start ?? null,
@@ -124,13 +129,7 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
       groups,
     }),
   );
-  const rows = JSON.parse(answer) as {
-    event: number;
-    group_id?: string;
-    other_members: number;
-    calendar_ids: string[];
-    diverged: boolean;
-  }[];
+  const rows = JSON.parse(answer) as CollapsedRowWire[];
   return rows.map((row) => ({
     event: events[row.event],
     ...(row.group_id == null ? {} : { group: byId.get(row.group_id) }),
