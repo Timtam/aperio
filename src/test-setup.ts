@@ -44,6 +44,7 @@ import {
   installMeetingLinkRules,
   installEventGroupFold,
   installGroupCarryRules,
+  installTaskGroupingRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -63,6 +64,7 @@ import {
   occurrenceCarryFieldsJson,
   futureCarryFieldsJson,
   carryOntoFieldsJson,
+  groupTasksJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -106,3 +108,4 @@ installGroupCarryRules({
   futureCarryFieldsJson,
   carryOntoFieldsJson,
 });
+installTaskGroupingRules({ groupTasksJson, languageTag: () => 'de' });

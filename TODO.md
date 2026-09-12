@@ -1254,7 +1254,7 @@ Siehe DESIGN §4.2.
   keiner Brücke gerufen; der Wächter duldet das mit Absicht.
 - [~] **Die Aufgaben-Gruppierung zieht in den Kern** (Tonis Wahl 2026-09-10),
   in denselben zwei Schritten wie der Übertrag.
-  ↳ **Schritt 1 (dieser PR): die Tabelle.** `buildEntries` (611 Zeilen, auf
+  ↳ **Schritt 1 (PR #41): die Tabelle.** `buildEntries` (611 Zeilen, auf
   BEIDEN Oberflächen aus `useMemo` gerufen — die Modul-Suche zeigte nur den
   Desktop, weil Mobile über das Barrel importiert) hatte 41 Desktop-Tests und
   keine Fixture, die Rust lesen könnte. Jetzt steht
@@ -1273,10 +1273,35 @@ Siehe DESIGN §4.2.
   `grp:bl:list:L1`, `grp:sec:bl:L1:s1`, `__aperio_done_group__` … sind die
   Klapp-Schlüssel, die beide Oberflächen persistieren. Ein Umzug, der sie
   ändert, klappt beim Nutzer still alles wieder auf.
-  ↳ Schritt 2 (offen): `cal_core::task_grouping` antwortet mit dem Wald aus
+  ↳ **Schritt 2 (dieser PR): `cal_core::task_grouping`.** Antwortet mit dem Wald aus
   Schlüsseln, Zählern und Positionen; die Türen sind synchron (WASM,
   `Function`); die Hülle in `shared/taskGrouping.ts` hydratisiert die Zeilen
-  aus dem, was sie hält. Nebenbefund für danach: `useTasks.ts` hat auf Desktop
+  aus dem, was sie hält, und wortet die Köpfe mit `t`. Die Portierung bestand
+  alle 46 Fälle der Fixture beim ERSTEN Lauf — das ist, was die Tabelle
+  vorher wert war. Die Sprache reist im Eingang mit (`languageTag()` am
+  Installationsort, pro Aufruf gelesen); der Kern liest keine Gerätesprache.
+  ↳ **Ein Unterschied mit Absicht, von drei Gegenlesern gefunden:** Erledigt und
+  Abgebrochen ordnen nach dem ZEITPUNKT, nicht nach der Schreibweise des
+  Zeitstempels. Das TypeScript verglich RFC-3339-Text; bei zwei Stempeln in
+  derselben Sekunde (lokaler Adapter mit Bruchteil, Provider mit ganzen
+  Sekunden) stand `…00Z` hinter `…00.250Z` — der frühere Zeitpunkt zuerst. Ein
+  Artefakt, keine Entscheidung; die Fixture pinnt die Zeitpunkt-Ordnung als
+  eigenen Fall mit `wasTypeScript`-Vermerk. Dazu ein Anti-Stille-Wächter:
+  `cargo test -p cal-core` OHNE das Feature meldet jetzt laut, dass der
+  Vertrag nicht lief, statt grün zu schweigen.
+  ↳ **Die Wire-Typen sind ERZEUGT, nicht gespiegelt:** `GroupingInput`,
+  `GroupableTask`, `GroupingRow`, `GroupHead`, `GroupKind`, `TaskGroupBy`
+  kommen per `cargo xtask ts-types` aus Rust und werden von `shared/types.ts`
+  exportiert; die Hülle importiert sie. Dafür liegen die Typen AUSSERHALB des
+  `collation`-Gates (der xtask baut nur mit `ts-export`), gegatet ist nur die
+  Gruppierung selbst.
+- [ ] **Nachzug für die älteren Türen:** Übertrag, Faltung und Vorschläge
+  annotieren ihre Rust-Typen zwar für ts-rs (`shared/generated/CarryPlan.ts`
+  & Co. existieren), aber `shared/groupCarry.ts`, `collapseEventGroups.ts`
+  und `groupSuggestions.ts` deklarieren weiter eigene Interfaces und
+  importieren die erzeugten nie — der `ts-types --check` prüft dort ins Leere.
+  Gleicher Schnitt wie bei der Gruppierung, eine Tür nach der anderen.
+  Nebenbefund für danach: `useTasks.ts` hat auf Desktop
   UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,

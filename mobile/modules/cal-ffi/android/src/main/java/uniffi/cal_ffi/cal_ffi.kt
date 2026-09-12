@@ -830,6 +830,8 @@ external fun uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_future_carry_fields(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_group_tasks(
+): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
@@ -1622,6 +1624,8 @@ external fun uniffi_cal_ffi_fn_func_find_meeting_link_pairs(`inputJson`: RustBuf
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_future_carry_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_group_tasks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1781,6 +1785,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_future_carry_fields() != 52339.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_group_tasks() != 171.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
@@ -10402,6 +10409,21 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_future_carry_fields(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The task view's rows: which group each task lands in, in which order,
+         * under which header, at what depth. Asked while rendering, so synchronous.
+         */
+    @Throws(StoreException::class) fun `groupTasks`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_group_tasks(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

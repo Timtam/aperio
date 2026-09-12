@@ -8,6 +8,7 @@ import {
   installMeetingLinkRules,
   installEventGroupFold,
   installGroupCarryRules,
+  installTaskGroupingRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -30,6 +31,7 @@ import {
   occurrenceCarryFieldsJson,
   futureCarryFieldsJson,
   carryOntoFieldsJson,
+  groupTasksJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -111,6 +113,9 @@ initCoreRules()
       futureCarryFieldsJson,
       carryOntoFieldsJson,
     });
+
+    // Grouping the task view.
+    installTaskGroupingRules({ groupTasksJson, languageTag: () => i18n.language });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

@@ -59,6 +59,15 @@ export type { Weekday } from './generated/Weekday';
 
 // Grouping
 export type { SuggestionDecline } from './generated/SuggestionDecline';
+// The task view's grouping, `cal_core::task_grouping` — what the door is
+// asked with and what it answers. The shell in `shared/taskGrouping.ts`
+// speaks these; nothing else builds them by hand.
+export type { GroupableTask } from './generated/GroupableTask';
+export type { GroupingInput } from './generated/GroupingInput';
+export type { GroupingRow } from './generated/GroupingRow';
+export type { GroupHead } from './generated/GroupHead';
+export type { GroupKind } from './generated/GroupKind';
+export type { TaskGroupBy } from './generated/TaskGroupBy';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

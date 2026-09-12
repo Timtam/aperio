@@ -29,6 +29,7 @@ import uniffi.cal_ffi.compareTitles as uniffiCompareTitles
 import uniffi.cal_ffi.detectConference as uniffiDetectConference
 import uniffi.cal_ffi.findGroupSuggestions as uniffiFindGroupSuggestions
 import uniffi.cal_ffi.carryOntoFields as uniffiCarryOntoFields
+import uniffi.cal_ffi.groupTasks as uniffiGroupTasks
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -330,6 +331,11 @@ class CalFfiModule : Module() {
 
     Function("carryOntoFields") { inputJson: String ->
       uniffiCarryOntoFields(inputJson)
+    }
+
+    // Grouping the task view. Asked while rendering.
+    Function("groupTasks") { inputJson: String ->
+      uniffiGroupTasks(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

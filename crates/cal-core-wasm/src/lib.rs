@@ -246,3 +246,10 @@ pub fn future_carry_fields(input_json: &str) -> Result<String, JsValue> {
 pub fn carry_onto(input_json: &str) -> Result<String, JsValue> {
     rules::carry_onto(input_json).map_err(to_js)
 }
+
+/// The task view's rows: which group each task lands in, in which order,
+/// under which header, at what depth. Asked inside `useMemo`, so synchronous.
+#[wasm_bindgen(js_name = groupTasks)]
+pub fn group_tasks(input_json: &str) -> Result<String, JsValue> {
+    rules::group_tasks(input_json).map_err(to_js)
+}
