@@ -1,0 +1,276 @@
+{
+  "what": "Two answers of shared/taskStatus.ts that move into the core: the i18n KEY a task state, effort or priority is announced with (null where nothing is announced), and how far a parent’s subtasks are. Measured from the TypeScript before the port.",
+  "why": "Both surfaces announce the same words for the same state, and a frontend that is not JavaScript has to announce them too. The core answers with the KEY, never the sentence (DESIGN §4.5 a); the surface renders it. The keys are published as one table the surface reads once at install, because the phone would otherwise cross the native bridge once per chip.",
+  "writtenBy": [
+    "src/intl/taskStatus.measure.test.ts — a one-off, run once and deleted; the progress cases mirror src/intl/taskStatus.test.ts plus the rows the port needs (only-cancelled children, several parents at once, an absent parent row)."
+  ],
+  "readBy": [
+    "src/intl/taskStatus.contract.test.ts",
+    "crates/cal-core/src/task_status.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like taskGrouping.json and taskDay.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves."
+  },
+  "notInThisTable": {
+    "statusMarker": "the glyphs ○ ◐ ● ⊘ stay on the surface: the core answers a state, each surface picks its characters (an e-ink display plausibly wants others)",
+    "priorityMarker": "the glyphs ! !! !!! and ★ stay on the surface, for the same reason",
+    "prioritySuffix_effortSuffix_subtaskProgressSuffix_subtaskParentSuffix_assigneeSuffix": "wording through t — the surface’s; they read the keys and counts from this table",
+    "effortSizeModifier": "a CSS class token: presentation",
+    "subtaskParentTitle": "a lookup of the parent’s title, not a decision",
+    "priorityRank_isImportantPriority_normalPriority": "already in the core (cal_core::task_priority), already doors"
+  },
+  "shape": {
+    "keys": "status: every TaskStatus → key; effort: every TaskEffort → key or null; priority: per PriorityScale, every TaskPriority → key or null",
+    "baseTask": "the Task every progress case starts from; a case’s `tasks` entries are overrides merged over it",
+    "progress": "{tasks, parents} → parent id → {done, total} or null. done = completed direct children; total = direct children that are not cancelled; null when total is 0."
+  },
+  "keys": {
+    "status": {
+      "open": "views.tasks.stateOpen",
+      "in_progress": "views.tasks.stateInProgress",
+      "completed": "views.tasks.stateDone",
+      "cancelled": "views.tasks.stateCancelled"
+    },
+    "effort": {
+      "small": "views.tasks.effortSmall",
+      "medium": null,
+      "large": "views.tasks.effortLarge"
+    },
+    "priority": {
+      "three": {
+        "low": "views.tasks.priorityLow",
+        "medium": null,
+        "high": "views.tasks.priorityHigh"
+      },
+      "two": {
+        "low": null,
+        "medium": null,
+        "high": "views.tasks.priorityImportant"
+      }
+    }
+  },
+  "baseTask": {
+    "id": "t",
+    "list_id": "list",
+    "title": "thing",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "progress": [
+    {
+      "name": "no-children-is-null",
+      "note": "A parent with no children at all, and a task that is nobody’s child.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p"
+          },
+          {
+            "id": "orphan"
+          }
+        ],
+        "parents": [
+          "p",
+          "orphan"
+        ]
+      },
+      "expect": {
+        "p": null,
+        "orphan": null
+      }
+    },
+    {
+      "name": "counts-completed-and-drops-cancelled-from-the-total",
+      "note": "Four children, one cancelled: the fraction reflects what is left to do. in_progress is not done.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p"
+          },
+          {
+            "id": "c1",
+            "parent_id": "p",
+            "status": "completed"
+          },
+          {
+            "id": "c2",
+            "parent_id": "p",
+            "status": "open"
+          },
+          {
+            "id": "c3",
+            "parent_id": "p",
+            "status": "in_progress"
+          },
+          {
+            "id": "c4",
+            "parent_id": "p",
+            "status": "cancelled"
+          }
+        ],
+        "parents": [
+          "p"
+        ]
+      },
+      "expect": {
+        "p": {
+          "done": 1,
+          "total": 3
+        }
+      }
+    },
+    {
+      "name": "direct-children-only",
+      "note": "A grandchild counts for its own parent, not for the grandparent.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "status": "open"
+          },
+          {
+            "id": "gc",
+            "parent_id": "c",
+            "status": "completed"
+          }
+        ],
+        "parents": [
+          "p",
+          "c"
+        ]
+      },
+      "expect": {
+        "p": {
+          "done": 0,
+          "total": 1
+        },
+        "c": {
+          "done": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "name": "only-cancelled-children-is-null",
+      "note": "Nothing left to do and nothing done: no fraction to speak.",
+      "input": {
+        "tasks": [
+          {
+            "id": "p"
+          },
+          {
+            "id": "c1",
+            "parent_id": "p",
+            "status": "cancelled"
+          }
+        ],
+        "parents": [
+          "p"
+        ]
+      },
+      "expect": {
+        "p": null
+      }
+    },
+    {
+      "name": "several-parents-in-one-ask",
+      "note": "The views ask per row; the core answers every parent at once.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "a1",
+            "parent_id": "a",
+            "status": "completed"
+          },
+          {
+            "id": "a2",
+            "parent_id": "a",
+            "status": "completed"
+          },
+          {
+            "id": "b"
+          },
+          {
+            "id": "b1",
+            "parent_id": "b",
+            "status": "open"
+          },
+          {
+            "id": "c"
+          }
+        ],
+        "parents": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      "expect": {
+        "a": {
+          "done": 2,
+          "total": 2
+        },
+        "b": {
+          "done": 0,
+          "total": 1
+        },
+        "c": null
+      }
+    },
+    {
+      "name": "children-count-even-when-the-parent-row-is-absent",
+      "note": "The count is by parent_id; whether the parent itself is in the list does not matter.",
+      "input": {
+        "tasks": [
+          {
+            "id": "c1",
+            "parent_id": "gone",
+            "status": "completed"
+          },
+          {
+            "id": "c2",
+            "parent_id": "gone",
+            "status": "open"
+          }
+        ],
+        "parents": [
+          "gone"
+        ]
+      },
+      "expect": {
+        "gone": {
+          "done": 1,
+          "total": 2
+        }
+      }
+    }
+  ]
+}
