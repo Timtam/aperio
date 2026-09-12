@@ -74,13 +74,13 @@ pub fn completion_record_for(completed: &Task) -> NewTask {
 /// True when a date-ended rule (`OnDate`) has run past its boundary.
 /// `After { occurrences }` isn't tracked here (no per-row counter) and
 /// `Never`/absent never end.
-fn recurrence_ended(rule: &TaskRecurrence, date: NaiveDate) -> bool {
+pub(crate) fn recurrence_ended(rule: &TaskRecurrence, date: NaiveDate) -> bool {
     matches!(&rule.end, Some(RecurrenceEnd::OnDate { date: end }) if date > *end)
 }
 
 /// Next trigger date for a `Schedule`-placement rule: the next `fixed_dates`
 /// entry when set, otherwise `advance` by frequency × interval.
-fn next_trigger(base: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
+pub(crate) fn next_trigger(base: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
     match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
         Some(dates) => next_fixed_date_after(base, dates),
         None => advance(base, rule),

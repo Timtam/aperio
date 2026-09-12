@@ -828,6 +828,8 @@ external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_detect_conference(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_expand_task_occurrences(
+): Short
 external fun uniffi_cal_ffi_checksum_func_find_group_suggestions(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(
@@ -838,11 +840,15 @@ external fun uniffi_cal_ffi_checksum_func_group_tasks(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_is_important_priority(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_next_task_occurrence(
+): Short
 external fun uniffi_cal_ffi_checksum_func_normal_priority(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_normalize_join_url(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_occurrence_carry_fields(
+): Short
+external fun uniffi_cal_ffi_checksum_func_occurrence_move_target(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_parse_attendee(
 ): Short
@@ -1638,6 +1644,8 @@ external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: 
 ): Int
 external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_expand_task_occurrences(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_group_suggestions(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_meeting_link_pairs(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1648,11 +1656,15 @@ external fun uniffi_cal_ffi_fn_func_group_tasks(`inputJson`: RustBuffer.ByValue,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_is_important_priority(`priority`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_cal_ffi_fn_func_next_task_occurrence(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_normal_priority(`previous`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_normalize_join_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_occurrence_carry_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_occurrence_move_target(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1816,6 +1828,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_detect_conference() != 16331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_expand_task_occurrences() != 30514.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 11457.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1831,6 +1846,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_is_important_priority() != 30160.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_next_task_occurrence() != 45709.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_normal_priority() != 55182.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1838,6 +1856,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_occurrence_carry_fields() != 22714.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_occurrence_move_target() != 9267.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_parse_attendee() != 55709.toShort()) {
@@ -10456,6 +10477,21 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * The occurrences of recurring scheduled tasks inside a window: which
+         * input task, on which day, real or projected.
+         */
+    @Throws(StoreException::class) fun `expandTaskOccurrences`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_expand_task_occurrences(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Copies worth offering among one day's rows, as JSON.
          *
          * `input_json` is `{events[], groups[], declines[]}`, where each event is
@@ -10531,6 +10567,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * The next occurrence of a repeating task after a day, or null.
+         */
+    @Throws(StoreException::class) fun `nextTaskOccurrence`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_next_task_occurrence(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The priority a task gets when "important" is cleared: what it already had,
          * unless that was the top one. An empty string means "nothing before".
          * See `cal_core::normal_priority`.
@@ -10576,6 +10626,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_occurrence_carry_fields(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * What "move to this day" can be on a source that owns the date.
+         */
+    @Throws(StoreException::class) fun `occurrenceMoveTarget`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_occurrence_move_target(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

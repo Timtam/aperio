@@ -303,6 +303,20 @@ public class CalFfiModule: Module {
       try autoDateOnStart(inputJson: inputJson)
     }
 
+    // The recurring-task projection: occurrences in a window, one step of
+    // the walk, and what a move can be where the source owns the date.
+    Function("expandTaskOccurrences") { (inputJson: String) -> String in
+      try expandTaskOccurrences(inputJson: inputJson)
+    }
+
+    Function("nextTaskOccurrence") { (inputJson: String) -> String in
+      try nextTaskOccurrence(inputJson: inputJson)
+    }
+
+    Function("occurrenceMoveTarget") { (inputJson: String) -> String in
+      try occurrenceMoveTarget(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

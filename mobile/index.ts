@@ -11,6 +11,7 @@ import {
   installTaskDayRules,
   installTaskStatusRules,
   installTaskCascadeRules,
+  installTaskOccurrenceRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -129,6 +130,13 @@ installTaskCascadeRules({
   planStatusCascadeJson: (inputJson) => CalFfi.planStatusCascade(inputJson),
   planAncestorRecomputeJson: (inputJson) => CalFfi.planAncestorRecompute(inputJson),
   autoDateOnStartJson: (inputJson) => CalFfi.autoDateOnStart(inputJson),
+});
+
+// The recurring-task projection: the days a repeating task shows on.
+installTaskOccurrenceRules({
+  expandTaskOccurrencesJson: (inputJson) => CalFfi.expandTaskOccurrences(inputJson),
+  nextTaskOccurrenceJson: (inputJson) => CalFfi.nextTaskOccurrence(inputJson),
+  occurrenceMoveTargetJson: (inputJson) => CalFfi.occurrenceMoveTarget(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

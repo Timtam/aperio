@@ -95,6 +95,14 @@ export type { CascadeInput } from './generated/CascadeInput';
 export type { RecomputeInput } from './generated/RecomputeInput';
 export type { AutoDateInput } from './generated/AutoDateInput';
 export type { StatusWrite as StatusWriteWire } from './generated/StatusWrite';
+// The recurring-task projection, `cal_core::task_occurrences`. The shell in
+// `shared/expandTaskOccurrences.ts` speaks these.
+export type { OccurrenceTask } from './generated/OccurrenceTask';
+export type { OccurrenceInput } from './generated/OccurrenceInput';
+export type { OccurrenceRow } from './generated/OccurrenceRow';
+export type { NextOccurrenceInput } from './generated/NextOccurrenceInput';
+export type { MoveTargetInput } from './generated/MoveTargetInput';
+export type { MoveTarget } from './generated/MoveTarget';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

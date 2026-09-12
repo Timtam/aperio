@@ -301,3 +301,22 @@ pub fn plan_ancestor_recompute(input_json: &str) -> Result<String, JsValue> {
 pub fn auto_date_on_start(input_json: &str) -> Result<String, JsValue> {
     rules::auto_date_on_start(input_json).map_err(to_js)
 }
+
+/// The occurrences of recurring scheduled tasks inside a window: which
+/// input task, on which day, real or projected.
+#[wasm_bindgen(js_name = expandTaskOccurrences)]
+pub fn expand_task_occurrences(input_json: &str) -> Result<String, JsValue> {
+    rules::expand_task_occurrences(input_json).map_err(to_js)
+}
+
+/// The next occurrence of a repeating task after a day, or null.
+#[wasm_bindgen(js_name = nextTaskOccurrence)]
+pub fn next_task_occurrence(input_json: &str) -> Result<String, JsValue> {
+    rules::next_task_occurrence(input_json).map_err(to_js)
+}
+
+/// What "move to this day" can be on a source that owns the date.
+#[wasm_bindgen(js_name = occurrenceMoveTarget)]
+pub fn occurrence_move_target(input_json: &str) -> Result<String, JsValue> {
+    rules::occurrence_move_target(input_json).map_err(to_js)
+}
