@@ -33,6 +33,7 @@ describe('taskStatus contract', () => {
       'counts-completed-and-drops-cancelled-from-the-total',
       'direct-children-only',
       'only-cancelled-children-is-null',
+      'a-parent-named-like-a-prototype-member',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);
     }

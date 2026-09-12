@@ -216,7 +216,10 @@ export interface TaskStatusRules {
 
 let installedStatus: TaskStatusRules | null = null;
 let keyTable: TaskI18nKeys | null = null;
-let progressByList: WeakMap<readonly Task[], Record<string, SubtaskProgress>> =
+// A Map, not the parsed object: ids are free text (a CalDAV UID is the id),
+// and a plain-object lookup would find `Object.prototype` behind a childless
+// parent called `constructor`.
+let progressByList: WeakMap<readonly Task[], Map<string, SubtaskProgress>> =
   new WeakMap();
 
 /** Bind this surface's door into the core. */
@@ -347,13 +350,13 @@ export function subtaskProgress(
         parent_id: t.parent_id ?? null,
       })),
     };
-    byParent = JSON.parse(
+    const answer = JSON.parse(
       statusRules().subtaskProgressJson(JSON.stringify(input)),
     ) as Record<string, SubtaskProgress>;
+    byParent = new Map(Object.entries(answer));
     progressByList.set(allTasks, byParent);
   }
-  const progress = byParent[parentId];
-  return progress === undefined ? null : progress;
+  return byParent.get(parentId) ?? null;
 }
 
 /**

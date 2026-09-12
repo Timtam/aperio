@@ -1384,6 +1384,15 @@ Siehe DESIGN §4.2.
   bleibt hier absichtlich, was sie im TypeScript war — eine Id wie jede
   andere, nach der niemand fragt; der Kern zählt nach Gleichheit, ohne
   Wahrheitswert-Test, also gibt es hier keine #46-Lücke.
+  ↳ **Von zwei der drei Gegenleser gefunden, gegen das echte WASM belegt:** die
+  Hülle las die Antwort als nacktes Objekt (`byParent[parentId]`), und eine
+  kinderlose Elternaufgabe namens `constructor`, `toString` oder `__proto__`
+  fand `Object.prototype` statt `null` — Ids sind Freitext (eine CalDAV-UID ist
+  die Id), und der Screenreader hätte einen Fortschritt mit unaufgelöstem
+  `{{done}}` gehört. Die Antwort liegt jetzt in einer `Map`; die Fixture pinnt
+  drei der Namen, `__proto__` pinnt ein Unit-Test (als JSON-Literal-Schlüssel
+  würde es den Prototyp setzen). Der dritte Gegenleser (Aufrufer, CI) fand
+  nichts: jede Zeile fragt mit demselben Hook-Array, eine Überfahrt pro Liste.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

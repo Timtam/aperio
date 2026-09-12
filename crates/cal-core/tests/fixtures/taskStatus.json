@@ -271,6 +271,44 @@
           "total": 2
         }
       }
+    },
+    {
+      "name": "a-parent-named-like-a-prototype-member",
+      "note": "Ids are free text (a CalDAV UID is the id). A childless parent called \"constructor\" or \"toString\" is null like any other childless parent - the shell must not find Object.prototype behind the answer. (`__proto__` is covered by a unit test: as a JSON-literal key it would set a prototype.)",
+      "input": {
+        "tasks": [
+          {
+            "id": "constructor",
+            "parent_id": null,
+            "status": "open"
+          },
+          {
+            "id": "toString",
+            "parent_id": null,
+            "status": "open"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "status": "completed"
+          }
+        ],
+        "parents": [
+          "constructor",
+          "toString",
+          "hasOwnProperty",
+          "p"
+        ]
+      },
+      "expect": {
+        "constructor": null,
+        "toString": null,
+        "hasOwnProperty": null,
+        "p": {
+          "done": 1,
+          "total": 1
+        }
+      }
     }
   ]
 }
