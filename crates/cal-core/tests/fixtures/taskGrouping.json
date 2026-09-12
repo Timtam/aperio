@@ -2,7 +2,8 @@
   "what": "How the task view groups, orders and nests its rows — as a table of inputs and the answer `buildEntries` gives for each. A header row carries its kind, its count(s) and the ids it points at, never its title: the wording is the caller’s, the decision is the rule’s.",
   "why": "This rule lives in `shared/taskGrouping.ts` and is asked on both surfaces while rendering. It is moving into cal-core, where a Rust implementation has to give the same answer; while both exist this file is what keeps them together, and once the TypeScript goes it is the record of what the rule did on the day it moved. Written by running the TypeScript BEFORE the port, so the port is measured against what is, not against what the port thinks it should be.",
   "writtenBy": [
-    "src/components/views/taskGrouping.measure.test.ts — a one-off, run once and deleted; its table mirrors src/components/views/taskGrouping.test.ts plus the rows the port needs that that file never exercised (the two-level priority scale, list-name ordering, a task-level and a list-level collapse, a list missing from the name map, one case with everything at once)."
+    "src/components/views/taskGrouping.measure.test.ts — a one-off, run once and deleted; its table mirrors src/components/views/taskGrouping.test.ts plus the rows the port needs that that file never exercised (the two-level priority scale, list-name ordering, a task-level and a list-level collapse, a list missing from the name map, one case with everything at once).",
+    "one case, done-orders-by-instant-not-by-spelling, was written by hand from the Rust answer after the port, because the TypeScript answered it differently on purpose — see its wasTypeScript."
   ],
   "readBy": [
     "src/components/views/taskGrouping.contract.test.ts",
@@ -27,7 +28,8 @@
       "rows": "DFS order. {id, depth, hidden, hasChildren} for every row; header rows add `group`: {kind, parentId, listId?, sectionId?, count, mine?, others?}. `mine`/`others` appear only when Done splits. `parentId` is the enclosing header’s id (null at the top). The synthetic header ids are collapse keys persisted by the UIs and must not change."
     },
     "deferred": "rows for isTaskDeferred: {resurface_date, today} → deferred",
-    "language": "the app language tag the answers were measured under (the collation of titles, section names and list names depends on it); the TypeScript side binds it through installTextCollation, the Rust side takes it as a parameter"
+    "language": "the app language tag the answers were measured under (the collation of titles, section names and list names depends on it); the TypeScript side binds it through installTextCollation, the Rust side takes it as a parameter",
+    "wasTypeScript": "present only on a case where the TypeScript this replaced answered differently: what it answered, and why the surviving answer was chosen. Absent means both agreed — every measured case."
   },
   "language": "de",
   "baseTask": {
@@ -3655,6 +3657,95 @@
           },
           {
             "id": "cx",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "done-orders-by-instant-not-by-spelling",
+      "note": "Two done tasks completed within the same second, one stamped by the local adapter with a fraction (.250Z), one by a provider with whole seconds (Z); the same for two cancelled tasks on updated_at. The later INSTANT comes first.",
+      "wasTypeScript": "The TypeScript compared the RFC-3339 strings, and a string compare puts \"…00Z\" after \"…00.250Z\" (Z is 0x5A, the dot 0x2E) — so it answered B, A and D, C: the whole-second stamp first, although it is the earlier instant. That was an artefact of the spelling, not a decision; the core compares instants, which is the rule this repository already had for timestamps. The one input where the two answers differ.",
+      "input": {
+        "tasks": [
+          {
+            "id": "A",
+            "title": "A",
+            "status": "completed",
+            "completed_at": "2026-05-22T15:00:00.250Z",
+            "updated_at": "2026-05-22T15:00:00.250Z"
+          },
+          {
+            "id": "B",
+            "title": "B",
+            "status": "completed",
+            "completed_at": "2026-05-22T15:00:00Z",
+            "updated_at": "2026-05-22T15:00:00Z"
+          },
+          {
+            "id": "C",
+            "title": "C",
+            "status": "cancelled",
+            "updated_at": "2026-05-22T16:00:00.500Z"
+          },
+          {
+            "id": "D",
+            "title": "D",
+            "status": "cancelled",
+            "updated_at": "2026-05-22T16:00:00Z"
+          }
+        ],
+        "lists": {
+          "L1": "Inbox"
+        },
+        "today": "2026-05-22"
+      },
+      "expect": {
+        "rows": [
+          {
+            "id": "__aperio_done_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "done",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "A",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "B",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "__aperio_cancelled_group__",
+            "depth": 0,
+            "hidden": false,
+            "hasChildren": true,
+            "group": {
+              "kind": "cancelled",
+              "parentId": null,
+              "count": 2
+            }
+          },
+          {
+            "id": "C",
+            "depth": 1,
+            "hidden": false,
+            "hasChildren": false
+          },
+          {
+            "id": "D",
             "depth": 1,
             "hidden": false,
             "hasChildren": false

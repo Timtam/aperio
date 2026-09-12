@@ -87,6 +87,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The carried fields laid over a member's own current values. */
   carryOntoFields(inputJson: string): string;
 
+  /** The task view's rows: which group each task lands in, in which order,
+   *  under which header, at what depth. Asked while rendering, so synchronous. */
+  groupTasks(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

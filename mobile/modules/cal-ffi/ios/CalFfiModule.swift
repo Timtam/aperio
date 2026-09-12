@@ -261,6 +261,11 @@ public class CalFfiModule: Module {
       try carryOntoFields(inputJson: inputJson)
     }
 
+    // Grouping the task view. Asked while rendering.
+    Function("groupTasks") { (inputJson: String) -> String in
+      try groupTasks(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

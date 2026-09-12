@@ -36,6 +36,7 @@ import init, {
   occurrenceCarryFields as wasmOccurrenceCarryFields,
   futureCarryFields as wasmFutureCarryFields,
   carryOntoFields as wasmCarryOntoFields,
+  groupTasks as wasmGroupTasks,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -179,4 +180,10 @@ export function futureCarryFieldsJson(inputJson: string): string {
 export function carryOntoFieldsJson(inputJson: string): string {
   assertReady();
   return wasmCarryOntoFields(inputJson);
+}
+
+/** See `cal_core::task_grouping::group_tasks_json`. */
+export function groupTasksJson(inputJson: string): string {
+  assertReady();
+  return wasmGroupTasks(inputJson);
 }
