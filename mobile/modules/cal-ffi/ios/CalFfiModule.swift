@@ -279,6 +279,16 @@ public class CalFfiModule: Module {
       try splitDeadlinesByWeek(inputJson: inputJson)
     }
 
+    // The task vocabulary's i18n keys (read once at install) and the subtask
+    // progress for a whole list.
+    Function("taskI18nKeys") { () -> String in
+      taskI18nKeys()
+    }
+
+    Function("subtaskProgress") { (inputJson: String) -> String in
+      try subtaskProgress(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

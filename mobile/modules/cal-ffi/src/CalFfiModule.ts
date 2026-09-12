@@ -98,6 +98,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Deadline-carrying items by week, as positions. */
   splitDeadlinesByWeek(inputJson: string): string;
 
+  /** Every i18n key of the task vocabulary, as one table: read once at
+   *  install, never asked per chip. */
+  taskI18nKeys(): string;
+
+  /** How far every parent's subtasks are, for a whole task list at once. */
+  subtaskProgress(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

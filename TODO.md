@@ -1369,9 +1369,21 @@ Siehe DESIGN §4.2.
   wird für alle Eltern einer Liste in EINER Überfahrt beantwortet; die Hülle
   merkt sich die Antwort pro Aufgaben-Array (WeakMap), weil die Views pro Zeile
   fragen.
-  ↳ Schritt 2 (offen): `cal_core::task_status` (ohne Feature-Gate — keine
-  Kollation), Türen `taskI18nKeys` + `subtaskProgress`, die drei Schlüssel-
-  Funktionen lesen die Tabelle, die Zwillinge verschwinden.
+  ↳ **Schritt 2 (Folge-PR auf #47): gebaut.** `cal_core::task_status` — ohne
+  Feature-Gate, nichts darin kollationiert — veröffentlicht die Tabelle
+  (`task_i18n_keys_json`) und zählt den Fortschritt (`subtask_progress_json`,
+  Eltern-Id → `{done, total}` für jede Elternaufgabe mit zählenden Kindern).
+  Zwei Türen auf beiden Oberflächen (`taskI18nKeys` ohne Eingabe,
+  `subtaskProgress`), acht Wire-Typen erzeugt. Die Hülle liest die Tabelle
+  beim ERSTEN Nachschlagen und behält sie; `subtaskProgress` schickt pro
+  Aufgaben-Array einmal drei Felder je Zeile (`id`, `status`, `parent_id`)
+  und merkt sich die Antwort in einer WeakMap — die Views fragen pro Zeile
+  mit derselben Liste. Die drei Schlüssel-Zwillinge und die Zählschleife sind
+  weg; der Rust-Vertragstest liest dieselbe Fixture, rot bewiesen (Regel
+  „abgebrochen zählt nicht" entfernt → ein Fall fällt). Die leere Eltern-Id
+  bleibt hier absichtlich, was sie im TypeScript war — eine Id wie jede
+  andere, nach der niemand fragt; der Kern zählt nach Gleichheit, ohne
+  Wahrheitswert-Test, also gibt es hier keine #46-Lücke.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

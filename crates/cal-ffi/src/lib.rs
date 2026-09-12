@@ -324,6 +324,22 @@ pub fn split_deadlines_by_week(input_json: String) -> Result<String, StoreError>
     })
 }
 
+/// Every i18n key of the task vocabulary, as one table: read once at
+/// install, never asked per chip.
+#[uniffi::export]
+pub fn task_i18n_keys() -> String {
+    cal_core::task_i18n_keys_json()
+}
+
+/// How far every parent's subtasks are, for a whole task list at once.
+#[uniffi::export]
+pub fn subtask_progress(input_json: String) -> Result<String, StoreError> {
+    cal_core::subtask_progress_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "subtask progress input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

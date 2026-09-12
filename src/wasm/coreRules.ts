@@ -40,6 +40,8 @@ import init, {
   tasksOnDays as wasmTasksOnDays,
   backlogWeeks as wasmBacklogWeeks,
   splitDeadlinesByWeek as wasmSplitDeadlinesByWeek,
+  taskI18nKeys as wasmTaskI18nKeys,
+  subtaskProgress as wasmSubtaskProgress,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -205,4 +207,16 @@ export function backlogWeeksJson(inputJson: string): string {
 export function splitDeadlinesByWeekJson(inputJson: string): string {
   assertReady();
   return wasmSplitDeadlinesByWeek(inputJson);
+}
+
+/** See `cal_core::task_status::task_i18n_keys_json`. */
+export function taskI18nKeysJson(): string {
+  assertReady();
+  return wasmTaskI18nKeys();
+}
+
+/** See `cal_core::task_status::subtask_progress_json`. */
+export function subtaskProgressJson(inputJson: string): string {
+  assertReady();
+  return wasmSubtaskProgress(inputJson);
 }

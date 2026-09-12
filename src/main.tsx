@@ -10,6 +10,7 @@ import {
   installGroupCarryRules,
   installTaskGroupingRules,
   installTaskDayRules,
+  installTaskStatusRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -36,6 +37,8 @@ import {
   tasksOnDaysJson,
   backlogWeeksJson,
   splitDeadlinesByWeekJson,
+  taskI18nKeysJson,
+  subtaskProgressJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -128,6 +131,10 @@ initCoreRules()
       splitDeadlinesByWeekJson,
       languageTag: () => i18n.language,
     });
+
+    // The task vocabulary's i18n keys, read once here, and the subtask
+    // progress.
+    installTaskStatusRules({ taskI18nKeysJson, subtaskProgressJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

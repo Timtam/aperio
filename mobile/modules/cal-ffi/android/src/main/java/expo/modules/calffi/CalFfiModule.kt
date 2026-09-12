@@ -33,6 +33,8 @@ import uniffi.cal_ffi.groupTasks as uniffiGroupTasks
 import uniffi.cal_ffi.tasksOnDays as uniffiTasksOnDays
 import uniffi.cal_ffi.backlogWeeks as uniffiBacklogWeeks
 import uniffi.cal_ffi.splitDeadlinesByWeek as uniffiSplitDeadlinesByWeek
+import uniffi.cal_ffi.taskI18nKeys as uniffiTaskI18nKeys
+import uniffi.cal_ffi.subtaskProgress as uniffiSubtaskProgress
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -352,6 +354,16 @@ class CalFfiModule : Module() {
 
     Function("splitDeadlinesByWeek") { inputJson: String ->
       uniffiSplitDeadlinesByWeek(inputJson)
+    }
+
+    // The task vocabulary's i18n keys (read once at install) and the subtask
+    // progress for a whole list.
+    Function("taskI18nKeys") {
+      uniffiTaskI18nKeys()
+    }
+
+    Function("subtaskProgress") { inputJson: String ->
+      uniffiSubtaskProgress(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────
