@@ -34,6 +34,12 @@
 
 import type { EventGroup } from './eventGroups';
 import type { SuggestionDecline } from './types';
+// What crosses the door, generated from `cal_core::group_suggestion`. The
+// caller-side `SuggestibleEvent` below is the least a row needs to take
+// part; the wire row carries the resolved series id instead of the event
+// id, and the answer is positions — hence the aliases.
+import type { GroupSuggestion as GroupSuggestionWire } from './generated/GroupSuggestion';
+import type { SuggestibleEvent as SuggestibleEventWire } from './generated/SuggestibleEvent';
 
 /** The minimum a row needs to take part. */
 export interface SuggestibleEvent {
@@ -86,16 +92,7 @@ function rules(): GroupSuggestionRules {
 }
 
 /** The wire shape of one row, built here so no caller has to know it. */
-function wireEvent(
-  event: SuggestibleEvent,
-  seriesId: string,
-): {
-  calendar_id: string;
-  series_id: string;
-  title: string;
-  start: string;
-  all_day: boolean;
-} {
+function wireEvent(event: SuggestibleEvent, seriesId: string): SuggestibleEventWire {
   return {
     calendar_id: event.calendar_id,
     series_id: seriesId,
@@ -151,7 +148,7 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
       declines,
     }),
   );
-  const pairs = JSON.parse(answer) as { first: number; second: number }[];
+  const pairs = JSON.parse(answer) as GroupSuggestionWire[];
   return pairs.map(({ first, second }) => ({
     first: events[first],
     second: events[second],

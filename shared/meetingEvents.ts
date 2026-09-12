@@ -26,6 +26,10 @@
  * The whole window crosses at once and the answer is POSITIONS, because the
  * caller is holding the rows already.
  */
+// What crosses the door, generated from `cal_core::meeting_events`; the
+// answer is positions, so nothing comes back to type.
+import type { MeetingFilterEvent } from './generated/MeetingFilterEvent';
+
 export interface MeetingDuplicateFilter {
   /** A `[{calendar_id, location?, description?, grouped}]` array in, the
    *  positions that survive out. */
@@ -86,7 +90,7 @@ export function withoutDuplicateMeetings<
   }
   const answer = installedFilter.withoutDuplicateMeetingsJson(
     JSON.stringify(
-      events.map((event) => ({
+      events.map((event): MeetingFilterEvent => ({
         calendar_id: event.calendar_id ?? '',
         location: event.location ?? null,
         description: event.description ?? null,

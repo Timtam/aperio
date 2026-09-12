@@ -27,25 +27,15 @@
 
 import type { EventGroup } from './eventGroups';
 
-/** The fields a change is carried in. */
-export interface CarryableFields {
-  title: string;
-  start: string;
-  end: string;
-  all_day: boolean;
-  location: string | null;
-  description: string | null;
-}
-
-/** One member of the group, as the caller knows it. */
-export interface CarryTarget {
-  calendar_id: string;
-  event_id: string;
-  /** The name to show when reporting what happened to it. */
-  title: string;
-  /** Whether Aperio may write to the calendar it lives in. */
-  writable: boolean;
-}
+// The wire types are generated from `cal_core::group_carry` by
+// `cargo xtask ts-types`; nothing here mirrors them by hand, so a field the
+// Rust side renames is a type error on this side, not a silent `undefined`.
+export type { CarryableFields } from './generated/CarryableFields';
+export type { CarryField } from './generated/CarryField';
+export type { CarryTarget } from './generated/CarryTarget';
+export type { CarryPlan } from './generated/CarryPlan';
+import type { CarryableFields } from './generated/CarryableFields';
+import type { CarryPlan } from './generated/CarryPlan';
 
 /**
  * Which occurrences an edit — and therefore its carry — is about.
@@ -60,18 +50,6 @@ export interface CarryTarget {
  * A caller-side discriminator: it decides WHICH rule to ask, so it stays here.
  */
 export type CarryScope = 'series' | 'occurrence' | 'future';
-
-/** What carrying would do, decided before anything is written. */
-export interface CarryPlan {
-  /** The fields that actually differ from the saved event. */
-  changed: (keyof CarryableFields)[];
-  /** Members Aperio can and will write. */
-  targets: CarryTarget[];
-  /** Members it must leave alone, and the user has to be told about. */
-  skipped: CarryTarget[];
-  /** Whether the plan is worth asking the user about at all. */
-  worth_carrying: boolean;
-}
 
 /** This surface's door into `cal_core::group_carry`. */
 export interface GroupCarryRules {
