@@ -121,8 +121,9 @@ otherwise the first).
 
 Every address book that has birthdays in it also appears as a **read-only
 birthday calendar** in the calendar list, which you can show or hide like any
-other calendar. Its name follows your app language ("Birthdays – Family");
-renaming it keeps your name. Those entries are derived from the contacts
+other calendar. Its name follows your app language and the address book's
+own name ("Birthdays – Family"): rename the address book and the calendar
+follows. Those entries are derived from the contacts
 themselves — there is nothing to edit there; change the birthday on the contact
 and the calendar follows. When the contact's birthday includes a **year**, the
 entry (and the reminder it fires) carries the new age in the name — "Max (42)".
