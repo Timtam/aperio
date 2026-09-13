@@ -1,0 +1,4243 @@
+{
+  "what": "The recurring-task projection of shared/expandTaskOccurrences.ts, as a table: which occurrences a recurring scheduled task shows inside a window (the real task on its own day, read-only projections on every other), one step of the same walk (nextTaskOccurrence), and what “move to this day” can be on a source that owns the date (occurrenceMoveTarget). Measured from the TypeScript before the port.",
+  "why": "The calendar views on both surfaces and the widget snapshot expand the same series; a frontend that is not JavaScript has to expand it too, and the projected days must match the instances the backend spawner creates. The core answers POSITIONS and DAYS (which input task, which day, real or projected); the shell builds the copies and their ids.",
+  "writtenBy": [
+    "src/intl/expandTaskOccurrences.measure.test.ts — a one-off, run once and deleted; its cases mirror src/intl/expandTaskOccurrences.test.ts plus the rows the port needs that those never had (a base after the window, an empty window, the default cap, the step cap, interval 0, a count end, invalid fixed dates, monthly without a day of month, a base off its listed weekday, two series in one list, in_progress)."
+  ],
+  "readBy": [
+    "src/intl/expandTaskOccurrences.contract.test.ts",
+    "crates/cal-core/src/task_occurrences.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like the other task fixtures: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves."
+  },
+  "notInThisTable": {
+    "makeOccurrenceId_isRecurringProjection_recurringSeriesTaskId": "the id encoding of a projection (`<id> occ <day>`) is the shell’s: the core answers which input task and which day, the shell builds the copy and its id, and decodes it back",
+    "projectionOf": "the copying of a task’s fields onto a projection (time of day rides along) — the shell’s",
+    "fromBackend_toBackend": "the form value ↔ wire conversion; the core reads the wire shape (`cal_core::TaskRecurrence`) directly, so the rules in this table are wire rules",
+    "spawner": "cal_core::spawn advances a completed task to its next instance with the same stepping; two rows here name where the projector answers differently (invalid fixed dates) — the projector’s answers are pinned, the spawner is not this table’s subject"
+  },
+  "shape": {
+    "expand": "{tasks, from, to, maxPerTask?} → [{task: index into tasks, day: YYYY-MM-DD or null, projection: bool}] in emission order: for each expandable task its occurrences in the window (the base day is the real task), non-expandable tasks pass through in place with their own day.",
+    "next": "{scheduled, rule (wire shape) | null} → the next occurrence key or null.",
+    "move": "{task, dateKey | null, canRescheduleOccurrence} → {date, advanced}.",
+    "wasTypeScript": "a row marked wasTypeScript pins a JS artifact the port may decide against; it must then change the row on purpose, with a note.",
+    "baseTask": "the Task every case’s task entries are overrides over"
+  },
+  "baseTask": {
+    "id": "t1",
+    "list_id": "list",
+    "title": "thing",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "expand": [
+    {
+      "name": "daily-projects-every-day-in-the-window",
+      "note": "Both window ends inclusive; the time of day rides each occurrence (the shell copies it).",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "scheduled_time": "09:00",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-05"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "the-real-task-is-the-one-on-its-own-day",
+      "note": "The occurrence on the task’s own scheduled_date is the real, interactive task; every other one is a projection.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-03",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-05"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "honours-the-interval",
+      "note": "Every 2 days.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 2,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-07"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-07",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "weekly-by-day-projects-only-the-listed-weekdays",
+      "note": "2026-05-04 is a Monday; Mon/Wed/Fri.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-04",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 1,
+              "day_of_week": [
+                "monday",
+                "wednesday",
+                "friday"
+              ],
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-04",
+        "to": "2026-05-15"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-15",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "weekly-plain-steps-seven-days",
+      "note": "No listed weekdays: seven days per step, times the interval.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 3,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-06-30"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-12",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "base-not-on-a-listed-weekday-still-emits-itself",
+      "note": "2026-05-05 is a Tuesday and the rule says Monday: the base day is the real task anyway; the walk continues on the next Monday.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-05",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 1,
+              "day_of_week": [
+                "monday"
+              ],
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-04",
+        "to": "2026-05-19"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-18",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "monthly-day-of-month-clamps-to-short-months",
+      "note": "Jan 31 → Feb 28 → Mar 31 → Apr 30: the day of month is re-applied every step.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-01-31",
+            "recurrence": {
+              "frequency": "monthly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": 31,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-01-31",
+        "to": "2026-04-30"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-01-31",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-30",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "monthly-without-day-of-month-steps-from-the-clamped-date",
+      "note": "Without a day of month the step starts from the date reached: Jan 31 → Feb 28 → Mar 28, not back to the 31st.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-01-31",
+            "recurrence": {
+              "frequency": "monthly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-01-31",
+        "to": "2026-04-30"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-01-31",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-28",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "yearly-clamps-feb-29",
+      "note": "A Feb-29 anchor lands on Feb 28 in non-leap years.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2024-02-29",
+            "recurrence": {
+              "frequency": "yearly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2024-02-29",
+        "to": "2026-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2024-02-29",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2025-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-28",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "yearly-interval-two",
+      "note": "Every second year.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2024-03-01",
+            "recurrence": {
+              "frequency": "yearly",
+              "interval": 2,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2024-01-01",
+        "to": "2029-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2024-03-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-03-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2028-03-01",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "fixed-dates-drive-a-seasonal-schedule",
+      "note": "April 1 and October 1, every year; the frequency is ignored.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-04-01",
+            "recurrence": {
+              "frequency": "yearly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": [
+                {
+                  "month": 4,
+                  "day": 1
+                },
+                {
+                  "month": 10,
+                  "day": 1
+                }
+              ]
+            }
+          }
+        ],
+        "from": "2026-04-01",
+        "to": "2027-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-04-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-10-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-04-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-10-01",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "fixed-dates-clamp-the-day-to-the-month",
+      "note": "Feb 30 is Feb 28 (or 29).",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-01-15",
+            "recurrence": {
+              "frequency": "yearly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": [
+                {
+                  "month": 2,
+                  "day": 30
+                }
+              ]
+            }
+          }
+        ],
+        "from": "2026-01-15",
+        "to": "2028-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-01-15",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2028-02-29",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "a-fixed-date-with-day-32-is-dropped",
+      "note": "The wire can carry day 32 or month 13; the TypeScript drops such a trigger (sanitize) instead of clamping it. With no trigger left, the frequency walks. The backend spawner clamps the day instead — a difference between spawner and projector, pinned as the projector answers today.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-01-15",
+            "recurrence": {
+              "frequency": "monthly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": [
+                {
+                  "month": 2,
+                  "day": 32
+                },
+                {
+                  "month": 13,
+                  "day": 1
+                },
+                {
+                  "month": 4,
+                  "day": 0
+                }
+              ]
+            }
+          }
+        ],
+        "from": "2026-01-15",
+        "to": "2026-05-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-01-15",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-02-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-15",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "fixed-dates-with-an-until-bound",
+      "note": "The bound applies to fixed triggers as well.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-04-01",
+            "recurrence": {
+              "frequency": "yearly",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "on_date",
+                "date": "2027-04-01"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": [
+                {
+                  "month": 4,
+                  "day": 1
+                },
+                {
+                  "month": 10,
+                  "day": 1
+                }
+              ]
+            }
+          }
+        ],
+        "from": "2026-04-01",
+        "to": "2028-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-04-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-10-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-04-01",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "stops-at-the-until-bound",
+      "note": "The bound day itself still emits; the day after does not.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "on_date",
+                "date": "2026-05-03"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "an-until-before-the-base-emits-nothing",
+      "note": "Already ended at the first step: not even the base day.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "on_date",
+                "date": "2026-04-30"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": []
+    },
+    {
+      "name": "a-count-end-is-not-an-end-here",
+      "note": "The projector only honours a date bound; an occurrence count is the provider’s (the spawner does the same). Pinned as it is.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "after",
+                "occurrences": 2
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-05"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "base-before-the-window-gives-only-projections",
+      "note": "None of the emitted days is the base day.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-03",
+        "to": "2026-05-05"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "a-base-after-the-window-emits-nothing",
+      "note": "The walk only goes forward: a series that starts after the window is absent from it — not passed through.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-06-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-05"
+      },
+      "expect": []
+    },
+    {
+      "name": "far-past-daily-base-reaches-the-window",
+      "note": "The cap counts emissions, not the walk: an old, never-completed daily task keeps its original date and must still arrive in the window.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2025-01-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-07-06",
+        "to": "2026-07-08"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-07-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-08",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "far-past-weekly-by-day-base-reaches-the-window",
+      "note": "2025-01-06 is a Monday; Mon/Thu. 2026-07-06 is a Monday, 07-09 a Thursday.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2025-01-06",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 1,
+              "day_of_week": [
+                "monday",
+                "thursday"
+              ],
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-07-06",
+        "to": "2026-07-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-07-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-09",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "interval-with-named-weekdays-is-not-dropped",
+      "note": "“Every 2 weeks on Monday” is every second Monday, not every Monday. 2026-08-03 is a Monday.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-08-03",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 2,
+              "day_of_week": [
+                "monday"
+              ],
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-08-03",
+        "to": "2026-09-01"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-08-03",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-08-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-31",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "every-listed-day-of-the-weeks-the-interval-lands-on",
+      "note": "Mon+Thu every two weeks is both days of every second week.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-08-03",
+            "recurrence": {
+              "frequency": "weekly",
+              "interval": 2,
+              "day_of_week": [
+                "monday",
+                "thursday"
+              ],
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-08-03",
+        "to": "2026-08-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-08-03",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-08-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-31",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "an-until-before-the-window-emits-nothing-and-terminates",
+      "note": "A far-past bounded series stops at its bound instead of walking to the window.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2025-01-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "on_date",
+                "date": "2025-06-01"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-07-06",
+        "to": "2026-07-08"
+      },
+      "expect": []
+    },
+    {
+      "name": "caps-at-max-per-task",
+      "note": "The first five emissions, then stop.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2027-05-01",
+        "maxPerTask": 5
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "max-per-task-zero-emits-nothing",
+      "note": "A zero budget emits nothing at all.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-05",
+        "maxPerTask": 0
+      },
+      "expect": []
+    },
+    {
+      "name": "the-default-cap-is-400",
+      "note": "Two years of a daily rule render 400 occurrences.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-01-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-01-01",
+        "to": "2027-12-31"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-01-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-01-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-01-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-02-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-03-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-04-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-06-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-07-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-08-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-09-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-10-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-11-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-12-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-04",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-05",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-06",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-07",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-08",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-09",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-10",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-11",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-12",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-13",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-14",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-15",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-16",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-17",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-18",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-19",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-20",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-21",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-22",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-23",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-24",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-25",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-26",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-27",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-28",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-29",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-30",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-01-31",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-02-01",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-02-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-02-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2027-02-04",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "a-base-beyond-the-step-cap-emits-nothing",
+      "note": "The walk is bounded by 100 000 steps (≈ 270 daily years); a base further back than that never reaches the window. Termination over completeness.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "1700-01-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-01-01",
+        "to": "2026-01-02"
+      },
+      "expect": []
+    },
+    {
+      "name": "interval-zero-on-a-scheduled-rule-counts-as-one",
+      "note": "The wire can carry interval 0 (a backlog rule’s “immediately”); a scheduled walk treats it as 1.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 0,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-03"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "an-empty-window-emits-nothing-and-passes-the-rest-through",
+      "note": "from after to: the recurring task is absent, the plain one passes through as always.",
+      "input": {
+        "tasks": [
+          {
+            "id": "rec",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          },
+          {
+            "id": "plain",
+            "scheduled_date": "2026-05-02"
+          }
+        ],
+        "from": "2026-05-05",
+        "to": "2026-05-01"
+      },
+      "expect": [
+        {
+          "task": 1,
+          "day": "2026-05-02",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "non-recurring-passes-through",
+      "note": "Verbatim, whatever its date.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01"
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "an-undated-plain-task-passes-through",
+      "note": "Pass-through keeps a null day.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": null
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": null,
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "from-completion-passes-through",
+      "note": "Its future dates depend on when each turn is checked off: unknowable ahead of time.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_completion",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "backlog-placement-passes-through",
+      "note": "Its next turn is undated.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "backlog",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "no-scheduled-date-passes-through",
+      "note": "A deadline is not a base.",
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": null,
+            "deadline_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": null,
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "completed-passes-through",
+      "note": "A terminal instance never projects: its future days belong to the next open instance the backend spawns.",
+      "input": {
+        "tasks": [
+          {
+            "status": "completed",
+            "completed_at": "2026-05-01T08:30:00Z",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "cancelled-passes-through",
+      "note": "Terminal as well.",
+      "input": {
+        "tasks": [
+          {
+            "status": "cancelled",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-10"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "in-progress-expands",
+      "note": "Only completed and cancelled are terminal.",
+      "input": {
+        "tasks": [
+          {
+            "status": "in_progress",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-03"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "mixed-list-keeps-input-order",
+      "note": "A task’s occurrences stay together, tasks stay in input order.",
+      "input": {
+        "tasks": [
+          {
+            "id": "rec",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          },
+          {
+            "id": "plain",
+            "scheduled_date": "2026-05-02"
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-03"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 1,
+          "day": "2026-05-02",
+          "projection": false
+        }
+      ]
+    },
+    {
+      "name": "two-series-in-input-order",
+      "note": "The second series follows the first, not interleaved by day.",
+      "input": {
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-02",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-01",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 2,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-04"
+      },
+      "expect": [
+        {
+          "task": 0,
+          "day": "2026-05-02",
+          "projection": false
+        },
+        {
+          "task": 0,
+          "day": "2026-05-03",
+          "projection": true
+        },
+        {
+          "task": 0,
+          "day": "2026-05-04",
+          "projection": true
+        },
+        {
+          "task": 1,
+          "day": "2026-05-01",
+          "projection": false
+        },
+        {
+          "task": 1,
+          "day": "2026-05-03",
+          "projection": true
+        }
+      ]
+    },
+    {
+      "name": "an-empty-scheduled-date-vanishes",
+      "note": "A JS artifact: \"\" is not null, parses to an invalid date, and the walk ends with nothing emitted — the task is absent. No producer writes \"\" (API rows carry null); a port is free to read \"\" as undated and pass the task through, and must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "tasks": [
+          {
+            "scheduled_date": "",
+            "recurrence": {
+              "frequency": "daily",
+              "interval": 1,
+              "day_of_week": null,
+              "day_of_month": null,
+              "end": {
+                "type": "never"
+              },
+              "anchor": "from_date",
+              "placement": "schedule",
+              "fixed_dates": null
+            }
+          }
+        ],
+        "from": "2026-05-01",
+        "to": "2026-05-03"
+      },
+      "expect": []
+    }
+  ],
+  "next": [
+    {
+      "name": "daily-by-its-interval",
+      "note": "Every 2 days.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "daily",
+          "interval": 2,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-06-27"
+    },
+    {
+      "name": "weekly-plain-is-seven-days",
+      "note": "",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "weekly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-07-02"
+    },
+    {
+      "name": "weekly-by-day-is-the-next-listed-day",
+      "note": "2026-06-25 is a Thursday; Mon/Fri → Friday the 26th.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "weekly",
+          "interval": 1,
+          "day_of_week": [
+            "monday",
+            "friday"
+          ],
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-06-26"
+    },
+    {
+      "name": "weekly-by-day-jumps-the-interval-when-the-week-is-spent",
+      "note": "Thursday, rule Monday every 2 weeks → the Monday of the week after next.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "weekly",
+          "interval": 2,
+          "day_of_week": [
+            "monday"
+          ],
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-07-06"
+    },
+    {
+      "name": "monthly-day-of-month-clamps",
+      "note": "Jan 31 → Feb 28.",
+      "input": {
+        "scheduled": "2026-01-31",
+        "rule": {
+          "frequency": "monthly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": 31,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-02-28"
+    },
+    {
+      "name": "monthly-from-a-clamped-day-stays-there",
+      "note": "Feb 28 → Mar 28 without a day of month.",
+      "input": {
+        "scheduled": "2026-02-28",
+        "rule": {
+          "frequency": "monthly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-03-28"
+    },
+    {
+      "name": "yearly",
+      "note": "",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "yearly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2027-06-25"
+    },
+    {
+      "name": "fixed-dates-wrap-to-next-year",
+      "note": "After October 1, the next trigger is April 1 of next year.",
+      "input": {
+        "scheduled": "2026-10-01",
+        "rule": {
+          "frequency": "yearly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": [
+            {
+              "month": 4,
+              "day": 1
+            },
+            {
+              "month": 10,
+              "day": 1
+            }
+          ]
+        }
+      },
+      "expect": "2027-04-01"
+    },
+    {
+      "name": "all-invalid-fixed-dates-fall-back-to-the-frequency",
+      "note": "The TypeScript drops invalid triggers before it looks, so none are left and the frequency walks. The spawner keeps them and finds no trigger. Pinned as the projector answers.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "weekly",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": [
+            {
+              "month": 13,
+              "day": 1
+            }
+          ]
+        }
+      },
+      "expect": "2026-07-02"
+    },
+    {
+      "name": "past-an-until-end-is-null",
+      "note": "The next step is after the bound.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "daily",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "on_date",
+            "date": "2026-06-25"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": null
+    },
+    {
+      "name": "on-the-until-day-is-kept",
+      "note": "The bound day itself is a valid step.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "daily",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "on_date",
+            "date": "2026-06-26"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-06-26"
+    },
+    {
+      "name": "a-count-end-does-not-end",
+      "note": "Only a date bound ends the walk here.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "daily",
+          "interval": 1,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "after",
+            "occurrences": 1
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-06-26"
+    },
+    {
+      "name": "no-rule-is-null",
+      "note": "Nothing to step.",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": null
+      },
+      "expect": null
+    },
+    {
+      "name": "interval-zero-counts-as-one",
+      "note": "",
+      "input": {
+        "scheduled": "2026-06-25",
+        "rule": {
+          "frequency": "daily",
+          "interval": 0,
+          "day_of_week": null,
+          "day_of_month": null,
+          "end": {
+            "type": "never"
+          },
+          "anchor": "from_date",
+          "placement": "schedule",
+          "fixed_dates": null
+        }
+      },
+      "expect": "2026-06-26"
+    }
+  ],
+  "move": [
+    {
+      "name": "passes-the-requested-day-through-where-the-source-can-store-it",
+      "note": "",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "never"
+            },
+            "anchor": "from_date",
+            "placement": "schedule",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": true
+      },
+      "expect": {
+        "date": "2026-08-05",
+        "advanced": false
+      }
+    },
+    {
+      "name": "advances-the-series-where-the-source-owns-the-date",
+      "note": "iOS Reminders: the due date is the series anchor; one step forward is what it can do, and the caller is told.",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "never"
+            },
+            "anchor": "from_date",
+            "placement": "schedule",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": "2026-08-02",
+        "advanced": true
+      }
+    },
+    {
+      "name": "leaves-a-non-repeating-task-alone",
+      "note": "",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": null
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": "2026-08-05",
+        "advanced": false
+      }
+    },
+    {
+      "name": "does-not-invent-a-day-when-clearing",
+      "note": "Clearing is clearing on every source.",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "never"
+            },
+            "anchor": "from_date",
+            "placement": "schedule",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": null,
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": null,
+        "advanced": false
+      }
+    },
+    {
+      "name": "an-undated-repeating-task-takes-the-day",
+      "note": "No base to advance from.",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": null,
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "never"
+            },
+            "anchor": "from_date",
+            "placement": "schedule",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": "2026-08-05",
+        "advanced": false
+      }
+    },
+    {
+      "name": "an-ended-series-keeps-the-requested-day",
+      "note": "No later turn: failing to move is better than moving somewhere invented.",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "on_date",
+              "date": "2026-08-01"
+            },
+            "anchor": "from_date",
+            "placement": "schedule",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": "2026-08-05",
+        "advanced": false
+      }
+    },
+    {
+      "name": "a-backlog-rule-still-advances-by-its-step",
+      "note": "The move does not ask about placement or anchor; only the projector does.",
+      "input": {
+        "task": {
+          "id": "gehoertraining",
+          "list_id": "device",
+          "scheduled_date": "2026-08-01",
+          "recurrence": {
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": {
+              "type": "never"
+            },
+            "anchor": "from_date",
+            "placement": "backlog",
+            "fixed_dates": null
+          }
+        },
+        "dateKey": "2026-08-05",
+        "canRescheduleOccurrence": false
+      },
+      "expect": {
+        "date": "2026-08-02",
+        "advanced": true
+      }
+    }
+  ]
+}
