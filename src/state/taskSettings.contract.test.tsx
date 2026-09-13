@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api/client', () => ({
@@ -15,7 +17,6 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: () => Promise.resolve(() => {}),
 }));
 
-import contract from '../../crates/cal-core/tests/fixtures/taskSettings.json';
 import {
   answerCountdownWrite,
   answerDayWindowWrite,
@@ -48,7 +49,17 @@ interface Row<I> {
   desktop?: unknown;
 }
 
-/** A fixture section as rows; JSON infers a union of literal shapes. */
+/**
+ * The fixture, read with `JSON.parse` rather than imported. A JSON import is
+ * compiled into an object literal, where the key `__proto__` sets the
+ * prototype instead of making a field, so the row that keeps a list named
+ * `__proto__` would expect nothing where both surfaces now hold the list.
+ */
+const contract = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'crates/cal-core/tests/fixtures/taskSettings.json'), 'utf8'),
+) as Record<'read' | 'effective' | 'countdownWrite' | 'dayWindowWrite' | 'overrideUpdate', Row<unknown>[]>;
+
+/** A fixture section as rows of one input shape. */
 const rows = <I,>(section: unknown): Row<I>[] => section as Row<I>[];
 
 describe('taskSettings contract', () => {

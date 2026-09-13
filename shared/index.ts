@@ -23,6 +23,7 @@ export * from './contactName';
 export * from './taskCascade';
 export * from './taskAssignment';
 export * from './dayStart';
+export * from './taskSettings';
 export * from './links';
 export * from './planTaskDates';
 export * from './formatAttendee';

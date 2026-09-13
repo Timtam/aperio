@@ -2,11 +2,12 @@
   "what": "How each surface reads the sixteen stored task and calendar preferences, resolves a list’s effective coupling, auto-date and carry-over, and normalises what it writes back: the countdown window, the visible day window and the per-list override map. Measured on the real code of both surfaces before the port.",
   "why": "The desktop TaskCascadeProvider and the mobile taskBehaviour.ts each parse these values with their own copy of every rule, and the synced prefs mean each device reads what the other wrote. One reader in the core answers the same for both, and for a frontend that is not JavaScript.",
   "writtenBy": [
-    "src/state/taskSettings.measure.test.tsx — a one-off, run once and deleted. It rendered the desktop provider with its preference reads answered from the case, and ran the mobile module with its preference module answered the same way; where the two surfaces answered differently, the row carries both (`expect` is mobile’s, `desktop` the desktop’s) and `surfacesDiffer`."
+    "src/state/taskSettings.measure.test.tsx — a one-off, run once and deleted. It rendered the desktop provider with its preference reads answered from the case, and ran the mobile module with its preference module answered the same way; where the two surfaces answered differently, the row carries both (`expect` is mobile’s, `desktop` the desktop’s) and `surfacesDiffer`.",
+    "With the port, four rows changed on purpose and one was added (decided 2026-09-13); each says so in its note. No row carries a desktop answer any more: the surfaces read alike."
   ],
   "readBy": [
-    "src/state/taskSettings.contract.test.tsx",
-    "crates/cal-core (once the port exists)"
+    "src/state/taskSettings.contract.test.tsx (both surfaces, now through the door)",
+    "crates/cal-core/src/task_settings.rs (the contract module)"
   ],
   "whereItLives": {
     "note": "Inside cal-core, beside the day-start tables."
@@ -15,7 +16,7 @@
     "the settings screens": "what each control offers and how it announces a change",
     "when to write": "the desktop’s debounced write that stays silent when the value did not move, the re-read after a sync round, and the mobile writes’ best-effort catch are the platform’s",
     "the sync whitelist": "which keys sync is sync-engine’s (`tasks.*`, `calendar.dayViewMode`, `calendar.dayStartMin`, `calendar.dayEndMin`)",
-    "host-core’s reading of tasks.dayStartTrigger": "reminders::day_start_time reads any HH:MM (seconds allowed) and garbage as midnight, where both surfaces read only the five offered values; an open decision, see the day-start table",
+    "host-core’s reading of tasks.dayStartTrigger": "no longer different: reminders::day_start_time asks cal_core::day_start_trigger, so it reads only the offered values too (decided 2026-09-13); pinned by host-core’s own test",
     "priorityScale": "the two-level switch as a scale name, a one-line mapping"
   },
   "shape": {
@@ -25,7 +26,8 @@
     "expect": "what mobile holds (reads and effective settings), or the string mobile writes",
     "desktop": "present only where the desktop answered differently",
     "Num": "\"NaN\", \"Infinity\" and \"-Infinity\" stand for the numbers JSON cannot spell",
-    "wasTypeScript": "a row pinning a JavaScript artifact a port may decide against, and must then change on purpose"
+    "wasTypeScript": "a row pinning a JavaScript artifact a port may decide against, and must then change on purpose",
+    "addedWithThePort": "a row the port added; not measured, answered by both surfaces through the door"
   },
   "keys": {
     "cascade": "tasks.cascadeStatusCoupling",
@@ -1491,9 +1493,8 @@
       }
     },
     {
-      "name": "a-list-named-proto-is-lost",
-      "note": "Assigning to \"__proto__\" on a plain object sets its prototype instead of a field, so the entry is not kept. A JavaScript artifact; a port that keeps the list must then change this row on purpose.",
-      "wasTypeScript": true,
+      "name": "a-list-named-proto-is-an-ordinary-list",
+      "note": "Changed on purpose in the port: a list whose id is \"__proto__\" is kept like any other. Both surfaces lost it as a field, because assigning to \"__proto__\" on a plain object sets its prototype.",
       "input": {
         "prefs": {
           "tasks.listOverrides": "{\"__proto__\":{\"cascade\":false},\"L1\":{\"autoDate\":false}}"
@@ -1516,6 +1517,9 @@
         "carryOverDefault": "ask",
         "dayStartTrigger": "00:00",
         "listOverrides": {
+          "__proto__": {
+            "cascade": false
+          },
           "L1": {
             "autoDate": false
           }
@@ -1524,7 +1528,7 @@
     },
     {
       "name": "one-failed-read",
-      "note": "The surfaces differ. Mobile reads all keys in one Promise.all behind one catch, so one failed read makes EVERY setting the default; the desktop catches each read, so only that key falls back.",
+      "note": "Changed on purpose in the port, decided 2026-09-13: only the setting whose read failed falls back to its default. The desktop already did this; mobile read every key behind one catch and fell back to the defaults for EVERY setting.",
       "input": {
         "prefs": {
           "tasks.cascadeStatusCoupling": "false",
@@ -1533,24 +1537,6 @@
         "failing": "tasks.carryOverDefault"
       },
       "expect": {
-        "cascadeEnabled": true,
-        "autoDate": true,
-        "autoSelfAssign": true,
-        "visualEffortSizing": true,
-        "twoLevelPriority": false,
-        "remindUntimedToday": true,
-        "remindDeadlineArrived": true,
-        "remindDeadlineCountdown": true,
-        "deadlineCountdownDays": 3,
-        "dayViewMode": "grid",
-        "dayStartMin": 0,
-        "dayEndMin": 1440,
-        "checkoffMode": "toggle",
-        "carryOverDefault": "ask",
-        "dayStartTrigger": "00:00",
-        "listOverrides": {}
-      },
-      "desktop": {
         "cascadeEnabled": false,
         "autoDate": true,
         "autoSelfAssign": true,
@@ -1567,8 +1553,7 @@
         "carryOverDefault": "ask",
         "dayStartTrigger": "00:00",
         "listOverrides": {}
-      },
-      "surfacesDiffer": true
+      }
     }
   ],
   "effective": [
@@ -1652,9 +1637,8 @@
       }
     },
     {
-      "name": "a-list-named-proto-finds-its-override-through-the-prototype",
-      "note": "The entry was not kept as a field (see the read row), yet looking up \"__proto__\" returns the map’s prototype, which IS that entry, so its coupling applies after all. A JavaScript artifact; a port that keeps \"__proto__\" as an ordinary list id answers the same here and must then change the read row on purpose.",
-      "wasTypeScript": true,
+      "name": "a-list-named-proto-is-an-ordinary-list",
+      "note": "The same answer as before, for a plain reason now: the list is kept like any other, and its override applies. The TypeScript reached it through the prototype.",
       "input": {
         "prefs": {
           "tasks.listOverrides": "{\"__proto__\":{\"cascade\":false}}"
@@ -1948,8 +1932,7 @@
     },
     {
       "name": "a-list-named-proto",
-      "note": "The surfaces differ: the desktop builds `{ ...prev, [listId]: trimmed }`, where a computed key makes a real field; mobile assigns `next[listId] = trimmed`, which sets the prototype. A JavaScript artifact either way.",
-      "wasTypeScript": true,
+      "note": "Changed on purpose in the port: both surfaces keep the list like any other. The desktop already did, through a computed key; mobile assigned, which set the prototype and lost the list.",
       "input": {
         "stored": null,
         "listId": "__proto__",
@@ -1957,9 +1940,20 @@
           "cascade": false
         }
       },
-      "expect": "{}",
-      "desktop": "{\"__proto__\":{\"cascade\":false}}",
-      "surfacesDiffer": true
+      "expect": "{\"__proto__\":{\"cascade\":false}}"
+    },
+    {
+      "name": "array-index-ids-come-first",
+      "note": "Added with the port, not measured: numeric list ids (which some providers use) are ordered the way a JavaScript object orders them, ascending before every other id, whatever order they were stored in.",
+      "addedWithThePort": true,
+      "input": {
+        "stored": "{\"12\":{\"cascade\":false},\"b\":{\"autoDate\":false},\"7\":{\"cascade\":true}}",
+        "listId": "b",
+        "override": {
+          "autoDate": true
+        }
+      },
+      "expect": "{\"7\":{\"cascade\":true},\"12\":{\"cascade\":false},\"b\":{\"autoDate\":true}}"
     }
   ]
 }

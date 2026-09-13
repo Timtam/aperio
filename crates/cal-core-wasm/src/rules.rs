@@ -302,6 +302,11 @@ pub fn day_start(input_json: &str) -> Result<String, WireError> {
     cal_core::day_start_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::taskSettings`].
+pub fn task_settings(input_json: &str) -> Result<String, WireError> {
+    cal_core::task_settings_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

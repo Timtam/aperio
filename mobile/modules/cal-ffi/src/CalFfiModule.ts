@@ -147,6 +147,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** One question to the day-start rules, and its answer. */
   dayStart(inputJson: string): string;
 
+  /** One question to the task-settings rules, and its answer. */
+  taskSettings(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

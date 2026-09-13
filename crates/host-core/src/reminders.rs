@@ -1450,19 +1450,29 @@ fn all_day_fire_instant<Tz: TimeZone>(
 }
 
 /// The day-carryover time-of-day that anchors all-day / birthday reminders,
-/// read from the synced `tasks.dayStartTrigger` pref. `'HH:MM'` parses to that
-/// time; the `'00:00'` default and `'app-start'` (no clock time) both anchor at
-/// midnight — a midnight-triggered reminder still surfaces at app-start via the
-/// catch-up filter.
+/// read from the synced `tasks.dayStartTrigger` pref.
 fn day_start_time(db: &SharedConn) -> NaiveTime {
+    day_start_time_of(
+        UserPrefsRepo::new(db)
+            .get("tasks.dayStartTrigger")
+            .ok()
+            .flatten()
+            .as_deref(),
+    )
+}
+
+/// The stored trigger read as the surfaces read it (`cal_core::day_start_trigger`):
+/// one of the offered values, anything else `'00:00'` (decided 2026-09-13; it
+/// used to accept any `HH:MM`, seconds included). An offered clock time
+/// anchors at that time; `'00:00'` and `'app-start'` (no clock time) both
+/// anchor at midnight — a midnight-triggered reminder still surfaces at
+/// app-start via the catch-up filter.
+fn day_start_time_of(raw: Option<&str>) -> NaiveTime {
     let midnight = NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is valid");
-    UserPrefsRepo::new(db)
-        .get("tasks.dayStartTrigger")
-        .ok()
-        .flatten()
-        .as_deref()
-        .and_then(parse_local_time)
-        .unwrap_or(midnight)
+    match cal_core::day_start_trigger(raw) {
+        "app-start" => midnight,
+        offered => NaiveTime::parse_from_str(offered, "%H:%M").unwrap_or(midnight),
+    }
 }
 
 fn parse_reminders(json: Option<&str>) -> Option<Vec<Reminder>> {
@@ -1531,6 +1541,26 @@ fn format_event_body(start: &DateTime<Utc>) -> String {
 fn format_task_body(due: &DateTime<Utc>) -> String {
     let local = chrono::Local.from_utc_datetime(&due.naive_utc());
     local.format("%Y-%m-%d %H:%M").to_string()
+}
+
+#[cfg(test)]
+mod day_start_trigger_reading {
+    use super::*;
+
+    #[test]
+    fn the_host_reads_the_trigger_as_the_surfaces_do() {
+        let at = |h, m| NaiveTime::from_hms_opt(h, m, 0).expect("a time");
+        assert_eq!(day_start_time_of(Some("06:00")), at(6, 0));
+        assert_eq!(day_start_time_of(Some("08:00")), at(8, 0));
+        assert_eq!(day_start_time_of(Some("12:00")), at(12, 0));
+        assert_eq!(day_start_time_of(Some("00:00")), at(0, 0));
+        assert_eq!(day_start_time_of(Some("app-start")), at(0, 0));
+        assert_eq!(day_start_time_of(None), at(0, 0));
+        // Not offered: midnight, where the host used to take the clock time.
+        assert_eq!(day_start_time_of(Some("07:00")), at(0, 0));
+        assert_eq!(day_start_time_of(Some("08:00:00")), at(0, 0));
+        assert_eq!(day_start_time_of(Some("garbage")), at(0, 0));
+    }
 }
 
 #[cfg(test)]

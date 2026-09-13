@@ -54,6 +54,7 @@ mod task_grouping_gate {
 }
 pub mod task_occurrences;
 pub mod task_priority;
+pub mod task_settings;
 pub mod task_status;
 pub mod types;
 
@@ -136,6 +137,11 @@ pub use task_occurrences::{
     DEFAULT_MAX_PER_TASK,
 };
 pub use task_priority::{normal_priority, priority_rank, PriorityScale};
+pub use task_settings::{
+    day_start_trigger, task_settings_json, CheckoffMode, DayViewMode, DayWindowMinutes,
+    TaskListEffective, TaskListGlobals, TaskListOverride, TaskListOverrideEntry,
+    TaskSettingsQuestion, TaskSettingsRead, TaskSettingsStored,
+};
 pub use task_status::{
     effort_i18n_key, priority_i18n_key, status_i18n_key, subtask_progress, subtask_progress_json,
     task_i18n_keys, task_i18n_keys_json, EffortKeys, PriorityKeys, PriorityKeysByScale,

@@ -365,3 +365,10 @@ pub fn apply_signature(input_json: &str) -> Result<String, JsValue> {
 pub fn day_start(input_json: &str) -> Result<String, JsValue> {
     rules::day_start(input_json).map_err(to_js)
 }
+
+/// One question to the task-settings rules — reading the stored settings, a
+/// list's effective settings, what a change stores — and its answer.
+#[wasm_bindgen(js_name = taskSettings)]
+pub fn task_settings(input_json: &str) -> Result<String, JsValue> {
+    rules::task_settings(input_json).map_err(to_js)
+}

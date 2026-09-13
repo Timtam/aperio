@@ -50,7 +50,7 @@ pub const SIGNATURE_MARKER: &str = "-- ";
 /// production (TAB, VT, FF, SP, NBSP, ZWNBSP/BOM, and every Zs character) and
 /// the LineTerminator production (LF, CR, LS, PS). Not U+0085 NEXT LINE, not
 /// U+001C..U+001F — those are whitespace to Rust and not here.
-fn is_js_whitespace(c: char) -> bool {
+pub(crate) fn is_js_whitespace(c: char) -> bool {
     matches!(
         c,
         '\u{0009}'

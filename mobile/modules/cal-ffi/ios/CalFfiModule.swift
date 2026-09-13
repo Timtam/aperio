@@ -349,6 +349,11 @@ public class CalFfiModule: Module {
       try dayStart(inputJson: inputJson)
     }
 
+    // The task settings: reading, effective settings per list, what a change stores.
+    Function("taskSettings") { (inputJson: String) -> String in
+      try taskSettings(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

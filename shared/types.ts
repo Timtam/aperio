@@ -125,6 +125,18 @@ export type { DayStartReminderGroups } from './generated/DayStartReminderGroups'
 export type { CarryOverDefault } from './generated/CarryOverDefault';
 export type { DayStartListSettings } from './generated/DayStartListSettings';
 export type { DayStartPlan as DayStartPlanWire } from './generated/DayStartPlan';
+// The task settings, `cal_core::task_settings`. The shell in
+// `shared/taskSettings.ts` speaks these.
+export type { CheckoffMode as CheckoffModeWire } from './generated/CheckoffMode';
+export type { DayViewMode as DayViewModeWire } from './generated/DayViewMode';
+export type { DayWindowMinutes } from './generated/DayWindowMinutes';
+export type { TaskListEffective } from './generated/TaskListEffective';
+export type { TaskListGlobals } from './generated/TaskListGlobals';
+export type { TaskListOverride } from './generated/TaskListOverride';
+export type { TaskListOverrideEntry } from './generated/TaskListOverrideEntry';
+export type { TaskSettingsQuestion } from './generated/TaskSettingsQuestion';
+export type { TaskSettingsRead } from './generated/TaskSettingsRead';
+export type { TaskSettingsStored } from './generated/TaskSettingsStored';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the
