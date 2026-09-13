@@ -38,6 +38,8 @@ use cal_core::{Calendar, ContactList, TaskList};
 use plugin_core::{RecurrenceCapabilities, TaskCapabilities};
 use serde::Serialize;
 
+use crate::birthdays::{birthday_layer, BirthdayLayer};
+
 /// A calendar plus the account that owns it and the recurrence shapes that
 /// account's adapter can store.
 ///
@@ -47,11 +49,20 @@ use serde::Serialize;
 /// RFC 5545: a missing manifest must not silently strip options the source may
 /// well support.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct CalendarRow {
     #[serde(flatten)]
     pub inner: Calendar,
     pub account_id: String,
     pub recurrence_capabilities: RecurrenceCapabilities,
+    /// Set on a synthesised birthday calendar (DESIGN §10.3), and only there:
+    /// which contact list it shows. The row's `name` is then that list's own
+    /// name, and a frontend builds what it shows — "Geburtstage – Familie" —
+    /// from this and its own catalog. Stamped by [`CalendarRow::new`] from the
+    /// calendar id, so no host can forget it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub birthdays: Option<BirthdayLayer>,
 }
 
 impl CalendarRow {
@@ -60,10 +71,12 @@ impl CalendarRow {
         account_id: String,
         recurrence_capabilities: RecurrenceCapabilities,
     ) -> Self {
+        let birthdays = birthday_layer(&inner);
         Self {
             inner,
             account_id,
             recurrence_capabilities,
+            birthdays,
         }
     }
 }

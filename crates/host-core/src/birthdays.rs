@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use cal_core::{Calendar, ColorSource, Contact, ContactsFeature, ContainerColor, DateRange, Event};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
+use serde::Serialize;
 
 use crate::cache::CacheStore;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
@@ -30,6 +31,15 @@ use crate::registry::{AdapterRegistry, LOCAL_ID};
 /// makes these unambiguously synthesised (every real adapter mints opaque ids
 /// that never start that way).
 pub const BIRTHDAY_CALENDAR_PREFIX: &str = "aperio-birthdays:";
+
+/// Prefix every synthesised birthday EVENT id carries:
+/// `aperio-birthday:<contact id>:<year>`. Singular, against the plural of
+/// [`BIRTHDAY_CALENDAR_PREFIX`], so a calendar id never reads as an event id.
+/// Both frontends recognise a birthday event by it where only an id is at
+/// hand (the event editors open a read-only summary; the mobile reminder
+/// overview reopens one by title), pinned against them by
+/// `shared/contracts/birthdayIds.json`.
+pub const BIRTHDAY_EVENT_PREFIX: &str = "aperio-birthday:";
 
 /// A warm pink, consistent across every synthesised layer (DESIGN.md §10.3) —
 /// distinct from the default-blue palette but muted enough not to dominate.
@@ -59,10 +69,14 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         // Synthetic, read-only birthday layer — no per-event color to store.
         supports_event_color: false,
         id: birthday_calendar_id(contact_list_id),
-        // English default; the user can re-localise via the existing
-        // local-override path (DESIGN.md §6.5) since `read_only = true` triggers
-        // the "fallback to local override" branch in `rename_container`.
-        name: format!("Birthdays – {list_name}"),
+        // The list's own name, nothing else. What a frontend shows —
+        // "Geburtstage – Familie" — it builds on its side from the row's
+        // `birthdays` layer and its own catalog (DESIGN §10.3, §4.5 a). The core
+        // used to stamp English "Birthdays – " here for both frontends to cut
+        // off again. No rename override ever reaches a birthday row either —
+        // both hosts append them after the overrides are stamped — so there is
+        // no user-chosen name here to protect.
+        name: list_name.to_string(),
         color: Some(ContainerColor {
             hex: BIRTHDAY_LAYER_COLOR_HEX.to_string(),
             source: ColorSource::Native,
@@ -70,6 +84,29 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         read_only: true,
         default_sound: None,
     }
+}
+
+/// What a synthesised birthday calendar is a layer OF, carried on its
+/// [`crate::wire::CalendarRow`] so a frontend names it in its own language
+/// ("Geburtstage – Familie") instead of the core stamping English text into the
+/// name for the frontend to cut off again (DESIGN §4.5 a).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct BirthdayLayer {
+    /// The contact list whose birthdays the calendar shows.
+    pub contact_list_id: String,
+    /// That list's name, as its source calls it.
+    pub list_name: String,
+}
+
+/// The birthday layer a calendar is, or `None` for every other calendar. Read
+/// off the calendar itself: its id says which contact list, and
+/// [`synthesise_calendar`] names it after that list.
+pub fn birthday_layer(calendar: &Calendar) -> Option<BirthdayLayer> {
+    underlying_contact_list_id(&calendar.id).map(|list_id| BirthdayLayer {
+        contact_list_id: list_id.to_string(),
+        list_name: calendar.name.clone(),
+    })
 }
 
 /// The UTC instant for an all-day birthday on `date`: LOCAL midnight converted
@@ -135,7 +172,7 @@ pub fn events_for_contacts(
             out.push(Event {
                 send_invitations: false,
                 truncate_tail_overrides: false,
-                id: format!("aperio-birthday:{}:{}", contact.id, year),
+                id: format!("{BIRTHDAY_EVENT_PREFIX}{}:{}", contact.id, year),
                 calendar_id: calendar_id.to_string(),
                 // The age rides IN the title when the birth year is known —
                 // "Max (41)" — because the title is what every surface shows:
@@ -427,9 +464,49 @@ mod tests {
     fn synthesise_calendar_is_read_only_with_birthday_colour() {
         let cal = synthesise_calendar("list-id", "Family");
         assert!(cal.read_only);
-        assert_eq!(cal.name, "Birthdays – Family");
+        assert_eq!(cal.name, "Family");
         assert_eq!(cal.id, "aperio-birthdays:list-id");
         assert_eq!(cal.color.as_ref().unwrap().hex, BIRTHDAY_LAYER_COLOR_HEX);
+    }
+
+    #[test]
+    fn a_birthday_calendar_names_its_layer_and_no_other_calendar_has_one() {
+        let cal = synthesise_calendar("list-id", "Family");
+        assert_eq!(
+            birthday_layer(&cal),
+            Some(BirthdayLayer {
+                contact_list_id: "list-id".into(),
+                list_name: "Family".into(),
+            })
+        );
+        let mut plain = cal.clone();
+        plain.id = "caldav-calendar-1".into();
+        assert_eq!(birthday_layer(&plain), None);
+    }
+
+    /// The row is where the layer reaches a frontend: present on a birthday
+    /// calendar, ABSENT (not null) on every other, stamped by `new` so no host
+    /// can forget it.
+    #[test]
+    fn the_row_carries_the_layer_only_for_a_birthday_calendar() {
+        let row = crate::wire::CalendarRow::new(
+            synthesise_calendar("list-id", "Family"),
+            LOCAL_ID.to_string(),
+            Default::default(),
+        );
+        let json = serde_json::to_value(&row).expect("a row serializes");
+        assert_eq!(json["name"], "Family");
+        assert_eq!(json["birthdays"]["contact_list_id"], "list-id");
+        assert_eq!(json["birthdays"]["list_name"], "Family");
+        let mut plain = synthesise_calendar("list-id", "Family");
+        plain.id = "caldav-calendar-1".into();
+        let json = serde_json::to_value(crate::wire::CalendarRow::new(
+            plain,
+            LOCAL_ID.to_string(),
+            Default::default(),
+        ))
+        .expect("a row serializes");
+        assert!(json.get("birthdays").is_none());
     }
 
     #[test]
@@ -458,5 +535,42 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].title, "Ohne-Jahr");
         assert!(events[0].description.is_none());
+    }
+
+    /// The Rust half of the birthday id contract. Its TypeScript twin is
+    /// `src/state/birthdays.test.ts`, and both read the SAME file: both
+    /// frontends recognise a synthesised calendar or event by these prefixes,
+    /// and a misspelt one would let a contact-derived event open a form whose
+    /// save can only fail.
+    mod id_contract {
+        use super::*;
+
+        /// `include_str!` on purpose — `host-core` is the host and never leaves
+        /// this repository (see the reach guard in `host-plugins`).
+        const CONTRACT: &str = include_str!("../../../shared/contracts/birthdayIds.json");
+
+        #[test]
+        fn the_ids_are_spelled_as_the_frontends_read_them() {
+            let c: serde_json::Value =
+                serde_json::from_str(CONTRACT).expect("the contract fixture is valid JSON");
+            assert_eq!(c["calendarPrefix"], BIRTHDAY_CALENDAR_PREFIX);
+            assert_eq!(c["eventPrefix"], BIRTHDAY_EVENT_PREFIX);
+            let ex = &c["examples"];
+            let list = ex["contactListId"].as_str().expect("a list id");
+            let calendar_id = ex["calendarId"].as_str().expect("a calendar id");
+            assert_eq!(birthday_calendar_id(list), calendar_id);
+            assert_eq!(underlying_contact_list_id(calendar_id), Some(list));
+            // The event id the synthesis actually mints, not a format string.
+            let mut contact =
+                make_contact("x", Some(NaiveDate::from_ymd_opt(1990, 3, 10).unwrap()));
+            contact.id = ex["contactId"].as_str().expect("a contact id").to_string();
+            let year = i32::try_from(ex["year"].as_i64().expect("a year")).expect("a year fits");
+            let start = Utc.with_ymd_and_hms(year, 1, 1, 0, 0, 0).unwrap();
+            let end = Utc.with_ymd_and_hms(year, 12, 31, 23, 59, 59).unwrap();
+            let events =
+                events_for_contacts(vec![contact], calendar_id, DateRange::new(start, end));
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].id, ex["eventId"].as_str().expect("an event id"));
+        }
     }
 }

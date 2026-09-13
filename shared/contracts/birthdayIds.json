@@ -1,0 +1,17 @@
+{
+  "what": "The id formats of the synthesised birthday layer (DESIGN §10.3): one read-only calendar per contact list, one all-day event per contact and year. host_core::birthdays mints them; both frontends recognise a birthday calendar or event by their prefixes where only an id is at hand.",
+  "why": "The frontends gate on these: the calendar list hides \"Manage\" for a synthetic calendar, the event editors open a read-only summary for a synthetic event, and the mobile reminder overview reopens one by title. A prefix spelt differently on one side would let a contact-derived event open a form whose save can only fail — silently, on one surface.",
+  "readBy": [
+    "crates/host-core/src/birthdays.rs (tests::id_contract)",
+    "src/state/birthdays.test.ts"
+  ],
+  "calendarPrefix": "aperio-birthdays:",
+  "eventPrefix": "aperio-birthday:",
+  "examples": {
+    "contactListId": "list-1234",
+    "calendarId": "aperio-birthdays:list-1234",
+    "contactId": "contact-7",
+    "year": 2026,
+    "eventId": "aperio-birthday:contact-7:2026"
+  }
+}

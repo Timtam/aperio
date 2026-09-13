@@ -116,6 +116,20 @@ export type { SignatureTextInput } from './generated/SignatureTextInput';
 export type { ApplySignatureInput } from './generated/ApplySignatureInput';
 
 /**
+ * A calendar as the frontends receive it when they LIST them: the
+ * `cal_core::Calendar` fields plus what the host stamps on while listing —
+ * the owning account, the recurrence shapes it can store, and, on a
+ * synthesised birthday calendar only, the `birthdays` layer it shows.
+ *
+ * Generated from `host_core::wire::CalendarRow`, the one declaration the
+ * desktop's Tauri command and the mobile bridge both answer with. Both
+ * surfaces kept a hand-written copy of it until the birthday layer was added,
+ * which is the arrangement that once let the task-list rows drift apart.
+ */
+export type { CalendarRow as Calendar } from './generated/CalendarRow';
+export type { BirthdayLayer } from './generated/BirthdayLayer';
+
+/**
  * A task list as the frontends receive it when they LIST them: the
  * `cal_core::TaskList` fields plus what the host stamps on while listing.
  *

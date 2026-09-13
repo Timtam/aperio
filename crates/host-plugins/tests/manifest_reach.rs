@@ -367,7 +367,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 4] = [
+const KNOWN_REACHES: [(&str, &str); 5] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -382,6 +382,13 @@ const KNOWN_REACHES: [(&str, &str); 4] = [
     (
         "crates/host-core/src/reminders.rs",
         "shared/contracts/taskOwnership.json",
+    ),
+    // The birthday layer's id formats, which both frontends read to recognise
+    // a synthesised calendar or event where only an id is at hand. Same crate,
+    // same reason as above.
+    (
+        "crates/host-core/src/birthdays.rs",
+        "shared/contracts/birthdayIds.json",
     ),
     // The same hop on the phone, where the Host applies the calendar's policy.
     (

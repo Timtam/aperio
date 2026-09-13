@@ -13,7 +13,6 @@
 
 import type {
   ContainerColor,
-  RecurrenceCapabilities,
   Reminder,
   SoundConfig,
   Task,
@@ -22,39 +21,8 @@ import type {
 
 export type * from '@aperio/shared';
 
-export interface Calendar {
-  id: string;
-  name: string;
-  color: ContainerColor | null;
-  /** Bound color-label id. When set, the rendered color resolves to the
-   *  label's live hex (priority over `color`). See `resolveContainerColor`. */
-  color_label: string | null;
-  read_only: boolean;
-  default_sound: SoundConfig | null;
-  /** Account that owns this calendar. `"local"` for the implicit
-   *  local adapter; a UUID for any external account. Backend
-   *  enriches every Calendar with this field via the registry's
-   *  route map so the frontend can group containers by source
-   *  without a second round-trip. */
-  account_id: string;
-  /** Recurrence shapes the owning adapter can store. Backend-
-   *  stamped alongside `account_id`; optional in the wire shape so
-   *  any consumer reading a Calendar from a pre-capabilities
-   *  snapshot still parses. Absent → treat as full support. */
-  recurrence_capabilities?: RecurrenceCapabilities;
-  /** True when the owning provider can email attendees about
-   *  invitations/updates/cancellations via server-side scheduling (EWS,
-   *  Google, Graph always; CalDAV/iCloud only when the server advertises
-   *  RFC 6638). Gates the "notify attendees" toggle in the event dialog.
-   *  Absent → treat as unsupported. */
-  supports_scheduling?: boolean;
-  /** True when the owning provider stores a per-event color natively
-   *  (RFC 7986 COLOR): local always; color-capable CalDAV (non-iCloud);
-   *  Google/Graph/EWS/iCal never. When false the color is kept as a
-   *  host-local override instead. Routes a recolor through `update_event`
-   *  (native) vs `setEventColor` (override). Absent → treat as unsupported. */
-  supports_event_color?: boolean;
-}
+// `Calendar` — the row `list_calendars` answers with — is generated from
+// `host_core::wire::CalendarRow` and comes in through `@aperio/shared` above.
 
 export interface EventRecurrence {
   rrule: string;

@@ -2038,6 +2038,14 @@ Der Plugin-Manager zeigt im Einrichtungsdialog nur die Capabilities an, die der 
 Geburtstage aus verbundenen Kontaktbüchern werden als **eigener, nicht-editierbarer Kalender-Layer** angezeigt – analog zu abonnierten Feiertags-iCals (Abschnitt 12).
 
 - Pro verbundenem Kontaktbuch gibt es einen eigenen Geburtstags-Layer (z.B. "Geburtstage – Google", "Geburtstage – iCloud")
+- **Der Name kommt aus der Oberfläche, nicht aus dem Kern.** Der Host nennt den
+  Kalender nach dem Kontaktbuch allein und hängt an die Kalenderzeile die Ebene
+  (`birthdays: {contact_list_id, list_name}`); die Oberfläche setzt „Geburtstage –
+  Familie" aus dem Schlüssel `birthdays.calendarName` in ihrer Sprache zusammen
+  (§4.5 a). Vorher stempelte der Kern englisch „Birthdays – " in den Namen, und
+  beide Oberflächen schnitten es wieder ab. Erkannt wird ein Geburtstagskalender
+  oder -termin dort, wo nur eine Id vorliegt, weiter am Präfix — beide Seiten
+  buchstabieren es aus `shared/contracts/birthdayIds.json`.
 - Layer sind einzeln ein-/ausblendbar
 - Geburtstage erscheinen als Ganztages-Termine mit dem Namen des Kontakts
 - Nicht editierbar in der App – Änderungen am Geburtsdatum erfolgen im jeweiligen Kontaktbuch

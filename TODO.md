@@ -1619,6 +1619,31 @@ Siehe DESIGN §4.2.
   gewünscht ist, gehört sie in die Tür-Konvention insgesamt, nicht in ein
   Modul. 5.000 Zufallstexte mit allen Leerraum- und Steuerzeichen, Emoji und
   Markern: Byte-gleich.
+- [x] **Geburtstagskalender: der Kern nennt das Buch, die Oberfläche den Kalender**
+  — das letzte Modul des Bogens der kleinen Doppelungen, nach einem Entwurf
+  (entschieden 2026-09-13: Feld mit Buchname; Kalenderzeile als Typ erzeugt).
+  `host_core::birthdays::synthesise_calendar` schrieb englisch „Birthdays – "
+  in `Calendar.name`, und beide `listCalendars`-Hüllen schnitten es mit
+  `birthdayCalendarListName` wieder ab. Jetzt ist der Name der Buchname, und
+  `host_core::wire::CalendarRow` trägt auf einer Geburtstagszeile — und nur
+  dort — `birthdays: {contact_list_id, list_name}`, gestempelt von
+  `CalendarRow::new` aus der Id, so dass kein Host es vergessen kann (der
+  Desktop-Befehl baute seine Zeilen bisher als Literale und geht jetzt auch
+  durch `new`). Eine gemeinsame `localizeBirthdayCalendarName` in
+  `shared/birthdays.ts` setzt „Geburtstage – Familie" aus dem Schlüssel; beide
+  Hüllen rufen dieselbe. Gefunden und mit entfernt: der Zweig „ein
+  umbenannter Geburtstagskalender bleibt, wie er ist" war tot — der Desktop
+  hängt die Geburtstagszeilen NACH dem Stempeln der Umbenennungen an, Mobile
+  wendet bewusst keine an —, und der Rust-Kommentar, man könne über eine
+  Umbenennung neu übersetzen, war falsch. `cal_core::Calendar` und
+  `CalendarRow` erzeugen jetzt ihre TypeScript-Typen; die zwei
+  handgeschriebenen `Calendar`-Kopien (Desktop `src/api/types.ts`, Mobile
+  `api/calendar.ts`) sind weg — dieselbe Anordnung, die bei den
+  Aufgabenlisten-Zeilen schon einmal Schaden angerichtet hatte. Die Id-Präfixe
+  bleiben (die mobile Erinnerungsübersicht kennt nur die Termin-Id), sind aber
+  jetzt durch `shared/contracts/birthdayIds.json` gegen die Ids gepinnt, die
+  die Synthese tatsächlich erzeugt; die Termin-Präfix-Zeichenkette ist dafür
+  eine Konstante `BIRTHDAY_EVENT_PREFIX` geworden.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
