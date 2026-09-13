@@ -1,0 +1,360 @@
+{
+  "what": "Three answers of shared/taskAssignment.ts that move into the core: the new assignee list a status change implies (self-assign on start or finish, step back on reopen), how many people a list can hold on one task, and what a list of assignees is trimmed to. Measured from the TypeScript before the port. The fourth rule of the module, \"is this mine?\", is already the core’s and has its own contract (shared/contracts/taskOwnership.json).",
+  "why": "Both surfaces apply these when a task is checked off or moved, and a frontend that is not JavaScript has to apply them too. The core answers WHO by position (which of the given assignees stay) or by a state (take me), never by echoing a user row; the mode and the trim are what stop an editor from offering a choice the source cannot keep.",
+  "writtenBy": [
+    "src/state/taskAssignment.measure.test.ts — a one-off, run once and deleted; its cases mirror src/state/taskAssignment.test.ts plus the rows the port needs that those never had (order kept when I am in the middle, every copy of me removed, cancelling a task I hold, in_progress on a colleague’s task, an empty list under single, every declared mode)."
+  ],
+  "readBy": [
+    "src/state/taskAssignment.contract.test.ts",
+    "crates/cal-core/src/task_assignment.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like the other task fixtures; taskOwnership.json stays in shared/contracts/ because host-core reads it and host-core never leaves this repository."
+  },
+  "notInThisTable": {
+    "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; the TypeScript copy serves shared/dayStart.ts until the day-start rules move",
+    "classifyDoneByMe": "no caller since the grouping moved into the core (#42); deleted with the port",
+    "currentUserForList": "who \"me\" is for a list is the platform’s (a session-cached adapter call); the rule takes it as an input",
+    "the Settings toggle": "whether the auto-assign is on travels in as `enabled`"
+  },
+  "shape": {
+    "selfAssign": "{nextStatus, assignees: [id…], me: id | null, enabled} → the new assignee ids or null (nothing changes). A user is its id: the rule compares ids alone.",
+    "mode": "{capabilities: wire object | null | \"absent\"} → \"none\" | \"single\" | \"multiple\".",
+    "clamp": "{mode, assignees: [id…]} → the ids that stay, in order."
+  },
+  "selfAssign": [
+    {
+      "name": "an-unassigned-task-going-in-progress-becomes-mine",
+      "note": "The auto-assign: work started on a task nobody owns.",
+      "input": {
+        "nextStatus": "in_progress",
+        "assignees": [],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": [
+        "me"
+      ]
+    },
+    {
+      "name": "an-unassigned-task-completed-becomes-mine",
+      "note": "Finishing it counts as taking it.",
+      "input": {
+        "nextStatus": "completed",
+        "assignees": [],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": [
+        "me"
+      ]
+    },
+    {
+      "name": "a-task-a-colleague-holds-is-not-taken",
+      "note": "The auto-assign acts only on a task nobody owns.",
+      "input": {
+        "nextStatus": "completed",
+        "assignees": [
+          "colleague"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "a-task-already-mine-is-left-alone",
+      "note": "Nothing to change.",
+      "input": {
+        "nextStatus": "completed",
+        "assignees": [
+          "me"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "reopening-removes-only-me",
+      "note": "Symmetric to the auto-assign: I step back, nobody else is touched.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [
+          "me"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": []
+    },
+    {
+      "name": "reopening-keeps-the-colleague-in-order",
+      "note": "The remaining assignees keep their order.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [
+          "me",
+          "colleague"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": [
+        "colleague"
+      ]
+    },
+    {
+      "name": "reopening-keeps-the-order-when-i-am-in-the-middle",
+      "note": "Positions, not a rebuilt list.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [
+          "anna",
+          "me",
+          "bernd"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": [
+        "anna",
+        "bernd"
+      ]
+    },
+    {
+      "name": "reopening-removes-every-copy-of-me",
+      "note": "A provider that lists the same person twice loses both copies; matching is by id.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [
+          "me",
+          "colleague",
+          "me"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": [
+        "colleague"
+      ]
+    },
+    {
+      "name": "reopening-a-colleagues-task-changes-nothing",
+      "note": "Not mine, not touched.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [
+          "colleague"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "reopening-an-unassigned-task-changes-nothing",
+      "note": "Nobody to remove.",
+      "input": {
+        "nextStatus": "open",
+        "assignees": [],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "cancelling-changes-nothing",
+      "note": "Cancelled is neither taking nor stepping back.",
+      "input": {
+        "nextStatus": "cancelled",
+        "assignees": [],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "cancelling-a-task-i-hold-changes-nothing",
+      "note": "",
+      "input": {
+        "nextStatus": "cancelled",
+        "assignees": [
+          "me"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "disabled-changes-nothing",
+      "note": "The Settings → Tasks toggle, off.",
+      "input": {
+        "nextStatus": "completed",
+        "assignees": [],
+        "me": "me",
+        "enabled": false
+      },
+      "expect": null
+    },
+    {
+      "name": "no-identity-changes-nothing",
+      "note": "A list whose adapter reports no \"me\" (the local store) has nobody to assign.",
+      "input": {
+        "nextStatus": "completed",
+        "assignees": [],
+        "me": null,
+        "enabled": true
+      },
+      "expect": null
+    },
+    {
+      "name": "in-progress-with-a-colleague-is-left-alone",
+      "note": "Starting work on a task someone else holds does not add me.",
+      "input": {
+        "nextStatus": "in_progress",
+        "assignees": [
+          "colleague"
+        ],
+        "me": "me",
+        "enabled": true
+      },
+      "expect": null
+    }
+  ],
+  "mode": [
+    {
+      "name": "an-unknown-list-cannot-assign",
+      "note": "No list, no capability: none.",
+      "input": {
+        "capabilities": "absent"
+      },
+      "expect": "none"
+    },
+    {
+      "name": "a-list-without-capabilities-cannot-assign",
+      "note": "The cautious default, mirroring TaskCapabilities::default().",
+      "input": {
+        "capabilities": null
+      },
+      "expect": "none"
+    },
+    {
+      "name": "a-capabilities-block-without-the-field-cannot-assign",
+      "note": "An adapter that has not said it can assign is taken at its word.",
+      "input": {
+        "capabilities": {
+          "subtasks": true
+        }
+      },
+      "expect": "none"
+    },
+    {
+      "name": "reads-none-as-declared",
+      "note": "What the adapter declared.",
+      "input": {
+        "capabilities": {
+          "task_assignment": "none"
+        }
+      },
+      "expect": "none"
+    },
+    {
+      "name": "reads-single-as-declared",
+      "note": "What the adapter declared.",
+      "input": {
+        "capabilities": {
+          "task_assignment": "single"
+        }
+      },
+      "expect": "single"
+    },
+    {
+      "name": "reads-multiple-as-declared",
+      "note": "What the adapter declared.",
+      "input": {
+        "capabilities": {
+          "task_assignment": "multiple"
+        }
+      },
+      "expect": "multiple"
+    }
+  ],
+  "clamp": [
+    {
+      "name": "single-keeps-the-first",
+      "note": "The same one Todoist’s adapter keeps (first_assignee_id), so the editor and the wire agree about who survives.",
+      "input": {
+        "mode": "single",
+        "assignees": [
+          "anna",
+          "bernd"
+        ]
+      },
+      "expect": [
+        "anna"
+      ]
+    },
+    {
+      "name": "single-keeps-one-of-one",
+      "note": "",
+      "input": {
+        "mode": "single",
+        "assignees": [
+          "anna"
+        ]
+      },
+      "expect": [
+        "anna"
+      ]
+    },
+    {
+      "name": "single-keeps-nothing-of-nothing",
+      "note": "",
+      "input": {
+        "mode": "single",
+        "assignees": []
+      },
+      "expect": []
+    },
+    {
+      "name": "multiple-keeps-all",
+      "note": "",
+      "input": {
+        "mode": "multiple",
+        "assignees": [
+          "anna",
+          "bernd",
+          "carla"
+        ]
+      },
+      "expect": [
+        "anna",
+        "bernd",
+        "carla"
+      ]
+    },
+    {
+      "name": "none-never-empties-what-it-cannot-show",
+      "note": "The editor hides the picker there; the task may still carry assignees another client wrote, and clearing them on open would destroy what the user was never shown.",
+      "input": {
+        "mode": "none",
+        "assignees": [
+          "anna",
+          "bernd"
+        ]
+      },
+      "expect": [
+        "anna",
+        "bernd"
+      ]
+    }
+  ],
+  "statuses": [
+    "open",
+    "in_progress",
+    "completed",
+    "cancelled"
+  ]
+}
