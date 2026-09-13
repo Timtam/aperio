@@ -2,11 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import {
-  actionableDescendantsOf,
-  buildReminderGroups,
-  filterCarriedOver,
   filterDeadlinePinTargets,
-  filterOverdue,
+  planDayStart,
   reminderCount,
   shouldFireToday,
   todayIsoKey,
@@ -24,7 +21,7 @@ import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { whenStartupSettled } from './startupGate';
-import { effectiveForList, readTaskBehaviour, type TaskBehaviour } from './taskBehaviour';
+import { effectiveForList, readTaskBehaviour } from './taskBehaviour';
 import { useTaskStore } from './taskStoreContext';
 
 // The mobile day-start checks — the screen-reader-first twin of the desktop's
@@ -116,34 +113,17 @@ async function runDeadlinePin(
 
 /**
  * Silent carry-over batch (one action) — the mobile twin of the desktop
- * runAutoCarryOverBatch. Collects every slipped root plus, when cascade is on
- * for THAT root's list, its actionable descendants, and shifts each one's
- * scheduled_date (today or null). Announces the ROOT count (descendants are an
+ * runAutoCarryOverBatch. Shifts the scheduled_date (today or null) of every
+ * target the day-start plan collected: each slipped root plus, when its list
+ * couples, what it brings along. Announces the ROOT count (descendants are an
  * implementation detail). No visual undo-toast: mobile has no toast surface yet,
  * and the screen-reader announce — the channel that matters here — is covered.
  */
 async function runAutoCarryOverBatch(
   action: 'today' | 'backlog',
-  slippedRoots: Task[],
-  allTasks: Task[],
-  behaviour: TaskBehaviour,
+  roots: number,
+  targets: Task[],
 ): Promise<void> {
-  // One question for every coupled root: a question per root sent the whole
-  // task list across the bridge each time.
-  const coupled = slippedRoots.filter((root) => effectiveForList(behaviour, root.list_id).cascade);
-  const below = actionableDescendantsOf(
-    coupled.map((root) => root.id),
-    allTasks,
-  );
-  const belowRoot = new Map<Task, Task[]>(coupled.map((root, i) => [root, below[i]]));
-  const collected = new Map<string, Task>();
-  for (const root of slippedRoots) {
-    collected.set(root.id, root);
-    for (const desc of belowRoot.get(root) ?? []) {
-      collected.set(desc.id, desc);
-    }
-  }
-  const targets = [...collected.values()];
   if (targets.length === 0) return;
   const newDate = action === 'today' ? todayIsoKey() : null;
   // Sequential so a first-row failure surfaces without a half-applied family.
@@ -155,7 +135,7 @@ async function runAutoCarryOverBatch(
       action === 'today'
         ? 'dialogs.dayStartReview.carryOver.autoToday'
         : 'dialogs.dayStartReview.carryOver.autoBacklog',
-      { count: slippedRoots.length },
+      { count: roots },
     ),
   );
 }
@@ -216,39 +196,26 @@ async function runDayStartReview(
   // ── Day-start TASK REMINDERS ────────────────────────────────────────────
   // Three read-only nudges, each gated by its own toggle, sharing this same
   // 'dayStartReview' fire-marker so they surface once a day with the review.
-  // Built via the SHARED `buildReminderGroups` so a task lands in exactly ONE
+  // Built by the core's day-start plan, so a task lands in exactly ONE
   // group (due-today > planned-today > countdown) and the spoken count, the OS
   // notification, and the modal's rendered rows all agree. The predicates skip
   // settled tasks, project parents, and other-user tasks (via `meFor`).
-  const reminders = buildReminderGroups(
-    all,
-    {
+  const plan = planDayStart(all, {
+    reminders: {
       remindUntimedToday: behaviour.remindUntimedToday,
       remindDeadlineArrived: behaviour.remindDeadlineArrived,
       remindDeadlineCountdown: behaviour.remindDeadlineCountdown,
       deadlineCountdownDays: behaviour.deadlineCountdownDays,
     },
-    meFor,
-  );
-  const reminderTotal = reminderCount(reminders);
-
-  const overdue = filterOverdue(all, meFor);
-  const slipped = filterCarriedOver(all, {
-    cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
+    // Slipped rows split by each list's carry-over default: 'today' /
+    // 'backlog' run silently, 'ask' surfaces in the modal. A mix produces a
+    // hybrid.
+    listSettings: (listId) => effectiveForList(behaviour, listId),
     meFor,
   });
-
-  // Split slipped rows by each list's carry-over default: 'today' / 'backlog'
-  // run silently, 'ask' surfaces in the modal. A mix produces a hybrid.
-  const askRows: Task[] = [];
-  const todayRows: Task[] = [];
-  const backlogRows: Task[] = [];
-  for (const row of slipped) {
-    const def = effectiveForList(behaviour, row.list_id).carryOverDefault;
-    if (def === 'today') todayRows.push(row);
-    else if (def === 'backlog') backlogRows.push(row);
-    else askRows.push(row);
-  }
+  const { overdue, askRows, todayRows, backlogRows } = plan;
+  const reminders = plan.reminders;
+  const reminderTotal = reminderCount(reminders);
 
   // Late lock re-probe: a re-lock during the settle/fan-out must not burn the
   // marker, speak task details through the cover, or present the review Modal
@@ -264,7 +231,7 @@ async function runDayStartReview(
   // were warm — a zero verdict on cold/partial data used to burn the marker
   // and silence the review for the whole day, which is exactly the failure
   // a screen-reader user cannot see happening.
-  const surfaced = overdue.length + askRows.length + reminderTotal;
+  const surfaced = plan.surfaced;
   const autoRows = todayRows.length + backlogRows.length;
   if (surfaced + autoRows === 0) {
     if (!settleConfirmed) {
@@ -335,10 +302,10 @@ async function runDayStartReview(
   }
 
   if (todayRows.length > 0) {
-    await runAutoCarryOverBatch('today', todayRows, all, behaviour);
+    await runAutoCarryOverBatch('today', todayRows.length, plan.todayTargets);
   }
   if (backlogRows.length > 0) {
-    await runAutoCarryOverBatch('backlog', backlogRows, all, behaviour);
+    await runAutoCarryOverBatch('backlog', backlogRows.length, plan.backlogTargets);
   }
   if (autoRows > 0) invalidateData();
 

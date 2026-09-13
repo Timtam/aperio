@@ -609,9 +609,11 @@ export function DayStartReviewDialog({
     // Per-list cascade — same logic as the per-row action above, just
     // applied to every visible carry-over row, and asked of the core once.
     const coupled = remainingSlipped.filter((row) => effectiveForList(row.list_id).cascade);
+    // Only subtasks that are mine or nobody's come along.
     const below = actionableDescendantsOf(
       coupled.map((row) => row.id),
       tasks,
+      meFor,
     );
     const belowRow = new Map<Task, Task[]>(coupled.map((row, i) => [row, below[i]]));
     const collected = new Map<string, Task>();
@@ -622,7 +624,7 @@ export function DayStartReviewDialog({
       }
     }
     return [...collected.values()];
-  }, [remainingSlipped, effectiveForList, tasks]);
+  }, [remainingSlipped, effectiveForList, meFor, tasks]);
 
   const allCarryToToday = useCallback(async () => {
     setBusy(true);

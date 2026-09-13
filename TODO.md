@@ -1757,6 +1757,27 @@ Siehe DESIGN §4.2.
   `dayStartPlan.contract.test.ts` spielt zurück (20 Tests); rot bewiesen
   (Backlog-Zeilen als Heute-Zeilen → drei Fälle fallen). Kein Produktionscode
   geändert.
+  ↳ **Schritt 2 (Folge-PR auf #62): gebaut.** `cal_core::day_start::plan`,
+  gefragt über dieselbe Tür (`rule: "plan"`): Überfällige, Fragen / Heute /
+  Backlog, die Ziele beider Stapel, die Erinnerungsgruppen und die Zahl, in
+  Positionen. Die Einstellungen reisen je Liste aufgelöst mit
+  (`DayStartListSettings`, `CarryOverDefault`); eine Liste, die die Frage nicht
+  nennt, koppelt nicht und fragt. Die Hülle `planDayStart` legt die Antwort
+  über die eigenen Aufgaben; Desktop-Prüfer, mobile Prüfungen und mobiler
+  Vorplaner fragen sie, die drei Inline-Kopien und die Ziel-Sammlung in beiden
+  `runAutoCarryOverBatch` sind weg. ZWEI Antworten absichtlich geändert
+  (Toni, 2026-09-13): **die Elternaufgabe entscheidet** — eine verschleppte
+  Zeile, die eine still übertragene Wurzel mitbringt, ist keine eigene Zeile
+  mehr (vorher in beiden Stapeln, der spätere gewann; auch keine Frage mehr
+  über eine schon verschobene Aufgabe); und **der Stapel bringt nur, was mir
+  oder niemandem gehört** (vorher auch die offene Unteraufgabe einer
+  Kollegin; der Weg geht durch sie hindurch weiter). Mitnehmen kann nicht in
+  beide Richtungen gehen: eine genommene Zeile liegt in einer ungekoppelten
+  Liste, und die bringt nichts. Die Sammel-Knöpfe in Dialog und Modal fragen
+  die Stapelform jetzt mit `meFor`; die Einzel-Aktion je Zeile bleibt ohne
+  Zuständigkeit. Fixture: drei Zeilen geändert, drei neu (je mit Notiz), 22
+  Fälle. Rust 24/24 beim ersten Lauf; rot bewiesen (Mitnehmen ausgeschaltet →
+  die Plan-Zeilen fallen).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

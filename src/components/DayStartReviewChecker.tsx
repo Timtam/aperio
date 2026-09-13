@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { buildReminderGroups, reminderCount } from '@aperio/shared';
+import { planDayStart } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -17,18 +17,10 @@ import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
 import { notify } from '../state/notify';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
-import type {
-  CarryOverDefault,
-  EffectiveListSettings,
-} from '../state/TaskCascadeProvider';
+import type { CarryOverDefault } from '../state/TaskCascadeProvider';
 import { useToast } from '../state/toastContext';
 import { useTasks } from '../state/useTasks';
-import {
-  actionableDescendantsOf,
-  filterCarriedOver,
-  filterOverdue,
-  isDayStartReviewSnoozed,
-} from './dayStartReview';
+import { isDayStartReviewSnoozed } from './dayStartReview';
 
 /**
  * Day-start gate for the unified review (DESIGN.md § 9.5).
@@ -116,27 +108,24 @@ export function DayStartReviewChecker() {
     if (!tasks.every((tk) => tk.list_id in currentUserByList)) return;
     const meFor = (listId: string) => currentUserByList[listId] ?? null;
 
-    const overdue = filterOverdue(tasks, meFor);
-    const slipped = filterCarriedOver(tasks, {
-      cascadeEnabledFor: (listId) => effectiveForList(listId).cascade,
+    // The whole morning in one question to the core: the overdue tasks, the
+    // slipped rows split by each list's carry-over default (tasks in lists
+    // set to 'ask' end up in the dialog; 'today' / 'backlog' lists run
+    // through the silent batch), what each silent batch writes, the reminder
+    // groups, and the count that opens the dialog. A mix of lists with
+    // different defaults produces a hybrid — some rows handled silently,
+    // others surfaced for explicit review.
+    const plan = planDayStart(tasks, {
+      reminders: {
+        remindUntimedToday,
+        remindDeadlineArrived,
+        remindDeadlineCountdown,
+        deadlineCountdownDays,
+      },
+      listSettings: effectiveForList,
       meFor,
     });
-    // Group slipped tasks by list and split by each list's carry-over
-    // default. Tasks in lists set to 'ask' end up in the dialog; tasks
-    // in 'today' / 'backlog' lists run through the silent batch with
-    // the appropriate action. A mix of lists with different defaults
-    // produces a hybrid — some rows handled silently, others surfaced
-    // for explicit review. Split HERE, before the reminder block, so the
-    // OS notification below can count everything the dialog will surface.
-    const askRows: Task[] = [];
-    const todayRows: Task[] = [];
-    const backlogRows: Task[] = [];
-    for (const row of slipped) {
-      const eff = effectiveForList(row.list_id);
-      if (eff.carryOverDefault === 'today') todayRows.push(row);
-      else if (eff.carryOverDefault === 'backlog') backlogRows.push(row);
-      else askRows.push(row);
-    }
+    const { todayRows, backlogRows } = plan;
     // Even on an empty day we record the fire — the gate's only job
     // is "review for this day". If new slipped / overdue rows appear
     // later (sync, manual edit), this tick wouldn't have caught
@@ -149,21 +138,11 @@ export function DayStartReviewChecker() {
     // Three read-only nudges, each gated by its own toggle, sharing the
     // same 'dayStartReview' fire-marker so they surface once a day with
     // the review. The groups are DE-DUPLICATED (a deadline-pinned task is
-    // counted/announced ONCE) by the shared `buildReminderGroups`, the
-    // same helper the dialog renders from — so the spoken count, the OS
+    // counted/announced ONCE) by the same core rule the dialog renders
+    // from through `buildReminderGroups` — so the spoken count, the OS
     // notification, and the visible rows always agree. The predicates
     // already skip settled tasks, project parents, and other-user tasks.
-    const reminderGroups = buildReminderGroups(
-      tasks,
-      {
-        remindUntimedToday,
-        remindDeadlineArrived,
-        remindDeadlineCountdown,
-        deadlineCountdownDays,
-      },
-      meFor,
-    );
-    const reminderTotal = reminderCount(reminderGroups);
+    const reminderGroups = plan.reminders;
 
     // The live region is a SINGLE polite channel — three sequential
     // announce() calls would clobber each other, leaving only the last
@@ -199,7 +178,7 @@ export function DayStartReviewChecker() {
     // rows whose list votes 'ask', and the reminder groups. The notification
     // used to count only the reminder half, so "1 task needs your attention"
     // fired on a morning where three overdue tasks also awaited a decision.
-    const surfaced = overdue.length + askRows.length + reminderTotal;
+    const surfaced = plan.surfaced;
     if (surfaced > 0) {
       // One combined OS notification for the "you're not looking at
       // Aperio" reach. The live announcement above already carries the
@@ -219,14 +198,13 @@ export function DayStartReviewChecker() {
       void (async () => {
         // Run each batch in its own pass so a failure on one half
         // (e.g. an offline iCloud account) doesn't block the other.
-        // Both share the same `effectiveForList` so each batch's
-        // cascade decision honours the originating row's list.
+        // The plan already honoured each row's own list when it
+        // collected what the batch writes.
         if (todayRows.length > 0) {
           await runAutoCarryOverBatch({
             action: 'today',
-            slippedRoots: todayRows,
-            allTasks: tasks,
-            effectiveForList,
+            roots: todayRows.length,
+            targets: plan.todayTargets,
             announce,
             t,
             invalidateData,
@@ -236,9 +214,8 @@ export function DayStartReviewChecker() {
         if (backlogRows.length > 0) {
           await runAutoCarryOverBatch({
             action: 'backlog',
-            slippedRoots: backlogRows,
-            allTasks: tasks,
-            effectiveForList,
+            roots: backlogRows.length,
+            targets: plan.backlogTargets,
             announce,
             t,
             invalidateData,
@@ -284,10 +261,9 @@ export function DayStartReviewChecker() {
 }
 
 /**
- * Apply a silent carry-over batch action. Collects every slipped row
- * plus, when cascade-coupling is on for THAT row's list, its
- * actionable descendants — the same target set the dialog's bulk
- * buttons would touch, with per-list cascade respected.
+ * Apply a silent carry-over batch action to the targets the day-start
+ * plan collected: every slipped row plus, when coupling is on for THAT
+ * row's list, the actionable tasks below it that are mine or nobody's.
  *
  * After a successful batch we surface a visible toast with an Undo
  * button. The Undo handler re-applies each task's original
@@ -303,9 +279,10 @@ export function DayStartReviewChecker() {
  */
 async function runAutoCarryOverBatch(args: {
   action: Exclude<CarryOverDefault, 'ask'>;
-  slippedRoots: Task[];
-  allTasks: Task[];
-  effectiveForList: (listId: string) => EffectiveListSettings;
+  /** How many slipped rows the batch carries: what the announcement counts. */
+  roots: number;
+  /** What the day-start plan says the batch writes. */
+  targets: Task[];
   announce: (message: string) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
   invalidateData: () => void;
@@ -315,23 +292,7 @@ async function runAutoCarryOverBatch(args: {
     durationMs?: number;
   }) => string;
 }): Promise<void> {
-  const { action, slippedRoots, allTasks, effectiveForList } = args;
-  // One question for every coupled root: a question per root sent the whole
-  // task list across the door each time.
-  const coupled = slippedRoots.filter((root) => effectiveForList(root.list_id).cascade);
-  const below = actionableDescendantsOf(
-    coupled.map((root) => root.id),
-    allTasks,
-  );
-  const belowRoot = new Map<Task, Task[]>(coupled.map((root, i) => [root, below[i]]));
-  const collected = new Map<string, Task>();
-  for (const root of slippedRoots) {
-    collected.set(root.id, root);
-    for (const desc of belowRoot.get(root) ?? []) {
-      collected.set(desc.id, desc);
-    }
-  }
-  const targets = [...collected.values()];
+  const { action, roots, targets } = args;
   if (targets.length === 0) return;
 
   const newDate = action === 'today' ? todayIsoKey() : null;
@@ -367,7 +328,7 @@ async function runAutoCarryOverBatch(args: {
       action === 'today'
         ? 'dialogs.dayStartReview.carryOver.autoToday'
         : 'dialogs.dayStartReview.carryOver.autoBacklog';
-    args.announce(args.t(announceKey, { count: slippedRoots.length }));
+    args.announce(args.t(announceKey, { count: roots }));
     args.invalidateData();
 
     // Surface a visible Undo handle. The screen-reader-only announce
@@ -381,7 +342,7 @@ async function runAutoCarryOverBatch(args: {
         ? 'dialogs.dayStartReview.carryOver.autoTodayToast'
         : 'dialogs.dayStartReview.carryOver.autoBacklogToast';
     args.showToast({
-      message: args.t(toastKey, { count: slippedRoots.length }),
+      message: args.t(toastKey, { count: roots }),
       undo: {
         action: async () => {
           // Replay the snapshot in parallel. We restore only the
@@ -402,7 +363,7 @@ async function runAutoCarryOverBatch(args: {
           args.invalidateData();
           args.announce(
             args.t('dialogs.dayStartReview.carryOver.undoAnnounce', {
-              count: slippedRoots.length,
+              count: roots,
             }),
           );
         },
