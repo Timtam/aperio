@@ -1857,6 +1857,18 @@ Siehe DESIGN §4.2.
   bulk-memory); und der TypeScript-Vertragstest liest seine Fixture mit
   `JSON.parse` statt per Import, weil ein JSON-Import den Schlüssel
   `__proto__` zum Prototyp macht.
+  Nach der Prüfung (drei Linsen: 8 bestätigt, 3 widerlegt) behoben: ein
+  Countdown, den `parseInt` als Unendlich liest (jenseits von 1,8e308, etwa
+  eine 1 mit 309 Nullen), las 30
+  statt des Standards 3 — jetzt wieder 3 wie im TypeScript; `serde_json` las
+  manche JavaScript-Zahlen eine ULP daneben (104.99999999999999 als 105, also
+  120 statt 90) — cal-core schaltet `float_roundtrip` ein. Je eine Zeile dazu
+  (91 Zeilen), die geänderten und neuen Zeilen stehen in beiden
+  Anti-Stille-Listen, vier veraltete Beschreibungen korrigiert (Notiz der
+  Auslöser-Zeile, `dayStart.json`, Kopf des TypeScript-Vertragstests,
+  Provider-Doku). Widerlegt: eine Override-Tabelle mit Zahlen jenseits von
+  f64, 128 Ebenen Tiefe oder einzelnen Surrogaten fällt ganz auf leer — kein
+  Aperio-Schreiber erzeugt so etwas.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

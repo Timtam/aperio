@@ -148,18 +148,18 @@ export type CalendarDayViewMode = 'grid' | 'list';
 
 /**
  * When the three day-start checkers (CarryOver, MissedTasks,
- * DeadlinePin) should fire on a long-running app. Values:
+ * DeadlinePin) should fire on a long-running app. One of five values:
  *
  *   - `'app-start'`: legacy mount-once. Fires only on initial
  *     launch — historical behaviour, opt-in for users who don't
  *     want re-fires while the app is running.
  *   - `'00:00'`: as soon as the local date rolls over (default).
- *   - Any other `HH:MM`: deferred to that morning hour on the new
- *     day so the user isn't woken up by a midnight dialog.
+ *   - `'06:00'`, `'08:00'`, `'12:00'`: deferred to that hour on the
+ *     new day so the user isn't woken up by a midnight dialog.
  *
- * Stored verbatim as a string. The core reads it as one of the five
- * offered values below, anything else as `'00:00'` — and the host's
- * all-day reminders read it the same way.
+ * Stored verbatim as a string. The core (`cal_core::day_start_trigger`)
+ * reads any other stored text as `'00:00'` — and the host's all-day
+ * reminders read it the same way.
  */
 export type DayStartTrigger = string;
 

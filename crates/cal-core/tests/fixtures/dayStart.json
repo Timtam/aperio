@@ -16,11 +16,11 @@
     "reminderCount": "the sum of three lengths — the shell’s",
     "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; the rows here exercise it through `currentUserByList`",
     "the day-start composition": "measured after this table and since moved into the core as cal_core::day_start::plan (the rule \"plan\"), pinned by its own table, dayStartPlan.json",
-    "effectiveForList": "the per-list override resolution exists on both surfaces (TaskCascadeProvider, taskBehaviour); a later step",
+    "effectiveForList": "the per-list override resolution, since moved into the core as cal_core::task_settings (the rule \"effective\"), pinned by taskSettings.json",
     "snooze, fired markers, tomorrowIsoKey": "storage and the clock — the platform’s",
     "dayStartPreschedulesOsNotification": "mobile-only delivery policy for OS notifications",
-    "parseCountdownDays": "the global window arrives already parsed: both surfaces parse the pref with their own copy (TaskCascadeProvider, taskBehaviour), clamping to whole days 1..30. The selector itself takes any number, so the zero and negative rows stay.",
-    "the trigger read twice": "host-core’s reminders::day_start_time reads the same tasks.dayStartTrigger pref with chrono (HH:MM:SS or HH:MM, else midnight); the fire gate here reads HH:MM only and fires at once on anything else. They disagree on \"08:00:00\" and on garbage, which is midnight there and \"now\" here. Not settled by the port, which keeps the fire gate’s reading: a decision of its own."
+    "parseCountdownDays": "the global window arrives already parsed: cal_core::task_settings reads the pref (the rule \"read\"), clamping to whole days 1..30, pinned by taskSettings.json. The selector itself takes any number, so the zero and negative rows stay.",
+    "the trigger read twice": "no longer apart: the fire gate here reads HH:MM only and fires at once on anything else, and host-core’s reminders::day_start_time read any HH:MM, seconds allowed. Since the settings port both surfaces read the pref through cal_core::day_start_trigger, which gives only the five offered values and anything else as \"00:00\", and day_start_time asks the same (decided 2026-09-13). The gate only ever receives one of the five; its own reading of other text stays, pinned by the rows."
   },
   "notMeasurable": {
     "parentCycles": "Three walks followed parent links without a visited set, and external providers can deliver a parent cycle (see the taskCascade fixture). actionableDescendants looped forever on any cycle below its root. filterCarriedOver with coupling on looped forever when a slipped task’s ancestors cycle without reaching a slipped node. hasActionableDescendants, which every selector except carry-over asks about each candidate, looped forever when the walk below the candidate reached a cycle of settled tasks — possible only through a duplicated id, since the candidate itself is actionable and a cycle through it ends the walk early. A hang cannot be a row. The port’s walks end, and their tests for cycles are in day_start.rs (`walks`), not rows here."
@@ -2796,7 +2796,7 @@
     },
     {
       "name": "a-trigger-with-seconds-is-garbage",
-      "note": "The fire gate reads HH:MM only. host-core’s day_start_time reads the same pref with seconds allowed, so the two disagree on \"08:00:00\"; recorded in notInThisTable.",
+      "note": "The fire gate reads HH:MM only. The settings reader never hands it \"08:00:00\": it reads that as \"00:00\", and so does host-core’s day_start_time; recorded in notInThisTable.",
       "input": {
         "trigger": "08:00:00",
         "lastFired": null,

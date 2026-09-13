@@ -3,7 +3,7 @@
   "why": "The desktop TaskCascadeProvider and the mobile taskBehaviour.ts each parse these values with their own copy of every rule, and the synced prefs mean each device reads what the other wrote. One reader in the core answers the same for both, and for a frontend that is not JavaScript.",
   "writtenBy": [
     "src/state/taskSettings.measure.test.tsx — a one-off, run once and deleted. It rendered the desktop provider with its preference reads answered from the case, and ran the mobile module with its preference module answered the same way; where the two surfaces answered differently, the row carries both (`expect` is mobile’s, `desktop` the desktop’s) and `surfacesDiffer`.",
-    "With the port, four rows changed on purpose and one was added (decided 2026-09-13); each says so in its note. No row carries a desktop answer any more: the surfaces read alike."
+    "With the port, four rows changed on purpose and three were added (decided 2026-09-13; two of the three after the review, restoring what the TypeScript answered); each says so in its note. No row carries a desktop answer any more: the surfaces read alike."
   ],
   "readBy": [
     "src/state/taskSettings.contract.test.tsx (both surfaces, now through the door)",
@@ -502,6 +502,34 @@
         "remindDeadlineArrived": true,
         "remindDeadlineCountdown": true,
         "deadlineCountdownDays": 30,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-too-long-for-a-number-is-the-default",
+      "note": "Added with the port after the review: past the range of a double, parseInt answers Infinity, which the TypeScript read as the default and the first port clamped to 30.",
+      "addedWithThePort": true,
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
         "dayViewMode": "grid",
         "dayStartMin": 0,
         "dayEndMin": 1440,
@@ -1063,7 +1091,7 @@
     },
     {
       "name": "a-trigger-off-the-list-is-midnight",
-      "note": "Only app-start, 00:00, 06:00, 08:00 and 12:00 are read; a valid time that is not offered falls back to 00:00. host-core’s reminders read the same key as any HH:MM.",
+      "note": "Only app-start, 00:00, 06:00, 08:00 and 12:00 are read; a valid time that is not offered falls back to 00:00. host-core’s reminders read the key the same way since the port (cal_core::day_start_trigger).",
       "input": {
         "prefs": {
           "tasks.dayStartTrigger": "07:00"
@@ -1773,6 +1801,19 @@
       "expect": {
         "start": "450",
         "end": "1080"
+      }
+    },
+    {
+      "name": "a-minute-just-below-a-midpoint-snaps-down",
+      "note": "Added with the port after the review: the minute reaches the core as JSON and must read back as the same double. One ULP below 105 rounds down to 90, as the TypeScript stored it; read as 105, it would snap up to 120.",
+      "addedWithThePort": true,
+      "input": {
+        "start": 104.99999999999999,
+        "end": 1440
+      },
+      "expect": {
+        "start": "90",
+        "end": "1440"
       }
     },
     {

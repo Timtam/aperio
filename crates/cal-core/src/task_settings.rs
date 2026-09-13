@@ -459,6 +459,9 @@ pub fn read(stored: &TaskSettingsStored) -> TaskSettingsRead {
             .deadline_countdown_days
             .as_deref()
             .and_then(js_parse_int)
+            // parseInt gives Infinity past f64's range; that is the default,
+            // as it was in the TypeScript, not a clamped 30 (or 1).
+            .filter(|n| n.is_finite())
             .map_or(DEFAULT_COUNTDOWN_DAYS, clamp_countdown),
         day_view_mode: if stored.day_view_mode.as_deref() == Some("list") {
             DayViewMode::List
@@ -585,6 +588,34 @@ mod reading {
         assert_eq!(js_parse_int("\u{0663}"), None);
         // NEL is not JavaScript whitespace.
         assert_eq!(js_parse_int("\u{0085}7"), None);
+    }
+
+    #[test]
+    fn a_countdown_past_the_range_of_a_double_is_the_default() {
+        for raw in [
+            format!("1{}", "0".repeat(309)),
+            format!("-1{}", "0".repeat(309)),
+        ] {
+            let stored = TaskSettingsStored {
+                deadline_countdown_days: Some(raw),
+                ..TaskSettingsStored::default()
+            };
+            assert_eq!(
+                read(&stored).deadline_countdown_days,
+                DEFAULT_COUNTDOWN_DAYS
+            );
+        }
+    }
+
+    #[test]
+    fn a_minute_reads_back_as_the_double_javascript_wrote() {
+        // JSON.stringify's shortest spelling of the double one ULP below 105.
+        let question =
+            r#"{"rule":"day_window_to_store","start_min":104.99999999999999,"end_min":1440}"#;
+        assert_eq!(
+            task_settings_json(question).expect("the door answers"),
+            r#"{"start_min":90,"end_min":1440}"#
+        );
     }
 
     #[test]
@@ -811,6 +842,8 @@ mod contract {
             "a-trigger-off-the-list-is-midnight",
             "a-bad-field-leaves-the-good-ones",
             "one-failed-read",
+            "countdown-days-too-long-for-a-number-is-the-default",
+            "a-list-named-proto-is-an-ordinary-list",
         ] {
             has_row(rows, name);
         }
@@ -825,6 +858,7 @@ mod contract {
         let doc = doc();
         let rows = cases(&doc, "effective");
         has_row(rows, "an-override-wins-per-field");
+        has_row(rows, "a-list-named-proto-is-an-ordinary-list");
         for case in rows {
             let settings = read(&stored(&doc, &case["input"]));
             let list_id = case["input"]["listId"].as_str().expect("a list id");
@@ -868,6 +902,7 @@ mod contract {
         let doc = doc();
         let rows = cases(&doc, "dayWindowWrite");
         has_row(rows, "an-edge-between-half-hours-snaps");
+        has_row(rows, "a-minute-just-below-a-midpoint-snaps-down");
         for case in rows {
             let w = day_window_to_store(num(&case["input"]["start"]), num(&case["input"]["end"]));
             assert_eq!(
@@ -885,6 +920,8 @@ mod contract {
         let rows = cases(&doc, "overrideUpdate");
         has_row(rows, "an-update-keeps-its-place");
         has_row(rows, "fields-are-written-in-a-fixed-order");
+        has_row(rows, "a-list-named-proto");
+        has_row(rows, "array-index-ids-come-first");
         for case in rows {
             let input = &case["input"];
             let entries = read_list_overrides(input["stored"].as_str());

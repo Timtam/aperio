@@ -30,14 +30,16 @@ import {
 } from './taskSettings.contractSupport';
 
 /**
- * The task settings, pinned as a table before they move.
+ * The task settings, as one table both surfaces answer.
  *
- * How each surface reads the stored task and calendar preferences, resolves a
- * list's effective settings, and normalises what it writes back. Today every
- * rule exists twice — the desktop `TaskCascadeProvider` and the mobile
- * `taskBehaviour.ts` — and this file runs BOTH on every case: a row where the
- * surfaces differ says so and carries the desktop's answer beside mobile's.
- * The Rust side will read the same file.
+ * How the stored task and calendar preferences read, how a list's effective
+ * settings resolve, and what a change writes back. The rules live once, in
+ * `cal_core::task_settings`, behind the door `shared/taskSettings.ts` asks;
+ * this file still runs BOTH surfaces — the desktop `TaskCascadeProvider` and
+ * the mobile `taskBehaviour.ts` — on every case, so each surface's wiring to
+ * the door is pinned as well. The rows were measured on the TypeScript before
+ * the port, no row carries a desktop answer any more, and the core's contract
+ * reads the same file.
  *
  * What stays out, and why, is written in the fixture's `notInThisTable`.
  */
@@ -77,11 +79,23 @@ describe('taskSettings contract', () => {
       'a-trigger-off-the-list-is-midnight',
       'a-bad-field-leaves-the-good-ones',
       'one-failed-read',
+      'countdown-days-too-long-for-a-number-is-the-default',
+      'a-list-named-proto-is-an-ordinary-list',
     );
-    named(contract.effective, 'an-override-wins-per-field');
+    named(contract.effective, 'an-override-wins-per-field', 'a-list-named-proto-is-an-ordinary-list');
     named(contract.countdownWrite, 'infinity-is-written-as-the-default');
-    named(contract.dayWindowWrite, 'an-edge-between-half-hours-snaps');
-    named(contract.overrideUpdate, 'an-update-keeps-its-place', 'fields-are-written-in-a-fixed-order');
+    named(
+      contract.dayWindowWrite,
+      'an-edge-between-half-hours-snaps',
+      'a-minute-just-below-a-midpoint-snaps-down',
+    );
+    named(
+      contract.overrideUpdate,
+      'an-update-keeps-its-place',
+      'fields-are-written-in-a-fixed-order',
+      'a-list-named-proto',
+      'array-index-ids-come-first',
+    );
   });
 
   const replay = <I, T>(
