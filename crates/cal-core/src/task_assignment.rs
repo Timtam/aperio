@@ -10,8 +10,8 @@
 //! copy, so a second Rust caller would have written a third. The TypeScript
 //! copy went when the day start moved into the core (`crate::day_start`, which
 //! asks [`mine_or_unassigned`] over ids); `shared/contracts/taskOwnership.json`
-//! still pins the rule, read by the reminder scheduler's test here and by the
-//! TypeScript suite through the day-start door.
+//! still pins the rule, read by the reminder scheduler's test in
+//! `host_core::reminders` and by the TypeScript suite through the day-start door.
 //!
 //! # The three rules around it
 //!

@@ -10,6 +10,7 @@ export {
   filterOverdue,
   filterCarriedOver,
   actionableDescendants,
+  actionableDescendantsOf,
   movedToToday,
 } from '@aperio/shared';
 

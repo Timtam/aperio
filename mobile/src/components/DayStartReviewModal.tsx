@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   actionableDescendants,
+  actionableDescendantsOf,
   buildReminderGroups,
   daysUntilDeadline,
   filterCarriedOver,
@@ -535,11 +536,17 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   /** Every visible carry-over row plus, when its list cascades, its actionable
    *  descendants — the bulk target set. The Map dedups overlapping branches. */
   const collectBulkCarryTargets = useCallback((): Task[] => {
+    // One question for every coupled row, not one per row across the bridge.
+    const coupled = remainingSlipped.filter((row) => cascadeFor(row.list_id));
+    const below = actionableDescendantsOf(
+      coupled.map((row) => row.id),
+      tasks,
+    );
+    const belowRow = new Map<Task, Task[]>(coupled.map((row, i) => [row, below[i]]));
     const collected = new Map<string, Task>();
     for (const row of remainingSlipped) {
       collected.set(row.id, row);
-      if (!cascadeFor(row.list_id)) continue;
-      for (const desc of actionableDescendants(row.id, tasks)) {
+      for (const desc of belowRow.get(row) ?? []) {
         collected.set(desc.id, desc);
       }
     }

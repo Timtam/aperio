@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import {
-  actionableDescendants,
+  actionableDescendantsOf,
   buildReminderGroups,
   filterCarriedOver,
   filterDeadlinePinTargets,
@@ -128,11 +128,18 @@ async function runAutoCarryOverBatch(
   allTasks: Task[],
   behaviour: TaskBehaviour,
 ): Promise<void> {
+  // One question for every coupled root: a question per root sent the whole
+  // task list across the bridge each time.
+  const coupled = slippedRoots.filter((root) => effectiveForList(behaviour, root.list_id).cascade);
+  const below = actionableDescendantsOf(
+    coupled.map((root) => root.id),
+    allTasks,
+  );
+  const belowRoot = new Map<Task, Task[]>(coupled.map((root, i) => [root, below[i]]));
   const collected = new Map<string, Task>();
   for (const root of slippedRoots) {
     collected.set(root.id, root);
-    if (!effectiveForList(behaviour, root.list_id).cascade) continue;
-    for (const desc of actionableDescendants(root.id, allTasks)) {
+    for (const desc of belowRoot.get(root) ?? []) {
       collected.set(desc.id, desc);
     }
   }

@@ -26,6 +26,7 @@ import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { useTasks } from '../state/useTasks';
 import {
   actionableDescendants,
+  actionableDescendantsOf,
   filterCarriedOver,
   movedToToday,
   filterOverdue,
@@ -605,13 +606,18 @@ export function DayStartReviewDialog({
    * cheap safety net.
    */
   const collectBulkCarryTargets = useCallback((): Task[] => {
+    // Per-list cascade — same logic as the per-row action above, just
+    // applied to every visible carry-over row, and asked of the core once.
+    const coupled = remainingSlipped.filter((row) => effectiveForList(row.list_id).cascade);
+    const below = actionableDescendantsOf(
+      coupled.map((row) => row.id),
+      tasks,
+    );
+    const belowRow = new Map<Task, Task[]>(coupled.map((row, i) => [row, below[i]]));
     const collected = new Map<string, Task>();
     for (const row of remainingSlipped) {
       collected.set(row.id, row);
-      // Per-list cascade — same logic as the per-row action
-      // above, just applied to every visible carry-over row.
-      if (!effectiveForList(row.list_id).cascade) continue;
-      for (const desc of actionableDescendants(row.id, tasks)) {
+      for (const desc of belowRow.get(row) ?? []) {
         collected.set(desc.id, desc);
       }
     }

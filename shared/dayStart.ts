@@ -165,6 +165,23 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
 }
 
 /**
+ * {@link actionableDescendants} for several roots, in the order given — for the
+ * carry-over batches, which need it for every slipped root. One question for
+ * all of them: a question per root sent every task across the door each time,
+ * which made a large batch hundreds of times slower than the walk it replaced.
+ * No roots, no crossing.
+ */
+export function actionableDescendantsOf(rootIds: string[], tasks: Task[]): Task[][] {
+  if (rootIds.length === 0) return [];
+  const below = ask<number[][]>({
+    rule: 'actionable_descendants_of',
+    tasks: wire(tasks),
+    root_ids: rootIds,
+  });
+  return below.map((positions) => pick(tasks, positions));
+}
+
+/**
  * The task as it stands after "move the lapsed deadline to today".
  *
  * Shared because the rule is the interesting part and both platforms have to

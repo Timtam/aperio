@@ -1711,6 +1711,22 @@ Siehe DESIGN §4.2.
   `shared/contracts/taskOwnership.json` wird auf der TypeScript-Seite jetzt
   durch die Tagesstart-Tür gelesen (DESIGN, Reichweiten-Wächter-Kommentar
   angepasst). Rust 19/19 beim ersten Lauf, rot bewiesen.
+  ↳ **Vom Review gefunden und behoben:** die vier Übertrags-Schleifen
+  (Desktop-Prüfer und -Dialog, mobile Prüfungen und Modal) fragten
+  `actionableDescendants` je verschleppter Wurzel, und jede Frage schickte und
+  indexierte die ganze Aufgabenliste — bei 2000 Aufgaben und 100 Wurzeln etwa
+  0,4 s statt 6 ms, auf dem UI-Thread. Jetzt gibt es die Stapelform
+  `actionable_descendants_of` (Shell: `actionableDescendantsOf`): eine Frage für
+  alle gekoppelten Wurzeln, ein Index; die Schleifen bauen ihre Ziele in
+  derselben Reihenfolge. In Rust und durch die Tür gegen den Einzelweg über jede
+  Nachfahren-Zeile der Fixture gepinnt. Dazu vier veraltete Sätze (die
+  taskAssignment-Fixture, der Rust-Leser des Besitz-Vertrags liegt in host-core,
+  die `writtenBy`-Zeile nannte die umbenannte Zeile, der Kopf des
+  TypeScript-Vertragstests). Acht weitere Befunde widerlegt, darunter die
+  Rundung naher Fließkommazahlen (kein Aufrufer erzeugt sie: das Fenster ist
+  1..30 geklemmt, die Aufgaben-Überschreibung ist i64) und Zeitzonen, die einen
+  Kalendertag übersprangen (der Kern zählt Kalendertage, wie die Funktion es
+  immer versprach; betroffen wären nur historische Tage vor dem Heute).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

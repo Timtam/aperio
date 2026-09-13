@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import contract from '../../crates/cal-core/tests/fixtures/dayStart.json';
 import type { Task } from '../api/types';
+import { actionableDescendants, actionableDescendantsOf } from '@aperio/shared';
 import {
   answerActionableDescendants,
   answerCarriedOver,
@@ -26,17 +27,19 @@ import {
 } from './dayStart.contractSupport';
 
 /**
- * The day-start selectors, pinned as a table before they move.
+ * The day-start rules, pinned as a table measured from the TypeScript before
+ * they moved into `cal_core::day_start`.
  *
  * Overdue, slipped, pinned-to-today, the three reminder groups, the days to a
- * deadline, "move to today" and the fire gate. Today that is TypeScript, run
- * on both surfaces every morning; it is going to be asked of `cal-core`
- * instead, and the Rust answer has to be the same answer, in the same order.
- * This file replays every case through the TypeScript — the Rust side reads
- * the same file.
+ * deadline, "move to today" and the fire gate, run on both surfaces every
+ * morning. This file replays every case through the shell in
+ * `shared/dayStart.ts` and so through the door into the core — the core's own
+ * contract test reads the same file. Rows the port changed on purpose say so
+ * in their notes.
  *
  * What stays out, and why, is written in the fixture's `notInThisTable`; what
- * cannot be measured at all (parent cycles, which hang), in `notMeasurable`.
+ * could not be measured (parent cycles, which hung the TypeScript), in
+ * `notMeasurable`.
  */
 describe('dayStart contract', () => {
   const base = contract.baseTask as Task;
@@ -84,6 +87,19 @@ describe('dayStart contract', () => {
       expect(answerActionableDescendants(c.input as TreeInput, base), c.note).toEqual(c.expect);
     });
   }
+  it('asks the walk for many roots once, with the answers of one root each', () => {
+    for (const c of contract.actionableDescendants) {
+      const tasks = c.input.tasks.map((over) => ({ ...base, ...over }) as Task);
+      const roots = [...tasks.map((t) => t.id), 'nobody'];
+      const batch = actionableDescendantsOf(roots, tasks);
+      const singles = roots.map((root) => actionableDescendants(root, tasks));
+      expect(batch, c.name).toEqual(singles);
+      // The caller's own objects come back, not copies.
+      batch.flat().forEach((task) => expect(tasks).toContain(task));
+    }
+    expect(actionableDescendantsOf([], [])).toEqual([]);
+  });
+
   for (const c of contract.hasActionableDescendants) {
     it(`has actionable descendants: ${c.name}`, () => {
       expect(answerHasActionableDescendants(c.input as TreeInput, base), c.note).toEqual(c.expect);

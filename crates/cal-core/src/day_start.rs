@@ -22,6 +22,12 @@
 //! reads, and [`day_start_json`] answers that rule alone. Twelve doors would
 //! have been twelve wirings on every surface for the same crossing.
 //!
+//! One rule also has a batch form, [`actionable_descendants_of`]: the
+//! carry-over batches ask the walk down for every slipped root, and a crossing
+//! per root sent — and indexed — every task each time, which made a large
+//! batch hundreds of times slower than the JavaScript walk it replaced. One
+//! crossing with all roots indexes the tasks once.
+//!
 //! # Day keys are text, the way the TypeScript read them
 //!
 //! A day is `YYYY-MM-DD`. The selectors COMPARE keys as text — earlier, the
@@ -141,6 +147,11 @@ pub enum DayStartQuestion {
     ActionableDescendants {
         tasks: Vec<DayStartTask>,
         root_id: String,
+    },
+    /// → positions per root, see [`actionable_descendants_of`].
+    ActionableDescendantsOf {
+        tasks: Vec<DayStartTask>,
+        root_ids: Vec<String>,
     },
     /// → yes/no, see [`has_actionable_descendants`].
     HasActionableDescendants {
@@ -460,6 +471,16 @@ pub fn actionable_descendants(tasks: &[DayStartTask], root_id: &str) -> Vec<usiz
     Tasks::index(tasks).actionable_below(root_id)
 }
 
+/// [`actionable_descendants`] for each of `root_ids`, in the order given, over
+/// one index of the tasks.
+pub fn actionable_descendants_of(tasks: &[DayStartTask], root_ids: &[String]) -> Vec<Vec<usize>> {
+    let index = Tasks::index(tasks);
+    root_ids
+        .iter()
+        .map(|root_id| index.actionable_below(root_id))
+        .collect()
+}
+
 /// Whether `root_id` still has an actionable task anywhere below it.
 pub fn has_actionable_descendants(tasks: &[DayStartTask], root_id: &str) -> bool {
     Tasks::index(tasks).has_actionable_below(root_id)
@@ -690,6 +711,9 @@ pub fn day_start_json(input_json: &str) -> Result<String, serde_json::Error> {
         } => serde_json::to_string(&carried_over(&tasks, &today, &identities, &coupled_lists)),
         DayStartQuestion::ActionableDescendants { tasks, root_id } => {
             serde_json::to_string(&actionable_descendants(&tasks, &root_id))
+        }
+        DayStartQuestion::ActionableDescendantsOf { tasks, root_ids } => {
+            serde_json::to_string(&actionable_descendants_of(&tasks, &root_ids))
         }
         DayStartQuestion::HasActionableDescendants { tasks, root_id } => {
             serde_json::to_string(&has_actionable_descendants(&tasks, &root_id))
@@ -1004,6 +1028,10 @@ mod contract {
     #[test]
     fn every_has_actionable_descendants_row_holds() {
         let doc = doc();
+        has_row(
+            cases(&doc, "hasActionableDescendants"),
+            "an-open-grandchild-through-a-settled-child",
+        );
         for case in cases(&doc, "hasActionableDescendants") {
             let tasks = tasks(&doc, case);
             let root = case["input"]["rootId"].as_str().expect("a root");
@@ -1014,6 +1042,28 @@ mod contract {
                 case["name"]
             );
         }
+    }
+
+    #[test]
+    fn the_batch_walk_answers_what_each_single_walk_answers() {
+        // Every task of every descendant row taken as a root, in one question.
+        let doc = doc();
+        for case in cases(&doc, "actionableDescendants") {
+            let tasks = tasks(&doc, case);
+            let mut roots: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
+            roots.push("nobody".to_string());
+            let singles: Vec<Vec<usize>> = roots
+                .iter()
+                .map(|root| actionable_descendants(&tasks, root))
+                .collect();
+            assert_eq!(
+                actionable_descendants_of(&tasks, &roots),
+                singles,
+                "{}",
+                case["name"]
+            );
+        }
+        assert!(actionable_descendants_of(&[], &[]).is_empty());
     }
 
     #[test]

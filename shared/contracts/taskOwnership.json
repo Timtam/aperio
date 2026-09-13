@@ -3,7 +3,7 @@
   "why": "The rule is not a wire format, it is a DECISION, and both sides make it independently on the same data. Rust makes it when it decides whether a task rings: enumerate_external_triggers drops a colleague's task before a Trigger is ever built. TypeScript makes it when it decides what to offer in the day-start review and how to split 'Done — N by me, M by others'. Neither can see the other's answer. If they disagree, the failure is silent in the worst direction: a phone that rings for a task the app never shows as mine, or a task the app treats as mine that never rings. Nothing crashes, nothing logs, and finding it means noticing over days that one surface disagrees with the other.",
   "writtenBy": [],
   "readBy": [
-    "crates/cal-core/src/task_assignment.rs (is_mine_or_unassigned)",
+    "crates/host-core/src/reminders.rs (ownership_contract, asking cal_core::is_mine_or_unassigned)",
     "src/state/taskOwnership.contract.test.ts (through shared/dayStart.ts into cal_core::day_start)"
   ],
   "shape": {
