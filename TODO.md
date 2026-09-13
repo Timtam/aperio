@@ -1528,6 +1528,35 @@ Siehe DESIGN §4.2.
   (Tag 32/Monat 13/Tag 0 verworfen, ungültig neben gültig ignoriert, 30.
   Februar klemmt, Backlog mit nur ungültigen Triggern nimmt sein Intervall,
   Monatstag 0 und 40 schreiten in ganzen Monaten, Monatstag 31 klemmt).
+- [~] **Die kleinen Doppelungen ziehen in den Kern** — der Bogen nach den
+  Aufgaben-Regeln (entschieden 2026-09-13): `taskAssignment`, dann
+  `eventGroups`, `signatures`, `birthdays`, `planTaskDates`,
+  `syncConflictGroups`; ein PR-Paar pro Modul, vermessen, dann Port.
+  ↳ **taskAssignment, Schritt 1 (dieser PR): die Tabelle.** Von den fünf
+  Exporten ist `isMineOrUnassigned` längst der Kern (`is_mine_or_unassigned`,
+  gepinnt durch `shared/contracts/taskOwnership.json`, das host-core liest);
+  die TypeScript-Kopie dient noch `shared/dayStart.ts` und fällt mit dem
+  Tagesstart. `classifyDoneByMe` hat seit der Gruppierung (#42) keinen
+  Aufrufer mehr und fällt mit dem Port. Was umzieht: `selfAssignOnStatusChange`
+  (wer eine Aufgabe nach dem Statuswechsel hält — nehmen beim Starten oder
+  Erledigen, zurücktreten beim Wiederöffnen; vier Aufrufstellen auf beiden
+  Oberflächen), `taskAssignmentMode` (wie viele Personen eine Liste halten
+  kann; fehlende Fähigkeit = keine) und `clampAssignees` (auf das kürzen, was
+  die Liste hält — die ERSTE bleibt, dieselbe wie bei Todoists Adapter).
+  `crates/cal-core/tests/fixtures/taskAssignment.json`, gemessen am heutigen
+  TypeScript: 15 Zuweisungs-, 6 Modus-, 5 Kürzungs-Zeilen — die Desktop-Tests
+  plus die Zeilen, die der Umzug braucht: Reihenfolge bleibt, wenn ich in der
+  Mitte stehe; JEDE Kopie von mir fällt beim Zurücktreten; Abbrechen einer
+  Aufgabe, die ich halte; `in_progress` auf der Aufgabe eines Kollegen; leere
+  Liste unter `single`; jeder deklarierte Modus. Der Kern wird POSITIONEN
+  antworten (welche der gegebenen Zuweisungen bleiben) oder einen Zustand
+  („nimm mich"), nie eine Nutzer-Zeile. `taskAssignment.contract.test.ts`
+  spielt zurück (27 Tests); rot bewiesen (Zurücktreten leert alles → drei
+  Zeilen fallen).
+  ↳ Schritt 2 (offen): Türen `selfAssignOnStatusChange`, `taskAssignmentMode`,
+  `clampAssignees` in `cal_core::task_assignment`; `TaskAssignment`/
+  `TaskCapabilities` liegen in `plugin-core` — die Tür nimmt den Modus als
+  Zeichenkette, damit `cal-core` keine Abhängigkeit nach oben bekommt.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
