@@ -538,9 +538,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const collectBulkCarryTargets = useCallback((): Task[] => {
     // One question for every coupled row, not one per row across the bridge.
     const coupled = remainingSlipped.filter((row) => cascadeFor(row.list_id));
+    // Only subtasks that are mine or nobody's come along.
     const below = actionableDescendantsOf(
       coupled.map((row) => row.id),
       tasks,
+      meFor,
     );
     const belowRow = new Map<Task, Task[]>(coupled.map((row, i) => [row, below[i]]));
     const collected = new Map<string, Task>();
@@ -551,7 +553,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       }
     }
     return [...collected.values()];
-  }, [cascadeFor, remainingSlipped, tasks]);
+  }, [cascadeFor, meFor, remainingSlipped, tasks]);
 
   const bulkCarry = useCallback(
     async (newDate: string | null, announcementKey: string) => {

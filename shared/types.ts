@@ -122,6 +122,9 @@ export type { DayStartReminderSettings } from './generated/DayStartReminderSetti
 export type { DayStartQuestion } from './generated/DayStartQuestion';
 export type { DayStartMoved } from './generated/DayStartMoved';
 export type { DayStartReminderGroups } from './generated/DayStartReminderGroups';
+export type { CarryOverDefault } from './generated/CarryOverDefault';
+export type { DayStartListSettings } from './generated/DayStartListSettings';
+export type { DayStartPlan as DayStartPlanWire } from './generated/DayStartPlan';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the

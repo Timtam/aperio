@@ -1,12 +1,13 @@
 {
   "what": "What the day-start sites compose from the day-start rules every morning, as a table: the overdue tasks, the slipped rows split by each list’s carry-over default into asked, carried to today and carried to the backlog, the silent batches’ targets (each root plus, where its list couples, its actionable descendants), the three reminder groups, and the count that opens the review. Measured from the TypeScript before the port.",
-  "why": "The composition exists three times inline — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule (for future mornings, count only) — and a frontend that is not JavaScript would write it a fourth time. One question to the core answers it for all of them.",
+  "why": "The composition existed three times inline — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule (for future mornings, count only) — and a frontend that is not JavaScript would have written it a fourth time. Since the port it is one question to the core, cal_core::day_start::plan.",
   "writtenBy": [
-    "src/components/dayStartPlan.measure.test.ts — a one-off, run once and deleted. It ran `measuredPlan` in dayStartPlan.contractSupport.ts, which is the desktop checker’s inline block copied verbatim, target collection included, over the day-start rules as they are in the core since #61."
+    "src/components/dayStartPlan.measure.test.ts — a one-off, run once and deleted. It ran `measuredPlan` in dayStartPlan.contractSupport.ts, which is the desktop checker’s inline block copied verbatim, target collection included, over the day-start rules as they are in the core since #61.",
+    "With the port, three rows were changed and three added on purpose (decided 2026-09-13); each says so in its note."
   ],
   "readBy": [
-    "src/components/dayStartPlan.contract.test.ts",
-    "crates/cal-core (once the port exists)"
+    "src/components/dayStartPlan.contract.test.ts (through the door in shared/dayStart.ts)",
+    "crates/cal-core/src/day_start.rs (plan_contract)"
   ],
   "whereItLives": {
     "note": "Inside cal-core, beside dayStart.json."
@@ -25,7 +26,8 @@
     "lists": "the global coupling and carry-over default, with per-list overrides per field",
     "reminders": "the four reminder knobs, as both surfaces hold them after reading",
     "expect": "task ids in answer order per part, and the count",
-    "baseTask": "the Task every case’s task entries are overrides over (the same as dayStart.json’s)"
+    "baseTask": "the Task every case’s task entries are overrides over (the same as dayStart.json’s)",
+    "addedWithThePort": "a row the port added for a decision taken with it; not measured, since the TypeScript it replaced answered otherwise"
   },
   "measuredIn": "Europe/Berlin",
   "baseTask": {
@@ -702,8 +704,8 @@
       }
     },
     {
-      "name": "a-descendant-that-is-also-a-row-is-targeted-once",
-      "note": "The subtask’s list is uncoupled, so it is a row of its own; its parent’s coupled list brings it as a descendant too. Targeted once, where the parent brought it.",
+      "name": "a-subtask-in-an-uncoupled-list-is-its-carried-roots-alone",
+      "note": "Changed on purpose in the port, decided 2026-09-13: the parent decides. The subtask’s list is uncoupled, which once made it a row of its own; its parent’s coupled list brings it along, so it is now only that root’s target, and the announcement counts one carried task, not two.",
       "input": {
         "today": "2026-05-20",
         "lists": {
@@ -739,8 +741,7 @@
         "overdue": [],
         "ask": [],
         "today": [
-          "p",
-          "c"
+          "p"
         ],
         "backlog": [],
         "todayTargets": [
@@ -755,8 +756,8 @@
       }
     },
     {
-      "name": "a-subtask-in-a-backlog-list-under-a-today-root-is-in-both-batches",
-      "note": "Measured as it is: the root’s list decides for its descendants, the subtask’s own uncoupled backlog list makes it a backlog row too. The today batch runs first, the backlog batch second.",
+      "name": "a-subtask-in-a-backlog-list-follows-its-today-root",
+      "note": "Changed on purpose in the port, decided 2026-09-13: the parent decides. The today root brings the subtask along, so it is no backlog row of its own. The TypeScript made it one, so the today batch moved it to today and the backlog batch then moved it to the backlog.",
       "input": {
         "today": "2026-05-20",
         "lists": {
@@ -795,16 +796,12 @@
         "today": [
           "p"
         ],
-        "backlog": [
-          "c"
-        ],
+        "backlog": [],
         "todayTargets": [
           "p",
           "c"
         ],
-        "backlogTargets": [
-          "c"
-        ],
+        "backlogTargets": [],
         "untimed": [],
         "dueToday": [],
         "countdown": [],
@@ -924,8 +921,8 @@
       }
     },
     {
-      "name": "a-colleagues-subtask-follows-my-root",
-      "note": "Measured as it is: the walk down asks no ownership, so a colleague’s open subtask under my carried root is carried with it.",
+      "name": "a-colleagues-subtask-stays-behind",
+      "note": "Changed on purpose in the port, decided 2026-09-13: the batch brings only tasks that are mine or nobody’s, like every other day-start rule. The TypeScript walk asked no ownership and moved a colleague’s open subtask along with my root.",
       "input": {
         "today": "2026-05-20",
         "currentUserByList": {
@@ -970,8 +967,180 @@
         ],
         "backlog": [],
         "todayTargets": [
+          "p"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "an-asked-subtask-under-a-carried-root-is-no-question",
+      "note": "Added with the port, decided 2026-09-13, not measured. The subtask’s own list asks, but the today root it lives under brings it along: no question about a task the batch already moved.",
+      "addedWithThePort": true,
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today",
+          "overrides": {
+            "L2": {
+              "cascade": false,
+              "carryOverDefault": "ask"
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p"
+        ],
+        "backlog": [],
+        "todayTargets": [
           "p",
           "c"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it",
+      "note": "Added with the port, decided 2026-09-13, not measured. The middle task’s uncoupled backlog list makes it a row of its own and brings nothing below it; the topmost carried root takes it and its subtask, so it leaves the backlog part.",
+      "addedWithThePort": true,
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today",
+          "overrides": {
+            "L2": {
+              "cascade": false,
+              "carryOverDefault": "backlog"
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "g",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "p",
+            "list_id": "L2",
+            "parent_id": "g",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "g"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "g",
+          "p",
+          "c"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-colleagues-middle-task-is-walked-through",
+      "note": "Added with the port, decided 2026-09-13, not measured. The colleague’s task stays behind, but the walk goes on below it, as it goes on below a settled task: the unassigned subtask under it comes along.",
+      "addedWithThePort": true,
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "m",
+            "parent_id": "p",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "g",
+            "parent_id": "m"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p",
+          "g"
         ],
         "backlogTargets": [],
         "untimed": [],

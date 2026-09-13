@@ -341,6 +341,9 @@ on (the default):
   so you can see what you finished versus what teammates did.
 - The **day-start review** only ever offers tasks that are **yours or
   unassigned**; a task assigned to someone else is left for them to handle.
+  When a list carries lapsed tasks to today or the backlog on its own, the
+  subtasks that move along are likewise only yours or unassigned — a
+  colleague's subtask keeps its day.
 - The **calendar views** (day, week, month) likewise show only tasks that are
   **yours or unassigned** — a task assigned to someone else stays off your
   calendar.

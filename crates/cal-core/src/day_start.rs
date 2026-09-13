@@ -28,6 +28,29 @@
 //! batch hundreds of times slower than the JavaScript walk it replaced. One
 //! crossing with all roots indexes the tasks once.
 //!
+//! # The plan
+//!
+//! [`plan`] answers the whole morning in one question: the overdue tasks, the
+//! slipped rows split by each list's carry-over default, what each silent
+//! batch touches, the reminder groups, and the count that opens the review.
+//! The desktop checker, the mobile checks and the mobile scheduler composed
+//! that inline (`tests/fixtures/dayStartPlan.json`, measured from them). Two
+//! answers changed on purpose, decided 2026-09-13. A slipped row that a
+//! carried root brings along is that root's, not a row of its own: it used to
+//! count as a row as well, was asked about after the batch had moved it, and
+//! when its own list carried the other way it was written by both batches,
+//! the later one winning. And the batch walk brings only tasks that are mine
+//! or nobody's, the ownership the rows themselves are chosen by.
+//!
+//! No slipped row is lost to that. With unique ids a taken row lives in an
+//! uncoupled list (in a coupled one it is already hidden below its slipped
+//! parent), and the topmost carried root writes it. Two accounts can repeat
+//! ids, though, and then the walk down (every row with that parent id) and
+//! the climb up (the last row with that id) can follow different rows, so
+//! roots can take each other. A taken row that no remaining batch would write
+//! therefore stays in its own part. And targets are collected per row, not per
+//! id: two rows with one id are two tasks, and both are written.
+//!
 //! # Day keys are text, the way the TypeScript read them
 //!
 //! A day is `YYYY-MM-DD`. The selectors COMPARE keys as text — earlier, the
@@ -120,6 +143,31 @@ pub struct DayStartReminderSettings {
     pub deadline_countdown_days: Option<f64>,
 }
 
+/// What a list does at day start with a task whose plan lapsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum CarryOverDefault {
+    /// Ask in the review.
+    #[default]
+    Ask,
+    /// Move it to today, silently.
+    Today,
+    /// Move it to the backlog, silently.
+    Backlog,
+}
+
+/// One list's day-start settings, resolved. A list the question does not name
+/// neither couples nor carries: its slipped rows are asked.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct DayStartListSettings {
+    pub list_id: String,
+    /// The parent/subtask status coupling.
+    pub cascade: bool,
+    pub carry_over_default: CarryOverDefault,
+}
+
 /// One question to the day-start rules. `today` is the day asked about — the
 /// wall-clock day, or a future one the scheduler anchors to.
 #[derive(Debug, Clone, Deserialize)]
@@ -152,6 +200,9 @@ pub enum DayStartQuestion {
     ActionableDescendantsOf {
         tasks: Vec<DayStartTask>,
         root_ids: Vec<String>,
+        /// With identities, only tasks that are mine or nobody's come along.
+        #[serde(default)]
+        identities: Vec<DayStartIdentity>,
     },
     /// → yes/no, see [`has_actionable_descendants`].
     HasActionableDescendants {
@@ -221,6 +272,17 @@ pub enum DayStartQuestion {
         now_hour: u32,
         now_minute: u32,
     },
+    /// → [`DayStartPlan`], see [`plan`].
+    Plan {
+        tasks: Vec<DayStartTask>,
+        today: String,
+        #[serde(default)]
+        identities: Vec<DayStartIdentity>,
+        /// Every list the tasks live in.
+        #[serde(default)]
+        lists: Vec<DayStartListSettings>,
+        settings: DayStartReminderSettings,
+    },
 }
 
 /// A task's dates after "move to today": the deadline is today, and the plan
@@ -241,6 +303,26 @@ pub struct DayStartReminderGroups {
     pub untimed: Vec<usize>,
     pub due_today: Vec<usize>,
     pub countdown: Vec<usize>,
+}
+
+/// The morning, as positions: see [`plan`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct DayStartPlan {
+    pub overdue: Vec<usize>,
+    /// Slipped rows the review asks about.
+    pub ask: Vec<usize>,
+    /// Slipped rows carried to today, silently.
+    pub today: Vec<usize>,
+    /// Slipped rows carried to the backlog, silently.
+    pub backlog: Vec<usize>,
+    /// What the today batch writes: each row, then what it brings along.
+    pub today_targets: Vec<usize>,
+    /// What the backlog batch writes.
+    pub backlog_targets: Vec<usize>,
+    pub reminders: DayStartReminderGroups,
+    /// What opens the review: overdue, asked, and every reminder.
+    pub surfaced: usize,
 }
 
 // ─────────────────────────────── Reading ────────────────────────────────────
@@ -326,9 +408,11 @@ impl<'a> Tasks<'a> {
         false
     }
 
-    /// The actionable tasks below `root_id`, in the order of a stack walk:
-    /// all children of a node, then the LAST child's subtree, then the first's.
-    fn actionable_below(&self, root_id: &str) -> Vec<usize> {
+    /// The actionable tasks below `root_id` that `owners` counts as mine, in
+    /// the order of a stack walk: all children of a node, then the LAST
+    /// child's subtree, then the first's. The walk goes on through everything,
+    /// settled or someone else's.
+    fn actionable_below(&self, root_id: &str, owners: &Owners) -> Vec<usize> {
         let mut out = Vec::new();
         let mut stack = vec![root_id];
         let mut expanded: HashSet<&str> = HashSet::from([root_id]);
@@ -341,7 +425,7 @@ impl<'a> Tasks<'a> {
                 if expanded.insert(row.id.as_str()) {
                     stack.push(row.id.as_str());
                 }
-                if is_actionable(row.status) {
+                if is_actionable(row.status) && owners.mine(row) {
                     out.push(child);
                 }
             }
@@ -414,10 +498,24 @@ pub fn carried_over(
     identities: &[DayStartIdentity],
     coupled_lists: &[String],
 ) -> Vec<usize> {
-    let index = Tasks::index(tasks);
-    let owners = Owners::of(identities);
+    let coupled: HashSet<&str> = coupled_lists.iter().map(String::as_str).collect();
+    carried_over_in(
+        &Tasks::index(tasks),
+        today,
+        &Owners::of(identities),
+        &coupled,
+    )
+}
+
+fn carried_over_in(
+    index: &Tasks,
+    today: &str,
+    owners: &Owners,
+    coupled: &HashSet<&str>,
+) -> Vec<usize> {
+    let tasks = index.rows;
     // Overdue for anyone: a colleague's overdue task is not carried either.
-    let overdue_ids: HashSet<&str> = overdue_in(&index, today, &Owners::nobody())
+    let overdue_ids: HashSet<&str> = overdue_in(index, today, &Owners::nobody())
         .into_iter()
         .map(|i| tasks[i].id.as_str())
         .collect();
@@ -430,11 +528,10 @@ pub fn carried_over(
             && js_less(plan, today)
             && owners.mine(row)
     });
-    if coupled_lists.is_empty() {
+    if coupled.is_empty() {
         return slipped;
     }
 
-    let coupled: HashSet<&str> = coupled_lists.iter().map(String::as_str).collect();
     let slipped_ids: HashSet<&str> = slipped.iter().map(|&i| tasks[i].id.as_str()).collect();
     // The last row with an id wins, as a JavaScript `Map` built from the list.
     let by_id: HashMap<&str, usize> = tasks
@@ -468,16 +565,22 @@ pub fn carried_over(
 /// The actionable (`open` / `in_progress`) tasks anywhere below `root_id` —
 /// what a verdict on a parent row drags along, leaving settled ones alone.
 pub fn actionable_descendants(tasks: &[DayStartTask], root_id: &str) -> Vec<usize> {
-    Tasks::index(tasks).actionable_below(root_id)
+    Tasks::index(tasks).actionable_below(root_id, &Owners::nobody())
 }
 
 /// [`actionable_descendants`] for each of `root_ids`, in the order given, over
-/// one index of the tasks.
-pub fn actionable_descendants_of(tasks: &[DayStartTask], root_ids: &[String]) -> Vec<Vec<usize>> {
+/// one index of the tasks. With identities, only the tasks that are mine or
+/// nobody's come along; the carry-over batches pass them.
+pub fn actionable_descendants_of(
+    tasks: &[DayStartTask],
+    root_ids: &[String],
+    identities: &[DayStartIdentity],
+) -> Vec<Vec<usize>> {
     let index = Tasks::index(tasks);
+    let owners = Owners::of(identities);
     root_ids
         .iter()
-        .map(|root_id| index.actionable_below(root_id))
+        .map(|root_id| index.actionable_below(root_id, &owners))
         .collect()
 }
 
@@ -624,16 +727,29 @@ pub fn reminder_groups(
     identities: &[DayStartIdentity],
     settings: &DayStartReminderSettings,
 ) -> DayStartReminderGroups {
-    let index = Tasks::index(tasks);
-    let owners = Owners::of(identities);
+    reminder_groups_in(
+        &Tasks::index(tasks),
+        today,
+        &Owners::of(identities),
+        settings,
+    )
+}
+
+fn reminder_groups_in(
+    index: &Tasks,
+    today: &str,
+    owners: &Owners,
+    settings: &DayStartReminderSettings,
+) -> DayStartReminderGroups {
+    let tasks = index.rows;
     let due_today = if settings.remind_deadline_arrived {
-        deadline_arrived_in(&index, today, &owners)
+        deadline_arrived_in(index, today, owners)
     } else {
         Vec::new()
     };
     let mut seen: HashSet<&str> = due_today.iter().map(|&i| tasks[i].id.as_str()).collect();
     let untimed: Vec<usize> = if settings.remind_untimed_today {
-        untimed_today_in(&index, today, &owners)
+        untimed_today_in(index, today, owners)
             .into_iter()
             .filter(|&i| !seen.contains(tasks[i].id.as_str()))
             .collect()
@@ -642,7 +758,7 @@ pub fn reminder_groups(
     };
     seen.extend(untimed.iter().map(|&i| tasks[i].id.as_str()));
     let countdown = if settings.remind_deadline_countdown {
-        deadline_countdown_in(&index, today, &owners, settings.deadline_countdown_days)
+        deadline_countdown_in(index, today, owners, settings.deadline_countdown_days)
             .into_iter()
             .filter(|&i| !seen.contains(tasks[i].id.as_str()))
             .collect()
@@ -654,6 +770,117 @@ pub fn reminder_groups(
         due_today,
         countdown,
     }
+}
+
+/// The whole morning for `today`: the overdue tasks, the slipped rows split
+/// by each list's carry-over default, what the silent batches write, the
+/// reminder groups, and the count that opens the review (see the module
+/// notes). Rows keep their input order within each part. A batch writes each
+/// of its rows and, where the row's list couples, the actionable tasks below
+/// it that are mine or nobody's; a slipped row one of them brings along is
+/// that root's and leaves its own part, unless no batch would write it then.
+/// Each row is written once.
+pub fn plan(
+    tasks: &[DayStartTask],
+    today: &str,
+    identities: &[DayStartIdentity],
+    lists: &[DayStartListSettings],
+    settings: &DayStartReminderSettings,
+) -> DayStartPlan {
+    let index = Tasks::index(tasks);
+    let owners = Owners::of(identities);
+    let by_list: HashMap<&str, &DayStartListSettings> =
+        lists.iter().map(|l| (l.list_id.as_str(), l)).collect();
+    let settings_of = |row: &DayStartTask| by_list.get(row.list_id.as_str()).copied();
+    let couples = |row: &DayStartTask| settings_of(row).is_some_and(|l| l.cascade);
+    let carry = |row: &DayStartTask| {
+        settings_of(row).map_or(CarryOverDefault::Ask, |l| l.carry_over_default)
+    };
+
+    let overdue = overdue_in(&index, today, &owners);
+    let coupled: HashSet<&str> = lists
+        .iter()
+        .filter(|l| l.cascade)
+        .map(|l| l.list_id.as_str())
+        .collect();
+    let slipped = carried_over_in(&index, today, &owners, &coupled);
+
+    // What each silently carried row brings along.
+    let below: HashMap<usize, Vec<usize>> = slipped
+        .iter()
+        .copied()
+        .filter(|&i| carry(&tasks[i]) != CarryOverDefault::Ask)
+        .map(|i| {
+            let brought = if couples(&tasks[i]) {
+                index.actionable_below(&tasks[i].id, &owners)
+            } else {
+                Vec::new()
+            };
+            (i, brought)
+        })
+        .collect();
+    // The parent decides: a row brought along is not a row of its own.
+    let mut taken: HashSet<usize> = below.values().flatten().copied().collect();
+    let split = |taken: &HashSet<usize>| {
+        let mut parts = (Vec::new(), Vec::new(), Vec::new());
+        for &i in &slipped {
+            if taken.contains(&i) {
+                continue;
+            }
+            match carry(&tasks[i]) {
+                CarryOverDefault::Ask => parts.0.push(i),
+                CarryOverDefault::Today => parts.1.push(i),
+                CarryOverDefault::Backlog => parts.2.push(i),
+            }
+        }
+        parts
+    };
+    let (mut ask, mut today_rows, mut backlog_rows) = split(&taken);
+    // Unless no batch would write it then: roots that take each other, which
+    // repeated ids make possible, keep their own parts rather than vanish.
+    let written: HashSet<usize> = today_rows
+        .iter()
+        .chain(&backlog_rows)
+        .flat_map(|root| std::iter::once(*root).chain(below[root].iter().copied()))
+        .collect();
+    if taken.iter().any(|i| !written.contains(i)) {
+        taken.retain(|i| written.contains(i));
+        (ask, today_rows, backlog_rows) = split(&taken);
+    }
+
+    let reminders = reminder_groups_in(&index, today, &owners, settings);
+    let surfaced = overdue.len()
+        + ask.len()
+        + reminders.untimed.len()
+        + reminders.due_today.len()
+        + reminders.countdown.len();
+    DayStartPlan {
+        today_targets: batch_targets(&today_rows, &below),
+        backlog_targets: batch_targets(&backlog_rows, &below),
+        overdue,
+        ask,
+        today: today_rows,
+        backlog: backlog_rows,
+        reminders,
+        surfaced,
+    }
+}
+
+/// Each root, then what it brings along, each row once. Two rows with the
+/// same id are two tasks and both are written; the JavaScript `Map` this
+/// replaced was keyed by id and kept only the later one.
+fn batch_targets(roots: &[usize], below: &HashMap<usize, Vec<usize>>) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for &root in roots {
+        let brought = below.get(&root).into_iter().flatten().copied();
+        for i in std::iter::once(root).chain(brought) {
+            if seen.insert(i) {
+                out.push(i);
+            }
+        }
+    }
+    out
 }
 
 /// `HH:MM` as the TypeScript's `^(\d{1,2}):(\d{2})$` read it: one or two
@@ -712,9 +939,11 @@ pub fn day_start_json(input_json: &str) -> Result<String, serde_json::Error> {
         DayStartQuestion::ActionableDescendants { tasks, root_id } => {
             serde_json::to_string(&actionable_descendants(&tasks, &root_id))
         }
-        DayStartQuestion::ActionableDescendantsOf { tasks, root_ids } => {
-            serde_json::to_string(&actionable_descendants_of(&tasks, &root_ids))
-        }
+        DayStartQuestion::ActionableDescendantsOf {
+            tasks,
+            root_ids,
+            identities,
+        } => serde_json::to_string(&actionable_descendants_of(&tasks, &root_ids, &identities)),
         DayStartQuestion::HasActionableDescendants { tasks, root_id } => {
             serde_json::to_string(&has_actionable_descendants(&tasks, &root_id))
         }
@@ -766,6 +995,13 @@ pub fn day_start_json(input_json: &str) -> Result<String, serde_json::Error> {
             now_hour,
             now_minute,
         )),
+        DayStartQuestion::Plan {
+            tasks,
+            today,
+            identities,
+            lists,
+            settings,
+        } => serde_json::to_string(&plan(&tasks, &today, &identities, &lists, &settings)),
     }
 }
 
@@ -1057,13 +1293,13 @@ mod contract {
                 .map(|root| actionable_descendants(&tasks, root))
                 .collect();
             assert_eq!(
-                actionable_descendants_of(&tasks, &roots),
+                actionable_descendants_of(&tasks, &roots, &[]),
                 singles,
                 "{}",
                 case["name"]
             );
         }
-        assert!(actionable_descendants_of(&[], &[]).is_empty());
+        assert!(actionable_descendants_of(&[], &[], &[]).is_empty());
     }
 
     #[test]
@@ -1213,5 +1449,298 @@ mod contract {
         .expect("a question");
         assert_eq!(answer, r#"{"deadline_date":"2026-05-20"}"#);
         assert!(day_start_json(r#"{"rule":"tomorrow"}"#).is_err());
+    }
+}
+
+/// The contract for the day-start plan: `tests/fixtures/dayStartPlan.json`,
+/// measured from the composition the day-start sites wrote inline. The rows the
+/// port changed or added on purpose say so in their notes. Its other half is
+/// `src/components/dayStartPlan.contract.test.ts`, through the door.
+#[cfg(test)]
+mod plan_contract {
+    use super::*;
+    use serde_json::{json, Value};
+
+    const CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/dayStartPlan.json"
+    ));
+
+    fn doc() -> Value {
+        serde_json::from_str(CONTRACT).expect("the contract parses")
+    }
+
+    /// The base task with one case's overrides laid over it, a user reduced
+    /// to its id.
+    fn row(doc: &Value, overrides: &Value) -> DayStartTask {
+        let mut row = doc["baseTask"].clone();
+        for (key, value) in overrides.as_object().expect("an override object") {
+            row[key.as_str()] = value.clone();
+        }
+        let ids: Vec<Value> = row["assignees"]
+            .as_array()
+            .expect("assignees is an array")
+            .iter()
+            .map(|user| user["id"].clone())
+            .collect();
+        row["assignees"] = Value::Array(ids);
+        serde_json::from_value(row).expect("a task row deserializes")
+    }
+
+    /// Every list the tasks live in, resolved the way both surfaces resolve
+    /// it: the override per field, else the global.
+    fn lists(case: &Value, tasks: &[DayStartTask]) -> Vec<DayStartListSettings> {
+        let lists = &case["input"]["lists"];
+        let mut seen = HashSet::new();
+        tasks
+            .iter()
+            .filter(|t| seen.insert(t.list_id.clone()))
+            .map(|t| {
+                let over = &lists["overrides"][t.list_id.as_str()];
+                let cascade = over["cascade"]
+                    .as_bool()
+                    .or(lists["cascade"].as_bool())
+                    .expect("a coupling");
+                let carry = if over["carryOverDefault"].is_string() {
+                    &over["carryOverDefault"]
+                } else {
+                    &lists["carryOverDefault"]
+                };
+                DayStartListSettings {
+                    list_id: t.list_id.clone(),
+                    cascade,
+                    carry_over_default: serde_json::from_value(carry.clone())
+                        .expect("a carry-over default"),
+                }
+            })
+            .collect()
+    }
+
+    fn identities(case: &Value) -> Vec<DayStartIdentity> {
+        case["input"]["currentUserByList"]
+            .as_object()
+            .map(|by_list| {
+                by_list
+                    .iter()
+                    .map(|(list, me)| DayStartIdentity {
+                        list_id: list.clone(),
+                        me: me.as_str().map(str::to_string),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn ids(tasks: &[DayStartTask], positions: &[usize]) -> Value {
+        json!(positions
+            .iter()
+            .map(|&i| tasks[i].id.as_str())
+            .collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn every_plan_row_holds() {
+        let doc = doc();
+        let cases = doc["cases"].as_array().expect("cases is an array");
+        for name in [
+            "per-list-overrides-split-one-morning",
+            "overdue-counts-whatever-the-list-carries",
+            "the-count-adds-all-three-sections",
+            "a-coupled-root-brings-its-actionable-descendants",
+            "a-subtask-in-a-backlog-list-follows-its-today-root",
+            "a-colleagues-subtask-stays-behind",
+            "an-asked-subtask-under-a-carried-root-is-no-question",
+            "a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it",
+            "a-colleagues-middle-task-is-walked-through",
+            "the-scheduler-plans-a-future-morning",
+        ] {
+            assert!(
+                cases.iter().any(|c| c["name"] == name),
+                "the contract lost `{name}`"
+            );
+        }
+        for case in cases {
+            let input = &case["input"];
+            let tasks: Vec<DayStartTask> = input["tasks"]
+                .as_array()
+                .expect("tasks is an array")
+                .iter()
+                .map(|over| row(&doc, over))
+                .collect();
+            let s = &input["reminders"];
+            let settings = DayStartReminderSettings {
+                remind_untimed_today: s["remindUntimedToday"].as_bool().expect("a toggle"),
+                remind_deadline_arrived: s["remindDeadlineArrived"].as_bool().expect("a toggle"),
+                remind_deadline_countdown: s["remindDeadlineCountdown"]
+                    .as_bool()
+                    .expect("a toggle"),
+                deadline_countdown_days: s["deadlineCountdownDays"].as_f64(),
+            };
+            let day = input["anchor"]
+                .as_str()
+                .or(input["today"].as_str())
+                .expect("a day");
+            let p = plan(
+                &tasks,
+                day,
+                &identities(case),
+                &lists(case, &tasks),
+                &settings,
+            );
+            let got = json!({
+                "overdue": ids(&tasks, &p.overdue),
+                "ask": ids(&tasks, &p.ask),
+                "today": ids(&tasks, &p.today),
+                "backlog": ids(&tasks, &p.backlog),
+                "todayTargets": ids(&tasks, &p.today_targets),
+                "backlogTargets": ids(&tasks, &p.backlog_targets),
+                "untimed": ids(&tasks, &p.reminders.untimed),
+                "dueToday": ids(&tasks, &p.reminders.due_today),
+                "countdown": ids(&tasks, &p.reminders.countdown),
+                "surfaced": p.surfaced,
+            });
+            assert_eq!(got, case["expect"], "{}", case["name"]);
+        }
+    }
+
+    fn task(id: &str, parent: Option<&str>, plan: Option<&str>) -> DayStartTask {
+        DayStartTask {
+            id: id.into(),
+            list_id: "list".into(),
+            status: TaskStatus::Open,
+            parent_id: parent.map(Into::into),
+            scheduled_date: plan.map(Into::into),
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_reminder_days: None,
+            assignees: Vec::new(),
+        }
+    }
+
+    fn quiet() -> DayStartReminderSettings {
+        DayStartReminderSettings {
+            remind_untimed_today: false,
+            remind_deadline_arrived: false,
+            remind_deadline_countdown: false,
+            deadline_countdown_days: Some(3.0),
+        }
+    }
+
+    #[test]
+    fn a_list_the_question_does_not_name_is_asked_and_brings_nothing() {
+        let tasks = vec![
+            task("p", None, Some("2026-05-10")),
+            task("c", Some("p"), None),
+        ];
+        let p = plan(&tasks, "2026-05-20", &[], &[], &quiet());
+        assert_eq!(p.ask, vec![0]);
+        assert!(p.today.is_empty() && p.backlog.is_empty());
+        assert!(p.today_targets.is_empty() && p.backlog_targets.is_empty());
+        assert_eq!(p.surfaced, 1);
+    }
+
+    fn in_list(mut row: DayStartTask, list: &str) -> DayStartTask {
+        row.list_id = list.into();
+        row
+    }
+
+    fn list(id: &str, cascade: bool, carry: CarryOverDefault) -> DayStartListSettings {
+        DayStartListSettings {
+            list_id: id.into(),
+            cascade,
+            carry_over_default: carry,
+        }
+    }
+
+    #[test]
+    fn two_rows_with_one_id_are_both_written() {
+        // Two accounts, one id: two tasks. The JavaScript `Map` kept only the
+        // later one, and the earlier stayed slipped every morning.
+        let tasks = vec![
+            task("x", None, Some("2026-05-10")),
+            task("x", None, Some("2026-05-11")),
+        ];
+        let lists = [list("list", false, CarryOverDefault::Today)];
+        let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
+        assert_eq!(p.today, vec![0, 1]);
+        assert_eq!(p.today_targets, vec![0, 1]);
+    }
+
+    #[test]
+    fn a_taken_row_that_shares_an_id_is_still_written_by_its_root() {
+        // The asked subtask leaves its part because the root brings it along,
+        // and the root's batch writes it, beside the other row with its id.
+        let tasks = vec![
+            in_list(task("p", None, Some("2026-05-10")), "L1"),
+            in_list(task("c", Some("p"), Some("2026-05-10")), "L2"),
+            in_list(task("c", Some("p"), None), "L1"),
+        ];
+        let lists = [
+            list("L1", true, CarryOverDefault::Today),
+            list("L2", false, CarryOverDefault::Ask),
+        ];
+        let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
+        assert!(p.ask.is_empty());
+        assert_eq!(p.today, vec![0]);
+        assert_eq!(p.today_targets, vec![0, 1, 2]);
+        assert_eq!(p.surfaced, 0);
+    }
+
+    #[test]
+    fn roots_that_take_each_other_both_keep_their_rows() {
+        // Repeated ids let the walk down follow rows the climb up does not:
+        // `a` reaches `b` and `b` reaches `a`. Neither vanishes; each stays a
+        // row, and every task below is written once.
+        let tasks = vec![
+            task("a", Some("m"), Some("2026-05-10")),
+            task("m", Some("b"), None),
+            task("b", Some("n"), Some("2026-05-10")),
+            task("n", Some("a"), None),
+            in_list(task("m", None, None), "L2"),
+            in_list(task("n", None, None), "L2"),
+        ];
+        let lists = [
+            list("list", true, CarryOverDefault::Today),
+            list("L2", true, CarryOverDefault::Today),
+        ];
+        let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
+        assert_eq!(p.today, vec![0, 2]);
+        let mut written = p.today_targets.clone();
+        written.sort_unstable();
+        assert_eq!(written, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn the_batch_walk_leaves_a_colleagues_task_behind_through_the_door() {
+        let question = |identities: &str| {
+            format!(
+                r#"{{"rule":"actionable_descendants_of","root_ids":["p"],{identities}"tasks":[
+                {{"id":"p","list_id":"list","status":"open"}},
+                {{"id":"m","list_id":"list","status":"open","parent_id":"p","assignees":["colleague"]}},
+                {{"id":"g","list_id":"list","status":"open","parent_id":"m"}}]}}"#
+            )
+        };
+        let mine = day_start_json(&question(r#""identities":[{"list_id":"list","me":"me"}],"#))
+            .expect("a question");
+        assert_eq!(mine, "[[2]]");
+        let anyone = day_start_json(&question("")).expect("a question");
+        assert_eq!(anyone, "[[1,2]]");
+    }
+
+    #[test]
+    fn the_door_answers_the_plan() {
+        let answer = day_start_json(
+            r#"{"rule":"plan","tasks":[],"today":"2026-05-20","settings":{"remind_untimed_today":true,"remind_deadline_arrived":true,"remind_deadline_countdown":true,"deadline_countdown_days":3}}"#,
+        )
+        .expect("a question");
+        assert_eq!(
+            serde_json::from_str::<Value>(&answer).expect("an answer"),
+            json!({
+                "overdue": [], "ask": [], "today": [], "backlog": [],
+                "today_targets": [], "backlog_targets": [],
+                "reminders": { "untimed": [], "due_today": [], "countdown": [] },
+                "surfaced": 0
+            })
+        );
     }
 }

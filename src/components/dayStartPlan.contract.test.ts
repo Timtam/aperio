@@ -5,15 +5,16 @@ import type { Task } from '../api/types';
 import { answerPlan, type PlanInput } from './dayStartPlan.contractSupport';
 
 /**
- * The day-start plan, pinned as a table before it moves.
+ * The day-start plan, pinned as a table measured before it moved into
+ * `cal_core::day_start`.
  *
- * What the day-start sites compose from the day-start rules every morning:
- * the overdue tasks, the slipped rows split by each list's carry-over default,
- * the silent batches' targets, the reminder groups, and the count that opens
- * the review. Today that is written inline three times; it is going to be one
- * question to `cal-core`, and the answer has to be the same answer, in the
- * same order. This file replays every case through the composition as the
- * desktop checker writes it — the Rust side will read the same file.
+ * What the day-start sites ask every morning: the overdue tasks, the slipped
+ * rows split by each list's carry-over default, the silent batches' targets,
+ * the reminder groups, and the count that opens the review. The three sites
+ * wrote that inline; they now ask `planDayStart`, and this file replays every
+ * case through it and so through the door into the core — the core's own
+ * contract test reads the same file. Rows the port changed or added on purpose
+ * say so in their notes.
  *
  * What stays out, and why, is written in the fixture's `notInThisTable`.
  */
@@ -28,8 +29,12 @@ describe('dayStartPlan contract', () => {
       'overdue-counts-whatever-the-list-carries',
       'the-count-adds-all-three-sections',
       'a-coupled-root-brings-its-actionable-descendants',
-      'a-descendant-that-is-also-a-row-is-targeted-once',
-      'a-subtask-in-a-backlog-list-under-a-today-root-is-in-both-batches',
+      'a-subtask-in-an-uncoupled-list-is-its-carried-roots-alone',
+      'a-subtask-in-a-backlog-list-follows-its-today-root',
+      'a-colleagues-subtask-stays-behind',
+      'an-asked-subtask-under-a-carried-root-is-no-question',
+      'a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it',
+      'a-colleagues-middle-task-is-walked-through',
       'the-scheduler-plans-a-future-morning',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);

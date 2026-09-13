@@ -1,13 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Task, TaskUser } from '@aperio/shared';
-import {
-  buildReminderGroups,
-  filterCarriedOver,
-  filterOverdue,
-  reminderCount,
-  todayIsoKey,
-} from '@aperio/shared';
+import { planDayStart, todayIsoKey } from '@aperio/shared';
 
 import { getTasks } from '../api/client';
 import { currentUserForList } from '../state/currentUser';
@@ -160,22 +154,15 @@ export async function upcomingDayStartNotifications(
     // groups. Computed from the data available NOW — a task completed before
     // the instant fires makes the number stale, the same accepted caveat the
     // reminder half always had; the tap opens the live review.
-    const reminders = reminderCount(
-      buildReminderGroups(tasks, settings, meFor, dayKey),
-    );
-    const overdue = filterOverdue(tasks, meFor, dayKey);
-    const askSlipped = filterCarriedOver(
+    const count = planDayStart(
       tasks,
       {
-        cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
+        reminders: settings,
+        listSettings: (listId) => effectiveForList(behaviour, listId),
         meFor,
       },
       dayKey,
-    ).filter(
-      (task) =>
-        effectiveForList(behaviour, task.list_id).carryOverDefault === 'ask',
-    );
-    const count = reminders + overdue.length + askSlipped.length;
+    ).surfaced;
     if (count > 0) out.push({ triggerAt, count });
   }
   return out;

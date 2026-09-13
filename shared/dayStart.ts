@@ -18,10 +18,13 @@
 
 import { todayIsoKey } from './taskDay';
 import type {
+  CarryOverDefault,
   DayStartIdentity,
   DayStartMoved,
+  DayStartPlanWire,
   DayStartQuestion,
   DayStartReminderGroups,
+  DayStartReminderSettings,
   DayStartTask,
   Task,
   TaskUser,
@@ -169,14 +172,21 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
  * carry-over batches, which need it for every slipped root. One question for
  * all of them: a question per root sent every task across the door each time,
  * which made a large batch hundreds of times slower than the walk it replaced.
- * No roots, no crossing.
+ * No roots, no crossing. With `meFor`, only the tasks that are mine or
+ * nobody's come along, as in every other day-start rule; the bulk carry-over
+ * buttons pass it.
  */
-export function actionableDescendantsOf(rootIds: string[], tasks: Task[]): Task[][] {
+export function actionableDescendantsOf(
+  rootIds: string[],
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[][] {
   if (rootIds.length === 0) return [];
   const below = ask<number[][]>({
     rule: 'actionable_descendants_of',
     tasks: wire(tasks),
     root_ids: rootIds,
+    identities: identities(tasks, meFor),
   });
   return below.map((positions) => pick(tasks, positions));
 }
@@ -392,12 +402,7 @@ export function buildReminderGroups(
     tasks: wire(tasks),
     today: dayKey,
     identities: identities(tasks, meFor),
-    settings: {
-      remind_untimed_today: settings.remindUntimedToday,
-      remind_deadline_arrived: settings.remindDeadlineArrived,
-      remind_deadline_countdown: settings.remindDeadlineCountdown,
-      deadline_countdown_days: windowOf(settings.deadlineCountdownDays),
-    },
+    settings: reminderSettingsWire(settings),
   });
   return {
     untimed: pick(tasks, groups.untimed),
@@ -409,6 +414,95 @@ export function buildReminderGroups(
 /** Total de-duplicated reminder count across the three groups. */
 export function reminderCount(groups: ReminderGroups): number {
   return groups.untimed.length + groups.dueToday.length + groups.countdown.length;
+}
+
+/** The reminder knobs as the wire carries them. */
+function reminderSettingsWire(settings: ReminderSettings): DayStartReminderSettings {
+  return {
+    remind_untimed_today: settings.remindUntimedToday,
+    remind_deadline_arrived: settings.remindDeadlineArrived,
+    remind_deadline_countdown: settings.remindDeadlineCountdown,
+    deadline_countdown_days: windowOf(settings.deadlineCountdownDays),
+  };
+}
+
+// ── The day-start PLAN ──────────────────────────────────────────────────────
+
+/** A list's day-start settings, resolved: its coupling and what it does with
+ *  a task whose plan lapsed. */
+export interface DayStartListChoice {
+  cascade: boolean;
+  carryOverDefault: CarryOverDefault;
+}
+
+/** The morning, over the caller's own task objects. */
+export interface DayStartPlan {
+  overdue: Task[];
+  /** Slipped rows the review asks about. */
+  askRows: Task[];
+  /** Slipped rows carried to today, silently. */
+  todayRows: Task[];
+  /** Slipped rows carried to the backlog, silently. */
+  backlogRows: Task[];
+  /** What the today batch writes: each row, then what it brings along. */
+  todayTargets: Task[];
+  /** What the backlog batch writes. */
+  backlogTargets: Task[];
+  reminders: ReminderGroups;
+  /** What opens the review: overdue, asked, and every reminder. */
+  surfaced: number;
+}
+
+/**
+ * The whole morning in one question: the overdue tasks, the slipped rows split
+ * by each list's carry-over default, what the silent batches write, the
+ * reminder groups, and the count that opens the review. The desktop checker,
+ * the mobile checks and the mobile scheduler (for a future `dayKey`) ask this;
+ * they used to compose it inline, three times.
+ *
+ * A batch writes each of its rows and, where the row's list couples, the
+ * actionable tasks below it that are mine or nobody's. A slipped row one of
+ * them brings along is that root's: the parent decides, and the row leaves its
+ * own part. `listSettings` is asked once for every list the tasks live in.
+ */
+export function planDayStart(
+  tasks: Task[],
+  options: {
+    reminders: ReminderSettings;
+    listSettings: (listId: string) => DayStartListChoice;
+    meFor?: (listId: string) => TaskUser | null;
+  },
+  dayKey: string = todayIsoKey(),
+): DayStartPlan {
+  const plan = ask<DayStartPlanWire>({
+    rule: 'plan',
+    tasks: wire(tasks),
+    today: dayKey,
+    identities: identities(tasks, options.meFor),
+    lists: listsOf(tasks).map((listId) => {
+      const chosen = options.listSettings(listId);
+      return {
+        list_id: listId,
+        cascade: chosen.cascade,
+        carry_over_default: chosen.carryOverDefault,
+      };
+    }),
+    settings: reminderSettingsWire(options.reminders),
+  });
+  return {
+    overdue: pick(tasks, plan.overdue),
+    askRows: pick(tasks, plan.ask),
+    todayRows: pick(tasks, plan.today),
+    backlogRows: pick(tasks, plan.backlog),
+    todayTargets: pick(tasks, plan.today_targets),
+    backlogTargets: pick(tasks, plan.backlog_targets),
+    reminders: {
+      untimed: pick(tasks, plan.reminders.untimed),
+      dueToday: pick(tasks, plan.reminders.due_today),
+      countdown: pick(tasks, plan.reminders.countdown),
+    },
+    surfaced: plan.surfaced,
+  };
 }
 
 /** The Settings → Tasks day-start-trigger pref: `'app-start'` or an `HH:MM`. */
