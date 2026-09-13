@@ -130,8 +130,9 @@ Exchange und Outlook genau eine (bevorzugt eine mit der Bezeichnung
 
 Jedes Adressbuch, in dem Geburtstage stehen, erscheint zusätzlich als
 **Nur-Lese-Geburtstagskalender** in der Kalenderliste, den du wie jeden anderen
-Kalender ein- und ausblenden kannst. Sein Name folgt deiner App-Sprache
-(„Geburtstage – Familie"); benennst du ihn um, bleibt dein Name stehen. Diese
+Kalender ein- und ausblenden kannst. Sein Name folgt deiner App-Sprache und
+dem Namen des Adressbuchs („Geburtstage – Familie"): benennst du das
+Adressbuch um, zieht der Kalender nach. Diese
 Einträge entstehen aus den Kontakten selbst – dort gibt es nichts zu
 bearbeiten; ändere den Geburtstag am Kontakt, und der Kalender zieht nach.
 Trägt der Geburtstag des Kontakts ein **Jahr**, steht das neue Alter mit im

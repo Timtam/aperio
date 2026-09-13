@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
+import { DEFAULT_RECURRENCE_CAPABILITIES, DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
 
 import type { Account, Calendar, TaskList } from '../api/types';
 import {
@@ -33,6 +33,9 @@ const makeCalendar = (
   read_only: false,
   default_sound: null,
   account_id: accountId,
+  recurrence_capabilities: DEFAULT_RECURRENCE_CAPABILITIES,
+  supports_scheduling: false,
+  supports_event_color: false,
 });
 
 const makeTaskList = (

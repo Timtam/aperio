@@ -5,7 +5,7 @@
 // `Request` structs.
 
 import { invoke } from '@tauri-apps/api/core';
-import { birthdayCalendarListName, isBirthdayCalendarId } from '@aperio/shared';
+import { localizeBirthdayCalendarName } from '@aperio/shared';
 import i18n from '../i18n';
 import { withCreatedRecurrenceZone } from '../intl/recurrence';
 import { notifyDayMarkersChanged } from '../state/dayMarkersChanged';
@@ -60,21 +60,13 @@ export async function openExternalUrl(url: string): Promise<void> {
 
 // ── Calendars ──────────────────────────────────────────────────────────────
 
-/** Re-render the Host's stock English birthday-calendar name in the UI
- *  language. Applied HERE, at the single loading boundary, so every consumer
- *  (sidebar, pickers, chip labels) inherits it without knowing the rule. A
- *  user-renamed birthday calendar no longer carries the stock prefix and
- *  passes through untouched — the user's own name always wins. */
-function localizeBirthdayCalendarName(cal: Calendar): Calendar {
-  if (!isBirthdayCalendarId(cal.id)) return cal;
-  const list = birthdayCalendarListName(cal.name);
-  if (list == null) return cal;
-  return { ...cal, name: i18n.t('birthdays.calendarName', { list }) };
-}
-
+/** Every calendar, with a birthday layer named in the UI language — built
+ *  HERE, at the single loading boundary, so every consumer (sidebar, pickers,
+ *  chip labels) inherits it without knowing the rule. The same function the
+ *  mobile wrapper calls. */
 export const listCalendars = async () =>
-  (await invoke<Calendar[]>('list_calendars')).map(
-    localizeBirthdayCalendarName,
+  (await invoke<Calendar[]>('list_calendars')).map((cal) =>
+    localizeBirthdayCalendarName(cal, (key, vars) => i18n.t(key, vars)),
   );
 
 export interface CreateCalendarRequest {

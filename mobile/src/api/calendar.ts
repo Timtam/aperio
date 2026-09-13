@@ -11,14 +11,12 @@
 
 import CalFfi from '../../modules/cal-ffi';
 import {
-  birthdayCalendarListName,
-  isBirthdayCalendarId,
+  localizeBirthdayCalendarName,
+  type Calendar,
   withCreatedRecurrenceZone,
 } from '@aperio/shared';
 import i18n from '../../i18n';
 import type {
-  ContainerColor,
-  RecurrenceCapabilities,
   Reminder,
   SoundConfig,
 } from '@aperio/shared';
@@ -49,21 +47,9 @@ export interface AttendeeResponse {
   status: AttendeeStatus;
 }
 
-/** A calendar enriched with its owning `account_id` (the desktop CalendarRow
- *  wire shape the Host produces). */
-export interface Calendar {
-  id: string;
-  name: string;
-  color: ContainerColor | null;
-  color_label: string | null;
-  read_only: boolean;
-  default_sound: SoundConfig | null;
-  account_id: string;
-  /** Absent → full RFC-5545 support (the Host omits it this slice). */
-  recurrence_capabilities?: RecurrenceCapabilities;
-  supports_scheduling?: boolean;
-  supports_event_color?: boolean;
-}
+/** A calendar as the Host lists it — generated from
+ *  `host_core::wire::CalendarRow`, the same declaration the desktop reads. */
+export type { Calendar };
 
 /** A persisted calendar event (the desktop `CalendarEvent` wire shape). */
 export interface CalendarEvent {
@@ -129,23 +115,12 @@ export interface EventRangeRequest {
 
 // ── Calendars ──────────────────────────────────────────────────────────────
 
-/** Re-render the Host's stock English birthday-calendar name in the UI
- *  language — the mobile twin of the desktop `listCalendars` wrapper. Applied
- *  at the single loading boundary so every consumer inherits it; a
- *  user-renamed birthday calendar lost the stock prefix and passes through
- *  untouched. */
-function localizeBirthdayCalendarName(cal: Calendar): Calendar {
-  if (!isBirthdayCalendarId(cal.id)) return cal;
-  const list = birthdayCalendarListName(cal.name);
-  if (list == null) return cal;
-  return { ...cal, name: i18n.t('birthdays.calendarName', { list }) };
-}
-
-/** All calendars (local + external); also primes the Host's route map, so call
- *  it before event operations. */
+/** All calendars (local + external), a birthday layer named in the UI
+ *  language — the same function the desktop wrapper calls; also primes the
+ *  Host's route map, so call it before event operations. */
 export const listCalendars = async (): Promise<Calendar[]> =>
-  (JSON.parse(await CalFfi.listCalendarsJson()) as Calendar[]).map(
-    localizeBirthdayCalendarName,
+  (JSON.parse(await CalFfi.listCalendarsJson()) as Calendar[]).map((cal) =>
+    localizeBirthdayCalendarName(cal, (key, vars) => i18n.t(key, vars)),
   );
 
 export const createCalendar = async (

@@ -25,6 +25,7 @@ impl DateRange {
 // ────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct Calendar {
     pub id: String,
     pub name: String,
