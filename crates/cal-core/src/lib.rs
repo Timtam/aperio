@@ -50,6 +50,7 @@ mod task_grouping_gate {
         ));
     }
 }
+pub mod task_occurrences;
 pub mod task_priority;
 pub mod task_status;
 pub mod types;
@@ -112,6 +113,12 @@ pub use task_day::{tasks_on_days, tasks_on_days_json};
 pub use task_grouping::{group_tasks, group_tasks_json};
 pub use task_grouping::{
     is_task_deferred, GroupHead, GroupKind, GroupableTask, GroupingInput, GroupingRow, TaskGroupBy,
+};
+pub use task_occurrences::{
+    expand_task_occurrences, expand_task_occurrences_json, next_task_occurrence,
+    next_task_occurrence_json, occurrence_move_target, occurrence_move_target_json, MoveTarget,
+    MoveTargetInput, NextOccurrenceInput, OccurrenceInput, OccurrenceRow, OccurrenceTask,
+    DEFAULT_MAX_PER_TASK,
 };
 pub use task_priority::{normal_priority, priority_rank, PriorityScale};
 pub use task_status::{

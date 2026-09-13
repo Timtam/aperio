@@ -48,6 +48,7 @@ import {
   installTaskDayRules,
   installTaskStatusRules,
   installTaskCascadeRules,
+  installTaskOccurrenceRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -76,6 +77,9 @@ import {
   planStatusCascadeJson,
   planAncestorRecomputeJson,
   autoDateOnStartJson,
+  expandTaskOccurrencesJson,
+  nextTaskOccurrenceJson,
+  occurrenceMoveTargetJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -131,4 +135,9 @@ installTaskCascadeRules({
   planStatusCascadeJson,
   planAncestorRecomputeJson,
   autoDateOnStartJson,
+});
+installTaskOccurrenceRules({
+  expandTaskOccurrencesJson,
+  nextTaskOccurrenceJson,
+  occurrenceMoveTargetJson,
 });

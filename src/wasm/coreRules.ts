@@ -45,6 +45,9 @@ import init, {
   planStatusCascade as wasmPlanStatusCascade,
   planAncestorRecompute as wasmPlanAncestorRecompute,
   autoDateOnStart as wasmAutoDateOnStart,
+  expandTaskOccurrences as wasmExpandTaskOccurrences,
+  nextTaskOccurrence as wasmNextTaskOccurrence,
+  occurrenceMoveTarget as wasmOccurrenceMoveTarget,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -240,4 +243,22 @@ export function planAncestorRecomputeJson(inputJson: string): string {
 export function autoDateOnStartJson(inputJson: string): string {
   assertReady();
   return wasmAutoDateOnStart(inputJson);
+}
+
+/** See `cal_core::task_occurrences::expand_task_occurrences_json`. */
+export function expandTaskOccurrencesJson(inputJson: string): string {
+  assertReady();
+  return wasmExpandTaskOccurrences(inputJson);
+}
+
+/** See `cal_core::task_occurrences::next_task_occurrence_json`. */
+export function nextTaskOccurrenceJson(inputJson: string): string {
+  assertReady();
+  return wasmNextTaskOccurrence(inputJson);
+}
+
+/** See `cal_core::task_occurrences::occurrence_move_target_json`. */
+export function occurrenceMoveTargetJson(inputJson: string): string {
+  assertReady();
+  return wasmOccurrenceMoveTarget(inputJson);
 }

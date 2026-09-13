@@ -38,6 +38,9 @@ import uniffi.cal_ffi.subtaskProgress as uniffiSubtaskProgress
 import uniffi.cal_ffi.planStatusCascade as uniffiPlanStatusCascade
 import uniffi.cal_ffi.planAncestorRecompute as uniffiPlanAncestorRecompute
 import uniffi.cal_ffi.autoDateOnStart as uniffiAutoDateOnStart
+import uniffi.cal_ffi.expandTaskOccurrences as uniffiExpandTaskOccurrences
+import uniffi.cal_ffi.nextTaskOccurrence as uniffiNextTaskOccurrence
+import uniffi.cal_ffi.occurrenceMoveTarget as uniffiOccurrenceMoveTarget
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -381,6 +384,20 @@ class CalFfiModule : Module() {
 
     Function("autoDateOnStart") { inputJson: String ->
       uniffiAutoDateOnStart(inputJson)
+    }
+
+    // The recurring-task projection: occurrences in a window, one step of
+    // the walk, and what a move can be where the source owns the date.
+    Function("expandTaskOccurrences") { inputJson: String ->
+      uniffiExpandTaskOccurrences(inputJson)
+    }
+
+    Function("nextTaskOccurrence") { inputJson: String ->
+      uniffiNextTaskOccurrence(inputJson)
+    }
+
+    Function("occurrenceMoveTarget") { inputJson: String ->
+      uniffiOccurrenceMoveTarget(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

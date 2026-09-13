@@ -251,6 +251,22 @@ pub fn auto_date_on_start(input_json: &str) -> Result<String, WireError> {
     cal_core::auto_date_on_start_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::expandTaskOccurrences`].
+pub fn expand_task_occurrences(input_json: &str) -> Result<String, WireError> {
+    cal_core::expand_task_occurrences_json(input_json)
+        .map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::nextTaskOccurrence`].
+pub fn next_task_occurrence(input_json: &str) -> Result<String, WireError> {
+    cal_core::next_task_occurrence_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::occurrenceMoveTarget`].
+pub fn occurrence_move_target(input_json: &str) -> Result<String, WireError> {
+    cal_core::occurrence_move_target_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -368,6 +368,34 @@ pub fn auto_date_on_start(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The occurrences of recurring scheduled tasks inside a window: which
+/// input task, on which day, real or projected.
+#[uniffi::export]
+pub fn expand_task_occurrences(input_json: String) -> Result<String, StoreError> {
+    cal_core::expand_task_occurrences_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "task occurrences input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The next occurrence of a repeating task after a day, or null.
+#[uniffi::export]
+pub fn next_task_occurrence(input_json: String) -> Result<String, StoreError> {
+    cal_core::next_task_occurrence_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "next occurrence input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// What "move to this day" can be on a source that owns the date.
+#[uniffi::export]
+pub fn occurrence_move_target(input_json: String) -> Result<String, StoreError> {
+    cal_core::occurrence_move_target_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "occurrence move input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

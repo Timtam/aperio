@@ -45,6 +45,7 @@ describe('taskOccurrences contract', () => {
       'from-completion-passes-through',
       'a-fixed-date-with-day-32-is-dropped',
       'a-base-beyond-the-step-cap-emits-nothing',
+      'an-empty-scheduled-date-is-undated',
     ]) {
       expect(expand, `fixture lost ${needed}`).toContain(needed);
     }
