@@ -1,0 +1,1044 @@
+{
+  "what": "What the day-start sites compose from the day-start rules every morning, as a table: the overdue tasks, the slipped rows split by each list’s carry-over default into asked, carried to today and carried to the backlog, the silent batches’ targets (each root plus, where its list couples, its actionable descendants), the three reminder groups, and the count that opens the review. Measured from the TypeScript before the port.",
+  "why": "The composition exists three times inline — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule (for future mornings, count only) — and a frontend that is not JavaScript would write it a fourth time. One question to the core answers it for all of them.",
+  "writtenBy": [
+    "src/components/dayStartPlan.measure.test.ts — a one-off, run once and deleted. It ran `measuredPlan` in dayStartPlan.contractSupport.ts, which is the desktop checker’s inline block copied verbatim, target collection included, over the day-start rules as they are in the core since #61."
+  ],
+  "readBy": [
+    "src/components/dayStartPlan.contract.test.ts",
+    "crates/cal-core (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, beside dayStart.json."
+  },
+  "notInThisTable": {
+    "the rules themselves": "overdue, carried over, the walk down and the reminder groups are pinned row by row in dayStart.json; the rows here exercise how they are combined",
+    "reading the settings": "the per-list overrides, the carry-over default, the coupling and the countdown window travel in already resolved (`lists`, `reminders`); parsing the stored prefs is the next step, with its own table",
+    "the gates": "the fire gate, the snooze, waiting for every list’s identity, an empty selection, the cache settle, the app lock and the day marker are the platform’s",
+    "the scheduler’s filter": "the scheduler keeps slipped rows whose list says exactly `ask`, the checkers keep everything that is not `today` or `backlog`; both surfaces validate the value on reading, so the two sets are the same",
+    "wording, announcements, notifications, the writes and the undo": "the platform’s"
+  },
+  "shape": {
+    "today": "the local wall-clock day the TypeScript ran on (noon)",
+    "anchor": "the future morning the scheduler plans for; absent = the live checkers, today",
+    "currentUserByList": "the account’s own user id per list; absent = no identity anywhere",
+    "lists": "the global coupling and carry-over default, with per-list overrides per field",
+    "reminders": "the four reminder knobs, as both surfaces hold them after reading",
+    "expect": "task ids in answer order per part, and the count",
+    "baseTask": "the Task every case’s task entries are overrides over (the same as dayStart.json’s)"
+  },
+  "measuredIn": "Europe/Berlin",
+  "baseTask": {
+    "id": "t1",
+    "list_id": "list",
+    "title": "something",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "cases": [
+    {
+      "name": "a-quiet-morning-surfaces-nothing",
+      "note": "Plans and deadlines still ahead, nothing reminded: every section empty, the count 0 — the review stays closed.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask"
+        },
+        "reminders": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-30"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "slipped-rows-ask-by-default",
+      "note": "The global default asks: every slipped row is a question and counts toward opening the review.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-19"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [
+          "a",
+          "b"
+        ],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 2
+      }
+    },
+    {
+      "name": "a-global-today-default-carries-silently",
+      "note": "Silent rows are the batch’s, not the review’s: they do not count.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-19"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "a",
+          "b"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "a",
+          "b"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-global-backlog-default-carries-silently",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "backlog"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [],
+        "backlog": [
+          "a"
+        ],
+        "todayTargets": [],
+        "backlogTargets": [
+          "a"
+        ],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "per-list-overrides-split-one-morning",
+      "note": "L1 carries to today, L2 to the backlog, L3 inherits the global ask; rows keep their input order within each part.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask",
+          "overrides": {
+            "L1": {
+              "carryOverDefault": "today"
+            },
+            "L2": {
+              "carryOverDefault": "backlog"
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "b1",
+            "list_id": "L2",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "t1",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "a1",
+            "list_id": "L3",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "t2",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-19"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [
+          "a1"
+        ],
+        "today": [
+          "t1",
+          "t2"
+        ],
+        "backlog": [
+          "b1"
+        ],
+        "todayTargets": [
+          "t1",
+          "t2"
+        ],
+        "backlogTargets": [
+          "b1"
+        ],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 1
+      }
+    },
+    {
+      "name": "an-override-of-coupling-alone-keeps-the-global-carry-over",
+      "note": "A list that only turns coupling off still carries by the global default.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today",
+          "overrides": {
+            "L1": {
+              "cascade": false
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "a"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "a"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "overdue-counts-whatever-the-list-carries",
+      "note": "An overdue task is the deadline section’s in a today list too: never a silent row, always counted.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "o",
+            "scheduled_date": "2026-05-10",
+            "deadline_date": "2026-05-15"
+          },
+          {
+            "id": "s",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [
+          "o"
+        ],
+        "ask": [],
+        "today": [
+          "s"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "s"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 1
+      }
+    },
+    {
+      "name": "reminders-count-toward-opening-the-review",
+      "note": "With every slipped row silent, the reminders alone open the review: untimed today, due today, counting down.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "s",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "s"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "s"
+        ],
+        "backlogTargets": [],
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [
+          "c"
+        ],
+        "surfaced": 3
+      }
+    },
+    {
+      "name": "reminders-that-are-off-do-not-count",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "the-count-adds-all-three-sections",
+      "note": "One overdue, one asked, three reminders: 5.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask"
+        },
+        "reminders": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "o",
+            "deadline_date": "2026-05-15"
+          },
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-21"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [
+          "o"
+        ],
+        "ask": [
+          "a"
+        ],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [
+          "c"
+        ],
+        "surfaced": 5
+      }
+    },
+    {
+      "name": "a-coupled-root-brings-its-actionable-descendants",
+      "note": "The batch targets the root, then its open and in-progress tasks below it however deep, skipping settled ones — whether or not they had a plan.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c1",
+            "parent_id": "p"
+          },
+          {
+            "id": "c2",
+            "parent_id": "p",
+            "status": "completed"
+          },
+          {
+            "id": "g",
+            "parent_id": "c2",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p",
+          "c1",
+          "g"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "an-uncoupled-root-goes-alone",
+      "note": "Coupling off: the root is targeted alone, and its own slipped subtask is a row of its own.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": false,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "d",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p",
+          "c"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p",
+          "c"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "targets-follow-the-rows-root-by-root",
+      "note": "Root one, its descendants, root two, its descendants.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "p2",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c2",
+            "parent_id": "p2"
+          },
+          {
+            "id": "c1",
+            "parent_id": "p1"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p1",
+          "p2"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p1",
+          "c1",
+          "p2",
+          "c2"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-descendant-that-is-also-a-row-is-targeted-once",
+      "note": "The subtask’s list is uncoupled, so it is a row of its own; its parent’s coupled list brings it as a descendant too. Targeted once, where the parent brought it.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today",
+          "overrides": {
+            "L2": {
+              "cascade": false
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p",
+          "c"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p",
+          "c"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-subtask-in-a-backlog-list-under-a-today-root-is-in-both-batches",
+      "note": "Measured as it is: the root’s list decides for its descendants, the subtask’s own uncoupled backlog list makes it a backlog row too. The today batch runs first, the backlog batch second.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today",
+          "overrides": {
+            "L2": {
+              "cascade": false,
+              "carryOverDefault": "backlog"
+            }
+          }
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p"
+        ],
+        "backlog": [
+          "c"
+        ],
+        "todayTargets": [
+          "p",
+          "c"
+        ],
+        "backlogTargets": [
+          "c"
+        ],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-coupled-slipped-subtask-is-no-row-of-its-own",
+      "note": "In a coupled ask list the slipped subtask below a slipped parent is decided at the parent: one question, not two.",
+      "input": {
+        "today": "2026-05-20",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [
+          "p"
+        ],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 1
+      }
+    },
+    {
+      "name": "a-colleagues-task-is-in-no-section",
+      "note": "Not overdue, not a row, not reminded, not counted.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me",
+          "L1": "me",
+          "L2": "me",
+          "L3": "me"
+        },
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "o",
+            "deadline_date": "2026-05-15",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "s",
+            "scheduled_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "a-colleagues-subtask-follows-my-root",
+      "note": "Measured as it is: the walk down asks no ownership, so a colleague’s open subtask under my carried root is carried with it.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me",
+          "L1": "me",
+          "L2": "me",
+          "L3": "me"
+        },
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "today"
+        },
+        "reminders": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [],
+        "ask": [],
+        "today": [
+          "p"
+        ],
+        "backlog": [],
+        "todayTargets": [
+          "p",
+          "c"
+        ],
+        "backlogTargets": [],
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [],
+        "surfaced": 0
+      }
+    },
+    {
+      "name": "the-scheduler-plans-a-future-morning",
+      "note": "Anchored to 05-25: what slipped, fell due and counts by then. The scheduler reads only the count; the parts are pinned so the port answers the same for every caller.",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "lists": {
+          "cascade": true,
+          "carryOverDefault": "ask"
+        },
+        "reminders": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "s",
+            "scheduled_date": "2026-05-22"
+          },
+          {
+            "id": "o",
+            "deadline_date": "2026-05-23"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-25"
+          },
+          {
+            "id": "x",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "later",
+            "scheduled_date": "2026-05-26"
+          }
+        ]
+      },
+      "expect": {
+        "overdue": [
+          "o"
+        ],
+        "ask": [
+          "s"
+        ],
+        "today": [],
+        "backlog": [],
+        "todayTargets": [],
+        "backlogTargets": [],
+        "untimed": [
+          "x"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [],
+        "surfaced": 4
+      }
+    }
+  ]
+}
