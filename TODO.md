@@ -1361,7 +1361,7 @@ Siehe DESIGN §4.2.
   Zeit, Blockende und Frist-Marker aus dem Eintrag statt sie pro Kachel neu
   abzuleiten. Der Vertragstest spielt die Kachel-Fakten jetzt DURCH DIE TÜR
   zurück (vorher aus den Zwillingen); die Fixture ist unverändert. Die
-  Unit-Tests der Zwillinge sind zu Tests über den Eintrag geworden — zwei
+  Unit-Tests der Zwillinge sind zu Tests über den Eintrag geworden — drei
   davon fragten nach einem Tag, an dem die Aufgabe gar nicht liegt, und
   prüfen jetzt genau das: kein Eintrag. Kein Verhalten hat sich geändert.
 - [~] **Der Aufgaben-Zustand zieht in den Kern** (`taskStatus`), in denselben
