@@ -1644,6 +1644,46 @@ Siehe DESIGN §4.2.
   jetzt durch `shared/contracts/birthdayIds.json` gegen die Ids gepinnt, die
   die Synthese tatsächlich erzeugt; die Termin-Präfix-Zeichenkette ist dafür
   eine Konstante `BIRTHDAY_EVENT_PREFIX` geworden.
+- [~] **Der Tagesstart zieht in den Kern** (`dayStart`), ein neuer Bogen nach
+  den kleinen Doppelungen (gewählt 2026-09-13). `shared/dayStart.ts` hat außer
+  `is_mine_or_unassigned` keinen Rust-Zwilling; Desktop-Prüfer und -Dialog,
+  die mobilen Prüfungen, das Modal und der Vorplaner der OS-Benachrichtigungen
+  laufen die Regeln jeden Morgen. Drei davon lesen die Uhr selbst
+  (`movedToToday`, `filterDeadlinePinTargets`, und `shouldFireToday` über
+  `now`); der Kern bekommt Tag und Uhrzeit hinein.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.**
+  `crates/cal-core/tests/fixtures/dayStart.json`, gemessen am heutigen
+  TypeScript in Europe/Berlin: 132 Zeilen über zwölf Regeln — überfällig,
+  verschleppt (mit Kopplung), handlungsfähige Nachfahren (Liste und Ja/Nein),
+  „auf heute", Frist-Anheften, Tage bis zur Frist, die drei Erinnerungen samt
+  Gruppen, das Auslöse-Tor. Die Tests aus `dayStartReview.test.ts`,
+  `DeadlinePinChecker.test.ts` und `useCurrentDayKey.test.ts`, plus die
+  Zeilen, die der Umzug braucht: Eingabe-Reihenfolge; Zuständigkeit nur per Id
+  und für eine Liste ohne Eintrag; ein Projekt-Elternteil mit abgelaufener
+  Frist UND abgelaufenem Plan ist nie überfällig, landet deshalb bei
+  „verschleppt" und versteckt seine verschleppte Unteraufgabe; die Kopplung
+  fragt nur die Liste der Unteraufgabe (der Vorfahr darf in einer
+  ungekoppelten liegen); der verschleppte Vorfahr eines Kollegen versteckt
+  nichts; die Stapel-Reihenfolge der Nachfahren; beide Zeitumstellungen und
+  ein Schalttag; das Durchfallen in die nächste Gruppe bei ausgeschaltetem
+  Schalter; die Ränder des Auslöse-Parsers (Sekunden, Leerzeichen, einstellige
+  Minute, nicht-ASCII-Ziffern, Marke eines anderen Tages). Als
+  `wasTypeScript` markiert: ungepolsterte und hexadezimale Tage, ein Anker,
+  der kein Tag ist (Textvergleich), eine leere Uhrzeit.
+  Nicht messbar, weil es hängt: drei Baum-Wege ohne Besucht-Menge laufen bei
+  einem Eltern-Zyklus endlos (`hasActionableDescendants` für jeden Kandidaten
+  der Erinnerungen, `actionableDescendants`, die Kopplung beim Verschleppen);
+  der Port muss enden. Außen vor und warum (`notInThisTable`): die
+  Zusammensetzung um die Regeln — verschleppte Zeilen nach dem
+  Übertrags-Standard der Liste teilen, die „aufgetaucht"-Zahl, die Ziele des
+  stillen Stapels — liegt DREIMAL inline (Desktop-Prüfer, `useDayStartChecks`,
+  `dayStartSchedule`) und ist der nächste Schritt; `effectiveForList` und
+  `parseCountdownDays` gibt es je zweimal; `host_core::reminders` liest
+  dieselbe Einstellung `tasks.dayStartTrigger` anders (Sekunden erlaubt,
+  Unsinn heißt Mitternacht statt „sofort") — eine Entscheidung für den Port.
+  `dayStart.contract.test.ts` spielt zurück (133 Tests); rot bewiesen (eine
+  heute fällige Frist als überfällig → zwei Zeilen fallen). Kein
+  Produktionscode geändert.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

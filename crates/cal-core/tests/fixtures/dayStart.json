@@ -1,0 +1,2827 @@
+{
+  "what": "The day-start selectors of shared/dayStart.ts, as a table: which tasks are overdue (lapsed deadline), which slipped (lapsed plan, cascade-aware), which are pinned to today, which are reminded (planned today untimed, due today, counted down) and in which group, how many days to a deadline, what \"move to today\" does to a task’s dates, and whether a day-start checker fires now. Measured from the TypeScript before the port.",
+  "why": "Both surfaces run these every morning — the desktop checkers and dialog, the mobile checks, modal and the ahead-of-time notification scheduler — and a frontend that is not JavaScript has to run them too. The core answers ids and days, never wording; it reads no clock, so the day (and the time for the fire gate) travels in.",
+  "writtenBy": [
+    "src/components/dayStart.measure.test.ts — a one-off, run once and deleted; its cases mirror src/components/dayStartReview.test.ts, src/components/DeadlinePinChecker.test.ts and src/hooks/useCurrentDayKey.test.ts plus the rows a port needs that those never had: input order, ownership by id alone and for a list missing from the map, a project parent with a lapsed deadline AND plan falling through to carry-over, cascade decided by the subtask’s own list, a settled or overdue parent hiding nothing, the stack-walk order of descendants, a future deadline and a missing deadline under “move to today”, both clock changes and a leap day, the JavaScript-isms of the day-key parser, group fall-through when a toggle is off, and the edges of the trigger parser."
+  ],
+  "readBy": [
+    "src/components/dayStart.contract.test.ts",
+    "crates/cal-core/src/day_start.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like the other task fixtures; a crate reads its own files."
+  },
+  "notInThisTable": {
+    "reminderCount": "the sum of three lengths — the shell’s",
+    "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; the rows here exercise it through `currentUserByList`",
+    "the day-start composition": "splitting slipped rows by each list’s carry-over default, the “surfaced” count that opens the review, and the silent batch’s targets (a root plus its actionable descendants where coupling is on) exist THREE times — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule — plus the bulk carry in both review dialogs. Not a function today, so not measurable here; the next step of the arc.",
+    "effectiveForList": "the per-list override resolution exists on both surfaces (TaskCascadeProvider, taskBehaviour); a later step",
+    "snooze, fired markers, tomorrowIsoKey": "storage and the clock — the platform’s",
+    "dayStartPreschedulesOsNotification": "mobile-only delivery policy for OS notifications",
+    "parseCountdownDays": "the global window arrives already parsed: both surfaces parse the pref with their own copy (TaskCascadeProvider, taskBehaviour), clamping to whole days 1..30. The selector itself takes any number, so the zero and negative rows stay.",
+    "the trigger read twice": "host-core’s reminders::day_start_time reads the same tasks.dayStartTrigger pref with chrono (HH:MM:SS or HH:MM, else midnight); the fire gate here reads HH:MM only and fires at once on anything else. They disagree on \"08:00:00\" and on garbage, which is midnight there and \"now\" here. A decision for the port, not this pin."
+  },
+  "notMeasurable": {
+    "parentCycles": "Three walks follow parent links without a visited set, and external providers can deliver a parent cycle (see the taskCascade fixture). hasActionableDescendants, which every selector except carry-over asks about each candidate, loops forever when the walk below the candidate reaches a cycle whose tasks are all settled (an actionable one ends it early). actionableDescendants loops forever on any cycle below its root. filterCarriedOver with coupling on loops forever when a slipped task’s ancestors cycle without reaching a slipped node. A hang cannot be a row; the port must terminate, and its rows for cycles are new, not measured."
+  },
+  "measuredIn": "Europe/Berlin — the clock-change rows cross real 23- and 25-hour days there",
+  "shape": {
+    "today": "the local wall-clock day the TypeScript ran on (noon); the core takes it as a parameter",
+    "anchor": "a day passed explicitly; absent = today",
+    "currentUserByList": "the account’s own user id per list; absent = no ownership filter; a list missing from the map = no identity",
+    "cascadeLists": "lists with status coupling on; absent = the option was not passed",
+    "lists": "selector answers are task ids in input order",
+    "now": "the fire gate’s local time, HH:MM",
+    "wasTypeScript": "a row that pins a JavaScript artifact a port may decide against; it must then change the row on purpose",
+    "baseTask": "the Task every case’s task entries are overrides over"
+  },
+  "baseTask": {
+    "id": "t1",
+    "list_id": "list",
+    "title": "something",
+    "description": null,
+    "status": "open",
+    "priority": "medium",
+    "effort": "medium",
+    "scheduled_date": null,
+    "scheduled_time": null,
+    "scheduled_end_time": null,
+    "deadline_date": null,
+    "deadline_time": null,
+    "deadline_reminder_days": null,
+    "recurrence": null,
+    "resurface_date": null,
+    "series_id": null,
+    "parent_id": null,
+    "section_id": null,
+    "color_label": null,
+    "reminders": [],
+    "assignees": [],
+    "sound": null,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "completed_at": null,
+    "etag": null
+  },
+  "overdue": [
+    {
+      "name": "a-deadline-strictly-before-today",
+      "note": "Yesterday and earlier; today and later are not missed yet.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-19"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-21"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-01"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "d"
+      ]
+    },
+    {
+      "name": "a-plan-alone-is-no-missed-commitment",
+      "note": "A lapsed scheduled day is carry-over territory, not overdue.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "settled-tasks-are-never-overdue",
+      "note": "Completed and cancelled drop out; in_progress stays.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-10",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-10",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-10",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "The mobile scheduler asks for a future day ahead of time.",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-25"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "a-project-parent-waits-for-its-subtasks",
+      "note": "A parent with an open subtask is managed through the subtask.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "a-parent-returns-once-its-subtasks-are-settled",
+      "note": "Every subtask completed or cancelled: the parent is asked about again.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "status": "completed"
+          },
+          {
+            "id": "d",
+            "parent_id": "p",
+            "status": "cancelled"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "a-settled-subtask-still-hides-an-open-grandchild",
+      "note": "The walk goes through a settled node to an open one below it.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "status": "completed"
+          },
+          {
+            "id": "g",
+            "parent_id": "c"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "a-subtask-with-its-own-lapsed-deadline-is-overdue",
+      "note": "The subtask is the asked-about unit.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "deadline_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "ownership-keeps-mine-and-unassigned",
+      "note": "A task held only by a colleague is theirs to handle; one I share is mine.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "me",
+                "name": "Name of me",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              },
+              {
+                "id": "me",
+                "name": "Name of me",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b",
+        "d"
+      ]
+    },
+    {
+      "name": "no-identity-keeps-everything",
+      "note": "A list without a \"me\" (the local store) filters nothing.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": null
+        },
+        "tasks": [
+          {
+            "id": "c",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "a-list-missing-from-the-map-has-no-identity",
+      "note": "Unknown list: no identity, nothing filtered.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "other": "me"
+        },
+        "tasks": [
+          {
+            "id": "c",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "ownership-is-by-id-alone",
+      "note": "The same person under another name and mail is still me.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "me",
+                "name": "Anders benannt",
+                "email": "x@example.org"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "input-order-is-kept",
+      "note": "The answer keeps the order the tasks came in.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "z",
+            "deadline_date": "2026-05-01"
+          },
+          {
+            "id": "a",
+            "deadline_date": "2026-05-19"
+          },
+          {
+            "id": "m",
+            "deadline_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "z",
+        "a",
+        "m"
+      ]
+    },
+    {
+      "name": "a-non-day-anchor-compares-as-text",
+      "note": "The day is compared as a string, and \"2026-…\" sorts before \"yesterday\", so every deadline is overdue. No caller passes junk (todayIsoKey, or the scheduler formatting its own days); a port that takes a typed day refuses it at the door and must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "yesterday",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-19"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-25"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b"
+      ]
+    }
+  ],
+  "carriedOver": [
+    {
+      "name": "a-lapsed-plan",
+      "note": "Before today only; today, later and the backlog stay.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-19"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "d"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "settled-tasks-are-never-carried",
+      "note": "Completed and cancelled drop out; in_progress stays.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-10",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "scheduled_date": "2026-05-10",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "without-cascade-a-slipped-subtask-surfaces-on-its-own",
+      "note": "No coupling option: parent and subtask are asked separately.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p",
+        "c"
+      ]
+    },
+    {
+      "name": "overdue-takes-priority",
+      "note": "A task whose deadline also lapsed is settled in the overdue section.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10",
+            "deadline_date": "2026-05-15"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-10",
+            "deadline_date": "2026-05-25"
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "a-project-parent-with-a-lapsed-deadline-and-plan-is-carried-over",
+      "note": "The overdue selector suppresses the parent (open subtask), so it is not in the overdue set and falls through to carry-over. Pinned as measured.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10",
+            "deadline_date": "2026-05-15"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "ownership-drops-a-colleagues-task",
+      "note": "Same rule as the overdue section.",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "cascade-hides-a-subtask-whose-parent-slipped",
+      "note": "The user decides at the root of the slipped subtree.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "cascade-keeps-a-subtask-whose-parent-did-not-slip",
+      "note": "The parent is planned for today.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "cascade-hides-a-grandchild-under-a-slipped-grandparent",
+      "note": "The middle node need not have slipped; any slipped ancestor hides.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "g",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "p",
+            "parent_id": "g"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "g"
+      ]
+    },
+    {
+      "name": "cascade-is-decided-by-the-subtasks-own-list",
+      "note": "Parent in a coupled list, subtask in an uncoupled one: the subtask stays.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "L1"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L2",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p",
+        "c"
+      ]
+    },
+    {
+      "name": "cascade-per-list-mixed",
+      "note": "Coupled L1 hides its subtask; uncoupled L2 keeps it.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "L1"
+        ],
+        "tasks": [
+          {
+            "id": "p1",
+            "list_id": "L1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c1",
+            "list_id": "L1",
+            "parent_id": "p1",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "p2",
+            "list_id": "L2",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c2",
+            "list_id": "L2",
+            "parent_id": "p2",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p1",
+        "p2",
+        "c2"
+      ]
+    },
+    {
+      "name": "a-cascade-option-naming-no-list-matches-no-option",
+      "note": "Every list uncoupled is the same as no coupling at all.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [],
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p",
+        "c"
+      ]
+    },
+    {
+      "name": "cascade-a-settled-parent-hides-nothing",
+      "note": "Only a slipped (actionable) ancestor hides.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10",
+            "status": "completed"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "cascade-a-project-parent-with-a-lapsed-deadline-still-hides-its-subtask",
+      "note": "A parent with an actionable subtask is never overdue (it waits for its subtasks), so with a lapsed plan it is slipped, and a slipped parent hides its slipped subtask.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10",
+            "deadline_date": "2026-05-15"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "cascade-an-ancestor-in-another-list-still-hides",
+      "note": "Only the subtask’s own list is asked about coupling; the slipped ancestor may live in an uncoupled list.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "L1"
+        ],
+        "tasks": [
+          {
+            "id": "p",
+            "list_id": "L2",
+            "scheduled_date": "2026-05-10"
+          },
+          {
+            "id": "c",
+            "list_id": "L1",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "cascade-a-colleagues-slipped-parent-hides-nothing",
+      "note": "The parent is filtered out of the slipped set by ownership, so it is not there to decide at; the subtask is asked on its own.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-10",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "cascade-a-missing-parent-row-is-no-ancestor",
+      "note": "The parent is not in the list: nothing above to decide.",
+      "input": {
+        "today": "2026-05-20",
+        "cascadeLists": [
+          "list"
+        ],
+        "tasks": [
+          {
+            "id": "c",
+            "parent_id": "gone",
+            "scheduled_date": "2026-05-10"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "The overdue exclusion is anchored to the same day.",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-22"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "c",
+            "scheduled_date": "2026-05-22",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    }
+  ],
+  "actionableDescendants": [
+    {
+      "name": "collects-open-and-in-progress-recursively",
+      "note": "Order: both children of the root in row order, then deeper levels as the stack pops.",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          },
+          {
+            "id": "b",
+            "parent_id": "r",
+            "status": "in_progress"
+          },
+          {
+            "id": "g",
+            "parent_id": "a"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b",
+        "g"
+      ]
+    },
+    {
+      "name": "walks-through-settled-nodes-without-collecting-them",
+      "note": "A completed middle node still leads to its open child.",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r",
+            "status": "completed"
+          },
+          {
+            "id": "g",
+            "parent_id": "a"
+          },
+          {
+            "id": "b",
+            "parent_id": "r",
+            "status": "cancelled"
+          }
+        ]
+      },
+      "expect": [
+        "g"
+      ]
+    },
+    {
+      "name": "the-last-child-subtree-comes-first-below-the-root",
+      "note": "A stack walk: a, b at the root level, then b1, then a1.",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          },
+          {
+            "id": "b",
+            "parent_id": "r"
+          },
+          {
+            "id": "a1",
+            "parent_id": "a"
+          },
+          {
+            "id": "b1",
+            "parent_id": "b"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b",
+        "b1",
+        "a1"
+      ]
+    },
+    {
+      "name": "the-root-itself-is-not-included",
+      "note": "",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "a-leaf-has-none",
+      "note": "",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "an-unknown-root-has-none",
+      "note": "",
+      "input": {
+        "rootId": "nope",
+        "tasks": [
+          {
+            "id": "r"
+          }
+        ]
+      },
+      "expect": []
+    }
+  ],
+  "hasActionableDescendants": [
+    {
+      "name": "an-open-child",
+      "note": "",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          }
+        ]
+      },
+      "expect": true
+    },
+    {
+      "name": "an-open-grandchild-through-a-settled-child",
+      "note": "The walk does not stop at a settled node.",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r",
+            "status": "completed"
+          },
+          {
+            "id": "g",
+            "parent_id": "a",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": true
+    },
+    {
+      "name": "only-settled-descendants",
+      "note": "",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r",
+            "status": "completed"
+          },
+          {
+            "id": "g",
+            "parent_id": "a",
+            "status": "cancelled"
+          }
+        ]
+      },
+      "expect": false
+    },
+    {
+      "name": "no-descendants",
+      "note": "",
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          }
+        ]
+      },
+      "expect": false
+    }
+  ],
+  "movedToToday": [
+    {
+      "name": "moves-the-day-and-keeps-the-time",
+      "note": "A 14:00 deadline that slipped is still a 14:00 deadline.",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-10",
+          "deadline_time": "14:00:00"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": "14:00:00",
+        "scheduled_date": null,
+        "scheduled_time": null
+      }
+    },
+    {
+      "name": "lifts-a-lapsed-plan-keeping-its-time",
+      "note": "Due today and planned for yesterday describes nothing anyone can act on.",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-10",
+          "scheduled_date": "2026-05-18",
+          "scheduled_time": "09:00:00"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": "2026-05-20",
+        "scheduled_time": "09:00:00"
+      }
+    },
+    {
+      "name": "a-plan-for-today-stays",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-10",
+          "scheduled_date": "2026-05-20"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": "2026-05-20",
+        "scheduled_time": null
+      }
+    },
+    {
+      "name": "a-plan-still-ahead-stays",
+      "note": "The user’s own arrangement.",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-10",
+          "scheduled_date": "2026-05-25"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": "2026-05-25",
+        "scheduled_time": null
+      }
+    },
+    {
+      "name": "no-plan-stays-without-one",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-10"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": null,
+        "scheduled_time": null
+      }
+    },
+    {
+      "name": "a-deadline-still-ahead-is-set-to-today-too",
+      "note": "The callers only pass overdue tasks; the rule itself does not check. Pinned as measured.",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "deadline_date": "2026-05-25"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": null,
+        "scheduled_time": null
+      }
+    },
+    {
+      "name": "a-lapsed-plan-without-a-deadline-gets-one",
+      "note": "As measured: the deadline is set whether or not there was one.",
+      "input": {
+        "today": "2026-05-20",
+        "task": {
+          "scheduled_date": "2026-05-10"
+        }
+      },
+      "expect": {
+        "deadline_date": "2026-05-20",
+        "deadline_time": null,
+        "scheduled_date": "2026-05-20",
+        "scheduled_time": null
+      }
+    }
+  ],
+  "deadlinePinTargets": [
+    {
+      "name": "a-deadline-today-not-yet-planned-today",
+      "note": "Planned another day, the deadline wins; planned today, nothing to do (idempotent).",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-19"
+          },
+          {
+            "id": "e",
+            "deadline_date": "2026-05-21"
+          },
+          {
+            "id": "f"
+          },
+          {
+            "id": "g",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-19"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "c",
+        "g"
+      ]
+    },
+    {
+      "name": "settled-tasks-are-never-pinned",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-20",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "never-pins-a-project-parent",
+      "note": "Its subtasks carry the day plan.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "pins-a-parent-whose-subtasks-are-settled",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "parent_id": "p",
+            "status": "completed"
+          }
+        ]
+      },
+      "expect": [
+        "p"
+      ]
+    },
+    {
+      "name": "never-pins-a-colleagues-task",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "me",
+                "name": "Name of me",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    }
+  ],
+  "daysUntilDeadline": [
+    {
+      "name": "today-is-zero",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-05-20"
+      },
+      "expect": 0
+    },
+    {
+      "name": "yesterday-is-minus-one",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-05-19"
+      },
+      "expect": -1
+    },
+    {
+      "name": "three-days-out",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-05-23"
+      },
+      "expect": 3
+    },
+    {
+      "name": "no-deadline-is-none",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": null
+      },
+      "expect": null
+    },
+    {
+      "name": "an-empty-deadline-is-none",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": ""
+      },
+      "expect": null
+    },
+    {
+      "name": "crosses-a-month",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-06-02"
+      },
+      "expect": 13
+    },
+    {
+      "name": "crosses-a-year",
+      "note": "",
+      "input": {
+        "today": "2026-12-30",
+        "deadline": "2027-01-02"
+      },
+      "expect": 3
+    },
+    {
+      "name": "over-a-leap-day",
+      "note": "",
+      "input": {
+        "today": "2028-02-27",
+        "deadline": "2028-03-01"
+      },
+      "expect": 3
+    },
+    {
+      "name": "over-the-spring-clock-change",
+      "note": "A 23-hour day is still one day (rounded).",
+      "input": {
+        "today": "2026-03-28",
+        "deadline": "2026-03-30"
+      },
+      "expect": 2
+    },
+    {
+      "name": "over-the-autumn-clock-change",
+      "note": "A 25-hour day is still one day (rounded).",
+      "input": {
+        "today": "2026-10-24",
+        "deadline": "2026-10-26"
+      },
+      "expect": 2
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "deadline": "2026-05-20"
+      },
+      "expect": -5
+    },
+    {
+      "name": "an-unparseable-deadline-is-none",
+      "note": "No NaN that passes every window check.",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "tomorrow"
+      },
+      "expect": null
+    },
+    {
+      "name": "a-month-thirteen-is-none",
+      "note": "JavaScript would roll it over into a plausible date; the round trip refuses.",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-13-99"
+      },
+      "expect": null
+    },
+    {
+      "name": "february-thirtieth-is-none",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-02-30"
+      },
+      "expect": null
+    },
+    {
+      "name": "a-date-with-a-time-is-none",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-05-20T10:00"
+      },
+      "expect": null
+    },
+    {
+      "name": "an-unparseable-anchor-is-none",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "yesterday",
+        "deadline": "2026-05-20"
+      },
+      "expect": null
+    },
+    {
+      "name": "an-unpadded-date-is-read",
+      "note": "Number() accepts \"5\" and \"3\"; the round trip holds. No producer writes it (deadlines cross serde as NaiveDate); a port may read strictly and must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "2026-5-23"
+      },
+      "expect": 3
+    },
+    {
+      "name": "a-hexadecimal-year-is-read",
+      "note": "Number(\"0x7EA\") is 2026. A JavaScript artifact; a port may refuse it and must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "0x7EA-05-23"
+      },
+      "expect": 3
+    }
+  ],
+  "untimedToday": [
+    {
+      "name": "planned-today-without-a-time",
+      "note": "A timed task already shows on the timeline.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-20",
+            "scheduled_time": "09:00:00"
+          },
+          {
+            "id": "c",
+            "scheduled_date": "2026-05-21"
+          },
+          {
+            "id": "d"
+          },
+          {
+            "id": "e",
+            "deadline_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "an-empty-time-counts-as-timed",
+      "note": "The check is \"not null\", and an empty string is not null. The wire carries the time as Option<NaiveTime>, so an empty one cannot cross; a port may drop this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20",
+            "scheduled_time": ""
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "settled-tasks-are-not-nudged",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-20",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "scheduled_date": "2026-05-20",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "a-project-parent-is-not-nudged",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "ownership",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "b",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    }
+  ],
+  "deadlineArrived": [
+    {
+      "name": "a-deadline-today-even-if-planned-today",
+      "note": "Unlike the pin, a task already planned today is still reminded.",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-19"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-21"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "name": "settled-tasks-are-not-reminded",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-20",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "a-project-parent-is-not-reminded",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "ownership",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-25"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    }
+  ],
+  "deadlineCountdown": [
+    {
+      "name": "the-window-is-cumulative",
+      "note": "Window 3: one, two and three days out; not today, not four, not past.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "d0",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "d1",
+            "deadline_date": "2026-05-21"
+          },
+          {
+            "id": "d2",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "d3",
+            "deadline_date": "2026-05-23"
+          },
+          {
+            "id": "d4",
+            "deadline_date": "2026-05-24"
+          },
+          {
+            "id": "dm",
+            "deadline_date": "2026-05-19"
+          }
+        ]
+      },
+      "expect": [
+        "d1",
+        "d2",
+        "d3"
+      ]
+    },
+    {
+      "name": "crosses-a-month",
+      "note": "Window 13 reaches 06-02, not 06-03.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 13,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-06-02"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-06-03"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "a-zero-window-selects-nothing",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 0,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-21"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "a-negative-window-selects-nothing",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": -1,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-21"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "an-override-widens-the-window",
+      "note": "Five days out: in at override 7, out at the global 3.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-25",
+            "deadline_reminder_days": 7
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-25"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "an-override-narrows-the-window",
+      "note": "Override 1: only the day before.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-23",
+            "deadline_reminder_days": 1
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-21",
+            "deadline_reminder_days": 1
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "an-override-below-one-falls-back-to-the-global",
+      "note": "Zero, negative and none all mean \"use the global window\".",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-22",
+            "deadline_reminder_days": 0
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-22",
+            "deadline_reminder_days": -2
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22",
+            "deadline_reminder_days": null
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "name": "an-override-holds-with-an-invalid-global",
+      "note": "A task with its own window is reminded even when the global one is off.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 0,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-22",
+            "deadline_reminder_days": 5
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "an-unparseable-deadline-is-no-deadline",
+      "note": "Not reminded every day forever.",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "tomorrow"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-13-99"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "settled-tasks-are-not-counted-down",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-22",
+            "status": "completed"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-22",
+            "status": "cancelled"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "expect": [
+        "c"
+      ]
+    },
+    {
+      "name": "a-project-parent-is-not-counted-down",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "p",
+            "deadline_date": "2026-05-22"
+          },
+          {
+            "id": "c",
+            "parent_id": "p"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "name": "ownership",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "daysUntil": 3,
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-22",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": [
+        "b"
+      ]
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "daysUntil": 3,
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-27"
+          },
+          {
+            "id": "b",
+            "deadline_date": "2026-05-21"
+          }
+        ]
+      },
+      "expect": [
+        "a"
+      ]
+    }
+  ],
+  "reminderGroups": [
+    {
+      "name": "due-today-and-planned-today-counts-once-as-due",
+      "note": "Priority: due today over planned today over countdown.",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [],
+        "dueToday": [
+          "a"
+        ],
+        "countdown": []
+      }
+    },
+    {
+      "name": "planned-today-with-an-upcoming-deadline-counts-once-as-planned",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "a"
+        ],
+        "dueToday": [],
+        "countdown": []
+      }
+    },
+    {
+      "name": "three-tasks-three-groups",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [
+          "c"
+        ]
+      }
+    },
+    {
+      "name": "the-untimed-toggle-silences-its-group",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [
+          "c"
+        ]
+      }
+    },
+    {
+      "name": "the-due-toggle-silences-its-group",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [],
+        "countdown": [
+          "c"
+        ]
+      }
+    },
+    {
+      "name": "the-countdown-toggle-silences-its-group",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": false,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": []
+      }
+    },
+    {
+      "name": "with-the-due-toggle-off-a-due-and-planned-task-counts-as-planned",
+      "note": "De-duplication is only against groups that are on.",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": false,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "deadline_date": "2026-05-20",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "a"
+        ],
+        "dueToday": [],
+        "countdown": []
+      }
+    },
+    {
+      "name": "with-the-untimed-toggle-off-a-planned-task-with-a-countdown-counts-down",
+      "note": "The task falls through to the next enabled group.",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": false,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "a",
+            "scheduled_date": "2026-05-20",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [],
+        "dueToday": [],
+        "countdown": [
+          "a"
+        ]
+      }
+    },
+    {
+      "name": "an-invalid-window-empties-the-countdown",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 0
+        },
+        "tasks": [
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [],
+        "dueToday": [],
+        "countdown": []
+      }
+    },
+    {
+      "name": "groups-keep-input-order",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "c2",
+            "deadline_date": "2026-05-23"
+          },
+          {
+            "id": "u1",
+            "scheduled_date": "2026-05-20"
+          },
+          {
+            "id": "c1",
+            "deadline_date": "2026-05-21"
+          },
+          {
+            "id": "u2",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "u1",
+          "u2"
+        ],
+        "dueToday": [],
+        "countdown": [
+          "c2",
+          "c1"
+        ]
+      }
+    },
+    {
+      "name": "ownership-applies-to-every-group",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "currentUserByList": {
+          "list": "me"
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-20",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-22",
+            "assignees": [
+              {
+                "id": "colleague",
+                "name": "Name of colleague",
+                "email": null
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [],
+        "dueToday": [],
+        "countdown": []
+      }
+    },
+    {
+      "name": "anchors-to-a-given-day",
+      "note": "",
+      "input": {
+        "today": "2026-05-20",
+        "anchor": "2026-05-25",
+        "settings": {
+          "remindUntimedToday": true,
+          "remindDeadlineArrived": true,
+          "remindDeadlineCountdown": true,
+          "deadlineCountdownDays": 3
+        },
+        "tasks": [
+          {
+            "id": "u",
+            "scheduled_date": "2026-05-25"
+          },
+          {
+            "id": "d",
+            "deadline_date": "2026-05-25"
+          },
+          {
+            "id": "c",
+            "deadline_date": "2026-05-27"
+          },
+          {
+            "id": "x",
+            "scheduled_date": "2026-05-20"
+          }
+        ]
+      },
+      "expect": {
+        "untimed": [
+          "u"
+        ],
+        "dueToday": [
+          "d"
+        ],
+        "countdown": [
+          "c"
+        ]
+      }
+    }
+  ],
+  "shouldFireToday": [
+    {
+      "name": "app-start-fires-once",
+      "note": "",
+      "input": {
+        "trigger": "app-start",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": true
+    },
+    {
+      "name": "app-start-never-fires-again",
+      "note": "Once any day was recorded — even an earlier one.",
+      "input": {
+        "trigger": "app-start",
+        "lastFired": "2026-05-19",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    },
+    {
+      "name": "app-start-not-twice-today",
+      "note": "",
+      "input": {
+        "trigger": "app-start",
+        "lastFired": "2026-05-20",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    },
+    {
+      "name": "a-clock-trigger-after-its-time",
+      "note": "",
+      "input": {
+        "trigger": "08:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-clock-trigger-before-its-time",
+      "note": "",
+      "input": {
+        "trigger": "10:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    },
+    {
+      "name": "a-clock-trigger-not-twice-a-day",
+      "note": "",
+      "input": {
+        "trigger": "08:00",
+        "lastFired": "2026-05-20",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    },
+    {
+      "name": "a-clock-trigger-again-on-a-new-day",
+      "note": "",
+      "input": {
+        "trigger": "08:00",
+        "lastFired": "2026-05-19",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": true
+    },
+    {
+      "name": "the-minute-counts-one-before",
+      "note": "",
+      "input": {
+        "trigger": "09:31",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    },
+    {
+      "name": "the-minute-counts-on-the-minute",
+      "note": "",
+      "input": {
+        "trigger": "09:30",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": true
+    },
+    {
+      "name": "midnight-on-the-minute",
+      "note": "",
+      "input": {
+        "trigger": "00:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-single-digit-hour-before",
+      "note": "",
+      "input": {
+        "trigger": "9:05",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:04"
+      },
+      "expect": false
+    },
+    {
+      "name": "a-single-digit-hour-on-time",
+      "note": "",
+      "input": {
+        "trigger": "9:05",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "09:05"
+      },
+      "expect": true
+    },
+    {
+      "name": "garbage-fires-immediately",
+      "note": "An unparseable trigger must never silence the day start.",
+      "input": {
+        "trigger": "bogus",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:01"
+      },
+      "expect": true
+    },
+    {
+      "name": "garbage-still-once-a-day",
+      "note": "",
+      "input": {
+        "trigger": "bogus",
+        "lastFired": "2026-05-20",
+        "today": "2026-05-20",
+        "now": "12:00"
+      },
+      "expect": false
+    },
+    {
+      "name": "hour-twenty-four-fires-immediately",
+      "note": "",
+      "input": {
+        "trigger": "24:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "minute-sixty-fires-immediately",
+      "note": "",
+      "input": {
+        "trigger": "12:60",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-three-digit-hour-is-garbage",
+      "note": "",
+      "input": {
+        "trigger": "007:05",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "an-empty-trigger-is-garbage",
+      "note": "",
+      "input": {
+        "trigger": "",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-trigger-with-seconds-is-garbage",
+      "note": "The fire gate reads HH:MM only. host-core’s day_start_time reads the same pref with seconds allowed, so the two disagree on \"08:00:00\"; recorded in notInThisTable.",
+      "input": {
+        "trigger": "08:00:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-padded-trigger-is-garbage",
+      "note": "",
+      "input": {
+        "trigger": " 08:00",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-one-digit-minute-is-garbage",
+      "note": "",
+      "input": {
+        "trigger": "8:5",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "non-ascii-digits-are-garbage",
+      "note": "The JavaScript digit class without the u flag is ASCII only; a port must not read Arabic-Indic digits as a time.",
+      "input": {
+        "trigger": "٠٨:٠٠",
+        "lastFired": null,
+        "today": "2026-05-20",
+        "now": "00:00"
+      },
+      "expect": true
+    },
+    {
+      "name": "a-marker-from-another-day-never-blocks-a-clock-trigger",
+      "note": "Only a marker equal to today blocks; a later one (the clock went back) does not.",
+      "input": {
+        "trigger": "08:00",
+        "lastFired": "2026-05-21",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": true
+    },
+    {
+      "name": "app-start-an-empty-marker-counts-as-fired",
+      "note": "Only a missing marker fires app-start.",
+      "input": {
+        "trigger": "app-start",
+        "lastFired": "",
+        "today": "2026-05-20",
+        "now": "09:30"
+      },
+      "expect": false
+    }
+  ]
+}
