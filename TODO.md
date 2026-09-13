@@ -1727,6 +1727,36 @@ Siehe DESIGN §4.2.
   1..30 geklemmt, die Aufgaben-Überschreibung ist i64) und Zeitzonen, die einen
   Kalendertag übersprangen (der Kern zählt Kalendertage, wie die Funktion es
   immer versprach; betroffen wären nur historische Tage vor dem Heute).
+- [~] **Die Tagesstart-Zusammensetzung zieht in den Kern** — der zweite Teil des
+  Tagesstart-Bogens, nach den Regeln (#60/#61). Entschieden 2026-09-13: EINE
+  Planungs-Frage an den Kern; das Einlesen der Aufgaben-Einstellungen folgt als
+  eigener Schritt ebenfalls in den Kern. Die Zusammensetzung steht dreimal
+  inline — Desktop-`DayStartReviewChecker`, mobile `useDayStartChecks`, mobiler
+  `dayStartSchedule` (für künftige Morgen, nur die Zahl): Überfällige,
+  verschleppte Zeilen nach dem Übertrags-Standard der Liste in Fragen / Heute /
+  Backlog geteilt, die Ziele der stillen Stapel (Wurzel plus, wo ihre Liste
+  koppelt, die handlungsfähigen Nachfahren), die Erinnerungsgruppen und die
+  Zahl, die den Rückblick öffnet.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.**
+  `crates/cal-core/tests/fixtures/dayStartPlan.json`, gemessen am heutigen
+  TypeScript: 19 Fälle. Gemessen wurde der Block des Desktop-Prüfers, wörtlich
+  in die Testhilfe kopiert (samt Ziel-Sammlung aus `runAutoCarryOverBatch`);
+  ein Textvergleich bestätigt Zeile für Zeile, dass Aufteilung und Ziel-Sammlung
+  gleich sind und die mobilen Prüfungen denselben Code laufen. Der Vorplaner
+  behält Zeilen mit genau `ask`, die Prüfer alles außer `today`/`backlog` — auf
+  beiden Oberflächen ist der Wert beim Einlesen geprüft, also dieselbe Menge.
+  Gepinnt: Aufteilung nach globalem Standard und Überschreibungen je Feld,
+  Überfällige zählen in jeder Liste und sind nie stille Zeile, Erinnerungen
+  allein öffnen den Rückblick, die Zahl ist Überfällige + Fragen + Erinnerungen,
+  Ziele Wurzel für Wurzel mit Nachfahren nur bei koppelnder Liste, eine
+  Unteraufgabe, die zugleich eigene Zeile ist, einmal. Gemessen und gepinnt, wie
+  es ist: eine Unteraufgabe in einer ungekoppelten Backlog-Liste unter einer
+  Heute-Wurzel steht in BEIDEN Stapeln (Heute läuft zuerst, Backlog danach),
+  und die offene Unteraufgabe einer Kollegin unter meiner Wurzel wird
+  mitgetragen (der Weg nach unten fragt keine Zuständigkeit).
+  `dayStartPlan.contract.test.ts` spielt zurück (20 Tests); rot bewiesen
+  (Backlog-Zeilen als Heute-Zeilen → drei Fälle fallen). Kein Produktionscode
+  geändert.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
