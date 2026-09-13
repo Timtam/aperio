@@ -1609,6 +1609,16 @@ Siehe DESIGN §4.2.
   Vertragstest prüft, dass Hülle und Kern dieselbe Marke buchstabieren); kein
   Aufrufer geändert (Termin-Dialog, Signatur-Knopf, mobiler Editor). Rust
   beim ersten Lauf grün, rot bewiesen (erster statt letzter Marker).
+  ↳ **Vom Review benannt, kein Befund dieses Ports:** ein einzelnes
+  Surrogat-Halbzeichen (kaputtes UTF-16, etwa aus einer fremden Zwischenablage)
+  wirft an JEDER JSON-Tür der App — serde lehnt `\ud83d` ohne Partner ab —,
+  hier wie bei der Konferenz-Erkennung, die derselbe Editor in derselben
+  Beschreibung längst fragt; ein Rust-Rand trägt UTF-8, eine byte-gleiche
+  Antwort gäbe es also ohnehin nicht. Kein Erzeuger bekannt (Host-Zeilen sind
+  gültiges UTF-8, Eingabefelder liefern wohlgeformte Paare). Wenn Toleranz
+  gewünscht ist, gehört sie in die Tür-Konvention insgesamt, nicht in ein
+  Modul. 5.000 Zufallstexte mit allen Leerraum- und Steuerzeichen, Emoji und
+  Markern: Byte-gleich.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
