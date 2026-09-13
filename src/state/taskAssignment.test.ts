@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import type { TaskUser } from '../api/types';
 import {
   clampAssignees,
-  isMineOrUnassigned,
   selfAssignOnStatusChange,
   taskAssignmentMode,
 } from '@aperio/shared';
@@ -36,19 +35,6 @@ describe('selfAssignOnStatusChange', () => {
     expect(selfAssignOnStatusChange('cancelled', [], me, true)).toBeUndefined();
     expect(selfAssignOnStatusChange('completed', [], me, false)).toBeUndefined();
     expect(selfAssignOnStatusChange('completed', [], null, true)).toBeUndefined();
-  });
-});
-
-describe('isMineOrUnassigned', () => {
-  it('treats no-identity, unassigned, and assigned-to-me as mine', () => {
-    expect(isMineOrUnassigned([other], null)).toBe(true);
-    expect(isMineOrUnassigned([], me)).toBe(true);
-    expect(isMineOrUnassigned([me], me)).toBe(true);
-    expect(isMineOrUnassigned([me, other], me)).toBe(true);
-  });
-
-  it('treats a task assigned only to others as not mine', () => {
-    expect(isMineOrUnassigned([other], me)).toBe(false);
   });
 });
 

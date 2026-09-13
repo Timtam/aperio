@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import contract from '../../shared/contracts/taskOwnership.json';
-import { isMineOrUnassigned } from '@aperio/shared';
-import type { TaskUser } from '@aperio/shared';
+import { filterOverdue } from '@aperio/shared';
+import type { Task, TaskUser } from '@aperio/shared';
 
 /**
  * The TypeScript half of the task-ownership contract.
@@ -10,14 +10,16 @@ import type { TaskUser } from '@aperio/shared';
  * Its Rust twin lives in `crates/host-core/src/reminders.rs`
  * (`ownership_contract`) and reads the SAME file. Unlike the calendar-default
  * -reminders contract beside it, this one pins a DECISION rather than a wire
- * format: each side answers "is this task mine to act on?" independently, on
- * the same data, and neither can see the other's answer.
+ * format: "is this task mine to act on?", asked by the reminder scheduler in
+ * the host and by the day start on both surfaces.
  *
- * That independence is what makes a disagreement expensive. Rust answers it
- * before a reminder Trigger is ever built, so a wrong `true` rings the phone
- * for a task this app does not list as mine, and a wrong `false` silences one
- * it does. Nothing crashes and nothing is logged — it would take days of
- * noticing that the two surfaces disagree.
+ * The rule is `cal_core::is_mine_or_unassigned` on both sides now; the
+ * TypeScript copy went when the day start moved into the core. What this side
+ * still owns is the shell in front of the day-start door — the account's
+ * identity per list, a user reduced to its id — so every case is asked
+ * through that door: one overdue task, offered or not. A disagreement stays
+ * expensive: a wrong `true` offers a colleague's task in my morning review, a
+ * wrong `false` hides one of mine, and nothing crashes or logs.
  */
 
 interface OwnershipCase {
@@ -34,6 +36,22 @@ const user = (id: string): TaskUser => ({
   email: null,
 });
 
+/** Whether the day start offers a lapsed task held by `assignees` to `me`. */
+function offered(assignees: TaskUser[], me: TaskUser | null): boolean {
+  const task = {
+    id: 'task',
+    list_id: 'list',
+    status: 'open',
+    parent_id: null,
+    scheduled_date: null,
+    scheduled_time: null,
+    deadline_date: '2026-05-10',
+    deadline_reminder_days: null,
+    assignees,
+  } as unknown as Task;
+  return filterOverdue([task], () => me, '2026-05-20').length === 1;
+}
+
 describe('task ownership — the contract Rust reads too', () => {
   const cases = contract.cases as OwnershipCase[];
 
@@ -44,9 +62,7 @@ describe('task ownership — the contract Rust reads too', () => {
   });
 
   it.each(cases)('$name', ({ assignees, me, mine }) => {
-    expect(isMineOrUnassigned(assignees.map(user), me === null ? null : user(me))).toBe(
-      mine,
-    );
+    expect(offered(assignees.map(user), me === null ? null : user(me))).toBe(mine);
   });
 
   it('still contains the colleague\'s task', () => {
@@ -63,6 +79,6 @@ describe('task ownership — the contract Rust reads too', () => {
     // ids only.
     const me: TaskUser = { id: 'u1', name: 'Toni', email: 'a@example.org' };
     const samePersonOtherLabel: TaskUser = { id: 'u1', name: 'T. B.', email: null };
-    expect(isMineOrUnassigned([samePersonOtherLabel], me)).toBe(true);
+    expect(offered([samePersonOtherLabel], me)).toBe(true);
   });
 });

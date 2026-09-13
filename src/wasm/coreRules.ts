@@ -54,6 +54,7 @@ import init, {
   signatureIn as wasmSignatureIn,
   stripSignature as wasmStripSignature,
   applySignature as wasmApplySignature,
+  dayStart as wasmDayStart,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -303,4 +304,10 @@ export function stripSignatureJson(inputJson: string): string {
 export function applySignatureJson(inputJson: string): string {
   assertReady();
   return wasmApplySignature(inputJson);
+}
+
+/** See `cal_core::day_start::day_start_json`. */
+export function dayStartJson(inputJson: string): string {
+  assertReady();
+  return wasmDayStart(inputJson);
 }

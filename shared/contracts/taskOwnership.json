@@ -1,10 +1,10 @@
 {
-  "what": "The ownership rule for a task — 'is this mine to act on?' — as a table of cases both languages answer. Rust: cal_core::is_mine_or_unassigned. TypeScript: isMineOrUnassigned in shared/taskAssignment.ts. Both suites read THIS file, so the two cannot drift apart in silence.",
+  "what": "The ownership rule for a task — 'is this mine to act on?' — as a table of cases both languages answer. Rust: cal_core::is_mine_or_unassigned. TypeScript: the same rule, asked through the day-start door in shared/dayStart.ts (the TypeScript copy went when the day start moved into the core). Both suites read THIS file, so the two cannot drift apart in silence.",
   "why": "The rule is not a wire format, it is a DECISION, and both sides make it independently on the same data. Rust makes it when it decides whether a task rings: enumerate_external_triggers drops a colleague's task before a Trigger is ever built. TypeScript makes it when it decides what to offer in the day-start review and how to split 'Done — N by me, M by others'. Neither can see the other's answer. If they disagree, the failure is silent in the worst direction: a phone that rings for a task the app never shows as mine, or a task the app treats as mine that never rings. Nothing crashes, nothing logs, and finding it means noticing over days that one surface disagrees with the other.",
   "writtenBy": [],
   "readBy": [
     "crates/cal-core/src/task_assignment.rs (is_mine_or_unassigned)",
-    "shared/taskAssignment.ts (isMineOrUnassigned)"
+    "src/state/taskOwnership.contract.test.ts (through shared/dayStart.ts into cal_core::day_start)"
   ],
   "shape": {
     "note": "Each case gives the task's assignee ids and the account's own identity, then the expected answer. Identity is compared by id ALONE — providers return the same person with different display names per endpoint, so matching on name or email would drop a real assignment.",

@@ -297,6 +297,11 @@ pub fn apply_signature(input_json: &str) -> Result<String, WireError> {
     cal_core::apply_signature_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::dayStart`].
+pub fn day_start(input_json: &str) -> Result<String, WireError> {
+    cal_core::day_start_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,17 +1,105 @@
-import { parseDayKey } from './dateKey';
-import { isMineOrUnassigned } from './taskAssignment';
-import { todayIsoKey } from './taskDay';
-import type { Task, TaskUser } from './types';
+// The day-start rules — this surface's door into `cal_core::day_start`.
+//
+// Which tasks are overdue, which slipped, which get pinned to today, which are
+// reminded and in which group, how many days remain to a deadline, what "move
+// to today" does to a task's dates, and whether a day-start checker fires now:
+// that decision lives in the core now, and both surfaces ask it every morning —
+// the desktop checkers and review dialog, the mobile checks and modal, and the
+// mobile scheduler that asks about future days ahead of time. What stays here
+// is the shell: the clock (today's key and the local time — the core reads
+// none), building the question from what a caller holds (a user is its id; a
+// list's identity and coupling are asked once per list), and laying the
+// answer — positions — back over the caller's own task objects. No platform
+// deps: storage and timers live in the platform layer.
+//
+// Pinned by `crates/cal-core/tests/fixtures/dayStart.json`, measured from the
+// TypeScript this replaced; `dayStart.contract.test.ts` replays it through
+// this door, and the core's own contract test reads the same file.
 
-// Pure day-start-review + deadline-pin selectors + the fire-gate, shared by the
-// desktop checkers and the mobile day-start checks. No platform deps (storage /
-// timers live in the platform layer). See the desktop dayStartReview.ts /
-// deadlinePinTargets.ts / useCurrentDayKey.ts for the original prose.
+import { todayIsoKey } from './taskDay';
+import type {
+  DayStartIdentity,
+  DayStartMoved,
+  DayStartQuestion,
+  DayStartReminderGroups,
+  DayStartTask,
+  Task,
+  TaskUser,
+} from './types';
+
+// ─────────────────────────────── The door ───────────────────────────────────
+
+/** This surface's door into `cal_core::day_start`: one question, one answer. */
+export interface DayStartRules {
+  dayStartJson(inputJson: string): string;
+}
+
+let installedRules: DayStartRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installDayStartRules(rules: DayStartRules): void {
+  installedRules = rules;
+}
+
+function ask<T>(question: DayStartQuestion): T {
+  if (installedRules === null) {
+    // Loud, not a local fallback. A fallback here would be the copy all over
+    // again, and its failure is one nobody reports: a morning that offers
+    // different tasks on the phone and on the desktop.
+    throw new Error(
+      'day-start rules used before installDayStartRules() — the surface must ' +
+        'bind its door into cal_core::day_start at startup',
+    );
+  }
+  return JSON.parse(installedRules.dayStartJson(JSON.stringify(question))) as T;
+}
+
+/** What the rules read of each task. A user is its id. */
+function wire(tasks: Task[]): DayStartTask[] {
+  return tasks.map((t) => ({
+    id: t.id,
+    list_id: t.list_id,
+    status: t.status,
+    parent_id: t.parent_id ?? null,
+    scheduled_date: t.scheduled_date ?? null,
+    scheduled_time: t.scheduled_time ?? null,
+    deadline_date: t.deadline_date ?? null,
+    deadline_reminder_days: t.deadline_reminder_days ?? null,
+    assignees: t.assignees.map((a) => a.id),
+  }));
+}
+
+/** The lists the tasks live in, each once, in first-seen order. */
+function listsOf(tasks: Task[]): string[] {
+  return [...new Set(tasks.map((t) => t.list_id))];
+}
+
+/** The account's own id per list; no `meFor`, no identities — nothing filtered. */
+function identities(
+  tasks: Task[],
+  meFor: ((listId: string) => TaskUser | null) | undefined,
+): DayStartIdentity[] {
+  if (!meFor) return [];
+  return listsOf(tasks).map((list_id) => ({ list_id, me: meFor(list_id)?.id ?? null }));
+}
+
+/** A window as the wire can carry it: `NaN` and the infinities are no window. */
+function windowOf(days: number): number | null {
+  return Number.isFinite(days) ? days : null;
+}
+
+function pick(tasks: Task[], positions: number[]): Task[] {
+  return positions.map((i) => tasks[i]);
+}
+
+// ─────────────────────────────── The rules ──────────────────────────────────
 
 /**
- * "Overdue" = a `deadline_date` strictly before today AND not already
+ * "Overdue" = a `deadline_date` strictly before the day AND not already
  * completed/cancelled. `scheduled_date` alone doesn't count — that's a planning
- * hint, not a missed commitment.
+ * hint, not a missed commitment. A "project" parent (still has open subtasks)
+ * is managed via its subtasks and returns here once they're all settled; a task
+ * owned by a concrete OTHER user is someone else's to handle.
  */
 export function filterOverdue(
   tasks: Task[],
@@ -21,27 +109,26 @@ export function filterOverdue(
   // notifications. Defaults to today — the live checkers pass nothing.
   dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = dayKey;
-  return tasks.filter((task) => {
-    if (!task.deadline_date) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    if (task.deadline_date >= today) return false;
-    // A "project" parent (still has open subtasks) is managed via its subtasks —
-    // don't nag about the container; it returns here once they're all settled.
-    if (hasActionableDescendants(task.id, tasks)) return false;
-    // Don't offer a task owned by a concrete OTHER user — someone else handles it.
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'overdue',
+      tasks: wire(tasks),
+      today: dayKey,
+      identities: identities(tasks, meFor),
+    }),
+  );
 }
 
 /**
- * Tasks with a `scheduled_date` strictly before today, still actionable (`open`
- * / `in_progress`), and NOT already in the overdue list (the deadline is the
- * bigger lever, shown in that section — and because that section's own "today"
- * answer, {@link movedToToday}, carries a lapsed plan along, the task is fully
- * settled there rather than half-answered in two places). When `cascadeEnabledFor` is given, a
- * slipped task in a cascading list is hidden if a same-list ancestor is also
- * slipped (the user decides at the subtree root); omitted ⇒ cascade off for all.
+ * Tasks with a `scheduled_date` strictly before the day, still actionable
+ * (`open` / `in_progress`), and NOT already in the overdue list (the deadline
+ * is the bigger lever, shown in that section — and because that section's own
+ * "today" answer, {@link movedToToday}, carries a lapsed plan along, the task
+ * is fully settled there rather than half-answered in two places). When
+ * `cascadeEnabledFor` is given, a slipped task in a cascading list is hidden if
+ * an ancestor is also slipped (the user decides at the subtree root); only the
+ * task's own list is asked. Omitted ⇒ cascade off for all.
  */
 export function filterCarriedOver(
   tasks: Task[],
@@ -52,40 +139,17 @@ export function filterCarriedOver(
   /** Anchor day — see {@link filterOverdue}. */
   dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = dayKey;
-  const overdueIds = new Set(
-    filterOverdue(tasks, undefined, dayKey).map((t) => t.id),
-  );
-  const meFor = options?.meFor;
-  const slipped = tasks.filter((task) => {
-    if (!task.scheduled_date) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    if (overdueIds.has(task.id)) return false;
-    if (task.scheduled_date >= today) return false;
-    // NB: project parents are NOT suppressed here. A term-paper parent has no
-    // scheduled_date of its own (only a deadline), so it never reaches this
-    // slipped set — its dated SUBTASKS do, and they're what we want surfaced.
-    // A parent the user DID schedule onto a work day still flows through the
-    // cascade-coupling below (decide-at-the-root), so we leave that intact.
-    // Don't offer a task owned by a concrete OTHER user — someone else handles it.
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
-
   const cascadeFor = options?.cascadeEnabledFor;
-  if (!cascadeFor) return slipped;
-
-  const slippedIds = new Set(slipped.map((t) => t.id));
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const hasSlippedAncestor = (task: Task): boolean => {
-    if (!cascadeFor(task.list_id)) return false;
-    let parentId: string | null = task.parent_id;
-    while (parentId) {
-      if (slippedIds.has(parentId)) return true;
-      parentId = byId.get(parentId)?.parent_id ?? null;
-    }
-    return false;
-  };
-  return slipped.filter((task) => !hasSlippedAncestor(task));
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'carried_over',
+      tasks: wire(tasks),
+      today: dayKey,
+      identities: identities(tasks, options?.meFor),
+      coupled_lists: cascadeFor ? listsOf(tasks).filter((listId) => cascadeFor(listId)) : [],
+    }),
+  );
 }
 
 /**
@@ -94,17 +158,10 @@ export function filterCarriedOver(
  * children along while leaving settled (completed/cancelled) ones untouched.
  */
 export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
-  const out: Task[] = [];
-  const stack: string[] = [rootId];
-  while (stack.length > 0) {
-    const id = stack.pop() as string;
-    for (const t of tasks) {
-      if (t.parent_id !== id) continue;
-      stack.push(t.id);
-      if (t.status === 'open' || t.status === 'in_progress') out.push(t);
-    }
-  }
-  return out;
+  return pick(
+    tasks,
+    ask<number[]>({ rule: 'actionable_descendants', tasks: wire(tasks), root_id: rootId }),
+  );
 }
 
 /**
@@ -119,20 +176,11 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
  * clearing it would silently turn a commitment into "sometime today", which is
  * not what the user wrote and not what they asked for.
  *
- * A PLAN that also lapsed comes along. This used to leave the scheduling
- * alone, on the reasoning that a lapsed deadline and a slipped plan are
- * separate answers and the carry-over section is where a plan gets moved.
- * That reasoning had a hole: `filterCarriedOver` deliberately skips anything
- * the deadline section already shows, so a task whose deadline AND plan lapsed
- * on the SAME day never reached the carry-over section at all. Answering
- * "today" settled the deadline and left the plan stranded in the past — where
- * the task list goes on calling the task overdue, because its "Überfällig"
- * group keys on `scheduled_date` alone, and nothing was left to say otherwise.
- *
- * So a plan strictly BEFORE today is lifted onto today, keeping its time of
- * day. Saying the work is due today while leaving it planned for yesterday
- * describes nothing anybody can act on. A plan that is already today, or still
- * ahead, is the user's own arrangement and stays untouched.
+ * A PLAN that also lapsed comes along: `filterCarriedOver` deliberately skips
+ * anything the deadline section already shows, so a task whose deadline AND
+ * plan lapsed never reaches the carry-over section, and answering "today" must
+ * not leave the plan stranded in the past. A plan that is already today, or
+ * still ahead, is the user's own arrangement and stays untouched.
  */
 export function movedToToday<
   T extends {
@@ -140,12 +188,15 @@ export function movedToToday<
     scheduled_date?: string | null;
   },
 >(task: T): T {
-  const today = todayIsoKey();
-  const planLapsed = !!task.scheduled_date && task.scheduled_date < today;
+  const moved = ask<DayStartMoved>({
+    rule: 'moved_to_today',
+    today: todayIsoKey(),
+    scheduled_date: task.scheduled_date ?? null,
+  });
   return {
     ...task,
-    deadline_date: today,
-    ...(planLapsed ? { scheduled_date: today } : {}),
+    deadline_date: moved.deadline_date,
+    ...(moved.scheduled_date === undefined ? {} : { scheduled_date: moved.scheduled_date }),
   };
 }
 
@@ -154,44 +205,37 @@ export function movedToToday<
  * descendant — i.e. it's a "project" parent whose real work lives in its
  * subtasks. The day-start selectors suppress such a parent (the SUBTASKS are the
  * surfaced, asked-about units, and they keep their own day plan); once every
- * subtask is settled the parent is no longer suppressed and returns to normal
- * review behaviour so its own deadline can be closed out. Early-exits.
+ * subtask is settled the parent returns to normal review behaviour so its own
+ * deadline can be closed out.
  */
 export function hasActionableDescendants(rootId: string, tasks: Task[]): boolean {
-  const stack: string[] = [rootId];
-  while (stack.length > 0) {
-    const id = stack.pop() as string;
-    for (const t of tasks) {
-      if (t.parent_id !== id) continue;
-      if (t.status === 'open' || t.status === 'in_progress') return true;
-      // a settled node can still host an actionable grandchild — keep walking.
-      stack.push(t.id);
-    }
-  }
-  return false;
+  return ask<boolean>({
+    rule: 'has_actionable_descendants',
+    tasks: wire(tasks),
+    root_id: rootId,
+  });
 }
 
 /**
  * Open / in_progress tasks whose `deadline_date` is today and that aren't
  * already pinned to today (`scheduled_date !== today`) — the silent
  * "by"-deadline auto-pin. The scheduled-date check keeps the batch idempotent
- * across re-launches inside the same calendar day.
+ * across re-launches inside the same calendar day. Never a project parent (its
+ * subtasks carry the day plan), never a task owned by a concrete OTHER user.
  */
 export function filterDeadlinePinTargets(
   tasks: Task[],
   meFor?: (listId: string) => TaskUser | null,
 ): Task[] {
-  const today = todayIsoKey();
-  return tasks.filter((task) => {
-    if (!task.deadline_date) return false;
-    if (task.deadline_date !== today) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    if (task.scheduled_date === today) return false;
-    // Never pin a project parent to today — its subtasks carry the day plan.
-    if (hasActionableDescendants(task.id, tasks)) return false;
-    // Don't silently pin a task owned by a concrete OTHER user to my today.
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'deadline_pin_targets',
+      tasks: wire(tasks),
+      today: todayIsoKey(),
+      identities: identities(tasks, meFor),
+    }),
+  );
 }
 
 // ── Day-start TASK REMINDERS ────────────────────────────────────────────────
@@ -199,43 +243,27 @@ export function filterDeadlinePinTargets(
 // deadline-pin), each gated by its own Settings toggle. Same structural rules as
 // the other selectors: skip settled tasks, suppress "project" parents (their
 // open subtasks are the real units), and never remind about a task owned by a
-// concrete OTHER user. PURE — `todayIsoKey()` reads the local wall-clock.
+// concrete OTHER user.
 
-/** Whole local calendar days from `fromDayKey` (default: today) until
- *  `task.deadline_date`: 0 = that day, negative = past, null = no deadline.
- *  Drives the countdown WINDOW check + the per-task "in N days" label. Rounds
- *  so a 23/25h DST day doesn't drift. The anchor parameter lets the mobile
- *  scheduler pre-compute FUTURE days' reminder groups for ahead-of-time OS
- *  notifications. */
+/** Whole calendar days from `fromDayKey` (default: today) until
+ *  `task.deadline_date`: 0 = that day, negative = past, null = no deadline, or
+ *  a key that is not a `YYYY-MM-DD` day — refused rather than answered with a
+ *  confident wrong number. Drives the countdown WINDOW check + the per-task
+ *  "in N days" label. The anchor parameter lets the mobile scheduler pre-compute
+ *  FUTURE days' reminder groups for ahead-of-time OS notifications. */
 export function daysUntilDeadline(
   task: Task,
   fromDayKey: string = todayIsoKey(),
 ): number | null {
-  if (!task.deadline_date) return null;
-  // A day key that is not one answers "no deadline", not a number.
-  //
-  // Two different wrong answers were possible here, and the second is the
-  // nastier one. `'tomorrow'` produces NaN, and NaN passes every guard in
-  // `filterDeadlineCountdown` — `days == null` is false, `days < 1` is false,
-  // `days > window` is false — so the task would be offered as a countdown
-  // reminder every single day and never age out of it. But `'2026-13-99'`
-  // produces no NaN at all: JavaScript rolls month 13 and day 99 over into
-  // April 2027 without complaint, so a finiteness check waves it through and
-  // the answer is a confident, plausible 324 days.
-  //
-  // Nothing produces such a value today: `Task.deadline_date` is
-  // `Option<NaiveDate>` in Rust, so a malformed one cannot cross serde. But
-  // this function is exported from `@aperio/shared` and takes a plain string,
-  // and "no caller can pass junk" is not a property a shared function should
-  // rest on.
-  const today = parseDayKey(fromDayKey);
-  const deadline = parseDayKey(task.deadline_date);
-  if (!today || !deadline) return null;
-  return Math.round((deadline.getTime() - today.getTime()) / 86_400_000);
+  return ask<number | null>({
+    rule: 'days_until_deadline',
+    deadline_date: task.deadline_date ?? null,
+    from: fromDayKey,
+  });
 }
 
 /**
- * Tasks scheduled for TODAY with NO time-of-day (`scheduled_time` null) and
+ * Tasks scheduled for the day with NO time-of-day (`scheduled_time` null) and
  * still actionable — the "you planned these for today" nudge. A task with a
  * concrete scheduled_time already shows on the calendar's timeline, so it's not
  * part of this untimed reminder.
@@ -245,34 +273,37 @@ export function filterUntimedToday(
   meFor?: (listId: string) => TaskUser | null,
   dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = dayKey;
-  return tasks.filter((task) => {
-    if (task.scheduled_date !== today) return false;
-    if (task.scheduled_time != null) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    if (hasActionableDescendants(task.id, tasks)) return false;
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'untimed_today',
+      tasks: wire(tasks),
+      today: dayKey,
+      identities: identities(tasks, meFor),
+    }),
+  );
 }
 
 /**
- * Tasks whose `deadline_date` is TODAY and still actionable — "the deadline is
- * here". Unlike `filterDeadlinePinTargets` this does NOT exclude tasks already
- * scheduled to today: the reminder fires regardless of whether the silent
- * deadline-pin also moves it (the pin runs separately, after).
+ * Tasks whose `deadline_date` is the day and still actionable — "the deadline
+ * is here". Unlike `filterDeadlinePinTargets` this does NOT exclude tasks
+ * already scheduled to today: the reminder fires regardless of whether the
+ * silent deadline-pin also moves it (the pin runs separately, after).
  */
 export function filterDeadlineArrived(
   tasks: Task[],
   meFor?: (listId: string) => TaskUser | null,
   dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = dayKey;
-  return tasks.filter((task) => {
-    if (task.deadline_date !== today) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    if (hasActionableDescendants(task.id, tasks)) return false;
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'deadline_arrived',
+      tasks: wire(tasks),
+      today: dayKey,
+      identities: identities(tasks, meFor),
+    }),
+  );
 }
 
 /**
@@ -293,25 +324,16 @@ export function filterDeadlineCountdown(
   meFor?: (listId: string) => TaskUser | null,
   dayKey: string = todayIsoKey(),
 ): Task[] {
-  const globalValid = Number.isFinite(daysUntil) && daysUntil >= 1;
-  return tasks.filter((task) => {
-    // Per-task override wins only when it's a finite window >= 1; else the global.
-    const override = task.deadline_reminder_days;
-    const window =
-      override != null && Number.isFinite(override) && override >= 1
-        ? override
-        : globalValid
-          ? daysUntil
-          : null;
-    if (window == null) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
-    const days = daysUntilDeadline(task, dayKey);
-    // 1..window: skip the deadline day (0 → filterDeadlineArrived) and anything
-    // already past or beyond the window.
-    if (days == null || days < 1 || days > window) return false;
-    if (hasActionableDescendants(task.id, tasks)) return false;
-    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
-  });
+  return pick(
+    tasks,
+    ask<number[]>({
+      rule: 'deadline_countdown',
+      tasks: wire(tasks),
+      today: dayKey,
+      identities: identities(tasks, meFor),
+      days_until: windowOf(daysUntil),
+    }),
+  );
 }
 
 /** The four Settings → Tasks reminder knobs (synced). */
@@ -328,7 +350,7 @@ export interface ReminderGroups {
   untimed: Task[];
   /** Deadline is today. */
   dueToday: Task[];
-  /** Deadline exactly `deadlineCountdownDays` out (and not already in another group). */
+  /** Deadline within the countdown window (and not already in another group). */
   countdown: Task[];
 }
 
@@ -348,20 +370,23 @@ export function buildReminderGroups(
   meFor?: (listId: string) => TaskUser | null,
   dayKey: string = todayIsoKey(),
 ): ReminderGroups {
-  const dueToday = settings.remindDeadlineArrived
-    ? filterDeadlineArrived(tasks, meFor, dayKey)
-    : [];
-  const seen = new Set(dueToday.map((t) => t.id));
-  const untimed = (
-    settings.remindUntimedToday ? filterUntimedToday(tasks, meFor, dayKey) : []
-  ).filter((t) => !seen.has(t.id));
-  untimed.forEach((t) => seen.add(t.id));
-  const countdown = (
-    settings.remindDeadlineCountdown
-      ? filterDeadlineCountdown(tasks, settings.deadlineCountdownDays, meFor, dayKey)
-      : []
-  ).filter((t) => !seen.has(t.id));
-  return { untimed, dueToday, countdown };
+  const groups = ask<DayStartReminderGroups>({
+    rule: 'reminder_groups',
+    tasks: wire(tasks),
+    today: dayKey,
+    identities: identities(tasks, meFor),
+    settings: {
+      remind_untimed_today: settings.remindUntimedToday,
+      remind_deadline_arrived: settings.remindDeadlineArrived,
+      remind_deadline_countdown: settings.remindDeadlineCountdown,
+      deadline_countdown_days: windowOf(settings.deadlineCountdownDays),
+    },
+  });
+  return {
+    untimed: pick(tasks, groups.untimed),
+    dueToday: pick(tasks, groups.due_today),
+    countdown: pick(tasks, groups.countdown),
+  };
 }
 
 /** Total de-duplicated reminder count across the three groups. */
@@ -377,7 +402,8 @@ export type DayStartTrigger = string;
  *   - `'app-start'`: fire iff never fired (lastFiredDayKey null).
  *   - `HH:MM`: fire iff not yet fired for `todayKey` AND the local clock has
  *     crossed the threshold. Unparseable / out-of-range ⇒ fire immediately.
- * Pure (clock + the marker are passed in) so it's trivially testable.
+ * The clock and the marker are passed in; the shell reads only the local hour
+ * and minute off `now`.
  */
 export function shouldFireToday(
   trigger: DayStartTrigger,
@@ -385,12 +411,12 @@ export function shouldFireToday(
   todayKey: string,
   now: Date = new Date(),
 ): boolean {
-  if (trigger === 'app-start') return lastFiredDayKey === null;
-  if (lastFiredDayKey === todayKey) return false;
-  const m = trigger.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return true;
-  const hours = Number(m[1]);
-  const minutes = Number(m[2]);
-  if (hours > 23 || minutes > 59) return true;
-  return now.getHours() > hours || (now.getHours() === hours && now.getMinutes() >= minutes);
+  return ask<boolean>({
+    rule: 'should_fire',
+    trigger,
+    last_fired: lastFiredDayKey,
+    today: todayKey,
+    now_hour: now.getHours(),
+    now_minute: now.getMinutes(),
+  });
 }

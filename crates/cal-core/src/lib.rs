@@ -13,6 +13,7 @@ pub mod collation;
 pub mod color;
 pub mod conferencing;
 pub mod day_marker;
+pub mod day_start;
 pub mod error;
 pub mod event_anchor;
 pub mod event_group;
@@ -64,6 +65,10 @@ pub use adapter::{
 pub use collation::{compare_names, compare_titles, CollationLanguage};
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
+pub use day_start::{
+    day_start_json, DayStartIdentity, DayStartMoved, DayStartQuestion, DayStartReminderGroups,
+    DayStartReminderSettings, DayStartTask,
+};
 pub use error::{Error, Result};
 pub use event_anchor::{plan_repairs, series_master_id, Anchored, Repair};
 pub use event_group::{normalized_title, EventGroup, EventGroupMember};

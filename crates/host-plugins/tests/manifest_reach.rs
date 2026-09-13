@@ -376,8 +376,8 @@ const KNOWN_REACHES: [(&str, &str); 5] = [
     ),
     // The app reading its own file again, for a contract that pins a DECISION
     // rather than a format: "is this task mine to act on?", which the reminder
-    // scheduler here and the frontends' `isMineOrUnassigned` answer separately
-    // on the same data. Same crate, same reason it is allowed — `host-core` is
+    // scheduler here and the frontends' day start ask on the same data. Same
+    // crate, same reason it is allowed — `host-core` is
     // the host and never leaves this repository.
     (
         "crates/host-core/src/reminders.rs",

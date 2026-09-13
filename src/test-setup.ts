@@ -51,6 +51,7 @@ import {
   installTaskOccurrenceRules,
   installTaskAssignmentRules,
   installSignatureRules,
+  installDayStartRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -88,6 +89,7 @@ import {
   signatureInJson,
   stripSignatureJson,
   applySignatureJson,
+  dayStartJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -155,3 +157,4 @@ installTaskAssignmentRules({
   clampAssigneesJson,
 });
 installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson });
+installDayStartRules({ dayStartJson });

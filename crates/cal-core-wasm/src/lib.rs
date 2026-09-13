@@ -358,3 +358,10 @@ pub fn strip_signature(input_json: &str) -> Result<String, JsValue> {
 pub fn apply_signature(input_json: &str) -> Result<String, JsValue> {
     rules::apply_signature(input_json).map_err(to_js)
 }
+
+/// One question to the day-start rules — overdue, slipped, pinned, reminded,
+/// days to a deadline, "move to today", the fire gate — and its answer.
+#[wasm_bindgen(js_name = dayStart)]
+pub fn day_start(input_json: &str) -> Result<String, JsValue> {
+    rules::day_start(input_json).map_err(to_js)
+}

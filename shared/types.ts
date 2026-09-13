@@ -114,6 +114,14 @@ export type { ClampAssigneesInput } from './generated/ClampAssigneesInput';
 // `shared/signatures.ts` speaks these.
 export type { SignatureTextInput } from './generated/SignatureTextInput';
 export type { ApplySignatureInput } from './generated/ApplySignatureInput';
+// The day-start rules, `cal_core::day_start`. The shell in `shared/dayStart.ts`
+// speaks these.
+export type { DayStartTask } from './generated/DayStartTask';
+export type { DayStartIdentity } from './generated/DayStartIdentity';
+export type { DayStartReminderSettings } from './generated/DayStartReminderSettings';
+export type { DayStartQuestion } from './generated/DayStartQuestion';
+export type { DayStartMoved } from './generated/DayStartMoved';
+export type { DayStartReminderGroups } from './generated/DayStartReminderGroups';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the

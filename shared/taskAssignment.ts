@@ -7,8 +7,9 @@
 // checked off or moved. What stays here is the shell — building the question
 // from what a caller holds (a user is its id; the rule compares ids alone) and
 // laying the answer (positions, or "take me") back over the caller's own user
-// rows — and the one rule that already was the core's and still has a
-// TypeScript reader (`isMineOrUnassigned`, below).
+// rows. The ownership rule ("is this mine?") is the core's
+// (`cal_core::is_mine_or_unassigned`); its last TypeScript copy went when the
+// day start moved into the core, which asks it there.
 //
 // Pinned by `crates/cal-core/tests/fixtures/taskAssignment.json`, measured
 // from the TypeScript this replaced; `taskAssignment.contract.test.ts` replays
@@ -92,21 +93,6 @@ export function selfAssignOnStatusChange(
     case 'keep':
       return outcome.positions.map((i) => assignees[i]);
   }
-}
-
-/**
- * True when a task is "mine to act on": there's no identity, OR it's unassigned,
- * OR I'm one of the assignees. False ONLY when it's assigned to concrete OTHER
- * users and not me.
- *
- * The rule is the core's (`cal_core::is_mine_or_unassigned`): the reminder
- * scheduler, the calendar day and the task grouping ask it there. This copy
- * serves `shared/dayStart.ts`, which walks every task at day start, until the
- * day-start rules move as well; it is pinned against the core by
- * `shared/contracts/taskOwnership.json`, which both test suites read.
- */
-export function isMineOrUnassigned(assignees: TaskUser[], me: TaskUser | null): boolean {
-  return !me || assignees.length === 0 || assignees.some((a) => a.id === me.id);
 }
 
 /**

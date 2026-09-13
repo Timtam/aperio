@@ -344,6 +344,11 @@ public class CalFfiModule: Module {
       try applySignature(inputJson: inputJson)
     }
 
+    // The day-start rules: one question, one answer.
+    Function("dayStart") { (inputJson: String) -> String in
+      try dayStart(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this
