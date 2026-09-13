@@ -36,10 +36,15 @@
 //! with one pinned difference: the projector DROPS an invalid fixed date (day
 //! 0 or 32, month 13) and, with none left, walks by the frequency — the
 //! TypeScript sanitised the rule before it looked — while the spawner clamps
-//! the day. A day of month outside 1..=31 is likewise no day of month. Pinned
-//! row by row in `tests/fixtures/taskOccurrences.json`, measured from the
-//! TypeScript this replaces; the `contract` module below reads it, and so does
-//! the TypeScript contract test on the other side of the boundary.
+//! the day. A day of month outside 1..=31 is likewise no day of month here,
+//! while the spawner clamps 32 and up to the month's end and finds no date at
+//! all for 0 — the same divergence, flagged in TODO.md for one decision that
+//! covers both. Pinned row by row in `tests/fixtures/taskOccurrences.json`,
+//! measured from the TypeScript this replaces; the `contract` module below
+//! reads it, and so does the TypeScript contract test on the other side of the
+//! boundary. One quirk was not carried over: JavaScript's `Date.UTC` mapped
+//! the years 0 to 99 onto 1900 to 1999, so a base in such a year walked into
+//! the twentieth century; chrono stays in the year, as the spawner always has.
 //!
 //! # Bounds
 //!

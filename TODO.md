@@ -1485,11 +1485,21 @@ Siehe DESIGN §4.2.
 - [ ] 🚩 **Spawner und Projektor lesen ungültige Feste Daten verschieden.**
   `spawn::next_fixed_date_after` KLEMMT Tag 32 auf den Monatsletzten und Tag 0
   auf den 1.; `fromBackend` (und jetzt `task_occurrences::projector_rule`)
-  VERWIRFT solche Einträge. Kein Editor schreibt sie (`toBackend` bereinigt),
-  ein Anbieter könnte. Entscheiden: eine Lesart für beide — vermutlich das
-  Verwerfen, weil ein Trigger, den niemand so gemeint hat, kein Datum erzeugen
-  sollte; dann `spawn.rs` anpassen und die Fixture-Zeile
-  `a-fixed-date-with-day-32-is-dropped` bleibt, wie sie ist.
+  VERWIRFT solche Einträge. Dasselbe beim Monatstag: `spawn::advance` klemmt
+  `day_of_month` ≥ 32 auf den Monatsletzten und liefert bei 0 gar KEIN Datum
+  (`clamp_to_month(y, m, 0)` = None — es wird keine nächste Instanz erzeugt,
+  obwohl der Kalender den 15. jedes Monats projiziert hat); `projector_rule`
+  verwirft den Eintrag und geht in ganzen Monaten vom Ankertag weiter. Kein
+  Editor schreibt solche Werte (`toBackend` bereinigt, EWS klemmt beim
+  Abbilden), ein Sync-übertragener oder fremd geschriebener Datensatz könnte.
+  Entscheiden: eine Lesart für beide — vermutlich das Verwerfen, weil ein
+  Trigger, den niemand so gemeint hat, kein Datum erzeugen sollte; dann
+  `spawn.rs` anpassen (`day_of_month.filter(1..=31)` auch dort, Feste Daten
+  bereinigen statt klemmen) und die Fixture-Zeilen
+  `a-fixed-date-with-day-32-is-dropped` und
+  `monthly-day-of-month-clamps-to-short-months` bleiben, wie sie sind. (Vom
+  dritten Gegenleser des Port-PRs gefunden: die Flagge nannte nur die Festen
+  Daten.)
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
