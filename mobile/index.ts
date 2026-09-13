@@ -13,6 +13,7 @@ import {
   installTaskCascadeRules,
   installTaskOccurrenceRules,
   installTaskAssignmentRules,
+  installSignatureRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -146,6 +147,13 @@ installTaskAssignmentRules({
   selfAssignOnStatusChangeJson: (inputJson) => CalFfi.selfAssignOnStatusChange(inputJson),
   taskAssignmentModeJson: (inputJson) => CalFfi.taskAssignmentMode(inputJson),
   clampAssigneesJson: (inputJson) => CalFfi.clampAssignees(inputJson),
+});
+
+// The signature block of a description: read, strip, apply.
+installSignatureRules({
+  signatureInJson: (inputJson) => CalFfi.signatureIn(inputJson),
+  stripSignatureJson: (inputJson) => CalFfi.stripSignature(inputJson),
+  applySignatureJson: (inputJson) => CalFfi.applySignature(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

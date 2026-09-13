@@ -1,4 +1,5 @@
-/** Signature blocks for event and task descriptions.
+/** Signature blocks for event and task descriptions — this surface's door
+ *  into `cal_core::signatures`.
  *
  *  The recurring work around a conference room is not creating it — a DFNconf
  *  room is permanent, and most people hold two or three. It is getting the
@@ -27,7 +28,19 @@
  *  So: a URL on a line of its own (which practically every client linkifies)
  *  and blank lines for structure. That is the whole formatting vocabulary, and
  *  it survives everywhere.
+ *
+ *  ## Where the rule lives
+ *
+ *  Where a block starts, what it says, and how a body is applied is decided in
+ *  the core now (`cal_core::signatures`), so two devices write the same bytes
+ *  and a frontend that is not JavaScript writes them too. This file is the
+ *  door: the three functions keep their names and hand the strings through.
+ *  Pinned by `crates/cal-core/tests/fixtures/signatures.json`, measured from
+ *  the TypeScript this replaced; `signatures.contract.test.ts` replays it
+ *  through this door, and the core's own contract test reads the same file.
  */
+
+import type { ApplySignatureInput, SignatureTextInput } from './types';
 
 /**
  * The separator that opens a signature block.
@@ -39,6 +52,9 @@
  * instead of stacking another copy underneath it.
  *
  * The trailing space is part of the convention and is deliberately preserved.
+ * The core writes it (`cal_core::signatures::SIGNATURE_MARKER`); this copy is
+ * for the tests that spell a block out, and the contract test checks the two
+ * agree.
  */
 export const SIGNATURE_MARKER = '-- ';
 
@@ -50,38 +66,46 @@ export interface Signature {
   body: string;
 }
 
-/** Index of the line that opens the signature block, or -1.
- *
- *  The LAST such line wins: a description may legitimately contain the marker
- *  in quoted text above, and the block that matters is the one at the end —
- *  the same rule mail clients apply. */
-function markerLine(lines: readonly string[]): number {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    // Trailing whitespace varies once a description has been through a
-    // provider; the marker is recognised by its content, not its bytes.
-    if (lines[i].trimEnd() === SIGNATURE_MARKER.trimEnd()) return i;
+// ─────────────────────────────── The door ───────────────────────────────────
+
+/** This surface's door into `cal_core::signatures`. */
+export interface SignatureRules {
+  signatureInJson(inputJson: string): string;
+  stripSignatureJson(inputJson: string): string;
+  applySignatureJson(inputJson: string): string;
+}
+
+let installedRules: SignatureRules | null = null;
+
+/** Bind this surface's door into the core. */
+export function installSignatureRules(rules: SignatureRules): void {
+  installedRules = rules;
+}
+
+function rules(): SignatureRules {
+  if (installedRules === null) {
+    // Loud, not a local fallback. A fallback here would be the copy all over
+    // again, and its failure is the one the marker exists to prevent: a block
+    // one device inserted and the other one doubled.
+    throw new Error(
+      'signature rules used before installSignatureRules() — the surface must ' +
+        'bind its door into cal_core::signatures at startup',
+    );
   }
-  return -1;
+  return installedRules;
 }
 
 /** The description without its signature block, and without the blank line
  *  that separated them. */
 export function stripSignature(description: string): string {
-  const lines = description.split('\n');
-  const at = markerLine(lines);
-  if (at < 0) return description;
-  let end = at;
-  // Eat the blank line the block was separated by, so removing and re-adding
-  // a signature does not grow a gap each time.
-  while (end > 0 && lines[end - 1].trim() === '') end -= 1;
-  return lines.slice(0, end).join('\n');
+  const input: SignatureTextInput = { description };
+  return JSON.parse(rules().stripSignatureJson(JSON.stringify(input))) as string;
 }
 
 /** What the description's signature block says, or `null` when it has none. */
 export function signatureIn(description: string): string | null {
-  const lines = description.split('\n');
-  const at = markerLine(lines);
-  return at < 0 ? null : lines.slice(at + 1).join('\n');
+  const input: SignatureTextInput = { description };
+  return JSON.parse(rules().signatureInJson(JSON.stringify(input))) as string | null;
 }
 
 /**
@@ -95,12 +119,8 @@ export function signatureIn(description: string): string | null {
  * the end, not a rewrite.
  */
 export function applySignature(description: string, body: string): string {
-  const stripped = stripSignature(description ?? '');
-  // A description of nothing but whitespace is a description of nothing:
-  // keeping it would open the block on a line of stray spaces.
-  const base = stripped.trim() === '' ? '' : stripped;
-  const trimmed = body.trim();
-  if (trimmed === '') return base;
-  const separator = base === '' ? '' : '\n\n';
-  return `${base}${separator}${SIGNATURE_MARKER}\n${trimmed}`;
+  // The editors hand over `undefined` for a description that was never set;
+  // the TypeScript read that as an empty text, and so does the door.
+  const input: ApplySignatureInput = { description: description ?? '', body };
+  return JSON.parse(rules().applySignatureJson(JSON.stringify(input))) as string;
 }

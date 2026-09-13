@@ -44,6 +44,9 @@ import uniffi.cal_ffi.occurrenceMoveTarget as uniffiOccurrenceMoveTarget
 import uniffi.cal_ffi.selfAssignOnStatusChange as uniffiSelfAssignOnStatusChange
 import uniffi.cal_ffi.taskAssignmentMode as uniffiTaskAssignmentMode
 import uniffi.cal_ffi.clampAssignees as uniffiClampAssignees
+import uniffi.cal_ffi.signatureIn as uniffiSignatureIn
+import uniffi.cal_ffi.stripSignature as uniffiStripSignature
+import uniffi.cal_ffi.applySignature as uniffiApplySignature
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -415,6 +418,19 @@ class CalFfiModule : Module() {
 
     Function("clampAssignees") { inputJson: String ->
       uniffiClampAssignees(inputJson)
+    }
+
+    // The signature block of a description: read, strip, apply.
+    Function("signatureIn") { inputJson: String ->
+      uniffiSignatureIn(inputJson)
+    }
+
+    Function("stripSignature") { inputJson: String ->
+      uniffiStripSignature(inputJson)
+    }
+
+    Function("applySignature") { inputJson: String ->
+      uniffiApplySignature(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

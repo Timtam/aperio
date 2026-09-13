@@ -110,6 +110,10 @@ export type { SelfAssignOutcome } from './generated/SelfAssignOutcome';
 export type { AssignmentCapabilities } from './generated/AssignmentCapabilities';
 export type { AssignmentModeInput } from './generated/AssignmentModeInput';
 export type { ClampAssigneesInput } from './generated/ClampAssigneesInput';
+// The signature block, `cal_core::signatures`. The shell in
+// `shared/signatures.ts` speaks these.
+export type { SignatureTextInput } from './generated/SignatureTextInput';
+export type { ApplySignatureInput } from './generated/ApplySignatureInput';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

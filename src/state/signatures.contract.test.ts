@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { SIGNATURE_MARKER } from '@aperio/shared';
+
 import contract from '../../crates/cal-core/tests/fixtures/signatures.json';
 import {
   answerApply,
@@ -21,6 +23,11 @@ import {
  * What stays out, and why, is written in the fixture's `notInThisTable`.
  */
 describe('signatures contract', () => {
+  // The marker the shell spells for its callers is the one the core writes.
+  it('spells the same marker as the core', () => {
+    expect(SIGNATURE_MARKER).toBe(contract.shape.marker);
+  });
+
   // Anti-silence: named rows, not a count. Each is the one case a whole rule
   // turns on; a fixture that lost it would pass for the wrong reason.
   it('still carries the rows the rules turn on', () => {

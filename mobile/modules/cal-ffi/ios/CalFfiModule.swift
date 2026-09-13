@@ -331,6 +331,19 @@ public class CalFfiModule: Module {
       try clampAssignees(inputJson: inputJson)
     }
 
+    // The signature block of a description: read, strip, apply.
+    Function("signatureIn") { (inputJson: String) -> String in
+      try signatureIn(inputJson: inputJson)
+    }
+
+    Function("stripSignature") { (inputJson: String) -> String in
+      try stripSignature(inputJson: inputJson)
+    }
+
+    Function("applySignature") { (inputJson: String) -> String in
+      try applySignature(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this
