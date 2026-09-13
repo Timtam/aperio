@@ -135,6 +135,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Which of the given assignees a list can hold: positions. */
   clampAssignees(inputJson: string): string;
 
+  /** What a description's signature block says, or null. */
+  signatureIn(inputJson: string): string;
+
+  /** The description without its signature block. */
+  stripSignature(inputJson: string): string;
+
+  /** The description with a body as its signature block. */
+  applySignature(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

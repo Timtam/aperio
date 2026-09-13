@@ -424,6 +424,34 @@ pub fn clamp_assignees(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// What a description's signature block says, or null.
+#[uniffi::export]
+pub fn signature_in(input_json: String) -> Result<String, StoreError> {
+    cal_core::signature_in_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "signature input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The description without its signature block.
+#[uniffi::export]
+pub fn strip_signature(input_json: String) -> Result<String, StoreError> {
+    cal_core::strip_signature_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "signature input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// The description with a body as its signature block — replacing, never
+/// stacking.
+#[uniffi::export]
+pub fn apply_signature(input_json: String) -> Result<String, StoreError> {
+    cal_core::apply_signature_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "apply signature input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

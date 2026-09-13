@@ -339,3 +339,22 @@ pub fn task_assignment_mode(input_json: &str) -> Result<String, JsValue> {
 pub fn clamp_assignees(input_json: &str) -> Result<String, JsValue> {
     rules::clamp_assignees(input_json).map_err(to_js)
 }
+
+/// What a description's signature block says, or null.
+#[wasm_bindgen(js_name = signatureIn)]
+pub fn signature_in(input_json: &str) -> Result<String, JsValue> {
+    rules::signature_in(input_json).map_err(to_js)
+}
+
+/// The description without its signature block.
+#[wasm_bindgen(js_name = stripSignature)]
+pub fn strip_signature(input_json: &str) -> Result<String, JsValue> {
+    rules::strip_signature(input_json).map_err(to_js)
+}
+
+/// The description with a body as its signature block — replacing, never
+/// stacking.
+#[wasm_bindgen(js_name = applySignature)]
+pub fn apply_signature(input_json: &str) -> Result<String, JsValue> {
+    rules::apply_signature(input_json).map_err(to_js)
+}

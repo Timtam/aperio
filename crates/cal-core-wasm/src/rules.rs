@@ -282,6 +282,21 @@ pub fn clamp_assignees(input_json: &str) -> Result<String, WireError> {
     cal_core::clamp_assignees_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::signatureIn`].
+pub fn signature_in(input_json: &str) -> Result<String, WireError> {
+    cal_core::signature_in_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::stripSignature`].
+pub fn strip_signature(input_json: &str) -> Result<String, WireError> {
+    cal_core::strip_signature_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::applySignature`].
+pub fn apply_signature(input_json: &str) -> Result<String, WireError> {
+    cal_core::apply_signature_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

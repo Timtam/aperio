@@ -51,6 +51,9 @@ import init, {
   selfAssignOnStatusChange as wasmSelfAssignOnStatusChange,
   taskAssignmentMode as wasmTaskAssignmentMode,
   clampAssignees as wasmClampAssignees,
+  signatureIn as wasmSignatureIn,
+  stripSignature as wasmStripSignature,
+  applySignature as wasmApplySignature,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -282,4 +285,22 @@ export function taskAssignmentModeJson(inputJson: string): string {
 export function clampAssigneesJson(inputJson: string): string {
   assertReady();
   return wasmClampAssignees(inputJson);
+}
+
+/** See `cal_core::signatures::signature_in_json`. */
+export function signatureInJson(inputJson: string): string {
+  assertReady();
+  return wasmSignatureIn(inputJson);
+}
+
+/** See `cal_core::signatures::strip_signature_json`. */
+export function stripSignatureJson(inputJson: string): string {
+  assertReady();
+  return wasmStripSignature(inputJson);
+}
+
+/** See `cal_core::signatures::apply_signature_json`. */
+export function applySignatureJson(inputJson: string): string {
+  assertReady();
+  return wasmApplySignature(inputJson);
 }

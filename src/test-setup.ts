@@ -50,6 +50,7 @@ import {
   installTaskCascadeRules,
   installTaskOccurrenceRules,
   installTaskAssignmentRules,
+  installSignatureRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -84,6 +85,9 @@ import {
   selfAssignOnStatusChangeJson,
   taskAssignmentModeJson,
   clampAssigneesJson,
+  signatureInJson,
+  stripSignatureJson,
+  applySignatureJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -150,3 +154,4 @@ installTaskAssignmentRules({
   taskAssignmentModeJson,
   clampAssigneesJson,
 });
+installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson });

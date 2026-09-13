@@ -814,7 +814,9 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_cal_ffi_checksum_func_auto_date_on_start(
+    external fun uniffi_cal_ffi_checksum_func_apply_signature(
+): Short
+external fun uniffi_cal_ffi_checksum_func_auto_date_on_start(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_backlog_weeks(
 ): Short
@@ -864,7 +866,11 @@ external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_self_assign_on_status_change(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_signature_in(
+): Short
 external fun uniffi_cal_ffi_checksum_func_split_deadlines_by_week(
+): Short
+external fun uniffi_cal_ffi_checksum_func_strip_signature(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_subtask_progress(
 ): Short
@@ -1636,6 +1642,8 @@ external fun uniffi_cal_ffi_fn_method_keychainbridge_delete(`ptr`: Long,`account
 ): Unit
 external fun uniffi_cal_ffi_fn_method_keychainbridge_delete_all(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_func_apply_signature(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_auto_date_on_start(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_backlog_weeks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1686,7 +1694,11 @@ external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue
 ): Int
 external fun uniffi_cal_ffi_fn_func_self_assign_on_status_change(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_signature_in(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_split_deadlines_by_week(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_strip_signature(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_subtask_progress(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1819,6 +1831,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_cal_ffi_checksum_func_apply_signature() != 60341.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_auto_date_on_start() != 34810.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1894,7 +1909,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_self_assign_on_status_change() != 56919.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_signature_in() != 24520.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_split_deadlines_by_week() != 58972.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_strip_signature() != 25374.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_subtask_progress() != 39894.toShort()) {
@@ -10399,6 +10420,21 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     }
 }
         /**
+         * The description with a body as its signature block — replacing, never
+         * stacking.
+         */
+    @Throws(StoreException::class) fun `applySignature`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_apply_signature(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The "started → pin to today" companion date, or null.
          */
     @Throws(StoreException::class) fun `autoDateOnStart`(`inputJson`: kotlin.String): kotlin.String {
@@ -10779,12 +10815,40 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * What a description's signature block says, or null.
+         */
+    @Throws(StoreException::class) fun `signatureIn`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_signature_in(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Deadline-carrying items by week, as positions.
          */
     @Throws(StoreException::class) fun `splitDeadlinesByWeek`(`inputJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_split_deadlines_by_week(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The description without its signature block.
+         */
+    @Throws(StoreException::class) fun `stripSignature`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_strip_signature(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

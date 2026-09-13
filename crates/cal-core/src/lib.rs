@@ -25,6 +25,7 @@ pub mod meeting_events;
 pub mod meeting_link_grouping;
 pub mod recurrence;
 pub mod reminder;
+pub mod signatures;
 pub mod spawn;
 pub mod suggestion_decline;
 pub mod task_assignment;
@@ -93,6 +94,10 @@ pub use meeting_link_grouping::{
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
+pub use signatures::{
+    apply_signature, apply_signature_json, signature_in, signature_in_json, strip_signature,
+    strip_signature_json, ApplySignatureInput, SignatureTextInput, SIGNATURE_MARKER,
+};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use task_assignment::{

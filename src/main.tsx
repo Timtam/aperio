@@ -14,6 +14,7 @@ import {
   installTaskCascadeRules,
   installTaskOccurrenceRules,
   installTaskAssignmentRules,
+  installSignatureRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -51,6 +52,9 @@ import {
   selfAssignOnStatusChangeJson,
   taskAssignmentModeJson,
   clampAssigneesJson,
+  signatureInJson,
+  stripSignatureJson,
+  applySignatureJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -169,6 +173,9 @@ initCoreRules()
       taskAssignmentModeJson,
       clampAssigneesJson,
     });
+
+    // The signature block of a description: read, strip, apply.
+    installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
