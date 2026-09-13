@@ -6,23 +6,16 @@
 // its preference module answered the same way. The test files that import
 // this mock `../api/client`, `../../mobile/src/api/prefs` and
 // `@tauri-apps/api/event`. Nothing in the app imports this.
+//
+// The mobile modules are loaded through a path the type checker does not
+// follow. A static import would pull the mobile sources — and through them
+// the Expo bridge module — into the desktop's `tsc`, which runs without the
+// mobile packages installed; the mobile types below are the few this file
+// reads.
 import { act, render } from '@testing-library/react';
 import { createElement } from 'react';
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 
-import {
-  getUserPref as mobileGetUserPref,
-  setUserPref as mobileSetUserPref,
-} from '../../mobile/src/api/prefs';
-import {
-  effectiveForList as mobileEffectiveForList,
-  readTaskBehaviour,
-  withListOverride,
-  writeDayWindow,
-  writeDeadlineCountdownDays,
-  type ListOverrides,
-  type TaskBehaviour,
-} from '../../mobile/src/state/taskBehaviour';
 import { getUserPref as desktopGetUserPref } from '../api/client';
 import { TaskCascadeProvider, type TaskCascadeContextValue } from './TaskCascadeProvider';
 import { useTaskCascadeEnabled } from './taskCascadeContext';
@@ -49,6 +42,13 @@ export const KEYS = {
 
 /** Stored values by key; a key that is absent is not stored. */
 export type RawPrefs = Record<string, string | null>;
+
+/** A list's override, as both surfaces hold it. */
+export interface ListOverrides {
+  cascade?: boolean;
+  autoDate?: boolean;
+  carryOverDefault?: string;
+}
 
 /** What a surface holds after reading, by one set of names. */
 export interface Settings {
@@ -93,12 +93,49 @@ function answering(prefs: RawPrefs, failing?: string) {
 
 // ── Mobile ─────────────────────────────────────────────────────────────────
 
-async function mobileBehaviour(prefs: RawPrefs, failing?: string): Promise<TaskBehaviour> {
-  vi.mocked(mobileGetUserPref).mockImplementation(answering(prefs, failing));
-  return readTaskBehaviour();
+/** `TaskBehaviour` from `mobile/src/state/taskBehaviour.ts`, as far as read. */
+type MobileBehaviour = Settings;
+
+interface MobileBehaviourModule {
+  readTaskBehaviour(): Promise<MobileBehaviour>;
+  effectiveForList(
+    b: MobileBehaviour,
+    listId: string,
+  ): { cascade: boolean; autoDate: boolean; carryOverDefault: string };
+  withListOverride(
+    map: Record<string, ListOverrides>,
+    listId: string,
+    override: ListOverrides,
+  ): Record<string, ListOverrides>;
+  writeDayWindow(startMin: number, endMin: number): Promise<void>;
+  writeDeadlineCountdownDays(value: number): Promise<void>;
 }
 
-function fromMobile(b: TaskBehaviour): Settings {
+interface MobilePrefsModule {
+  getUserPref: Mock<[key: string], Promise<string | null>>;
+  setUserPref: Mock<[key: string, value: string], Promise<void>>;
+}
+
+// Variables, so neither `tsc` nor the bundler's import analysis follows them;
+// the test runner resolves them next to this file at run time.
+const MOBILE_BEHAVIOUR = '../../mobile/src/state/taskBehaviour';
+const MOBILE_PREFS = '../../mobile/src/api/prefs';
+
+async function mobileModules(): Promise<{ behaviour: MobileBehaviourModule; prefs: MobilePrefsModule }> {
+  const [behaviour, prefs] = await Promise.all([
+    import(/* @vite-ignore */ MOBILE_BEHAVIOUR) as Promise<MobileBehaviourModule>,
+    import(/* @vite-ignore */ MOBILE_PREFS) as Promise<MobilePrefsModule>,
+  ]);
+  return { behaviour, prefs };
+}
+
+async function mobileBehaviour(prefs: RawPrefs, failing?: string): Promise<MobileBehaviour> {
+  const m = await mobileModules();
+  m.prefs.getUserPref.mockImplementation(answering(prefs, failing));
+  return m.behaviour.readTaskBehaviour();
+}
+
+function fromMobile(b: MobileBehaviour): Settings {
   return {
     cascadeEnabled: b.cascadeEnabled,
     autoDate: b.autoDate,
@@ -120,8 +157,8 @@ function fromMobile(b: TaskBehaviour): Settings {
 }
 
 /** The last value mobile wrote for `key`. */
-function mobileWrote(key: string): string | undefined {
-  const calls = vi.mocked(mobileSetUserPref).mock.calls.filter(([k]) => k === key);
+function mobileWrote(prefs: MobilePrefsModule, key: string): string | undefined {
+  const calls = prefs.setUserPref.mock.calls.filter(([k]) => k === key);
   return calls.at(-1)?.[1];
 }
 
@@ -216,7 +253,8 @@ export interface Effective {
 }
 
 export async function answerEffective(i: EffectiveInput): Promise<BySurface<Effective>> {
-  const m = mobileEffectiveForList(await mobileBehaviour(i.prefs), i.listId);
+  const { behaviour } = await mobileModules();
+  const m = behaviour.effectiveForList(await mobileBehaviour(i.prefs), i.listId);
   const desktop = await mountDesktop(i.prefs);
   try {
     const d = desktop.current().effectiveForList(i.listId);
@@ -230,9 +268,10 @@ export async function answerEffective(i: EffectiveInput): Promise<BySurface<Effe
 }
 
 export async function answerCountdownWrite(value: Num): Promise<BySurface<string>> {
-  vi.mocked(mobileSetUserPref).mockClear();
-  await writeDeadlineCountdownDays(num(value));
-  const mobile = mobileWrote(KEYS.deadlineCountdownDays) ?? '(nothing written)';
+  const { behaviour, prefs } = await mobileModules();
+  prefs.setUserPref.mockClear();
+  await behaviour.writeDeadlineCountdownDays(num(value));
+  const mobile = mobileWrote(prefs, KEYS.deadlineCountdownDays) ?? '(nothing written)';
   const desktop = await mountDesktop({});
   try {
     act(() => desktop.current().setDeadlineCountdownDays(num(value)));
@@ -249,11 +288,12 @@ export interface WindowWrite {
 }
 
 export async function answerDayWindowWrite(start: Num, end: Num): Promise<BySurface<WindowWrite>> {
-  vi.mocked(mobileSetUserPref).mockClear();
-  await writeDayWindow(num(start), num(end));
+  const { behaviour, prefs } = await mobileModules();
+  prefs.setUserPref.mockClear();
+  await behaviour.writeDayWindow(num(start), num(end));
   const mobile = {
-    start: mobileWrote(KEYS.dayStartMin) ?? '(nothing written)',
-    end: mobileWrote(KEYS.dayEndMin) ?? '(nothing written)',
+    start: mobileWrote(prefs, KEYS.dayStartMin) ?? '(nothing written)',
+    end: mobileWrote(prefs, KEYS.dayEndMin) ?? '(nothing written)',
   };
   const desktop = await mountDesktop({});
   try {
@@ -277,11 +317,16 @@ export interface OverrideUpdateInput {
  *  it stores: its key order is what the sync comparison sees. */
 export async function answerOverrideUpdate(i: OverrideUpdateInput): Promise<BySurface<string>> {
   const prefs: RawPrefs = { [KEYS.listOverrides]: i.stored };
+  const { behaviour } = await mobileModules();
   const b = await mobileBehaviour(prefs);
-  const mobile = JSON.stringify(withListOverride(b.listOverrides, i.listId, i.override));
+  const mobile = JSON.stringify(behaviour.withListOverride(b.listOverrides, i.listId, i.override));
   const desktop = await mountDesktop(prefs);
   try {
-    act(() => desktop.current().setListOverride(i.listId, i.override));
+    act(() =>
+      desktop
+        .current()
+        .setListOverride(i.listId, i.override as Parameters<TaskCascadeContextValue['setListOverride']>[1]),
+    );
     return { mobile, desktop: JSON.stringify(desktop.current().listOverrides) };
   } finally {
     desktop.unmount();
