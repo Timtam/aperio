@@ -6,13 +6,13 @@
   ],
   "readBy": [
     "src/state/taskAssignment.contract.test.ts",
-    "crates/cal-core/src/task_assignment.rs (once the port exists)"
+    "crates/cal-core/src/task_assignment.rs (the contract module)"
   ],
   "whereItLives": {
     "note": "Inside cal-core, like the other task fixtures; taskOwnership.json stays in shared/contracts/ because host-core reads it and host-core never leaves this repository."
   },
   "notInThisTable": {
-    "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; the TypeScript copy serves shared/dayStart.ts until the day-start rules move",
+    "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; its last TypeScript copy went when the day-start rules moved into the core (cal_core::day_start)",
     "classifyDoneByMe": "no caller since the grouping moved into the core (#42); deleted with the port",
     "currentUserForList": "who \"me\" is for a list is the platform’s (a session-cached adapter call); the rule takes it as an input",
     "the Settings toggle": "whether the auto-assign is on travels in as `enabled`"

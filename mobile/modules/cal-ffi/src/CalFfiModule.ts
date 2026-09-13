@@ -144,6 +144,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The description with a body as its signature block. */
   applySignature(inputJson: string): string;
 
+  /** One question to the day-start rules, and its answer. */
+  dayStart(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -3,11 +3,11 @@
   "why": "Both surfaces run these every morning — the desktop checkers and dialog, the mobile checks, modal and the ahead-of-time notification scheduler — and a frontend that is not JavaScript has to run them too. The core answers ids and days, never wording; it reads no clock, so the day (and the time for the fire gate) travels in.",
   "writtenBy": [
     "src/components/dayStart.measure.test.ts — a one-off, run once and deleted; its cases mirror src/components/dayStartReview.test.ts, src/components/DeadlinePinChecker.test.ts and src/hooks/useCurrentDayKey.test.ts plus the rows a port needs that those never had: input order, ownership by id alone and for a list missing from the map, a project parent with a lapsed deadline AND plan falling through to carry-over, cascade decided by the subtask’s own list, a settled or overdue parent hiding nothing, the stack-walk order of descendants, a future deadline and a missing deadline under “move to today”, both clock changes and a leap day, the JavaScript-isms of the day-key parser, group fall-through when a toggle is off, and the edges of the trigger parser.",
-    "Two rows were added after the measure test was deleted, with their answers confirmed by replaying them through the same TypeScript in the contract test: a-year-below-one-hundred-is-none and a-duplicated-id-is-walked-twice."
+    "Two rows were added after the measure test was deleted, with their answers confirmed by replaying them through the same TypeScript in the contract test: a-year-below-one-hundred-is-none and a-duplicated-id-is-walked-twice (since renamed a-duplicated-id-is-walked-once: the port changed that answer on purpose, see its note)."
   ],
   "readBy": [
-    "src/components/dayStart.contract.test.ts",
-    "crates/cal-core/src/day_start.rs (once the port exists)"
+    "src/components/dayStart.contract.test.ts (through the door in shared/dayStart.ts)",
+    "crates/cal-core/src/day_start.rs (the contract module)"
   ],
   "whereItLives": {
     "note": "Inside cal-core, like the other task fixtures; a crate reads its own files."
@@ -20,10 +20,10 @@
     "snooze, fired markers, tomorrowIsoKey": "storage and the clock — the platform’s",
     "dayStartPreschedulesOsNotification": "mobile-only delivery policy for OS notifications",
     "parseCountdownDays": "the global window arrives already parsed: both surfaces parse the pref with their own copy (TaskCascadeProvider, taskBehaviour), clamping to whole days 1..30. The selector itself takes any number, so the zero and negative rows stay.",
-    "the trigger read twice": "host-core’s reminders::day_start_time reads the same tasks.dayStartTrigger pref with chrono (HH:MM:SS or HH:MM, else midnight); the fire gate here reads HH:MM only and fires at once on anything else. They disagree on \"08:00:00\" and on garbage, which is midnight there and \"now\" here. A decision for the port, not this pin."
+    "the trigger read twice": "host-core’s reminders::day_start_time reads the same tasks.dayStartTrigger pref with chrono (HH:MM:SS or HH:MM, else midnight); the fire gate here reads HH:MM only and fires at once on anything else. They disagree on \"08:00:00\" and on garbage, which is midnight there and \"now\" here. Not settled by the port, which keeps the fire gate’s reading: a decision of its own."
   },
   "notMeasurable": {
-    "parentCycles": "Three walks follow parent links without a visited set, and external providers can deliver a parent cycle (see the taskCascade fixture). hasActionableDescendants, which every selector except carry-over asks about each candidate, loops forever when the walk below the candidate reaches a cycle whose tasks are all settled (an actionable one ends it early). actionableDescendants loops forever on any cycle below its root. filterCarriedOver with coupling on loops forever when a slipped task’s ancestors cycle without reaching a slipped node. A hang cannot be a row; the port must terminate, and its rows for cycles are new, not measured."
+    "parentCycles": "Three walks followed parent links without a visited set, and external providers can deliver a parent cycle (see the taskCascade fixture). actionableDescendants looped forever on any cycle below its root. filterCarriedOver with coupling on looped forever when a slipped task’s ancestors cycle without reaching a slipped node. hasActionableDescendants, which every selector except carry-over asks about each candidate, looped forever when the walk below the candidate reached a cycle of settled tasks — possible only through a duplicated id, since the candidate itself is actionable and a cycle through it ends the walk early. A hang cannot be a row. The port’s walks end, and their tests for cycles are in day_start.rs (`walks`), not rows here."
   },
   "measuredIn": "Europe/Berlin — the clock-change rows cross real 23- and 25-hour days there",
   "shape": {
@@ -408,7 +408,7 @@
     },
     {
       "name": "a-non-day-anchor-compares-as-text",
-      "note": "The day is compared as a string, and \"2026-…\" sorts before \"yesterday\", so every deadline is overdue. No caller passes junk (todayIsoKey, or the scheduler formatting its own days); a port that takes a typed day refuses it at the door and must then change this row on purpose.",
+      "note": "The day is compared as a string, and \"2026-…\" sorts before \"yesterday\", so every deadline is overdue. Kept by the port: the core compares day keys as text too, by UTF-16 code unit, so a key that is not a day orders the same on both sides. No caller passes junk (todayIsoKey, or the scheduler formatting its own days).",
       "wasTypeScript": true,
       "input": {
         "today": "2026-05-20",
@@ -997,9 +997,8 @@
       ]
     },
     {
-      "name": "a-duplicated-id-is-walked-twice",
-      "note": "Two rows with the same id under the root are both collected, and the walk below that id runs once per row, so the grandchild is collected twice and a batch would write it twice. Ids are provider ids and two accounts can share one. A JavaScript artifact of pushing ids without a visited set; a port that walks each id once collects the grandchild once and must then change this row on purpose.",
-      "wasTypeScript": true,
+      "name": "a-duplicated-id-is-walked-once",
+      "note": "Changed on purpose in the port. Both rows with the id under the root are collected — two accounts can share an id, and they are two tasks — but the walk below that id runs once, so the grandchild is collected once. The TypeScript pushed ids without a visited set and answered a, a, g, g: a batch would have written the grandchild twice.",
       "input": {
         "rootId": "r",
         "tasks": [
@@ -1023,7 +1022,6 @@
       "expect": [
         "a",
         "a",
-        "g",
         "g"
       ]
     },
@@ -1576,24 +1574,22 @@
       "expect": null
     },
     {
-      "name": "an-unpadded-date-is-read",
-      "note": "Number() accepts \"5\" and \"3\"; the round trip holds. No producer writes it (deadlines cross serde as NaiveDate); a port may read strictly and must then change this row on purpose.",
-      "wasTypeScript": true,
+      "name": "an-unpadded-date-is-none",
+      "note": "Changed on purpose in the port. JavaScript’s Number() read \"5\" and \"23\", so the TypeScript answered 3; the core reads YYYY-MM-DD strictly and refuses it. No producer writes it: deadlines cross serde as NaiveDate.",
       "input": {
         "today": "2026-05-20",
         "deadline": "2026-5-23"
       },
-      "expect": 3
+      "expect": null
     },
     {
-      "name": "a-hexadecimal-year-is-read",
-      "note": "Number(\"0x7EA\") is 2026. A JavaScript artifact; a port may refuse it and must then change this row on purpose.",
-      "wasTypeScript": true,
+      "name": "a-hexadecimal-year-is-none",
+      "note": "Changed on purpose in the port. Number(\"0x7EA\") is 2026, so the TypeScript answered 3; the core reads four ASCII digits.",
       "input": {
         "today": "2026-05-20",
         "deadline": "0x7EA-05-23"
       },
-      "expect": 3
+      "expect": null
     }
   ],
   "untimedToday": [
@@ -1631,7 +1627,7 @@
     },
     {
       "name": "an-empty-time-counts-as-timed",
-      "note": "The check is \"not null\", and an empty string is not null. The wire carries the time as Option<NaiveTime>, so an empty one cannot cross; a port may drop this row on purpose.",
+      "note": "The check is \"not null\", and an empty string is not null. Kept by the port: the core asks whether a time is present, not whether it is empty. The wire carries the time as Option<NaiveTime>, so an empty one cannot cross.",
       "wasTypeScript": true,
       "input": {
         "today": "2026-05-20",

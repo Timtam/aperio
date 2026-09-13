@@ -1684,14 +1684,15 @@ Sie lag zweimal: in `shared/taskAssignment.ts` und **privat** in
 Kopie wiederverwenden — ein zweiter Rust-Aufrufer hätte eine dritte
 geschrieben. Jetzt steht sie als `cal_core::is_mine_or_unassigned` im Kern.
 
-Die TypeScript-Hälfte bleibt vorerst, weil sie synchron im Render gebraucht
-wird (siehe §4.2 und TODO A11); die beiden sind daher **gegeneinander
-festgenagelt** durch `shared/contracts/taskOwnership.json`, das beide Suiten
-lesen. Das ist kein Wire-Format, sondern eine **Entscheidung**, die beide
-Seiten unabhängig auf denselben Daten treffen — und ein Auseinanderlaufen wäre
-still in beide Richtungen: ein Telefon, das für die Aufgabe einer Kollegin
-klingelt, oder eine eigene, die nie klingelt. Nichts stürzt ab, nichts
-protokolliert.
+Die TypeScript-Hälfte gibt es nicht mehr: sie diente zuletzt dem Tagesstart,
+und der fragt seit seinem Umzug (`cal_core::day_start`) den Kern. Die Regel
+bleibt **festgenagelt** durch `shared/contracts/taskOwnership.json`, das der
+Erinnerungsplaner in Rust und die TypeScript-Suite lesen — diese durch die
+Tagesstart-Tür, weil die Hülle davor noch die Identität je Liste und die Ids
+baut. Das ist kein Wire-Format, sondern eine **Entscheidung** — und ein
+Auseinanderlaufen wäre still in beide Richtungen: ein Telefon, das für die
+Aufgabe einer Kollegin klingelt, oder eine eigene, die nie klingelt. Nichts
+stürzt ab, nichts protokolliert.
 
 **UI.** Im Aufgaben-Dialog ein „Zugewiesen an"-Picker (Suche über die Listen-Mitglieder, Multi-Chips, capability-gated). „Für andere einplanen" ist damit Datum **+** Assignee im selben Dialog — beides sind Aufgaben-Felder. In der Aufgaben-Ansicht ein Assignee-Badge je Zeile plus Filter „mir / anderen / niemandem".
 

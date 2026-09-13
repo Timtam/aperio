@@ -24,7 +24,7 @@ import type {
 import { useToast } from '../state/toastContext';
 import { useTasks } from '../state/useTasks';
 import {
-  actionableDescendants,
+  actionableDescendantsOf,
   filterCarriedOver,
   filterOverdue,
   isDayStartReviewSnoozed,
@@ -316,11 +316,18 @@ async function runAutoCarryOverBatch(args: {
   }) => string;
 }): Promise<void> {
   const { action, slippedRoots, allTasks, effectiveForList } = args;
+  // One question for every coupled root: a question per root sent the whole
+  // task list across the door each time.
+  const coupled = slippedRoots.filter((root) => effectiveForList(root.list_id).cascade);
+  const below = actionableDescendantsOf(
+    coupled.map((root) => root.id),
+    allTasks,
+  );
+  const belowRoot = new Map<Task, Task[]>(coupled.map((root, i) => [root, below[i]]));
   const collected = new Map<string, Task>();
   for (const root of slippedRoots) {
     collected.set(root.id, root);
-    if (!effectiveForList(root.list_id).cascade) continue;
-    for (const desc of actionableDescendants(root.id, allTasks)) {
+    for (const desc of belowRoot.get(root) ?? []) {
       collected.set(desc.id, desc);
     }
   }

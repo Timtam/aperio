@@ -1686,6 +1686,47 @@ Siehe DESIGN §4.2.
   `dayStart.contract.test.ts` spielt zurück (135 Tests); rot bewiesen (eine
   heute fällige Frist als überfällig → zwei Zeilen fallen). Kein
   Produktionscode geändert.
+  ↳ **Schritt 2 (Folge-PR auf #60): gebaut.** `cal_core::day_start` — ohne
+  Feature-Gate — mit EINER Tür `day_start_json`: eine `DayStartQuestion` nennt
+  ihre Regel (`rule`: overdue, carried_over, actionable_descendants,
+  has_actionable_descendants, moved_to_today, deadline_pin_targets,
+  days_until_deadline, untimed_today, deadline_arrived, deadline_countdown,
+  reminder_groups, should_fire) und trägt, was diese Regel liest; die Antwort
+  sind Positionen, Tage oder Ja/Nein. Zwölf Türen wären zwölf Verdrahtungen je
+  Oberfläche für dieselbe Überfahrt gewesen. Der Kern liest keine Uhr: die Hülle
+  schickt den Tag und für das Auslöse-Tor Stunde und Minute. Ein Nutzer ist
+  seine Id, die Identität und die Kopplung reisen je Liste. Tage werden wie im
+  TypeScript als TEXT verglichen (nach UTF-16-Einheit, damit auch ein Anker,
+  der kein Tag ist, gleich sortiert); nur die Tage bis zur Frist lesen einen
+  Tag als Datum, und zwar streng (`YYYY-MM-DD`, ASCII-Ziffern, Jahr ab 100).
+  Die Wege nach unten erweitern jede Id höchstens einmal, der Aufstieg hält an
+  einer schon gesehenen Id — ein Eltern-Zyklus hängt den Tagesstart nicht mehr
+  (Rust-Tests in `day_start::walks`). ABSICHTLICH geänderte Fixture-Zeilen: ein
+  ungepolsterter und ein hexadezimaler Tag sind keine Tage mehr, und unter einer
+  doppelten Id läuft der Weg einmal (der Enkel kommt einmal in den Stapel, beide
+  Zeilen mit der Id bleiben — zwei Konten, zwei Aufgaben). Die Hülle behält alle
+  zwölf Funktionsnamen und Signaturen; kein Aufrufer geändert. Die letzte
+  TypeScript-Kopie von `isMineOrUnassigned` ist gelöscht; der Kern fragt
+  `task_assignment::mine_or_unassigned` über Ids, und
+  `shared/contracts/taskOwnership.json` wird auf der TypeScript-Seite jetzt
+  durch die Tagesstart-Tür gelesen (DESIGN, Reichweiten-Wächter-Kommentar
+  angepasst). Rust 19/19 beim ersten Lauf, rot bewiesen.
+  ↳ **Vom Review gefunden und behoben:** die vier Übertrags-Schleifen
+  (Desktop-Prüfer und -Dialog, mobile Prüfungen und Modal) fragten
+  `actionableDescendants` je verschleppter Wurzel, und jede Frage schickte und
+  indexierte die ganze Aufgabenliste — bei 2000 Aufgaben und 100 Wurzeln etwa
+  0,4 s statt 6 ms, auf dem UI-Thread. Jetzt gibt es die Stapelform
+  `actionable_descendants_of` (Shell: `actionableDescendantsOf`): eine Frage für
+  alle gekoppelten Wurzeln, ein Index; die Schleifen bauen ihre Ziele in
+  derselben Reihenfolge. In Rust und durch die Tür gegen den Einzelweg über jede
+  Nachfahren-Zeile der Fixture gepinnt. Dazu vier veraltete Sätze (die
+  taskAssignment-Fixture, der Rust-Leser des Besitz-Vertrags liegt in host-core,
+  die `writtenBy`-Zeile nannte die umbenannte Zeile, der Kopf des
+  TypeScript-Vertragstests). Acht weitere Befunde widerlegt, darunter die
+  Rundung naher Fließkommazahlen (kein Aufrufer erzeugt sie: das Fenster ist
+  1..30 geklemmt, die Aufgaben-Überschreibung ist i64) und Zeitzonen, die einen
+  Kalendertag übersprangen (der Kern zählt Kalendertage, wie die Funktion es
+  immer versprach; betroffen wären nur historische Tage vor dem Heute).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

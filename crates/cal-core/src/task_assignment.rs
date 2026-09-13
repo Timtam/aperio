@@ -7,9 +7,11 @@
 //! It lived twice — here in spirit and privately inside
 //! `host_core::reminders`, plus a TypeScript copy in
 //! `shared/taskAssignment.ts`. Private meant Rust could not even reuse its own
-//! copy, so a second Rust caller would have written a third. The two halves are
-//! pinned against each other by `shared/contracts/taskOwnership.json`, which
-//! both languages read.
+//! copy, so a second Rust caller would have written a third. The TypeScript
+//! copy went when the day start moved into the core (`crate::day_start`, which
+//! asks [`mine_or_unassigned`] over ids); `shared/contracts/taskOwnership.json`
+//! still pins the rule, read by the reminder scheduler's test in
+//! `host_core::reminders` and by the TypeScript suite through the day-start door.
 //!
 //! # The three rules around it
 //!
@@ -43,10 +45,28 @@ use crate::{TaskAssignment, TaskStatus, TaskUser};
 /// day-start review, and must not be counted among the things I finished. It is
 /// still visible — this decides ownership, not visibility.
 pub fn is_mine_or_unassigned(assignees: &[TaskUser], me: Option<&TaskUser>) -> bool {
-    match me {
-        None => true,
-        Some(me) => assignees.is_empty() || assignees.iter().any(|a| a.id == me.id),
+    mine_or_unassigned(
+        assignees.iter().map(|a| a.id.as_str()),
+        me.map(|m| m.id.as_str()),
+    )
+}
+
+/// [`is_mine_or_unassigned`] over ids — the form a door carries a user in.
+pub(crate) fn mine_or_unassigned<'a>(
+    assignees: impl IntoIterator<Item = &'a str>,
+    me: Option<&str>,
+) -> bool {
+    let Some(me) = me else {
+        return true;
+    };
+    let mut nobody = true;
+    for assignee in assignees {
+        if assignee == me {
+            return true;
+        }
+        nobody = false;
     }
+    nobody
 }
 
 /// The question [`self_assign_on_status_change`] answers, over the wire. A

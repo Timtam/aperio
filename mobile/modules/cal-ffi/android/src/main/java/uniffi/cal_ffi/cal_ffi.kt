@@ -830,6 +830,8 @@ external fun uniffi_cal_ffi_checksum_func_compare_names(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_compare_titles(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_day_start(
+): Short
 external fun uniffi_cal_ffi_checksum_func_detect_conference(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_expand_task_occurrences(
@@ -1658,6 +1660,8 @@ external fun uniffi_cal_ffi_fn_func_compare_names(`a`: RustBuffer.ByValue,`b`: R
 ): Int
 external fun uniffi_cal_ffi_fn_func_compare_titles(`a`: RustBuffer.ByValue,`b`: RustBuffer.ByValue,`languageTag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_func_day_start(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_expand_task_occurrences(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1853,6 +1857,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_compare_titles() != 57834.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_day_start() != 58863.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_detect_conference() != 16331.toShort()) {
@@ -10524,6 +10531,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_compare_titles(
     
         FfiConverterString.lower(`a`),FfiConverterString.lower(`b`),FfiConverterString.lower(`languageTag`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * One question to the day-start rules, and its answer.
+         */
+    @Throws(StoreException::class) fun `dayStart`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_day_start(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }

@@ -452,6 +452,15 @@ pub fn apply_signature(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// One question to the day-start rules, and its answer.
+#[uniffi::export]
+pub fn day_start(input_json: String) -> Result<String, StoreError> {
+    cal_core::day_start_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "day start question".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

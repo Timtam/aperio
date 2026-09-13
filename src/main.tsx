@@ -15,6 +15,7 @@ import {
   installTaskOccurrenceRules,
   installTaskAssignmentRules,
   installSignatureRules,
+  installDayStartRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -55,6 +56,7 @@ import {
   signatureInJson,
   stripSignatureJson,
   applySignatureJson,
+  dayStartJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -176,6 +178,9 @@ initCoreRules()
 
     // The signature block of a description: read, strip, apply.
     installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson });
+
+    // The day-start rules: overdue, slipped, pinned, reminded, and the fire gate.
+    installDayStartRules({ dayStartJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
