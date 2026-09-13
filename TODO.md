@@ -1795,6 +1795,36 @@ Siehe DESIGN §4.2.
   Besitz-Weg der Sammel-Knöpfe hatte keinen Test (jetzt in Rust durch die Tür
   und in TypeScript), die Namens-Wächter nannten die neuen Zeilen nicht, und
   zwei Fixture-Texte beschrieben den Stand vor dem Umzug.
+- [~] **Die Aufgaben-Einstellungen ziehen in den Kern** — der dritte Teil des
+  Tagesstart-Bogens, nach Regeln (#60/#61) und Zusammensetzung (#62/#63).
+  Entschieden 2026-09-13. Beide Oberflächen lesen dieselben sechzehn
+  gespeicherten Werte mit je eigener Kopie jeder Regel: die Aufgaben-Schalter,
+  das Countdown-Fenster, das Tagesfenster des Kalenders, Ansicht, Abhaken,
+  Übertrags-Standard, Auslöser und die Überschreibungen je Liste — Desktop im
+  `TaskCascadeProvider` (private Helfer), Mobile in `taskBehaviour.ts`. Dazu die
+  wirksamen Werte je Liste und was beim Schreiben geklemmt wird.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.**
+  `crates/cal-core/tests/fixtures/taskSettings.json`, gemessen am ECHTEN Code
+  beider Oberflächen: der Desktop-Provider gerendert, seine Lesungen aus der
+  Tabelle beantwortet; das mobile Modul mit gemocktem Einstellungs-Modul. 88
+  Zeilen: 54 Lesungen, 6 wirksame Werte, 12 Countdown-Schreibungen, 9
+  Tagesfenster-Schreibungen, 7 Überschreibungs-Änderungen. Gepinnt: Schalter
+  gehen nur bei genau `false` aus (die Zweistufen-Priorität nur bei genau
+  `true` an); das Countdown-Fenster über `parseInt` (`12abc` ist 12, `1e2` ist
+  1, `0x10` ist 0 und wird 1) und 1..30 geklemmt, beim Schreiben gerundet,
+  nicht-endlich ist der Standard 3; das Tagesfenster auf halbe Stunden
+  gerundet (halb nach oben), geklemmt, verdreht oder leer ist der ganze Tag;
+  der Auslöser nur aus den fünf angebotenen Werten (`07:00` wird `00:00`); die
+  Überschreibungen je Feld geprüft, leere Einträge fallen, die Reihenfolge der
+  gespeicherten JSON-Schlüssel bleibt beim Ändern.
+  **Wo die Oberflächen heute auseinandergehen** (Zeile trägt beide Antworten):
+  eine fehlgeschlagene Lesung macht mobil ALLE Einstellungen zum Standard, am
+  Desktop nur die eine; und eine Liste mit der Id `__proto__` wird am Desktop
+  gespeichert, mobil nicht. JavaScript-Artefakte als `wasTypeScript`: die Liste
+  `__proto__` geht beim Lesen als Feld verloren und wirkt über den Prototyp
+  trotzdem. `taskSettings.contract.test.tsx` spielt beide Oberflächen zurück
+  (89 Tests); rot bewiesen (mobile Klemme auf 29 → die fünf Zeilen, die auf 30
+  klemmen, fallen für Mobile). Kein Produktionscode geändert.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
