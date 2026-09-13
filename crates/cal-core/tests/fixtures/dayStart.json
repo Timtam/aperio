@@ -2,7 +2,8 @@
   "what": "The day-start selectors of shared/dayStart.ts, as a table: which tasks are overdue (lapsed deadline), which slipped (lapsed plan, cascade-aware), which are pinned to today, which are reminded (planned today untimed, due today, counted down) and in which group, how many days to a deadline, what \"move to today\" does to a task’s dates, and whether a day-start checker fires now. Measured from the TypeScript before the port.",
   "why": "Both surfaces run these every morning — the desktop checkers and dialog, the mobile checks, modal and the ahead-of-time notification scheduler — and a frontend that is not JavaScript has to run them too. The core answers ids and days, never wording; it reads no clock, so the day (and the time for the fire gate) travels in.",
   "writtenBy": [
-    "src/components/dayStart.measure.test.ts — a one-off, run once and deleted; its cases mirror src/components/dayStartReview.test.ts, src/components/DeadlinePinChecker.test.ts and src/hooks/useCurrentDayKey.test.ts plus the rows a port needs that those never had: input order, ownership by id alone and for a list missing from the map, a project parent with a lapsed deadline AND plan falling through to carry-over, cascade decided by the subtask’s own list, a settled or overdue parent hiding nothing, the stack-walk order of descendants, a future deadline and a missing deadline under “move to today”, both clock changes and a leap day, the JavaScript-isms of the day-key parser, group fall-through when a toggle is off, and the edges of the trigger parser."
+    "src/components/dayStart.measure.test.ts — a one-off, run once and deleted; its cases mirror src/components/dayStartReview.test.ts, src/components/DeadlinePinChecker.test.ts and src/hooks/useCurrentDayKey.test.ts plus the rows a port needs that those never had: input order, ownership by id alone and for a list missing from the map, a project parent with a lapsed deadline AND plan falling through to carry-over, cascade decided by the subtask’s own list, a settled or overdue parent hiding nothing, the stack-walk order of descendants, a future deadline and a missing deadline under “move to today”, both clock changes and a leap day, the JavaScript-isms of the day-key parser, group fall-through when a toggle is off, and the edges of the trigger parser.",
+    "Two rows were added after the measure test was deleted, with their answers confirmed by replaying them through the same TypeScript in the contract test: a-year-below-one-hundred-is-none and a-duplicated-id-is-walked-twice."
   ],
   "readBy": [
     "src/components/dayStart.contract.test.ts",
@@ -996,6 +997,37 @@
       ]
     },
     {
+      "name": "a-duplicated-id-is-walked-twice",
+      "note": "Two rows with the same id under the root are both collected, and the walk below that id runs once per row, so the grandchild is collected twice and a batch would write it twice. Ids are provider ids and two accounts can share one. A JavaScript artifact of pushing ids without a visited set; a port that walks each id once collects the grandchild once and must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "rootId": "r",
+        "tasks": [
+          {
+            "id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          },
+          {
+            "id": "a",
+            "parent_id": "r"
+          },
+          {
+            "id": "g",
+            "parent_id": "a"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "a",
+        "g",
+        "g"
+      ]
+    },
+    {
       "name": "the-root-itself-is-not-included",
       "note": "",
       "input": {
@@ -1521,6 +1553,15 @@
       "input": {
         "today": "2026-05-20",
         "deadline": "2026-05-20T10:00"
+      },
+      "expect": null
+    },
+    {
+      "name": "a-year-below-one-hundred-is-none",
+      "note": "JavaScript repairs the years 0 to 99 into 19xx; the round trip refuses them. A port reading the year as written must refuse them too.",
+      "input": {
+        "today": "2026-05-20",
+        "deadline": "0099-05-23"
       },
       "expect": null
     },

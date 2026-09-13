@@ -1653,7 +1653,7 @@ Siehe DESIGN §4.2.
   `now`); der Kern bekommt Tag und Uhrzeit hinein.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/dayStart.json`, gemessen am heutigen
-  TypeScript in Europe/Berlin: 132 Zeilen über zwölf Regeln — überfällig,
+  TypeScript in Europe/Berlin: 134 Zeilen über zwölf Regeln — überfällig,
   verschleppt (mit Kopplung), handlungsfähige Nachfahren (Liste und Ja/Nein),
   „auf heute", Frist-Anheften, Tage bis zur Frist, die drei Erinnerungen samt
   Gruppen, das Auslöse-Tor. Die Tests aus `dayStartReview.test.ts`,
@@ -1665,11 +1665,13 @@ Siehe DESIGN §4.2.
   fragt nur die Liste der Unteraufgabe (der Vorfahr darf in einer
   ungekoppelten liegen); der verschleppte Vorfahr eines Kollegen versteckt
   nichts; die Stapel-Reihenfolge der Nachfahren; beide Zeitumstellungen und
-  ein Schalttag; das Durchfallen in die nächste Gruppe bei ausgeschaltetem
+  ein Schalttag, ein Jahr unter 100 (JavaScript repariert es, der Rückweg
+  lehnt ab); das Durchfallen in die nächste Gruppe bei ausgeschaltetem
   Schalter; die Ränder des Auslöse-Parsers (Sekunden, Leerzeichen, einstellige
   Minute, nicht-ASCII-Ziffern, Marke eines anderen Tages). Als
   `wasTypeScript` markiert: ungepolsterte und hexadezimale Tage, ein Anker,
-  der kein Tag ist (Textvergleich), eine leere Uhrzeit.
+  der kein Tag ist (Textvergleich), eine leere Uhrzeit, und eine doppelte Id,
+  unter der der Weg zweimal läuft (der Enkel käme zweimal in den Stapel).
   Nicht messbar, weil es hängt: drei Baum-Wege ohne Besucht-Menge laufen bei
   einem Eltern-Zyklus endlos (`hasActionableDescendants` für jeden Kandidaten
   der Erinnerungen, `actionableDescendants`, die Kopplung beim Verschleppen);
@@ -1681,7 +1683,7 @@ Siehe DESIGN §4.2.
   `parseCountdownDays` gibt es je zweimal; `host_core::reminders` liest
   dieselbe Einstellung `tasks.dayStartTrigger` anders (Sekunden erlaubt,
   Unsinn heißt Mitternacht statt „sofort") — eine Entscheidung für den Port.
-  `dayStart.contract.test.ts` spielt zurück (133 Tests); rot bewiesen (eine
+  `dayStart.contract.test.ts` spielt zurück (135 Tests); rot bewiesen (eine
   heute fällige Frist als überfällig → zwei Zeilen fallen). Kein
   Produktionscode geändert.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
