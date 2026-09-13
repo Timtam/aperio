@@ -48,7 +48,6 @@ import {
 import {
   expandScheduledRecurringTasks,
   groupTasksByDay,
-  isDeadlineChip,
   isRecurringProjection,
   recurringSeriesTaskId,
 } from '../../intl/taskDay';
@@ -305,13 +304,17 @@ export function MonthView() {
         title: event.title,
         event,
       });
-      const taskItems: MonthDayItem[] = (tasksByDay.get(key) ?? []).map((task) => ({
-        kind: 'task',
-        id: `task-${task.id}`,
-        title: task.title,
-        task,
-        isBy: isDeadlineChip(task, key),
-      }));
+      const taskItems: MonthDayItem[] = (tasksByDay.get(key) ?? []).map(
+        ({ task, deadlineChip }) => ({
+          kind: 'task',
+          id: `task-${task.id}`,
+          title: task.title,
+          task,
+          // Whether this chip is the "due here" marker is the core's answer
+          // on the day row.
+          isBy: deadlineChip,
+        }),
+      );
       // Order: timed events, then tasks, then all-day events. All-day events
       // render hidden inside the cell (they live in the lane above the row)
       // but stay in the DOM for keyboard nav — keeping them last leaves the

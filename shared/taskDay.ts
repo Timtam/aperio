@@ -1,9 +1,11 @@
 // The calendar-day task rules — this surface's door into `cal_core::task_day`.
 //
-// Which tasks a day shows, in which order, and how the backlog rail cuts its
-// weeks: that decision lives in the core now, and both surfaces ask it while
-// rendering. What stays here is the shell — building the question from what a
-// caller holds, laying the answer (positions) back over the caller's own rows,
+// Which tasks a day shows, in which order, what each chip carries (its time,
+// its block end, whether it is a deadline marker), and how the backlog rail
+// cuts its weeks: that decision lives in the core now, and both surfaces ask
+// it while rendering. What stays here is the shell — building the question
+// from what a caller holds, laying the answer (positions and chip facts) back
+// over the caller's own rows as `DayTaskEntry`,
 // and the two things the core deliberately does not do: read the clock
 // (`todayIsoKey`) and resolve a UTC instant into a LOCAL day (the device zone,
 // `completionDayKey`), which travels in as `completed_day`.
@@ -120,15 +122,43 @@ function wireTask(task: Task): DayTask {
   };
 }
 
+/**
+ * One task on one day, as the views read it: the caller's own task object
+ * and the three facts a chip is drawn from — answered by the core with the
+ * row (`DayTaskRow`), never re-derived on this side.
+ */
+export interface DayTaskEntry<T extends Task = Task> {
+  task: T;
+  /**
+   * The time the task slots into on this day (`HH:MM[:SS]`): its scheduled
+   * time when scheduled here, else its deadline time when due here, else
+   * null — no minute to honestly point at, so it keeps its place in the
+   * untimed lane. "I plan to do it then" beats "must be done by then".
+   */
+  time: string | null;
+  /**
+   * The end of the task's planned block on this day, or null. Only the
+   * scheduled slot can carry a block: a deadline is a moment, and giving it
+   * a length would draw a bar across the hours before something is due.
+   */
+  endTime: string | null;
+  /**
+   * True when the task sits here BECAUSE of its deadline, not its plan — a
+   * "due here" marker rather than a "planned work" chip. A task scheduled
+   * and due on the same day is the scheduled chip.
+   */
+  deadlineChip: boolean;
+}
+
 /** One crossing for every day asked. The two callbacks are evaluated once
  *  per list here and travel as data, so no caller had to learn the wire. */
-function tasksOnDays(
-  tasks: Task[],
+function tasksOnDays<T extends Task>(
+  tasks: T[],
   days: string[],
   isCompletedVisible: ((listId: string) => boolean) | undefined,
   meFor: ((listId: string) => TaskUser | null) | undefined,
   scale: PriorityScale,
-): Map<string, Task[]> {
+): Map<string, DayTaskEntry<T>[]> {
   const door = rules();
   const listIds = Array.from(new Set(tasks.map((task) => task.list_id)));
   const input: DayInput = {
@@ -143,11 +173,16 @@ function tasksOnDays(
     string,
     DayTaskRow[]
   >;
-  const out = new Map<string, Task[]>();
+  const out = new Map<string, DayTaskEntry<T>[]>();
   for (const day of days) {
     out.set(
       day,
-      (answer[day] ?? []).map((row) => tasks[row.task]),
+      (answer[day] ?? []).map((row) => ({
+        task: tasks[row.task],
+        time: row.time,
+        endTime: row.endTime,
+        deadlineChip: row.deadlineChip,
+      })),
     );
   }
   return out;
@@ -174,17 +209,18 @@ function tasksOnDays(
  * `isCompletedVisible`. `meFor` gates by ownership: on a shared list a task
  * assigned to a concrete OTHER user is hidden from my calendar (DESIGN §9.7).
  *
- * The decision is the core's (`cal_core::task_day`); this is the door.
+ * The decision is the core's (`cal_core::task_day`); this is the door. Each
+ * entry carries the task and what its chip shows on this day (`DayTaskEntry`).
  * `dayIsoKey` is the local `YYYY-MM-DD` key, matching `localDateKey()`.
  */
-export function filterTasksOnDay(
-  tasks: Task[],
+export function filterTasksOnDay<T extends Task>(
+  tasks: T[],
   dayIsoKey: string,
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
   /** The user's priority system — how many bands the ordering has. */
   scale: PriorityScale = 'three',
-): Task[] {
+): DayTaskEntry<T>[] {
   return tasksOnDays(tasks, [dayIsoKey], isCompletedVisible, meFor, scale).get(dayIsoKey) ?? [];
 }
 
@@ -193,83 +229,16 @@ export function filterTasksOnDay(
  * crossing, a Map keyed by ISO day string so the consumer can render each day
  * independently.
  */
-export function groupTasksByDay(
-  tasks: Task[],
+export function groupTasksByDay<T extends Task>(
+  tasks: T[],
   dayKeys: string[],
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
   /** The user's priority system — passed straight through to the per-day
    *  ordering (see {@link filterTasksOnDay}). */
   scale: PriorityScale = 'three',
-): Map<string, Task[]> {
+): Map<string, DayTaskEntry<T>[]> {
   return tasksOnDays(tasks, dayKeys, isCompletedVisible, meFor, scale);
-}
-
-// ─────────────────────── What a chip carries (per task) ─────────────────────
-//
-// The core answers these three with every day row (`DayTaskRow`), and the
-// views still ask them per chip with (task, day) in hand. Until the views read
-// the rows, these stay as the TypeScript twins of `cal_core::task_day::
-// {time_on_day, end_time_on_day, is_deadline_chip}`, pinned against them by
-// the same fixture: the TypeScript contract test derives its chip facts from
-// these, the Rust contract test from the core's fields, and both must match
-// the table.
-
-/**
- * True when the task appears on `dayIsoKey` BECAUSE of its deadline,
- * not its scheduled day — i.e. this chip is a "due here" marker rather
- * than a "planned work" chip. A task that is scheduled AND due on the
- * same day is treated as the scheduled chip (schedule wins), so this
- * returns false there. Drives the "fällig bis" aria + the `--by`
- * styling of the deadline marker.
- */
-export function isDeadlineChip(task: Task, dayIsoKey: string): boolean {
-  return (
-    task.deadline_date != null &&
-    task.deadline_date === dayIsoKey &&
-    task.scheduled_date !== dayIsoKey
-  );
-}
-
-/**
- * Effective time-of-day at which a task should slot into the timed
- * lane of `dayIsoKey`, or `null` when the task has no specific time
- * on that day: `scheduled_time` when scheduled here, else `deadline_time`
- * when due here. When both apply on the same day the scheduled time wins —
- * it's the "I plan to do it then" commitment, while the deadline_time on the
- * same day is the "must be done by then" cap.
- *
- * Returned shape is the raw `HH:MM[:SS]` string, which sorts
- * lexicographically the same way it sorts numerically.
- */
-export function taskTimeOnDay(
-  task: Task,
-  dayIsoKey: string,
-): string | null {
-  if (task.scheduled_time && task.scheduled_date === dayIsoKey) {
-    return task.scheduled_time;
-  }
-  if (task.deadline_time && task.deadline_date === dayIsoKey) {
-    return task.deadline_time;
-  }
-  return null;
-}
-
-/**
- * The END of a task's planned block on `dayIsoKey`, as `HH:MM[:SS]`, or `null`
- * when it has none there. Only the SCHEDULED slot can carry a block: a
- * deadline is a moment — "by then" — and giving it a length would draw a bar
- * across the hours before something is due.
- */
-export function taskEndTimeOnDay(task: Task, dayIsoKey: string): string | null {
-  if (
-    task.scheduled_end_time &&
-    task.scheduled_time &&
-    task.scheduled_date === dayIsoKey
-  ) {
-    return task.scheduled_end_time;
-  }
-  return null;
 }
 
 // ──────────────────────────── Rendering helpers ─────────────────────────────
@@ -280,15 +249,16 @@ export function taskEndTimeOnDay(task: Task, dayIsoKey: string): string | null {
  * `kind: 'task'`, sharing the per-day time column so 09:30 events and
  * 09:45 task deadlines line up the way the user expects.
  */
-export type DayGridItem<TEvent, TTask> =
+export type DayGridItem<TEvent, TTask extends Task = Task> =
   | { kind: 'event'; event: TEvent; sortKey: number }
-  | { kind: 'task'; task: TTask; sortKey: number };
+  | { kind: 'task'; task: TTask; entry: DayTaskEntry<TTask>; sortKey: number };
 
 /**
  * Merge events and timed tasks into a single chronologically sorted
- * list for one day. Untimed tasks (those for which `taskTimeOnDay`
- * returned `null`) are returned in a second array so the caller can
- * render them in the existing untimed lane below the grid.
+ * list for one day. Untimed tasks (entries whose `time` is null) are
+ * returned in a second array so the caller can render them in the
+ * existing untimed lane below the grid. A task item keeps its entry, so a
+ * chip reads its time, block end and deadline marker from the core's row.
  *
  * `eventTime(event)` returns the event's start as epoch-ms. Composing a task's
  * `HH:MM` on this day into the same scale goes through the local `Date`, so a
@@ -297,26 +267,26 @@ export type DayGridItem<TEvent, TTask> =
  */
 export function mergeDayItems<TEvent, TTask extends Task>(
   events: TEvent[],
-  tasks: TTask[],
+  entries: DayTaskEntry<TTask>[],
   dayIsoKey: string,
   eventTime: (e: TEvent) => number,
-): { timed: DayGridItem<TEvent, TTask>[]; untimed: TTask[] } {
+): { timed: DayGridItem<TEvent, TTask>[]; untimed: DayTaskEntry<TTask>[] } {
   const timed: DayGridItem<TEvent, TTask>[] = events.map((event) => ({
     kind: 'event' as const,
     event,
     sortKey: eventTime(event),
   }));
-  const untimed: TTask[] = [];
-  for (const task of tasks) {
-    const time = taskTimeOnDay(task, dayIsoKey);
+  const untimed: DayTaskEntry<TTask>[] = [];
+  for (const entry of entries) {
+    const time = entry.time;
     if (time === null) {
-      untimed.push(task);
+      untimed.push(entry);
       continue;
     }
     const [hh, mm, ss] = time.split(':').map((n) => Number(n));
     const [y, mo, d] = dayIsoKey.split('-').map((n) => Number(n));
     const ms = new Date(y, mo - 1, d, hh ?? 0, mm ?? 0, ss ?? 0).getTime();
-    timed.push({ kind: 'task', task, sortKey: ms });
+    timed.push({ kind: 'task', task: entry.task, entry, sortKey: ms });
   }
   timed.sort((a, b) => a.sortKey - b.sortKey);
   return { timed, untimed };

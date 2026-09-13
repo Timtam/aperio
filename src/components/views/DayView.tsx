@@ -45,12 +45,10 @@ import { localDateKey } from '../../intl/dateKey';
 import {
   expandScheduledRecurringTasks,
   filterTasksOnDay,
-  isDeadlineChip,
+  type DayTaskEntry,
   isRecurringProjection,
   mergeDayItems,
   recurringSeriesTaskId,
-  taskEndTimeOnDay,
-  taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
@@ -460,10 +458,8 @@ export function DayView() {
         // is what a planned block IS. An unparseable time falls back to
         // midnight so the item ALWAYS gets a slot and never flows static
         // inside the positioned canvas (which would corrupt the grid).
-        const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
-        const end = minutesFromMidnight(
-          taskEndTimeOnDay(item.task, dayKey) ?? '',
-        );
+        const m = minutesFromMidnight(item.entry.time ?? '');
+        const end = minutesFromMidnight(item.entry.endTime ?? '');
         const startMin = m ?? 0;
         s = {
           startMin,
@@ -481,7 +477,7 @@ export function DayView() {
     });
     slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
     return map;
-  }, [timedItems, anchor, dayKey, dayStartMin, dayEndMin]);
+  }, [timedItems, anchor, dayStartMin, dayEndMin]);
 
   // Items ENTIRELY outside the visible window (placement 'before' / 'after')
   // aren't placed on the canvas: their listbox option is clipped (visually
@@ -513,7 +509,7 @@ export function DayView() {
         };
       } else {
         const task = item.task;
-        const t0 = taskTimeOnDay(task, dayKey);
+        const t0 = item.entry.time;
         entry = {
           key: `task-${task.id}`,
           title: task.title,
@@ -585,9 +581,10 @@ export function DayView() {
   const listItems = useMemo(
     () => [
       ...timedItems,
-      ...untimedTasks.map((task) => ({
+      ...untimedTasks.map((entry) => ({
         kind: 'task' as const,
-        task,
+        task: entry.task,
+        entry,
         sortKey: Number.POSITIVE_INFINITY,
       })),
     ],
@@ -1232,16 +1229,16 @@ export function DayView() {
               // A read-only future occurrence of a recurring task — no
               // drag/toggle/menu; it opens its series on activate.
               const projection = isRecurringProjection(task);
-              // Pull the effective time-of-day via the shared helper;
-              // it returns scheduled_time when on the scheduled day,
-              // deadline_time when on the deadline day, with the
-              // schedule winning on a same-day collision.
-              const timeOnDay = taskTimeOnDay(task, dayKey);
+              // The effective time-of-day is the core's answer on the day
+              // row: scheduled_time when on the scheduled day, deadline_time
+              // when on the deadline day, the schedule winning on a same-day
+              // collision.
+              const timeOnDay = item.entry.time;
               // A planned block reads as a span, the same shape an event
               // announces — "09:00 to 10:30" rather than a bare start, which
               // would leave a listener with no idea how long the day's plan
               // takes.
-              const endOnDay = taskEndTimeOnDay(task, dayKey);
+              const endOnDay = item.entry.endTime;
               const timeStr = timeOnDay
                 ? endOnDay
                   ? t('views.timeRange', {
@@ -1591,8 +1588,7 @@ export function DayView() {
       {untimedTasks.length > 0 && (
         <DayUntimedTasks
           variant={listMode ? 'section' : 'band'}
-          tasks={untimedTasks}
-          dayKey={dayKey}
+          entries={untimedTasks}
           allTasks={tasks}
           fmt={fmt}
           t={t}
@@ -1697,8 +1693,7 @@ export function DayView() {
  */
 function DayUntimedTasks({
   variant,
-  tasks,
-  dayKey,
+  entries,
   allTasks,
   fmt,
   t,
@@ -1712,8 +1707,7 @@ function DayUntimedTasks({
   onContextMenu,
 }: {
   variant: 'band' | 'section';
-  tasks: Task[];
-  dayKey: string;
+  entries: DayTaskEntry[];
   allTasks: Task[];
   fmt: ReturnType<typeof useDateFormat>;
   t: ReturnType<typeof useTranslation>['t'];
@@ -1744,12 +1738,13 @@ function DayUntimedTasks({
     >
       <h3 className="day-tasks__heading">{t('views.day.tasksHeading')}</h3>
       <ul className="day-tasks__list">
-        {tasks.map((task) => {
+        {entries.map(({ task, deadlineChip }) => {
           // "Due here" when the task is on this day because of its
           // deadline (not its scheduled day) — that chip is the
           // deadline marker ("fällig bis …"). A task scheduled today
-          // stays a plain work chip even with a later deadline.
-          const isBy = isDeadlineChip(task, dayKey);
+          // stays a plain work chip even with a later deadline. The
+          // core says which, with the day row.
+          const isBy = deadlineChip;
           // The scheduled chip now also announces its deadline (the
           // deadline-day duplicate is suppressed in filterTasksOnDay), so
           // use the "fällig bis …" label whenever the task carries a

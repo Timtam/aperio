@@ -14,13 +14,13 @@ import {
 /**
  * The calendar-day task rules, pinned as a table before they move.
  *
- * `filterTasksOnDay` decides which tasks a day shows and in which order;
- * `taskTimeOnDay`, `taskEndTimeOnDay` and `isDeadlineChip` say what the chip
- * carries; `backlogWeeks` and `splitDeadlinesByWeek` cut the backlog rail.
- * Today that is TypeScript, asked on both surfaces while rendering; it is going
- * to be asked of `cal-core` instead, and the Rust answer has to be the same
- * answer. This file replays every case in the fixture through the TypeScript
- * and compares — the Rust side reads the same file.
+ * `filterTasksOnDay` decides which tasks a day shows, in which order, and
+ * what each chip carries (its time, its block end, whether it is a deadline
+ * marker) — one entry per task and day; `backlogWeeks` and
+ * `splitDeadlinesByWeek` cut the backlog rail. The answers are the core's
+ * (`cal_core::task_day`), asked through the door the surface installs. This
+ * file replays every case in the fixture through that door and compares —
+ * the Rust side reads the same file.
  *
  * What stays out, and why, is written in the fixture's `notInThisTable`.
  */

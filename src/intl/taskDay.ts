@@ -4,13 +4,10 @@
 export {
   filterTasksOnDay,
   groupTasksByDay,
-  isDeadlineChip,
-  taskEndTimeOnDay,
-  taskTimeOnDay,
   todayIsoKey,
   mergeDayItems,
   expandScheduledRecurringTasks,
   isRecurringProjection,
   recurringSeriesTaskId,
 } from '@aperio/shared';
-export type { DayGridItem } from '@aperio/shared';
+export type { DayGridItem, DayTaskEntry } from '@aperio/shared';

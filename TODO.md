@@ -1351,6 +1351,19 @@ Siehe DESIGN §4.2.
   machten (Monatsraster: 42-mal, jede mit ALLEN Aufgaben serialisiert; mobile
   Tagesliste über die native Brücke; Widget-Schnappschuss), fragen jetzt einmal
   mit allen Tagesschlüsseln (`groupTasksByDay`).
+  ↳ **Schritt 3 (Folge-PR): die Views lesen die Antwort-Zeilen.**
+  `filterTasksOnDay`/`groupTasksByDay` geben `DayTaskEntry {task, time,
+  endTime, deadlineChip}` zurück — die Kern-Zeile über das eigene
+  Aufgaben-Objekt gelegt — und `mergeDayItems` trägt den Eintrag an jedem
+  Zeit-Item mit. Die drei TypeScript-Zwillinge (`taskTimeOnDay`,
+  `taskEndTimeOnDay`, `isDeadlineChip`) sind gelöscht; Tages-, Wochen- und
+  Monatsansicht, die mobile Tagesliste und der Widget-Schnappschuss lesen
+  Zeit, Blockende und Frist-Marker aus dem Eintrag statt sie pro Kachel neu
+  abzuleiten. Der Vertragstest spielt die Kachel-Fakten jetzt DURCH DIE TÜR
+  zurück (vorher aus den Zwillingen); die Fixture ist unverändert. Die
+  Unit-Tests der Zwillinge sind zu Tests über den Eintrag geworden — drei
+  davon fragten nach einem Tag, an dem die Aufgabe gar nicht liegt, und
+  prüfen jetzt genau das: kein Eintrag. Kein Verhalten hat sich geändert.
 - [~] **Der Aufgaben-Zustand zieht in den Kern** (`taskStatus`), in denselben
   zwei Schritten — mit dem Schnitt vom 2026-09-09: Zustand rein, Zeichen vorn.
   ↳ **Schritt 1 (dieser PR): die Tabelle.** Von den 18 Exporten des Moduls

@@ -64,7 +64,7 @@ describe('text ordering comes from the core', () => {
     const sorted = filterTasksOnDay(
       [task('c', 'Übung 10'), task('a', 'Übung 2'), task('b', 'Aufgabe')],
       DAY,
-    ).map((t) => t.title);
+    ).map((e) => e.task.title);
     expect(sorted).toEqual(['Aufgabe', 'Übung 2', 'Übung 10']);
   });
 
