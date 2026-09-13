@@ -65,7 +65,7 @@ import {
   expandAll,
   expandScheduledRecurringTasks,
   groupTasksByDay,
-  isDeadlineChip,
+  type DayTaskEntry,
   isRecurringProjection,
   layoutDayColumn,
   localDateKey,
@@ -81,8 +81,6 @@ import {
   statusMarker,
   subtaskParentSuffix,
   subtaskProgressSuffix,
-  taskEndTimeOnDay,
-  taskTimeOnDay,
 } from '@aperio/shared';
 
 import {
@@ -325,7 +323,7 @@ interface DayBucket {
   date: Date;
   allDay: CalendarEvent[];
   timed: DayGridItem<CalendarEvent, Task>[];
-  untimed: Task[];
+  untimed: DayTaskEntry[];
   count: number;
 }
 
@@ -1349,8 +1347,8 @@ export function CalendarDayList({
   );
 
   const taskLabel = useCallback(
-    (task: Task, key: string, colourName: string | null): string => {
-      const time = taskTimeOnDay(task, key);
+    (entry: DayTaskEntry, key: string, colourName: string | null): string => {
+      const { task, time } = entry;
       const common = {
         title: task.title,
         state: t(statusI18nKey(task.status)),
@@ -1362,7 +1360,7 @@ export function CalendarDayList({
       // uses and the same shape this file's own EVENT rows already announce.
       // Without it a two-hour plan and a bare point sound identical, while the
       // row is silently drawn ninety minutes tall.
-      const end = taskEndTimeOnDay(task, key);
+      const end = entry.endTime;
       let label: string;
       if (time) {
         label = t('views.week.taskChipTimed', {
@@ -1600,7 +1598,8 @@ export function CalendarDayList({
     );
   };
 
-  const renderTaskRow = (task: Task, key: string, slot?: PositionedSpan) => {
+  const renderTaskRow = (entry: DayTaskEntry, key: string, slot?: PositionedSpan) => {
+    const { task, time, endTime, deadlineChip } = entry;
     const done = task.status === 'completed';
     const grid = slot != null;
     const resolved = resolveTaskColor(task, listsById, labelsById, sectionColorById);
@@ -1627,8 +1626,6 @@ export function CalendarDayList({
     // Day-aware visible meta (the row's reason for being on THIS day): its time
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
-    const time = taskTimeOnDay(task, key);
-    const endTime = taskEndTimeOnDay(task, key);
     let meta = time
       ? endTime
         ? t('views.timeRange', {
@@ -1636,12 +1633,12 @@ export function CalendarDayList({
             end: fmtTime(buildTimeDate(key, endTime)),
           })
         : fmtTime(buildTimeDate(key, time))
-      : isDeadlineChip(task, key)
+      : deadlineChip
         ? t('views.tasks.dueDeadline', { date: fmtDateOnly(key) })
         : t('views.tasks.dueScheduled', { date: fmtDateOnly(key) });
     // A scheduled task now carries its deadline on its plan row (no separate
     // deadline-day row), so surface the due date visibly alongside the meta.
-    if (!isDeadlineChip(task, key) && task.deadline_date) {
+    if (!deadlineChip && task.deadline_date) {
       meta += ` · ${t('views.week.taskChipDeadlineBadge', {
         deadline: fmtDateOnly(task.deadline_date),
       })}`;
@@ -1722,7 +1719,7 @@ export function CalendarDayList({
         key={`t-${task.id}@${key}`}
         accessible
         accessibilityRole="button"
-        accessibilityLabel={taskLabel(task, key, resolved.labelName)}
+        accessibilityLabel={taskLabel(entry, key, resolved.labelName)}
         // A projection offers edit + go-to, not the full verb set — promising
         // "complete, rename, or delete" here would be a lie the rotor exposes.
         // When go-to IS offered, say the actions rotor exists at all (the
@@ -1831,8 +1828,8 @@ export function CalendarDayList({
         // to midnight so it ALWAYS gets a slot.
         // A planned block occupies its hours here exactly as it does on the
         // desktop grid; without one the task stays a point.
-        const m = minutesFromMidnight(taskTimeOnDay(item.task, b.key) ?? '');
-        const end = minutesFromMidnight(taskEndTimeOnDay(item.task, b.key) ?? '');
+        const m = minutesFromMidnight(item.entry.time ?? '');
+        const end = minutesFromMidnight(item.entry.endTime ?? '');
         const startMin = m ?? 0;
         s = {
           startMin,
@@ -1890,7 +1887,7 @@ export function CalendarDayList({
   ): ReactNode =>
     item.kind === 'event'
       ? renderEventRow(item.event, day, multiDayInfo(item.event, day))
-      : renderTaskRow(item.task, key);
+      : renderTaskRow(item.entry, key);
 
   // Single-day hour-grid: all-day events, then (when the window hides them) a
   // compact BEFORE band of items earlier than the window start, then the windowed
@@ -1995,7 +1992,7 @@ export function CalendarDayList({
             {inWindow.map(({ item, idx }) =>
               item.kind === 'event'
                 ? renderEventRow(item.event, b.date, multiDayInfo(item.event, b.date), slots.get(idx))
-                : renderTaskRow(item.task, b.key, slots.get(idx)),
+                : renderTaskRow(item.entry, b.key, slots.get(idx)),
             )}
           </View>
         </View>
@@ -2020,7 +2017,7 @@ export function CalendarDayList({
             <Text accessibilityRole="header" style={styles.taskBandHeading}>
               {t('views.day.tasksHeading')}
             </Text>
-            {b.untimed.map((task) => renderTaskRow(task, b.key))}
+            {b.untimed.map((entry) => renderTaskRow(entry, b.key))}
           </View>
         )}
         {renderDayCreateButtons(b)}
@@ -2041,7 +2038,7 @@ export function CalendarDayList({
     <View key={b.key} style={styles.daySection}>
       {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
       {b.timed.map((item) => {
-        if (item.kind === 'task') return renderTaskRow(item.task, b.key);
+        if (item.kind === 'task') return renderTaskRow(item.entry, b.key);
         const ev = item.event;
         const height = Math.round(
           eventBlockFactor(eventDurationMinForDay(new Date(ev.start), new Date(ev.end), b.date)) *
@@ -2058,7 +2055,7 @@ export function CalendarDayList({
         // for SR users).
         return renderEventRow(ev, b.date, multiDayInfo(ev, b.date), undefined, { height, overflow: 'hidden' });
       })}
-      {b.untimed.map((task) => renderTaskRow(task, b.key))}
+      {b.untimed.map((entry) => renderTaskRow(entry, b.key))}
       {renderDayCreateButtons(b)}
     </View>
   );
@@ -2200,11 +2197,11 @@ export function CalendarDayList({
               rows.push(
                 item.kind === 'event'
                   ? renderEventRow(item.event, b.date, multiDayInfo(item.event, b.date))
-                  : renderTaskRow(item.task, b.key),
+                  : renderTaskRow(item.entry, b.key),
               );
             }
-            for (const task of b.untimed) {
-              rows.push(renderTaskRow(task, b.key));
+            for (const entry of b.untimed) {
+              rows.push(renderTaskRow(entry, b.key));
             }
             return (
               <View key={b.key} style={styles.daySection}>

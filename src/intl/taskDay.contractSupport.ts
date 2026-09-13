@@ -6,10 +6,7 @@ import type { Task, TaskUser } from '../api/types';
 import {
   backlogWeeks,
   filterTasksOnDay,
-  isDeadlineChip,
   splitDeadlinesByWeek,
-  taskEndTimeOnDay,
-  taskTimeOnDay,
   type BacklogWeeks,
   type PriorityScale,
 } from '@aperio/shared';
@@ -55,12 +52,14 @@ export function answerOnDay(input: OnDayInput, baseTask: Task): OnDayAnswer {
   const meFor = users === undefined ? undefined : (listId: string) => users[listId] ?? null;
   const out: OnDayAnswer = {};
   for (const day of input.days) {
+    // The chip facts come with the entry now — the core's row, read through
+    // the door — so this replays the whole table through one call.
     out[day] = filterTasksOnDay(tasks, day, isCompletedVisible, meFor, input.scale ?? 'three').map(
-      (task) => ({
-        id: task.id,
-        time: taskTimeOnDay(task, day),
-        endTime: taskEndTimeOnDay(task, day),
-        deadlineChip: isDeadlineChip(task, day),
+      (entry) => ({
+        id: entry.task.id,
+        time: entry.time,
+        endTime: entry.endTime,
+        deadlineChip: entry.deadlineChip,
       }),
     );
   }

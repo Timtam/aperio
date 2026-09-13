@@ -89,7 +89,7 @@ describe('the priority ranking comes from the core', () => {
         undefined,
         undefined,
         scale,
-      ).map((t) => t.title);
+      ).map((e) => e.task.title);
 
     // Three bands: high, then medium, then low.
     expect(order('three')).toEqual(['Brot', 'Apfel', 'Zebra']);

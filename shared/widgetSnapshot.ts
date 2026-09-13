@@ -23,7 +23,7 @@ import {
 import { collapseEventGroups } from './collapseEventGroups';
 import type { EventGroup } from './eventGroups';
 import { expandAll, seriesIdOf, type RecurringEventLike } from './recurrence';
-import { groupTasksByDay, taskTimeOnDay } from './taskDay';
+import { groupTasksByDay } from './taskDay';
 import { compareTitles } from './ordering';
 import type { Task, TaskUser } from './types';
 
@@ -438,9 +438,8 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   // horizon, the way the views ask.
   const tasksByDay = groupTasksByDay(expandedTasks, dayKeys, () => false, meFor);
   for (const key of dayKeys) {
-    for (const task of tasksByDay.get(key) ?? []) {
+    for (const { task, time } of tasksByDay.get(key) ?? []) {
       if (seenTasks.has(task.id)) continue;
-      const time = taskTimeOnDay(task, key);
       const at = time ? atTimeOn(key, time) : dayStart(key);
       // A timed task whose time has passed is done being "next"; an untimed one
       // stands all day, because there is no moment at which it stopped being

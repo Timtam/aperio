@@ -54,12 +54,10 @@ import { visibleRange } from '../../state/viewMath';
 import {
   expandScheduledRecurringTasks,
   groupTasksByDay,
-  isDeadlineChip,
+  type DayTaskEntry,
   isRecurringProjection,
   mergeDayItems,
   recurringSeriesTaskId,
-  taskEndTimeOnDay,
-  taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
@@ -535,10 +533,8 @@ export function WeekView() {
           // that is what a planned block IS. An unparseable time falls back to
           // midnight so the item ALWAYS gets a slot and never flows static
           // inside the positioned canvas (which would corrupt the grid).
-          const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
-          const end = minutesFromMidnight(
-            taskEndTimeOnDay(item.task, dayKey) ?? '',
-          );
+          const m = minutesFromMidnight(item.entry.time ?? '');
+          const end = minutesFromMidnight(item.entry.endTime ?? '');
           const startMin = m ?? 0;
           s = {
             startMin,
@@ -613,7 +609,7 @@ export function WeekView() {
           };
         } else {
           const task = item.task;
-          const t0 = taskTimeOnDay(task, dayKey);
+          const t0 = item.entry.time;
           entry = {
             key: `task-${task.id}`,
             title: task.title,
@@ -707,7 +703,7 @@ export function WeekView() {
         // unreachable. WeekDayTasks renders these below the lane and mirrors
         // their indices (timed count + offset) for aria-activedescendant.
         const untimed: DayItem[] =
-          merged?.untimed.map((task) => ({
+          merged?.untimed.map(({ task }) => ({
             kind: 'task' as const,
             task,
             title: task.title,
@@ -1667,16 +1663,15 @@ export function WeekView() {
                         // A read-only future occurrence of a recurring task — no
                         // drag/toggle/menu; it opens its series on activate.
                         const projection = isRecurringProjection(task);
-                        // Pull the effective time-of-day for this row
-                        // on this specific day — could come from either
-                        // scheduled_time (the planned slot) or
-                        // deadline_time (when this is the deadline day
-                        // and only a deadline is set). The same helper
-                        // backs taskTimeOnDay-based sorting upstream,
-                        // so chips line up consistently.
-                        const timeOnDay = taskTimeOnDay(task, dayKey);
+                        // The effective time-of-day for this row on this
+                        // specific day is the core's answer on the day row:
+                        // scheduled_time (the planned slot) or deadline_time
+                        // (when this is the deadline day and only a deadline
+                        // is set). The same row sorted the lane upstream, so
+                        // chips line up consistently.
+                        const timeOnDay = item.entry.time;
                         // A planned block reads as a span, like an event's.
-                        const endOnDay = taskEndTimeOnDay(task, dayKey);
+                        const endOnDay = item.entry.endTime;
                         const time = timeOnDay
                           ? endOnDay
                             ? t('views.timeRange', {
@@ -2116,8 +2111,7 @@ export function WeekView() {
                       continues after the timed lane (`optionIdBase`), so
                       Tab walks them like any other chip. */}
                   <WeekDayTasks
-                    tasks={untimedTasks}
-                    dayKey={dayKey}
+                    entries={untimedTasks}
                     allTasks={tasks}
                     cellIndex={i}
                     listMode={listMode}
@@ -2256,8 +2250,7 @@ function groupEventsByDay(
  * calendar chips are display + drill-into-detail only.
  */
 function WeekDayTasks({
-  tasks,
-  dayKey,
+  entries,
   allTasks,
   cellIndex,
   listMode,
@@ -2273,10 +2266,7 @@ function WeekDayTasks({
   onDragStart,
   onDragEnd,
 }: {
-  tasks: Task[];
-  /** ISO day key of this column — lets a chip tell whether it's here
-   *  because it's DUE today (deadline marker) vs scheduled today. */
-  dayKey: string;
+  entries: DayTaskEntry[];
   /** All tasks in the store — used to resolve subtask progress
    *  for the parents that show up in this day's chip list. */
   allTasks: Task[];
@@ -2321,7 +2311,7 @@ function WeekDayTasks({
   const fmt = useDateFormat();
   const { sectionColorById } = useCalendarStore();
   const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
-  if (tasks.length === 0) return null;
+  if (entries.length === 0) return null;
   return (
     <ul
       className={
@@ -2332,15 +2322,15 @@ function WeekDayTasks({
         // option ids / Tab nav are unchanged in both.
         (listMode ? '' : ' week-grid__tasks--grid')
       }
-      aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
+      aria-label={t('views.week.tasksOnDay', { count: entries.length })}
     >
-      {tasks.map((task, idx) => {
+      {entries.map(({ task, deadlineChip }, idx) => {
         // `isBy` = the task is here as a pure deadline marker (a deadline-only
         // task on its due day) — it keeps the hard-edge `--by` ring. A task
         // with a scheduled day now shows ONLY on that day and announces its
         // deadline there, so the "fällig bis …" label is used whenever the
-        // task carries a deadline.
-        const isBy = isDeadlineChip(task, dayKey);
+        // task carries a deadline. The core says which, with the day row.
+        const isBy = deadlineChip;
         const hasDeadline = task.deadline_date != null;
         const labelKey = hasDeadline
           ? 'views.week.taskChipBy'

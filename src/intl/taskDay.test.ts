@@ -3,9 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Task } from '../api/types';
 import {
   filterTasksOnDay,
-  isDeadlineChip,
   mergeDayItems,
-  taskTimeOnDay,
 } from './taskDay';
 
 const baseTask: Task = {
@@ -43,7 +41,7 @@ describe('filterTasksOnDay', () => {
       { ...baseTask, id: 'sched', scheduled_date: '2026-05-20' },
       { ...baseTask, id: 'other', scheduled_date: '2026-05-21' },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((e) => e.task.id)).toEqual([
       'sched',
     ]);
   });
@@ -55,7 +53,7 @@ describe('filterTasksOnDay', () => {
       { ...baseTask, id: 'on-match', scheduled_date: '2026-05-22' },
       { ...baseTask, id: 'on-other', scheduled_date: '2026-05-21' },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((e) => e.task.id)).toEqual([
       'on-match',
     ]);
   });
@@ -68,7 +66,7 @@ describe('filterTasksOnDay', () => {
       { ...baseTask, id: 'by', deadline_date: '2026-05-22' },
     ];
     // deadline day → yes
-    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((e) => e.task.id)).toEqual([
       'by',
     ]);
     // day before the deadline → no (no window)
@@ -89,7 +87,7 @@ describe('filterTasksOnDay', () => {
         deadline_date: '2026-05-22',
       },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((e) => e.task.id)).toEqual([
       'both',
     ]);
     expect(filterTasksOnDay(tasks, '2026-05-21')).toEqual([]);
@@ -106,7 +104,7 @@ describe('filterTasksOnDay', () => {
         deadline_date: '2026-05-22',
       },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((e) => e.task.id)).toEqual([
       'same',
     ]);
   });
@@ -130,7 +128,7 @@ describe('filterTasksOnDay', () => {
     ];
     // The dated subtask surfaces as its own chip; the undated one stays hidden
     // (it travels with its parent).
-    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((e) => e.task.id)).toEqual([
       'parent',
       'dated-child',
     ]);
@@ -152,7 +150,7 @@ describe('filterTasksOnDay', () => {
       },
       { ...baseTask, id: 'live', scheduled_date: '2026-05-20', status: 'open' },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((e) => e.task.id)).toEqual([
       'live',
     ]);
   });
@@ -183,7 +181,7 @@ describe('filterTasksOnDay', () => {
     ];
     const visible = (listId: string) => listId === 'list-A';
     expect(
-      filterTasksOnDay(tasks, '2026-05-20', visible).map((t) => t.id),
+      filterTasksOnDay(tasks, '2026-05-20', visible).map((e) => e.task.id),
     ).toEqual(['done-shown', 'live']);
   });
 
@@ -215,7 +213,7 @@ describe('filterTasksOnDay', () => {
       },
       { ...baseTask, id: 'lo', title: 'Anfang', priority: 'low', scheduled_date: '2026-05-20' },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((e) => e.task.id)).toEqual([
       'hi',
       'b2',
       'b10',
@@ -228,155 +226,151 @@ describe('filterTasksOnDay', () => {
   });
 });
 
-describe('isDeadlineChip', () => {
-  it('is true on the deadline day when not also scheduled there', () => {
-    expect(
-      isDeadlineChip({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-22'),
-    ).toBe(true);
+describe('what a chip carries, from the day row', () => {
+  const on = (task: Task, day: string) => filterTasksOnDay([task], day);
+
+  it('marks the deadline chip on the deadline day when not also scheduled there', () => {
+    const [entry] = on({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-22');
+    expect(entry.deadlineChip).toBe(true);
   });
 
-  it('is false on a non-deadline day', () => {
-    expect(
-      isDeadlineChip({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-21'),
-    ).toBe(false);
+  it('does not show a deadline task on a non-deadline day at all', () => {
+    expect(on({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-21')).toEqual([]);
   });
 
-  it('is false when the task has no deadline', () => {
-    expect(
-      isDeadlineChip(
-        { ...baseTask, scheduled_date: '2026-05-22' },
-        '2026-05-22',
-      ),
-    ).toBe(false);
+  it('is a plain chip when the task has no deadline', () => {
+    const [entry] = on({ ...baseTask, scheduled_date: '2026-05-22' }, '2026-05-22');
+    expect(entry.deadlineChip).toBe(false);
   });
 
-  it('is false when scheduled AND due the same day (schedule wins)', () => {
-    expect(
-      isDeadlineChip(
-        {
-          ...baseTask,
-          scheduled_date: '2026-05-22',
-          deadline_date: '2026-05-22',
-        },
-        '2026-05-22',
-      ),
-    ).toBe(false);
+  it('is a plain chip when scheduled AND due the same day (schedule wins)', () => {
+    const [entry] = on(
+      { ...baseTask, scheduled_date: '2026-05-22', deadline_date: '2026-05-22' },
+      '2026-05-22',
+    );
+    expect(entry.deadlineChip).toBe(false);
   });
 
-  it('is true on the deadline day even when scheduled on a different day', () => {
-    expect(
-      isDeadlineChip(
-        {
-          ...baseTask,
-          scheduled_date: '2026-05-20',
-          deadline_date: '2026-05-22',
-        },
-        '2026-05-22',
-      ),
-    ).toBe(true);
-  });
-});
-
-describe('taskTimeOnDay', () => {
-  it('returns scheduled_time on the scheduled day (legacy "on" semantic)', () => {
-    const task: Task = {
-      ...baseTask,
-      scheduled_date: '2026-05-22',
-      scheduled_time: '14:30:00',
-    };
-    expect(taskTimeOnDay(task, '2026-05-22')).toBe('14:30:00');
+  it('shows a scheduled task only on its plan day, not as a marker on its deadline day', () => {
+    const task = { ...baseTask, scheduled_date: '2026-05-20', deadline_date: '2026-05-22' };
+    expect(on(task, '2026-05-22')).toEqual([]);
+    const [entry] = on(task, '2026-05-20');
+    expect(entry.deadlineChip).toBe(false);
   });
 
-  it('returns deadline_time on the deadline day when only a deadline is set', () => {
-    const task: Task = {
-      ...baseTask,
-      deadline_date: '2026-05-22',
-      deadline_time: '17:00:00',
-    };
-    expect(taskTimeOnDay(task, '2026-05-22')).toBe('17:00:00');
+  it('carries scheduled_time on the scheduled day', () => {
+    const [entry] = on(
+      { ...baseTask, scheduled_date: '2026-05-22', scheduled_time: '14:30:00' },
+      '2026-05-22',
+    );
+    expect(entry.time).toBe('14:30:00');
+    expect(entry.endTime).toBeNull();
   });
 
-  it('prefers scheduled_time when both could apply on the same day', () => {
-    const task: Task = {
-      ...baseTask,
-      scheduled_date: '2026-05-22',
-      scheduled_time: '09:00:00',
-      deadline_date: '2026-05-22',
-      deadline_time: '17:00:00',
-    };
-    expect(taskTimeOnDay(task, '2026-05-22')).toBe('09:00:00');
+  it('carries deadline_time on the deadline day when only a deadline is set', () => {
+    const [entry] = on(
+      { ...baseTask, deadline_date: '2026-05-22', deadline_time: '17:00:00' },
+      '2026-05-22',
+    );
+    expect(entry.time).toBe('17:00:00');
   });
 
-  it('returns null on a day that is neither the scheduled nor deadline day', () => {
-    const task: Task = {
-      ...baseTask,
-      deadline_date: '2026-05-22',
-      deadline_time: '14:30:00',
-    };
-    expect(taskTimeOnDay(task, '2026-05-21')).toBeNull();
+  it('prefers scheduled_time when both apply on the same day', () => {
+    const [entry] = on(
+      {
+        ...baseTask,
+        scheduled_date: '2026-05-22',
+        scheduled_time: '09:00:00',
+        deadline_date: '2026-05-22',
+        deadline_time: '17:00:00',
+      },
+      '2026-05-22',
+    );
+    expect(entry.time).toBe('09:00:00');
   });
 
-  it('returns null when the user did not pick a time', () => {
-    const task: Task = {
-      ...baseTask,
-      scheduled_date: '2026-05-22',
-      scheduled_time: null,
-    };
-    expect(taskTimeOnDay(task, '2026-05-22')).toBeNull();
+  it('carries the block end only with a scheduled slot', () => {
+    const [planned] = on(
+      {
+        ...baseTask,
+        scheduled_date: '2026-05-22',
+        scheduled_time: '09:00:00',
+        scheduled_end_time: '10:30:00',
+      },
+      '2026-05-22',
+    );
+    expect(planned.endTime).toBe('10:30:00');
+    const [due] = on(
+      { ...baseTask, deadline_date: '2026-05-22', deadline_time: '17:00:00' },
+      '2026-05-22',
+    );
+    expect(due.endTime).toBeNull();
+  });
+
+  it('has no time when the user did not pick one', () => {
+    const [entry] = on({ ...baseTask, scheduled_date: '2026-05-22', scheduled_time: null }, '2026-05-22');
+    expect(entry.time).toBeNull();
   });
 });
 
 describe('mergeDayItems', () => {
   const eventTime = (e: { start: string }) => new Date(e.start).getTime();
+  // The split is by the entry's time — the core's answer on the day row — so
+  // the entries are built here as the door hands them over.
+  const entry = (task: Task, time: string | null) => ({
+    task,
+    time,
+    endTime: null,
+    deadlineChip: false,
+  });
 
   it('interleaves timed tasks with events sorted by time', () => {
     const events = [
       { id: 'morning', start: '2026-05-22T09:00:00' },
       { id: 'afternoon', start: '2026-05-22T15:00:00' },
     ];
-    const tasks: Task[] = [
-      {
-        ...baseTask,
-        id: 'task-noon',
-        scheduled_date: '2026-05-22',
-        scheduled_time: '14:00:00',
-      },
+    const entries = [
+      entry(
+        { ...baseTask, id: 'task-noon', scheduled_date: '2026-05-22', scheduled_time: '14:00:00' },
+        '14:00:00',
+      ),
     ];
-    const { timed, untimed } = mergeDayItems(
-      events,
-      tasks,
-      '2026-05-22',
-      eventTime,
-    );
-    expect(
-      timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)),
-    ).toEqual(['morning', 'task-noon', 'afternoon']);
+    const { timed, untimed } = mergeDayItems(events, entries, '2026-05-22', eventTime);
+    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id))).toEqual([
+      'morning',
+      'task-noon',
+      'afternoon',
+    ]);
+    // A task item keeps its entry, so a chip reads its facts from the row.
+    const item = timed[1];
+    expect(item.kind === 'task' ? item.entry.time : null).toBe('14:00:00');
     expect(untimed).toEqual([]);
   });
 
-  it('untimed tasks go into the second bucket, not into the timed lane', () => {
+  it('untimed entries go into the second bucket, not into the timed lane', () => {
     const events = [{ id: 'meeting', start: '2026-05-22T09:00:00' }];
+    const entries = [
+      entry({ ...baseTask, id: 'sched', scheduled_date: '2026-05-21' }, null),
+      entry({ ...baseTask, id: 'no-time', scheduled_date: '2026-05-21' }, null),
+    ];
+    const { timed, untimed } = mergeDayItems(events, entries, '2026-05-21', eventTime);
+    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id))).toEqual(['meeting']);
+    expect(untimed.map((e) => e.task.id)).toEqual(['sched', 'no-time']);
+  });
+
+  it('splits a real day the way the door answers it', () => {
     const tasks: Task[] = [
-      // Pure scheduled — no time of day.
-      { ...baseTask, id: 'sched', scheduled_date: '2026-05-21' },
-      // Deadline task whose deadline is a different day → no time here.
-      {
-        ...baseTask,
-        id: 'by-other-day',
-        deadline_date: '2026-05-22',
-        deadline_time: '14:00:00',
-      },
+      { ...baseTask, id: 'planned', scheduled_date: '2026-05-22', scheduled_time: '10:00:00' },
+      { ...baseTask, id: 'someday', scheduled_date: '2026-05-22' },
     ];
     const { timed, untimed } = mergeDayItems(
-      events,
-      tasks,
-      '2026-05-21',
+      [] as { start: string }[],
+      filterTasksOnDay(tasks, '2026-05-22'),
+      '2026-05-22',
       eventTime,
     );
-    expect(
-      timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)),
-    ).toEqual(['meeting']);
-    expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-other-day']);
+    expect(timed.map((i) => (i.kind === 'task' ? i.task.id : ''))).toEqual(['planned']);
+    expect(untimed.map((e) => e.task.id)).toEqual(['someday']);
   });
 });
 
@@ -395,7 +389,7 @@ describe('filterTasksOnDay — where a finished task sits', () => {
       status: 'completed',
       completed_at: new Date(2026, 7, 5, 18, 0).toISOString(),
     };
-    expect(filterTasksOnDay([done], '2026-08-05', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay([done], '2026-08-05', shown).map((e) => e.task.id)).toEqual([
       'abgehakt',
     ]);
     expect(filterTasksOnDay([done], '2026-08-06', shown)).toEqual([]);
@@ -413,7 +407,7 @@ describe('filterTasksOnDay — where a finished task sits', () => {
       status: 'completed',
       completed_at: lateEvening.toISOString(),
     };
-    expect(filterTasksOnDay([done], '2026-08-05', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay([done], '2026-08-05', shown).map((e) => e.task.id)).toEqual([
       'spaet',
     ]);
   });
@@ -427,7 +421,7 @@ describe('filterTasksOnDay — where a finished task sits', () => {
       status: 'completed',
       completed_at: null,
     };
-    expect(filterTasksOnDay([done], '2026-08-04', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay([done], '2026-08-04', shown).map((e) => e.task.id)).toEqual([
       'ohne-zeitstempel',
     ]);
   });
@@ -450,10 +444,10 @@ describe('filterTasksOnDay — where a finished task sits', () => {
       scheduled_date: '2026-08-12',
     };
     const tasks = [yesterdaysDose, todaysDose];
-    expect(filterTasksOnDay(tasks, '2026-08-11', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-08-11', shown).map((e) => e.task.id)).toEqual([
       'tabletten-gestern',
     ]);
-    expect(filterTasksOnDay(tasks, '2026-08-12', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay(tasks, '2026-08-12', shown).map((e) => e.task.id)).toEqual([
       'tabletten-heute',
     ]);
   });
@@ -469,7 +463,7 @@ describe('filterTasksOnDay — where a finished task sits', () => {
       completed_at: new Date(2026, 7, 12, 8, 30).toISOString(),
     };
     const moved: Task = { ...done, scheduled_date: '2026-08-09' };
-    expect(filterTasksOnDay([moved], '2026-08-09', shown).map((t) => t.id)).toEqual([
+    expect(filterTasksOnDay([moved], '2026-08-09', shown).map((e) => e.task.id)).toEqual([
       'verschoben',
     ]);
     expect(filterTasksOnDay([moved], '2026-08-11', shown)).toEqual([]);
@@ -490,7 +484,7 @@ describe('filterTasksOnDay — the door keeps the old tolerance', () => {
       deadline_date: '',
       deadline_time: '',
     };
-    expect(filterTasksOnDay([odd], '2026-05-20').map((t) => t.id)).toEqual(['odd']);
-    expect(taskTimeOnDay(odd, '2026-05-20')).toBeNull();
+    expect(filterTasksOnDay([odd], '2026-05-20').map((e) => e.task.id)).toEqual(['odd']);
+    expect(filterTasksOnDay([odd], '2026-05-20')[0].time).toBeNull();
   });
 });
