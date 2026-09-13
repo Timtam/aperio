@@ -267,6 +267,21 @@ pub fn occurrence_move_target(input_json: &str) -> Result<String, WireError> {
     cal_core::occurrence_move_target_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::selfAssignOnStatusChange`].
+pub fn self_assign_on_status_change(input_json: &str) -> Result<String, WireError> {
+    cal_core::self_assign_on_status_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::taskAssignmentMode`].
+pub fn task_assignment_mode(input_json: &str) -> Result<String, WireError> {
+    cal_core::task_assignment_mode_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::clampAssignees`].
+pub fn clamp_assignees(input_json: &str) -> Result<String, WireError> {
+    cal_core::clamp_assignees_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

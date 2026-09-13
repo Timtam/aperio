@@ -103,6 +103,13 @@ export type { OccurrenceRow } from './generated/OccurrenceRow';
 export type { NextOccurrenceInput } from './generated/NextOccurrenceInput';
 export type { MoveTargetInput } from './generated/MoveTargetInput';
 export type { MoveTarget } from './generated/MoveTarget';
+// The assignment rules, `cal_core::task_assignment`. The shell in
+// `shared/taskAssignment.ts` speaks these.
+export type { SelfAssignInput } from './generated/SelfAssignInput';
+export type { SelfAssignOutcome } from './generated/SelfAssignOutcome';
+export type { AssignmentCapabilities } from './generated/AssignmentCapabilities';
+export type { AssignmentModeInput } from './generated/AssignmentModeInput';
+export type { ClampAssigneesInput } from './generated/ClampAssigneesInput';
 
 /**
  * A task list as the frontends receive it when they LIST them: the

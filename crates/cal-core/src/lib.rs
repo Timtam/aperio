@@ -95,7 +95,12 @@ pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurre
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
-pub use task_assignment::is_mine_or_unassigned;
+pub use task_assignment::{
+    clamp_assignees, clamp_assignees_json, is_mine_or_unassigned, self_assign_on_status_change,
+    self_assign_on_status_json, task_assignment_mode, task_assignment_mode_json,
+    AssignmentCapabilities, AssignmentModeInput, ClampAssigneesInput, SelfAssignInput,
+    SelfAssignOutcome,
+};
 pub use task_cascade::{
     auto_date_on_start, auto_date_on_start_json, derive_status_from_children,
     plan_ancestor_recompute, plan_ancestor_recompute_json, plan_status_cascade,
@@ -130,6 +135,6 @@ pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     ContactValue, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember,
     MemberRight, MonthDay, NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd,
-    RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskEffort, TaskList, TaskListShare,
-    TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
+    RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
+    TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };

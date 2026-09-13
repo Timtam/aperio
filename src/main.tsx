@@ -13,6 +13,7 @@ import {
   installTaskStatusRules,
   installTaskCascadeRules,
   installTaskOccurrenceRules,
+  installTaskAssignmentRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -47,6 +48,9 @@ import {
   expandTaskOccurrencesJson,
   nextTaskOccurrenceJson,
   occurrenceMoveTargetJson,
+  selfAssignOnStatusChangeJson,
+  taskAssignmentModeJson,
+  clampAssigneesJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -156,6 +160,14 @@ initCoreRules()
       expandTaskOccurrencesJson,
       nextTaskOccurrenceJson,
       occurrenceMoveTargetJson,
+    });
+
+    // The assignment rules: who holds a task after a status change, and what
+    // a list can hold.
+    installTaskAssignmentRules({
+      selfAssignOnStatusChangeJson,
+      taskAssignmentModeJson,
+      clampAssigneesJson,
     });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(

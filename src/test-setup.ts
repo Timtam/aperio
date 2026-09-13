@@ -49,6 +49,7 @@ import {
   installTaskStatusRules,
   installTaskCascadeRules,
   installTaskOccurrenceRules,
+  installTaskAssignmentRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -80,6 +81,9 @@ import {
   expandTaskOccurrencesJson,
   nextTaskOccurrenceJson,
   occurrenceMoveTargetJson,
+  selfAssignOnStatusChangeJson,
+  taskAssignmentModeJson,
+  clampAssigneesJson,
   isImportantPriority,
   markCoreRulesReady,
   normalPriority,
@@ -140,4 +144,9 @@ installTaskOccurrenceRules({
   expandTaskOccurrencesJson,
   nextTaskOccurrenceJson,
   occurrenceMoveTargetJson,
+});
+installTaskAssignmentRules({
+  selfAssignOnStatusChangeJson,
+  taskAssignmentModeJson,
+  clampAssigneesJson,
 });

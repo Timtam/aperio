@@ -317,6 +317,20 @@ public class CalFfiModule: Module {
       try occurrenceMoveTarget(inputJson: inputJson)
     }
 
+    // The assignment rules: who holds a task after a status change, how many
+    // a list can hold, what a list of assignees is trimmed to.
+    Function("selfAssignOnStatusChange") { (inputJson: String) -> String in
+      try selfAssignOnStatusChange(inputJson: inputJson)
+    }
+
+    Function("taskAssignmentMode") { (inputJson: String) -> String in
+      try taskAssignmentMode(inputJson: inputJson)
+    }
+
+    Function("clampAssignees") { (inputJson: String) -> String in
+      try clampAssignees(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

@@ -1553,10 +1553,24 @@ Siehe DESIGN §4.2.
   („nimm mich"), nie eine Nutzer-Zeile. `taskAssignment.contract.test.ts`
   spielt zurück (27 Tests); rot bewiesen (Zurücktreten leert alles → drei
   Zeilen fallen).
-  ↳ Schritt 2 (offen): Türen `selfAssignOnStatusChange`, `taskAssignmentMode`,
-  `clampAssignees` in `cal_core::task_assignment`; `TaskAssignment`/
-  `TaskCapabilities` liegen in `plugin-core` — die Tür nimmt den Modus als
-  Zeichenkette, damit `cal-core` keine Abhängigkeit nach oben bekommt.
+  ↳ **Schritt 2 (Folge-PR auf #55): gebaut.** `cal_core::task_assignment`
+  beantwortet die drei Fragen: `self_assign_on_status_json` mit einem
+  ZUSTAND (`unchanged` / `assign_me` / `keep {positions}` — welche der
+  gegebenen Zuweisungen bleiben, in Reihenfolge), `task_assignment_mode_json`
+  (liest nur `task_assignment` aus dem Fähigkeiten-Block, fehlend = keine),
+  `clamp_assignees_json` (Positionen; `single` behält die erste). Ein Nutzer
+  ist auf der Leitung seine Id — die Regeln vergleichen nur Ids —, und keine
+  Nutzer-Zeile wird zurückgegeben. `TaskAssignment` ist statt einer
+  Zeichenkette NACH UNTEN gezogen: die Aufzählung liegt jetzt in `cal-core`,
+  `plugin-core` reexportiert sie unter dem alten Pfad (kein Aufrufer im
+  Manifest geändert, das erzeugte `TaskAssignment.ts` ist dasselbe). Drei
+  Türen auf beiden Oberflächen, fünf Wire-Typen erzeugt. Die Hülle schickt
+  Ids und legt Positionen über die eigenen Nutzer-Objekte; Signaturen der drei
+  Funktionen unverändert, kein Aufrufer geändert. `classifyDoneByMe` (tot seit
+  #42) ist gelöscht; `isMineOrUnassigned` bleibt als TypeScript für
+  `shared/dayStart.ts`, weiter durch `taskOwnership.json` gepinnt. Rust 4/4
+  beim ersten Lauf, rot bewiesen (Zurücktreten behält mich statt der anderen
+  → Zeilen-Test und Draht-Test fallen).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

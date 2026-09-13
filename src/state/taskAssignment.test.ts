@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import type { TaskUser } from '../api/types';
 import {
   clampAssignees,
-  classifyDoneByMe,
   isMineOrUnassigned,
   selfAssignOnStatusChange,
   taskAssignmentMode,
@@ -40,7 +39,7 @@ describe('selfAssignOnStatusChange', () => {
   });
 });
 
-describe('isMineOrUnassigned / classifyDoneByMe', () => {
+describe('isMineOrUnassigned', () => {
   it('treats no-identity, unassigned, and assigned-to-me as mine', () => {
     expect(isMineOrUnassigned([other], null)).toBe(true);
     expect(isMineOrUnassigned([], me)).toBe(true);
@@ -50,13 +49,6 @@ describe('isMineOrUnassigned / classifyDoneByMe', () => {
 
   it('treats a task assigned only to others as not mine', () => {
     expect(isMineOrUnassigned([other], me)).toBe(false);
-  });
-
-  it('classifyDoneByMe mirrors the ownership predicate', () => {
-    expect(classifyDoneByMe([], me)).toBe('me');
-    expect(classifyDoneByMe([me], me)).toBe('me');
-    expect(classifyDoneByMe([other], me)).toBe('other');
-    expect(classifyDoneByMe([other], null)).toBe('me');
   });
 });
 
