@@ -37,11 +37,19 @@
 //! that inline (`tests/fixtures/dayStartPlan.json`, measured from them). Two
 //! answers changed on purpose, decided 2026-09-13. A slipped row that a
 //! carried root brings along is that root's, not a row of its own: it used to
-//! be carried by both batches, the later one winning. And the batch walk
-//! brings only tasks that are mine or nobody's, like every other day-start
-//! rule. A row a coupled root takes lives in an uncoupled list (in a coupled
-//! one it would already be hidden below its slipped parent), and an uncoupled
-//! list brings nothing, so taking never goes both ways.
+//! count as a row as well, was asked about after the batch had moved it, and
+//! when its own list carried the other way it was written by both batches,
+//! the later one winning. And the batch walk brings only tasks that are mine
+//! or nobody's, the ownership the rows themselves are chosen by.
+//!
+//! No slipped row is lost to that. With unique ids a taken row lives in an
+//! uncoupled list (in a coupled one it is already hidden below its slipped
+//! parent), and the topmost carried root writes it. Two accounts can repeat
+//! ids, though, and then the walk down (every row with that parent id) and
+//! the climb up (the last row with that id) can follow different rows, so
+//! roots can take each other. A taken row that no remaining batch would write
+//! therefore stays in its own part. And targets are collected per row, not per
+//! id: two rows with one id are two tasks, and both are written.
 //!
 //! # Day keys are text, the way the TypeScript read them
 //!
@@ -770,9 +778,8 @@ fn reminder_groups_in(
 /// notes). Rows keep their input order within each part. A batch writes each
 /// of its rows and, where the row's list couples, the actionable tasks below
 /// it that are mine or nobody's; a slipped row one of them brings along is
-/// that root's and leaves its own part. Targets are keyed by id, like the
-/// JavaScript `Map` they were collected into: a later row with an id already
-/// collected takes the earlier one's place.
+/// that root's and leaves its own part, unless no batch would write it then.
+/// Each row is written once.
 pub fn plan(
     tasks: &[DayStartTask],
     today: &str,
@@ -813,20 +820,32 @@ pub fn plan(
         })
         .collect();
     // The parent decides: a row brought along is not a row of its own.
-    let taken: HashSet<usize> = below.values().flatten().copied().collect();
-
-    let mut ask = Vec::new();
-    let mut today_rows = Vec::new();
-    let mut backlog_rows = Vec::new();
-    for &i in &slipped {
-        if taken.contains(&i) {
-            continue;
+    let mut taken: HashSet<usize> = below.values().flatten().copied().collect();
+    let split = |taken: &HashSet<usize>| {
+        let mut parts = (Vec::new(), Vec::new(), Vec::new());
+        for &i in &slipped {
+            if taken.contains(&i) {
+                continue;
+            }
+            match carry(&tasks[i]) {
+                CarryOverDefault::Ask => parts.0.push(i),
+                CarryOverDefault::Today => parts.1.push(i),
+                CarryOverDefault::Backlog => parts.2.push(i),
+            }
         }
-        match carry(&tasks[i]) {
-            CarryOverDefault::Ask => ask.push(i),
-            CarryOverDefault::Today => today_rows.push(i),
-            CarryOverDefault::Backlog => backlog_rows.push(i),
-        }
+        parts
+    };
+    let (mut ask, mut today_rows, mut backlog_rows) = split(&taken);
+    // Unless no batch would write it then: roots that take each other, which
+    // repeated ids make possible, keep their own parts rather than vanish.
+    let written: HashSet<usize> = today_rows
+        .iter()
+        .chain(&backlog_rows)
+        .flat_map(|root| std::iter::once(*root).chain(below[root].iter().copied()))
+        .collect();
+    if taken.iter().any(|i| !written.contains(i)) {
+        taken.retain(|i| written.contains(i));
+        (ask, today_rows, backlog_rows) = split(&taken);
     }
 
     let reminders = reminder_groups_in(&index, today, &owners, settings);
@@ -836,8 +855,8 @@ pub fn plan(
         + reminders.due_today.len()
         + reminders.countdown.len();
     DayStartPlan {
-        today_targets: batch_targets(tasks, &today_rows, &below),
-        backlog_targets: batch_targets(tasks, &backlog_rows, &below),
+        today_targets: batch_targets(&today_rows, &below),
+        backlog_targets: batch_targets(&backlog_rows, &below),
         overdue,
         ask,
         today: today_rows,
@@ -847,23 +866,17 @@ pub fn plan(
     }
 }
 
-/// Each root, then what it brings along, keyed by id.
-fn batch_targets(
-    tasks: &[DayStartTask],
-    roots: &[usize],
-    below: &HashMap<usize, Vec<usize>>,
-) -> Vec<usize> {
-    let mut out: Vec<usize> = Vec::new();
-    let mut slot: HashMap<&str, usize> = HashMap::new();
+/// Each root, then what it brings along, each row once. Two rows with the
+/// same id are two tasks and both are written; the JavaScript `Map` this
+/// replaced was keyed by id and kept only the later one.
+fn batch_targets(roots: &[usize], below: &HashMap<usize, Vec<usize>>) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
     for &root in roots {
         let brought = below.get(&root).into_iter().flatten().copied();
         for i in std::iter::once(root).chain(brought) {
-            match slot.get(tasks[i].id.as_str()) {
-                Some(&at) => out[at] = i,
-                None => {
-                    slot.insert(tasks[i].id.as_str(), out.len());
-                    out.push(i);
-                }
+            if seen.insert(i) {
+                out.push(i);
             }
         }
     }
@@ -1536,6 +1549,9 @@ mod plan_contract {
             "a-coupled-root-brings-its-actionable-descendants",
             "a-subtask-in-a-backlog-list-follows-its-today-root",
             "a-colleagues-subtask-stays-behind",
+            "an-asked-subtask-under-a-carried-root-is-no-question",
+            "a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it",
+            "a-colleagues-middle-task-is-walked-through",
             "the-scheduler-plans-a-future-morning",
         ] {
             assert!(
@@ -1623,22 +1639,92 @@ mod plan_contract {
         assert_eq!(p.surfaced, 1);
     }
 
+    fn in_list(mut row: DayStartTask, list: &str) -> DayStartTask {
+        row.list_id = list.into();
+        row
+    }
+
+    fn list(id: &str, cascade: bool, carry: CarryOverDefault) -> DayStartListSettings {
+        DayStartListSettings {
+            list_id: id.into(),
+            cascade,
+            carry_over_default: carry,
+        }
+    }
+
     #[test]
-    fn a_later_row_with_a_collected_id_takes_its_place() {
-        // Two accounts, one id: the second row replaces the first in the batch,
-        // in the first one's slot, as the JavaScript `Map` did.
+    fn two_rows_with_one_id_are_both_written() {
+        // Two accounts, one id: two tasks. The JavaScript `Map` kept only the
+        // later one, and the earlier stayed slipped every morning.
         let tasks = vec![
             task("x", None, Some("2026-05-10")),
             task("x", None, Some("2026-05-11")),
         ];
-        let lists = [DayStartListSettings {
-            list_id: "list".into(),
-            cascade: false,
-            carry_over_default: CarryOverDefault::Today,
-        }];
+        let lists = [list("list", false, CarryOverDefault::Today)];
         let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
         assert_eq!(p.today, vec![0, 1]);
-        assert_eq!(p.today_targets, vec![1]);
+        assert_eq!(p.today_targets, vec![0, 1]);
+    }
+
+    #[test]
+    fn a_taken_row_that_shares_an_id_is_still_written_by_its_root() {
+        // The asked subtask leaves its part because the root brings it along,
+        // and the root's batch writes it, beside the other row with its id.
+        let tasks = vec![
+            in_list(task("p", None, Some("2026-05-10")), "L1"),
+            in_list(task("c", Some("p"), Some("2026-05-10")), "L2"),
+            in_list(task("c", Some("p"), None), "L1"),
+        ];
+        let lists = [
+            list("L1", true, CarryOverDefault::Today),
+            list("L2", false, CarryOverDefault::Ask),
+        ];
+        let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
+        assert!(p.ask.is_empty());
+        assert_eq!(p.today, vec![0]);
+        assert_eq!(p.today_targets, vec![0, 1, 2]);
+        assert_eq!(p.surfaced, 0);
+    }
+
+    #[test]
+    fn roots_that_take_each_other_both_keep_their_rows() {
+        // Repeated ids let the walk down follow rows the climb up does not:
+        // `a` reaches `b` and `b` reaches `a`. Neither vanishes; each stays a
+        // row, and every task below is written once.
+        let tasks = vec![
+            task("a", Some("m"), Some("2026-05-10")),
+            task("m", Some("b"), None),
+            task("b", Some("n"), Some("2026-05-10")),
+            task("n", Some("a"), None),
+            in_list(task("m", None, None), "L2"),
+            in_list(task("n", None, None), "L2"),
+        ];
+        let lists = [
+            list("list", true, CarryOverDefault::Today),
+            list("L2", true, CarryOverDefault::Today),
+        ];
+        let p = plan(&tasks, "2026-05-20", &[], &lists, &quiet());
+        assert_eq!(p.today, vec![0, 2]);
+        let mut written = p.today_targets.clone();
+        written.sort_unstable();
+        assert_eq!(written, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn the_batch_walk_leaves_a_colleagues_task_behind_through_the_door() {
+        let question = |identities: &str| {
+            format!(
+                r#"{{"rule":"actionable_descendants_of","root_ids":["p"],{identities}"tasks":[
+                {{"id":"p","list_id":"list","status":"open"}},
+                {{"id":"m","list_id":"list","status":"open","parent_id":"p","assignees":["colleague"]}},
+                {{"id":"g","list_id":"list","status":"open","parent_id":"m"}}]}}"#
+            )
+        };
+        let mine = day_start_json(&question(r#""identities":[{"list_id":"list","me":"me"}],"#))
+            .expect("a question");
+        assert_eq!(mine, "[[2]]");
+        let anyone = day_start_json(&question("")).expect("a question");
+        assert_eq!(anyone, "[[1,2]]");
     }
 
     #[test]

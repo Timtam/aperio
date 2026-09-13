@@ -1,6 +1,6 @@
 {
   "what": "What the day-start sites compose from the day-start rules every morning, as a table: the overdue tasks, the slipped rows split by each list’s carry-over default into asked, carried to today and carried to the backlog, the silent batches’ targets (each root plus, where its list couples, its actionable descendants), the three reminder groups, and the count that opens the review. Measured from the TypeScript before the port.",
-  "why": "The composition exists three times inline — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule (for future mornings, count only) — and a frontend that is not JavaScript would write it a fourth time. One question to the core answers it for all of them.",
+  "why": "The composition existed three times inline — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule (for future mornings, count only) — and a frontend that is not JavaScript would have written it a fourth time. Since the port it is one question to the core, cal_core::day_start::plan.",
   "writtenBy": [
     "src/components/dayStartPlan.measure.test.ts — a one-off, run once and deleted. It ran `measuredPlan` in dayStartPlan.contractSupport.ts, which is the desktop checker’s inline block copied verbatim, target collection included, over the day-start rules as they are in the core since #61.",
     "With the port, three rows were changed and three added on purpose (decided 2026-09-13); each says so in its note."
@@ -704,7 +704,7 @@
       }
     },
     {
-      "name": "a-descendant-that-is-also-a-row-is-targeted-once",
+      "name": "a-subtask-in-an-uncoupled-list-is-its-carried-roots-alone",
       "note": "Changed on purpose in the port, decided 2026-09-13: the parent decides. The subtask’s list is uncoupled, which once made it a row of its own; its parent’s coupled list brings it along, so it is now only that root’s target, and the announcement counts one carried task, not two.",
       "input": {
         "today": "2026-05-20",
@@ -1032,7 +1032,7 @@
     },
     {
       "name": "a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it",
-      "note": "Added with the port, decided 2026-09-13, not measured. The middle task’s uncoupled backlog list brings nothing and makes it no row of its own; the topmost carried root takes it and its subtask.",
+      "note": "Added with the port, decided 2026-09-13, not measured. The middle task’s uncoupled backlog list makes it a row of its own and brings nothing below it; the topmost carried root takes it and its subtask, so it leaves the backlog part.",
       "addedWithThePort": true,
       "input": {
         "today": "2026-05-20",

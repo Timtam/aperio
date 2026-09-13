@@ -100,6 +100,19 @@ describe('dayStart contract', () => {
     expect(actionableDescendantsOf([], [])).toEqual([]);
   });
 
+  it('leaves a colleague\'s task behind in the batch walk when asked with meFor', () => {
+    // The bulk carry buttons pass meFor; the per-row action does not.
+    const colleague = { id: 'colleague', name: 'Colleague', email: null };
+    const tasks = [
+      { ...base, id: 'p' },
+      { ...base, id: 'm', parent_id: 'p', assignees: [colleague] },
+      { ...base, id: 'g', parent_id: 'm' },
+    ] as Task[];
+    const me = { id: 'me', name: 'Me', email: null };
+    expect(actionableDescendantsOf(['p'], tasks, () => me)).toEqual([[tasks[2]]]);
+    expect(actionableDescendantsOf(['p'], tasks)).toEqual([[tasks[1], tasks[2]]]);
+  });
+
   for (const c of contract.hasActionableDescendants) {
     it(`has actionable descendants: ${c.name}`, () => {
       expect(answerHasActionableDescendants(c.input as TreeInput, base), c.note).toEqual(c.expect);

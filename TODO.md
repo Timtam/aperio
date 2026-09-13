@@ -1768,16 +1768,33 @@ Siehe DESIGN §4.2.
   `runAutoCarryOverBatch` sind weg. ZWEI Antworten absichtlich geändert
   (Toni, 2026-09-13): **die Elternaufgabe entscheidet** — eine verschleppte
   Zeile, die eine still übertragene Wurzel mitbringt, ist keine eigene Zeile
-  mehr (vorher in beiden Stapeln, der spätere gewann; auch keine Frage mehr
-  über eine schon verschobene Aufgabe); und **der Stapel bringt nur, was mir
-  oder niemandem gehört** (vorher auch die offene Unteraufgabe einer
-  Kollegin; der Weg geht durch sie hindurch weiter). Mitnehmen kann nicht in
-  beide Richtungen gehen: eine genommene Zeile liegt in einer ungekoppelten
-  Liste, und die bringt nichts. Die Sammel-Knöpfe in Dialog und Modal fragen
+  mehr (vorher zählte sie doppelt, wurde nach dem Verschieben noch gefragt und
+  mit anderem Standard ihrer eigenen Liste von beiden Stapeln geschrieben, der
+  spätere gewann); und **der Stapel bringt nur, was mir oder niemandem
+  gehört** — dieselbe Zuständigkeit, nach der die Zeilen selbst gewählt werden
+  (vorher auch die offene Unteraufgabe einer Kollegin; der Weg geht durch sie
+  hindurch weiter). Die Sammel-Knöpfe in Dialog und Modal fragen
   die Stapelform jetzt mit `meFor`; die Einzel-Aktion je Zeile bleibt ohne
   Zuständigkeit. Fixture: drei Zeilen geändert, drei neu (je mit Notiz), 22
   Fälle. Rust 24/24 beim ersten Lauf; rot bewiesen (Mitnehmen ausgeschaltet →
   die Plan-Zeilen fallen).
+  ↳ **Vom Review gefunden und behoben:** mit wiederholten Ids (zwei Konten)
+  ging eine verschleppte Aufgabe verloren — nicht gefragt, von keinem Stapel
+  geschrieben. Zwei Wege dahin: die Ziele waren nach Id gesammelt, so dass eine
+  zweite Zeile mit derselben Id die genommene verdrängte; und Wurzeln konnten
+  einander nehmen, weil der Weg nach unten jeder Zeile mit der Eltern-Id folgt,
+  der Aufstieg aber nur der letzten Zeile mit einer Id. Jetzt werden Ziele je
+  Zeile gesammelt (zwei Zeilen mit einer Id sind zwei Aufgaben und werden beide
+  geschrieben — die JavaScript-`Map` behielt nur die spätere), und eine
+  genommene Zeile, die kein verbleibender Stapel schriebe, bleibt in ihrem
+  Teil. Mit eindeutigen Ids ändert sich nichts (200.000 Zufallsmorgen gegen eine
+  unabhängige Nachbildung der Entscheidungen: keine unerklärte Abweichung).
+  Dazu: die Begründungen im Moduldoc, hier und im PR waren zu stark („nie in
+  beide Richtungen“, „in beiden Stapeln“, „wie jede andere Regel“), der
+  Dialog-Kommentar nannte Sammel-Knöpfe und Einzel-Aktion gleich, der
+  Besitz-Weg der Sammel-Knöpfe hatte keinen Test (jetzt in Rust durch die Tür
+  und in TypeScript), die Namens-Wächter nannten die neuen Zeilen nicht, und
+  zwei Fixture-Texte beschrieben den Stand vor dem Umzug.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

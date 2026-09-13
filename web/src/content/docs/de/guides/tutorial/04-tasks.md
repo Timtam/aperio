@@ -378,9 +378,9 @@ Aperio die Zuordnung für dich pflegen. Mit **Einstellungen → Aufgaben →
   12 von mir, 3 von anderen"*, damit du siehst, was du selbst geschafft hast.
 - Der **Tagesbeginn-Überblick** schlägt dir nur Aufgaben vor, die **dir oder
   niemandem** zugewiesen sind; eine Aufgabe einer anderen Person bleibt bei ihr.
-  Trägt eine Liste verpasste Aufgaben von selbst auf heute oder in den Backlog,
-  wandern auch nur Unteraufgaben mit, die **dir oder niemandem** gehören – die
-  Unteraufgabe einer anderen Person behält ihren Tag.
+  Übernimmt eine Liste liegengebliebene Aufgaben automatisch auf heute oder
+  verschiebt sie ins Backlog, wandern nur Unteraufgaben mit, die **dir oder
+  niemandem** gehören – die Unteraufgabe einer anderen Person behält ihren Tag.
 - Die **Kalenderansichten** (Tag, Woche, Monat) zeigen ebenso nur Aufgaben, die
   **dir oder niemandem** zugewiesen sind – eine Aufgabe einer anderen Person
   erscheint nicht in deinem Kalender.

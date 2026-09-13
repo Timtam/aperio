@@ -15,7 +15,7 @@
   "notInThisTable": {
     "reminderCount": "the sum of three lengths — the shell’s",
     "isMineOrUnassigned": "already the core’s (cal_core::is_mine_or_unassigned), pinned by shared/contracts/taskOwnership.json; the rows here exercise it through `currentUserByList`",
-    "the day-start composition": "splitting slipped rows by each list’s carry-over default, the “surfaced” count that opens the review, and the silent batch’s targets (a root plus its actionable descendants where coupling is on) exist THREE times — the desktop DayStartReviewChecker, the mobile useDayStartChecks and the mobile dayStartSchedule — plus the bulk carry in both review dialogs. Not a function today, so not measurable here; the next step of the arc.",
+    "the day-start composition": "measured after this table and since moved into the core as cal_core::day_start::plan (the rule \"plan\"), pinned by its own table, dayStartPlan.json",
     "effectiveForList": "the per-list override resolution exists on both surfaces (TaskCascadeProvider, taskBehaviour); a later step",
     "snooze, fired markers, tomorrowIsoKey": "storage and the clock — the platform’s",
     "dayStartPreschedulesOsNotification": "mobile-only delivery policy for OS notifications",

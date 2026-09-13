@@ -29,9 +29,12 @@ describe('dayStartPlan contract', () => {
       'overdue-counts-whatever-the-list-carries',
       'the-count-adds-all-three-sections',
       'a-coupled-root-brings-its-actionable-descendants',
-      'a-descendant-that-is-also-a-row-is-targeted-once',
+      'a-subtask-in-an-uncoupled-list-is-its-carried-roots-alone',
       'a-subtask-in-a-backlog-list-follows-its-today-root',
       'a-colleagues-subtask-stays-behind',
+      'an-asked-subtask-under-a-carried-root-is-no-question',
+      'a-carried-root-brings-an-uncoupled-row-and-what-lies-below-it',
+      'a-colleagues-middle-task-is-walked-through',
       'the-scheduler-plans-a-future-morning',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);
