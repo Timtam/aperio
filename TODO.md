@@ -1482,7 +1482,8 @@ Siehe DESIGN §4.2.
   ungültiger Fester Daten ist ein eigener Punkt (unten). Rust 4/4 beim ersten
   Lauf (62 Zeilen + Draht), rot bewiesen (Verwerf-Regel entfernt → die
   Tag-32-Zeile und die Alle-ungültig-Zeile fallen).
-- [ ] 🚩 **Spawner und Projektor lesen ungültige Feste Daten verschieden.**
+- [x] **Spawner und Projektor lesen ungültige Feste Daten verschieden.** ENTSCHIEDEN
+  UND ANGEGLICHEN (siehe unten).
   `spawn::next_fixed_date_after` KLEMMT Tag 32 auf den Monatsletzten und Tag 0
   auf den 1.; `fromBackend` (und jetzt `task_occurrences::projector_rule`)
   VERWIRFT solche Einträge. Dasselbe beim Monatstag: `spawn::advance` klemmt
@@ -1500,6 +1501,20 @@ Siehe DESIGN §4.2.
   `monthly-day-of-month-clamps-to-short-months` bleiben, wie sie sind. (Vom
   dritten Gegenleser des Port-PRs gefunden: die Flagge nannte nur die Festen
   Daten.)
+  ↳ **Angeglichen: das Verwerfen, auf beiden Seiten.** `spawn.rs` liest eine
+  Regel jetzt wie der Projektor — `is_valid_month_day` (Monat 1..12, Tag 1..31)
+  entscheidet, ob ein Fester Trigger überhaupt einen Kalendertag benennt;
+  ungültige werden übersprungen, und nur eine Regel mit mindestens einem
+  gültigen Trigger ist eine Feste-Daten-Regel (sonst läuft die Frequenz, auch
+  im Backlog-Zweig). `advance` ignoriert einen Monatstag außerhalb 1..31 statt
+  ihn zu klemmen (0 lieferte vorher gar kein Datum). Ein GÜLTIGER Tag über
+  die Monatslänge hinaus klemmt weiter (30. Februar = Monatsende), beide
+  Seiten. `task_occurrences::projector_rule` ist damit weg — der Projektor
+  braucht keine eigene Lesart mehr, die Fixture-Zeilen laufen unverändert
+  durch dieselben Schrittfunktionen. Sieben Spawner-Tests pinnen die Lesart
+  (Tag 32/Monat 13/Tag 0 verworfen, ungültig neben gültig ignoriert, 30.
+  Februar klemmt, Backlog mit nur ungültigen Triggern nimmt sein Intervall,
+  Monatstag 0 und 40 schreiten in ganzen Monaten, Monatstag 31 klemmt).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

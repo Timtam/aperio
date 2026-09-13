@@ -30,21 +30,22 @@
 //! next open instance the backend spawns). Everything else passes through
 //! unchanged, in place, with its own day.
 //!
-//! # The projector's reading of a rule
+//! # One reading of a rule
 //!
-//! The spawner and the projector step the same way ([`crate::spawn::advance`])
-//! with one pinned difference: the projector DROPS an invalid fixed date (day
-//! 0 or 32, month 13) and, with none left, walks by the frequency — the
-//! TypeScript sanitised the rule before it looked — while the spawner clamps
-//! the day. A day of month outside 1..=31 is likewise no day of month here,
-//! while the spawner clamps 32 and up to the month's end and finds no date at
-//! all for 0 — the same divergence, flagged in TODO.md for one decision that
-//! covers both. Pinned row by row in `tests/fixtures/taskOccurrences.json`,
-//! measured from the TypeScript this replaces; the `contract` module below
-//! reads it, and so does the TypeScript contract test on the other side of the
-//! boundary. One quirk was not carried over: JavaScript's `Date.UTC` mapped
-//! the years 0 to 99 onto 1900 to 1999, so a base in such a year walked into
-//! the twentieth century; chrono stays in the year, as the spawner always has.
+//! The spawner and the projector step the same way ([`crate::spawn::advance`],
+//! [`crate::spawn::next_trigger`]) and read a rule the same way: a fixed date
+//! that names no calendar day (day 0 or 32, month 13) is dropped and, with none
+//! left, the frequency walks; a day of month outside 1..=31 is no day of month.
+//! That was the projector's reading from the start — the TypeScript sanitised
+//! the rule before it looked — and the spawner clamped instead until it was
+//! brought in line (`spawn.rs`, "One reading of a rule"), so the days the
+//! calendar shows are the days a completion creates. Pinned row by row in
+//! `tests/fixtures/taskOccurrences.json`, measured from the TypeScript this
+//! replaces; the `contract` module below reads it, and so does the TypeScript
+//! contract test on the other side of the boundary. One quirk was not carried
+//! over: JavaScript's `Date.UTC` mapped the years 0 to 99 onto 1900 to 1999,
+//! so a base in such a year walked into the twentieth century; chrono stays in
+//! the year, as the spawner always has.
 //!
 //! # Bounds
 //!
@@ -140,28 +141,8 @@ pub const DEFAULT_MAX_PER_TASK: usize = 400;
 /// window. 100k daily steps ≈ 270 years, far beyond any real gap.
 const MAX_STEPS: usize = 100_000;
 
-/// The rule as the projector reads it (see the module doc): invalid fixed
-/// dates dropped, and none left means none; a day of month outside 1..=31
-/// means none.
-fn projector_rule(rule: &TaskRecurrence) -> TaskRecurrence {
-    let mut r = rule.clone();
-    r.day_of_month = r.day_of_month.filter(|d| (1..=31).contains(d));
-    r.fixed_dates = r
-        .fixed_dates
-        .as_ref()
-        .map(|dates| {
-            dates
-                .iter()
-                .copied()
-                .filter(|md| (1..=12).contains(&md.month) && (1..=31).contains(&md.day))
-                .collect::<Vec<_>>()
-        })
-        .filter(|dates| !dates.is_empty());
-    r
-}
-
 /// The rule IF this task can be projected (module doc: deterministic, dated,
-/// scheduled, not terminal), read the projector's way.
+/// scheduled, not terminal).
 fn expandable(task: &OccurrenceTask) -> Option<TaskRecurrence> {
     if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
         return None;
@@ -171,7 +152,7 @@ fn expandable(task: &OccurrenceTask) -> Option<TaskRecurrence> {
     {
         return None;
     }
-    Some(projector_rule(rule))
+    Some(rule.clone())
 }
 
 /// The occurrences of every task inside `[from, to]`, in emission order: for
@@ -244,12 +225,12 @@ pub fn next_task_occurrence(
     scheduled: NaiveDate,
     rule: Option<&TaskRecurrence>,
 ) -> Option<NaiveDate> {
-    let rule = projector_rule(rule?);
-    let next = next_trigger(scheduled, &rule)?;
+    let rule = rule?;
+    let next = next_trigger(scheduled, rule)?;
     if next == scheduled {
         return None; // non-advancing rule guard
     }
-    if recurrence_ended(&rule, next) {
+    if recurrence_ended(rule, next) {
         return None;
     }
     Some(next)

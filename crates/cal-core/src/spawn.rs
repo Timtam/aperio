@@ -6,6 +6,20 @@
 //! trigger. No IO, no idempotency: the caller decides whether to actually
 //! create the result (local adapter via SQL, the host orchestration via the
 //! owning external adapter — DESIGN §9.12 "runs for external lists too").
+//!
+//! # One reading of a rule
+//!
+//! The projector (`task_occurrences`) walks on this module's stepping, so
+//! the days the calendar shows are the days a completion will create. That
+//! holds only if both read a rule the same way, and for two fields they did
+//! not: a fixed date that names no calendar day (day 0 or 32, month 13) was
+//! CLAMPED here and DROPPED there, and a `day_of_month` outside 1..=31 was
+//! clamped here (and found no date at all for 0, so nothing was spawned) and
+//! ignored there. No editor writes such values; a sync-transferred or
+//! externally written row could. Now both drop: a trigger nobody could have
+//! meant produces no date rather than a guessed one, and with no valid
+//! trigger left the frequency walks. A VALID day past a month's length still
+//! clamps (Feb 30 → Feb 28), on both sides.
 
 use chrono::{Datelike, Days, Months, NaiveDate};
 
@@ -81,7 +95,11 @@ pub(crate) fn recurrence_ended(rule: &TaskRecurrence, date: NaiveDate) -> bool {
 /// Next trigger date for a `Schedule`-placement rule: the next `fixed_dates`
 /// entry when set, otherwise `advance` by frequency × interval.
 pub(crate) fn next_trigger(base: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
-    match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
+    match rule
+        .fixed_dates
+        .as_ref()
+        .filter(|d| d.iter().any(is_valid_month_day))
+    {
         Some(dates) => next_fixed_date_after(base, dates),
         None => advance(base, rule),
     }
@@ -89,17 +107,17 @@ pub(crate) fn next_trigger(base: NaiveDate, rule: &TaskRecurrence) -> Option<Nai
 
 /// The earliest `MonthDay` strictly after `from`, scanning the current year
 /// then the next so wrap-around (e.g. completing in November with an April
-/// trigger) lands on next April. Out-of-range months are skipped; a day past
-/// the month's length is clamped (Feb 30 → Feb 28/29).
+/// trigger) lands on next April. A trigger that names no calendar day is
+/// dropped ([`is_valid_month_day`]); a valid day past the month's length is
+/// clamped (Feb 30 → Feb 28/29).
 fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDate> {
     let mut best: Option<NaiveDate> = None;
     for year in [from.year(), from.year() + 1] {
         for md in dates {
-            if !(1..=12).contains(&md.month) {
+            if !is_valid_month_day(md) {
                 continue;
             }
-            let day = u32::from(md.day).max(1);
-            let Some(cand) = clamp_to_month(year, u32::from(md.month), day) else {
+            let Some(cand) = clamp_to_month(year, u32::from(md.month), u32::from(md.day)) else {
                 continue;
             };
             if cand > from && best.is_none_or(|b| cand < b) {
@@ -209,7 +227,11 @@ fn next_backlog_instance(
     completion_date: NaiveDate,
 ) -> Option<NewTask> {
     let from = completion_date;
-    let resurface: Option<NaiveDate> = match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
+    let resurface: Option<NaiveDate> = match rule
+        .fixed_dates
+        .as_ref()
+        .filter(|d| d.iter().any(is_valid_month_day))
+    {
         Some(dates) => Some(next_fixed_date_after(from, dates)?),
         // No interval ⇒ surface immediately (the dishwasher case):
         // `None` resurface_date means "visible now".
@@ -274,6 +296,10 @@ fn instance_skeleton(
 /// listed weekday relative to the anchor. `day_of_month` for monthly
 /// rules is respected verbatim, clamped to the target month's length
 /// (e.g. the 31st in February becomes the last day of February).
+/// One step forward by frequency × interval — or, for a monthly rule with a
+/// day of month, onto that day of the target month (clamped to its length).
+/// A day of month outside 1..=31 names no day and is ignored (module doc,
+/// "One reading of a rule").
 pub fn advance(anchor: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
     let interval = rule.interval.max(1) as i64;
     match rule.frequency {
@@ -287,7 +313,7 @@ pub fn advance(anchor: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
         }
         RecurrenceFrequency::Monthly => {
             let next = anchor.checked_add_months(Months::new(interval as u32))?;
-            if let Some(d) = rule.day_of_month {
+            if let Some(d) = rule.day_of_month.filter(|d| (1..=31).contains(d)) {
                 clamp_to_month(next.year(), next.month(), d.into())
             } else {
                 Some(next)
@@ -346,6 +372,13 @@ fn weekday_to_iso(w: Weekday) -> u32 {
         Weekday::Saturday => 6,
         Weekday::Sunday => 7,
     }
+}
+
+/// Whether a fixed date names a calendar day at all: month 1..=12, day
+/// 1..=31. Anything else is dropped by every reader of the rule (module doc,
+/// "One reading of a rule"); the form's `toBackend` never writes such a value.
+pub(crate) fn is_valid_month_day(md: &MonthDay) -> bool {
+    (1..=12).contains(&md.month) && (1..=31).contains(&md.day)
 }
 
 fn clamp_to_month(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
@@ -855,5 +888,157 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2026, 5, 17).unwrap()),
         );
         assert_eq!(next.resurface_date, None);
+    }
+
+    // ── One reading of a rule (module doc) ────────────────────────────────
+
+    fn scheduled_on(t: &mut Task, y: i32, m: u32, d: u32) {
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(y, m, d).unwrap());
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
+        Some(NaiveDate::from_ymd_opt(y, m, d).unwrap())
+    }
+
+    /// Day 32, month 13, day 0: none of these names a calendar day. They used
+    /// to be clamped here (Feb 32 → Feb 28, day 0 → the 1st) while the
+    /// projector dropped them — the calendar showed the 15th of every month
+    /// and the completion spawned the 28th. With no valid trigger left, the
+    /// frequency walks, on both sides.
+    #[test]
+    fn invalid_fixed_dates_are_dropped_not_clamped() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Monthly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                Some(vec![
+                    MonthDay { month: 2, day: 32 },
+                    MonthDay { month: 13, day: 1 },
+                    MonthDay { month: 4, day: 0 },
+                ]),
+            ),
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 15);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 2, 15));
+    }
+
+    #[test]
+    fn an_invalid_trigger_beside_a_valid_one_is_ignored() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Yearly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                Some(vec![
+                    MonthDay { month: 13, day: 1 },
+                    MonthDay { month: 4, day: 1 },
+                ]),
+            ),
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 15);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 4, 1));
+    }
+
+    /// A VALID day past the month's length is a different thing: February 30
+    /// means "the end of February", and still clamps.
+    #[test]
+    fn a_valid_fixed_day_past_the_months_length_still_clamps() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Yearly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                Some(vec![MonthDay { month: 2, day: 30 }]),
+            ),
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 15);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 2, 28));
+    }
+
+    /// A backlog rule reads its fixed dates the same way: only invalid ones
+    /// left means none, and the interval decides the resurface day.
+    #[test]
+    fn a_backlog_rule_with_only_invalid_fixed_dates_uses_its_interval() {
+        let t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                3,
+                RecurrenceAnchor::FromCompletion,
+                RecurrencePlacement::Backlog,
+                Some(vec![MonthDay { month: 0, day: 1 }]),
+            ),
+            NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
+        );
+        assert_eq!(spawn(&t).unwrap().resurface_date, day(2026, 5, 13));
+    }
+
+    /// `day_of_month: 0` used to reach `clamp_to_month(y, m, 0)`, which is no
+    /// date — nothing was spawned, while the calendar projected the 15th of
+    /// every month. It names no day; the rule steps by whole months.
+    #[test]
+    fn day_of_month_zero_names_no_day_and_steps_by_whole_months() {
+        let mut t = template(
+            TaskRecurrence {
+                day_of_month: Some(0),
+                ..rule(
+                    RecurrenceFrequency::Monthly,
+                    1,
+                    RecurrenceAnchor::FromDate,
+                    RecurrencePlacement::Schedule,
+                    None,
+                )
+            },
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 15);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 2, 15));
+    }
+
+    /// Day 40 used to clamp to the month's end (Feb 28); it names no day.
+    #[test]
+    fn day_of_month_past_31_names_no_day() {
+        let mut t = template(
+            TaskRecurrence {
+                day_of_month: Some(40),
+                ..rule(
+                    RecurrenceFrequency::Monthly,
+                    1,
+                    RecurrenceAnchor::FromDate,
+                    RecurrencePlacement::Schedule,
+                    None,
+                )
+            },
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 15);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 2, 15));
+    }
+
+    /// A valid day of month past a short month's length still clamps, and
+    /// comes back to the day the rule names the month after.
+    #[test]
+    fn a_valid_day_of_month_still_clamps_to_short_months() {
+        let mut t = template(
+            TaskRecurrence {
+                day_of_month: Some(31),
+                ..rule(
+                    RecurrenceFrequency::Monthly,
+                    1,
+                    RecurrenceAnchor::FromDate,
+                    RecurrencePlacement::Schedule,
+                    None,
+                )
+            },
+            NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
+        );
+        scheduled_on(&mut t, 2026, 1, 31);
+        assert_eq!(spawn(&t).unwrap().scheduled_date, day(2026, 2, 28));
     }
 }
