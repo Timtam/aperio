@@ -15,7 +15,7 @@
     "makeOccurrenceId_isRecurringProjection_recurringSeriesTaskId": "the id encoding of a projection (`<id> occ <day>`) is the shell’s: the core answers which input task and which day, the shell builds the copy and its id, and decodes it back",
     "projectionOf": "the copying of a task’s fields onto a projection (time of day rides along) — the shell’s",
     "fromBackend_toBackend": "the form value ↔ wire conversion; the core reads the wire shape (`cal_core::TaskRecurrence`) directly, so the rules in this table are wire rules",
-    "spawner": "cal_core::spawn advances a completed task to its next instance with the same stepping; two rows here name where the projector answers differently (invalid fixed dates) — the projector’s answers are pinned, the spawner is not this table’s subject"
+    "spawner": "cal_core::spawn advances a completed task to its next instance with the same stepping, and since PR #53 reads a rule the same way (spawn::is_valid_month_day): an invalid fixed date is dropped on both sides. The rows here pin the projector; the spawner has its own tests."
   },
   "shape": {
     "expand": "{tasks, from, to, maxPerTask?} → [{task: index into tasks, day: YYYY-MM-DD or null, projection: bool}] in emission order: for each expandable task its occurrences in the window (the base day is the real task), non-expandable tasks pass through in place with their own day.",
@@ -630,7 +630,7 @@
     },
     {
       "name": "a-fixed-date-with-day-32-is-dropped",
-      "note": "The wire can carry day 32 or month 13; the TypeScript drops such a trigger (sanitize) instead of clamping it. With no trigger left, the frequency walks. The backend spawner clamps the day instead — a difference between spawner and projector, pinned as the projector answers today.",
+      "note": "The wire can carry day 32 or month 13; such a trigger names no calendar day and is dropped (the TypeScript sanitised the rule before it looked). With no trigger left, the frequency walks. The backend spawner drops it the same way since PR #53 (spawn::is_valid_month_day); spawner and projector agree.",
       "input": {
         "tasks": [
           {
@@ -3935,7 +3935,7 @@
     },
     {
       "name": "all-invalid-fixed-dates-fall-back-to-the-frequency",
-      "note": "The TypeScript drops invalid triggers before it looks, so none are left and the frequency walks. The spawner keeps them and finds no trigger. Pinned as the projector answers.",
+      "note": "The TypeScript dropped invalid triggers before it looked, so none were left and the frequency walked. The spawner does the same since PR #53: a rule without a valid trigger is not a fixed-date rule.",
       "input": {
         "scheduled": "2026-06-25",
         "rule": {

@@ -1869,6 +1869,19 @@ Bei `open→completed` einer Instanz mit Wiederholung wird die nächste Instanz 
   - `FromCompletion`: Abschlussdatum + Intervall (sofort, wenn Intervall 0/leer)
   - `fixed_dates`: nächstes der Daten nach dem Abschluss
 - Die Instanz erbt die `series_id` der Vorlage.
+- **Eine Lesart der Regel, für Spawner und Projektor.** Der Kalender zeigt eine
+  wiederkehrende Aufgabe an den Tagen, die der Abschluss erzeugen wird
+  (`cal_core::task_occurrences` läuft auf denselben Schrittfunktionen wie der
+  Spawner). Das hält nur, wenn beide eine Regel gleich lesen: ein Fester
+  Trigger, der keinen Kalendertag benennt (Tag 0 oder 32, Monat 13), wird
+  VERWORFEN, nicht geklemmt — ein Trigger, den niemand so gemeint haben kann,
+  erzeugt kein geratenes Datum; bleibt kein gültiger übrig, läuft die Frequenz.
+  Ein Monatstag außerhalb 1..31 benennt keinen Tag und wird ignoriert. Ein
+  GÜLTIGER Tag über die Monatslänge hinaus klemmt weiterhin (30. Februar =
+  Monatsende). Kein Editor schreibt solche Werte (`toBackend` bereinigt); ein
+  Sync-übertragener oder fremd geschriebener Datensatz könnte, und vorher
+  zeigte der Kalender dann den 15. jedes Monats, während der Abschluss den 28.
+  erzeugte — oder gar nichts (Monatstag 0).
 - **Aufholen statt nachholen.** Liegt der berechnete nächste Termin bereits in der
   Vergangenheit (die Aufgabe blieb liegen), rückt der Spawner weiter – bis zum **letzten
   Termin, der nicht nach dem Abschlusstag liegt**. Eine Serie trägt höchstens eine offene
