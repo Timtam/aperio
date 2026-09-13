@@ -1,0 +1,420 @@
+{
+  "what": "The signature block of an event or task description (shared/signatures.ts): where a block starts (the LAST line that is exactly \"-- \", trailing whitespace ignored), what it says, the description without it, and the description with a body applied — replacing, never stacking. Measured from the TypeScript before the port.",
+  "why": "Both editors insert and remove signatures, on both surfaces, and the blocks must be byte-identical so neither device doubles what the other inserted. A frontend that is not JavaScript has to write the same block. The rule is text only (RFC 5545 DESCRIPTION is TEXT); the core answers strings.",
+  "writtenBy": [
+    "src/state/signatures.measure.test.ts — a one-off, run once and deleted; its cases mirror src/state/signatures.test.ts plus the rows the port needs that those never had: extra trailing whitespace on the marker, an indented marker, three dashes, the marker as first or last line, only the marker, several blank lines before the block, no blank line before it, CRLF text, and the whitespace characters where JavaScript and Rust disagree (NEL U+0085, BOM U+FEFF, NBSP) — DESIGN §4.5 (c): a twin must not lean on a built-in."
+  ],
+  "readBy": [
+    "src/state/signatures.contract.test.ts",
+    "crates/cal-core/src/signatures.rs (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, like the other fixtures; a crate reads its own files."
+  },
+  "notInThisTable": {
+    "the auto-signature of a bound calendar": "which signature a calendar binds, and the \"mine versus theirs\" bookkeeping the editors do when the calendar changes (autoSignature ref) — the surface’s; they call these three",
+    "Signature {id, name, body}": "a stored record; the name is never sent"
+  },
+  "shape": {
+    "marker": "-- ",
+    "texts": "{description} → read: the block’s text or null; strip: the description without the block and the blank lines that separated it.",
+    "apply": "{description, body} → the description with `body` as its block; an empty (whitespace-only) body removes the block; a whitespace-only description is nothing.",
+    "lineEndings": "Lines are split on LF alone; a CR stays part of its line and counts as trailing whitespace on the marker line.",
+    "whitespace": "Trailing whitespace on the marker line and the emptiness tests use JavaScript’s whitespace set (WhiteSpace + LineTerminator: includes U+FEFF and U+00A0, excludes U+0085) — pinned by the nel/bom rows."
+  },
+  "texts": [
+    {
+      "name": "no-block",
+      "note": "Plain text has no signature; stripping changes nothing.",
+      "input": {
+        "description": "Nur Text."
+      },
+      "expect": {
+        "read": null,
+        "strip": "Nur Text."
+      }
+    },
+    {
+      "name": "empty",
+      "note": "",
+      "input": {
+        "description": ""
+      },
+      "expect": {
+        "read": null,
+        "strip": ""
+      }
+    },
+    {
+      "name": "a-block-after-a-blank-line",
+      "note": "The shape applySignature writes; the blank line goes with the block.",
+      "input": {
+        "description": "Agenda.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "the-last-marker-wins",
+      "note": "A forwarded invitation carries somebody else’s signature above; ours is the one at the end, the same rule mail clients apply.",
+      "input": {
+        "description": "Weitergeleitet:\n-- \nDie Signatur der Kollegin\n\n-- \nMeine"
+      },
+      "expect": {
+        "read": "Meine",
+        "strip": "Weitergeleitet:\n-- \nDie Signatur der Kollegin"
+      }
+    },
+    {
+      "name": "a-marker-whose-trailing-space-a-provider-ate",
+      "note": "Round-tripping through a provider trims line ends: \"--\" is still ours.",
+      "input": {
+        "description": "Agenda.\n\n--\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "a-marker-with-extra-trailing-spaces",
+      "note": "Recognised by content, not bytes.",
+      "input": {
+        "description": "Agenda.\n\n--   \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "a-marker-with-a-trailing-tab",
+      "note": "Trailing whitespace of any kind.",
+      "input": {
+        "description": "Agenda.\n\n-- \t\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "an-indented-marker-is-no-marker",
+      "note": "Leading whitespace is not stripped: the line must START with the dashes.",
+      "input": {
+        "description": "Agenda.\n\n -- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": null,
+        "strip": "Agenda.\n\n -- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      }
+    },
+    {
+      "name": "three-dashes-are-no-marker",
+      "note": "A rule line, not a signature.",
+      "input": {
+        "description": "Agenda.\n\n---\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": null,
+        "strip": "Agenda.\n\n---\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      }
+    },
+    {
+      "name": "a-marker-inside-a-line-is-no-marker",
+      "note": "An em-dash substitute in running text.",
+      "input": {
+        "description": "Zeile eins\n\nZeile drei mit -- Gedankenstrich"
+      },
+      "expect": {
+        "read": null,
+        "strip": "Zeile eins\n\nZeile drei mit -- Gedankenstrich"
+      }
+    },
+    {
+      "name": "the-marker-as-the-first-line",
+      "note": "Nothing before it: the block is the whole text.",
+      "input": {
+        "description": "-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": ""
+      }
+    },
+    {
+      "name": "the-marker-as-the-last-line",
+      "note": "A block with nothing in it is still a block: read back empty, not null.",
+      "input": {
+        "description": "Agenda.\n\n-- "
+      },
+      "expect": {
+        "read": "",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "only-the-marker",
+      "note": "",
+      "input": {
+        "description": "-- "
+      },
+      "expect": {
+        "read": "",
+        "strip": ""
+      }
+    },
+    {
+      "name": "several-blank-lines-before-the-block-all-go",
+      "note": "Removing and re-adding must not grow a gap.",
+      "input": {
+        "description": "Agenda.\n\n   \n\t\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "no-blank-line-before-the-block",
+      "note": "A block glued to the text: only the block goes.",
+      "input": {
+        "description": "Agenda.\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "crlf-line-endings",
+      "note": "A provider that returns CRLF: the marker is recognised (the CR is trailing whitespace), and the CRs on the other lines stay as they are — the split is on LF alone. Pinned as measured.",
+      "input": {
+        "description": "Agenda.\r\n\r\n-- \r\nZeile eins\r\nZeile zwei"
+      },
+      "expect": {
+        "read": "Zeile eins\r\nZeile zwei",
+        "strip": "Agenda.\r"
+      }
+    },
+    {
+      "name": "a-block-with-blank-lines-inside",
+      "note": "The body keeps its own structure.",
+      "input": {
+        "description": "Agenda.\n\n-- \nRaum 42\n\nTel. 123"
+      },
+      "expect": {
+        "read": "Raum 42\n\nTel. 123",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "trailing-nel-on-the-marker-line",
+      "note": "U+0085 NEXT LINE after the dashes. JavaScript’s trimEnd does NOT remove it (it is not in its whitespace set), so this is NOT a marker there. Pinned so the port cannot lean on Rust’s is_whitespace, which does remove it (DESIGN §4.5 c).",
+      "input": {
+        "description": "Agenda.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": null,
+        "strip": "Agenda.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      }
+    },
+    {
+      "name": "trailing-bom-on-the-marker-line",
+      "note": "U+FEFF after the dashes. JavaScript’s trimEnd DOES remove it (it counts as whitespace there), so this IS a marker; Rust’s is_whitespace would not. Pinned for the same reason.",
+      "input": {
+        "description": "Agenda.\n\n-- ﻿\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    },
+    {
+      "name": "trailing-nbsp-on-the-marker-line",
+      "note": "U+00A0 after the dashes: whitespace on both sides.",
+      "input": {
+        "description": "Agenda.\n\n--  \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": {
+        "read": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "strip": "Agenda."
+      }
+    }
+  ],
+  "apply": [
+    {
+      "name": "appends-after-a-blank-line",
+      "note": "Text, blank line, marker, body.",
+      "input": {
+        "description": "Bitte Unterlagen mitbringen.",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Bitte Unterlagen mitbringen.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "applying-twice-leaves-one-block",
+      "note": "The whole reason the marker exists.",
+      "input": {
+        "description": "Agenda folgt.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Agenda folgt.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "replaces-the-block-when-the-signature-changes",
+      "note": "The appointment’s own text is untouched.",
+      "input": {
+        "description": "Agenda folgt.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "body": "Vorlesung, Raum 42"
+      },
+      "expect": "Agenda folgt.\n\n-- \nVorlesung, Raum 42"
+    },
+    {
+      "name": "an-empty-description-gets-no-leading-gap",
+      "note": "",
+      "input": {
+        "description": "",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-whitespace-description-is-nothing",
+      "note": "Keeping it would open the block on a line of stray spaces.",
+      "input": {
+        "description": "   ",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-tabs-and-newlines-description-is-nothing",
+      "note": "",
+      "input": {
+        "description": "\n\t \n",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "an-empty-body-removes-the-block",
+      "note": "",
+      "input": {
+        "description": "Agenda folgt.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "body": ""
+      },
+      "expect": "Agenda folgt."
+    },
+    {
+      "name": "a-whitespace-body-removes-the-block",
+      "note": "",
+      "input": {
+        "description": "Agenda folgt.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "body": "   "
+      },
+      "expect": "Agenda folgt."
+    },
+    {
+      "name": "an-empty-body-on-a-plain-text-changes-nothing",
+      "note": "",
+      "input": {
+        "description": "Agenda folgt.",
+        "body": ""
+      },
+      "expect": "Agenda folgt."
+    },
+    {
+      "name": "the-body-is-trimmed",
+      "note": "Surrounding blank lines and spaces of the body do not travel.",
+      "input": {
+        "description": "Agenda.",
+        "body": "\n  Raum 42  \n"
+      },
+      "expect": "Agenda.\n\n-- \nRaum 42"
+    },
+    {
+      "name": "the-body-keeps-its-inner-structure",
+      "note": "Blank lines inside the body stay.",
+      "input": {
+        "description": "Agenda.",
+        "body": "Raum 42\n\nTel. 123"
+      },
+      "expect": "Agenda.\n\n-- \nRaum 42\n\nTel. 123"
+    },
+    {
+      "name": "a-marker-in-the-text-is-left-alone",
+      "note": "A dash-dash inside a line is not a marker; the text survives a round trip.",
+      "input": {
+        "description": "Zeile eins\n\nZeile drei mit -- Gedankenstrich",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Zeile eins\n\nZeile drei mit -- Gedankenstrich\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-quoted-block-above-stays-when-ours-is-replaced",
+      "note": "Only the last block is ours.",
+      "input": {
+        "description": "Weitergeleitet:\n-- \nDie Signatur der Kollegin\n\n-- \nMeine",
+        "body": "Neue"
+      },
+      "expect": "Weitergeleitet:\n-- \nDie Signatur der Kollegin\n\n-- \nNeue"
+    },
+    {
+      "name": "a-provider-trimmed-marker-is-replaced-not-doubled",
+      "note": "The \"--\" that came back is still ours.",
+      "input": {
+        "description": "Agenda.\n\n--\nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Agenda.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-description-ending-in-newlines-keeps-them-and-adds-a-gap",
+      "note": "Trailing newlines of the text are NOT trimmed away (only a description that is nothing but whitespace is emptied), and the blank-line separator is added on top. Pinned as measured.",
+      "input": {
+        "description": "Agenda.\n\n",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Agenda.\n\n\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-body-containing-a-marker-line",
+      "note": "A body with its own \"-- \" line: applied verbatim, and the LAST marker then sits inside the body. Pinned as measured; no editor writes such a body.",
+      "input": {
+        "description": "Agenda.",
+        "body": "Zeile\n-- \nRest"
+      },
+      "expect": "Agenda.\n\n-- \nZeile\n-- \nRest"
+    },
+    {
+      "name": "a-bom-only-description-is-nothing",
+      "note": "U+FEFF alone: JavaScript’s trim removes it, so the block opens the text. Rust’s trim would not (DESIGN §4.5 c). Pinned.",
+      "input": {
+        "description": "﻿",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "a-nel-only-description-is-text",
+      "note": "U+0085 alone: JavaScript’s trim does NOT remove it, so it is kept as the text. Rust’s trim would remove it. Pinned.",
+      "input": {
+        "description": "",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    },
+    {
+      "name": "crlf-description",
+      "note": "CRLF text gets the block appended with LF separators; the CRs inside the text stay. Pinned as measured.",
+      "input": {
+        "description": "Agenda.\r\nZweite Zeile.",
+        "body": "Sprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+      },
+      "expect": "Agenda.\r\nZweite Zeile.\n\n-- \nSprechstunde, DFNconf\nhttps://conf.dfn.de/webapp/#/?conference=97912345"
+    }
+  ]
+}

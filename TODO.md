@@ -1571,6 +1571,34 @@ Siehe DESIGN §4.2.
   `shared/dayStart.ts`, weiter durch `taskOwnership.json` gepinnt. Rust 4/4
   beim ersten Lauf, rot bewiesen (Zurücktreten behält mich statt der anderen
   → Zeilen-Test und Draht-Test fallen).
+- [~] **Die Signaturen ziehen in den Kern** (`signatures`), das zweite Modul
+  des Bogens der kleinen Doppelungen. Dazwischen geprüft und gestrichen:
+  `eventGroups` (drei Helfer sind JavaScript-Kleber um erzeugte Typen —
+  Map-Schlüssel als JSON, Map-Index, Wire-Objekt aus dem Termin; dieselbe
+  Begründung wie `eventKey.ts`), `planTaskDates` (liest die Uhr, formatiert)
+  und `syncConflictGroups` (Listen-Gruppierung; wenn, dann im Host).
+  `birthdays` braucht einen Entwurf: der Host liefert den Namen eines
+  Geburtstagskalenders als Schlüssel plus Listenname statt „Birthdays – "
+  (DESIGN §4.5 a), dann fallen die Schere und die Präfix-Zwillinge.
+  ↳ **Schritt 1 (dieser PR): die Tabelle.** Die Signatur-Regel hat KEINEN
+  Rust-Zwilling; beide Editoren laufen sie: die LETZTE Zeile, die genau `-- `
+  ist (nachlaufender Leerraum egal), eröffnet den Block; Auslesen, Abschneiden
+  (samt Leerzeilen davor), Anwenden (ersetzt statt zu stapeln; leerer Körper
+  entfernt; leere Beschreibung öffnet ohne Lücke).
+  `crates/cal-core/tests/fixtures/signatures.json`, gemessen am heutigen
+  TypeScript: 20 Texte (je Auslesen und Abschneiden) und 19 Anwendungen — die
+  11 Desktop-Tests plus die Zeilen, die der Umzug braucht: Marker mit
+  Tab/mehr Leerraum, eingerückter Marker (keiner), `---` (keiner), Marker als
+  erste/letzte/einzige Zeile, mehrere Leerzeilen davor, ohne Leerzeile davor,
+  CRLF (Split nur an LF, das CR bleibt an seiner Zeile), und die Zeichen, bei
+  denen JavaScript und Rust auseinandergehen (DESIGN §4.5 c): NEL U+0085 ist
+  für JavaScript KEIN Leerraum, BOM U+FEFF und NBSP SIND welcher — der Port
+  darf nicht auf `is_whitespace` lehnen. Gemessen und gepinnt: nachlaufende
+  Zeilenumbrüche des Textes bleiben erhalten und bekommen die Lücke obendrauf.
+  `signatures.contract.test.ts` spielt zurück (60 Tests); rot bewiesen
+  (erster statt letzter Marker → die Weiterleitungs-Zeilen fallen).
+  ↳ Schritt 2 (offen): `cal_core::signatures` mit drei Türen (`signatureIn`,
+  `stripSignature`, `applySignature`), Leerraum nach JavaScripts Menge.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
