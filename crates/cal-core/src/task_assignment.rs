@@ -10,8 +10,26 @@
 //! copy, so a second Rust caller would have written a third. The two halves are
 //! pinned against each other by `shared/contracts/taskOwnership.json`, which
 //! both languages read.
+//!
+//! # The three rules around it
+//!
+//! Who holds a task after a status change ([`self_assign_on_status_change`]:
+//! take it when starting or finishing a task nobody owns, step back when
+//! reopening one I hold), how many people a list can hold on one task
+//! ([`task_assignment_mode`]: an undeclared capability is none), and what a
+//! list of assignees is trimmed to when a task moves ([`clamp_assignees`]: the
+//! FIRST stays, the same one Todoist's adapter keeps). Both surfaces apply
+//! them when a task is checked off or moved; they were TypeScript on both, and
+//! are here now. A user is its id on the wire — the rules compare ids alone —
+//! and the answer is positions (which of the given assignees stay) or a state
+//! ("take me"), never a user row (DESIGN §4.5 a). Pinned by
+//! `tests/fixtures/taskAssignment.json`, measured from the TypeScript this
+//! replaces; the `contract` module below reads it, and so does the
+//! TypeScript contract test on the other side of the boundary.
 
-use crate::TaskUser;
+use serde::{Deserialize, Serialize};
+
+use crate::{TaskAssignment, TaskStatus, TaskUser};
 
 /// Is this task mine to act on?
 ///
@@ -28,6 +46,296 @@ pub fn is_mine_or_unassigned(assignees: &[TaskUser], me: Option<&TaskUser>) -> b
     match me {
         None => true,
         Some(me) => assignees.is_empty() || assignees.iter().any(|a| a.id == me.id),
+    }
+}
+
+/// The question [`self_assign_on_status_change`] answers, over the wire. A
+/// user is its id.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct SelfAssignInput {
+    /// The status the task changes to.
+    pub status: TaskStatus,
+    /// The assignee ids as the task carries them, in order.
+    pub assignees: Vec<String>,
+    /// The account's own id, or none when the adapter reports no identity.
+    #[serde(default)]
+    pub me: Option<String>,
+    /// The Settings → Tasks toggle.
+    pub enabled: bool,
+}
+
+/// Who holds the task afterwards: nothing changes, I take it, or these of
+/// the given assignees stay (positions into the input, in order).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum SelfAssignOutcome {
+    Unchanged,
+    AssignMe,
+    Keep { positions: Vec<usize> },
+}
+
+/// The new holders of a task after it changes to `status`, in shared lists
+/// where the adapter knows "me":
+/// - into `in_progress` or `completed` on an UNASSIGNED task → I take it;
+/// - into `open` while I am an assignee → the others stay, I step back;
+/// - otherwise nothing changes.
+///
+/// Only with `enabled` and an identity. The step-back removes ONLY me — every
+/// copy of me, should a provider list the same person twice — and keeps the
+/// colleagues in their order; symmetric to the auto-assign, which acts only
+/// on a task nobody owns. `cancelled` is neither taking nor stepping back.
+pub fn self_assign_on_status_change(
+    status: TaskStatus,
+    assignee_ids: &[String],
+    me: Option<&str>,
+    enabled: bool,
+) -> SelfAssignOutcome {
+    if !enabled {
+        return SelfAssignOutcome::Unchanged;
+    }
+    let Some(me) = me else {
+        return SelfAssignOutcome::Unchanged;
+    };
+    let became_active = matches!(status, TaskStatus::InProgress | TaskStatus::Completed);
+    if became_active && assignee_ids.is_empty() {
+        return SelfAssignOutcome::AssignMe;
+    }
+    if status == TaskStatus::Open && assignee_ids.iter().any(|a| a == me) {
+        return SelfAssignOutcome::Keep {
+            positions: assignee_ids
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.as_str() != me)
+                .map(|(i, _)| i)
+                .collect(),
+        };
+    }
+    SelfAssignOutcome::Unchanged
+}
+
+/// [`self_assign_on_status_change`] over the wire.
+pub fn self_assign_on_status_json(input_json: &str) -> Result<String, serde_json::Error> {
+    let input: SelfAssignInput = serde_json::from_str(input_json)?;
+    serde_json::to_string(&self_assign_on_status_change(
+        input.status,
+        &input.assignees,
+        input.me.as_deref(),
+        input.enabled,
+    ))
+}
+
+/// The slice of a list's capabilities this rule reads; the rest of the block
+/// is the plugin manifest's (`plugin_core::TaskCapabilities`), and a full one
+/// deserializes into this.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct AssignmentCapabilities {
+    #[serde(default)]
+    pub task_assignment: TaskAssignment,
+}
+
+/// The question [`task_assignment_mode`] answers, over the wire.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct AssignmentModeInput {
+    /// The list's capabilities, or none when the list has none or is unknown.
+    #[serde(default)]
+    pub capabilities: Option<AssignmentCapabilities>,
+}
+
+/// How many people a list can hold on one task. Absent capabilities, or a
+/// block that does not say, mean `None`: an adapter that has not said it can
+/// assign is taken at its word rather than credited with an ability whose
+/// failure is silent — the editor would offer a choice the source cannot keep.
+pub fn task_assignment_mode(capabilities: Option<&AssignmentCapabilities>) -> TaskAssignment {
+    capabilities.map(|c| c.task_assignment).unwrap_or_default()
+}
+
+/// [`task_assignment_mode`] over the wire.
+pub fn task_assignment_mode_json(input_json: &str) -> Result<String, serde_json::Error> {
+    let input: AssignmentModeInput = serde_json::from_str(input_json)?;
+    serde_json::to_string(&task_assignment_mode(input.capabilities.as_ref()))
+}
+
+/// The question [`clamp_assignees`] answers, over the wire.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct ClampAssigneesInput {
+    pub mode: TaskAssignment,
+    /// The assignee ids as the form holds them, in order.
+    pub assignees: Vec<String>,
+}
+
+/// Which of `count` assignees a list in `mode` can hold: positions, in order.
+/// `Single` keeps the FIRST — the same one Todoist's adapter keeps when it
+/// clamps (`first_assignee_id`), so the editor and the wire agree about who
+/// survives. `None` is deliberately NOT emptied: the editor simply does not
+/// show the picker there, and the task may still carry assignees another
+/// client wrote — clearing them on open would destroy what the user was never
+/// shown, which is the whole failure this capability exists to stop.
+pub fn clamp_assignees(mode: TaskAssignment, count: usize) -> Vec<usize> {
+    let kept = match mode {
+        TaskAssignment::Single => count.min(1),
+        TaskAssignment::None | TaskAssignment::Multiple => count,
+    };
+    (0..kept).collect()
+}
+
+/// [`clamp_assignees`] over the wire.
+pub fn clamp_assignees_json(input_json: &str) -> Result<String, serde_json::Error> {
+    let input: ClampAssigneesInput = serde_json::from_str(input_json)?;
+    serde_json::to_string(&clamp_assignees(input.mode, input.assignees.len()))
+}
+
+/// The contract with the TypeScript this replaced.
+///
+/// Its other half is `src/state/taskAssignment.contract.test.ts`, reading
+/// this same file through the doors. The fixture was written by running the
+/// TypeScript BEFORE the port, so the port is measured against what was.
+#[cfg(test)]
+mod contract {
+    use super::*;
+    use serde_json::{json, Value};
+
+    const CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/taskAssignment.json"
+    ));
+
+    fn doc() -> Value {
+        serde_json::from_str(CONTRACT).expect("the contract parses")
+    }
+
+    fn ids(v: &Value) -> Vec<String> {
+        v.as_array()
+            .expect("an id list")
+            .iter()
+            .map(|s| s.as_str().expect("an id").to_string())
+            .collect()
+    }
+
+    fn has_row(cases: &[Value], name: &str) {
+        assert!(
+            cases.iter().any(|c| c["name"] == name),
+            "the contract lost `{name}`"
+        );
+    }
+
+    #[test]
+    fn every_self_assign_row_holds() {
+        let doc = doc();
+        let cases = doc["selfAssign"]
+            .as_array()
+            .expect("selfAssign is an array");
+        for needed in [
+            "an-unassigned-task-going-in-progress-becomes-mine",
+            "a-task-a-colleague-holds-is-not-taken",
+            "reopening-removes-only-me",
+            "reopening-keeps-the-order-when-i-am-in-the-middle",
+            "reopening-removes-every-copy-of-me",
+            "cancelling-changes-nothing",
+            "no-identity-changes-nothing",
+        ] {
+            has_row(cases, needed);
+        }
+        for case in cases {
+            let i = &case["input"];
+            let assignees = ids(&i["assignees"]);
+            let me = i["me"].as_str();
+            let status: TaskStatus =
+                serde_json::from_value(i["nextStatus"].clone()).expect("a status");
+            let got = match self_assign_on_status_change(
+                status,
+                &assignees,
+                me,
+                i["enabled"].as_bool().expect("a bool"),
+            ) {
+                SelfAssignOutcome::Unchanged => Value::Null,
+                SelfAssignOutcome::AssignMe => json!([me.expect("assign-me needs an identity")]),
+                SelfAssignOutcome::Keep { positions } => {
+                    json!(positions.iter().map(|&p| &assignees[p]).collect::<Vec<_>>())
+                }
+            };
+            assert_eq!(got, case["expect"], "{}: {}", case["name"], case["note"]);
+        }
+    }
+
+    #[test]
+    fn every_mode_row_holds() {
+        let doc = doc();
+        let cases = doc["mode"].as_array().expect("mode is an array");
+        has_row(
+            cases,
+            "a-capabilities-block-without-the-field-cannot-assign",
+        );
+        for case in cases {
+            let caps = &case["input"]["capabilities"];
+            let caps: Option<AssignmentCapabilities> = if caps.is_null() || caps == "absent" {
+                None
+            } else {
+                Some(serde_json::from_value(caps.clone()).expect("a capabilities block"))
+            };
+            let got = task_assignment_mode(caps.as_ref());
+            assert_eq!(json!(got), case["expect"], "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn every_clamp_row_holds() {
+        let doc = doc();
+        let cases = doc["clamp"].as_array().expect("clamp is an array");
+        has_row(cases, "single-keeps-the-first");
+        has_row(cases, "none-never-empties-what-it-cannot-show");
+        for case in cases {
+            let assignees = ids(&case["input"]["assignees"]);
+            let mode: TaskAssignment =
+                serde_json::from_value(case["input"]["mode"].clone()).expect("a mode");
+            let kept: Vec<&String> = clamp_assignees(mode, assignees.len())
+                .into_iter()
+                .map(|p| &assignees[p])
+                .collect();
+            assert_eq!(json!(kept), case["expect"], "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn the_wire_speaks_the_outcome_and_reads_a_full_capabilities_block() {
+        assert_eq!(
+            self_assign_on_status_json(
+                r#"{"status": "open", "assignees": ["a", "me", "b"], "me": "me", "enabled": true}"#
+            )
+            .expect("valid"),
+            r#"{"change":"keep","positions":[0,2]}"#
+        );
+        assert_eq!(
+            self_assign_on_status_json(
+                r#"{"status": "completed", "assignees": [], "me": "me", "enabled": true}"#
+            )
+            .expect("valid"),
+            r#"{"change":"assign_me"}"#
+        );
+        assert_eq!(
+            self_assign_on_status_json(
+                r#"{"status": "completed", "assignees": [], "enabled": true}"#
+            )
+            .expect("valid"),
+            r#"{"change":"unchanged"}"#
+        );
+        // A full manifest block deserializes: the other fields are ignored.
+        assert_eq!(
+            task_assignment_mode_json(
+                r#"{"capabilities": {"nested_projects": true, "task_span": false,
+                    "task_assignment": "multiple", "subtasks": true}}"#
+            )
+            .expect("valid"),
+            r#""multiple""#
+        );
+        assert_eq!(
+            clamp_assignees_json(r#"{"mode": "single", "assignees": ["a", "b"]}"#).expect("valid"),
+            "[0]"
+        );
     }
 }
 

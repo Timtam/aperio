@@ -320,3 +320,22 @@ pub fn next_task_occurrence(input_json: &str) -> Result<String, JsValue> {
 pub fn occurrence_move_target(input_json: &str) -> Result<String, JsValue> {
     rules::occurrence_move_target(input_json).map_err(to_js)
 }
+
+/// Who holds a task after a status change: positions of the assignees that
+/// stay, or "take me", or nothing.
+#[wasm_bindgen(js_name = selfAssignOnStatusChange)]
+pub fn self_assign_on_status_change(input_json: &str) -> Result<String, JsValue> {
+    rules::self_assign_on_status_change(input_json).map_err(to_js)
+}
+
+/// How many people a list can hold on one task.
+#[wasm_bindgen(js_name = taskAssignmentMode)]
+pub fn task_assignment_mode(input_json: &str) -> Result<String, JsValue> {
+    rules::task_assignment_mode(input_json).map_err(to_js)
+}
+
+/// Which of the given assignees a list can hold: positions.
+#[wasm_bindgen(js_name = clampAssignees)]
+pub fn clamp_assignees(input_json: &str) -> Result<String, JsValue> {
+    rules::clamp_assignees(input_json).map_err(to_js)
+}

@@ -396,6 +396,34 @@ pub fn occurrence_move_target(input_json: String) -> Result<String, StoreError> 
     })
 }
 
+/// Who holds a task after a status change: positions of the assignees that
+/// stay, or "take me", or nothing.
+#[uniffi::export]
+pub fn self_assign_on_status_change(input_json: String) -> Result<String, StoreError> {
+    cal_core::self_assign_on_status_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "self-assign input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// How many people a list can hold on one task.
+#[uniffi::export]
+pub fn task_assignment_mode(input_json: String) -> Result<String, StoreError> {
+    cal_core::task_assignment_mode_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "assignment mode input".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// Which of the given assignees a list can hold: positions.
+#[uniffi::export]
+pub fn clamp_assignees(input_json: String) -> Result<String, StoreError> {
+    cal_core::clamp_assignees_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "clamp assignees input".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

@@ -125,6 +125,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** What "move to this day" can be on a source that owns the date. */
   occurrenceMoveTarget(inputJson: string): string;
 
+  /** Who holds a task after a status change: positions of the assignees
+   *  that stay, or "take me", or nothing. */
+  selfAssignOnStatusChange(inputJson: string): string;
+
+  /** How many people a list can hold on one task. */
+  taskAssignmentMode(inputJson: string): string;
+
+  /** Which of the given assignees a list can hold: positions. */
+  clampAssignees(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -12,6 +12,7 @@ import {
   installTaskStatusRules,
   installTaskCascadeRules,
   installTaskOccurrenceRules,
+  installTaskAssignmentRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -137,6 +138,14 @@ installTaskOccurrenceRules({
   expandTaskOccurrencesJson: (inputJson) => CalFfi.expandTaskOccurrences(inputJson),
   nextTaskOccurrenceJson: (inputJson) => CalFfi.nextTaskOccurrence(inputJson),
   occurrenceMoveTargetJson: (inputJson) => CalFfi.occurrenceMoveTarget(inputJson),
+});
+
+// The assignment rules: who holds a task after a status change, and what a
+// list can hold.
+installTaskAssignmentRules({
+  selfAssignOnStatusChangeJson: (inputJson) => CalFfi.selfAssignOnStatusChange(inputJson),
+  taskAssignmentModeJson: (inputJson) => CalFfi.taskAssignmentMode(inputJson),
+  clampAssigneesJson: (inputJson) => CalFfi.clampAssignees(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

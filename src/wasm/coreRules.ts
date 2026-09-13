@@ -48,6 +48,9 @@ import init, {
   expandTaskOccurrences as wasmExpandTaskOccurrences,
   nextTaskOccurrence as wasmNextTaskOccurrence,
   occurrenceMoveTarget as wasmOccurrenceMoveTarget,
+  selfAssignOnStatusChange as wasmSelfAssignOnStatusChange,
+  taskAssignmentMode as wasmTaskAssignmentMode,
+  clampAssignees as wasmClampAssignees,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -261,4 +264,22 @@ export function nextTaskOccurrenceJson(inputJson: string): string {
 export function occurrenceMoveTargetJson(inputJson: string): string {
   assertReady();
   return wasmOccurrenceMoveTarget(inputJson);
+}
+
+/** See `cal_core::task_assignment::self_assign_on_status_json`. */
+export function selfAssignOnStatusChangeJson(inputJson: string): string {
+  assertReady();
+  return wasmSelfAssignOnStatusChange(inputJson);
+}
+
+/** See `cal_core::task_assignment::task_assignment_mode_json`. */
+export function taskAssignmentModeJson(inputJson: string): string {
+  assertReady();
+  return wasmTaskAssignmentMode(inputJson);
+}
+
+/** See `cal_core::task_assignment::clamp_assignees_json`. */
+export function clampAssigneesJson(inputJson: string): string {
+  assertReady();
+  return wasmClampAssignees(inputJson);
 }
