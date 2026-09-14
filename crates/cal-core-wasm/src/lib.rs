@@ -372,3 +372,10 @@ pub fn day_start(input_json: &str) -> Result<String, JsValue> {
 pub fn task_settings(input_json: &str) -> Result<String, JsValue> {
     rules::task_settings(input_json).map_err(to_js)
 }
+
+/// Shifting a recurring series by whole days: the rule a drag of the whole
+/// series onto another day writes, or why it cannot move.
+#[wasm_bindgen(js_name = seriesShift)]
+pub fn series_shift(input_json: &str) -> Result<String, JsValue> {
+    rules::series_shift(input_json).map_err(to_js)
+}

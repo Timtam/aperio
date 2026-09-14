@@ -137,6 +137,9 @@ export type { TaskListOverrideEntry } from './generated/TaskListOverrideEntry';
 export type { TaskSettingsQuestion } from './generated/TaskSettingsQuestion';
 export type { TaskSettingsRead } from './generated/TaskSettingsRead';
 export type { TaskSettingsStored } from './generated/TaskSettingsStored';
+export type { SeriesShift } from './generated/SeriesShift';
+export type { SeriesShiftQuestion } from './generated/SeriesShiftQuestion';
+export type { ShiftRefusal } from './generated/ShiftRefusal';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the

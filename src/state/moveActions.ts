@@ -6,8 +6,17 @@ import { invoke } from '@tauri-apps/api/core';
 import { differenceInCalendarDays } from 'date-fns';
 
 import {
+  moveSeriesInstant,
+  movedSeriesUntil,
+  seriesDayKey,
+  shiftSeriesRule,
+  type ShiftRefusal,
+} from '@aperio/shared';
+
+import {
   addEventExdate,
   createEvent as apiCreateEvent,
+  getEventById,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
@@ -314,10 +323,10 @@ export async function moveOrCopyEvent(
  * day shifts (`setDate` keeps the local time across DST transitions).
  *
  * Recurrence scope mirrors §7.5:
- *  - **series** — update the MASTER row with the dragged occurrence's
- *    shifted dates, re-anchoring the whole series on the new day (the
- *    same master-row semantics `moveEventToCalendar` uses; works for
- *    external providers without needing to fetch the master).
+ *  - **series** — move every occurrence by the same distance: the master's
+ *    start, end and exceptions, and its rule through `cal_core::series_shift`
+ *    (see `moveSeries`). A rule that cannot move by whole days throws
+ *    `SeriesShiftRefusedError`.
  *  - **occurrence** — detach: create a STANDALONE event on the target
  *    day, then EXDATE the source occurrence (created first, excluded
  *    second, so a failed create never loses the occurrence).
@@ -410,11 +419,140 @@ export async function moveEventToSlot(
     return true;
   }
 
+  if (!isSeriesOccurrence(event) && !event.recurrence?.rrule) {
+    await apiUpdateEvent({
+      ...event,
+      id: seriesIdOf(event),
+      start: newStart,
+      end: newEnd,
+    });
+    return true;
+  }
+  return moveSeries(event, newStart, delta, minute);
+}
+
+export type { ShiftRefusal };
+
+/** Moving a whole series was refused: its rule cannot move by whole days. The
+ *  surface says why and offers to move only the occurrence. */
+export class SeriesShiftRefusedError extends Error {
+  readonly reason: ShiftRefusal;
+
+  constructor(reason: ShiftRefusal) {
+    super(`the series cannot move by whole days (${reason})`);
+    this.name = 'SeriesShiftRefusedError';
+    this.reason = reason;
+  }
+}
+
+/** The series a dragged row belongs to could not be loaded, so nothing was
+ *  written: an occurrence's own fields cannot stand in for the series. The
+ *  surface names the event in the user's language. */
+export class SeriesNotLoadedError extends Error {
+  readonly seriesId: string;
+
+  constructor(seriesId: string) {
+    super(`the series ${seriesId} could not be loaded; nothing was changed`);
+    this.name = 'SeriesNotLoadedError';
+    this.seriesId = seriesId;
+  }
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Move a whole series the way a drop moved one of its rows: `event` (an
+ * occurrence, a provider override, or the series' own row) now starts at
+ * `dropped`, `delta` days later on the device's calendar, at the dropped time of
+ * day when `minute` is given.
+ *
+ * Every occurrence moves by the same distance: the MASTER's start, end and
+ * exceptions, and — through `cal_core::series_shift` — its rule, so a Monday
+ * rule becomes a Tuesday rule and UNTIL moves along. The dragged row may be an
+ * occurrence or a provider override, whose start is not the series', so the
+ * master is loaded. A rule that cannot move by whole days throws
+ * {@link SeriesShiftRefusedError}, and nothing is written.
+ *
+ * The move is read off the dragged row on the series' own clock (its zone, or
+ * UTC without one), where the rule is read: the days between its old and new
+ * start there, and its new time of day there. Placing the drop on the master's
+ * date with the device's clock put the series an hour off whenever the device's
+ * offset differed between the two dates.
+ */
+async function moveSeries(
+  event: CalendarEvent,
+  dropped: string,
+  delta: number,
+  minute: number | null,
+): Promise<boolean> {
+  const seriesId = seriesIdOf(event);
+  const master =
+    event.id === seriesId && event.recurrence?.rrule
+      ? event
+      : await getEventById(seriesId, event.calendar_id);
+  const recurrence = master?.recurrence;
+  if (!master || !recurrence?.rrule) {
+    throw new SeriesNotLoadedError(seriesId);
+  }
+  const { tzid } = recurrence;
+  const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid)) / DAY_MS;
+  const days = Math.round(dayOf(dropped) - dayOf(event.start));
+
+  let start: string;
+  let end: string;
+  let timeChanges = false;
+  if (master.all_day) {
+    // An all-day series is a run of local days: it stays at local midnight.
+    const onDevice = (iso: string) => {
+      const when = new Date(iso);
+      when.setDate(when.getDate() + delta);
+      return when.toISOString();
+    };
+    start = onDevice(master.start);
+    end = onDevice(master.end);
+  } else {
+    start = moveSeriesInstant(
+      master.start,
+      tzid,
+      days,
+      minute === null ? undefined : dropped,
+    );
+    timeChanges = start !== moveSeriesInstant(master.start, tzid, days);
+    end = new Date(
+      Date.parse(start) + Date.parse(master.end) - Date.parse(master.start),
+    ).toISOString();
+  }
+  if (Date.parse(start) === Date.parse(master.start)) return false;
+
+  const answer = shiftSeriesRule(
+    recurrence.rrule,
+    seriesDayKey(master.start, tzid),
+    days,
+    timeChanges,
+    movedSeriesUntil(recurrence.rrule, tzid, master.start, start),
+  );
+  if (answer.outcome === 'refused') {
+    throw new SeriesShiftRefusedError(answer.reason);
+  }
   await apiUpdateEvent({
-    ...event,
-    id: seriesIdOf(event),
-    start: newStart,
-    end: newEnd,
+    ...master,
+    start,
+    end,
+    recurrence: {
+      ...recurrence,
+      rrule: answer.rrule,
+      // Each exception moves like the occurrence it cancels, so they still
+      // meet. An all-day series takes its start's time on the series' clock,
+      // which a clock change on the device moves by an hour.
+      exceptions: recurrence.exceptions.map((iso) =>
+        moveSeriesInstant(
+          iso,
+          tzid,
+          days,
+          timeChanges || master.all_day ? start : undefined,
+        ),
+      ),
+    },
   });
   return true;
 }

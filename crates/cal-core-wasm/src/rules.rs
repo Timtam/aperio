@@ -307,6 +307,11 @@ pub fn task_settings(input_json: &str) -> Result<String, WireError> {
     cal_core::task_settings_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::seriesShift`].
+pub fn series_shift(input_json: &str) -> Result<String, WireError> {
+    cal_core::series_shift_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -55,6 +55,7 @@ import {
   installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
+  installSeriesShiftRules,
 } from '@aperio/shared';
 
 import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
@@ -96,6 +97,7 @@ import {
   markCoreRulesReady,
   normalPriority,
   priorityRank,
+  seriesShiftJson,
 } from './wasm/coreRules';
 
 initSync({
@@ -161,3 +163,4 @@ installTaskAssignmentRules({
 installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson });
 installDayStartRules({ dayStartJson });
 installTaskSettingsRules({ taskSettingsJson });
+installSeriesShiftRules({ seriesShiftJson });

@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { ShiftRefusal } from '../state/moveActions';
 import { Modal } from './Modal';
 
 /**
@@ -21,8 +22,11 @@ export interface MoveEventScopeDialogProps {
   title: string;
   /** Detach just this occurrence onto the target day. */
   onOccurrence: () => void;
-  /** Re-anchor the whole series on the target day. */
+  /** Move the whole series by the same distance. */
   onSeries: () => void;
+  /** Set when moving the whole series was refused: the prompt says why and
+   *  offers only this occurrence. */
+  refused?: ShiftRefusal | null;
 }
 
 export function MoveEventScopeDialog({
@@ -31,9 +35,11 @@ export function MoveEventScopeDialog({
   title,
   onOccurrence,
   onSeries,
+  refused = null,
 }: MoveEventScopeDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const messageId = useId();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -47,9 +53,19 @@ export function MoveEventScopeDialog({
       title={t('dialogs.moveScope.title')}
       className="modal--confirm modal--confirm-wide"
       dismissOnBackdrop={false}
+      // The message names the event and, after a refusal, why the series
+      // cannot move. As a static <p> in the role="application" body it is
+      // unreachable to NVDA, so it is the dialog's description and is read
+      // when the dialog opens.
+      describedById={messageId}
     >
-      <p className="form__message">
-        {t('dialogs.moveScope.message', { title })}
+      <p id={messageId} className="form__message">
+        {refused
+          ? t('dialogs.moveScope.refusedMessage', {
+              title,
+              reason: t(`dialogs.moveScope.refusal.${refused}`),
+            })
+          : t('dialogs.moveScope.message', { title })}
       </p>
       <div className="form__actions">
         <button
@@ -70,16 +86,18 @@ export function MoveEventScopeDialog({
         >
           {t('dialogs.moveScope.occurrence')}
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSeries();
-            onClose();
-          }}
-          className="form__action form__action--primary"
-        >
-          {t('dialogs.moveScope.series')}
-        </button>
+        {refused ? null : (
+          <button
+            type="button"
+            onClick={() => {
+              onSeries();
+              onClose();
+            }}
+            className="form__action form__action--primary"
+          >
+            {t('dialogs.moveScope.series')}
+          </button>
+        )}
       </div>
     </Modal>
   );

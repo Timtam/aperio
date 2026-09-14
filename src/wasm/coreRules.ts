@@ -56,6 +56,7 @@ import init, {
   applySignature as wasmApplySignature,
   dayStart as wasmDayStart,
   taskSettings as wasmTaskSettings,
+  seriesShift as wasmSeriesShift,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -317,4 +318,10 @@ export function dayStartJson(inputJson: string): string {
 export function taskSettingsJson(inputJson: string): string {
   assertReady();
   return wasmTaskSettings(inputJson);
+}
+
+/** See `cal_core::series_shift::series_shift_json`. */
+export function seriesShiftJson(inputJson: string): string {
+  assertReady();
+  return wasmSeriesShift(inputJson);
 }

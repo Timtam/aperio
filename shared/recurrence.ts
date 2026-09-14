@@ -263,6 +263,84 @@ function shiftUntilToWall(rruleBody: string, tzid: string): string {
   );
 }
 
+/** The zone a series is expanded in, or `null` for UTC — including a zone `Intl`
+ *  cannot resolve, which {@link zonedOccurrences} also expands in UTC. */
+function expansionZone(tzid: string | null | undefined): string | null {
+  const zone = zoneOrNull(tzid);
+  if (!zone) return null;
+  try {
+    zoneFormatter(zone);
+    return zone;
+  } catch {
+    return null;
+  }
+}
+
+/** An instant on the clock a series recurs in, as a Date whose UTC fields hold
+ *  that clock's reading. */
+function seriesWall(instant: Date, tzid: string | null | undefined): Date {
+  const zone = expansionZone(tzid);
+  return zone ? realToWall(instant, zone) : instant;
+}
+
+/**
+ * The `YYYY-MM-DD` day `iso` falls on in the clock a series recurs in: its zone,
+ * or UTC for a series without one (see {@link expandEvent}). A rule's weekdays
+ * and days of the month are read against this day, which can differ from the
+ * day the device shows.
+ */
+export function seriesDayKey(iso: string, tzid: string | null | undefined): string {
+  return seriesWall(new Date(iso), tzid).toISOString().slice(0, 10);
+}
+
+/**
+ * `iso` moved by `days` whole days on the clock a series recurs in, and placed
+ * at `timeOf`'s time of day on that clock when given. This is how each instant
+ * of a series (its start, its exceptions) moves when the whole series moves, so
+ * the exceptions still meet the occurrences they cancel.
+ */
+export function moveSeriesInstant(
+  iso: string,
+  tzid: string | null | undefined,
+  days: number,
+  timeOf?: string,
+): string {
+  const zone = expansionZone(tzid);
+  let moved = seriesWall(new Date(iso), tzid).getTime() + days * DAY_MS;
+  if (timeOf !== undefined) {
+    const timeOfDay = (ms: number) => ((ms % DAY_MS) + DAY_MS) % DAY_MS;
+    moved += timeOfDay(seriesWall(new Date(timeOf), tzid).getTime()) - timeOfDay(moved);
+  }
+  return (zone ? wallToReal(new Date(moved), zone) : new Date(moved)).toISOString();
+}
+
+/**
+ * A rule's UTC `UNTIL`, moved on the series' clock the way its start moved from
+ * `from` to `to`, written `YYYYMMDDTHHMMSSZ` as the rule stores it; `undefined`
+ * when the rule has no UTC date-time `UNTIL`.
+ *
+ * The bound is an instant. Moved by whole UTC days it slides an hour against
+ * the occurrences across a clock change, and left in place while the time of
+ * day changes, the last occurrence drops past it or a cut one comes back.
+ */
+export function movedSeriesUntil(
+  rrule: string,
+  tzid: string | null | undefined,
+  from: string,
+  to: string,
+): string | undefined {
+  const match = /(?:^|;)\s*UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\s*(?:;|$)/i.exec(rrule);
+  if (!match) return undefined;
+  const [, y, mo, d, h, mi, s] = match.map(Number);
+  const until = Date.UTC(y, mo - 1, d, h, mi, s);
+  if (Number.isNaN(until)) return undefined;
+  const zone = expansionZone(tzid);
+  const wall = (ms: number) => (zone ? realToWall(new Date(ms), zone) : new Date(ms)).getTime();
+  const movedWall = wall(until) + wall(Date.parse(to)) - wall(Date.parse(from));
+  const moved = zone ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
+  return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
 /**
  * The host's current IANA time zone (e.g. `America/New_York`), or `null` when
  * the runtime can't report a usable one (or only reports plain UTC).
