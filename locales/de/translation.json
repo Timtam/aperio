@@ -1400,7 +1400,8 @@
       "occurrence": "Nur diesen Termin",
       "thisAndFuture": "Diesen und alle folgenden",
       "series": "Ganze Serie",
-      "cancel": "Abbrechen"
+      "cancel": "Abbrechen",
+      "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden. Versuche es noch einmal, oder bearbeite nur diesen Termin."
     },
     "taskDeleteScope": {
       "title": "Wiederkehrende Erinnerung löschen",
@@ -1471,6 +1472,7 @@
       "thisAndFutureCancelled": "„{{title}}\" wurde ab diesem Termin abgesagt; Teilnehmer benachrichtigt, frühere Termine bleiben.",
       "thisAndFutureUpdated": "„{{title}}\" wurde ab diesem Termin geändert; frühere Termine bleiben unverändert.",
       "thisAndFutureLoadFailed": "Die Serie „{{title}}\" konnte zum Aufteilen nicht geladen werden; es wurde nichts geändert.",
+      "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
         "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",

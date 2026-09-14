@@ -34,6 +34,8 @@ import {
   timeInput,
   toIso,
   editedRecurrence,
+  exceptionsAtSeriesTime,
+  seriesTimesFromOccurrenceEdit,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -971,19 +973,52 @@ export default function EventEditorModal({
         // move (create-on-target + delete-from-source) rather than an in-place
         // PUT to a non-existent target resource (which an external provider
         // rejects 412). A cross-adapter move returns the new event at the target.
+        //
+        // `original` is the series itself. The scope prompt opens it without an
+        // occurrence; opened on one of its occurrences with the whole-series
+        // scope (the scope control in the form), the fields hold that
+        // occurrence, so the edit is read as a change to the series: an
+        // untouched date leaves the series start where it is.
+        const seededOccurrence =
+          isOccurrence && occurrence != null && original.recurrence != null
+            ? {
+                start: occurrence,
+                end: new Date(
+                  Date.parse(occurrence) +
+                    Date.parse(original.end) -
+                    Date.parse(original.start),
+                ).toISOString(),
+              }
+            : null;
+        const times = seededOccurrence
+          ? seriesTimesFromOccurrenceEdit(
+              original,
+              original.recurrence?.tzid,
+              seededOccurrence,
+              { start, end },
+              allDay,
+            )
+          : { start, end };
         const updated = await updateEvent(
           {
             ...original,
             title: trimmedTitle,
             calendar_id: calId,
             all_day: allDay,
-            start,
-            end,
+            start: times.start,
+            end: times.end,
             location: location.trim() || null,
             description: description.trim() || null,
             color_label: colorToSend,
             reminders: remindersForWire,
-            recurrence: recurrenceToSend,
+            // A new time of day takes the exceptions along, or the occurrences
+            // they cancel would come back at that time.
+            recurrence: exceptionsAtSeriesTime(
+              recurrenceToSend,
+              original.start,
+              times.start,
+              allDay || original.all_day,
+            ),
             attendees,
             send_invitations: sendInvitations,
           },

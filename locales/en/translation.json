@@ -1403,7 +1403,8 @@
       "occurrence": "This occurrence only",
       "thisAndFuture": "This and all following",
       "series": "Whole series",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "seriesLoadFailed": "The series \"{{title}}\" could not be loaded. Try again, or edit just this occurrence."
     },
     "taskDeleteScope": {
       "title": "Delete recurring reminder",
@@ -1471,6 +1472,7 @@
       "thisAndFutureCancelled": "\"{{title}}\" was cancelled from this occurrence on; attendees notified, earlier ones stay.",
       "thisAndFutureUpdated": "\"{{title}}\" was changed from this occurrence on; earlier ones are unchanged.",
       "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
+      "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {
         "title": "Cancel meeting?",
         "message": "You organize \"{{title}}\". Cancel it and notify the attendees, or just remove it from your calendar without telling them?",

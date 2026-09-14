@@ -23,8 +23,11 @@ export interface EditEventScopeDialogProps {
   onOccurrence: () => void;
   /** Open the editor scoped to this occurrence and all following ones. */
   onThisAndFuture: () => void;
-  /** Open the editor scoped to the whole series. */
+  /** Open the editor on the whole series. */
   onSeries: () => void;
+  /** The whole series was chosen but could not be loaded; the prompt stays and
+   *  says so. */
+  seriesLoadFailed?: boolean;
 }
 
 export function EditEventScopeDialog({
@@ -34,6 +37,7 @@ export function EditEventScopeDialog({
   onOccurrence,
   onThisAndFuture,
   onSeries,
+  seriesLoadFailed = false,
 }: EditEventScopeDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -59,6 +63,11 @@ export function EditEventScopeDialog({
       <p id={msgId} className="form__message">
         {t('dialogs.editScope.message', { title })}
       </p>
+      {seriesLoadFailed && (
+        <p role="alert" className="form__error">
+          {t('dialogs.editScope.seriesLoadFailed', { title })}
+        </p>
+      )}
       <div className="form__actions">
         <button
           ref={cancelRef}

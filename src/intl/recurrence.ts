@@ -18,6 +18,8 @@ export {
   planSeriesSplit,
   writeSeriesSplit,
   firstOccurrenceFrom,
+  seriesTimesFromOccurrenceEdit,
+  exceptionsAtSeriesTime,
   localTimeZone,
   withCreatedRecurrenceZone,
   editedRecurrence,

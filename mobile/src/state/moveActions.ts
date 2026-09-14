@@ -8,6 +8,7 @@ import { isSeriesOccurrence, occurrenceIsoOf, seriesIdOf } from '@aperio/shared'
 import {
   addEventExdate,
   createEvent,
+  getEventById,
   updateEvent,
   type CalendarEvent,
 } from '../api/calendar';
@@ -138,6 +139,11 @@ export async function moveOrCopyTask(
  *
  * Occurrence scope only takes effect for an actual expanded occurrence; a plain
  * master row falls back to whole-series behaviour.
+ *
+ * The whole series is moved or copied as the series: a row of a series (an
+ * expanded occurrence, or a provider override) starts at that occurrence and
+ * an override carries no rule, so the master is loaded. Written from the row,
+ * the series started at that occurrence and could lose its rule.
  */
 export async function moveOrCopyEvent(
   event: CalendarEvent,
@@ -148,26 +154,28 @@ export async function moveOrCopyEvent(
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
 
   if (mode === 'move' && !asOccurrence) {
+    const series = await seriesRowOf(event);
     await updateEvent(
-      { ...event, id: seriesIdOf(event), calendar_id: targetCalendarId },
-      event.calendar_id,
+      { ...series, calendar_id: targetCalendarId },
+      series.calendar_id,
     );
     return;
   }
 
+  const source = asOccurrence ? event : await seriesRowOf(event);
   await createEvent({
     calendar_id: targetCalendarId,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    start: event.start,
-    end: event.end,
-    all_day: event.all_day,
-    recurrence: asOccurrence ? null : event.recurrence,
-    color_label: event.color_label,
-    reminders: event.reminders,
-    sound: event.sound,
-    attendees: event.attendees,
+    title: source.title,
+    description: source.description,
+    location: source.location,
+    start: source.start,
+    end: source.end,
+    all_day: source.all_day,
+    recurrence: asOccurrence ? null : source.recurrence,
+    color_label: source.color_label,
+    reminders: source.reminders,
+    sound: source.sound,
+    attendees: source.attendees,
   });
 
   if (mode === 'move' && asOccurrence) {
@@ -176,4 +184,17 @@ export async function moveOrCopyEvent(
       await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
     }
   }
+}
+
+/** The row that stands for the whole series `event` belongs to: `event` itself
+ *  when it is that row, else the loaded master. Throws when the master cannot
+ *  be loaded, so nothing is written from an occurrence's fields. */
+async function seriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+  const seriesId = seriesIdOf(event);
+  if (event.id === seriesId) return event;
+  const master = await getEventById(seriesId, event.calendar_id);
+  if (!master) {
+    throw new Error(`the series ${seriesId} could not be loaded; nothing was changed`);
+  }
+  return master;
 }

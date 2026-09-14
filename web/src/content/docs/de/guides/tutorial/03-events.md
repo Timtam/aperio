@@ -124,7 +124,10 @@ oder die **ganze Serie** beziehen soll – dieselben drei Umfänge wie bei ander
 Kalendern (Google, Outlook). **Diesen und alle folgenden** teilt die Serie am
 gewählten Termin: Die früheren Termine bleiben unangetastet, dieser und jeder
 spätere werden geändert (beim Bearbeiten übernimmt ab hier eine neue Serie) oder
-entfernt (beim Löschen).
+entfernt (beim Löschen). **Die ganze Serie** öffnet die Serie selbst, mit ihrem
+eigenen Beginn und Ende, auch wenn du sie von einem späteren Termin aus geöffnet
+hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
+Beginn der Serie.
 
 > **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
 > werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste

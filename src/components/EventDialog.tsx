@@ -38,6 +38,8 @@ import {
   seriesIdOf,
   writeSeriesSplit,
   editedRecurrence,
+  exceptionsAtSeriesTime,
+  seriesTimesFromOccurrenceEdit,
 } from '../intl/recurrence';
 import {
   eventPrefillFrom,
@@ -1232,17 +1234,56 @@ export function EventDialog({
             }
           }
 
+          // The row that is the series. The scope prompt opens the series
+          // itself; an editor opened on a row of a series with the whole-series
+          // scope (the scope control in the form) holds that occurrence's
+          // fields instead. Then the series is loaded and the edit is read as a
+          // change to it, so an untouched date leaves the series start where it
+          // is and an untouched rule stays the series' rule.
+          const series = isOccurrence
+            ? await getEventById(seriesId, event.calendar_id)
+            : event;
+          if (!series) {
+            throw new Error(
+              t('dialogs.event.seriesLoadFailed', { title: event.title }),
+            );
+          }
+          const times = isOccurrence
+            ? seriesTimesFromOccurrenceEdit(
+                series,
+                series.recurrence?.tzid,
+                event,
+                { start, end },
+                form.allDay,
+              )
+            : { start, end };
+          const seriesRecurrence = isOccurrence
+            ? editedRecurrence(
+                form.rrule === (event.recurrence?.rrule ?? null)
+                  ? (series.recurrence?.rrule ?? form.rrule)
+                  : form.rrule,
+                series.recurrence ?? { exceptions: [] },
+                form.allDay,
+              )
+            : recurrence;
           const updated: CalendarEvent = {
-            ...event,
+            ...series,
             id: seriesId,
             title: trimmedTitle,
             calendar_id: form.calendarId,
-            start,
-            end,
+            start: times.start,
+            end: times.end,
             all_day: form.allDay,
             location: form.location.trim() || null,
             description: form.description.trim() || null,
-            recurrence,
+            // A new time of day takes the exceptions along, or the occurrences
+            // they cancel would come back at that time.
+            recurrence: exceptionsAtSeriesTime(
+              seriesRecurrence,
+              series.start,
+              times.start,
+              form.allDay || series.all_day,
+            ),
             color_label: form.colorLabel,
             reminders: remindersForWire,
             attendees: form.attendees,
@@ -1278,7 +1319,7 @@ export function EventDialog({
           // Only for a whole-event edit: an occurrence override and a
           // series truncation each return above, because "which copy of
           // which occurrence" is a question this cannot answer yet.
-          carriedToGroup = await offerToCarry(event, updated);
+          carriedToGroup = await offerToCarry(series, updated);
         } else {
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
@@ -1871,7 +1912,9 @@ export function EventDialog({
             {t(
               editScope === 'occurrence'
                 ? 'dialogs.event.scope.occurrence'
-                : 'dialogs.event.scope.series',
+                : editScope === 'this_and_future'
+                  ? 'dialogs.event.scope.thisAndFuture'
+                  : 'dialogs.event.scope.series',
             )}
           </p>
         )}

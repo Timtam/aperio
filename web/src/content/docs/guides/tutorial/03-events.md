@@ -117,6 +117,9 @@ the **whole series** — the same three scopes other calendars (Google, Outlook)
 offer. **This and all following** splits the series at the chosen occurrence:
 the earlier occurrences stay untouched, and this one plus every later one are
 changed (on edit, a new series takes over from here) or removed (on delete).
+**The whole series** opens the series itself, with its own start and end, even
+when you opened it from a later occurrence. A new time applies to every
+occurrence, and a new date moves the start of the series.
 
 > **Tip:** Recurring events from external calendars (e.g. iCloud) expand
 > correctly in every view – even when the first occurrence lies in the past.
