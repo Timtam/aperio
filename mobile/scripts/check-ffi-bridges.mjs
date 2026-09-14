@@ -26,7 +26,8 @@
  *   Rust  ↔ Swift     — ditto for iOS, where nothing local ever compiles it.
  *
  * And one more, from the other side: every function `CalFfiModule.ts` declares
- * has to be registered in BOTH native modules (see `declaredSurface`).
+ * has to be registered in BOTH native modules, as the same kind of function and
+ * with the same number of parameters (see `declaredFunctions`).
  *
  * Only methods a bridge actually calls are checked, so a Rust method no phone
  * uses is nobody's problem here.
@@ -79,15 +80,17 @@ function balanced(text, open) {
 
 /**
  * Top-level comma-separated items. `<>`, `()` and `[]` all nest, so
- * `Map<String, Int>` and `foo(a, b)` each count as one.
+ * `Map<String, Int>` and `foo(a, b)` each count as one. The `>` of an arrow
+ * (`->`, `=>`) closes nothing.
  */
 function splitTop(text) {
   const parts = [];
   let depth = 0;
   let current = '';
   for (const c of text) {
+    const arrow = c === '>' && (current.endsWith('-') || current.endsWith('='));
     if (c === '<' || c === '(' || c === '[') depth += 1;
-    if (c === '>' || c === ')' || c === ']') depth -= 1;
+    if ((c === '>' && !arrow) || c === ')' || c === ']') depth -= 1;
     if (c === ',' && depth === 0) {
       parts.push(current);
       current = '';
@@ -332,27 +335,202 @@ for (const [name, count] of declared) {
 }
 
 /**
- * The functions JavaScript can call, by name: every method `CalFfiModule.ts`
- * declares has to be registered as `Function("…")` or `AsyncFunction("…")` in
- * BOTH native modules.
+ * A source with its comments blanked out and its strings kept. Block comments
+ * nest in Kotlin and Swift, not in TypeScript.
+ *
+ * A registration that was commented out still compiles on both platforms, and
+ * a name inside a comment is nothing JavaScript can call.
+ */
+function withoutComments(text, { nested }) {
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith('"""', i)) {
+      const end = text.indexOf('"""', i + 3);
+      const stop = end < 0 ? text.length : end + 3;
+      out += text.slice(i, stop);
+      i = stop;
+    } else if (text[i] === '"' || text[i] === "'" || text[i] === '`') {
+      const quote = text[i];
+      let j = i + 1;
+      while (j < text.length && text[j] !== quote && (text[j] !== '\n' || quote === '`')) {
+        j += text[j] === '\\' ? 2 : 1;
+      }
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else if (text.startsWith('//', i)) {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (text.startsWith('/*', i)) {
+      let depth = 1;
+      let j = i + 2;
+      while (j < text.length && depth > 0) {
+        if (nested && text.startsWith('/*', j)) {
+          depth += 1;
+          j += 2;
+        } else if (text.startsWith('*/', j)) {
+          depth -= 1;
+          j += 2;
+        } else j += 1;
+      }
+      out += blank(text.slice(i, j));
+      i = j;
+    } else {
+      out += text[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** The text inside the brace at `open` and its match. */
+function braced(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return null;
+}
+
+/** A declared return type: names, generics, arrays and unions, and nothing else. */
+const isReturnType = (text) =>
+  /^[\w$.[\]]+(?: ?\| ?[\w$.[\]]+)*$/.test(text.replace(/<[^<>]*(?:<[^<>]*>[^<>]*)*>/g, ''));
+
+/**
+ * The functions JavaScript can call, as `CalFfiModule.ts` declares them:
+ * `members` maps a name to its parameter count, whether it returns a Promise,
+ * and its return type. Only the body of `declare class CalFfiModule` counts;
+ * the events type above it is not callable.
  *
  * Everything above follows calls INTO Rust. A free function such as
- * `seriesShift` is registered in each module and called there by bare name,
- * which none of those patterns see: a module that forgot to register it passed
- * this check, and TypeScript trusts the declaration, so the gap showed only on
- * the phone, as "CalFfi.seriesShift is not a function".
+ * `seriesShift` is registered in each native module and called there by bare
+ * name, which none of those patterns see: a module that forgot to register it
+ * passed this check, and TypeScript trusts the declaration, so the gap showed
+ * only on the phone, as "CalFfi.seriesShift is not a function".
+ *
+ * A member has to be one this reads — a method, `name(args): Result;`, or a
+ * property holding a function, `name: (args) => Result;`. Anything else goes
+ * into `unreadable` with its text instead of being skipped: a declaration the
+ * check cannot read is one it cannot hold the native modules to.
  */
-const declaredSurface = new Set(
-  [...readFileSync(TS_MODULE, 'utf8').matchAll(/^ {2}([a-z][A-Za-z0-9]*)\s*\(/gm)].map(
-    (m) => m[1],
-  ),
-);
-const registeredIn = (source) =>
-  new Set(
-    [...source.matchAll(/\b(?:Async)?Function\("([A-Za-z0-9_]+)"\)/g)].map((m) => m[1]),
-  );
-const kotlinSurface = registeredIn(readFileSync(KOTLIN, 'utf8'));
-const swiftSurface = registeredIn(readFileSync(SWIFT, 'utf8'));
+function declaredFunctions(ts) {
+  const source = withoutComments(ts, { nested: false });
+  const marker = source.search(/\bdeclare class CalFfiModule\b/);
+  const body = marker < 0 ? null : braced(source, source.indexOf('{', marker));
+  if (body === null) {
+    console.error(
+      'Could not find the body of `declare class CalFfiModule` in\n  ' +
+        TS_MODULE +
+        '\nThe check cannot run, which is a failure and not a pass.',
+    );
+    process.exit(1);
+  }
+  const members = new Map();
+  const unreadable = [];
+  let depth = 0;
+  let current = '';
+  const chunks = [];
+  for (const c of body) {
+    if (c === '(' || c === '{' || c === '[') depth += 1;
+    if (c === ')' || c === '}' || c === ']') depth -= 1;
+    if (c === ';' && depth === 0) {
+      chunks.push(current);
+      current = '';
+    } else current += c;
+  }
+  chunks.push(current);
+  for (const chunk of chunks) {
+    const text = chunk.replace(/\s+/g, ' ').trim();
+    if (text === '') continue;
+    const head = /^([A-Za-z_$][\w$]*) ?(<[^()]*>)? ?([(:])/.exec(text);
+    let signature = null;
+    if (head !== null && head[3] === '(') {
+      const args = balanced(text, head[0].length - 1);
+      const ret = args && /^ ?: ?(.+)$/.exec(text.slice(args.end));
+      if (ret) signature = { args: args.inner, returns: ret[1] };
+    } else if (head !== null && !head[2]) {
+      const rest = text.slice(head[0].length).trimStart();
+      const args = rest.startsWith('(') ? balanced(rest, 0) : null;
+      const ret = args && /^ ?=> ?(.+)$/.exec(rest.slice(args.end));
+      if (ret) signature = { args: args.inner, returns: ret[1] };
+    }
+    const params = signature && splitTop(signature.args);
+    if (
+      signature === null ||
+      !isReturnType(signature.returns) ||
+      params.some((p) => !/^[A-Za-z_$][\w$]* ?: ?\S/.test(p))
+    ) {
+      unreadable.push({ name: head?.[1] ?? null, text });
+      continue;
+    }
+    members.set(head[1], {
+      params: params.length,
+      async: /^Promise</.test(signature.returns),
+      returns: signature.returns,
+    });
+  }
+  return { members, unreadable };
+}
+
+/**
+ * The parameters a native closure takes from JavaScript, or `null` when this
+ * cannot read them. expo's trailing `Promise` parameter is not one JavaScript
+ * passes. A closure that opens straight into its body takes none.
+ *
+ *   Kotlin: `{ inputJson: String -> … }`, `{ -> … }`, `{ host.foo() }`
+ *   Swift:  `{ (inputJson: String) -> String in … }`, `{ self.host.foo() }`
+ */
+function closureParams(after, language) {
+  let list = null;
+  if (language === 'kotlin') {
+    const param = String.raw`[A-Za-z_]\w*\s*:\s*[A-Za-z_][\w.]*(?:<[^{}()]*?>)?\??`;
+    const typed = new RegExp(String.raw`^\s*(?:(${param}(?:\s*,\s*${param})*)\s*)?->`).exec(after);
+    if (typed) list = typed[1] ? splitTop(typed[1]) : [];
+    else if (/^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*->/.test(after)) return null;
+    else list = [];
+  } else {
+    const open = /^\s*\(/.exec(after);
+    const args = open && balanced(after, open[0].length - 1);
+    if (args && /^\s*(?:async\s+)?(?:throws\s+)?(?:->[^{}]*?)?\s*\bin\b/.test(after.slice(args.end))) {
+      list = splitTop(args.inner);
+      if (list.some((p) => !/^(?:[A-Za-z_]\w*\s+)?[A-Za-z_]\w*\s*:\s*\S/.test(p))) return null;
+    } else if (/^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s+in\b/.test(after)) return null;
+    else list = [];
+  }
+  return list.filter((p) => !/:\s*Promise\s*$/.test(p)).length;
+}
+
+/**
+ * name → every registration of it in one native module: `Function("…")` or
+ * `AsyncFunction("…")`, and how many parameters its closure takes from
+ * JavaScript (`null`: unreadable).
+ *
+ * Registrations are expected in the module file itself. Moving some into a
+ * helper file reports them as missing, loudly, rather than passing.
+ */
+function registeredFunctions(source, language) {
+  const code = withoutComments(source, { nested: true });
+  const out = new Map();
+  for (const m of code.matchAll(/\b(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)\s*(\{)?/g)) {
+    const params = m[3] ? closureParams(code.slice(m.index + m[0].length), language) : null;
+    out.set(m[2], [...(out.get(m[2]) ?? []), { async: Boolean(m[1]), params }]);
+  }
+  return out;
+}
+
+const declaredSurface = declaredFunctions(readFileSync(TS_MODULE, 'utf8'));
+const MODULE = { android: 'Android', ios: 'iOS' };
+const nativeModules = new Map([
+  ['android', registeredFunctions(readFileSync(KOTLIN, 'utf8'), 'kotlin')],
+  ['ios', registeredFunctions(readFileSync(SWIFT, 'utf8'), 'swift')],
+]);
 
 /**
  * Functions only one platform has, each named with its reason. Their callers
@@ -365,33 +543,70 @@ const ONLY_ON = new Map([
   ['disableBackgroundRefresh', ['ios', 'cancels that iOS-only wake-up']],
   ['writeVoicePickers', ['ios', 'feeds the Siri intents, which exist only on iOS']],
 ]);
-const MODULE = { android: 'Android', ios: 'iOS' };
 
-for (const name of declaredSurface) {
-  const only = ONLY_ON.get(name)?.[0];
-  if (only !== 'ios' && !kotlinSurface.has(name)) {
-    problems.push(`CalFfiModule.ts declares ${name}(), which the Android module does not register`);
+/** What JavaScript can call and what the native modules register, kept apart
+ *  from `problems`: regenerating bindings fixes none of these. */
+const surface = [];
+const unreadableNames = new Set(declaredSurface.unreadable.map((u) => u.name));
+
+for (const { text } of declaredSurface.unreadable) {
+  surface.push(
+    `CalFfiModule.ts has a member this check cannot read, so it cannot hold the ` +
+      `native modules to it: "${text.length > 80 ? `${text.slice(0, 77)}...` : text}"`,
+  );
+}
+for (const [platform, registered] of nativeModules) {
+  const where = `the ${MODULE[platform]} module`;
+  for (const name of declaredSurface.members.keys()) {
+    if (ONLY_ON.has(name) && ONLY_ON.get(name)[0] !== platform) continue;
+    if (!registered.has(name)) {
+      surface.push(`CalFfiModule.ts declares ${name}(), which ${where} does not register`);
+    }
   }
-  if (only !== 'android' && !swiftSurface.has(name)) {
-    problems.push(`CalFfiModule.ts declares ${name}(), which the iOS module does not register`);
+  for (const [name, found] of registered) {
+    if (found.length > 1) surface.push(`${where} registers ${name}() ${found.length} times`);
+    const fn = declaredSurface.members.get(name);
+    if (fn === undefined) {
+      if (!unreadableNames.has(name)) {
+        surface.push(`${where} registers ${name}(), which CalFfiModule.ts does not declare`);
+      }
+      continue;
+    }
+    const [registration] = found;
+    if (registration.async !== fn.async) {
+      surface.push(
+        fn.async
+          ? `CalFfiModule.ts declares that ${name}() returns ${fn.returns}, but ${where} ` +
+              'registers it with Function, so JavaScript gets no Promise'
+          : `CalFfiModule.ts declares that ${name}() returns ${fn.returns}, but ${where} ` +
+              'registers it with AsyncFunction, so JavaScript gets a Promise',
+      );
+    }
+    if (registration.params === null) {
+      surface.push(
+        `this check cannot read the parameters ${where} gives ${name}() — ` +
+          'write each one with its type',
+      );
+    } else if (registration.params !== fn.params) {
+      surface.push(
+        `CalFfiModule.ts declares ${name}() with ${fn.params} parameter(s), ` +
+          `but ${where} takes ${registration.params}`,
+      );
+    }
   }
 }
 for (const [name, [platform]] of ONLY_ON) {
-  if (!declaredSurface.has(name)) {
-    problems.push(
+  if (!declaredSurface.members.has(name)) {
+    surface.push(
       `${name}() is listed as ${MODULE[platform]} only, but CalFfiModule.ts no longer declares it`,
     );
   }
-  const other = platform === 'ios' ? kotlinSurface : swiftSurface;
-  if (other.has(name)) {
-    problems.push(
-      `${name}() is listed as ${MODULE[platform]} only, but the other module registers it too`,
+  const other = platform === 'ios' ? 'android' : 'ios';
+  if (nativeModules.get(other).has(name)) {
+    surface.push(
+      `${name}() is listed as ${MODULE[platform]} only, but ` +
+        `the ${MODULE[other]} module registers it too`,
     );
-  }
-}
-for (const name of new Set([...kotlinSurface, ...swiftSurface])) {
-  if (!declaredSurface.has(name)) {
-    problems.push(`a native module registers ${name}(), which CalFfiModule.ts does not declare`);
   }
 }
 
@@ -404,7 +619,9 @@ const floors = [
   // Free functions are few by nature; the floor only has to prove the
   // parse found the family at all.
   ['exported Rust free functions', rustFree.size, 3],
-  ['functions CalFfiModule.ts declares', declaredSurface.size, 100],
+  ['functions CalFfiModule.ts declares', declaredSurface.members.size, 100],
+  ['Android module registrations', nativeModules.get('android').size, 100],
+  ['iOS module registrations', nativeModules.get('ios').size, 100],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -430,12 +647,37 @@ if (problems.length > 0) {
       'The committed bindings and the vendored .so must come from the SAME\n' +
       'cal-ffi source, or JNA fails to resolve symbols at call time.',
   );
-  process.exit(1);
 }
 
+if (surface.length > 0) {
+  console.error(
+    `${problems.length > 0 ? '\n' : ''}CalFfiModule.ts and the native modules ` +
+      `disagree in ${surface.length} place(s):\n`,
+  );
+  for (const p of [...new Set(surface)].sort()) console.error(`  ${p}`);
+  console.error(
+    '\nEvery function CalFfiModule.ts declares is registered in CalFfiModule.kt AND\n' +
+      'CalFfiModule.swift: with AsyncFunction when it returns a Promise, with Function\n' +
+      "otherwise, and with one closure parameter per declared parameter (expo's\n" +
+      'trailing Promise parameter does not count). A function one platform lacks on\n' +
+      'purpose goes into ONLY_ON in mobile/scripts/check-ffi-bridges.mjs, with its reason.',
+  );
+}
+
+if (problems.length > 0 || surface.length > 0) process.exit(1);
+
+const onlyOn = Object.entries(MODULE)
+  .map(([platform, label]) => {
+    const names = [...ONLY_ON].filter(([, [p]]) => p === platform).map(([n]) => n);
+    return names.length > 0 ? `${label} only: ${names.sort().join(', ')}` : null;
+  })
+  .filter(Boolean)
+  .join('; ');
+
 console.log(
-  `FFI bridges OK — the ${declaredSurface.size} functions CalFfiModule.ts declares are ` +
-    `registered in both native modules (${ONLY_ON.size} named as one platform only), ` +
+  `FFI bridges OK — the ${declaredSurface.members.size} functions CalFfiModule.ts declares ` +
+    `are registered in both native modules, as the same kind and with the same ` +
+    `parameter count (${onlyOn}), ` +
     `${kotlin.size} Android and ${swift.size} iOS calls agree ` +
     `with the committed bindings and with crates/cal-ffi, and its ` +
     `${rustFree.size} exported free functions ` +

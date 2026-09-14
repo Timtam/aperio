@@ -911,6 +911,19 @@ Siehe DESIGN §4.2.
   fehlten — das wäre erst als `:cal-ffi:compileReleaseKotlin`-Fehler minutentief
   in einem EAS-Bau aufgefallen. Erweitert und an genau diesem Fall rot
   bewiesen.
+  ↳ **Zweite Wächter-Lücke (2026-09-14, #72):** Der Wächter folgte nur Aufrufen
+  IN Rust hinein. Ob eine in `CalFfiModule.ts` erklärte Funktion in beiden
+  nativen Modulen registriert ist, sah er nicht: Swift-`seriesShift` entfernt,
+  und er meldete GRÜN. Auf dem iPhone wäre das erst beim Aufruf als „is not a
+  function“ aufgefallen.
+
+  Jetzt hält er jede erklärte Funktion an beide Module fest: Sie muss
+  registriert sein, als dieselbe Art (`AsyncFunction` genau dann, wenn sie ein
+  Promise liefert) und mit derselben Parameterzahl. Auskommentierte
+  Registrierungen zählen nicht, und eine Erklärung, die er nicht lesen kann,
+  nennt er mit ihrem Text. Die drei iOS-Funktionen stehen mit Grund in `ONLY_ON`.
+
+  17 Proben: 13 Sabotagen rot und 4 frühere Fehlalarme grün.
   ↳ Offen bleibt: honoriert Hermes `{ numeric: true }`? Die Frage ist für die
   Zukunft entschärft (der Kern sortiert jetzt), aber falls Hermes es nicht tat,
   ändert sich mit dem nächsten Mobile-Build eine bestehende Reihenfolge sichtbar
