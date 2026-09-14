@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   expandEvent,
   expandAll,
@@ -516,35 +516,59 @@ describe('withCreatedRecurrenceZone', () => {
 });
 
 describe('editedRecurrence', () => {
+  /** Pretend the device is in Berlin, whatever zone the test machine is in. */
+  const deviceInBerlin = () => {
+    const real = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...real,
+      timeZone: 'Europe/Berlin',
+    });
+  };
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('keeps the exceptions and the zone of the series it edits', () => {
-    const series = { exceptions: ['2026-06-22T07:00:00.000Z'], tzid: 'Europe/Berlin' };
-    expect(editedRecurrence('FREQ=WEEKLY;BYDAY=MO', series)).toEqual({
+    deviceInBerlin();
+    const series = { exceptions: ['2026-06-22T07:00:00.000Z'], tzid: 'America/New_York' };
+    expect(editedRecurrence('FREQ=WEEKLY;BYDAY=MO', series, false)).toEqual({
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
       exceptions: ['2026-06-22T07:00:00.000Z'],
+      tzid: 'America/New_York',
+    });
+  });
+
+  it("gives a timed series without a zone the device's zone, as a new one gets", () => {
+    deviceInBerlin();
+    expect(
+      editedRecurrence('FREQ=DAILY', { exceptions: ['2026-06-22T07:00:00.000Z'], tzid: null }, false),
+    ).toEqual({ rrule: 'FREQ=DAILY', exceptions: ['2026-06-22T07:00:00.000Z'], tzid: 'Europe/Berlin' });
+    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] }, false)?.tzid).toBe('Europe/Berlin');
+  });
+
+  it('leaves an all-day series without a zone as it is', () => {
+    deviceInBerlin();
+    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] }, true)).toEqual({
+      rrule: 'FREQ=DAILY',
+      exceptions: [],
+    });
+  });
+
+  it("gives an event that becomes a series the device's zone, unless it is all-day", () => {
+    // An existing one-off event that gets a rule is saved through the update
+    // path, where nothing else stamps a zone.
+    deviceInBerlin();
+    expect(editedRecurrence('FREQ=WEEKLY', null, false)).toEqual({
+      rrule: 'FREQ=WEEKLY',
+      exceptions: [],
       tzid: 'Europe/Berlin',
     });
-  });
-
-  it('adds no zone to a series that had none', () => {
-    expect(editedRecurrence('FREQ=DAILY', { exceptions: [], tzid: null })).toEqual({
-      rrule: 'FREQ=DAILY',
-      exceptions: [],
-    });
-    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] })).toEqual({
-      rrule: 'FREQ=DAILY',
-      exceptions: [],
-    });
-  });
-
-  it('leaves a new series to the stamp at create time', () => {
-    const fresh = editedRecurrence('FREQ=DAILY', null);
-    expect(fresh).toEqual({ rrule: 'FREQ=DAILY', exceptions: [] });
-    expect(withCreatedRecurrenceZone(fresh, false)?.tzid ?? null).toBe(localTimeZone());
+    expect(editedRecurrence('FREQ=WEEKLY', null, true)).toEqual({ rrule: 'FREQ=WEEKLY', exceptions: [] });
   });
 
   it('is no recurrence when the form has no rule', () => {
-    expect(editedRecurrence('', { exceptions: [], tzid: 'Europe/Berlin' })).toBeNull();
-    expect(editedRecurrence(null, undefined)).toBeNull();
+    expect(editedRecurrence('', { exceptions: [], tzid: 'Europe/Berlin' }, false)).toBeNull();
+    expect(editedRecurrence(null, undefined, false)).toBeNull();
   });
 });
 

@@ -88,6 +88,26 @@ verlor bei uns nicht nur die Uhrzeit, sondern den **ganzen Tag** und lag ohne
 Datum im Backlog. Und eine Aufgabe aus **Microsoft To Do**, die jemand in seiner
 eigenen Zeitzone angelegt hat, konnte bei uns einen Tag zu früh erscheinen.
 
+## Eine Terminserie steht nach der Zeitumstellung eine Stunde daneben
+
+Beim Speichern einer Terminserie im Editor von Aperio ging bisher ihre Zeitzone
+verloren. Das betraf jede Serie mit Zeitzone, die seit Juni 2026 in Aperio als
+Ganzes bearbeitet wurde, auch Serien, die anderswo angelegt wurden, etwa auf dem
+iPhone, in Outlook oder im Google-Kalender, und im lokalen Kalender genauso wie
+bei iCloud, Google, Microsoft 365 oder Exchange. Ein Termin, der im Editor zur
+Serie wurde, bekam gar keine Zeitzone.
+
+Ohne Zeitzone behält eine Serie ihre Uhrzeit in UTC. Nach der Zeitumstellung
+steht sie eine Stunde zu früh oder zu spät, bei uns und in jedem anderen
+Programm, das den Kalender liest. In den Kalenderansichten sieht man es schon,
+wenn man über die nächste Umstellung hinaus blättert.
+
+Seit dieser Version behält der Editor die Zeitzone und gibt einer Serie ohne
+Zeitzone die deines Geräts. Um eine schon betroffene Serie zu reparieren, öffne
+in Aperio die **ganze Serie** (nicht ein einzelnes Vorkommen) und speichere sie
+einmal. Aperio legt sie dann mit der Zeitzone deines Geräts ab, und sie behält
+ihre Uhrzeit von da an über jede Zeitumstellung.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.

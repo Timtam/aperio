@@ -1924,10 +1924,16 @@ Siehe DESIGN §4.2.
   speichert, was er bekommt: lokal blieb `rrule_tzid` leer, CalDAV, Google,
   Graph und EWS schrieben den Start in UTC. Ab der nächsten Zeitumstellung
   rutschte die Serie um eine Stunde, in den Ansichten, in ihren Erinnerungen
-  und in jedem anderen Programm. Jetzt fragen beide Editoren
+  und in jedem anderen Programm. Betroffen war jede Serie mit Zone, auch eine
+  vom Anbieter (iPhone, Outlook, Google), die seit dem 23.06. als Ganzes
+  bearbeitet wurde; ein Termin, der im Editor zur Serie wurde, bekam nie eine.
+  Jetzt fragen beide Editoren
   `editedRecurrence` (`shared/recurrence.ts`): die Regel aus dem Formular, die
-  Ausnahmen und die Zone der Serie. Eine Serie ohne Zone bleibt ohne; eine
-  neue wird beim Anlegen gestempelt wie bisher.
+  Ausnahmen und die Zone der Serie. Eine zeitgebundene Serie ohne Zone bekommt
+  beim Speichern die Zone des Geräts, wie beim Anlegen — so repariert einmal
+  Öffnen und Speichern eine Serie, die ihre Zone schon verloren hat (Toni,
+  2026-09-14); eine ganztägige ohne Zone bleibt ohne. Die Hilfe beschreibt es
+  unter „Fehlerbehebung".
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

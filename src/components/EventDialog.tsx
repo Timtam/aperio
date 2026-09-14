@@ -918,9 +918,9 @@ export function EventDialog({
         return;
       }
 
-      // The series keeps its exceptions and its zone; a new series is stamped
-      // with the device's zone when it is created.
-      const recurrence = editedRecurrence(form.rrule, event?.recurrence);
+      // The series keeps its exceptions and its zone; a timed series without a
+      // zone gets the device's zone, as a new one does.
+      const recurrence = editedRecurrence(form.rrule, event?.recurrence, form.allDay);
 
       setSubmitting(true);
       try {

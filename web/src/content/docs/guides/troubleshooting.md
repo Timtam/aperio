@@ -80,6 +80,26 @@ it lost its **whole day** and sat undated in the backlog. And a task from
 **Microsoft To Do**, created by someone in their own time zone, could show up a
 day early.
 
+## A recurring appointment is an hour off after the clocks change
+
+Saving a recurring appointment in Aperio's editor used to drop its time zone.
+That affected every series with a time zone that was edited as a whole in
+Aperio since June 2026, including series created elsewhere, for example on an
+iPhone, in Outlook or in Google Calendar, and on local calendars as much as on
+iCloud, Google, Microsoft 365 or Exchange. An appointment turned into a series
+in the editor got no time zone at all.
+
+Without its zone, a series keeps its time in UTC. After the clocks change it
+shows an hour early or late, here and in every other program that reads the
+calendar. In the calendar views you can see it already when you look past the
+next change.
+
+From this version the editor keeps the zone, and gives a series without one
+your device's time zone. To repair a series that is already affected, open the
+**whole series** in Aperio (not a single occurrence) and save it once. Aperio
+then stores it with your device's time zone, and from then on it keeps its time
+across every change of the clocks.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.
