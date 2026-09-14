@@ -1881,32 +1881,43 @@ Siehe DESIGN §4.2.
   nicht und rollte in UTC aus, ab der Zeitumstellung am 25.10. eine Stunde zu
   früh; (2) der Bogen beginnt mit dem Ausrollen, der Motor (rrule-Kiste oder
   eigene Regel) wird erst nach dem Pin mit gemessener WASM-Größe gewählt.
-  ↳ **Schritt 1 (Pin): gebaut.** `crates/cal-core/tests/fixtures/
-  eventOccurrences.json`, 58 Zeilen: Regeln, Bereich, UNTIL, Ausnahmen,
-  Zonen, ganztägig, Einzeländerungen, Größe. `expect` ist die Antwort der
-  Ansichten (`expandAll`); wo die Erinnerungen anders antworten — jeder Termin
-  einzeln, wie `event_triggers` ausrollt —, trägt die Zeile `reminders`.
-  **17 Zeilen weichen ab**, jede eine Entscheidung für den Port:
-  UNTIL als reines Datum, ohne `Z` oder vor dem Start (die rrule-Kiste nimmt
-  die Regel nicht an, die Erinnerungen behalten nur den Starttermin; rrule.js
-  liest das Datum als 00:00 UTC, und eine ganztägige Serie westlich von UTC
-  verliert so ihren letzten Tag — `wasTypeScript`); ein abschließendes
-  Semikolon (rrule.js scheitert, die Kiste liest es); eine Ausnahme eine
-  Millisekunde daneben (die Erinnerungen löschen das Vorkommen trotzdem); ein
-  Zonenname mit Leerzeichen (host-core trimmt, Intl nicht) oder in
-  Kleinbuchstaben (Intl nimmt ihn, chrono-tz nicht); eine Zeitumstellung um
-  Mitternacht (Santiago: die Ansichten schieben 00:30 auf 01:30, die
-  Erinnerungen lassen den Tag aus und enden einen Tag später);
-  Einzeländerungen (die Erinnerungen wenden keine an, der alte Platz erinnert
-  weiter); eine abgesagte Serie (die Erinnerungen überspringen sie, gewollt);
-  und die Kappe der Erinnerungen bei 500 Vorkommen. Auf beiden Seiten gleich
-  und gepinnt: die Sommerzeit-Lücke (vorwärts um die Lückenlänge), die
-  Überlappung (die frühere Lesung), ganztägige Serien ohne Zone (steppen in
-  UTC, nach der Umstellung um 23:00 am Vortag) und ein Vorkommen, das vor dem
-  Bereich begann (fehlt, gewählt wird nach dem Start). Verträge:
+  ↳ **Schritt 1 (Pin): gebaut.** `shared/contracts/eventOccurrences.json`
+  (dort, weil host-core die Tabelle liest und nur von dort einbetten darf),
+  78 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
+  (auch zonierte Serien genau an den Rändern), UNTIL (auch das `T235959Z` des
+  Editors und ein zoniertes UNTIL über eine Zeitumstellung), Ausnahmen, Zonen,
+  ganztägig, Einzeländerungen, Größe. `expect` ist die Antwort der Ansichten
+  (`expandAll`); wo die Erinnerungen anders antworten — jeder Termin einzeln,
+  wie `event_triggers` ausrollt —, trägt die Zeile `reminders`. Verglichen
+  werden Zeitpunkte, sortiert nach Zeitpunkt und Position; die Reihenfolge von
+  `expandAll` (nach dem Text des Starts) zählt nicht. **22 Zeilen weichen ab**,
+  jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
+  vor dem Start (die rrule-Kiste nimmt die Regel nicht an, die Erinnerungen
+  behalten nur den Starttermin; rrule.js liest ohne Zone ein Datum als 00:00
+  UTC und eine Uhrzeit ohne `Z` als UTC, bei einer zonierten Serie beides als
+  Wanduhrzeit — eine ganztägige Serie westlich von UTC verliert so ihren
+  letzten Tag, `wasTypeScript`); ein Start mit Millisekunden (die Erinnerungen
+  verlieren sie und beginnen einen Tag später); ein abschließendes Semikolon
+  (rrule.js scheitert, die Kiste liest es); eine Ausnahme eine Millisekunde
+  daneben (die Erinnerungen löschen das Vorkommen trotzdem); ein Zonenname mit
+  Leerzeichen (host-core trimmt, Intl nicht) oder in Kleinbuchstaben (Intl
+  nimmt ihn, chrono-tz nicht); eine Zeitumstellung um Mitternacht (Santiago:
+  die Ansichten schieben 00:30 auf 01:30, die Erinnerungen lassen den Tag aus
+  und enden einen Tag später); Einzeländerungen, auch an einer zonierten Serie
+  nach der Umstellung (die Erinnerungen wenden keine an, der alte Platz
+  erinnert weiter); eine abgesagte Serie (die Erinnerungen überspringen sie,
+  gewollt); und die Kappe der Erinnerungen bei 500 Vorkommen. Auf beiden Seiten
+  gleich und gepinnt: die Sommerzeit-Lücke (vorwärts um die Lückenlänge), die
+  Überlappung (die frühere Lesung), zonierte Serien an den Bereichsrändern, ein
+  zoniertes UNTIL mit `Z` über eine Umstellung, WKST, ganztägige Serien ohne
+  Zone (steppen in UTC, nach der Umstellung um 23:00 am Vortag), das
+  `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behält
+  einen Tag zu viel — `wasTypeScript`) und ein Vorkommen, das vor dem Bereich
+  begann (fehlt, gewählt wird nach dem Start). Verträge:
   `src/intl/eventOccurrences.contract.test.ts` (Ansichten) und
   `event_occurrence_contract` in `host-core/src/reminders.rs` (Erinnerungen,
-  die abweichenden Zeilen namentlich).
+  die abweichenden Zeilen namentlich). Die Prüfung von #67 fand die Lücken und
+  das Reihenfolge-Artefakt; die Tabelle wurde danach neu gemessen.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

@@ -3317,7 +3317,7 @@ mod tests {
         assert_eq!(triggers.len(), 3, "UNTIL=06-03 should leave three triggers");
     }
 
-    /// The reminder half of `crates/cal-core/tests/fixtures/eventOccurrences.json`;
+    /// The reminder half of `shared/contracts/eventOccurrences.json`;
     /// the views half is `src/intl/eventOccurrences.contract.test.ts`.
     ///
     /// Until the rule moves into the core, the reminder path is held to the same
@@ -3328,24 +3328,29 @@ mod tests {
         use serde_json::Value;
 
         /// A missing table stops the crate compiling rather than skipping the contract.
-        const TABLE: &str = include_str!("../../cal-core/tests/fixtures/eventOccurrences.json");
+        const TABLE: &str = include_str!("../../../shared/contracts/eventOccurrences.json");
 
         /// The rows where the reminders answer differently, by name: a count would
         /// break on exactly the change it has to survive.
         const DIFFERING: &[&str] = &[
+            "a-start-with-milliseconds",
             "a-trailing-semicolon",
             "a-date-only-until-without-a-zone",
             "a-date-only-until-on-a-zoned-series",
+            "a-date-only-until-on-a-zoned-series-at-one-in-the-morning",
             "an-until-without-z",
             "an-until-without-z-on-a-zoned-series",
+            "an-until-without-z-before-the-wall-clock-time",
             "an-until-before-the-start",
             "an-all-day-series-west-of-utc-until-its-local-day",
+            "a-date-only-until-on-an-all-day-series-east-of-utc",
             "an-exception-a-millisecond-off-keeps-the-occurrence",
             "a-zone-with-surrounding-space",
             "a-lowercase-zone",
             "a-daily-series-across-a-change-at-midnight",
             "a-moved-occurrence-stands-in-for-its-slot",
             "a-cancelled-occurrence-removes-its-slot",
+            "a-moved-occurrence-of-a-zoned-series-after-the-change",
             "an-override-slot-in-another-spelling",
             "an-override-listed-before-its-series",
             "a-cancelled-series",
@@ -3365,7 +3370,7 @@ mod tests {
 
         /// Every event on its own, as `event_triggers` expands it: a cancelled event
         /// is skipped before anything expands, and an override is just another event.
-        /// Sorted by start, ties in input order — the order the views emit.
+        /// Sorted by instant, then input index — the order the table records.
         fn reminder_answer(input: &Value) -> Vec<(DateTime<Utc>, usize)> {
             let lo = instant(&input["range"]["start"]);
             let hi = instant(&input["range"]["end"]);

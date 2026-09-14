@@ -39,7 +39,7 @@ interface Row {
  * What stays out, and why, is written in the table's `notInThisTable`.
  */
 const table = JSON.parse(
-  readFileSync(resolve(process.cwd(), 'crates/cal-core/tests/fixtures/eventOccurrences.json'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'shared/contracts/eventOccurrences.json'), 'utf8'),
 ) as { cases: Row[] };
 
 /** The views' answer as positions and instants. */
@@ -55,8 +55,16 @@ function answer(row: Row): Occurrence[] {
   });
 }
 
-/** Instants compare as instants, never as text. */
-const instants = (rows: Occurrence[]) => rows.map((r) => ({ event: r.event, at: Date.parse(r.start) }));
+/**
+ * Instants compare as instants, never as text, and in the table's order: by
+ * instant, then input index. expandAll sorts its output by the start TEXT, so
+ * its own order would make a plain event and an occurrence at the same
+ * instant swap places depending on how each start is spelled.
+ */
+const instants = (rows: Occurrence[]) =>
+  rows
+    .map((r) => ({ event: r.event, at: Date.parse(r.start) }))
+    .sort((a, b) => a.at - b.at || a.event - b.event);
 
 describe('eventOccurrences contract (views)', () => {
   // Anti-silence: named rows, not a count.
@@ -74,6 +82,16 @@ describe('eventOccurrences contract (views)', () => {
       'a-moved-occurrence-stands-in-for-its-slot',
       'a-cancelled-occurrence-removes-its-slot',
       'a-long-daily-series-in-a-wide-range',
+      'a-date-only-until-on-a-zoned-series-at-one-in-the-morning',
+      'an-until-without-z-before-the-wall-clock-time',
+      'a-date-only-until-on-an-all-day-series-east-of-utc',
+      'the-editors-until-on-an-all-day-series-east-of-utc',
+      'a-zoned-until-with-z-across-the-autumn-change',
+      'a-zoned-series-on-both-range-ends-into-summer',
+      'a-zoned-occurrence-just-past-the-range-end',
+      'a-moved-occurrence-of-a-zoned-series-after-the-change',
+      'every-other-week-with-the-week-starting-on-sunday',
+      'a-plain-event-at-the-same-instant-as-an-occurrence',
     ]) {
       expect(names, `table lost ${n}`).toContain(n);
     }

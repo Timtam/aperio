@@ -3,18 +3,20 @@
   "why": "The views and the reminders expand the same series with two libraries in two languages, and the survey of 2026-09-14 found them apart. One expander in the core answers both, and a frontend that is not JavaScript. Every row where the two differ is a decision for the port.",
   "writtenBy": [
     "src/intl/eventOccurrences.measure.test.ts — a one-off, run once and deleted: expandAll on every case.",
-    "crates/host-core/src/reminders_measure.rs — a one-off, run once and deleted: every case expanded the way event_triggers does, merged in where the instants differ."
+    "crates/host-core/src/reminders_measure.rs — a one-off, run once and deleted: every case expanded the way event_triggers does, merged in where the instants differ.",
+    "Measured twice: the review of PR #67 found gaps, and the second run added the rows it asked for and dropped the emission order from the comparison."
   ],
   "readBy": [
     "src/intl/eventOccurrences.contract.test.ts (the views: expandAll)",
     "crates/host-core/src/reminders.rs, tests::event_occurrence_contract (the reminders: expand_occurrences, one event at a time)"
   ],
   "whereItLives": {
-    "note": "Inside cal-core, beside taskOccurrences.json, where the rule is going. host-core reads it by path until then; no adapter repository compiles host-core."
+    "note": "In shared/contracts, beside the other tables both languages check themselves against, because host-core reads it and may embed only from here (KNOWN_REACHES in crates/host-plugins/tests/manifest_reach.rs). When the rule moves into cal-core the table moves beside taskOccurrences.json and host-core stops reading it."
   },
   "notInThisTable": {
     "reminder offsets and the fire window": "which reminder fires when (relative offsets, the all-day anchor, catch-up) is host-core’s trigger logic around the expansion; the range here bounds occurrence STARTS on both sides",
-    "the local SQL read": "which columns the local reminder path reads is host-core’s (rrule_tzid since PR #66); the table starts at the recurrence the path hands on",
+    "the local SQL read": "which columns the local reminder path reads is host-core’s (PR #66 adds rrule_tzid); the table starts at the recurrence the path hands on",
+    "the emission order": "expandAll sorts its output by the start TEXT (a plain event’s spelling against an occurrence’s .000Z), the reminders sort nothing that matters; the table records occurrences by instant and then input index, so order never counts as a difference",
     "ids": "the occurrence id (`master@ISO`), `series_id`, `occurrence_start` and the `::rid::` override id are the shell’s encoding; the answer here is which input event and which instant",
     "writing rules": "parseRRule, buildRRule, truncateRRuleBefore, splitRRuleForEdit and seriesSplit write or cut rules; they get tables of their own",
     "the EWS instance index": "adapter-ews expands in UTC without exceptions on purpose to count an InstanceIndex — a provider convention, neither a view nor a reminder",
@@ -23,8 +25,8 @@
   },
   "shape": {
     "input": "{events: [{id, start, end, recurrence: {rrule, exceptions, tzid?} | null, cancelled?}], range: {start, end}}; instants in RFC 3339, UTC",
-    "expect": "[{event: index into events, start}] in the order expandAll emits: by start, ties in input order",
-    "reminders": "present only where the reminder path answered differently: the same shape, each event expanded on its own (a cancelled event skipped, overrides not applied), by start with ties in input order",
+    "expect": "[{event: index into events, start}], sorted by instant and then by input index",
+    "reminders": "present only where the reminder path answered differently: the same shape and order, each event expanded on its own (a cancelled event skipped, overrides not applied)",
     "surfacesDiffer": "marks a row that records `reminders`",
     "wasTypeScript": "a row pinning a JavaScript artifact the port may decide against; it must then change the row on purpose, with a note",
     "instants": "compare as instants, never as text: expandAll writes milliseconds (.000Z)",
@@ -145,6 +147,92 @@
       ]
     },
     {
+      "name": "every-other-week-with-the-week-starting-on-sunday",
+      "note": "EWS writes WKST whenever Outlook’s week does not start on Monday. With the week starting on Sunday, the Tuesdays are May 5 and 19.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-03T09:00:00Z",
+            "end": "2026-05-03T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "every-other-week-with-the-week-starting-on-monday",
+      "note": "The same rule with the week starting on Monday: the Tuesdays are May 12 and 26.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-03T09:00:00Z",
+            "end": "2026-05-03T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=MO",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T09:00:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "monthly-on-the-31st-skips-short-months",
       "note": "",
       "input": {
@@ -180,6 +268,53 @@
         {
           "event": 0,
           "start": "2026-07-31T12:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "monthly-on-the-last-day",
+      "note": "A negative day counts from the end of the month.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-01-31T09:00:00Z",
+            "end": "2026-01-31T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2026-07-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-01-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-30T09:00:00.000Z"
         }
       ]
     },
@@ -297,6 +432,76 @@
       ]
     },
     {
+      "name": "yearly-on-the-first-friday-of-march",
+      "note": "The yearly form the editor writes (buildRRule).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-06T09:00:00Z",
+            "end": "2026-03-06T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=YEARLY;BYMONTH=3;BYDAY=1FR",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2029-01-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2028-03-03T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "yearly-on-the-last-sunday-of-march",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-29T09:00:00Z",
+            "end": "2026-03-29T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2029-01-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2028-03-26T09:00:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "every-six-hours",
       "note": "",
       "input": {
@@ -336,6 +541,56 @@
         {
           "event": 0,
           "start": "2026-05-02T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-start-with-milliseconds",
+      "note": "The views carry the milliseconds onto every occurrence. The reminders drop the milliseconds and start a day later: their three occurrences are May 2 to 4.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00.500Z",
+            "end": "2026-05-01T10:00:00.500Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=3",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.500Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.500Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.500Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T09:00:00.000Z"
         }
       ]
     },
@@ -714,6 +969,138 @@
       "expect": []
     },
     {
+      "name": "a-zoned-series-on-both-range-ends-into-summer",
+      "note": "Monday 09:00 Europe/Berlin; the range starts on the winter occurrence and ends on the summer one. Both ends are kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-23T08:00:00Z",
+            "end": "2026-03-23T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-03-23T08:00:00Z",
+          "end": "2026-04-06T07:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-23T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-06T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-series-on-both-range-ends-into-winter",
+      "note": "Monday 09:00 Europe/Berlin; the range starts on the summer occurrence and ends on the winter one. Both ends are kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-19T07:00:00Z",
+          "end": "2026-11-02T08:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-series-near-the-range-end-on-the-change-day",
+      "note": "Daily 02:30 summer time Europe/Berlin; the range ends 40 minutes after the occurrence on the day the clocks go back. That occurrence is kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-24T00:30:00Z",
+            "end": "2026-10-24T01:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-23T00:00:00Z",
+          "end": "2026-10-25T01:10:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-24T00:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T00:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-occurrence-just-past-the-range-end",
+      "note": "The same series; the range ends ten minutes before the second occurrence, and only the first is returned.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-24T00:30:00Z",
+            "end": "2026-10-24T01:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-24T00:00:00Z",
+          "end": "2026-10-25T00:20:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-24T00:30:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "an-until-with-z-is-inclusive",
       "note": "",
       "input": {
@@ -724,6 +1111,41 @@
             "end": "2026-05-01T10:00:00Z",
             "recurrence": {
               "rrule": "FREQ=DAILY;UNTIL=20260503T090000Z",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "the-editors-until-on-a-timed-series",
+      "note": "buildRRule always writes UNTIL at 23:59:59 UTC; read as that instant, May 3 is kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
               "exceptions": []
             }
           }
@@ -826,6 +1248,45 @@
       ]
     },
     {
+      "name": "a-date-only-until-on-a-zoned-series-at-one-in-the-morning",
+      "note": "01:00 Europe/Berlin, which is 23:00 UTC the day before: a date read as local midnight and one read as UTC midnight give different answers here. The views read it as local midnight and cut May 3. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-04-30T23:00:00Z",
+            "end": "2026-05-01T00:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-04-30T23:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T23:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-04-30T23:00:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "an-until-without-z",
       "note": "An UNTIL without Z reads as UTC, and 09:00 on May 3 is kept. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
       "surfacesDiffer": true,
@@ -911,6 +1372,45 @@
       ]
     },
     {
+      "name": "an-until-without-z-before-the-wall-clock-time",
+      "note": "09:00 Europe/Berlin with UNTIL at 08:00 and no Z: 08:00 as wall clock is before the occurrence, 08:00 UTC is after it. The views compare it as wall-clock time and cut May 3. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T07:00:00Z",
+            "end": "2026-05-01T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T080000",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T07:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "an-until-with-z-on-a-zoned-series-at-its-last-occurrence",
       "note": "09:00 Europe/Berlin; UNTIL is the last occurrence’s instant, moved into wall-clock time and kept.",
       "input": {
@@ -943,6 +1443,106 @@
         {
           "event": 0,
           "start": "2026-05-03T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "the-editors-until-on-a-zoned-series-late-in-the-evening",
+      "note": "Daily 00:30 Europe/Berlin (22:30 UTC the day before) with the editor’s UNTIL. Read as an instant, it keeps 00:30 on May 4, local time.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T22:30:00Z",
+            "end": "2026-05-01T23:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T22:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T22:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T22:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-until-with-z-across-the-autumn-change",
+      "note": "Monday 09:00 Europe/Berlin from summer, cut one second before the November 2 occurrence: the rule a “this and all following” split leaves behind. The cut is moved into the zone at its own instant, so the series stops before November 2.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;UNTIL=20261102T075959Z",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-until-with-z-across-the-spring-change",
+      "note": "Monday 09:00 Europe/Berlin from winter, cut one second before the April 6 occurrence; the series stops before April 6.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-23T08:00:00Z",
+            "end": "2026-03-23T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;UNTIL=20260406T065959Z",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-03-20T00:00:00Z",
+          "end": "2026-04-07T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-23T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T07:00:00.000Z"
         }
       ]
     },
@@ -1011,6 +1611,88 @@
         {
           "event": 0,
           "start": "2026-05-04T04:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-date-only-until-on-an-all-day-series-east-of-utc",
+      "note": "All-day in Berlin from May 4 (local midnight is 22:00 UTC the day before), with the date-only UNTIL an all-day split writes: May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 02:00 on May 6 in Berlin, and keep May 6 as the last day. The rrule crate does not accept the date-only UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-03T22:00:00Z",
+            "end": "2026-05-04T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260506",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T22:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-03T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "the-editors-until-on-an-all-day-series-east-of-utc",
+      "note": "The same Berlin all-day series ended through the editor, which writes UNTIL=20260506T235959Z for “ends on May 6” whether or not the series is all-day. Read as an instant, that is 01:59 on May 7 in Berlin, and May 7 is kept as a fourth day.",
+      "wasTypeScript": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-03T22:00:00Z",
+            "end": "2026-05-04T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260506T235959Z",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-06T22:00:00.000Z"
         }
       ]
     },
@@ -1905,6 +2587,67 @@
       ]
     },
     {
+      "name": "a-moved-occurrence-of-a-zoned-series-after-the-change",
+      "note": "Monday 09:00 Europe/Berlin from summer; CalDAV names the slot of the November 2 occurrence by its winter instant. The views drop that slot and show the override at 12:00 UTC. The reminders apply no override: the November 2 slot fires as well as the override.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-2",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          },
+          {
+            "id": "cal|uid-2::rid::2026-11-02T08:00:00Z",
+            "start": "2026-11-02T12:00:00Z",
+            "end": "2026-11-02T13:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-11-02T12:00:00Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-11-02T12:00:00.000Z"
+        }
+      ]
+    },
+    {
       "name": "an-override-without-its-series",
       "note": "Shown as it is.",
       "input": {
@@ -2215,8 +2958,8 @@
       "reminders": []
     },
     {
-      "name": "two-series-at-the-same-time-keep-their-order",
-      "note": "Equal starts keep the order of the list.",
+      "name": "two-series-at-the-same-instant",
+      "note": "Equal instants are recorded by input index; the order expandAll emits is not part of the table.",
       "input": {
         "events": [
           {
@@ -2259,6 +3002,51 @@
         {
           "event": 1,
           "start": "2026-05-26T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-plain-event-at-the-same-instant-as-an-occurrence",
+      "note": "The plain event is listed first. expandAll would emit the occurrence first (its start text ends in .000Z); the table records both at the same instant, by input index.",
+      "input": {
+        "events": [
+          {
+            "id": "p",
+            "start": "2026-05-26T09:00:00Z",
+            "end": "2026-05-26T10:00:00Z",
+            "recurrence": null
+          },
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 1,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-06-02T09:00:00.000Z"
         }
       ]
     },
