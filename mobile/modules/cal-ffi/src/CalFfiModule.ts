@@ -67,6 +67,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Fold a join URL to what two spellings of the same link agree on. */
   normalizeJoinUrl(url: string): string;
 
+  /** The zone a series repeats on: the stored name when it is a zone, `''`
+   *  when on UTC. Synchronous. See `cal_core::series_clock`. */
+  seriesClockZone(tzid: string): string;
+
+  /** tzdata's spelling of the zone a name resolves to; `''` for a name tzdata
+   *  does not know. Synchronous. See `cal_core::canonical_zone`. */
+  canonicalZone(name: string): string;
+
   /** Fold each group's members into a single row. `{events[], groups[]}` in,
    *  one row per surviving slot out. Synchronous. See
    *  `cal_core::event_group_fold`. */

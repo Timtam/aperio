@@ -25,6 +25,7 @@ export * from './taskAssignment';
 export * from './dayStart';
 export * from './taskSettings';
 export * from './seriesShift';
+export * from './seriesClock';
 export * from './links';
 export * from './planTaskDates';
 export * from './formatAttendee';

@@ -48,7 +48,7 @@
 //! Now a cdylib that uses the SDK and then fails to name exactly one adapter is
 //! an error that says which crate and why.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -61,6 +61,7 @@ fn main() -> ExitCode {
         Some("stage-plugins") => run(stage_plugins(&args[1..])),
         Some("pack-plugins") => run(pack_plugins(&args[1..])),
         Some("ts-types") => run(ts_types(&args[1..])),
+        Some("tz-list") => run(tz_list(&args[1..])),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
@@ -116,7 +117,19 @@ Tasks:
 
         --check   generate into a scratch directory and compare, changing
                   nothing. For CI, so a Rust field that never reached the
-                  frontends is a red build rather than a value nobody reads.";
+                  frontends is a red build rather than a value nobody reads.
+
+  tz-list [--check]
+        Regenerate crates/cal-core/src/series_clock/zone_names.rs — every
+        tzdata name, the zone each link resolves to, and the zones outside
+        Etc/ — from the tzdata sources chrono-tz ships. Run it after a
+        chrono-tz update. xtask compiles cal-core, which includes that file:
+        if it is missing or broken, restore it first with
+        `git restore --source origin/main -- crates/cal-core/src/series_clock/zone_names.rs`.
+
+        --check   generate in memory and compare, changing nothing. For CI, so
+                  the core never resolves zone names from another tzdata
+                  release than the one host-core and the adapters parse with.";
 
 /// One bundled plugin, as the workspace describes it.
 struct Bundled {
@@ -373,9 +386,8 @@ fn host_triple() -> Result<String, String> {
         .ok_or_else(|| "`rustc -vV` printed no host line".to_string())
 }
 
-/// What `cargo metadata` says about this workspace, with dependencies left out:
-/// every member is listed either way, and resolving the graph costs a network
-/// round trip this task has no use for.
+/// What `cargo metadata` says about this workspace, dependencies included —
+/// see the comment on the arguments for why.
 fn metadata() -> Result<serde_json::Value, String> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let out = Command::new(cargo)
@@ -592,6 +604,474 @@ fn describe_drift(have: &[(String, String)], fresh: &[(String, String)]) -> Opti
         lines.sort();
         Some(lines.join("\n"))
     }
+}
+
+/// Where `tz-list` writes, relative to the workspace root.
+const ZONE_NAMES: &str = "crates/cal-core/src/series_clock/zone_names.rs";
+
+/// Names every generation must hold, by name. A read that went wrong would
+/// otherwise write a table that compiles and resolves nothing.
+const TZ_MUST_HAVE: &[&str] = &[
+    "Etc/UTC",
+    "Etc/GMT",
+    "UTC",
+    "Europe/Berlin",
+    "Asia/Kolkata",
+    "Asia/Calcutta",
+    "Europe/Kyiv",
+    "America/Argentina/Buenos_Aires",
+];
+
+/// `tz-list` — generate the zone names `cal_core::series_clock` resolves, from
+/// the tzdata chrono-tz ships.
+///
+/// # Why a table, and why from chrono-tz
+///
+/// The core answers which stored names a series repeats on. That needs every
+/// tzdata name and the zone each link points at, and no offsets, so the core
+/// carries a generated table instead of a chrono-tz dependency twelve adapter
+/// repositories would compile. chrono-tz stays the source because host-core
+/// and the adapters parse zones with it: every zone the core resolves a name
+/// to is then one they can parse, from the same tzdata release.
+///
+/// `chrono_tz::Tz::name()` of a link is the link's own name, so the link
+/// targets come from the tz source files the crate ships beside its manifest.
+/// What those files declare is checked against the zones chrono-tz was built
+/// with, and the UTC rule's premise — that the names resolving to `Etc/UTC` or
+/// `Etc/GMT` are exactly the clocks that always read UTC — against chrono-tz's
+/// own offsets.
+fn tz_list(args: &[String]) -> Result<String, String> {
+    let mut check = false;
+    for arg in args {
+        match arg.as_str() {
+            "--check" => check = true,
+            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+        }
+    }
+
+    let meta = metadata()?;
+    let root = PathBuf::from(
+        meta["workspace_root"]
+            .as_str()
+            .ok_or("`cargo metadata` printed no workspace_root")?,
+    );
+    let (crate_version, tz_dir) = chrono_tz_source(&meta)?;
+    let sources = read_tz_dir(&tz_dir)?;
+    let news_path = tz_dir.join("NEWS");
+    let news = fs::read_to_string(&news_path)
+        .map_err(|e| format!("reading {}: {e}", news_path.display()))?;
+    let (zones, links) = read_tz_sources(&sources)?;
+    let names = zone_table(&zones, &links)?;
+    agrees_with_chrono_tz(&names, &news)?;
+    let fresh = render_zone_names(&names, &crate_version);
+    let listed = names.iter().filter(|(n, t)| is_listed(n, t)).count();
+    let tzdata = chrono_tz::IANA_TZDB_VERSION;
+
+    let target = root.join(ZONE_NAMES);
+    if check {
+        let have = match fs::read_to_string(&target) {
+            Ok(text) => text.replace("\r\n", "\n"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(format!("reading {}: {e}", target.display())),
+        };
+        return match describe_zone_drift(&have, &fresh) {
+            None => Ok(format!(
+                "{ZONE_NAMES} is current — {} names, {listed} listed zones, tzdata {tzdata}.",
+                names.len(),
+            )),
+            Some(drift) => Err(format!(
+                "{ZONE_NAMES} does not match the tzdata chrono-tz {crate_version} ships:\n\
+                 {drift}\n\nRun `cargo xtask tz-list` and commit the result."
+            )),
+        };
+    }
+
+    // Written beside the table and moved over it: a write that fails halfway
+    // must not leave a broken table, because xtask cannot build without one.
+    let staging = target.with_extension("rs.tmp");
+    fs::write(&staging, &fresh).map_err(|e| format!("writing {}: {e}", staging.display()))?;
+    fs::rename(&staging, &target).map_err(|e| {
+        format!(
+            "moving {} over {}: {e}",
+            staging.display(),
+            target.display()
+        )
+    })?;
+    Ok(format!(
+        "{ZONE_NAMES}: {} names, {listed} listed zones, from chrono-tz {crate_version} \
+         (tzdata {tzdata}).",
+        names.len(),
+    ))
+}
+
+/// The chrono-tz package in the dependency graph: its version, and the `tz`
+/// directory beside its manifest. Two versions in the graph is an error — which
+/// one's names the core should carry is not this task's guess to make.
+fn chrono_tz_source(meta: &serde_json::Value) -> Result<(String, PathBuf), String> {
+    let found: Vec<(&str, &str)> = meta["packages"]
+        .as_array()
+        .ok_or("`cargo metadata` printed no packages")?
+        .iter()
+        .filter(|p| p["name"] == "chrono-tz")
+        .filter_map(|p| Some((p["version"].as_str()?, p["manifest_path"].as_str()?)))
+        .collect();
+    match found.as_slice() {
+        [(version, manifest)] => {
+            let dir = Path::new(manifest)
+                .parent()
+                .ok_or_else(|| format!("{manifest} has no parent directory"))?
+                .join("tz");
+            Ok((version.to_string(), dir))
+        }
+        [] => Err(
+            "`cargo metadata` lists no chrono-tz package, and the zone names are read from \
+             the tzdata it ships"
+                .to_string(),
+        ),
+        many => Err(format!(
+            "`cargo metadata` lists chrono-tz {}: with more than one version, which tzdata \
+             the core should carry is ambiguous",
+            many.iter().map(|(v, _)| *v).collect::<Vec<_>>().join(", "),
+        )),
+    }
+}
+
+/// Every tzdata source file in `dir`, by name. `NEWS` and `LICENSE` are not
+/// data; every other file is read, so a file chrono-tz starts to ship is not
+/// skipped in silence.
+fn read_tz_dir(dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let entries = fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("reading {}: {e}", dir.display()))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !entry.path().is_file() || !name.chars().any(|c| c.is_ascii_lowercase()) {
+            continue;
+        }
+        let text = fs::read_to_string(entry.path())
+            .map_err(|e| format!("reading {}: {e}", entry.path().display()))?;
+        out.push((name, text));
+    }
+    out.sort();
+    if out.is_empty() {
+        return Err(format!("{} holds no tzdata source files", dir.display()));
+    }
+    Ok(out)
+}
+
+/// The zones and the links (name → target) tzdata's source files declare.
+///
+/// Only three kinds of line start at column 0: `Rule`, `Zone` and `Link`.
+/// Indented lines continue a zone, and `#` starts a comment. Any other line is
+/// an error that names its file and line, rather than a line skipped.
+fn read_tz_sources(
+    sources: &[(String, String)],
+) -> Result<(BTreeSet<String>, BTreeMap<String, String>), String> {
+    let mut zones = BTreeSet::new();
+    let mut links = BTreeMap::new();
+    for (file, text) in sources {
+        for (at, raw) in text.lines().enumerate() {
+            let line = raw.split('#').next().unwrap_or("");
+            if line.trim().is_empty() || line.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            match fields.as_slice() {
+                ["Rule", ..] => {}
+                ["Zone", name, ..] => {
+                    if !zones.insert(name.to_string()) {
+                        return Err(format!("{file}:{}: zone {name} is declared twice", at + 1));
+                    }
+                }
+                ["Link", target, name, ..] => {
+                    if links.insert(name.to_string(), target.to_string()).is_some() {
+                        return Err(format!("{file}:{}: link {name} is declared twice", at + 1));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{file}:{}: a line this reader does not know: {raw:?}",
+                        at + 1
+                    ))
+                }
+            }
+        }
+    }
+    Ok((zones, links))
+}
+
+/// Every name with the zone it resolves to, sorted by the name with ASCII
+/// letters lowercased — the order `cal_core::series_clock` searches.
+///
+/// Refused, each by name: a link that is also a zone, a link whose target is
+/// not a zone (a missing one, or another link, which the core's one-step
+/// lookup could not follow), two names that differ only in ASCII case (the
+/// lookup could not tell them apart), and a name that is empty, not ASCII, or
+/// holds whitespace, a quote or a backslash.
+fn zone_table(
+    zones: &BTreeSet<String>,
+    links: &BTreeMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    let mut problems = Vec::new();
+    for (name, target) in links {
+        if zones.contains(name) {
+            problems.push(format!("{name} is both a zone and a link"));
+        }
+        if !zones.contains(target) {
+            let why = if links.contains_key(target) {
+                " (a link to a link)"
+            } else {
+                ""
+            };
+            problems.push(format!(
+                "{name} links to {target}, which is not a zone{why}"
+            ));
+        }
+    }
+    let mut names: Vec<(String, String)> = zones
+        .iter()
+        .map(|zone| (zone.clone(), zone.clone()))
+        .chain(
+            links
+                .iter()
+                .map(|(name, target)| (name.clone(), target.clone())),
+        )
+        .collect();
+    names.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    for pair in names.windows(2) {
+        if pair[0].0.eq_ignore_ascii_case(&pair[1].0) {
+            problems.push(format!(
+                "{} and {} differ only in ASCII case",
+                pair[0].0, pair[1].0
+            ));
+        }
+    }
+    for (name, _) in &names {
+        if name.is_empty()
+            || !name.is_ascii()
+            || name.contains(|c: char| c.is_whitespace() || c == '"' || c == '\\')
+        {
+            problems.push(format!("{name:?} is not a name the table can hold"));
+        }
+    }
+    if problems.is_empty() {
+        Ok(names)
+    } else {
+        Err(format!(
+            "the tzdata names do not form a table:\n  {}",
+            problems.join("\n  ")
+        ))
+    }
+}
+
+/// The names read agree with the zones chrono-tz was built with, from the
+/// same release, and the UTC rule's premise holds on chrono-tz's own offsets.
+fn agrees_with_chrono_tz(names: &[(String, String)], news: &str) -> Result<(), String> {
+    let mut problems = Vec::new();
+
+    let release = news
+        .lines()
+        .find_map(|line| line.strip_prefix("Release "))
+        .and_then(|rest| rest.split_whitespace().next());
+    if release != Some(chrono_tz::IANA_TZDB_VERSION) {
+        problems.push(format!(
+            "chrono-tz was built from tzdata {}, but the NEWS beside the files read names {}",
+            chrono_tz::IANA_TZDB_VERSION,
+            release.unwrap_or("no release"),
+        ));
+    }
+
+    let read: BTreeSet<&str> = names.iter().map(|(name, _)| name.as_str()).collect();
+    let built: BTreeSet<&str> = chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect();
+    for name in read.difference(&built) {
+        problems.push(format!(
+            "{name} is in the files, but chrono-tz has no such zone"
+        ));
+    }
+    for name in built.difference(&read) {
+        problems.push(format!(
+            "{name} is a chrono-tz zone the files read do not declare"
+        ));
+    }
+
+    let linked: BTreeSet<&str> = names
+        .iter()
+        .filter(|(_, target)| target == "Etc/UTC" || target == "Etc/GMT")
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let measured: BTreeSet<&str> = chrono_tz::TZ_VARIANTS
+        .iter()
+        .filter(|tz| keeps_utc(**tz))
+        .map(|tz| tz.name())
+        .collect();
+    if linked != measured {
+        problems.push(format!(
+            "the names resolving to Etc/UTC or Etc/GMT ({}) are not the zones whose clock \
+             reads UTC at every sample ({}), and the UTC rule in cal_core::series_clock rests \
+             on the two being the same",
+            linked.iter().copied().collect::<Vec<_>>().join(", "),
+            measured.iter().copied().collect::<Vec<_>>().join(", "),
+        ));
+    }
+
+    for name in TZ_MUST_HAVE {
+        if !read.contains(name) {
+            problems.push(format!("{name} is missing"));
+        }
+    }
+
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the tzdata read does not add up:\n  {}",
+            problems.join("\n  ")
+        ))
+    }
+}
+
+/// Whether a zone's clock reads UTC in the middle of every month from 1800 to
+/// 2099. Before about 1900 every place kept its local mean time, so a zone that
+/// only has offset zero today (Africa/Abidjan) fails at the first sample, and a
+/// zone with daylight saving fails in its first summer.
+fn keeps_utc(tz: chrono_tz::Tz) -> bool {
+    use chrono::{Offset, TimeZone};
+    (1800..2100).all(|year| {
+        (1..=12).all(|month| {
+            chrono::NaiveDate::from_ymd_opt(year, month, 15)
+                .and_then(|day| day.and_hms_opt(12, 0, 0))
+                .is_some_and(|at| tz.offset_from_utc_datetime(&at).fix().local_minus_utc() == 0)
+        })
+    })
+}
+
+/// A zone the list of a series' zone is chosen from: a zone, not a link, and
+/// not one of tzdata's `Etc/` fixed offsets and UTC names.
+fn is_listed(name: &str, target: &str) -> bool {
+    name == target && !name.starts_with("Etc/")
+}
+
+/// The generated Rust file. One entry per line, so a tzdata update reads as a
+/// diff of the names it touched.
+fn render_zone_names(names: &[(String, String)], crate_version: &str) -> String {
+    let tzdata = chrono_tz::IANA_TZDB_VERSION;
+    let mut out = format!(
+        "// @generated by `cargo xtask tz-list` from chrono-tz {crate_version} (IANA tzdata {tzdata}).\n\
+         // Do not edit: run the task and commit what it writes. See ../series_clock.rs.\n\
+         \n\
+         /// The IANA tzdata release these names were read from.\n\
+         pub const TZDATA_VERSION: &str = \"{tzdata}\";\n\
+         \n\
+         /// Every tzdata name, zones and links, with the zone it resolves to. Sorted\n\
+         /// by the name with ASCII letters lowercased, which is how it is searched.\n\
+         pub const NAMES: &[(&str, &str)] = &[\n"
+    );
+    for (name, target) in names {
+        out.push_str(&format!("    (\"{name}\", \"{target}\"),\n"));
+    }
+    out.push_str(
+        "];\n\n/// The zones outside `Etc/`, in the same order.\npub const LISTED: &[&str] = &[\n",
+    );
+    for (name, _) in names
+        .iter()
+        .filter(|(name, target)| is_listed(name, target))
+    {
+        out.push_str(&format!("    \"{name}\",\n"));
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// A generated file read back: its tzdata release, names and listed zones.
+struct GeneratedZones {
+    tzdata: Option<String>,
+    names: BTreeMap<String, String>,
+    listed: BTreeSet<String>,
+}
+
+fn read_zone_names(text: &str) -> GeneratedZones {
+    let mut out = GeneratedZones {
+        tzdata: None,
+        names: BTreeMap::new(),
+        listed: BTreeSet::new(),
+    };
+    let mut section = "";
+    for line in text.lines().map(str::trim) {
+        if let Some(value) = line.strip_prefix("pub const TZDATA_VERSION: &str = ") {
+            out.tzdata = Some(value.trim_end_matches(';').trim_matches('"').to_string());
+        } else if line.starts_with("pub const NAMES") {
+            section = "names";
+        } else if line.starts_with("pub const LISTED") {
+            section = "listed";
+        } else if line == "];" {
+            section = "";
+        } else if section == "names" {
+            let pair = line
+                .strip_prefix("(\"")
+                .and_then(|rest| rest.strip_suffix("\"),"))
+                .and_then(|inner| inner.split_once("\", \""));
+            if let Some((name, target)) = pair {
+                out.names.insert(name.to_string(), target.to_string());
+            }
+        } else if section == "listed" {
+            if let Some(name) = line
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix("\","))
+            {
+                out.listed.insert(name.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// What moved between the committed table and a fresh one, by NAME.
+fn describe_zone_drift(have: &str, fresh: &str) -> Option<String> {
+    if have == fresh {
+        return None;
+    }
+    if have.is_empty() {
+        return Some(format!("  missing:  {ZONE_NAMES} does not exist"));
+    }
+    let old = read_zone_names(have);
+    let new = read_zone_names(fresh);
+    let mut lines = Vec::new();
+    if old.tzdata != new.tzdata {
+        lines.push(format!(
+            "  tzdata:   {} -> {}",
+            old.tzdata.as_deref().unwrap_or("none"),
+            new.tzdata.as_deref().unwrap_or("none"),
+        ));
+    }
+    for (name, target) in &new.names {
+        match old.names.get(name) {
+            None => lines.push(format!("  added:    {name} -> {target}")),
+            Some(was) if was != target => {
+                lines.push(format!("  moved:    {name} -> {target} (was {was})"))
+            }
+            Some(_) => {}
+        }
+    }
+    for name in old
+        .names
+        .keys()
+        .filter(|name| !new.names.contains_key(*name))
+    {
+        lines.push(format!("  removed:  {name}"));
+    }
+    for name in new.listed.difference(&old.listed) {
+        lines.push(format!("  listed:   {name}"));
+    }
+    for name in old.listed.difference(&new.listed) {
+        lines.push(format!("  unlisted: {name}"));
+    }
+    if lines.is_empty() {
+        lines.push(
+            "  the names agree, but the file's text does not (its header, layout or order)"
+                .to_string(),
+        );
+    }
+    Some(lines.join("\n"))
 }
 
 /// Every workspace member that produces a cdylib and depends on a `*-plugin`
@@ -1207,5 +1687,110 @@ mod tests {
             found.iter().map(|b| &b.cdylib_crate).collect::<Vec<_>>(),
         );
         assert_eq!(found[0].cdylib_crate, "adapter-x-cdylib");
+    }
+
+    /// Shaped like the real files: a rule, a zone with a continuation line, a
+    /// trailing comment, and a link commented out.
+    const TZ_SNIPPET: &str = "\
+# A comment line
+Rule\tEU\t1981\tmax\t-\tMar\tlastSun\t 1:00u\t1:00\tS
+Zone\tEurope/Berlin\t0:53:28 -\tLMT\t1893 Apr
+\t\t\t1:00\tEU\tCE%sT
+Zone\tEtc/UTC\t0\t-\tUTC
+Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
+Link\tEtc/UTC\t\tZulu
+#Link\tEtc/UTC\t\tCommented/Out
+";
+
+    #[test]
+    fn the_tz_reader_takes_zones_and_links_and_nothing_else() {
+        let (zones, links) = read_tz_sources(&[pair("europe", TZ_SNIPPET)]).expect("readable");
+        assert_eq!(
+            zones.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["Etc/UTC", "Europe/Berlin"],
+        );
+        assert_eq!(
+            links.get("Europe/Oslo").map(String::as_str),
+            Some("Europe/Berlin")
+        );
+        assert_eq!(links.get("Zulu").map(String::as_str), Some("Etc/UTC"));
+        assert!(!links.contains_key("Commented/Out"));
+    }
+
+    #[test]
+    fn the_tz_reader_names_a_line_it_does_not_know() {
+        let err = read_tz_sources(&[pair("asia", "Zone\tA/B\t0\t-\tX\nLeap\t2016\tDec\t31\n")])
+            .expect_err("a leap-second line is not tzdata's zone syntax");
+        assert!(err.contains("asia:2"), "{err}");
+    }
+
+    #[test]
+    fn a_link_must_point_at_a_zone() {
+        let zones: BTreeSet<String> = ["Etc/UTC".to_string()].into();
+        let links: BTreeMap<String, String> = [
+            ("UTC".to_string(), "Zulu".to_string()),
+            ("Zulu".to_string(), "Etc/UTC".to_string()),
+            ("Gone".to_string(), "Nowhere/Else".to_string()),
+        ]
+        .into();
+        let err = zone_table(&zones, &links).expect_err("two links go nowhere");
+        assert!(
+            err.contains("UTC links to Zulu, which is not a zone (a link to a link)"),
+            "{err}"
+        );
+        assert!(
+            err.contains("Gone links to Nowhere/Else, which is not a zone"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn names_that_differ_only_in_case_are_refused() {
+        let zones: BTreeSet<String> = ["Etc/UTC".to_string(), "etc/utc".to_string()].into();
+        let err = zone_table(&zones, &BTreeMap::new()).expect_err("a case collision");
+        assert!(err.contains("differ only in ASCII case"), "{err}");
+    }
+
+    #[test]
+    fn the_generated_table_reads_back_and_its_drift_is_named() {
+        let names = vec![
+            ("Etc/UTC".to_string(), "Etc/UTC".to_string()),
+            ("Europe/Berlin".to_string(), "Europe/Berlin".to_string()),
+            ("Europe/Oslo".to_string(), "Europe/Berlin".to_string()),
+        ];
+        let text = render_zone_names(&names, "0.0.0");
+        let read = read_zone_names(&text);
+        assert_eq!(read.names.len(), 3);
+        assert_eq!(read.tzdata.as_deref(), Some(chrono_tz::IANA_TZDB_VERSION));
+        assert_eq!(
+            read.listed.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["Europe/Berlin"]
+        );
+        assert_eq!(describe_zone_drift(&text, &text), None);
+
+        let mut changed = names.clone();
+        changed[2].1 = "Europe/Oslo".to_string();
+        changed.remove(0);
+        changed.push(("Europe/Kyiv".to_string(), "Europe/Kyiv".to_string()));
+        let report =
+            describe_zone_drift(&text, &render_zone_names(&changed, "0.0.0")).expect("drift");
+        assert!(
+            report.contains("moved:    Europe/Oslo -> Europe/Oslo (was Europe/Berlin)"),
+            "{report}"
+        );
+        assert!(
+            report.contains("added:    Europe/Kyiv -> Europe/Kyiv"),
+            "{report}"
+        );
+        assert!(report.contains("removed:  Etc/UTC"), "{report}");
+        assert!(report.contains("listed:   Europe/Oslo"), "{report}");
+
+        let report = describe_zone_drift(&text, &render_zone_names(&names, "0.0.1"))
+            .expect("the header names another crate version");
+        assert!(report.contains("the names agree"), "{report}");
+        assert_eq!(
+            describe_zone_drift("", &text).as_deref(),
+            Some(format!("  missing:  {ZONE_NAMES} does not exist").as_str()),
+        );
     }
 }

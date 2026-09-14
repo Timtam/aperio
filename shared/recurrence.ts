@@ -1,6 +1,7 @@
 import { RRule, rrulestr } from 'rrule';
 
 import { compareMachineStrings } from './ordering';
+import { seriesClockZone } from './seriesClock';
 
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
 // minimal `RecurringEventLike` so it needs neither side's full `CalendarEvent`
@@ -23,8 +24,9 @@ export interface RecurringEventLike {
     rrule: string;
     exceptions: string[];
     /** IANA zone of the master DTSTART (e.g. `America/New_York`), when the
-     *  source carried one. Present → expand in this zone so occurrences keep
-     *  their local wall-clock across DST; absent/null → expand in UTC. */
+     *  source carried one. A zone → expand in it so occurrences keep their
+     *  local wall-clock across DST; absent/null, a UTC name, or a name tzdata
+     *  does not know → expand in UTC (see `seriesClock.ts`). */
     tzid?: string | null;
   } | null;
 }
@@ -98,9 +100,10 @@ export function expandEvent<E extends RecurringEventLike>(
     });
 }
 
-/** The recurrence zone, or `null` to expand in UTC (floating / `Z` / all-day). */
+/** The recurrence zone, or `null` to expand in UTC: no zone, a UTC name
+ *  (`Etc/UTC`, `GMT`, …), or a name tzdata does not know. The core's rule. */
 function zoneOrNull(tzid: string | null | undefined): string | null {
-  return !tzid || tzid.toUpperCase() === 'UTC' ? null : tzid;
+  return seriesClockZone(tzid);
 }
 
 function buildRule(rruleBody: string, dtstart: Date): RRule {
@@ -342,16 +345,22 @@ export function movedSeriesUntil(
 }
 
 /**
- * The host's current IANA time zone (e.g. `America/New_York`), or `null` when
- * the runtime can't report a usable one (or only reports plain UTC).
+ * The host's current IANA time zone as the runtime spells it (e.g.
+ * `America/New_York`, or `Asia/Calcutta` from V8), or `null` when it reports
+ * none, a UTC name, or a name tzdata does not know (`+00:00`, `Etc/Unknown`):
+ * the same rule a stored zone is read by, so a series stamped here repeats
+ * where the views and the reminders will read it.
  */
 export function localTimeZone(): string | null {
+  let tz: string | undefined;
+  // Only the runtime's read is guarded. The rule below throws when its door is
+  // not installed, and swallowing that would quietly stop every stamp.
   try {
-    const tz = new Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return tz && tz.toUpperCase() !== 'UTC' ? tz : null;
+    tz = new Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
     return null;
   }
+  return seriesClockZone(tz);
 }
 
 /**

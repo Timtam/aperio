@@ -1113,19 +1113,29 @@ fn expand_occurrences(
         }
     };
 
-    // The zone the rule repeats in. An unknown name degrades to UTC — the
-    // previous behaviour for everything — rather than dropping the series.
-    let zone = tzid
-        .map(str::trim)
-        .filter(|z| !z.is_empty())
-        .and_then(|z| match z.parse::<chrono_tz::Tz>() {
-            Ok(tz) => Some(RruleTz::Tz(tz)),
+    // The zone the rule repeats in, by the core's rule — the answer the views
+    // get (`cal_core::series_clock`): a name tzdata knows, in any ASCII case and
+    // untrimmed, that is not a UTC name. Anything else repeats in UTC rather
+    // than dropping the series.
+    let zone = match cal_core::series_clock_zone(tzid).and_then(cal_core::canonical_zone) {
+        Some(canonical) => match canonical.parse::<chrono_tz::Tz>() {
+            Ok(tz) => RruleTz::Tz(tz),
             Err(_) => {
-                warn!(tzid = %z, "unknown TZID on a recurring event; expanding reminders in UTC");
-                None
+                warn!(
+                    tzid = %canonical,
+                    "a zone the core resolves is unknown to chrono-tz; expanding reminders in UTC",
+                );
+                RruleTz::UTC
             }
-        })
-        .unwrap_or(RruleTz::UTC);
+        },
+        None => {
+            if let Some(z) = tzid.filter(|z| !z.is_empty() && cal_core::canonical_zone(z).is_none())
+            {
+                warn!(tzid = %z, "unknown TZID on a recurring event; expanding reminders in UTC");
+            }
+            RruleTz::UTC
+        }
+    };
     // DTSTART carries the zone: rrule repeats at ITS wall clock, so a weekly
     // 09:00 series stays 09:00 across the DST boundary instead of sliding to
     // 08:00 or 10:00. The bounds and EXDATEs stay instants — they are compared,
@@ -3392,8 +3402,6 @@ mod tests {
             "an-all-day-series-west-of-utc-until-its-local-day",
             "a-date-only-until-on-an-all-day-series-east-of-utc",
             "an-exception-a-millisecond-off-keeps-the-occurrence",
-            "a-zone-with-surrounding-space",
-            "a-lowercase-zone",
             "a-daily-series-across-a-change-at-midnight",
             "a-moved-occurrence-stands-in-for-its-slot",
             "a-cancelled-occurrence-removes-its-slot",
@@ -3403,6 +3411,41 @@ mod tests {
             "a-cancelled-series",
             "a-long-daily-series-in-a-wide-range",
         ];
+
+        /// The zone rows decided on 2026-09-14 (decision 26a): the views and the
+        /// reminders read a stored zone name through one rule,
+        /// `cal_core::series_clock`, so none of these may record a reminders
+        /// answer of its own again. Named, like `DIFFERING`.
+        const AGREEING: &[&str] = &[
+            "a-zone-named-utc",
+            "an-empty-zone",
+            "an-unknown-zone",
+            "a-windows-zone-name",
+            "a-fixed-offset-zone",
+            "a-zone-with-surrounding-space",
+            "a-lowercase-zone",
+            "a-series-stored-as-etc-utc",
+            "a-series-stored-as-gmt",
+            "a-lowercase-utc-name",
+            "an-offset-for-a-zone-name",
+        ];
+
+        #[test]
+        fn the_zone_rows_agree_between_views_and_reminders() {
+            let t = table();
+            let cases = t["cases"].as_array().expect("cases");
+            for name in AGREEING {
+                let case = cases
+                    .iter()
+                    .find(|c| c["name"] == *name)
+                    .unwrap_or_else(|| panic!("the table lost {name}"));
+                assert!(
+                    case.get("reminders").is_none() && case.get("surfacesDiffer").is_none(),
+                    "{name} records a reminders answer of its own, but views and reminders \
+                     read a zone through one rule (cal_core::series_clock, decision 26a)",
+                );
+            }
+        }
 
         fn table() -> Value {
             serde_json::from_str(TABLE).expect("the table parses")

@@ -54,6 +54,8 @@ import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
 import uniffi.cal_ffi.normalizeJoinUrl as uniffiNormalizeJoinUrl
+import uniffi.cal_ffi.seriesClockZone as uniffiSeriesClockZone
+import uniffi.cal_ffi.canonicalZone as uniffiCanonicalZone
 import uniffi.cal_ffi.occurrenceCarryFields as uniffiOccurrenceCarryFields
 import uniffi.cal_ffi.planCarry as uniffiPlanCarry
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
@@ -328,6 +330,16 @@ class CalFfiModule : Module() {
 
     Function("normalizeJoinUrl") { url: String ->
       uniffiNormalizeJoinUrl(url)
+    }
+
+    // The clock a series repeats on: the stored name, or "" for UTC.
+    // Synchronous — every expansion of a series asks while it renders.
+    Function("seriesClockZone") { tzid: String ->
+      uniffiSeriesClockZone(tzid)
+    }
+
+    Function("canonicalZone") { name: String ->
+      uniffiCanonicalZone(name)
     }
 
     // Folding a group into one row — what a day actually looks like.

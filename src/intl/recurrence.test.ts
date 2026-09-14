@@ -13,6 +13,12 @@ import {
   editedRecurrence,
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
+import {
+  exceptionsAtSeriesTime,
+  movedSeriesUntil,
+  moveSeriesInstant,
+  seriesDayKey,
+} from '@aperio/shared';
 
 function mkEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   const start = '2026-05-19T09:00:00.000Z';
@@ -512,6 +518,112 @@ describe('withCreatedRecurrenceZone', () => {
 
   it('passes a non-recurring event (null) through', () => {
     expect(withCreatedRecurrenceZone(null, false)).toBeNull();
+  });
+});
+
+describe('which stored zones a series repeats on (cal_core::series_clock)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Sunday 23:30 UTC, weekly on Mondays: near midnight, where any clock other
+   *  than UTC puts the occurrences on other days. */
+  const nearMidnight = (tzid: string | null) =>
+    mkEvent({
+      id: `near-${tzid}`,
+      start: '2026-10-18T23:30:00.000Z',
+      end: '2026-10-19T00:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid },
+    });
+  const range = {
+    start: new Date('2026-10-18T00:00:00Z'),
+    end: new Date('2026-11-10T00:00:00Z'),
+  };
+  const starts = (tzid: string | null) =>
+    expandEvent(nearMidnight(tzid), range).map((o) => o.start);
+
+  /** Pretend the device reports `timeZone`, whatever zone the test machine is in. */
+  const deviceZone = (timeZone: string) => {
+    const real = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...real,
+      timeZone,
+    });
+  };
+
+  it.each(['Etc/UTC', 'Zulu', 'etc/utc', 'GMT', 'Etc/GMT+0'])(
+    'expands a series stored as %s in UTC, without asking Intl for a zone',
+    (tzid) => {
+      const onUtc = starts(null);
+      const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+      expect(starts(tzid)).toEqual(onUtc);
+      expect(zoneReads).not.toHaveBeenCalled();
+    },
+  );
+
+  it('expands an offset stored as a zone in UTC, on the days UTC gives', () => {
+    // Intl accepts "+05:30" and reads Sunday 23:30 UTC as Monday 05:00 there,
+    // which would move every occurrence a day earlier.
+    expect(starts('+05:30')).toEqual(starts(null));
+    expect(starts('+05:30')[0]).toBe('2026-10-19T23:30:00.000Z');
+  });
+
+  it('reads days, moves and UNTIL on UTC for a UTC name and for an unknown name', () => {
+    const at = '2026-10-18T23:30:00.000Z';
+    const rule = 'FREQ=WEEKLY;UNTIL=20261231T233000Z';
+    // GMT gives UTC's answers on the zoned path too (offset 0), so the path is
+    // what separates the old rule from this one: no zone read at all.
+    const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    for (const tzid of ['GMT', '+05:30']) {
+      expect(seriesDayKey(at, tzid)).toBe(seriesDayKey(at, null));
+      expect(moveSeriesInstant(at, tzid, 1)).toBe(moveSeriesInstant(at, null, 1));
+      expect(movedSeriesUntil(rule, tzid, at, '2026-10-19T01:30:00.000Z')).toBe(
+        movedSeriesUntil(rule, null, at, '2026-10-19T01:30:00.000Z'),
+      );
+    }
+    expect(zoneReads).not.toHaveBeenCalled();
+    expect(seriesDayKey(at, '+05:30')).toBe('2026-10-18');
+  });
+
+  it('moves exceptions on UTC for a series stored under a UTC name or an unknown one', () => {
+    const recurrence = (tzid: string | null) => ({
+      rrule: 'FREQ=WEEKLY',
+      exceptions: ['2026-10-25T23:30:00.000Z'],
+      tzid,
+    });
+    const from = '2026-10-18T23:30:00.000Z';
+    const to = '2026-10-19T00:30:00.000Z';
+    const onUtc = exceptionsAtSeriesTime(recurrence(null), from, to, false)?.exceptions;
+    const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    for (const tzid of ['Etc/UTC', '+05:30']) {
+      expect(exceptionsAtSeriesTime(recurrence(tzid), from, to, false)?.exceptions).toEqual(onUtc);
+    }
+    expect(zoneReads).not.toHaveBeenCalled();
+  });
+
+  it.each(['UTC', 'Etc/UTC', 'GMT', 'Zulu', 'Etc/Unknown', '+00:00'])(
+    'reads a device reporting %s as having no zone',
+    (zone) => {
+      deviceZone(zone);
+      expect(localTimeZone()).toBeNull();
+    },
+  );
+
+  it.each(['Asia/Calcutta', 'Europe/Kiev', 'Europe/Berlin'])(
+    'keeps the spelling a device reports for %s',
+    (zone) => {
+      deviceZone(zone);
+      expect(localTimeZone()).toBe(zone);
+    },
+  );
+
+  it('stamps no zone on a new series created on a device that reports Zulu', () => {
+    deviceZone('Zulu');
+    const rule: { rrule: string; exceptions: string[]; tzid?: string | null } = {
+      rrule: 'FREQ=WEEKLY',
+      exceptions: [],
+    };
+    expect(withCreatedRecurrenceZone(rule, false)?.tzid).toBeUndefined();
   });
 });
 

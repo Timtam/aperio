@@ -1,10 +1,11 @@
 {
-  "what": "Event recurrence as a table: which occurrences a set of events (series, the overrides of single occurrences, plain events) yields inside a range. `expect` is what the calendar views and the widget get from shared/recurrence.ts expandAll (rrule.js). Where the reminder path in host-core (expand_occurrences on the rrule crate, one event at a time as event_triggers calls it) answers differently, the row carries that answer as `reminders` and says `surfacesDiffer`. Measured on the real code of both before the port.",
+  "what": "Event recurrence as a table: which occurrences a set of events (series, the overrides of single occurrences, plain events) yields inside a range. `expect` is what the calendar views and the widget get from shared/recurrence.ts expandAll (rrule.js). Where the reminder path in host-core (expand_occurrences on the rrule crate, one event at a time as event_triggers calls it) answers differently, the row carries that answer as `reminders` and says `surfacesDiffer`. Measured on the real code of both before the port; rows whose note names a decision were changed or added by hand after it.",
   "why": "The views and the reminders expand the same series with two libraries in two languages, and the survey of 2026-09-14 found them apart. One expander in the core answers both, and a frontend that is not JavaScript. Every row where the two differ is a decision for the port.",
   "writtenBy": [
     "src/intl/eventOccurrences.measure.test.ts — a one-off, run once and deleted: expandAll on every case.",
     "crates/host-core/src/reminders_measure.rs — a one-off, run once and deleted: every case expanded the way event_triggers does, merged in where the instants differ.",
-    "Measured twice: the review of PR #67 found gaps, and the second run added the rows it asked for and dropped the emission order from the comparison."
+    "Measured twice: the review of PR #67 found gaps, and the second run added the rows it asked for and dropped the emission order from the comparison.",
+    "Stage 2 of DESIGN-series-time-zone.md (2026-09-14): a-zone-with-surrounding-space and a-lowercase-zone changed, and four zone rows added, by hand to cal_core::series_clock (decision 26a). Checked by both contract tests, not measured."
   ],
   "readBy": [
     "src/intl/eventOccurrences.contract.test.ts (the views: expandAll)",
@@ -2099,8 +2100,7 @@
     },
     {
       "name": "a-zone-with-surrounding-space",
-      "note": "Intl rejects the name with the spaces, so the views expand in UTC. host-core trims the name before it looks the zone up, so the reminders keep the Berlin wall clock.",
-      "surfacesDiffer": true,
+      "note": "Nothing is trimmed: tzdata does not know the name with the spaces, so the series repeats in UTC in the views and in the reminders alike (cal_core::series_clock). Until 2026-09-14 the reminders trimmed the name and kept the Berlin wall clock.",
       "input": {
         "events": [
           {
@@ -2132,26 +2132,11 @@
           "event": 0,
           "start": "2026-11-02T07:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-10-19T07:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-10-26T08:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-11-02T08:00:00.000Z"
-        }
       ]
     },
     {
       "name": "a-lowercase-zone",
-      "note": "Intl resolves zone names in any case, so the views keep the Berlin wall clock. chrono-tz knows zone names only in their exact case, so the reminders expand in UTC.",
-      "surfacesDiffer": true,
+      "note": "tzdata names match in any ASCII case, so the views and the reminders both keep the Berlin wall clock (cal_core::series_clock). Until 2026-09-14 the reminders knew names only in their exact case and expanded in UTC.",
       "input": {
         "events": [
           {
@@ -2183,8 +2168,30 @@
           "event": 0,
           "start": "2026-11-02T08:00:00.000Z"
         }
-      ],
-      "reminders": [
+      ]
+    },
+    {
+      "name": "a-series-stored-as-etc-utc",
+      "note": "What Exchange stores for its own UTC. A UTC name, so the series repeats in UTC and 07:00 UTC stays 07:00 UTC across the change in late October. Until 2026-09-14 the views took the zoned path for it, at the same instants; which path a UTC name takes is pinned by crates/cal-core/tests/fixtures/seriesClock.json.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Etc/UTC"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
         {
           "event": 0,
           "start": "2026-10-19T07:00:00.000Z"
@@ -2196,6 +2203,114 @@
         {
           "event": 0,
           "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-series-stored-as-gmt",
+      "note": "GMT is a link to Etc/GMT: zero offset, no daylight saving, a UTC name. The row pins the instants only: zero offset gives the same ones on the zoned path, so which path a UTC name takes is pinned by crates/cal-core/tests/fixtures/seriesClock.json.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "GMT"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-lowercase-utc-name",
+      "note": "etc/utc is Etc/UTC in any ASCII case, and a UTC name. The row pins the instants only: zero offset gives the same ones on the zoned path, so which path a UTC name takes is pinned by crates/cal-core/tests/fixtures/seriesClock.json.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "etc/utc"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-offset-for-a-zone-name",
+      "note": "Sunday 23:30 UTC, weekly on Sundays, stored with the zone +05:30. Intl accepts an offset as a zone: on its clock the start is Monday 05:00 and the Sundays fall a day earlier. tzdata has no such name, so the series repeats in UTC on Sundays, in the views and in the reminders alike (cal_core::series_clock, decided 2026-09-14).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-18T23:30:00Z",
+            "end": "2026-10-19T00:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=SU",
+              "exceptions": [],
+              "tzid": "+05:30"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-18T23:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T23:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-01T23:30:00.000Z"
         }
       ]
     },

@@ -1,13 +1,13 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden, noch nicht gebaut.** Toni hat die Form am 14. September
-2026 festgelegt (Entscheidungen 13b, 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b
-und 24a). Die Planung lief in zwei Runden: drei Varianten mit je einer
-Gegenprüfung, dann zwei Planer (Bedienung, Unterbau) mit je einem Kritiker und
-einer Zusammenführung. Danach wurde dieses Dokument selbst gegen die
-Entscheidungen, den Code und die Planung geprüft. Der Code-Stand dahinter ist
-main nach #69 und #70. Die Stufenliste am Ende sagt, was in welcher Reihenfolge
-gebaut wird. Nichts davon lief bisher auf einem Gerät.
+Status: **entschieden; Stufe 1 gebaut (#72), Stufe 2 in Arbeit (#73).** Toni hat
+die Form am 14. September 2026 festgelegt (Entscheidungen 13b, 14a, 15a, 16b,
+17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b und 26a). Die Planung lief in zwei
+Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
+Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
+Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
+Stufenliste am Ende sagt, was in welcher Reihenfolge gebaut wird. Nichts davon
+lief bisher auf einem Gerät.
 
 ## Der Anlass
 
@@ -67,6 +67,18 @@ keinen, dort ist die Wahl Tonis Sache.
 - **24a — Serien, deren Tage am Beginn hängen,** werden nicht gefragt, außer sie
   können ihre Tage nicht halten. Die Ansage nach der Wahl nennt den neuen Tag des
   Beginns.
+- **25b — zusammengelegte Orte.** Die Liste bleibt bei 312 Zonen. Einen Ort, den
+  tzdata mit einer anderen Stadt zusammengelegt hat (Oslo mit Berlin), findet
+  die Suche als „Berlin (auch Oslo)“. Gespeichert wird die Zone, auf die er
+  verweist.
+- **26a — eine Regel für gespeicherte Zonen und die Gerätezone.**
+  1. Eine Zone gilt nur, wenn tzdata den Namen kennt und er kein UTC-Name ist.
+     Sonst wiederholt sich die Serie nach UTC, auch bei einem Versatz wie
+     `+05:30` und bei einer Gerätezone, die tzdata nicht kennt.
+  2. Alle 18 UTC-Namen gelten als keine Zone.
+  3. Die Erinnerungen fragen dieselbe Regel wie die Ansichten.
+  4. Bis Stufe 10 bekommt eine neue Serie die Gerätezone in der Schreibweise des
+     Geräts, etwa `Asia/Calcutta`.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -118,7 +130,7 @@ stehen.
 | Der Editor zeigt | Wiederholung | Ganztägig | Zonen-Auswahl | Beginn und Ende stehen auf |
 |---|---|---|---|---|
 | neuer Termin | keine | egal | nicht da | Geräte-Uhr |
-| neuer Termin | ja | aus | wählbar; Vorgabe Gerätezone, UTC, wenn das Gerät UTC meldet oder der Kalender die Gerätezone nicht speichern kann (22a) | Uhr der Serie |
+| neuer Termin | ja | aus | wählbar; Vorgabe Gerätezone, UTC, wenn das Gerät UTC oder eine Zone meldet, die tzdata nicht kennt (26a), oder der Kalender die Gerätezone nicht speichern kann (22a) | Uhr der Serie |
 | egal | ja | an | nicht da; die Zone wird nicht gespeichert, wenn Ganztägig hier eingeschaltet wurde | Datum des Geräts |
 | gespeicherter Einzeltermin, hier zur Serie gemacht | ja | aus | wählbar; Vorgabe wie beim neuen Termin | Uhr der Serie |
 | ganze Serie | ja | aus | wählbar | gespeicherte Zone; UTC, wenn keine |
@@ -181,7 +193,7 @@ Antwort steht der Eintrag ohne Versatz.
 
 **Oben stehen, solange die Suche leer ist:** „Aktuell: {Eintrag}“ (wenn die Zone
 weder die des Geräts noch UTC ist), „Dieses Gerät: {Eintrag}“ (außer das Gerät
-läuft auf UTC) und der UTC-Eintrag. Danach folgen alle Einträge nach
+läuft auf UTC oder auf einer Zone, die tzdata nicht kennt) und der UTC-Eintrag. Danach folgen alle Einträge nach
 Standard-Versatz, dann nach Stadt.
 
 **Die Suche** findet Teile von Stadt, Zonen-Id, alten Namen, Region in der
@@ -382,6 +394,9 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   Unberührt heißt: der gespeicherte Wert wörtlich; gewählt: die kanonische Zone;
   UTC: keine Zone.
 - **Anlegen aus dem Editor** stempelt nie die Gerätezone über eine gewählte UTC.
+- **Schreibweise der Gerätezone:** Bis Stufe 10 bekommt eine neue Serie die
+  Gerätezone so, wie das Gerät sie schreibt, etwa `Asia/Calcutta` (26a). Stufe 10
+  entscheidet, ob die Vorbelegung kanonisch gespeichert wird.
 - **Kopieren und Duplizieren** behalten die Zonen-Entscheidung der Quelle: Eine
   Serie auf „UTC (ohne Sommerzeit)“ bleibt als Kopie auf UTC, statt wie heute die
   Gerätezone zu bekommen. Das Verschieben einer ganzen Serie ändert die Zone
@@ -392,11 +407,25 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 
 ### UTC und Anbieter
 
-- **Was als UTC gilt:** keine oder eine leere Zone, `Etc/UTC` und seine Aliase,
-  `Etc/GMT` und seine Aliase mit Versatz null, unabhängig von Groß- und
-  Kleinschreibung, ohne Leerzeichen zu entfernen. Eine einzige Kern-Regel, die
-  Ansichten, Liste und Geräteprüfung benutzen. `Etc/GMT±N` bleibt eine benannte
-  Zone und steht als „Aktuell: Etc/GMT+8 (nicht in Aperios Liste)“ da.
+- **Was als UTC gilt:**
+  - keine oder eine leere Zone;
+  - die 18 Namen, die tzdata UTC gibt: `Etc/UTC` mit seinen sieben Verweisen wie
+    `UTC`, `Zulu` oder `Etc/Universal`, und `Etc/GMT` mit seinen neun Verweisen
+    wie `GMT`, `GMT0` oder `Greenwich`;
+  - jeder Name, den tzdata nicht kennt: ein Windows-Name, ein Versatz wie
+    `+05:30` oder eine Zone, die neuer ist als Aperios tzdata.
+
+  Groß- und Kleinschreibung zählt nicht, Leerzeichen werden nicht entfernt. Das
+  ist eine einzige Kern-Regel (`cal_core::series_clock`). Ansichten, Erinnerungen
+  und die Gerätezone benutzen sie (26a). `Etc/GMT±N` bleibt eine benannte Zone
+  und steht als „Aktuell: Etc/GMT+8 (nicht in Aperios Liste)“ da.
+- **Zusammengelegte Orte (25b):** tzdata führt 139 Orte als Verweis auf eine
+  andere Stadt, deren Uhr seit 1970 gleich läuft: 106, die früher eine eigene
+  Zone mit Länderzeile hatten, und 33 weitere (etwa Montreal auf Toronto).
+  Beispiele: Oslo, Stockholm und
+  Kopenhagen verweisen auf Berlin, Amsterdam auf Brüssel, Reykjavik auf Abidjan.
+  Die Liste bleibt bei 312 Zonen. Die Suche findet einen solchen Ort als „Berlin
+  (auch Oslo)“, und gespeichert wird das Ziel.
 - **Was die Anbieter für „keine Zone“ bekommen**, bleibt wie heute: Google
   `Etc/UTC`, Microsoft 365 `UTC`, CalDAV `Z`, Exchange keine Zone.
 - **Exchange:** Erst messen, was ein Update ohne StartTimeZone mit einer Serie
@@ -457,16 +486,32 @@ Handy im selben PR.
    cal-ffi-Export, Kotlin- und Swift-Funktion, `CalFfiModule.ts`, Installation
    in `mobile/index.ts`, Bindungen neu erzeugt. Schließt die Lücke aus #69.
 2. **Zonennamen und eine UTC-Regel** — `feat(core): generated zone names and one UTC clock`.
-   `cargo xtask tz-list [--check]` erzeugt aus chrono-tz die 312 kanonischen
-   Namen, die Alias-Tabelle und die UTC-Menge. Kern-Regeln `canonical_zone` und
-   `series_clock_zone`, Türen in WebAssembly und cal-ffi. `zoneOrNull` und
-   `localTimeZone` laufen darüber. Gemeinsame Fixture `seriesClock.json`.
-   Vorher messen: Größe des WebAssembly-Moduls, Kosten des Aufrufs in großen
-   Ansichten, welche Zonen-Namen WebView2, Hermes auf iOS und Android für UTC,
-   Indien und die Ukraine melden.
+   `cargo xtask tz-list [--check]` liest die tzdata-Dateien, die chrono-tz
+   mitliefert. Er schreibt `crates/cal-core/src/series_clock/zone_names.rs`: alle
+   597 Namen mit der Zone, auf die sie verweisen, und die 312 Zonen der Liste.
+   Dabei prüft er an chrono-tz selbst, dass die Namen, die auf `Etc/UTC` oder
+   `Etc/GMT` verweisen, genau die Zonen sind, deren Uhr von 1800 bis 2099 in
+   jedem Monat UTC zeigt. Dass es 18 sind, prüft ein Test im Kern.
+
+   Dazu gehören die Kern-Regeln `canonical_zone` und `series_clock_zone`, Türen
+   in WebAssembly und cal-ffi und die Hülle `shared/seriesClock.ts`.
+   `zoneOrNull`, `localTimeZone` und die Erinnerungen in host-core laufen darüber
+   (26a). Die gemeinsame Fixture `seriesClock.json` lesen der Kern, die
+   WebAssembly-Tür und die Handy-Tür.
+
+   Gemessen:
+   - Das WebAssembly-Modul wächst um 20,6 KB, gepackt um 6,5 KB (gzip) bzw.
+     7,2 KB (brotli, so packt Tauri).
+   - Ein Aufruf kostet in Node etwa 0,4 µs, einmal pro Serie beim Aufklappen.
+   - WebView2 152 meldet `Asia/Calcutta`, `Europe/Kiev` und für jede
+     UTC-Schreibweise `UTC`.
+   - Hermes auf iOS und Android ist nur aus dem Quelltext gelesen. Das prüft der
+     nächste Handy-Build.
 3. **Die Weltliste mit Versatz und Suche** — `feat(core): the world zone list with offsets, and its search`.
-   Kern-Feature `zones` (in WebAssembly aus): Liste mit Versatz und Aliasen,
-   Suche mit Faltungstabelle. Desktop über einen Tauri-Befehl, Handy über
+   Kern-Feature `zones` (in WebAssembly aus): Versatz und Suche mit
+   Faltungstabelle auf der Namens-Tabelle aus Stufe 2 (`zone_names.rs`,
+   `listed_zones`); die Aliase für „(auch Oslo)“ kommen aus dieser Tabelle.
+   Desktop über einen Tauri-Befehl, Handy über
    cal-ffi. Fixture `timeZoneFilter.json`. Vorher messen: Größenzuwachs nativ,
    Abweichungen zwischen chrono-tz und Intl der Geräte, welche Namen Hermes auf
    alten Geräten ablehnt, wie NVDA und VoiceOver „UTC+02:00“ und „UTC+05:30“
@@ -489,7 +534,7 @@ Handy im selben PR.
    `wallClock.json`. Vorher messen: ob der Datums-Picker auf dem Handy eine feste
    Zone annimmt, und ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
-   `series_clock_change` mit Türen, `seriesClock.ts` in shared, Fixture
+   `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
    Passung im Kern für gezählte Wochentage und negative Monatstage übereinstimmen.
 10. **Das Formular-Modell** — `feat(shared): the series clock form model`.
@@ -518,6 +563,23 @@ Handy im selben PR.
   Aufklappen aus Intl des Geräts. Für Zonen, die sich seit der chrono-tz-Version
   geändert haben, können Versatz im Eintrag und Uhrzeit in den Feldern
   auseinanderliegen.
+  - V8 meldet alte Namen wie `Asia/Calcutta`.
+  - Die tzdata in Node (2026b) ist neuer als die in chrono-tz (2025b).
+  - Eine Zone, die neuer ist als Aperios tzdata, wiederholt sich nach UTC, bis
+    chrono-tz aktualisiert ist.
+- **Erinnerungen folgen der Kern-Regel (26a).** Für zwei gespeicherte
+  Schreibweisen ändern sie sich:
+  - „europe/berlin“ erinnert jetzt nach Berlin statt nach UTC.
+  - „ Europe/Berlin “ mit Leerzeichen erinnert nach UTC statt nach Berlin.
+
+  Beides zeigen die Ansichten schon so.
+- **Adapter lesen Zonennamen in exakter Schreibweise.** CalDAV und Microsoft 365
+  geben den gespeicherten Namen direkt an chrono-tz, das Groß- und
+  Kleinschreibung unterscheidet. Eine Serie mit „europe/berlin“ wiederholt sich
+  in Ansichten und Erinnerungen nach Berlin. CalDAV liest und schreibt ihren
+  Beginn aber als UTC-Zeit, und Microsoft 365 schreibt sie als UTC. Das war
+  schon vor Stufe 2 so. Behoben ist es erst, wenn die Adapter die Kern-Regel
+  fragen.
 - **Versatz-Ansagen ungetestet.** Liest ein Screenreader „UTC+02:00“ schlecht,
   sind 313 ähnliche Einträge schwer zu unterscheiden. Die Form steckt in einem
   Übersetzungsschlüssel und lässt sich ohne Rust ändern.
@@ -548,8 +610,12 @@ Handy im selben PR.
   Die Parität ruht darauf, dass die Logik in shared liegt und dort getestet ist.
 - **Microsoft 365.** Eine dort mit Zone angelegte Serie lässt sich danach in
   Aperio weder zeigen noch korrigieren.
-- **Kosten im Aufklappen.** Die UTC-Tür läuft in jedem Aufklappen; ihre Kosten in
-  großen Ansichten sind ungemessen.
+- **Kosten im Aufklappen.** Die Tür läuft in jedem Aufklappen, einmal pro Serie.
+  Gemessen in Node:
+  - etwa 0,4 µs pro Aufruf;
+  - ein Monatsraster mit 55 Serien braucht dafür etwa 0,1 % seiner Zeit.
+
+  Die Kosten auf dem Handy sind ungemessen.
 - **Erzeugte Tabellen.** Die Generatoren hängen daran, dass chrono-tz seine
   Quelldaten mitliefert und die CLDR-Datei eingecheckt ist; ein Update lässt
   `--check` laut scheitern.
@@ -566,8 +632,9 @@ Handy im selben PR.
   das Öffnen einen Moment später mit TalkBack funktioniert. Ob Listenzeilen per
   Wischen erreichbar bleiben.
 - Welche Zonen-Namen Intl auf Android 7 bis 9 und iOS 16.4 ablehnt.
-- Welche Gerätezone WebView2, iOS und Android für UTC, Indien und die Ukraine
-  melden.
+- Welche Gerätezone iOS und Android für UTC, Indien und die Ukraine melden.
+  Gemessen ist nur WebView2 152: `UTC`, `Asia/Calcutta` und `Europe/Kiev`, für
+  eine emulierte Gerätezone `GMT` (ICU) `+00:00`.
 - Ob der Datums-Picker auf dem Handy eine feste Zone annimmt.
 - Was Exchange bei einem Update ohne StartTimeZone macht und ob sich das Feld
   entfernen lässt; wie viele Zonen nach der CLDR-Tabelle abbildbar sind.
@@ -582,6 +649,9 @@ Handy im selben PR.
 - Ob das Aufklappen mit rrule.js und die Passung im Kern für gezählte Wochentage
   und negative Monatstage übereinstimmen.
 - Abweichungen zwischen chrono-tz und den Intl-Daten der Geräte.
-- Größen und Aufrufkosten.
-- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet (auf Windows wurde
-  `America/Los_Angeles` ignoriert).
+- Größenzuwachs der nativen Bibliothek und Aufrufkosten auf dem Handy. Für
+  WebAssembly sind beide gemessen.
+- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
+  - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
+    mit `/` umschreibt.
+  - Aus PowerShell beachtet Node sie.

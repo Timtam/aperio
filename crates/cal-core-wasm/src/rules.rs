@@ -180,6 +180,18 @@ pub fn normalize_join_url(url: &str) -> String {
     cal_core::normalize_join_url(url)
 }
 
+/// See [`crate::seriesClockZone`]. Infallible; `""` means UTC, both ways.
+pub fn series_clock_zone(tzid: &str) -> String {
+    cal_core::series_clock_zone(Some(tzid))
+        .unwrap_or("")
+        .to_string()
+}
+
+/// See [`crate::canonicalZone`]. Infallible; `""` for a name tzdata does not know.
+pub fn canonical_zone(name: &str) -> String {
+    cal_core::canonical_zone(name).unwrap_or("").to_string()
+}
+
 /// See [`crate::collapseEventGroups`].
 pub fn collapse_event_groups(input_json: &str) -> Result<String, WireError> {
     cal_core::collapse_event_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
