@@ -16,16 +16,26 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * An event that becomes a series in the editor gets the device's zone, as a new
  * series does. A series that already recurs without a zone is left as it is: it
  * may be meant to run in UTC.
+ *
+ * A row of a series opened with the whole-series scope holds that occurrence's
+ * fields. It saves onto the series, which it loads: the series keeps its start,
+ * its rule and its exceptions unless the edit changed them.
  */
 
-const invokeMock = vi.hoisted(() =>
-  vi.fn((command: string, payload?: unknown) => {
+const { invokeMock, onFile } = vi.hoisted(() => {
+  /** What `get_event_by_id` answers: the series a row of a series belongs to. */
+  const onFile: { series: unknown } = { series: null };
+  const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'update_event') {
-      return Promise.resolve((payload as { event: CalendarEvent }).event);
+      return Promise.resolve((payload as { event: unknown }).event);
+    }
+    if (command === 'get_event_by_id') {
+      return Promise.resolve(onFile.series);
     }
     return Promise.resolve([]);
-  }),
-);
+  });
+  return { invokeMock, onFile };
+});
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: () => Promise.resolve(() => {}),
@@ -54,6 +64,16 @@ const SERIES: CalendarEvent = {
   color_label: null,
   reminders: [],
   attendees: [],
+} as unknown as CalendarEvent;
+
+/** A later Monday of SERIES, as the views expand it. */
+const JULY_OCCURRENCE = {
+  ...SERIES,
+  id: 'ev-series@2026-07-06T07:00:00.000Z',
+  series_id: 'ev-series',
+  occurrence_start: '2026-07-06T07:00:00.000Z',
+  start: '2026-07-06T07:00:00.000Z',
+  end: '2026-07-06T08:00:00.000Z',
 } as unknown as CalendarEvent;
 
 const STORE = {
@@ -94,6 +114,7 @@ vi.mock('./RecurrenceSelector', () => ({
 afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
+  onFile.series = null;
   vi.restoreAllMocks();
 });
 
@@ -106,8 +127,12 @@ function deviceInBerlin() {
   });
 }
 
-/** Open the event, make the given change, save, and return the recurrence that went out. */
-async function saveEdited(event: CalendarEvent, change?: () => void, initialScope?: 'series') {
+/** Open the event, make the given change, save, and return the event that went out. */
+async function saveEditedEvent(
+  event: CalendarEvent,
+  change?: () => void,
+  initialScope?: 'series',
+): Promise<CalendarEvent> {
   const { EventDialog } = await import('./EventDialog');
   render(
     <StrictMode>
@@ -121,7 +146,12 @@ async function saveEdited(event: CalendarEvent, change?: () => void, initialScop
     expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
   );
   const update = invokeMock.mock.calls.find((call) => call[0] === 'update_event');
-  return (update?.[1] as { event: CalendarEvent }).event.recurrence;
+  return (update?.[1] as { event: CalendarEvent }).event;
+}
+
+/** Like {@link saveEditedEvent}, returning only the recurrence that went out. */
+async function saveEdited(event: CalendarEvent, change?: () => void, initialScope?: 'series') {
+  return (await saveEditedEvent(event, change, initialScope)).recurrence;
 }
 
 describe('EventDialog → editing a series as a whole', () => {
@@ -180,9 +210,15 @@ describe('EventDialog → editing a series as a whole', () => {
 
   it('does not treat an override opened as the whole series as a new series', async () => {
     // A provider override (CalDAV, EWS) carries no rule of its own. Saved as
-    // the whole series it lands on the master, which may recur without a zone
-    // on purpose, so nothing is stamped.
+    // the whole series it lands on the series, which may recur without a zone
+    // on purpose, so nothing is stamped, and the series keeps its exceptions.
     deviceInBerlin();
+    onFile.series = {
+      ...SERIES,
+      start: '2026-06-15T23:30:00.000Z',
+      end: '2026-06-16T00:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: ['2026-06-29T23:30:00.000Z'] },
+    };
     const override = {
       ...SERIES,
       id: 'ev-series::rid::2026-06-22T23:30:00Z',
@@ -199,5 +235,61 @@ describe('EventDialog → editing a series as a whole', () => {
     );
     expect(sent?.tzid ?? null).toBeNull();
     expect(sent?.rrule).toBe('FREQ=WEEKLY');
+    expect(sent?.exceptions).toEqual(['2026-06-29T23:30:00.000Z']);
+  });
+});
+
+describe('EventDialog → a row of a series saved as the whole series', () => {
+  it('keeps the series start when the dates are untouched', async () => {
+    // The form holds the July occurrence; writing it as it is moved the series
+    // start to July and the June Mondays disappeared.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    const sent = await saveEditedEvent(JULY_OCCURRENCE, undefined, 'series');
+    expect(sent.id).toBe('ev-series');
+    expect(sent.start).toBe(SERIES.start);
+    expect(sent.end).toBe(SERIES.end);
+    expect(sent.recurrence).toEqual(SERIES.recurrence);
+  });
+
+  it('gives the whole series a new time and takes its exceptions along', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    const sent = await saveEditedEvent(
+      JULY_OCCURRENCE,
+      () => {
+        fireEvent.change(screen.getByLabelText(/startzeit|start time/i), {
+          target: { value: '10:30' },
+        });
+      },
+      'series',
+    );
+    const start = new Date(sent.start);
+    // The series' own day, at the new time.
+    expect([start.getHours(), start.getMinutes()]).toEqual([10, 30]);
+    expect(start.toDateString()).toBe(new Date(SERIES.start).toDateString());
+    // The excluded Monday moved with it, or it would come back at 10:30.
+    const moved = Date.parse(sent.start) - Date.parse(SERIES.start);
+    expect(moved).not.toBe(0);
+    expect(sent.recurrence?.exceptions).toEqual([
+      new Date(Date.parse(SERIES.recurrence!.exceptions[0]) + moved).toISOString(),
+    ]);
+  });
+
+  it('keeps the series rule when an override is saved unchanged', async () => {
+    // An override carries no rule, and the form had none to send: the series
+    // lost its rule.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    const override = {
+      ...SERIES,
+      id: 'ev-series::rid::2026-07-06T07:00:00Z',
+      start: '2026-07-06T07:30:00.000Z',
+      end: '2026-07-06T08:30:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    const sent = await saveEditedEvent(override, undefined, 'series');
+    expect(sent.recurrence).toEqual(SERIES.recurrence);
+    expect(sent.start).toBe(SERIES.start);
   });
 });

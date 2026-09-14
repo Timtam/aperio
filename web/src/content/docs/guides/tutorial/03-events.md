@@ -93,14 +93,16 @@ In the event dialog you can also set:
   or choose **Edit** from the context menu.
 - **Move:** Change the times in the dialog – this works reliably and is
   screen-reader friendly. With a mouse you can also drag an event onto a
-  **different day** in the week or month view (time of day and duration
-  are preserved) or onto a **calendar in the sidebar** to move it to that
-  calendar. For recurring events Aperio asks whether to move just this
-  occurrence or the whole series. The whole series moves every occurrence
-  by the same number of days, so "every Monday" becomes "every Tuesday" and
-  the end date moves along. Some rules cannot move that way, such as "the
-  second Sunday of every month" or a day after the 28th; Aperio then says why
-  and offers to move just this occurrence.
+  **different day** in the week or month view, which keeps its time of day
+  and duration, or into the hour grid of the day or week view, which gives it
+  the time you drop it on. Dragged onto a **calendar in the sidebar**, it moves
+  to that calendar. For recurring events Aperio asks whether to move just this
+  occurrence or the whole series. The whole series moves every occurrence by
+  the same number of days, so "every Monday" becomes "every Tuesday" and the
+  end date moves along. Some rules cannot move that way, such as "the second
+  Sunday of every month" or a day after the 28th; Aperio then says why and
+  offers to move just this occurrence. See also **Single changed or deleted
+  occurrences** below.
 - **Delete:** Select the event and choose **Delete** (default: `Delete`).
   You are asked to confirm before deletion.
 
@@ -117,6 +119,19 @@ the **whole series** — the same three scopes other calendars (Google, Outlook)
 offer. **This and all following** splits the series at the chosen occurrence:
 the earlier occurrences stay untouched, and this one plus every later one are
 changed (on edit, a new series takes over from here) or removed (on delete).
+**The whole series** opens the series itself, with its own start and end, even
+when you opened it from a later occurrence. A new time applies to every
+occurrence, and a new date moves the start of the series.
+
+> **Single changed or deleted occurrences:** When a whole series moves to
+> another day or time, by dragging it or in the dialog, some single occurrences
+> stay tied to their old date: occurrences changed on their own in an external
+> calendar (iCloud, Google, Exchange), and occurrences deleted in a Google
+> calendar, also when you deleted them in Aperio (possibly in Exchange too).
+> After the move a deleted occurrence can come back, a changed one can show up
+> twice, and another occurrence can be missing where the old one was. Aperio
+> cannot repair this. Check the series afterwards in the calendar's own app,
+> where such single changes can be undone.
 
 > **Tip:** Recurring events from external calendars (e.g. iCloud) expand
 > correctly in every view – even when the first occurrence lies in the past.

@@ -247,16 +247,34 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
  * the master (never a single occurrence); the previous `calendar_id` is the
  * cross-adapter move hint, so external adapters reroute as create+delete
  * rather than PUT-to-a-nonexistent-resource.
+ *
+ * A row of a series (an expanded occurrence, or a provider override) is not the
+ * master: its start is that occurrence's, and an override carries no rule.
+ * Written as the series it moved the series start to that occurrence, and could
+ * drop the rule, so the master is loaded and moved as it is.
  */
 export async function moveEventToCalendar(
   event: CalendarEvent,
   targetCalendarId: string,
 ): Promise<void> {
-  const seriesId = seriesIdOf(event);
+  const series = await seriesRowOf(event);
   await apiUpdateEvent(
-    { ...event, id: seriesId, calendar_id: targetCalendarId },
-    event.calendar_id,
+    { ...series, calendar_id: targetCalendarId },
+    series.calendar_id,
   );
+}
+
+/** The row that stands for the whole series `event` belongs to: `event` itself
+ *  when it is that row, else the loaded master. Throws when the master cannot
+ *  be loaded, so nothing is written from an occurrence's fields. */
+async function seriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+  const seriesId = seriesIdOf(event);
+  if (event.id === seriesId) return event;
+  const master = await getEventById(seriesId, event.calendar_id);
+  if (!master) {
+    throw new SeriesNotLoadedError(seriesId);
+  }
+  return master;
 }
 
 export type MoveCopyMode = 'move' | 'copy';
@@ -275,7 +293,9 @@ export type MoveCopyScope = 'occurrence' | 'series';
  *    second, so a failed create never silently drops the occurrence.
  *
  * `occurrence` scope only takes effect for an actual expanded occurrence; a
- * plain master row falls back to whole-series behaviour.
+ * plain master row falls back to whole-series behaviour. The whole series is
+ * moved or copied as the series: from a row of a series the master is loaded
+ * (see `moveEventToCalendar`), so a copy starts where the series starts.
  */
 export async function moveOrCopyEvent(
   event: CalendarEvent,
@@ -293,20 +313,21 @@ export async function moveOrCopyEvent(
     return;
   }
 
+  const source = asOccurrence ? event : await seriesRowOf(event);
   await apiCreateEvent({
     calendar_id: targetCalendarId,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    start: event.start,
-    end: event.end,
-    all_day: event.all_day,
+    title: source.title,
+    description: source.description,
+    location: source.location,
+    start: source.start,
+    end: source.end,
+    all_day: source.all_day,
     // Occurrence scope detaches into a single event; series keeps the rule.
-    recurrence: asOccurrence ? null : event.recurrence,
-    color_label: event.color_label,
-    reminders: event.reminders,
-    sound: event.sound,
-    attendees: event.attendees,
+    recurrence: asOccurrence ? null : source.recurrence,
+    color_label: source.color_label,
+    reminders: source.reminders,
+    sound: source.sound,
+    attendees: source.attendees,
   });
 
   if (mode === 'move' && asOccurrence) {

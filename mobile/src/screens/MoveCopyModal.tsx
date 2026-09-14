@@ -28,6 +28,7 @@ import {
   moveOrCopyTask,
   type MoveCopyMode,
   type MoveCopyScope,
+  SeriesNotLoadedError,
 } from '../state/moveActions';
 import {
   useShowHiddenCalendarTargets,
@@ -276,7 +277,10 @@ export default function MoveCopyModal({
       );
       navigation.goBack();
     } catch (err) {
-      const message = errorMessage(err);
+      const message =
+        err instanceof SeriesNotLoadedError
+          ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
+          : errorMessage(err);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {

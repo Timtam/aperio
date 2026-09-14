@@ -18,6 +18,7 @@ import {
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
+  SeriesNotLoadedError,
 } from './moveActions';
 
 /** An expanded recurring occurrence (what the views/dialog hand in). */
@@ -171,21 +172,72 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
     });
   });
 
-  it('copy + series → keeps the recurrence rule, no EXDATE', async () => {
+  /** The series `occurrence()` belongs to: it starts two weeks earlier. */
+  const seriesMaster = () =>
+    ({
+      ...occurrence(),
+      id: 'e1',
+      series_id: null,
+      occurrence_start: null,
+      start: '2026-06-01T09:00:00.000Z',
+      end: '2026-06-01T09:30:00.000Z',
+    }) as unknown as CalendarEvent;
+  const serving = (series: CalendarEvent | null) =>
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === 'get_event_by_id' ? series : {}),
+    );
+  const callsTo = (cmd: string) => invokeMock.mock.calls.filter((call) => call[0] === cmd);
+
+  it('copy + series → copies the series from its own start with its rule, no EXDATE', async () => {
+    serving(seriesMaster());
     await moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series');
-    expect(invokeMock.mock.calls).toHaveLength(1);
-    const [cmd, args] = invokeMock.mock.calls[0];
-    expect(cmd).toBe('create_event');
-    expect(args.request.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+    const creates = callsTo('create_event');
+    expect(creates).toHaveLength(1);
+    expect(creates[0][1].request.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+    // From an occurrence the copy used to start at that occurrence.
+    expect(creates[0][1].request.start).toBe('2026-06-01T09:00:00.000Z');
+    expect(callsTo('add_event_exdate')).toHaveLength(0);
   });
 
-  it('move + series → moves the master via update_event, no create/EXDATE', async () => {
+  it('move + series → moves the master as it is via update_event, no create/EXDATE', async () => {
+    serving(seriesMaster());
     await moveOrCopyEvent(occurrence(), 'c2', 'move', 'series');
-    expect(invokeMock.mock.calls).toHaveLength(1);
-    const [cmd, args] = invokeMock.mock.calls[0];
-    expect(cmd).toBe('update_event');
-    expect(args.event.id).toBe('e1'); // master series id, not the occurrence id
-    expect(args.event.calendar_id).toBe('c2');
+    const updates = callsTo('update_event');
+    expect(updates).toHaveLength(1);
+    const { event } = updates[0][1];
+    expect(event.id).toBe('e1'); // master series id, not the occurrence id
+    expect(event.calendar_id).toBe('c2');
+    expect(event.start).toBe('2026-06-01T09:00:00.000Z');
+    expect(callsTo('create_event')).toHaveLength(0);
+  });
+
+  it('move + series from a provider override keeps the rule of the master', async () => {
+    // An override carries no rule; written as the series it dropped the rule.
+    serving(seriesMaster());
+    const override = {
+      ...occurrence(),
+      id: 'e1::rid::2026-06-15T09:00:00Z',
+      series_id: null,
+      occurrence_start: null,
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    await moveOrCopyEvent(override, 'c2', 'move', 'series');
+    const { event } = callsTo('update_event')[0][1];
+    expect(event.id).toBe('e1');
+    expect(event.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+    expect(event.start).toBe('2026-06-01T09:00:00.000Z');
+  });
+
+  it('writes nothing when the series cannot be loaded', async () => {
+    serving(null);
+    await expect(moveOrCopyEvent(occurrence(), 'c2', 'move', 'series')).rejects.toBeInstanceOf(
+      SeriesNotLoadedError,
+    );
+    await expect(moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series')).rejects.toThrow(
+      /could not be loaded/,
+    );
+    expect(callsTo('update_event')).toHaveLength(0);
+    expect(callsTo('create_event')).toHaveLength(0);
   });
 
   it('a non-recurring event ignores occurrence scope (whole-row move)', async () => {

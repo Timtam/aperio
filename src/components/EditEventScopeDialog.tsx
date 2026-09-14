@@ -6,9 +6,10 @@ import { Modal } from './Modal';
 /**
  * Outlook-style "edit this occurrence vs the whole series" prompt, shown when
  * the user opens a RECURRING event's editor. Mirrors `MoveEventScopeDialog`'s
- * shape; picking a scope hands off to the event editor (locked to that scope),
- * so the choice is made up front instead of via a radio group buried in the
- * form — which a screen-reader user could miss and edit the whole series by
+ * shape. "This occurrence" and "this and all following" hand off to the event
+ * editor locked to that scope; "whole series" opens the editor on the series
+ * itself. The choice is made up front instead of via a radio group buried in
+ * the form — which a screen-reader user could miss and edit the whole series by
  * accident.
  *
  * Cancel takes initial focus so a stray Enter changes nothing.
@@ -23,8 +24,11 @@ export interface EditEventScopeDialogProps {
   onOccurrence: () => void;
   /** Open the editor scoped to this occurrence and all following ones. */
   onThisAndFuture: () => void;
-  /** Open the editor scoped to the whole series. */
+  /** Open the editor on the whole series. */
   onSeries: () => void;
+  /** How often the whole series failed to load. The prompt stays and says so;
+   *  each new count is announced again. */
+  seriesLoadFailed?: number;
 }
 
 export function EditEventScopeDialog({
@@ -34,10 +38,12 @@ export function EditEventScopeDialog({
   onOccurrence,
   onThisAndFuture,
   onSeries,
+  seriesLoadFailed = 0,
 }: EditEventScopeDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const msgId = useId();
+  const failureId = useId();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -59,6 +65,14 @@ export function EditEventScopeDialog({
       <p id={msgId} className="form__message">
         {t('dialogs.editScope.message', { title })}
       </p>
+      {seriesLoadFailed > 0 && (
+        // A fresh node for every failure: an unchanged alert is not announced
+        // again, and a retry that failed too would pass in silence. It also
+        // describes "Whole series", where focus stays, so it can be read again.
+        <p key={seriesLoadFailed} id={failureId} role="alert" className="form__error">
+          {t('dialogs.editScope.seriesLoadFailed', { title })}
+        </p>
+      )}
       <div className="form__actions">
         <button
           ref={cancelRef}
@@ -83,6 +97,7 @@ export function EditEventScopeDialog({
           type="button"
           onClick={onSeries}
           className="form__action form__action--primary"
+          aria-describedby={seriesLoadFailed > 0 ? failureId : undefined}
         >
           {t('dialogs.editScope.series')}
         </button>

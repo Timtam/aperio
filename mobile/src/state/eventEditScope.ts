@@ -35,13 +35,17 @@ export function editEventWithScope(
   navigate: (params: EditEventParams) => void,
 ): void {
   const occurrence = occurrenceIsoOf(ev);
-  const open = (initialScope?: 'occurrence' | 'series' | 'this_and_future') => {
+  /** Without `scoped` the editor opens the series itself. */
+  const open = (scoped?: {
+    occurrence: string;
+    initialScope: 'occurrence' | 'this_and_future';
+  }) => {
     const eventId = seriesIdOf(ev);
     navigate({
       eventId,
       calendarId: ev.calendar_id,
-      occurrence,
-      initialScope,
+      occurrence: scoped?.occurrence,
+      initialScope: scoped?.initialScope,
       // A synthetic birthday event opens a read-only summary that can't
       // re-fetch its own name — hand it over from the row.
       initialTitle: isBirthdayEventId(eventId) ? ev.title : undefined,
@@ -65,17 +69,21 @@ export function editEventWithScope(
       {
         key: 'occurrence',
         label: t('dialogs.editScope.occurrence'),
-        run: () => open('occurrence'),
+        run: () => open({ occurrence, initialScope: 'occurrence' }),
       },
       {
         key: 'thisAndFuture',
         label: t('dialogs.editScope.thisAndFuture'),
-        run: () => open('this_and_future'),
+        run: () => open({ occurrence, initialScope: 'this_and_future' }),
       },
       {
         key: 'series',
         label: t('dialogs.editScope.series'),
-        run: () => open('series'),
+        // The whole series opens as the series — its own start, end, rule and
+        // exceptions, like a search hit. Seeded from the occurrence, saving
+        // moved the series start to that occurrence and the earlier ones
+        // disappeared.
+        run: () => open(),
       },
     ],
   });

@@ -23,6 +23,7 @@ import {
   moveOrCopyEvent,
   moveTaskToList,
   type MoveCopyScope,
+  SeriesNotLoadedError,
 } from '../state/moveActions';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { canAssignSection } from '../state/taskMoves';
@@ -250,7 +251,9 @@ export function MoveCopyDialog({
         );
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
+        if (err instanceof SeriesNotLoadedError) {
+          setError(t('dialogs.event.seriesLoadFailed', { title: itemTitle }));
+        } else if (isCommandError(err)) {
           setError(`${err.code}: ${err.message}`);
         } else {
           setError(String(err));

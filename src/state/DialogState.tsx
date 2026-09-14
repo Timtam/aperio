@@ -6,10 +6,10 @@ import {
   type ReactNode,
 } from 'react';
 
-import { isSeriesOccurrence } from '@aperio/shared';
+import { isSeriesOccurrence, seriesIdOf } from '@aperio/shared';
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 
-import type { NewGroupMember } from '../api/client';
+import { getEventById, type NewGroupMember } from '../api/client';
 import type {
   Account,
   CalendarEvent,
@@ -75,6 +75,9 @@ export type DialogMode =
       // event so the chosen scope can hand off to the event frame.
       kind: 'eventEditScope';
       event: CalendarEvent;
+      /** How often loading the whole series failed. Each failure counts, so
+       *  the prompt announces a failed retry again. */
+      seriesLoadFailed?: number;
     }
   | {
       kind: 'task';
@@ -235,7 +238,9 @@ export interface DialogStateValue {
   ) => void;
   /** Resolve the recurring-edit scope prompt: swap the top `eventEditScope`
    *  frame for the event editor locked to `scope` (keeps the opener's
-   *  focus-return). No-op if the top frame isn't the scope prompt. */
+   *  focus-return). The whole series opens the loaded series itself; when it
+   *  cannot be loaded the prompt stays, marked `seriesLoadFailed`. No-op if the
+   *  top frame isn't the scope prompt. */
   chooseEventEditScope: (scope: EventEditScope) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
@@ -445,18 +450,48 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     },
     [push, replaceTop],
   );
+  // The prompt frame `chooseEventEditScope` answers, read before its update.
+  const stackRef = useRef(stack);
+  stackRef.current = stack;
+  // The prompt whose series is loading. A second press waits for that load:
+  // two loads could land in either order, and a failure landing first
+  // replaced the prompt the success was meant for.
+  const seriesLoadingFor = useRef<DialogMode | null>(null);
   const chooseEventEditScope = useCallback((scope: EventEditScope) => {
+    const prompt = stackRef.current[stackRef.current.length - 1];
+    if (!prompt || prompt.kind !== 'eventEditScope') return;
     // Swap the scope-prompt frame in place (no new trigger capture) so the
     // editor inherits the opener's focus-return target, mirroring the
-    // createChooser → quick-add hand-off.
-    setStack((s) => {
-      const top = s[s.length - 1];
-      if (!top || top.kind !== 'eventEditScope') return s;
-      return [
-        ...s.slice(0, -1),
-        { kind: 'event', event: top.event, initialScope: scope },
-      ];
-    });
+    // createChooser → quick-add hand-off. Only while that same prompt is still
+    // on top: it may have been dismissed while the series was loading.
+    const swap = (next: DialogMode) =>
+      setStack((s) =>
+        s[s.length - 1] === prompt ? [...s.slice(0, -1), next] : s,
+      );
+    if (scope !== 'series') {
+      swap({ kind: 'event', event: prompt.event, initialScope: scope });
+      return;
+    }
+    // The whole series opens as the series — its own start and end, its rule
+    // and its exceptions, like a search hit. An occurrence's fields cannot
+    // describe the series: saved as the series, they moved its start to that
+    // occurrence and the earlier occurrences disappeared. When the series
+    // cannot be loaded the prompt stays and says so.
+    if (seriesLoadingFor.current === prompt) return;
+    seriesLoadingFor.current = prompt;
+    const { event } = prompt;
+    void getEventById(seriesIdOf(event), event.calendar_id)
+      .catch(() => null)
+      .then((series) => {
+        // Only its own: a load for a prompt that was dismissed meanwhile must
+        // not unblock the prompt that replaced it.
+        if (seriesLoadingFor.current === prompt) seriesLoadingFor.current = null;
+        swap(
+          series
+            ? { kind: 'event', event: series }
+            : { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 },
+        );
+      });
   }, []);
   const openTaskDialog = useCallback(
     (task: Task | null = null, options?: OpenTaskOptions) => {
