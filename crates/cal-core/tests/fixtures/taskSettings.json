@@ -1,0 +1,1965 @@
+{
+  "what": "How each surface reads the sixteen stored task and calendar preferences, resolves a list’s effective coupling, auto-date and carry-over, and normalises what it writes back: the countdown window, the visible day window and the per-list override map. Measured on the real code of both surfaces before the port.",
+  "why": "The desktop TaskCascadeProvider and the mobile taskBehaviour.ts each parse these values with their own copy of every rule, and the synced prefs mean each device reads what the other wrote. One reader in the core answers the same for both, and for a frontend that is not JavaScript.",
+  "writtenBy": [
+    "src/state/taskSettings.measure.test.tsx — a one-off, run once and deleted. It rendered the desktop provider with its preference reads answered from the case, and ran the mobile module with its preference module answered the same way; where the two surfaces answered differently, the row carries both (`expect` is mobile’s, `desktop` the desktop’s) and `surfacesDiffer`."
+  ],
+  "readBy": [
+    "src/state/taskSettings.contract.test.tsx",
+    "crates/cal-core (once the port exists)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, beside the day-start tables."
+  },
+  "notInThisTable": {
+    "the settings screens": "what each control offers and how it announces a change",
+    "when to write": "the desktop’s debounced write that stays silent when the value did not move, the re-read after a sync round, and the mobile writes’ best-effort catch are the platform’s",
+    "the sync whitelist": "which keys sync is sync-engine’s (`tasks.*`, `calendar.dayViewMode`, `calendar.dayStartMin`, `calendar.dayEndMin`)",
+    "host-core’s reading of tasks.dayStartTrigger": "reminders::day_start_time reads any HH:MM (seconds allowed) and garbage as midnight, where both surfaces read only the five offered values; an open decision, see the day-start table",
+    "priorityScale": "the two-level switch as a scale name, a one-line mapping"
+  },
+  "shape": {
+    "keys": "the stored keys, by the names the cases use",
+    "prefs": "stored values by key; a key not given is not stored",
+    "failing": "a key whose read fails",
+    "expect": "what mobile holds (reads and effective settings), or the string mobile writes",
+    "desktop": "present only where the desktop answered differently",
+    "Num": "\"NaN\", \"Infinity\" and \"-Infinity\" stand for the numbers JSON cannot spell",
+    "wasTypeScript": "a row pinning a JavaScript artifact a port may decide against, and must then change on purpose"
+  },
+  "keys": {
+    "cascade": "tasks.cascadeStatusCoupling",
+    "autoDate": "tasks.autoDateOnStart",
+    "autoSelfAssign": "tasks.autoSelfAssign",
+    "visualEffortSizing": "tasks.visualEffortSizing",
+    "twoLevelPriority": "tasks.twoLevelPriority",
+    "remindUntimedToday": "tasks.remindUntimedToday",
+    "remindDeadlineArrived": "tasks.remindDeadlineArrived",
+    "remindDeadlineCountdown": "tasks.remindDeadlineCountdown",
+    "deadlineCountdownDays": "tasks.deadlineCountdownDays",
+    "dayViewMode": "calendar.dayViewMode",
+    "dayStartMin": "calendar.dayStartMin",
+    "dayEndMin": "calendar.dayEndMin",
+    "checkoffMode": "tasks.checkoffMode",
+    "carryOverDefault": "tasks.carryOverDefault",
+    "dayStartTrigger": "tasks.dayStartTrigger",
+    "listOverrides": "tasks.listOverrides"
+  },
+  "read": [
+    {
+      "name": "nothing-stored-reads-as-the-defaults",
+      "note": "",
+      "input": {
+        "prefs": {}
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-on-knob-turns-off-only-on-a-literal-false",
+      "note": "Default-on knobs: only the exact string \"false\" turns one off; any other spelling, or nothing, leaves it on.",
+      "input": {
+        "prefs": {
+          "tasks.cascadeStatusCoupling": "false",
+          "tasks.autoDateOnStart": "FALSE",
+          "tasks.autoSelfAssign": " false",
+          "tasks.visualEffortSizing": "0",
+          "tasks.remindUntimedToday": "no",
+          "tasks.remindDeadlineArrived": "",
+          "tasks.remindDeadlineCountdown": "true"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": false,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "two-level-priority-turns-on-on-a-literal-true",
+      "note": "The one opt-in knob.",
+      "input": {
+        "prefs": {
+          "tasks.twoLevelPriority": "true"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": true,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "two-level-priority-ignores-other-spellings",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.twoLevelPriority": "TRUE"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-within-the-range",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "7"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 7,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-zero-clamps-to-one",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "0"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 1,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-above-thirty-clamp-to-thirty",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "31"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 30,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-negative-clamp-to-one",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "-5"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 1,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-a-decimal-is-cut",
+      "note": "parseInt reads the digits before the point.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "2.7"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 2,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-trailing-garbage-is-ignored",
+      "note": "parseInt stops at the first non-digit.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "12abc"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 12,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-garbage-is-the-default",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "abc"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-an-exponent-reads-its-digits-only",
+      "note": "parseInt reads \"1\", not 100.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "1e2"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 1,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-leading-space-is-read",
+      "note": "parseInt skips leading whitespace.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": " 7"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 7,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-a-plus-sign-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "+4"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 4,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-hexadecimal-is-zero",
+      "note": "Base 10: \"0x10\" reads as 0, clamped to 1.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "0x10"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 1,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-empty-is-the-default",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": ""
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-a-huge-number-clamps",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "99999999999999999999"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 30,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "countdown-days-non-ascii-digits-are-garbage",
+      "note": "parseInt knows ASCII digits only.",
+      "input": {
+        "prefs": {
+          "tasks.deadlineCountdownDays": "٣"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-day-window-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "420",
+          "calendar.dayEndMin": "1080"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 420,
+        "dayEndMin": 1080,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-window-edge-between-half-hours-snaps",
+      "note": "435 minutes is 14.5 half hours; it rounds up to 450.",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "435",
+          "calendar.dayEndMin": "1080"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 450,
+        "dayEndMin": 1080,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-out-of-order-window-is-the-whole-day",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "1080",
+          "calendar.dayEndMin": "420"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-missing-end-is-the-end-of-the-day",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "420",
+          "calendar.dayEndMin": null
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 420,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-garbage-start-is-midnight",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "abc",
+          "calendar.dayEndMin": "600"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 600,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-window-beyond-the-day-is-clamped",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "-60",
+          "calendar.dayEndMin": "1500"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-empty-window-is-the-whole-day",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "0",
+          "calendar.dayEndMin": "0"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "quarter-hours-round-half-up",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "15",
+          "calendar.dayEndMin": "45"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 30,
+        "dayEndMin": 60,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-window-decimal-is-cut-before-snapping",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "600.9",
+          "calendar.dayEndMin": "700"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 600,
+        "dayEndMin": 690,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-window-exponent-reads-its-digits-only",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayStartMin": "7e2",
+          "calendar.dayEndMin": "900"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 900,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "the-list-view-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayViewMode": "list"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "list",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-view-spelled-otherwise-is-the-grid",
+      "note": "",
+      "input": {
+        "prefs": {
+          "calendar.dayViewMode": "List"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "the-cycle-checkoff-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.checkoffMode": "cycle"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "cycle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-checkoff-spelled-otherwise-is-toggle",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.checkoffMode": "Cycle"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "carry-over-today-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.carryOverDefault": "today"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "today",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "carry-over-backlog-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.carryOverDefault": "backlog"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "backlog",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-carry-over-spelled-otherwise-asks",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.carryOverDefault": "Today"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-listed-trigger-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.dayStartTrigger": "06:00"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "06:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "the-app-start-trigger-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.dayStartTrigger": "app-start"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "app-start",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-trigger-off-the-list-is-midnight",
+      "note": "Only app-start, 00:00, 06:00, 08:00 and 12:00 are read; a valid time that is not offered falls back to 00:00. host-core’s reminders read the same key as any HH:MM.",
+      "input": {
+        "prefs": {
+          "tasks.dayStartTrigger": "07:00"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-trigger-with-seconds-is-midnight",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.dayStartTrigger": "08:00:00"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-trigger-spelled-otherwise-is-midnight",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.dayStartTrigger": "APP-START"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "list-overrides-are-read-per-field",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":false},\"L2\":{\"autoDate\":false,\"carryOverDefault\":\"backlog\"},\"L3\":{\"cascade\":true,\"autoDate\":true,\"carryOverDefault\":\"today\"}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {
+          "L1": {
+            "cascade": false
+          },
+          "L2": {
+            "autoDate": false,
+            "carryOverDefault": "backlog"
+          },
+          "L3": {
+            "cascade": true,
+            "autoDate": true,
+            "carryOverDefault": "today"
+          }
+        }
+      }
+    },
+    {
+      "name": "unreadable-overrides-are-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "not json"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "null-overrides-are-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "null"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-array-of-overrides-is-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "[]"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-number-of-overrides-is-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "5"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-string-of-overrides-is-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "\"L1\""
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-empty-override-map-is-none",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "an-entry-that-is-not-an-object-is-dropped",
+      "note": "An array passes the object check but has none of the fields, so it drops as empty.",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":5,\"L2\":null,\"L3\":[],\"L4\":{}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "fields-of-the-wrong-type-are-dropped",
+      "note": "No string for a boolean, no number, no carry-over spelled otherwise; an entry left with nothing is dropped.",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":\"true\",\"autoDate\":1,\"carryOverDefault\":\"Today\"}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      }
+    },
+    {
+      "name": "a-bad-field-leaves-the-good-ones",
+      "note": "Unknown fields are ignored.",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":false,\"autoDate\":\"no\",\"carryOverDefault\":\"backlog\",\"extra\":true}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {
+          "L1": {
+            "cascade": false,
+            "carryOverDefault": "backlog"
+          }
+        }
+      }
+    },
+    {
+      "name": "a-repeated-list-keeps-the-last",
+      "note": "JSON.parse keeps the last of two equal keys.",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":false},\"L1\":{\"cascade\":true}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {
+          "L1": {
+            "cascade": true
+          }
+        }
+      }
+    },
+    {
+      "name": "a-list-named-constructor-is-read",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"constructor\":{\"carryOverDefault\":\"backlog\"}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {
+          "constructor": {
+            "carryOverDefault": "backlog"
+          }
+        }
+      }
+    },
+    {
+      "name": "a-list-named-proto-is-lost",
+      "note": "Assigning to \"__proto__\" on a plain object sets its prototype instead of a field, so the entry is not kept. A JavaScript artifact; a port that keeps the list must then change this row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"__proto__\":{\"cascade\":false},\"L1\":{\"autoDate\":false}}"
+        }
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {
+          "L1": {
+            "autoDate": false
+          }
+        }
+      }
+    },
+    {
+      "name": "one-failed-read",
+      "note": "The surfaces differ. Mobile reads all keys in one Promise.all behind one catch, so one failed read makes EVERY setting the default; the desktop catches each read, so only that key falls back.",
+      "input": {
+        "prefs": {
+          "tasks.cascadeStatusCoupling": "false",
+          "tasks.carryOverDefault": "today"
+        },
+        "failing": "tasks.carryOverDefault"
+      },
+      "expect": {
+        "cascadeEnabled": true,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      },
+      "desktop": {
+        "cascadeEnabled": false,
+        "autoDate": true,
+        "autoSelfAssign": true,
+        "visualEffortSizing": true,
+        "twoLevelPriority": false,
+        "remindUntimedToday": true,
+        "remindDeadlineArrived": true,
+        "remindDeadlineCountdown": true,
+        "deadlineCountdownDays": 3,
+        "dayViewMode": "grid",
+        "dayStartMin": 0,
+        "dayEndMin": 1440,
+        "checkoffMode": "toggle",
+        "carryOverDefault": "ask",
+        "dayStartTrigger": "00:00",
+        "listOverrides": {}
+      },
+      "surfacesDiffer": true
+    }
+  ],
+  "effective": [
+    {
+      "name": "an-override-wins-per-field",
+      "note": "L1 overrides only the coupling; auto-date and carry-over come from the globals.",
+      "input": {
+        "prefs": {
+          "tasks.cascadeStatusCoupling": "false",
+          "tasks.carryOverDefault": "today",
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":true},\"L3\":{\"cascade\":false,\"autoDate\":false,\"carryOverDefault\":\"backlog\"},\"constructor\":{\"carryOverDefault\":\"backlog\"}}"
+        },
+        "listId": "L1"
+      },
+      "expect": {
+        "cascade": true,
+        "autoDate": true,
+        "carryOverDefault": "today"
+      }
+    },
+    {
+      "name": "a-list-without-an-override-inherits",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.cascadeStatusCoupling": "false",
+          "tasks.carryOverDefault": "today",
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":true},\"L3\":{\"cascade\":false,\"autoDate\":false,\"carryOverDefault\":\"backlog\"},\"constructor\":{\"carryOverDefault\":\"backlog\"}}"
+        },
+        "listId": "L2"
+      },
+      "expect": {
+        "cascade": false,
+        "autoDate": true,
+        "carryOverDefault": "today"
+      }
+    },
+    {
+      "name": "every-field-overridden",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":true},\"L3\":{\"cascade\":false,\"autoDate\":false,\"carryOverDefault\":\"backlog\"},\"constructor\":{\"carryOverDefault\":\"backlog\"}}"
+        },
+        "listId": "L3"
+      },
+      "expect": {
+        "cascade": false,
+        "autoDate": false,
+        "carryOverDefault": "backlog"
+      }
+    },
+    {
+      "name": "a-list-named-constructor-without-an-override-inherits",
+      "note": "Looking up \"constructor\" on a map without it finds Object.prototype.constructor, whose fields are all absent.",
+      "input": {
+        "prefs": {
+          "tasks.autoDateOnStart": "false"
+        },
+        "listId": "constructor"
+      },
+      "expect": {
+        "cascade": true,
+        "autoDate": false,
+        "carryOverDefault": "ask"
+      }
+    },
+    {
+      "name": "a-list-named-constructor-with-an-override",
+      "note": "",
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"L1\":{\"cascade\":true},\"L3\":{\"cascade\":false,\"autoDate\":false,\"carryOverDefault\":\"backlog\"},\"constructor\":{\"carryOverDefault\":\"backlog\"}}"
+        },
+        "listId": "constructor"
+      },
+      "expect": {
+        "cascade": true,
+        "autoDate": true,
+        "carryOverDefault": "backlog"
+      }
+    },
+    {
+      "name": "a-list-named-proto-finds-its-override-through-the-prototype",
+      "note": "The entry was not kept as a field (see the read row), yet looking up \"__proto__\" returns the map’s prototype, which IS that entry, so its coupling applies after all. A JavaScript artifact; a port that keeps \"__proto__\" as an ordinary list id answers the same here and must then change the read row on purpose.",
+      "wasTypeScript": true,
+      "input": {
+        "prefs": {
+          "tasks.listOverrides": "{\"__proto__\":{\"cascade\":false}}"
+        },
+        "listId": "__proto__"
+      },
+      "expect": {
+        "cascade": false,
+        "autoDate": true,
+        "carryOverDefault": "ask"
+      }
+    }
+  ],
+  "countdownWrite": [
+    {
+      "name": "a-value-in-range-is-written",
+      "note": "",
+      "input": {
+        "value": 3
+      },
+      "expect": "3"
+    },
+    {
+      "name": "seven-is-written",
+      "note": "",
+      "input": {
+        "value": 7
+      },
+      "expect": "7"
+    },
+    {
+      "name": "zero-is-written-as-one",
+      "note": "",
+      "input": {
+        "value": 0
+      },
+      "expect": "1"
+    },
+    {
+      "name": "thirty-one-is-written-as-thirty",
+      "note": "",
+      "input": {
+        "value": 31
+      },
+      "expect": "30"
+    },
+    {
+      "name": "a-negative-is-written-as-one",
+      "note": "",
+      "input": {
+        "value": -2
+      },
+      "expect": "1"
+    },
+    {
+      "name": "a-half-rounds-up",
+      "note": "",
+      "input": {
+        "value": 2.5
+      },
+      "expect": "3"
+    },
+    {
+      "name": "below-a-half-rounds-down",
+      "note": "",
+      "input": {
+        "value": 2.4
+      },
+      "expect": "2"
+    },
+    {
+      "name": "twenty-nine-and-a-half-rounds-to-thirty",
+      "note": "",
+      "input": {
+        "value": 29.5
+      },
+      "expect": "30"
+    },
+    {
+      "name": "not-a-number-is-written-as-the-default",
+      "note": "",
+      "input": {
+        "value": "NaN"
+      },
+      "expect": "3"
+    },
+    {
+      "name": "infinity-is-written-as-the-default",
+      "note": "Not finite, so the default, not the upper clamp.",
+      "input": {
+        "value": "Infinity"
+      },
+      "expect": "3"
+    },
+    {
+      "name": "minus-infinity-is-written-as-the-default",
+      "note": "",
+      "input": {
+        "value": "-Infinity"
+      },
+      "expect": "3"
+    },
+    {
+      "name": "a-huge-number-clamps",
+      "note": "",
+      "input": {
+        "value": 10000000000
+      },
+      "expect": "30"
+    }
+  ],
+  "dayWindowWrite": [
+    {
+      "name": "a-window-is-written",
+      "note": "",
+      "input": {
+        "start": 420,
+        "end": 1080
+      },
+      "expect": {
+        "start": "420",
+        "end": "1080"
+      }
+    },
+    {
+      "name": "an-edge-between-half-hours-snaps",
+      "note": "",
+      "input": {
+        "start": 435,
+        "end": 1080
+      },
+      "expect": {
+        "start": "450",
+        "end": "1080"
+      }
+    },
+    {
+      "name": "an-out-of-order-window-is-written-as-the-whole-day",
+      "note": "",
+      "input": {
+        "start": 1080,
+        "end": 420
+      },
+      "expect": {
+        "start": "0",
+        "end": "1440"
+      }
+    },
+    {
+      "name": "a-start-that-is-not-a-number-is-midnight",
+      "note": "",
+      "input": {
+        "start": "NaN",
+        "end": 600
+      },
+      "expect": {
+        "start": "0",
+        "end": "600"
+      }
+    },
+    {
+      "name": "a-window-beyond-the-day-is-clamped",
+      "note": "",
+      "input": {
+        "start": -30,
+        "end": 2000
+      },
+      "expect": {
+        "start": "0",
+        "end": "1440"
+      }
+    },
+    {
+      "name": "quarter-hours-round-half-up",
+      "note": "",
+      "input": {
+        "start": 15,
+        "end": 45
+      },
+      "expect": {
+        "start": "30",
+        "end": "60"
+      }
+    },
+    {
+      "name": "just-below-a-quarter-rounds-down",
+      "note": "",
+      "input": {
+        "start": 14.9,
+        "end": 45
+      },
+      "expect": {
+        "start": "0",
+        "end": "60"
+      }
+    },
+    {
+      "name": "an-empty-window-at-the-end-is-the-whole-day",
+      "note": "",
+      "input": {
+        "start": 1440,
+        "end": 1440
+      },
+      "expect": {
+        "start": "0",
+        "end": "1440"
+      }
+    },
+    {
+      "name": "the-whole-day-is-written",
+      "note": "",
+      "input": {
+        "start": 0,
+        "end": 1440
+      },
+      "expect": {
+        "start": "0",
+        "end": "1440"
+      }
+    }
+  ],
+  "overrideUpdate": [
+    {
+      "name": "a-new-list-is-appended",
+      "note": "",
+      "input": {
+        "stored": "{\"L1\":{\"cascade\":false}}",
+        "listId": "L2",
+        "override": {
+          "carryOverDefault": "today"
+        }
+      },
+      "expect": "{\"L1\":{\"cascade\":false},\"L2\":{\"carryOverDefault\":\"today\"}}"
+    },
+    {
+      "name": "an-update-keeps-its-place",
+      "note": "The key order is what the stored JSON is compared by.",
+      "input": {
+        "stored": "{\"L1\":{\"cascade\":false},\"L2\":{\"autoDate\":true}}",
+        "listId": "L1",
+        "override": {
+          "autoDate": false
+        }
+      },
+      "expect": "{\"L1\":{\"autoDate\":false},\"L2\":{\"autoDate\":true}}"
+    },
+    {
+      "name": "fields-are-written-in-a-fixed-order",
+      "note": "Coupling, auto-date, carry-over, whatever order they were given in.",
+      "input": {
+        "stored": null,
+        "listId": "L1",
+        "override": {
+          "carryOverDefault": "today",
+          "cascade": true
+        }
+      },
+      "expect": "{\"L1\":{\"cascade\":true,\"carryOverDefault\":\"today\"}}"
+    },
+    {
+      "name": "an-empty-override-clears-the-list",
+      "note": "",
+      "input": {
+        "stored": "{\"L1\":{\"cascade\":false},\"L2\":{\"autoDate\":true}}",
+        "listId": "L1",
+        "override": {}
+      },
+      "expect": "{\"L2\":{\"autoDate\":true}}"
+    },
+    {
+      "name": "clearing-an-absent-list-changes-nothing",
+      "note": "",
+      "input": {
+        "stored": "{\"L1\":{\"cascade\":false}}",
+        "listId": "L9",
+        "override": {}
+      },
+      "expect": "{\"L1\":{\"cascade\":false}}"
+    },
+    {
+      "name": "an-update-on-an-unreadable-map-starts-fresh",
+      "note": "",
+      "input": {
+        "stored": "not json",
+        "listId": "L1",
+        "override": {
+          "cascade": false
+        }
+      },
+      "expect": "{\"L1\":{\"cascade\":false}}"
+    },
+    {
+      "name": "a-list-named-proto",
+      "note": "The surfaces differ: the desktop builds `{ ...prev, [listId]: trimmed }`, where a computed key makes a real field; mobile assigns `next[listId] = trimmed`, which sets the prototype. A JavaScript artifact either way.",
+      "wasTypeScript": true,
+      "input": {
+        "stored": null,
+        "listId": "__proto__",
+        "override": {
+          "cascade": false
+        }
+      },
+      "expect": "{}",
+      "desktop": "{\"__proto__\":{\"cascade\":false}}",
+      "surfacesDiffer": true
+    }
+  ]
+}
