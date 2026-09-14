@@ -332,7 +332,8 @@ export function localTimeZone(): string | null {
  * expands DST-correctly — a series created here at 19:00 keeps 19:00 across DST,
  * the same guarantee a zoned CalDAV series gets. Leaves all-day rules (they use
  * the date-based path), already-zoned rules, and non-recurring events untouched.
- * Use at CREATE time only; editing keeps whatever zone the series already has.
+ * Called when a series is created, and by {@link editedRecurrence} when an
+ * existing event becomes a series in the editor.
  */
 export function withCreatedRecurrenceZone<
   R extends { rrule: string; exceptions: string[]; tzid?: string | null },
@@ -342,6 +343,41 @@ export function withCreatedRecurrenceZone<
   }
   const tz = localTimeZone();
   return tz ? { ...recurrence, tzid: tz } : recurrence;
+}
+
+/**
+ * The recurrence an editor saves: the rule from the form, with the exceptions
+ * and the zone of the series it edits.
+ *
+ * The editors hold only the rule text, and rebuilding `{rrule, exceptions}`
+ * from it dropped the zone. Every writer stores what it is handed — the local
+ * store left `rrule_tzid` empty, and CalDAV, Google, Graph and EWS wrote the
+ * start in UTC — so a series edited as a whole slid an hour at the next clock
+ * change, in the views, in its reminders and in every other client.
+ *
+ * A series that has a zone keeps it. An event that had no rule and gets one
+ * here is a NEW series whose rule was just built from the local form, so it
+ * gets the device's zone, as a created series does
+ * ({@link withCreatedRecurrenceZone}); it is saved through the update path,
+ * where nothing else stamps one. A series that already recurs without a zone
+ * stays as it is: a lost zone and a series meant to run in UTC look the same
+ * here (Google's `Etc/UTC` and a CalDAV `Z` start both arrive without one), and
+ * stamping the second would move its occurrences — to another weekday for a
+ * late-evening rule.
+ */
+export function editedRecurrence(
+  rrule: string | null | undefined,
+  previous: { exceptions: string[]; tzid?: string | null } | null | undefined,
+  allDay: boolean,
+): { rrule: string; exceptions: string[]; tzid?: string | null } | null {
+  if (!rrule) {
+    return null;
+  }
+  if (!previous) {
+    return withCreatedRecurrenceZone({ rrule, exceptions: [] }, allDay);
+  }
+  const { exceptions } = previous;
+  return previous.tzid ? { rrule, exceptions, tzid: previous.tzid } : { rrule, exceptions };
 }
 
 /**
