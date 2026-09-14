@@ -30,6 +30,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
 } from '../../state/moveActions';
@@ -750,6 +751,9 @@ export function DayView() {
   const [pendingEventDrop, setPendingEventDrop] = useState<{
     event: CalendarEvent;
     minute: number;
+    /** The day it was dropped on, so the answer lands there even when the view
+     *  has moved on meanwhile. */
+    dayKey: string;
     /** Why moving the whole series was refused, when it was. */
     refused?: ShiftRefusal;
   } | null>(null);
@@ -760,22 +764,42 @@ export function DayView() {
     ev: CalendarEvent,
     minute: number,
     scope: MoveCopyScope,
+    targetDayKey: string,
   ) => {
     try {
-      const moved = await moveEventToSlot(ev, dayKey, minute, scope);
+      const moved = await moveEventToSlot(ev, targetDayKey, minute, scope);
       if (!moved) return; // dropped back on its own time — nothing happened
       announce(
         t('views.eventMovedToTime', {
           title: ev.title,
-          date: fmt.format(anchor, 'PPP'),
+          date: fmt.format(new Date(`${targetDayKey}T00:00:00`), 'PPP'),
           time: clockAt(minute),
         }),
       );
       invalidateData();
     } catch (err) {
       if (err instanceof SeriesShiftRefusedError) {
-        // Ask again, offering only this occurrence.
-        setPendingEventDrop({ event: ev, minute, refused: err.reason });
+        if (isSeriesOccurrence(ev)) {
+          // Ask again, offering only this occurrence.
+          setPendingEventDrop({
+            event: ev,
+            minute,
+            dayKey: targetDayKey,
+            refused: err.reason,
+          });
+        } else {
+          // The series' own row has no single occurrence to move instead.
+          announce(
+            t('dialogs.moveScope.refusedAnnouncement', {
+              title: ev.title,
+              reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+            }),
+          );
+        }
+        return;
+      }
+      if (err instanceof SeriesNotLoadedError) {
+        announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
         return;
       }
       announce(
@@ -786,10 +810,10 @@ export function DayView() {
 
   const handleEventTimeDrop = (ev: CalendarEvent, minute: number) => {
     if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
-      setPendingEventDrop({ event: ev, minute });
+      setPendingEventDrop({ event: ev, minute, dayKey });
       return;
     }
-    void performEventTimeDrop(ev, minute, 'series');
+    void performEventTimeDrop(ev, minute, 'series', dayKey);
   };
 
   /** Minute of day the pointer let go on, from the canvas geometry. */
@@ -1638,6 +1662,7 @@ export function DayView() {
               pendingEventDrop.event,
               pendingEventDrop.minute,
               'occurrence',
+              pendingEventDrop.dayKey,
             );
           }
         }}
@@ -1647,6 +1672,7 @@ export function DayView() {
               pendingEventDrop.event,
               pendingEventDrop.minute,
               'series',
+              pendingEventDrop.dayKey,
             );
           }
         }}

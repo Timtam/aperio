@@ -35,6 +35,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
 } from '../../state/moveActions';
@@ -941,8 +942,22 @@ export function WeekView() {
         invalidateData();
       } catch (err) {
         if (err instanceof SeriesShiftRefusedError) {
-          // Ask again, offering only this occurrence.
-          setPendingEventDrop({ event: ev, dayKey, minute, refused: err.reason });
+          if (isSeriesOccurrence(ev)) {
+            // Ask again, offering only this occurrence.
+            setPendingEventDrop({ event: ev, dayKey, minute, refused: err.reason });
+          } else {
+            // The series' own row has no single occurrence to move instead.
+            announce(
+              t('dialogs.moveScope.refusedAnnouncement', {
+                title: ev.title,
+                reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+              }),
+            );
+          }
+          return;
+        }
+        if (err instanceof SeriesNotLoadedError) {
+          announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
         if (isCommandError(err)) {

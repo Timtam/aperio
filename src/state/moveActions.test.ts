@@ -391,7 +391,13 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
     expect(await moveEventToSlot(occ, localKey(occ.start), 10 * 60 + 30, 'series')).toBe(true);
     const row = written();
-    expect(row.recurrence.rrule).toBe(master.recurrence?.rrule);
+    // Same weekday; the UTC end bound moves by as much as the start did.
+    const moved = Date.parse(row.start) - Date.parse(master.start);
+    const until = new Date(Date.parse('2026-08-31T23:59:59.000Z') + moved)
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}/, '');
+    expect(row.recurrence.rrule).toBe(`FREQ=WEEKLY;BYDAY=MO;UNTIL=${until}`);
     expect(localKey(row.start)).toBe(localKey(master.start));
     expect([new Date(row.start).getHours(), new Date(row.start).getMinutes()]).toEqual([10, 30]);
     const exception = new Date(row.recurrence.exceptions[0]);
@@ -421,6 +427,77 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     expect(row.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
     expect(row.recurrence.exceptions).toEqual(['2026-06-22T11:00:00.000Z']);
     expect(row.recurrence.tzid).toBe('Pacific/Kiritimati');
+  });
+
+  it('places an hour-grid drop by the dragged row on the series clock', async () => {
+    // A New York series written in winter; the March occurrence is in summer
+    // time. Placing the drop on the January date with the device's clock put
+    // the series an hour off.
+    const zoned = {
+      ...master,
+      start: '2026-01-05T14:00:00.000Z',
+      end: '2026-01-05T14:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: 'America/New_York' },
+    } as unknown as CalendarEvent;
+    serving(zoned);
+    const occ = occurrenceOf(zoned, '2026-03-16T13:00:00.000Z');
+    const dropped = new Date('2026-03-17T13:00:00.000Z'); // 09:00 in New York
+    const minute = dropped.getHours() * 60 + dropped.getMinutes();
+    expect(await moveEventToSlot(occ, localKey(dropped.toISOString()), minute, 'series')).toBe(true);
+    const row = written();
+    expect(row.start).toBe('2026-01-06T14:00:00.000Z');
+    expect(row.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+  });
+
+  it('keeps the series time of day on a day-only drag across a clock change', async () => {
+    // Fridays 09:00 in New York from a winter-time Friday; New York changes its
+    // clocks between that Friday and the Monday the series moves to.
+    const zoned = {
+      ...master,
+      start: '2026-03-06T14:00:00.000Z',
+      end: '2026-03-06T14:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=FR', exceptions: [], tzid: 'America/New_York' },
+    } as unknown as CalendarEvent;
+    serving(zoned);
+    const occ = occurrenceOf(zoned, '2026-03-13T13:00:00.000Z');
+    expect(await moveEventToDay(occ, localKey(occ.start, 3), 'series')).toBe(true);
+    const row = written();
+    // Monday 09:00 in New York, now in summer time.
+    expect(row.start).toBe('2026-03-09T13:00:00.000Z');
+    expect(row.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
+  });
+
+  it('moves a UTC end bound with a new time of day', async () => {
+    const bounded = {
+      ...master,
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20260831T070000Z', exceptions: [] },
+    } as unknown as CalendarEvent;
+    serving(bounded);
+    const occ = occurrenceOf(bounded, '2026-07-06T07:00:00.000Z');
+    const dropped = new Date('2026-07-06T08:00:00.000Z');
+    const minute = dropped.getHours() * 60 + dropped.getMinutes();
+    expect(await moveEventToSlot(occ, localKey(occ.start), minute, 'series')).toBe(true);
+    // The last Monday stays in: the bound moved by the same hour.
+    expect(written().recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260831T080000Z');
+  });
+
+  it('moves a UTC end bound on the series clock across a clock change', async () => {
+    // Mondays 09:00 in Berlin, bounded just before October 26 (winter time),
+    // moved a week earlier: the bound keeps its Berlin reading a week earlier,
+    // now in summer time, so the series ends on October 12.
+    const berlin = {
+      ...master,
+      start: '2026-09-07T07:00:00.000Z',
+      end: '2026-09-07T07:30:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261026T075959Z',
+        exceptions: [],
+        tzid: 'Europe/Berlin',
+      },
+    } as unknown as CalendarEvent;
+    serving(berlin);
+    expect(await moveEventToDay(berlin, localKey(berlin.start, -7), 'series')).toBe(true);
+    expect(written().recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20261019T065959Z');
   });
 
   it('refuses a rule that cannot move by whole days and writes nothing', async () => {

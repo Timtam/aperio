@@ -3,4 +3,4 @@
 /**
  * Why a rule cannot move by whole days.
  */
-export type ShiftRefusal = "unreadable" | "ordinal_weekday" | "set_position" | "year_day" | "week_number" | "time_of_day" | "negative_month_day" | "month_end" | "leap_day" | "unknown_part";
+export type ShiftRefusal = "unreadable" | "ordinal_weekday" | "set_position" | "year_day" | "week_number" | "time_of_day" | "negative_month_day" | "month_end" | "limited_months" | "leap_day" | "unknown_part";
