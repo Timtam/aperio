@@ -1,0 +1,6472 @@
+{
+  "what": "Event recurrence as a table: which occurrences a set of events (series, the overrides of single occurrences, plain events) yields inside a range. `expect` is what the calendar views and the widget get from shared/recurrence.ts expandAll (rrule.js). Where the reminder path in host-core (expand_occurrences on the rrule crate, one event at a time as event_triggers calls it) answers differently, the row carries that answer as `reminders` and says `surfacesDiffer`. Measured on the real code of both before the port.",
+  "why": "The views and the reminders expand the same series with two libraries in two languages, and the survey of 2026-09-14 found them apart. One expander in the core answers both, and a frontend that is not JavaScript. Every row where the two differ is a decision for the port.",
+  "writtenBy": [
+    "src/intl/eventOccurrences.measure.test.ts — a one-off, run once and deleted: expandAll on every case.",
+    "crates/host-core/src/reminders_measure.rs — a one-off, run once and deleted: every case expanded the way event_triggers does, merged in where the instants differ."
+  ],
+  "readBy": [
+    "src/intl/eventOccurrences.contract.test.ts (the views: expandAll)",
+    "crates/host-core/src/reminders.rs, tests::event_occurrence_contract (the reminders: expand_occurrences, one event at a time)"
+  ],
+  "whereItLives": {
+    "note": "Inside cal-core, beside taskOccurrences.json, where the rule is going. host-core reads it by path until then; no adapter repository compiles host-core."
+  },
+  "notInThisTable": {
+    "reminder offsets and the fire window": "which reminder fires when (relative offsets, the all-day anchor, catch-up) is host-core’s trigger logic around the expansion; the range here bounds occurrence STARTS on both sides",
+    "the local SQL read": "which columns the local reminder path reads is host-core’s (rrule_tzid since PR #66); the table starts at the recurrence the path hands on",
+    "ids": "the occurrence id (`master@ISO`), `series_id`, `occurrence_start` and the `::rid::` override id are the shell’s encoding; the answer here is which input event and which instant",
+    "writing rules": "parseRRule, buildRRule, truncateRRuleBefore, splitRRuleForEdit and seriesSplit write or cut rules; they get tables of their own",
+    "the EWS instance index": "adapter-ews expands in UTC without exceptions on purpose to count an InstanceIndex — a provider convention, neither a view nor a reminder",
+    "birthdays": "yearly all-day events synthesised without a rule (host-core birthdays.rs)",
+    "providers that expand for us": "Graph’s calendarView and the device calendars deliver occurrences; nothing is expanded for them"
+  },
+  "shape": {
+    "input": "{events: [{id, start, end, recurrence: {rrule, exceptions, tzid?} | null, cancelled?}], range: {start, end}}; instants in RFC 3339, UTC",
+    "expect": "[{event: index into events, start}] in the order expandAll emits: by start, ties in input order",
+    "reminders": "present only where the reminder path answered differently: the same shape, each event expanded on its own (a cancelled event skipped, overrides not applied), by start with ties in input order",
+    "surfacesDiffer": "marks a row that records `reminders`",
+    "wasTypeScript": "a row pinning a JavaScript artifact the port may decide against; it must then change the row on purpose, with a note",
+    "instants": "compare as instants, never as text: expandAll writes milliseconds (.000Z)",
+    "measuredWith": "the rrule.js version and the zone of the machine the views’ answer was measured on (the expander does not read it)"
+  },
+  "measuredWith": {
+    "rruleJs": "2.8.1",
+    "machineZone": "Europe/Berlin"
+  },
+  "cases": [
+    {
+      "name": "a-weekly-rule-by-day",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-daily-rule-with-a-count",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T08:00:00Z",
+            "end": "2026-05-01T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=3",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "every-second-week",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-04T10:00:00Z",
+            "end": "2026-05-04T11:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;INTERVAL=2",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-07-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-04T10:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-18T10:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-01T10:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-15T10:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-29T10:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "monthly-on-the-31st-skips-short-months",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-01-31T12:00:00Z",
+            "end": "2026-01-31T13:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=MONTHLY;BYMONTHDAY=31",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2026-08-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-01-31T12:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-31T12:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T12:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-31T12:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "monthly-on-the-second-sunday",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-01-11T18:00:00Z",
+            "end": "2026-01-11T19:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=MONTHLY;BYDAY=2SU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2026-05-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-01-11T18:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-08T18:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-08T18:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-12T18:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "monthly-on-the-last-weekday",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-01-30T09:00:00Z",
+            "end": "2026-01-30T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-01-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-29T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "yearly-on-february-29",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2024-02-29T09:00:00Z",
+            "end": "2024-02-29T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=YEARLY",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2024-01-01T00:00:00Z",
+          "end": "2029-01-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2024-02-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2028-02-29T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "every-six-hours",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T00:00:00Z",
+            "end": "2026-05-01T01:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=HOURLY;INTERVAL=6;COUNT=5",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-05-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T00:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T06:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T12:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T18:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-rrule-prefix-is-read",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "RRULE:FREQ=DAILY;COUNT=2",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-lowercase-rule",
+      "note": "rrule.js reads property names in any case.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "freq=daily;count=2",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-trailing-semicolon",
+      "note": "rrule.js rejects the empty property after the last semicolon (“Unknown RRULE property ''”), and the views show only the master. The reminders read the rule despite the semicolon and expand it.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=2;",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-start-off-its-listed-weekday",
+      "note": "The master starts on a Wednesday, the rule lists Mondays. The views do not count the master’s own start: the first occurrence is the Monday after it.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-20T09:00:00Z",
+            "end": "2026-05-20T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=MO",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-05T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-01T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-count-counts-an-excluded-occurrence",
+      "note": "COUNT includes the excluded occurrence: three are generated and one is removed.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T08:00:00Z",
+            "end": "2026-05-01T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=3",
+              "exceptions": [
+                "2026-05-02T08:00:00Z"
+              ]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-count-of-zero",
+      "note": "No occurrence at all, not even the master.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T08:00:00Z",
+            "end": "2026-05-01T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=0",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "an-until-and-a-count-together",
+      "note": "RFC 5545 forbids both in one rule; rrule.js stops at whichever comes first.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T08:00:00Z",
+            "end": "2026-05-01T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=5;UNTIL=20260503T080000Z",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-rule-that-cannot-be-read-keeps-the-master",
+      "note": "The master is outside the range and is still returned.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-20T09:00:00Z",
+            "end": "2026-05-20T10:00:00Z",
+            "recurrence": {
+              "rrule": "BOGUS=NOPE",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-07-01T00:00:00Z",
+          "end": "2026-08-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-20T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "an-empty-rule-is-no-recurrence",
+      "note": "The master is outside the range and is still returned: an empty rule is no recurrence.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-20T09:00:00Z",
+            "end": "2026-05-20T10:00:00Z",
+            "recurrence": {
+              "rrule": "",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-07-01T00:00:00Z",
+          "end": "2026-08-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-20T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "a-plain-event-outside-the-range-passes-through",
+      "note": "The range bounds expanded occurrences only; the views filter plain events themselves.",
+      "input": {
+        "events": [
+          {
+            "id": "p",
+            "start": "2026-05-20T09:00:00Z",
+            "end": "2026-05-20T10:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-07-01T00:00:00Z",
+          "end": "2026-08-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-20T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "both-range-ends-are-inclusive",
+      "note": "Occurrences sit exactly on both ends and both are kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T00:00:00Z",
+            "end": "2026-05-01T01:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=5",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-03T00:00:00Z",
+          "end": "2026-05-04T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T00:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-occurrence-that-began-before-the-range",
+      "note": "Two hours long, starting an hour before the range and still running inside it. Occurrences are chosen by their start, so it is not returned.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T23:00:00Z",
+            "end": "2026-05-02T01:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=3",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-02T00:00:00Z",
+          "end": "2026-05-02T12:00:00Z"
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "a-range-before-the-series",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T08:00:00Z",
+            "end": "2026-05-01T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-04-10T00:00:00Z"
+        }
+      },
+      "expect": []
+    },
+    {
+      "name": "an-until-with-z-is-inclusive",
+      "note": "",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T090000Z",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-date-only-until-without-a-zone",
+      "note": "rrule.js reads a date-only UNTIL as 00:00 UTC of that day, so the 09:00 occurrence on May 3 is cut. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-date-only-until-on-a-zoned-series",
+      "note": "09:00 Europe/Berlin. The views iterate in wall-clock time and read the date as 00:00 local, so May 3 is cut. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T07:00:00Z",
+            "end": "2026-05-01T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T07:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-until-without-z",
+      "note": "An UNTIL without Z reads as UTC, and 09:00 on May 3 is kept. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T09:00:00Z",
+            "end": "2026-05-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T090000",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-until-without-z-on-a-zoned-series",
+      "note": "09:00 Europe/Berlin. Only an UNTIL with Z is moved into wall-clock time; one without Z is compared as wall-clock time, so 09:00 local on May 3 is kept. The rrule crate does not accept the rule with this UNTIL, so the reminders keep only the master.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T07:00:00Z",
+            "end": "2026-05-01T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T090000",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T07:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-until-with-z-on-a-zoned-series-at-its-last-occurrence",
+      "note": "09:00 Europe/Berlin; UNTIL is the last occurrence’s instant, moved into wall-clock time and kept.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-01T07:00:00Z",
+            "end": "2026-05-01T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260503T070000Z",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-01T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-until-before-the-start",
+      "note": "No occurrence, not even the master. The rrule crate does not accept an UNTIL before the start, so the reminders keep the master where the views show nothing.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-10T09:00:00Z",
+            "end": "2026-05-10T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260501T000000Z",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-10T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-west-of-utc-until-its-local-day",
+      "note": "All-day in New York: local midnight is 04:00 UTC. truncateRRuleBefore writes the local day as a date-only UNTIL for an all-day split, so May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 20:00 on May 5 in New York, and lose May 6. The rrule crate does not accept the date-only UNTIL, so the reminders keep only the master.",
+      "wasTypeScript": true,
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-04T04:00:00Z",
+            "end": "2026-05-05T04:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260506",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-04T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T04:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-04T04:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-exception-removes-its-occurrence",
+      "note": "Exceptions match by the exact instant.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": [
+                "2026-05-26T09:00:00Z"
+              ]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-exception-a-millisecond-off-keeps-the-occurrence",
+      "note": "Exceptions match by the exact instant, to the millisecond. The reminders do not tell the two instants apart and drop the occurrence.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": [
+                "2026-05-26T09:00:00.001Z"
+              ]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-exception-on-a-zoned-series-at-its-winter-instant",
+      "note": "Monday 09:00 Europe/Berlin; the excluded Monday is after the clocks change and is written at its winter instant (08:00 UTC).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [
+                "2026-10-26T08:00:00Z"
+              ],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-exception-at-the-summer-instant-after-the-change-misses",
+      "note": "The same exception written at the summer instant (07:00 UTC) matches no occurrence.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [
+                "2026-10-26T07:00:00Z"
+              ],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-weekly-series-keeps-its-wall-clock-into-winter",
+      "note": "Monday 09:00 Europe/Berlin: 07:00 UTC in summer, 08:00 UTC in winter.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zoned-weekly-series-keeps-its-wall-clock-into-summer",
+      "note": "Monday 09:00 Europe/Berlin: 08:00 UTC in winter, 07:00 UTC in summer.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-23T08:00:00Z",
+            "end": "2026-03-23T09:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-03-20T00:00:00Z",
+          "end": "2026-04-07T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-23T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-06T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-wall-clock-in-the-spring-gap",
+      "note": "Daily 02:30 Europe/Berlin; on 2026-03-29 the clock jumps from 02:00 to 03:00. The views move the missing 02:30 forward by the length of the gap, to 03:30 summer time (01:30 UTC).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-03-27T01:30:00Z",
+            "end": "2026-03-27T02:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=4",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-03-26T00:00:00Z",
+          "end": "2026-04-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-03-27T01:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-28T01:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-29T01:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T00:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-wall-clock-in-the-autumn-overlap",
+      "note": "Daily 02:30 Europe/Berlin; on 2026-10-25 the clock reads 02:30 twice. The views take the earlier reading, summer time (00:30 UTC).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-23T00:30:00Z",
+            "end": "2026-10-23T01:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=4",
+              "exceptions": [],
+              "tzid": "Europe/Berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-22T00:00:00Z",
+          "end": "2026-10-28T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-23T00:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-24T00:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T00:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T01:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-unknown-zone",
+      "note": "An unknown zone expands in UTC.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Mars/Olympus"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zone-named-utc",
+      "note": "Expands in UTC.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "UTC"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-empty-zone",
+      "note": "An empty zone is no zone: UTC.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": ""
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-zone-with-surrounding-space",
+      "note": "Intl rejects the name with the spaces, so the views expand in UTC. host-core trims the name before it looks the zone up, so the reminders keep the Berlin wall clock.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": " Europe/Berlin "
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-lowercase-zone",
+      "note": "Intl resolves zone names in any case, so the views keep the Berlin wall clock. chrono-tz knows zone names only in their exact case, so the reminders expand in UTC.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "europe/berlin"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T08:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T08:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-windows-zone-name",
+      "note": "EWS maps Windows names to IANA before they get here; a name that slipped through is unknown and expands in UTC.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "W. Europe Standard Time"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-fixed-offset-zone",
+      "note": "Etc/GMT-2 is two hours ahead of UTC all year, so nothing shifts.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-19T07:00:00Z",
+            "end": "2026-10-19T08:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Etc/GMT-2"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-18T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-19T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T07:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-monthly-series-in-new-york-authored-in-winter",
+      "note": "Second Sunday 19:00 America/New_York, written in December and seen in July: 23:00 UTC on Sunday the 12th.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2025-12-15T00:00:00Z",
+            "end": "2025-12-15T01:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=MONTHLY;BYDAY=2SU",
+              "exceptions": [],
+              "tzid": "America/New_York"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-07-01T00:00:00Z",
+          "end": "2026-08-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-07-12T23:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-daily-series-across-a-change-at-midnight",
+      "note": "Daily 00:30 America/Santiago, where the clocks change at midnight in early September. The views keep 00:30 local on both sides. On 2026-09-06 the clocks go from 00:00 to 01:00, so 00:30 does not exist that day. The views move it to 01:30; the reminders skip the day and, still counting fourteen, end a day later on 2026-09-13.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-08-30T04:30:00Z",
+            "end": "2026-08-30T05:30:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=14",
+              "exceptions": [],
+              "tzid": "America/Santiago"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-08-29T00:00:00Z",
+          "end": "2026-09-15T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-08-30T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-31T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-01T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-02T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-03T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-04T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-05T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-06T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-07T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-08T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-09T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-10T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-11T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-12T03:30:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-08-30T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-31T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-01T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-02T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-03T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-04T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-05T04:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-07T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-08T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-09T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-10T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-11T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-12T03:30:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-13T03:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-without-zone-into-winter",
+      "note": "All-day weekly from Monday 2026-10-19 in Berlin, stored as local midnight (22:00 UTC the day before). All-day series carry no zone and step in UTC, so after the change each occurrence sits at 23:00 on the Sunday, local time.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-10-18T22:00:00Z",
+            "end": "2026-10-19T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-17T00:00:00Z",
+          "end": "2026-11-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-18T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-01T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-moved-occurrence-stands-in-for-its-slot",
+      "note": "The override’s id names the series and the slot it replaces. The views drop the master’s slot and show the override at its new time. The reminders expand each event on its own and apply no override: the master’s slot fires as well as the override.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::2026-05-26T09:00:00Z",
+            "start": "2026-05-26T14:00:00Z",
+            "end": "2026-05-26T15:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T14:00:00Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T14:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-cancelled-occurrence-removes-its-slot",
+      "note": "The views drop the master’s slot and the cancelled override both. The reminders skip the cancelled override and still fire at the master’s slot.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::2026-05-26T09:00:00Z",
+            "start": "2026-05-26T09:00:00Z",
+            "end": "2026-05-26T10:00:00Z",
+            "recurrence": null,
+            "cancelled": true
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-override-without-its-series",
+      "note": "Shown as it is.",
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1::rid::2026-05-26T09:00:00Z",
+            "start": "2026-05-26T14:00:00Z",
+            "end": "2026-05-26T15:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-26T14:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "an-override-for-a-slot-the-rule-never-makes",
+      "note": "No slot of the master matches, so the views show every occurrence of the rule and the override.",
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::2026-05-26T10:00:00Z",
+            "start": "2026-05-27T09:00:00Z",
+            "end": "2026-05-27T10:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-27T09:00:00Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-override-slot-in-another-spelling",
+      "note": "The slot is written with an offset instead of Z and matched as an instant. The reminders apply no override: the master’s slot fires as well as the override.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::2026-05-26T11:00:00+02:00",
+            "start": "2026-05-26T14:00:00Z",
+            "end": "2026-05-26T15:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T14:00:00Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T14:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-override-slot-that-is-not-an-instant",
+      "note": "No slot to drop: the views show the override beside every occurrence of the master.",
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::garbage",
+            "start": "2026-05-27T14:00:00Z",
+            "end": "2026-05-27T15:00:00Z",
+            "recurrence": null
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-27T14:00:00Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-cancelled-override-slot-that-is-not-an-instant",
+      "note": "The cancelled override is dropped, and every occurrence of the master stays.",
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "cal|uid-1::rid::garbage",
+            "start": "2026-05-27T14:00:00Z",
+            "end": "2026-05-27T15:00:00Z",
+            "recurrence": null,
+            "cancelled": true
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-override-listed-before-its-series",
+      "note": "The order of the list does not matter for which slot is dropped. The reminders apply no override: the master’s slot fires as well as the override.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "cal|uid-1::rid::2026-05-26T09:00:00Z",
+            "start": "2026-05-26T14:00:00Z",
+            "end": "2026-05-26T15:00:00Z",
+            "recurrence": null
+          },
+          {
+            "id": "cal|uid-1",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-15T00:00:00Z",
+          "end": "2026-06-03T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 1,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T14:00:00Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 1,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T14:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-06-02T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-cancelled-series",
+      "note": "A whole cancelled series, no override id. The views keep it; whether it is shown is the show-cancelled setting’s business. The reminders skip a cancelled event entirely: a cancelled meeting never nags.",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;BYDAY=TU",
+              "exceptions": []
+            },
+            "cancelled": true
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        }
+      ],
+      "reminders": []
+    },
+    {
+      "name": "two-series-at-the-same-time-keep-their-order",
+      "note": "Equal starts keep the order of the list.",
+      "input": {
+        "events": [
+          {
+            "id": "b",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;COUNT=2",
+              "exceptions": []
+            }
+          },
+          {
+            "id": "a",
+            "start": "2026-05-19T09:00:00Z",
+            "end": "2026-05-19T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;COUNT=2",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-05-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 1,
+          "start": "2026-05-26T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-long-daily-series-in-a-wide-range",
+      "note": "Daily for eighteen months. The views have no cap. The reminders stop at 500 occurrences (RRULESET_LIMIT).",
+      "surfacesDiffer": true,
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "start": "2026-01-01T09:00:00Z",
+            "end": "2026-01-01T10:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-01-01T00:00:00Z",
+          "end": "2027-06-30T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-01-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-06-29T09:00:00.000Z"
+        }
+      ],
+      "reminders": [
+        {
+          "event": 0,
+          "start": "2026-01-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-01-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-02-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-07-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-08-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-09-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-10-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-12-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-01-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-02-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-31T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-15T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-16T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-17T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-18T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-19T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-20T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-21T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-22T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-23T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-24T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-25T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-26T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-27T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-28T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-29T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-30T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-01T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-02T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-03T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-04T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-05T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-06T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-07T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-08T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-09T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-10T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-11T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-12T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-13T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-14T09:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-05-15T09:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}
