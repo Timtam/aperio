@@ -183,3 +183,19 @@ missed a change where three methods gained a parameter, the Kotlin bridge was
 updated to pass it, and the regeneration silently did not run: every name still
 matched. The Swift direction matters most, because nothing on this machine ever
 compiles Swift — that mistake is only visible after an XCFramework build.
+
+It also checks what JavaScript can call. Every function
+`modules/cal-ffi/src/CalFfiModule.ts` declares must be registered in BOTH
+`CalFfiModule.kt` and `CalFfiModule.swift`, with `AsyncFunction` when it returns
+a Promise and `Function` otherwise, and with one closure parameter per declared
+parameter (expo's trailing `Promise` parameter does not count). A commented-out
+registration does not count, and a declaration the check cannot read is named,
+not skipped. TypeScript trusts the declaration, so without this a missing
+registration shows only on the phone, as "CalFfi.x is not a function", and the
+wrong kind as a Promise where a value was expected. A function one platform
+lacks on purpose (the iOS background wake-up, the Siri pickers) is listed in
+`ONLY_ON` in the script, with its reason.
+
+So a new free function in `crates/cal-ffi` takes four steps: export it,
+regenerate the Kotlin bindings, declare it in `CalFfiModule.ts`, and register it
+in both native modules.

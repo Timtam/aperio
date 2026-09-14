@@ -16,6 +16,7 @@ import {
   installSignatureRules,
   installDayStartRules,
   installTaskSettingsRules,
+  installSeriesShiftRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -166,6 +167,13 @@ installDayStartRules({
 // The task settings: how the stored preferences read, and what a change stores.
 installTaskSettingsRules({
   taskSettingsJson: (inputJson) => CalFfi.taskSettings(inputJson),
+});
+
+// Shifting a recurring series by whole days: the rule a whole-series move
+// writes, or why it cannot move. The same door the desktop reaches through
+// WebAssembly.
+installSeriesShiftRules({
+  seriesShiftJson: (inputJson) => CalFfi.seriesShift(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

@@ -49,6 +49,7 @@ import uniffi.cal_ffi.stripSignature as uniffiStripSignature
 import uniffi.cal_ffi.applySignature as uniffiApplySignature
 import uniffi.cal_ffi.dayStart as uniffiDayStart
 import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
+import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -443,6 +444,11 @@ class CalFfiModule : Module() {
     // The task settings: reading, effective settings per list, what a change stores.
     Function("taskSettings") { inputJson: String ->
       uniffiTaskSettings(inputJson)
+    }
+
+    // Shifting a recurring series by whole days: one question, one answer.
+    Function("seriesShift") { inputJson: String ->
+      uniffiSeriesShift(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────
