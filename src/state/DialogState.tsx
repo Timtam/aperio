@@ -75,8 +75,9 @@ export type DialogMode =
       // event so the chosen scope can hand off to the event frame.
       kind: 'eventEditScope';
       event: CalendarEvent;
-      /** The whole series was chosen but could not be loaded. */
-      seriesLoadFailed?: boolean;
+      /** How often loading the whole series failed. Each failure counts, so
+       *  the prompt announces a failed retry again. */
+      seriesLoadFailed?: number;
     }
   | {
       kind: 'task';
@@ -452,6 +453,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   // The prompt frame `chooseEventEditScope` answers, read before its update.
   const stackRef = useRef(stack);
   stackRef.current = stack;
+  // The prompt whose series is loading. A second press waits for that load:
+  // two loads could land in either order, and a failure landing first
+  // replaced the prompt the success was meant for.
+  const seriesLoadingFor = useRef<DialogMode | null>(null);
   const chooseEventEditScope = useCallback((scope: EventEditScope) => {
     const prompt = stackRef.current[stackRef.current.length - 1];
     if (!prompt || prompt.kind !== 'eventEditScope') return;
@@ -472,16 +477,19 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // describe the series: saved as the series, they moved its start to that
     // occurrence and the earlier occurrences disappeared. When the series
     // cannot be loaded the prompt stays and says so.
+    if (seriesLoadingFor.current === prompt) return;
+    seriesLoadingFor.current = prompt;
     const { event } = prompt;
     void getEventById(seriesIdOf(event), event.calendar_id)
       .catch(() => null)
-      .then((series) =>
+      .then((series) => {
+        seriesLoadingFor.current = null;
         swap(
           series
             ? { kind: 'event', event: series }
-            : { ...prompt, seriesLoadFailed: true },
-        ),
-      );
+            : { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 },
+        );
+      });
   }, []);
   const openTaskDialog = useCallback(
     (task: Task | null = null, options?: OpenTaskOptions) => {

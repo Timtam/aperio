@@ -975,9 +975,9 @@ export default function EventEditorModal({
         // rejects 412). A cross-adapter move returns the new event at the target.
         //
         // `original` is the series itself. The scope prompt opens it without an
-        // occurrence; opened on one of its occurrences with the whole-series
-        // scope (the scope control in the form), the fields hold that
-        // occurrence, so the edit is read as a change to the series: an
+        // occurrence. No path opens an occurrence with the whole-series scope
+        // today; should one (the scope control in the form), its fields hold
+        // that occurrence, so the edit is read as a change to the series: an
         // untouched date leaves the series start where it is.
         const seededOccurrence =
           isOccurrence && occurrence != null && original.recurrence != null

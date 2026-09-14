@@ -1235,11 +1235,11 @@ export function EventDialog({
           }
 
           // The row that is the series. The scope prompt opens the series
-          // itself; an editor opened on a row of a series with the whole-series
-          // scope (the scope control in the form) holds that occurrence's
-          // fields instead. Then the series is loaded and the edit is read as a
-          // change to it, so an untouched date leaves the series start where it
-          // is and an untouched rule stays the series' rule.
+          // itself, so a row of a series gets here only when no prompt set its
+          // scope, or when a split or an occurrence edit could not be planned.
+          // Its fields hold that occurrence: the series is loaded and the edit
+          // is read as a change to it, so an untouched date leaves the series
+          // start where it is and an untouched rule stays the series' rule.
           const series = isOccurrence
             ? await getEventById(seriesId, event.calendar_id)
             : event;

@@ -12,6 +12,13 @@ const JULY = { start: '2026-07-06T13:00:00.000Z', end: '2026-07-06T14:00:00.000Z
 /** An occurrence in winter time (EST, UTC-5): 09:00 there is 14:00 UTC. */
 const DECEMBER = { start: '2026-12-07T14:00:00.000Z', end: '2026-12-07T15:00:00.000Z' };
 
+/** `iso` moved by `days` on the device's calendar, keeping the device's reading. */
+function onDevice(iso: string, days: number): string {
+  const when = new Date(iso);
+  when.setDate(when.getDate() + days);
+  return when.toISOString();
+}
+
 describe('seriesTimesFromOccurrenceEdit', () => {
   it('leaves the series where it is when the fields are untouched', () => {
     expect(seriesTimesFromOccurrenceEdit(SERIES, NY, JULY, JULY, false)).toEqual(SERIES);
@@ -43,6 +50,19 @@ describe('seriesTimesFromOccurrenceEdit', () => {
     });
   });
 
+  it('keeps the series time when only the date moved across a clock change on the device', () => {
+    // A series without a zone runs in UTC. The form shows the device's clock,
+    // and an untouched time a week later, past the device's clock change, is
+    // another UTC time; the series must still keep its own.
+    const series = { start: '2026-06-15T07:00:00.000Z', end: '2026-06-15T08:00:00.000Z' };
+    const occurrence = { start: '2026-10-19T07:00:00.000Z', end: '2026-10-19T08:00:00.000Z' };
+    const edited = { start: onDevice(occurrence.start, 7), end: onDevice(occurrence.end, 7) };
+    expect(seriesTimesFromOccurrenceEdit(series, null, occurrence, edited, false)).toEqual({
+      start: '2026-06-22T07:00:00.000Z',
+      end: '2026-06-22T08:00:00.000Z',
+    });
+  });
+
   it('moves an all-day series by local days and keeps the edited length', () => {
     const local = (y: number, m: number, d: number) => new Date(y, m - 1, d).toISOString();
     const series = { start: local(2026, 6, 15), end: local(2026, 6, 16) };
@@ -70,6 +90,16 @@ describe('exceptionsAtSeriesTime', () => {
       // 10:30 in New York: 14:30 UTC in summer, 15:30 UTC in winter.
       exceptions: ['2026-06-22T14:30:00.000Z', '2026-12-14T15:30:00.000Z'],
     });
+  });
+
+  it('moves an exception a day when the new time crosses midnight on the series clock', () => {
+    // 21:00 in New York becomes 01:00 the next day there, on the same date on
+    // the device. The occurrences move a day on the series' clock; an exception
+    // left on its day would cancel the occurrence before the one it cancelled.
+    const daily = { rrule: 'FREQ=DAILY', exceptions: ['2026-06-18T01:00:00.000Z'], tzid: NY };
+    expect(
+      exceptionsAtSeriesTime(daily, '2026-06-15T01:00:00.000Z', '2026-06-15T05:00:00.000Z', false),
+    ).toEqual({ ...daily, exceptions: ['2026-06-18T05:00:00.000Z'] });
   });
 
   it('leaves the exceptions alone when only the date moved', () => {

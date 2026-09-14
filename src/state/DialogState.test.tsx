@@ -45,7 +45,7 @@ function Probe() {
       </span>
       <span data-testid="event">{m.kind === 'event' ? (m.event?.id ?? '') : ''}</span>
       <span data-testid="failed">
-        {m.kind === 'eventEditScope' && m.seriesLoadFailed ? 'failed' : ''}
+        {m.kind === 'eventEditScope' && m.seriesLoadFailed ? String(m.seriesLoadFailed) : ''}
       </span>
       <button type="button" onClick={() => d.openEventDialog(occurrence)}>
         open-occ
@@ -81,6 +81,18 @@ function renderProbe() {
   );
 }
 
+/** A load the test answers itself, when it chooses. */
+function pendingLoad() {
+  let answer: (value: CalendarEvent | null) => void = () => {};
+  const promise = new Promise<CalendarEvent | null>((resolve) => {
+    answer = resolve;
+  });
+  return { promise, answer: (value: CalendarEvent | null) => answer(value) };
+}
+
+const seriesLoads = () =>
+  invokeMock.mock.calls.filter((call) => call[0] === 'get_event_by_id').length;
+
 afterEach(() => {
   invokeMock.mockReset();
 });
@@ -115,7 +127,7 @@ describe('DialogState recurring-edit scope prompt', () => {
     await click('open-occ');
     await click('choose-series');
     expect(screen.getByTestId('kind').textContent).toBe('eventEditScope');
-    expect(screen.getByTestId('failed').textContent).toBe('failed');
+    expect(screen.getByTestId('failed').textContent).toBe('1');
   });
 
   it('keeps the prompt when loading the series throws', async () => {
@@ -124,22 +136,44 @@ describe('DialogState recurring-edit scope prompt', () => {
     await click('open-occ');
     await click('choose-series');
     expect(screen.getByTestId('kind').textContent).toBe('eventEditScope');
-    expect(screen.getByTestId('failed').textContent).toBe('failed');
+    expect(screen.getByTestId('failed').textContent).toBe('1');
+  });
+
+  it('counts a retry that fails too, so it is announced again', async () => {
+    invokeMock.mockResolvedValue(null);
+    renderProbe();
+    await click('open-occ');
+    await click('choose-series');
+    await click('choose-series');
+    expect(screen.getByTestId('failed').textContent).toBe('2');
+  });
+
+  it('starts no second load while the series is loading', async () => {
+    // Two loads could land in either order; a failure landing first replaced
+    // the prompt, and the success that followed was dropped.
+    const load = pendingLoad();
+    invokeMock.mockReturnValue(load.promise);
+    renderProbe();
+    await click('open-occ');
+    await click('choose-series');
+    await click('choose-series');
+    expect(seriesLoads()).toBe(1);
+    await act(async () => {
+      load.answer(series);
+    });
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    expect(screen.getByTestId('event').textContent).toBe('evt-1');
   });
 
   it('opens nothing when the prompt was cancelled while the series loaded', async () => {
-    let answer: (value: CalendarEvent) => void = () => {};
-    invokeMock.mockReturnValue(
-      new Promise<CalendarEvent>((resolve) => {
-        answer = resolve;
-      }),
-    );
+    const load = pendingLoad();
+    invokeMock.mockReturnValue(load.promise);
     renderProbe();
     await click('open-occ');
     await click('choose-series');
     await click('cancel');
     await act(async () => {
-      answer(series);
+      load.answer(series);
     });
     expect(screen.getByTestId('kind').textContent).toBe('none');
   });

@@ -422,7 +422,14 @@ export function seriesTimesFromOccurrenceEdit(
   }
   const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid)) / DAY_MS;
   const days = Math.round(dayOf(edited.start) - dayOf(occurrence.start));
-  const timeChanged = !same(moveSeriesInstant(occurrence.start, tzid, days), edited.start);
+  // The form shows the device's clock: the time changed when its reading did.
+  // Compared on the series' clock, an untouched time on a date past a clock
+  // change on the device would read as a new time for every occurrence.
+  const reading = (iso: string) => {
+    const d = new Date(iso);
+    return d.getHours() * 60 + d.getMinutes();
+  };
+  const timeChanged = reading(edited.start) !== reading(occurrence.start);
   const start = moveSeriesInstant(series.start, tzid, days, timeChanged ? edited.start : undefined);
   const end = new Date(Date.parse(start) + Date.parse(edited.end) - Date.parse(edited.start));
   return { start, end: end.toISOString() };
@@ -434,8 +441,8 @@ export function seriesTimesFromOccurrenceEdit(
  *
  * An exception names the instant of the occurrence it cancels. When the series
  * moves to another time the old instants cancel nothing, and the cancelled
- * occurrences came back at the new time. Each exception keeps its day on the
- * series' clock and takes the new time. All-day series are left alone.
+ * occurrences came back at the new time. Each exception takes the new time, on
+ * the day the occurrence it cancels moves to. All-day series are left alone.
  */
 export function exceptionsAtSeriesTime<R extends { exceptions: string[]; tzid?: string | null }>(
   recurrence: R | null,
@@ -450,9 +457,16 @@ export function exceptionsAtSeriesTime<R extends { exceptions: string[]; tzid?: 
   if (moveSeriesInstant(previousStart, tzid, 0, start) === moveSeriesInstant(previousStart, tzid, 0)) {
     return recurrence;
   }
+  // A new time can land on another day on the series' clock while the device
+  // shows the same date. The occurrences move to that day, so the exceptions
+  // do too; a date the user changed moves only the series start.
+  const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid)) / DAY_MS;
+  const days =
+    Math.round(dayOf(start) - dayOf(previousStart)) -
+    (localDayNumber(start) - localDayNumber(previousStart));
   return {
     ...recurrence,
-    exceptions: recurrence.exceptions.map((iso) => moveSeriesInstant(iso, tzid, 0, start)),
+    exceptions: recurrence.exceptions.map((iso) => moveSeriesInstant(iso, tzid, days, start)),
   };
 }
 
