@@ -57,6 +57,8 @@ import init, {
   dayStart as wasmDayStart,
   taskSettings as wasmTaskSettings,
   seriesShift as wasmSeriesShift,
+  seriesClockZone as wasmSeriesClockZone,
+  canonicalZone as wasmCanonicalZone,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -324,4 +326,16 @@ export function taskSettingsJson(inputJson: string): string {
 export function seriesShiftJson(inputJson: string): string {
   assertReady();
   return wasmSeriesShift(inputJson);
+}
+
+/** See `cal_core::series_clock_zone`: the stored name, or `''` for UTC. */
+export function seriesClockZoneThroughCore(tzid: string): string {
+  assertReady();
+  return wasmSeriesClockZone(tzid);
+}
+
+/** See `cal_core::canonical_zone`: tzdata's spelling, or `''` for an unknown name. */
+export function canonicalZoneThroughCore(name: string): string {
+  assertReady();
+  return wasmCanonicalZone(name);
 }

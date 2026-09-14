@@ -247,6 +247,22 @@ pub fn normalize_join_url(url: String) -> String {
     cal_core::normalize_join_url(&url)
 }
 
+/// The zone a series repeats on: the stored name when it is a zone, "" when the
+/// series repeats on UTC. See cal_core::series_clock_zone.
+#[uniffi::export]
+pub fn series_clock_zone(tzid: String) -> String {
+    cal_core::series_clock_zone(Some(&tzid))
+        .unwrap_or("")
+        .to_string()
+}
+
+/// tzdata's spelling of the zone a name resolves to; "" for a name tzdata does
+/// not know. See cal_core::canonical_zone.
+#[uniffi::export]
+pub fn canonical_zone(name: String) -> String {
+    cal_core::canonical_zone(&name).unwrap_or("").to_string()
+}
+
 /// Fold each group's members into a single row, as JSON.
 ///
 /// `input_json` is `{events[], groups[]}`; the answer is one row per surviving
@@ -659,6 +675,38 @@ mod tests {
                 assert_eq!(field, "series shift question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's series-clock table, through the phone's doors,
+    /// which write "none" as "" and could get that wrong where the core cannot.
+    #[test]
+    fn series_clock_doors_answer_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/seriesClock.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+
+        let rows = doc["seriesClockZone"]
+            .as_array()
+            .expect("seriesClockZone rows");
+        for tzid in ["Etc/UTC", "europe/berlin", "+05:30"] {
+            assert!(
+                rows.iter().any(|r| r["tzid"].as_str() == Some(tzid)),
+                "the contract lost the {tzid:?} row",
+            );
+        }
+        for row in rows {
+            let tzid = row["tzid"].as_str().unwrap_or("").to_string();
+            let want = row["zone"].as_str().unwrap_or("");
+            assert_eq!(series_clock_zone(tzid.clone()), want, "{tzid:?}");
+        }
+
+        for row in doc["canonicalZone"].as_array().expect("canonicalZone rows") {
+            let name = row["name"]
+                .as_str()
+                .expect("every row names a zone")
+                .to_string();
+            let want = row["canonical"].as_str().unwrap_or("");
+            assert_eq!(canonical_zone(name.clone()), want, "{name:?}");
         }
     }
 }

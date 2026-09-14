@@ -212,6 +212,21 @@ pub fn normalize_join_url(url: &str) -> String {
     rules::normalize_join_url(url)
 }
 
+/// The zone a series repeats on: the stored name when it is a zone, `""` when
+/// the series repeats on UTC — no zone, a UTC name, or a name tzdata does not
+/// know. A plain string door, not JSON: every expansion of a series asks.
+#[wasm_bindgen(js_name = seriesClockZone)]
+pub fn series_clock_zone(tzid: &str) -> String {
+    rules::series_clock_zone(tzid)
+}
+
+/// tzdata's spelling of the zone a name resolves to (`Asia/Calcutta` is
+/// `Asia/Kolkata`), `""` for a name tzdata does not know.
+#[wasm_bindgen(js_name = canonicalZone)]
+pub fn canonical_zone(name: &str) -> String {
+    rules::canonical_zone(name)
+}
+
 /// Fold each group's members into a single row, keeping the input order.
 ///
 /// `{events[], groups[]}` in, one row per surviving slot out — each naming the

@@ -820,6 +820,8 @@ external fun uniffi_cal_ffi_checksum_func_auto_date_on_start(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_backlog_weeks(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_canonical_zone(
+): Short
 external fun uniffi_cal_ffi_checksum_func_carry_onto_fields(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_clamp_assignees(
@@ -867,6 +869,8 @@ external fun uniffi_cal_ffi_checksum_func_plan_status_cascade(
 external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_self_assign_on_status_change(
+): Short
+external fun uniffi_cal_ffi_checksum_func_series_clock_zone(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_series_shift(
 ): Short
@@ -1654,6 +1658,8 @@ external fun uniffi_cal_ffi_fn_func_auto_date_on_start(`inputJson`: RustBuffer.B
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_backlog_weeks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_canonical_zone(`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_carry_onto_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_clamp_assignees(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1701,6 +1707,8 @@ external fun uniffi_cal_ffi_fn_func_plan_status_cascade(`inputJson`: RustBuffer.
 external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_func_self_assign_on_status_change(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_series_clock_zone(`tzid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_series_shift(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1852,6 +1860,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_backlog_weeks() != 39931.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_func_canonical_zone() != 54179.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_func_carry_onto_fields() != 62986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1922,6 +1933,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_self_assign_on_status_change() != 56919.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_series_clock_zone() != 107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_series_shift() != 32104.toShort()) {
@@ -10484,6 +10498,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * tzdata's spelling of the zone a name resolves to; "" for a name tzdata does
+         * not know. See cal_core::canonical_zone.
+         */ fun `canonicalZone`(`name`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_canonical_zone(
+    
+        FfiConverterString.lower(`name`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The carried fields laid over a member's own current values.
          */
     @Throws(StoreException::class) fun `carryOntoFields`(`inputJson`: kotlin.String): kotlin.String {
@@ -10844,6 +10872,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_self_assign_on_status_change(
     
         FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The zone a series repeats on: the stored name when it is a zone, "" when the
+         * series repeats on UTC. See cal_core::series_clock_zone.
+         */ fun `seriesClockZone`(`tzid`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_series_clock_zone(
+    
+        FfiConverterString.lower(`tzid`),_status)
 }
     )
     }

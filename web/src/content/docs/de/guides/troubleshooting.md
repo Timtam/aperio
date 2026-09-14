@@ -103,7 +103,15 @@ Programm, das den Kalender liest. In den Kalenderansichten sieht man es schon,
 wenn man über die nächste Umstellung hinaus blättert.
 
 Seit dieser Version behält der Editor die Zeitzone, und ein Termin, der zur
-Serie wird, bekommt die Zeitzone deines Geräts. Eine Serie, die ihre Zeitzone
+Serie wird, bekommt die Zeitzone deines Geräts. Meldet dein Gerät UTC oder eine
+Zeitzone, die Aperio nicht kennt, bekommt die Serie keine Zeitzone.
+
+Eine Serie, deren Zeitzone UTC unter einem anderen Namen ist, etwa „Etc/UTC“
+oder „GMT“, gilt als Serie ohne Zeitzone. Dasselbe gilt für eine Zeitzone, die
+Aperio nicht kennt, etwa einen Windows-Namen. Solche Serien wiederholen sich in
+UTC, in den Ansichten und in den Erinnerungen gleich.
+
+Eine Serie, die ihre Zeitzone
 schon verloren hat, ändert Aperio nicht von selbst: Für Aperio sieht sie genauso
 aus wie eine Serie, die absichtlich in UTC geführt wird. Um eine betroffene
 Serie zu reparieren, lege sie neu an oder stelle ihre Zeitzone in dem Programm

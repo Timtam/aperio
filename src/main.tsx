@@ -20,6 +20,7 @@ import {
   installTaskPriorityRules,
   installTextCollation,
   installSeriesShiftRules,
+  installSeriesClockRules,
 } from '@aperio/shared';
 
 import { App } from './App';
@@ -65,6 +66,8 @@ import {
   normalPriority,
   priorityRank,
   seriesShiftJson,
+  seriesClockZoneThroughCore,
+  canonicalZoneThroughCore,
 } from './wasm/coreRules';
 import i18n from './i18n';
 import './styles.css';
@@ -189,6 +192,12 @@ initCoreRules()
     // The task settings: how the stored preferences read, and what a change stores.
     installTaskSettingsRules({ taskSettingsJson });
     installSeriesShiftRules({ seriesShiftJson });
+
+    // The clock a series repeats on: which stored zone names are a zone.
+    installSeriesClockRules({
+      seriesClockZone: seriesClockZoneThroughCore,
+      canonicalZone: canonicalZoneThroughCore,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

@@ -392,11 +392,23 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 
 ### UTC und Anbieter
 
-- **Was als UTC gilt:** keine oder eine leere Zone, `Etc/UTC` und seine Aliase,
-  `Etc/GMT` und seine Aliase mit Versatz null, unabhängig von Groß- und
-  Kleinschreibung, ohne Leerzeichen zu entfernen. Eine einzige Kern-Regel, die
-  Ansichten, Liste und Geräteprüfung benutzen. `Etc/GMT±N` bleibt eine benannte
-  Zone und steht als „Aktuell: Etc/GMT+8 (nicht in Aperios Liste)“ da.
+- **Was als UTC gilt:**
+  - keine oder eine leere Zone;
+  - die 18 Namen, die tzdata UTC gibt: `Etc/UTC` mit seinen sieben Verweisen wie
+    `UTC`, `Zulu` oder `Etc/Universal`, und `Etc/GMT` mit seinen neun Verweisen
+    wie `GMT`, `GMT0` oder `Greenwich`;
+  - jeder Name, den tzdata nicht kennt: ein Windows-Name, ein Versatz wie
+    `+05:30` oder eine Zone, die neuer ist als Aperios tzdata.
+
+  Groß- und Kleinschreibung zählt nicht, Leerzeichen werden nicht entfernt. Das
+  ist eine einzige Kern-Regel (`cal_core::series_clock`). Ansichten, Erinnerungen
+  und die Gerätezone benutzen sie (26a). `Etc/GMT±N` bleibt eine benannte Zone
+  und steht als „Aktuell: Etc/GMT+8 (nicht in Aperios Liste)“ da.
+- **Zusammengelegte Orte (25b):** tzdata führt 106 Orte als Verweis auf eine
+  andere Stadt, deren Uhr seit 1970 gleich läuft. Beispiele: Oslo, Stockholm und
+  Kopenhagen verweisen auf Berlin, Amsterdam auf Brüssel, Reykjavik auf Abidjan.
+  Die Liste bleibt bei 312 Zonen. Die Suche findet einen solchen Ort als „Berlin
+  (auch Oslo)“, und gespeichert wird das Ziel.
 - **Was die Anbieter für „keine Zone“ bekommen**, bleibt wie heute: Google
   `Etc/UTC`, Microsoft 365 `UTC`, CalDAV `Z`, Exchange keine Zone.
 - **Exchange:** Erst messen, was ein Update ohne StartTimeZone mit einer Serie
@@ -457,13 +469,25 @@ Handy im selben PR.
    cal-ffi-Export, Kotlin- und Swift-Funktion, `CalFfiModule.ts`, Installation
    in `mobile/index.ts`, Bindungen neu erzeugt. Schließt die Lücke aus #69.
 2. **Zonennamen und eine UTC-Regel** — `feat(core): generated zone names and one UTC clock`.
-   `cargo xtask tz-list [--check]` erzeugt aus chrono-tz die 312 kanonischen
-   Namen, die Alias-Tabelle und die UTC-Menge. Kern-Regeln `canonical_zone` und
-   `series_clock_zone`, Türen in WebAssembly und cal-ffi. `zoneOrNull` und
-   `localTimeZone` laufen darüber. Gemeinsame Fixture `seriesClock.json`.
-   Vorher messen: Größe des WebAssembly-Moduls, Kosten des Aufrufs in großen
-   Ansichten, welche Zonen-Namen WebView2, Hermes auf iOS und Android für UTC,
-   Indien und die Ukraine melden.
+   `cargo xtask tz-list [--check]` liest die tzdata-Dateien, die chrono-tz
+   mitliefert. Er schreibt `crates/cal-core/src/series_clock/zone_names.rs`: alle
+   597 Namen mit der Zone, auf die sie verweisen, und die 312 Zonen der Liste.
+   Dabei prüft er, dass genau die 18 UTC-Namen zu jeder Zeit UTC zeigen.
+
+   Dazu gehören die Kern-Regeln `canonical_zone` und `series_clock_zone`, Türen
+   in WebAssembly und cal-ffi und die Hülle `shared/seriesClock.ts`.
+   `zoneOrNull`, `localTimeZone` und die Erinnerungen in host-core laufen darüber
+   (26a). Die gemeinsame Fixture `seriesClock.json` lesen der Kern, die
+   WebAssembly-Tür und die Handy-Tür.
+
+   Gemessen:
+   - Das WebAssembly-Modul wächst um 20,6 KB, gepackt um 6,5 KB (gzip) bzw.
+     7,2 KB (brotli, so packt Tauri).
+   - Ein Aufruf kostet in Node etwa 0,4 µs, einmal pro Serie beim Aufklappen.
+   - WebView2 152 meldet `Asia/Calcutta`, `Europe/Kiev` und für jede
+     UTC-Schreibweise `UTC`.
+   - Hermes auf iOS und Android ist nur aus dem Quelltext gelesen. Das prüft der
+     nächste Handy-Build.
 3. **Die Weltliste mit Versatz und Suche** — `feat(core): the world zone list with offsets, and its search`.
    Kern-Feature `zones` (in WebAssembly aus): Liste mit Versatz und Aliasen,
    Suche mit Faltungstabelle. Desktop über einen Tauri-Befehl, Handy über
@@ -489,7 +513,7 @@ Handy im selben PR.
    `wallClock.json`. Vorher messen: ob der Datums-Picker auf dem Handy eine feste
    Zone annimmt, und ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
-   `series_clock_change` mit Türen, `seriesClock.ts` in shared, Fixture
+   `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
    Passung im Kern für gezählte Wochentage und negative Monatstage übereinstimmen.
 10. **Das Formular-Modell** — `feat(shared): the series clock form model`.
@@ -518,6 +542,16 @@ Handy im selben PR.
   Aufklappen aus Intl des Geräts. Für Zonen, die sich seit der chrono-tz-Version
   geändert haben, können Versatz im Eintrag und Uhrzeit in den Feldern
   auseinanderliegen.
+  - V8 meldet alte Namen wie `Asia/Calcutta`.
+  - Die tzdata in Node (2026b) ist neuer als die in chrono-tz (2025b).
+  - Eine Zone, die neuer ist als Aperios tzdata, wiederholt sich nach UTC, bis
+    chrono-tz aktualisiert ist.
+- **Erinnerungen folgen der Kern-Regel (26a).** Für zwei gespeicherte
+  Schreibweisen ändern sie sich:
+  - „europe/berlin“ erinnert jetzt nach Berlin statt nach UTC.
+  - „ Europe/Berlin “ mit Leerzeichen erinnert nach UTC statt nach Berlin.
+
+  Beides zeigen die Ansichten schon so.
 - **Versatz-Ansagen ungetestet.** Liest ein Screenreader „UTC+02:00“ schlecht,
   sind 313 ähnliche Einträge schwer zu unterscheiden. Die Form steckt in einem
   Übersetzungsschlüssel und lässt sich ohne Rust ändern.
@@ -548,8 +582,12 @@ Handy im selben PR.
   Die Parität ruht darauf, dass die Logik in shared liegt und dort getestet ist.
 - **Microsoft 365.** Eine dort mit Zone angelegte Serie lässt sich danach in
   Aperio weder zeigen noch korrigieren.
-- **Kosten im Aufklappen.** Die UTC-Tür läuft in jedem Aufklappen; ihre Kosten in
-  großen Ansichten sind ungemessen.
+- **Kosten im Aufklappen.** Die Tür läuft in jedem Aufklappen, einmal pro Serie.
+  Gemessen in Node:
+  - etwa 0,4 µs pro Aufruf;
+  - ein Monatsraster mit 55 Serien braucht dafür etwa 0,1 % seiner Zeit.
+
+  Die Kosten auf dem Handy sind ungemessen.
 - **Erzeugte Tabellen.** Die Generatoren hängen daran, dass chrono-tz seine
   Quelldaten mitliefert und die CLDR-Datei eingecheckt ist; ein Update lässt
   `--check` laut scheitern.
@@ -566,8 +604,9 @@ Handy im selben PR.
   das Öffnen einen Moment später mit TalkBack funktioniert. Ob Listenzeilen per
   Wischen erreichbar bleiben.
 - Welche Zonen-Namen Intl auf Android 7 bis 9 und iOS 16.4 ablehnt.
-- Welche Gerätezone WebView2, iOS und Android für UTC, Indien und die Ukraine
-  melden.
+- Welche Gerätezone iOS und Android für UTC, Indien und die Ukraine melden.
+  Gemessen ist nur WebView2 152: `UTC`, `Asia/Calcutta` und `Europe/Kiev`, für
+  ein GMT-Gerät `+00:00`.
 - Ob der Datums-Picker auf dem Handy eine feste Zone annimmt.
 - Was Exchange bei einem Update ohne StartTimeZone macht und ob sich das Feld
   entfernen lässt; wie viele Zonen nach der CLDR-Tabelle abbildbar sind.
@@ -582,6 +621,9 @@ Handy im selben PR.
 - Ob das Aufklappen mit rrule.js und die Passung im Kern für gezählte Wochentage
   und negative Monatstage übereinstimmen.
 - Abweichungen zwischen chrono-tz und den Intl-Daten der Geräte.
-- Größen und Aufrufkosten.
-- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet (auf Windows wurde
-  `America/Los_Angeles` ignoriert).
+- Größenzuwachs der nativen Bibliothek und Aufrufkosten auf dem Handy. Für
+  WebAssembly sind beide gemessen.
+- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
+  - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
+    mit `/` umschreibt.
+  - Aus PowerShell beachtet Node sie.

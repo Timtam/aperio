@@ -258,6 +258,14 @@ jobs:
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask ts-types --check
 
+      # The zone names `cal_core::series_clock` resolves are generated from the
+      # tzdata chrono-tz ships. A chrono-tz update that changes tzdata is a red
+      # build here until the table is regenerated, so the core never reads
+      # names from another release than host-core and the adapters parse with.
+      - name: Zone names are generated from chrono-tz
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: cargo xtask tz-list --check
+
   # The Rust host, the committed UniFFI bindings, and the Kotlin + Swift bridges
   # agree about every method and its arity. Deliberately its own job rather than
   # a step in `frontend`: it needs no npm install and no toolchain, so it can

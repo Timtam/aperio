@@ -367,7 +367,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 6] = [
+const KNOWN_REACHES: [(&str, &str); 7] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -403,6 +403,13 @@ const KNOWN_REACHES: [(&str, &str); 6] = [
     (
         "crates/cal-ffi/src/host.rs",
         "shared/contracts/calendarDefaultReminders.json",
+    ),
+    // The phone's doors into the series-clock rule, driven by the core's own
+    // table: each door writes "none" as "", which the core cannot get wrong and
+    // a door can. The fixture stays inside cal-core, which reads it itself.
+    (
+        "crates/cal-ffi/src/lib.rs",
+        "cal-core/tests/fixtures/seriesClock.json",
     ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by

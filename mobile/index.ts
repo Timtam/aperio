@@ -17,6 +17,7 @@ import {
   installDayStartRules,
   installTaskSettingsRules,
   installSeriesShiftRules,
+  installSeriesClockRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -174,6 +175,14 @@ installTaskSettingsRules({
 // WebAssembly.
 installSeriesShiftRules({
   seriesShiftJson: (inputJson) => CalFfi.seriesShift(inputJson),
+});
+
+// The clock a series repeats on: which stored zone names are a zone. Every
+// expansion of a series asks, and so do the reminder and widget passes, so it
+// is installed before anything can render or run in the background.
+installSeriesClockRules({
+  seriesClockZone: (tzid) => CalFfi.seriesClockZone(tzid),
+  canonicalZone: (name) => CalFfi.canonicalZone(name),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

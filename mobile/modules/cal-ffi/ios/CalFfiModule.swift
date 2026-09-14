@@ -239,6 +239,15 @@ public class CalFfiModule: Module {
       normalizeJoinUrl(url: url)
     }
 
+    // The clock a series repeats on: the stored name, or "" for UTC.
+    Function("seriesClockZone") { (tzid: String) -> String in
+      seriesClockZone(tzid: tzid)
+    }
+
+    Function("canonicalZone") { (name: String) -> String in
+      canonicalZone(name: name)
+    }
+
     // Folding a group into one row — what a day actually looks like.
     Function("collapseEventGroups") { (inputJson: String) -> String in
       try collapseEventGroups(inputJson: inputJson)

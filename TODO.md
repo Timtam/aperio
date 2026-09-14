@@ -1949,6 +1949,32 @@ Siehe DESIGN §4.2.
   anderen Wochentag (Nachprüfung von #68; die zuerst gebaute Reparatur beim
   Speichern ist deshalb zurückgenommen, Toni 2026-09-14). Die Hilfe beschreibt
   das Verrutschen unter „Fehlersuche & Protokolle".
+  ↳ **Eine Zonen-Regel im Kern (Zeitzonen-Auswahl, Stufe 2, 2026-09-14):**
+  Welche gespeicherten Zonennamen eine Zone sind, entschieden drei Stellen
+  verschieden:
+  - Die Ansichten nahmen jeden Namen außer `UTC`.
+  - Die Erinnerungen trimmten den Namen und kannten ihn nur in exakter
+    Schreibweise.
+  - Eine neue Serie bekam, was das Gerät meldete.
+
+  Jetzt antwortet `cal_core::series_clock` einmal für alle (Toni, 26a). Ein Name
+  zählt, wenn tzdata ihn kennt und er keiner der 18 UTC-Namen ist.
+  Groß-/Kleinschreibung (ASCII) spielt keine Rolle, getrimmt wird nichts.
+  - **Namen:** `cargo xtask tz-list` erzeugt sie aus den tzdata-Dateien von
+    chrono-tz. CI prüft das mit `--check`.
+  - **Fixture:** `seriesClock.json` lesen Kern, WebAssembly-Tür und Handy-Tür.
+  - **`eventOccurrences.json`:** Zwei Zeilen stimmen jetzt zwischen Ansichten und
+    Erinnerungen überein. Neu sind vier Zeilen für UTC-Namen und einen Offset.
+
+  ↻ **Mit dem nächsten Handy-Build prüfen.** Keine CI sieht, ob `mobile/index.ts`
+  die Tür installiert.
+  - Die App startet ohne „series clock rules used before
+    installSeriesClockRules()“.
+  - Eine Serie mit `Etc/UTC` zeigt dieselben Zeiten wie vorher.
+  - Mit dem Gerät auf UTC wird eine neue Serie ohne Zone gespeichert.
+  - In einem Dev-Build `resolvedOptions().timeZone` für UTC, Indien und die
+    Ukraine auf iOS und Android notieren (DESIGN-series-time-zone.md,
+    „Ungeprüft“).
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

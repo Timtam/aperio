@@ -212,7 +212,9 @@ pub struct EventRecurrence {
     /// occurrence keeps its local wall-clock time across DST (otherwise a series
     /// authored in winter drifts an hour — and can slip a day — once it crosses
     /// into summer). `None` = expand in UTC (floating / `Z` / all-day), which
-    /// preserves the prior behaviour for those shapes.
+    /// preserves the prior behaviour for those shapes. Some stored names mean
+    /// UTC too — a UTC name, or one tzdata does not know; see
+    /// [`crate::series_clock_zone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tzid: Option<String>,
 }

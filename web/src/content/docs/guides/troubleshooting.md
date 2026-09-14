@@ -95,7 +95,15 @@ calendar. In the calendar views you can see it already when you look past the
 next change.
 
 From this version the editor keeps the zone, and an appointment that becomes a
-series gets your device's time zone. A series that has already lost its zone is
+series gets your device's time zone. If your device reports UTC, or a time zone
+Aperio does not know, the series gets no time zone.
+
+A series whose time zone is UTC under another name, such as "Etc/UTC" or "GMT",
+counts as a series without a time zone. So does a time zone Aperio does not
+know, such as a Windows zone name. These series repeat in UTC, in the views and
+in the reminders alike.
+
+A series that has already lost its zone is
 not changed on its own: to Aperio it looks the same as a series that is meant to
 run in UTC. To fix an affected series, create it again, or set its time zone
 again in the program it came from.

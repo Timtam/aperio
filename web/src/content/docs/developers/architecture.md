@@ -98,7 +98,15 @@ What crosses today:
 - `priorityRank`, `isImportantPriority`, `normalPriority`;
 - **text ordering**, `cal_core::collation` — `compare_names` for names of
   things (case- and accent-insensitive) and `compare_titles` for text the user
-  wrote (digit runs by value: "Kapitel 2" before "Kapitel 10").
+  wrote (digit runs by value: "Kapitel 2" before "Kapitel 10");
+- **the series clock**, `cal_core::series_clock`:
+  - `seriesClockZone` answers which stored zone names a series repeats on;
+  - `canonicalZone` resolves a tzdata name to its zone.
+
+  Both are plain strings, with `''` for none, because every expansion of a
+  series asks. The names are generated from chrono-tz by `cargo xtask tz-list`.
+
+Those are examples. `src/wasm/coreRules.ts` holds every door.
 
 **Do not reach for `localeCompare`.** Use `compareNames` / `compareTitles`
 from `@aperio/shared` for text a person reads — each surface installs its own

@@ -92,6 +92,12 @@ describe('eventOccurrences contract (views)', () => {
       'a-moved-occurrence-of-a-zoned-series-after-the-change',
       'every-other-week-with-the-week-starting-on-sunday',
       'a-plain-event-at-the-same-instant-as-an-occurrence',
+      'a-zone-with-surrounding-space',
+      'a-lowercase-zone',
+      'a-series-stored-as-etc-utc',
+      'a-series-stored-as-gmt',
+      'a-lowercase-utc-name',
+      'an-offset-for-a-zone-name',
     ]) {
       expect(names, `table lost ${n}`).toContain(n);
     }

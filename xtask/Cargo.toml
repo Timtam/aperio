@@ -6,7 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — repository automation run as `cargo xtask <task>`; today it stages the bundled plugin cdylibs a desktop build has to find (DESIGN.md section 20.6)."
+description = "Aperio — repository automation run as `cargo xtask <task>`: staging and packing the bundled plugins (DESIGN.md section 20.6), and generating the frontends' TypeScript declarations and the core's zone names."
 publish = false
 
 [dependencies]
@@ -18,6 +18,11 @@ plugin-core.workspace = true
 # `cargo_metadata` crate: three fields are needed, and a build tool earns its
 # dependencies the same way anything else does.
 serde_json.workspace = true
+# `tz-list` reads the tzdata chrono-tz ships, and checks what it generates
+# against the zones and offsets chrono-tz was built with: the release host-core
+# and the adapters parse zones with.
+chrono.workspace = true
+chrono-tz.workspace = true
 
 [lints]
 workspace = true
