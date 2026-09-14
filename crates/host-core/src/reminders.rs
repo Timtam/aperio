@@ -3412,6 +3412,41 @@ mod tests {
             "a-long-daily-series-in-a-wide-range",
         ];
 
+        /// The zone rows decided on 2026-09-14 (decision 26a): the views and the
+        /// reminders read a stored zone name through one rule,
+        /// `cal_core::series_clock`, so none of these may record a reminders
+        /// answer of its own again. Named, like `DIFFERING`.
+        const AGREEING: &[&str] = &[
+            "a-zone-named-utc",
+            "an-empty-zone",
+            "an-unknown-zone",
+            "a-windows-zone-name",
+            "a-fixed-offset-zone",
+            "a-zone-with-surrounding-space",
+            "a-lowercase-zone",
+            "a-series-stored-as-etc-utc",
+            "a-series-stored-as-gmt",
+            "a-lowercase-utc-name",
+            "an-offset-for-a-zone-name",
+        ];
+
+        #[test]
+        fn the_zone_rows_agree_between_views_and_reminders() {
+            let t = table();
+            let cases = t["cases"].as_array().expect("cases");
+            for name in AGREEING {
+                let case = cases
+                    .iter()
+                    .find(|c| c["name"] == *name)
+                    .unwrap_or_else(|| panic!("the table lost {name}"));
+                assert!(
+                    case.get("reminders").is_none() && case.get("surfacesDiffer").is_none(),
+                    "{name} records a reminders answer of its own, but views and reminders \
+                     read a zone through one rule (cal_core::series_clock, decision 26a)",
+                );
+            }
+        }
+
         fn table() -> Value {
             serde_json::from_str(TABLE).expect("the table parses")
         }

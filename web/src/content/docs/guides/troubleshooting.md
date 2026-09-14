@@ -99,14 +99,17 @@ series gets your device's time zone. If your device reports UTC, or a time zone
 Aperio does not know, the series gets no time zone.
 
 A series whose time zone is UTC under another name, such as "Etc/UTC" or "GMT",
-counts as a series without a time zone. So does a time zone Aperio does not
-know, such as a Windows zone name. These series repeat in UTC, in the views and
-in the reminders alike.
+counts as a series without a time zone; its times do not change. So does a time
+zone Aperio does not know, such as the name of a Windows time zone or a bare
+offset such as "+05:30". A series stored with such an offset now repeats in
+UTC, and near midnight its appointments can fall on other days than before. All
+of these series repeat in UTC, in the views and in the reminders alike, and are
+an hour off after the clocks change, as described above.
 
-A series that has already lost its zone is
-not changed on its own: to Aperio it looks the same as a series that is meant to
-run in UTC. To fix an affected series, create it again, or set its time zone
-again in the program it came from.
+A series that has already lost its zone is not changed on its own: to Aperio it
+looks the same as a series that is meant to run in UTC. To fix an affected
+series, create it again, or set its time zone again in the program it came
+from.
 
 ## Reporting a bug
 

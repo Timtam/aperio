@@ -64,9 +64,21 @@ describe('seriesClock contract (WebAssembly door and shared shell)', () => {
     expect(seriesClockZone(undefined)).toBeNull();
   });
 
-  it('hands on the name the surface stored, not a copy the door wrote', () => {
-    const stored = 'europe/berlin';
-    expect(seriesClockZone(stored)).toBe(stored);
+});
+
+describe('the shell around the door', () => {
+  // A module graph of its own, with a door that answers every zone in one
+  // spelling of its own: the shell must still hand on the name the surface
+  // stored, never the string the door answered with.
+  it('hands on the stored name, not the door answer', async () => {
+    vi.resetModules();
+    const shell = await import('../../shared/seriesClock');
+    shell.installSeriesClockRules({
+      seriesClockZone: (tzid) => (tzid === '' ? '' : 'Europe/Berlin'),
+      canonicalZone: () => '',
+    });
+    expect(shell.seriesClockZone('europe/berlin')).toBe('europe/berlin');
+    expect(shell.seriesClockZone(null)).toBeNull();
   });
 });
 

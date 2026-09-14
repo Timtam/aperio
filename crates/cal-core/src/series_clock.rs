@@ -23,12 +23,16 @@
 //! `cargo xtask tz-list` from the tzdata chrono-tz ships, rather than read
 //! through a chrono-tz dependency here: this crate needs names and links, not
 //! offsets, and twelve adapter repositories compile it. host-core and the
-//! adapters parse zones with that same chrono-tz, so a name this module
-//! accepts is one they can read.
+//! adapters use that same chrono-tz, so every zone [`canonical_zone`] returns
+//! is one chrono-tz can parse, from the same tzdata release. chrono-tz knows
+//! names in their exact case only: a Rust caller that parses a series' zone
+//! resolves it through [`canonical_zone`] first, as host-core's reminders do.
+//! The CalDAV and Graph adapters still parse the stored spelling
+//! (DESIGN-series-time-zone.md, "Risiken").
 //!
 //! Pinned row by row in `tests/fixtures/seriesClock.json`; the `contract`
-//! module below reads it, and so does the TypeScript contract test through the
-//! WebAssembly door.
+//! module below reads it, and so do the phone's door tests in cal-ffi and the
+//! TypeScript contract test through the WebAssembly door.
 
 #[rustfmt::skip]
 mod zone_names;
@@ -56,9 +60,11 @@ pub fn canonical_zone(name: &str) -> Option<&'static str> {
 /// repeats on UTC: no zone, one of the names tzdata gives UTC, or a name
 /// tzdata does not know.
 ///
-/// The stored spelling comes back unchanged, so a surface keeps handing its
-/// clock library the name it has always handed it; only the question "is this
-/// a zone" is answered here.
+/// The stored spelling comes back unchanged, so a surface keeps handing Intl
+/// the name it has always handed it; only the question "is this a zone" is
+/// answered here. A caller that parses the zone with chrono-tz, which knows
+/// names in their exact case only, resolves it through [`canonical_zone`]
+/// first.
 pub fn series_clock_zone(tzid: Option<&str>) -> Option<&str> {
     let tzid = tzid?;
     match canonical_zone(tzid)? {

@@ -93,7 +93,7 @@ synchronous Expo `Function`, and a future native frontend links it directly.
 `cal-core-wasm` is **pure marshalling**: strings in, values out, every body a
 `match`. No rule may live there — it exists so rules can live in the core.
 
-What crosses today:
+Some of the rules that cross today:
 
 - `priorityRank`, `isImportantPriority`, `normalPriority`;
 - **text ordering**, `cal_core::collation` — `compare_names` for names of
@@ -106,7 +106,7 @@ What crosses today:
   Both are plain strings, with `''` for none, because every expansion of a
   series asks. The names are generated from chrono-tz by `cargo xtask tz-list`.
 
-Those are examples. `src/wasm/coreRules.ts` holds every door.
+`src/wasm/coreRules.ts` holds every door.
 
 **Do not reach for `localeCompare`.** Use `compareNames` / `compareTitles`
 from `@aperio/shared` for text a person reads — each surface installs its own

@@ -688,7 +688,12 @@ mod tests {
         let rows = doc["seriesClockZone"]
             .as_array()
             .expect("seriesClockZone rows");
-        for tzid in ["Etc/UTC", "europe/berlin", "+05:30"] {
+        // The rows that reach the door's "" encoding, and the rows the rule turns on.
+        assert!(
+            rows.iter().any(|r| r["tzid"].is_null()),
+            "the contract lost the row without a zone",
+        );
+        for tzid in ["", "Etc/UTC", "europe/berlin", "+05:30"] {
             assert!(
                 rows.iter().any(|r| r["tzid"].as_str() == Some(tzid)),
                 "the contract lost the {tzid:?} row",
@@ -700,7 +705,14 @@ mod tests {
             assert_eq!(series_clock_zone(tzid.clone()), want, "{tzid:?}");
         }
 
-        for row in doc["canonicalZone"].as_array().expect("canonicalZone rows") {
+        let canonical = doc["canonicalZone"].as_array().expect("canonicalZone rows");
+        for name in ["", "asia/calcutta", "Europe/Oslo", "UTC"] {
+            assert!(
+                canonical.iter().any(|r| r["name"].as_str() == Some(name)),
+                "the contract lost the {name:?} canonical row",
+            );
+        }
+        for row in canonical {
             let name = row["name"]
                 .as_str()
                 .expect("every row names a zone")

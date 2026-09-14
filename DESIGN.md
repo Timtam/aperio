@@ -94,7 +94,7 @@ icalendar = "0.16"          # iCal-Parsing (VEVENT, VTODO, VALARM)
 oauth2 = "4"                # OAuth2 für Daten-, Sync- und Videokonferenz-Adapter
 keyring = "2"               # Sichere Speicherung von Zugangsdaten
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.9"           # Zeitzonen
+chrono-tz = "0.10"          # Zeitzonen; `cargo xtask tz-list` liest ihre tz-Dateien
 libloading = "0.8"          # Dynamisches Laden von Plugin-Bibliotheken
 aes-gcm = "0.10"            # AES-256-GCM für E2E-Verschlüsselung
 argon2 = "0.5"              # Schlüsselableitung aus Passwort

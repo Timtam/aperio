@@ -1965,6 +1965,11 @@ Siehe DESIGN §4.2.
   - **Fixture:** `seriesClock.json` lesen Kern, WebAssembly-Tür und Handy-Tür.
   - **`eventOccurrences.json`:** Zwei Zeilen stimmen jetzt zwischen Ansichten und
     Erinnerungen überein. Neu sind vier Zeilen für UTC-Namen und einen Offset.
+    Die Tabelle hat jetzt 82 Zeilen, 20 davon weichen ab. Ein Wächter
+    (`AGREEING` in `reminders.rs`) hält die Zonen-Zeilen übereinstimmend.
+  - **Offen:** CalDAV und Graph geben den gespeicherten Namen weiter direkt an
+    chrono-tz, das nur die exakte Schreibweise kennt. Eine Serie mit
+    „europe/berlin“ schreiben sie als UTC-Zeit. Das bestand schon vorher.
 
   ↻ **Mit dem nächsten Handy-Build prüfen.** Keine CI sieht, ob `mobile/index.ts`
   die Tür installiert.

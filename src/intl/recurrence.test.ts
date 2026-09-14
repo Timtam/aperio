@@ -571,6 +571,9 @@ describe('which stored zones a series repeats on (cal_core::series_clock)', () =
   it('reads days, moves and UNTIL on UTC for a UTC name and for an unknown name', () => {
     const at = '2026-10-18T23:30:00.000Z';
     const rule = 'FREQ=WEEKLY;UNTIL=20261231T233000Z';
+    // GMT gives UTC's answers on the zoned path too (offset 0), so the path is
+    // what separates the old rule from this one: no zone read at all.
+    const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
     for (const tzid of ['GMT', '+05:30']) {
       expect(seriesDayKey(at, tzid)).toBe(seriesDayKey(at, null));
       expect(moveSeriesInstant(at, tzid, 1)).toBe(moveSeriesInstant(at, null, 1));
@@ -578,10 +581,11 @@ describe('which stored zones a series repeats on (cal_core::series_clock)', () =
         movedSeriesUntil(rule, null, at, '2026-10-19T01:30:00.000Z'),
       );
     }
+    expect(zoneReads).not.toHaveBeenCalled();
     expect(seriesDayKey(at, '+05:30')).toBe('2026-10-18');
   });
 
-  it('moves exceptions on UTC for a series stored under a UTC name', () => {
+  it('moves exceptions on UTC for a series stored under a UTC name or an unknown one', () => {
     const recurrence = (tzid: string | null) => ({
       rrule: 'FREQ=WEEKLY',
       exceptions: ['2026-10-25T23:30:00.000Z'],
@@ -589,9 +593,12 @@ describe('which stored zones a series repeats on (cal_core::series_clock)', () =
     });
     const from = '2026-10-18T23:30:00.000Z';
     const to = '2026-10-19T00:30:00.000Z';
-    expect(exceptionsAtSeriesTime(recurrence('Etc/UTC'), from, to, false)?.exceptions).toEqual(
-      exceptionsAtSeriesTime(recurrence(null), from, to, false)?.exceptions,
-    );
+    const onUtc = exceptionsAtSeriesTime(recurrence(null), from, to, false)?.exceptions;
+    const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    for (const tzid of ['Etc/UTC', '+05:30']) {
+      expect(exceptionsAtSeriesTime(recurrence(tzid), from, to, false)?.exceptions).toEqual(onUtc);
+    }
+    expect(zoneReads).not.toHaveBeenCalled();
   });
 
   it.each(['UTC', 'Etc/UTC', 'GMT', 'Zulu', 'Etc/Unknown', '+00:00'])(

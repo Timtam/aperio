@@ -123,7 +123,9 @@ Tasks:
         Regenerate crates/cal-core/src/series_clock/zone_names.rs — every
         tzdata name, the zone each link resolves to, and the zones outside
         Etc/ — from the tzdata sources chrono-tz ships. Run it after a
-        chrono-tz update.
+        chrono-tz update. xtask compiles cal-core, which includes that file:
+        if it is missing or broken, restore it first with
+        `git restore --source origin/main -- crates/cal-core/src/series_clock/zone_names.rs`.
 
         --check   generate in memory and compare, changing nothing. For CI, so
                   the core never resolves zone names from another tzdata
@@ -629,8 +631,8 @@ const TZ_MUST_HAVE: &[&str] = &[
 /// tzdata name and the zone each link points at, and no offsets, so the core
 /// carries a generated table instead of a chrono-tz dependency twelve adapter
 /// repositories would compile. chrono-tz stays the source because host-core
-/// and the adapters parse zones with it: a name the core accepts is then one
-/// they can read, from the same tzdata release.
+/// and the adapters parse zones with it: every zone the core resolves a name
+/// to is then one they can parse, from the same tzdata release.
 ///
 /// `chrono_tz::Tz::name()` of a link is the link's own name, so the link
 /// targets come from the tz source files the crate ships beside its manifest.
@@ -684,7 +686,17 @@ fn tz_list(args: &[String]) -> Result<String, String> {
         };
     }
 
-    fs::write(&target, &fresh).map_err(|e| format!("writing {}: {e}", target.display()))?;
+    // Written beside the table and moved over it: a write that fails halfway
+    // must not leave a broken table, because xtask cannot build without one.
+    let staging = target.with_extension("rs.tmp");
+    fs::write(&staging, &fresh).map_err(|e| format!("writing {}: {e}", staging.display()))?;
+    fs::rename(&staging, &target).map_err(|e| {
+        format!(
+            "moving {} over {}: {e}",
+            staging.display(),
+            target.display()
+        )
+    })?;
     Ok(format!(
         "{ZONE_NAMES}: {} names, {listed} listed zones, from chrono-tz {crate_version} \
          (tzdata {tzdata}).",
