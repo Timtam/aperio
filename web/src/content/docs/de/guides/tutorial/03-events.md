@@ -106,7 +106,7 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
   verschoben werden soll. Die ganze Serie verschiebt jeden Termin um
   dieselbe Zahl von Tagen: Aus „jeden Montag“ wird „jeden Dienstag“, und
   das Enddatum wandert mit. Manche Regeln lassen sich so nicht verschieben,
-  etwa „jeden zweiten Sonntag im Monat“ oder ein Tag nach dem 28.; dann sagt
+  etwa „am zweiten Sonntag jedes Monats“ oder ein Tag nach dem 28.; dann sagt
   Aperio, warum, und bietet an, nur diesen Termin zu verschieben.
 - **Löschen:** Termin markieren und **Löschen** wählen (Standard: `Entf`).
   Vor dem Löschen wird nachgefragt.

@@ -7,6 +7,7 @@ import { differenceInCalendarDays } from 'date-fns';
 
 import {
   moveSeriesInstant,
+  movedSeriesUntil,
   seriesDayKey,
   shiftSeriesRule,
   type ShiftRefusal,
@@ -427,7 +428,7 @@ export async function moveEventToSlot(
     });
     return true;
   }
-  return moveSeries(event, delta, minute);
+  return moveSeries(event, newStart, delta, minute);
 }
 
 export type { ShiftRefusal };
@@ -444,11 +445,26 @@ export class SeriesShiftRefusedError extends Error {
   }
 }
 
+/** The series a dragged row belongs to could not be loaded, so nothing was
+ *  written: an occurrence's own fields cannot stand in for the series. The
+ *  surface names the event in the user's language. */
+export class SeriesNotLoadedError extends Error {
+  readonly seriesId: string;
+
+  constructor(seriesId: string) {
+    super(`the series ${seriesId} could not be loaded; nothing was changed`);
+    this.name = 'SeriesNotLoadedError';
+    this.seriesId = seriesId;
+  }
+}
+
 const DAY_MS = 86_400_000;
 
 /**
- * Move a whole series by `delta` days and, when `minute` is given, to that time
- * of day.
+ * Move a whole series the way a drop moved one of its rows: `event` (an
+ * occurrence, a provider override, or the series' own row) now starts at
+ * `dropped`, `delta` days later on the device's calendar, at the dropped time of
+ * day when `minute` is given.
  *
  * Every occurrence moves by the same distance: the MASTER's start, end and
  * exceptions, and — through `cal_core::series_shift` — its rule, so a Monday
@@ -457,12 +473,15 @@ const DAY_MS = 86_400_000;
  * master is loaded. A rule that cannot move by whole days throws
  * {@link SeriesShiftRefusedError}, and nothing is written.
  *
- * The drop is placed on the device's clock, but the rule is read on the
- * series' own clock (its zone, or UTC without one). A new time of day can land
- * on another day there, so the days the rule moves by are counted on that clock.
+ * The move is read off the dragged row on the series' own clock (its zone, or
+ * UTC without one), where the rule is read: the days between its old and new
+ * start there, and its new time of day there. Placing the drop on the master's
+ * date with the device's clock put the series an hour off whenever the device's
+ * offset differed between the two dates.
  */
 async function moveSeries(
   event: CalendarEvent,
+  dropped: string,
   delta: number,
   minute: number | null,
 ): Promise<boolean> {
@@ -473,52 +492,67 @@ async function moveSeries(
       : await getEventById(seriesId, event.calendar_id);
   const recurrence = master?.recurrence;
   if (!master || !recurrence?.rrule) {
-    throw new Error(`the series ${seriesId} could not be loaded; nothing was moved`);
+    throw new SeriesNotLoadedError(seriesId);
   }
-  const placedMinute = master.all_day ? null : minute;
-  // Where the drop puts the series start, on the device's clock: the drag's
-  // days, and the dropped time of day when there is one.
-  const onDevice = (iso: string) => {
-    const when = new Date(iso);
-    when.setDate(when.getDate() + delta);
-    if (placedMinute !== null) {
-      when.setHours(Math.floor(placedMinute / 60), placedMinute % 60, 0, 0);
-    }
-    return when.toISOString();
-  };
-  const start = onDevice(master.start);
-
   const { tzid } = recurrence;
-  const fromDay = seriesDayKey(master.start, tzid);
-  const days = Math.round((Date.parse(seriesDayKey(start, tzid)) - Date.parse(fromDay)) / DAY_MS);
-  // Moving by whole days on the series' clock misses the new start exactly when
-  // its time of day changed there.
-  const timeChanges = moveSeriesInstant(master.start, tzid, days) !== start;
-  if (days === 0 && !timeChanges) return false;
+  const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid)) / DAY_MS;
+  const days = Math.round(dayOf(dropped) - dayOf(event.start));
 
-  const answer = shiftSeriesRule(recurrence.rrule, fromDay, days, timeChanges);
+  let start: string;
+  let end: string;
+  let timeChanges = false;
+  if (master.all_day) {
+    // An all-day series is a run of local days: it stays at local midnight.
+    const onDevice = (iso: string) => {
+      const when = new Date(iso);
+      when.setDate(when.getDate() + delta);
+      return when.toISOString();
+    };
+    start = onDevice(master.start);
+    end = onDevice(master.end);
+  } else {
+    start = moveSeriesInstant(
+      master.start,
+      tzid,
+      days,
+      minute === null ? undefined : dropped,
+    );
+    timeChanges = start !== moveSeriesInstant(master.start, tzid, days);
+    end = new Date(
+      Date.parse(start) + Date.parse(master.end) - Date.parse(master.start),
+    ).toISOString();
+  }
+  if (Date.parse(start) === Date.parse(master.start)) return false;
+
+  const answer = shiftSeriesRule(
+    recurrence.rrule,
+    seriesDayKey(master.start, tzid),
+    days,
+    timeChanges,
+    movedSeriesUntil(recurrence.rrule, tzid, master.start, start),
+  );
   if (answer.outcome === 'refused') {
     throw new SeriesShiftRefusedError(answer.reason);
   }
-  const durationMs = new Date(master.end).getTime() - new Date(master.start).getTime();
-  const end =
-    placedMinute === null
-      ? onDevice(master.end)
-      : new Date(new Date(start).getTime() + durationMs).toISOString();
-  await apiUpdateEvent(
-    {
-      ...master,
-      start,
-      end,
-      recurrence: {
-        ...recurrence,
-        rrule: answer.rrule,
-        // Each exception moves like the occurrence it cancels, so they still meet.
-        exceptions: recurrence.exceptions.map((iso) =>
-          moveSeriesInstant(iso, tzid, days, timeChanges ? start : undefined),
+  await apiUpdateEvent({
+    ...master,
+    start,
+    end,
+    recurrence: {
+      ...recurrence,
+      rrule: answer.rrule,
+      // Each exception moves like the occurrence it cancels, so they still
+      // meet. An all-day series takes its start's time on the series' clock,
+      // which a clock change on the device moves by an hour.
+      exceptions: recurrence.exceptions.map((iso) =>
+        moveSeriesInstant(
+          iso,
+          tzid,
+          days,
+          timeChanges || master.all_day ? start : undefined,
         ),
-      },
+      ),
     },
-  );
+  });
   return true;
 }

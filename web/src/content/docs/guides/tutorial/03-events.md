@@ -98,8 +98,8 @@ In the event dialog you can also set:
   calendar. For recurring events Aperio asks whether to move just this
   occurrence or the whole series. The whole series moves every occurrence
   by the same number of days, so "every Monday" becomes "every Tuesday" and
-  the end date moves along. Some rules cannot move that way, such as "every
-  second Sunday of the month" or a day after the 28th; Aperio then says why
+  the end date moves along. Some rules cannot move that way, such as "the
+  second Sunday of every month" or a day after the 28th; Aperio then says why
   and offers to move just this occurrence.
 - **Delete:** Select the event and choose **Delete** (default: `Delete`).
   You are asked to confirm before deletion.

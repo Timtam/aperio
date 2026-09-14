@@ -9,14 +9,23 @@ export type SeriesShiftQuestion = {
  */
 rrule: string, 
 /**
- * The day the series starts, `YYYY-MM-DD`, in the device's zone.
+ * The day the series starts, `YYYY-MM-DD`, on the series' own clock: its
+ * zone, or UTC for a series without one.
  */
 start: string, 
 /**
- * Whole days to move it by; negative moves it earlier.
+ * Whole days to move it by, on that clock; negative moves it earlier.
  */
 days: number, 
 /**
  * Whether the time of day changes as well.
  */
-time_changes: boolean, };
+time_changes: boolean, 
+/**
+ * The moved bound for a rule whose `UNTIL` is a UTC date-time, written
+ * `YYYYMMDDTHHMMSSZ`. That bound is an instant: it moves on the series'
+ * clock by the days and by the change in time of day, which needs the zone
+ * the shell has. Without it a UTC `UNTIL` moves by whole UTC days. A date
+ * or a floating `UNTIL` moves by days here, and this is ignored for it.
+ */
+until: string | null, };

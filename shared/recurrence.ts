@@ -315,6 +315,33 @@ export function moveSeriesInstant(
 }
 
 /**
+ * A rule's UTC `UNTIL`, moved on the series' clock the way its start moved from
+ * `from` to `to`, written `YYYYMMDDTHHMMSSZ` as the rule stores it; `undefined`
+ * when the rule has no UTC date-time `UNTIL`.
+ *
+ * The bound is an instant. Moved by whole UTC days it slides an hour against
+ * the occurrences across a clock change, and left in place while the time of
+ * day changes, the last occurrence drops past it or a cut one comes back.
+ */
+export function movedSeriesUntil(
+  rrule: string,
+  tzid: string | null | undefined,
+  from: string,
+  to: string,
+): string | undefined {
+  const match = /(?:^|;)\s*UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\s*(?:;|$)/i.exec(rrule);
+  if (!match) return undefined;
+  const [, y, mo, d, h, mi, s] = match.map(Number);
+  const until = Date.UTC(y, mo - 1, d, h, mi, s);
+  if (Number.isNaN(until)) return undefined;
+  const zone = expansionZone(tzid);
+  const wall = (ms: number) => (zone ? realToWall(new Date(ms), zone) : new Date(ms)).getTime();
+  const movedWall = wall(until) + wall(Date.parse(to)) - wall(Date.parse(from));
+  const moved = zone ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
+  return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+/**
  * The host's current IANA time zone (e.g. `America/New_York`), or `null` when
  * the runtime can't report a usable one (or only reports plain UTC).
  */
