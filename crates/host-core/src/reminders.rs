@@ -95,13 +95,14 @@ const EXTERNAL_PAST_DAYS: i64 = 7;
 const EXTERNAL_FUTURE_DAYS: i64 = 90;
 
 /// `SELECT id, title, start_utc, end_utc, reminders, rrule, rrule_exceptions,
-/// calendar_id, all_day FROM events` — `end_utc` drives each event's duration
-/// (the catch-up relevance window); `rrule`/`rrule_exceptions` drive
-/// per-occurrence expansion; `calendar_id` resolves the §14.4 container sound;
-/// `all_day` routes the reminder to the day-carryover anchor instead of a
-/// minutes-before-midnight offset.
+/// calendar_id, all_day, rrule_tzid FROM events` — `end_utc` drives each
+/// event's duration (the catch-up relevance window); `rrule`/`rrule_exceptions`
+/// drive per-occurrence expansion; `calendar_id` resolves the §14.4 container
+/// sound; `all_day` routes the reminder to the day-carryover anchor instead of
+/// a minutes-before-midnight offset; `rrule_tzid` is the zone a series expands
+/// in, the one the calendar views expand it in.
 const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
-    rrule, rrule_exceptions, calendar_id, all_day FROM events";
+    rrule, rrule_exceptions, calendar_id, all_day, rrule_tzid FROM events";
 
 /// `SELECT id, title, scheduled_date, scheduled_time, deadline_date,
 /// deadline_time, reminders, recurrence, list_id FROM tasks` — `recurrence` is
@@ -157,6 +158,7 @@ pub fn enumerate_local_triggers(
                 let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
                 let all_day: bool = row.get(8).unwrap_or(false);
+                let rrule_tzid: Option<String> = row.get(9).unwrap_or(None);
                 // The calendar's defaults ride along — the same merge rule
                 // `event_triggers` applies to adapter-backed calendars.
                 let reminders = effective_reminders(
@@ -181,7 +183,10 @@ pub fn enumerate_local_triggers(
                 let recurrence = rrule.map(|rule| EventRecurrence {
                     rrule: rule,
                     exceptions: parse_rrule_exceptions(exceptions_json.as_deref()),
-                    tzid: None,
+                    // The stored zone, read as the views and `event_triggers`
+                    // read it: without it a series stamped with the device's
+                    // zone stepped in UTC here and its reminders drifted by DST.
+                    tzid: rrule_tzid,
                 });
                 acc.extend(occurrence_triggers(
                     &id,
@@ -2314,6 +2319,48 @@ mod tests {
                 .collect();
         at.sort();
         at
+    }
+
+    /// A zoned local series keeps its wall clock in its reminders across DST.
+    ///
+    /// The bug this pins down: `enumerate_local_triggers` built the recurrence
+    /// with `tzid: None`, so a series created here — stamped with the device's
+    /// zone, and shown by the views at 09:00 all year — expanded in UTC for its
+    /// reminders. Authored in summer, every reminder after the switch to winter
+    /// time came an hour early.
+    #[test]
+    fn a_local_zoned_series_reminds_at_its_wall_clock_across_dst() {
+        let db = prefs_db();
+        // Monday 2026-10-19, 09:00 Europe/Berlin in summer time: 07:00 UTC.
+        let summer = Utc.with_ymd_and_hms(2026, 10, 19, 7, 0, 0).unwrap();
+        let reminders = serde_json::to_string(&one_hour_before()).unwrap();
+        insert_local_event(&db, "ev-weekly", "cal", &reminders, summer);
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE events SET rrule = ?, rrule_tzid = ? WHERE id = ?",
+                params!["FREQ=WEEKLY", "Europe/Berlin", "ev-weekly"],
+            )
+            .unwrap();
+        let mut at: Vec<DateTime<Utc>> = enumerate_local_triggers(
+            &db,
+            Utc.with_ymd_and_hms(2026, 10, 18, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 10, 27, 0, 0, 0).unwrap(),
+        )
+        .into_iter()
+        .filter(|t| t.item_id == "ev-weekly")
+        .map(|t| t.trigger_at)
+        .collect();
+        at.sort();
+        assert_eq!(
+            at,
+            vec![
+                // An hour before 09:00 summer time.
+                Utc.with_ymd_and_hms(2026, 10, 19, 6, 0, 0).unwrap(),
+                // An hour before 09:00 winter time, which is 08:00 UTC.
+                Utc.with_ymd_and_hms(2026, 10, 26, 7, 0, 0).unwrap(),
+            ]
+        );
     }
 
     /// A local calendar's defaults fire for its reminder-less events. The
