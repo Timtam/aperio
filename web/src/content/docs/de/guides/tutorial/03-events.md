@@ -107,7 +107,12 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
   dieselbe Zahl von Tagen: Aus „jeden Montag“ wird „jeden Dienstag“, und
   das Enddatum wandert mit. Manche Regeln lassen sich so nicht verschieben,
   etwa „am zweiten Sonntag jedes Monats“ oder ein Tag nach dem 28.; dann sagt
-  Aperio, warum, und bietet an, nur diesen Termin zu verschieben.
+  Aperio, warum, und bietet an, nur diesen Termin zu verschieben. Vorsicht bei
+  einzelnen Terminen, die du in einem externen Kalender wie iCloud, Google oder
+  Exchange für sich geändert oder gelöscht hast: Sie wandern womöglich nicht
+  mit. Ein gelöschter Termin kann am neuen Tag wieder auftauchen, und ein
+  geänderter kann bleiben, wo er war, während die Serie ihn am neuen Tag noch
+  einmal zeigt. Lösche oder ändere diese Termine nach dem Verschieben erneut.
 - **Löschen:** Termin markieren und **Löschen** wählen (Standard: `Entf`).
   Vor dem Löschen wird nachgefragt.
 

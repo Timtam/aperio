@@ -100,7 +100,12 @@ In the event dialog you can also set:
   by the same number of days, so "every Monday" becomes "every Tuesday" and
   the end date moves along. Some rules cannot move that way, such as "the
   second Sunday of every month" or a day after the 28th; Aperio then says why
-  and offers to move just this occurrence.
+  and offers to move just this occurrence. Careful with single occurrences you
+  changed or deleted on their own in an external calendar such as iCloud,
+  Google or Exchange: they may not move with the series. A deleted occurrence
+  can come back on its new day, and a changed one can stay where it was while
+  the series shows it again on the new day. Delete or change those occurrences
+  again after the move.
 - **Delete:** Select the event and choose **Delete** (default: `Delete`).
   You are asked to confirm before deletion.
 
