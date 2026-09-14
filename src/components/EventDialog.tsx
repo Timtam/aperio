@@ -37,6 +37,7 @@ import {
   planSeriesSplit,
   seriesIdOf,
   writeSeriesSplit,
+  editedRecurrence,
 } from '../intl/recurrence';
 import {
   eventPrefillFrom,
@@ -917,9 +918,16 @@ export function EventDialog({
         return;
       }
 
-      const recurrence = form.rrule
-        ? { rrule: form.rrule, exceptions: event?.recurrence?.exceptions ?? [] }
-        : null;
+      // The series keeps its exceptions and its zone; an event that becomes a
+      // series here gets the device's zone, as a new one does. A row of a
+      // series (an expanded occurrence, or a provider override that carries no
+      // rule of its own) is never a new series: saved as the whole series it
+      // lands on the master, which may recur without a zone on purpose.
+      const recurrence = editedRecurrence(
+        form.rrule,
+        isOccurrence ? (event?.recurrence ?? { exceptions: [] }) : event?.recurrence,
+        form.allDay,
+      );
 
       setSubmitting(true);
       try {

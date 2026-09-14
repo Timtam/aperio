@@ -20,6 +20,7 @@ export {
   firstOccurrenceFrom,
   localTimeZone,
   withCreatedRecurrenceZone,
+  editedRecurrence,
 } from '@aperio/shared';
 
 /** An expanded per-occurrence copy of the desktop `CalendarEvent`. */

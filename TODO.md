@@ -1918,6 +1918,24 @@ Siehe DESIGN §4.2.
   `event_occurrence_contract` in `host-core/src/reminders.rs` (Erinnerungen,
   die abweichenden Zeilen namentlich). Die Prüfung von #67 fand die Lücken und
   das Reihenfolge-Artefakt; die Tabelle wurde danach neu gemessen.
+  ↳ **Beifund, vorab behoben (Toni, 2026-09-14):** eine Serie verlor beim
+  Bearbeiten als Ganzes ihre Zeitzone. Beide Editoren bauten
+  `{rrule, exceptions}` aus dem Formular neu, ohne `tzid`, und jeder Schreiber
+  speichert, was er bekommt: lokal blieb `rrule_tzid` leer, CalDAV, Google,
+  Graph und EWS schrieben den Start in UTC. Ab der nächsten Zeitumstellung
+  rutschte die Serie um eine Stunde, in den Ansichten, in ihren Erinnerungen
+  und in jedem anderen Programm. Betroffen war jede Serie mit Zone, auch eine
+  vom Anbieter (iPhone, Outlook, Google), die seit dem 23.06. als Ganzes
+  bearbeitet wurde; ein Termin, der im Editor zur Serie wurde, bekam nie eine.
+  Jetzt fragen beide Editoren
+  `editedRecurrence` (`shared/recurrence.ts`): die Regel aus dem Formular, die
+  Ausnahmen und die Zone der Serie. Ein Termin, der im Editor zur Serie wird,
+  bekommt die Zone des Geräts wie eine neue Serie. Eine Serie, die schon ohne
+  Zone wiederholt, bleibt unverändert: eine verlorene Zone und eine gewollte
+  UTC-Serie sehen gleich aus, und das Stempeln verschöbe späte Termine auf einen
+  anderen Wochentag (Nachprüfung von #68; die zuerst gebaute Reparatur beim
+  Speichern ist deshalb zurückgenommen, Toni 2026-09-14). Die Hilfe beschreibt
+  das Verrutschen unter „Fehlersuche & Protokolle".
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
