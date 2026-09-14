@@ -354,6 +354,11 @@ public class CalFfiModule: Module {
       try taskSettings(inputJson: inputJson)
     }
 
+    // Shifting a recurring series by whole days: one question, one answer.
+    Function("seriesShift") { (inputJson: String) -> String in
+      try seriesShift(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

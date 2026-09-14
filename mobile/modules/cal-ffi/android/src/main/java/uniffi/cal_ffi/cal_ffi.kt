@@ -868,6 +868,8 @@ external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_self_assign_on_status_change(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_series_shift(
+): Short
 external fun uniffi_cal_ffi_checksum_func_signature_in(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_split_deadlines_by_week(
@@ -1700,6 +1702,8 @@ external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue
 ): Int
 external fun uniffi_cal_ffi_fn_func_self_assign_on_status_change(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_series_shift(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_signature_in(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_split_deadlines_by_week(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1918,6 +1922,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_self_assign_on_status_change() != 56919.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_series_shift() != 32104.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_signature_in() != 24520.toShort()) {
@@ -10835,6 +10842,22 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_self_assign_on_status_change(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Shifting a recurring series by whole days: the rule a whole-series move
+         * writes, or why it cannot move. The desktop reaches the same rule through
+         * WebAssembly; the series time zone choice needs it on the phone too.
+         */
+    @Throws(StoreException::class) fun `seriesShift`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_series_shift(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

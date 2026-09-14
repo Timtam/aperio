@@ -25,6 +25,9 @@
  *   bindings ↔ Kotlin — the Android bridge calls a shape that does not exist.
  *   Rust  ↔ Swift     — ditto for iOS, where nothing local ever compiles it.
  *
+ * And one more, from the other side: every function `CalFfiModule.ts` declares
+ * has to be registered in BOTH native modules (see `declaredSurface`).
+ *
  * Only methods a bridge actually calls are checked, so a Rust method no phone
  * uses is nobody's problem here.
  *
@@ -50,6 +53,8 @@ const KOTLIN = join(
 const SWIFT = join(root, 'mobile/modules/cal-ffi/ios/CalFfiModule.swift');
 /** Free functions live here, not in `host.rs` — see `rustFreeArity`. */
 const LIB = join(root, 'crates/cal-ffi/src/lib.rs');
+/** The functions JavaScript sees, as the module declares them — see `declaredSurface`. */
+const TS_MODULE = join(root, 'mobile/modules/cal-ffi/src/CalFfiModule.ts');
 
 /** snake_case as Rust writes it → camelCase as UniFFI emits it. */
 const camel = (name) => name.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
@@ -326,6 +331,70 @@ for (const [name, count] of declared) {
   }
 }
 
+/**
+ * The functions JavaScript can call, by name: every method `CalFfiModule.ts`
+ * declares has to be registered as `Function("…")` or `AsyncFunction("…")` in
+ * BOTH native modules.
+ *
+ * Everything above follows calls INTO Rust. A free function such as
+ * `seriesShift` is registered in each module and called there by bare name,
+ * which none of those patterns see: a module that forgot to register it passed
+ * this check, and TypeScript trusts the declaration, so the gap showed only on
+ * the phone, as "CalFfi.seriesShift is not a function".
+ */
+const declaredSurface = new Set(
+  [...readFileSync(TS_MODULE, 'utf8').matchAll(/^ {2}([a-z][A-Za-z0-9]*)\s*\(/gm)].map(
+    (m) => m[1],
+  ),
+);
+const registeredIn = (source) =>
+  new Set(
+    [...source.matchAll(/\b(?:Async)?Function\("([A-Za-z0-9_]+)"\)/g)].map((m) => m[1]),
+  );
+const kotlinSurface = registeredIn(readFileSync(KOTLIN, 'utf8'));
+const swiftSurface = registeredIn(readFileSync(SWIFT, 'utf8'));
+
+/**
+ * Functions only one platform has, each named with its reason. Their callers
+ * guard on `Platform.OS`. A name listed here that turns up on both platforms, or
+ * that is no longer declared, is reported too: an exception nobody needs any
+ * more is how a real gap would hide behind it.
+ */
+const ONLY_ON = new Map([
+  ['enableBackgroundRefresh', ['ios', 'the short BGAppRefreshTask wake-up exists only on iOS']],
+  ['disableBackgroundRefresh', ['ios', 'cancels that iOS-only wake-up']],
+  ['writeVoicePickers', ['ios', 'feeds the Siri intents, which exist only on iOS']],
+]);
+const MODULE = { android: 'Android', ios: 'iOS' };
+
+for (const name of declaredSurface) {
+  const only = ONLY_ON.get(name)?.[0];
+  if (only !== 'ios' && !kotlinSurface.has(name)) {
+    problems.push(`CalFfiModule.ts declares ${name}(), which the Android module does not register`);
+  }
+  if (only !== 'android' && !swiftSurface.has(name)) {
+    problems.push(`CalFfiModule.ts declares ${name}(), which the iOS module does not register`);
+  }
+}
+for (const [name, [platform]] of ONLY_ON) {
+  if (!declaredSurface.has(name)) {
+    problems.push(
+      `${name}() is listed as ${MODULE[platform]} only, but CalFfiModule.ts no longer declares it`,
+    );
+  }
+  const other = platform === 'ios' ? kotlinSurface : swiftSurface;
+  if (other.has(name)) {
+    problems.push(
+      `${name}() is listed as ${MODULE[platform]} only, but the other module registers it too`,
+    );
+  }
+}
+for (const name of new Set([...kotlinSurface, ...swiftSurface])) {
+  if (!declaredSurface.has(name)) {
+    problems.push(`a native module registers ${name}(), which CalFfiModule.ts does not declare`);
+  }
+}
+
 // A parse that matched nothing would report no problems and mean nothing.
 const floors = [
   ['exported Rust methods', rust.size, 100],
@@ -335,6 +404,7 @@ const floors = [
   // Free functions are few by nature; the floor only has to prove the
   // parse found the family at all.
   ['exported Rust free functions', rustFree.size, 3],
+  ['functions CalFfiModule.ts declares', declaredSurface.size, 100],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -364,7 +434,9 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `FFI bridges OK — ${kotlin.size} Android and ${swift.size} iOS calls agree ` +
+  `FFI bridges OK — the ${declaredSurface.size} functions CalFfiModule.ts declares are ` +
+    `registered in both native modules (${ONLY_ON.size} named as one platform only), ` +
+    `${kotlin.size} Android and ${swift.size} iOS calls agree ` +
     `with the committed bindings and with crates/cal-ffi, and its ` +
     `${rustFree.size} exported free functions ` +
     `(${[...rustFree.keys()].sort().join(', ')}) are all declared there.`,

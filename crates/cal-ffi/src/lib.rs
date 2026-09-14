@@ -470,6 +470,17 @@ pub fn task_settings(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// Shifting a recurring series by whole days: the rule a whole-series move
+/// writes, or why it cannot move. The desktop reaches the same rule through
+/// WebAssembly; the series time zone choice needs it on the phone too.
+#[uniffi::export]
+pub fn series_shift(input_json: String) -> Result<String, StoreError> {
+    cal_core::series_shift_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "series shift question".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {
@@ -621,5 +632,33 @@ mod tests {
                 email: "bob@example.com".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn series_shift_door_answers_like_the_core() {
+        assert_eq!(
+            series_shift(
+                r#"{"rrule":"FREQ=WEEKLY;BYDAY=MO","start":"2026-05-04","days":1}"#.to_string()
+            )
+            .expect("a readable question"),
+            r#"{"outcome":"shifted","rrule":"FREQ=WEEKLY;BYDAY=TU"}"#
+        );
+        assert_eq!(
+            series_shift(
+                r#"{"rrule":"FREQ=MONTHLY;BYDAY=2SU","start":"2026-05-10","days":1}"#.to_string()
+            )
+            .expect("a readable question"),
+            r#"{"outcome":"refused","reason":"ordinal_weekday"}"#
+        );
+    }
+
+    #[test]
+    fn series_shift_door_names_a_question_it_cannot_read() {
+        match series_shift("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "series shift question")
+            }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
     }
 }
