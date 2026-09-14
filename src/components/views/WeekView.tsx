@@ -35,6 +35,8 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  SeriesShiftRefusedError,
+  type ShiftRefusal,
 } from '../../state/moveActions';
 import {
   isSeriesOccurrence,
@@ -909,6 +911,8 @@ export function WeekView() {
     /** Carried across the scope question so the answer lands on the time the
      *  user actually dropped on, not on the old one. */
     minute: number | null;
+    /** Why moving the whole series was refused, when it was. */
+    refused?: ShiftRefusal;
   } | null>(null);
   const performEventDrop = useCallback(
     async (
@@ -936,6 +940,11 @@ export function WeekView() {
         );
         invalidateData();
       } catch (err) {
+        if (err instanceof SeriesShiftRefusedError) {
+          // Ask again, offering only this occurrence.
+          setPendingEventDrop({ event: ev, dayKey, minute, refused: err.reason });
+          return;
+        }
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
         } else {
@@ -2180,6 +2189,7 @@ export function WeekView() {
         isOpen={pendingEventDrop !== null}
         onClose={() => setPendingEventDrop(null)}
         title={pendingEventDrop?.event.title ?? ''}
+        refused={pendingEventDrop?.refused ?? null}
         onOccurrence={() => {
           if (pendingEventDrop) {
             void performEventDrop(

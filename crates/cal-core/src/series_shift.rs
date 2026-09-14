@@ -1,0 +1,572 @@
+//! Shifting a recurring series by whole days: the rule that dragging a whole
+//! series onto another day writes.
+//!
+//! Moving a series by N days has to move every occurrence by N days. For the
+//! rule that means: a weekday list moves round the week (a Monday rule becomes
+//! a Tuesday rule), a day of the month moves within the month, and `UNTIL`
+//! moves with the series. The start and the exceptions are instants in the
+//! device's zone and move in the shell; this module rewrites only the rule.
+//!
+//! Some rules cannot move every occurrence by the same number of days without
+//! changing what they mean. Those are refused rather than bent (Toni,
+//! 2026-09-14): the surface says so and offers to move only the occurrence.
+//! Refused are an ordinal weekday ("the second Sunday"), `BYSETPOS`,
+//! `BYYEARDAY`, `BYWEEKNO`, a negative day of the month, a day of the month
+//! past the 28th or a shift that leaves the month (months differ in length), a
+//! month-restricted weekday rule, a yearly rule whose shift touches the end of
+//! February (leap years), time-of-day parts when the time changes too, and any
+//! part this module does not know.
+
+use chrono::{Datelike, Duration, NaiveDate};
+use serde::{Deserialize, Serialize};
+
+const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+
+/// Why a rule cannot move by whole days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum ShiftRefusal {
+    /// The rule, its `FREQ`, a value in it or the start day cannot be read.
+    Unreadable,
+    /// `BYDAY` with an ordinal, such as `2SU` or `-1FR`.
+    OrdinalWeekday,
+    /// `BYSETPOS`.
+    SetPosition,
+    /// `BYYEARDAY`.
+    YearDay,
+    /// `BYWEEKNO`.
+    WeekNumber,
+    /// `BYHOUR`, `BYMINUTE` or `BYSECOND`, when the time of day changes too.
+    TimeOfDay,
+    /// A negative `BYMONTHDAY`, counted from the end of the month.
+    NegativeMonthDay,
+    /// A day of the month past the 28th, a shift out of the month, or weekdays
+    /// restricted to certain months.
+    MonthEnd,
+    /// A yearly rule whose shift touches the end of February.
+    LeapDay,
+    /// A part this module does not know.
+    UnknownPart,
+}
+
+/// What shifting a series by whole days writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum SeriesShift {
+    /// The rule to store with the moved series.
+    Shifted { rrule: String },
+    /// The rule cannot move by whole days.
+    Refused { reason: ShiftRefusal },
+}
+
+/// The question the door takes.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct SeriesShiftQuestion {
+    /// The series' rule, with or without the `RRULE:` prefix.
+    pub rrule: String,
+    /// The day the series starts, `YYYY-MM-DD`, in the device's zone.
+    pub start: String,
+    /// Whole days to move it by; negative moves it earlier.
+    pub days: i32,
+    /// Whether the time of day changes as well.
+    #[serde(default)]
+    pub time_changes: bool,
+}
+
+/// The rule for a series that starts on `start` and moves by `days`, with the
+/// time of day changing too when `time_changes`.
+pub fn shift_series(rrule: &str, start: NaiveDate, days: i32, time_changes: bool) -> SeriesShift {
+    match shift(rrule, start, days, time_changes) {
+        Ok(rrule) => SeriesShift::Shifted { rrule },
+        Err(reason) => SeriesShift::Refused { reason },
+    }
+}
+
+/// The door: a [`SeriesShiftQuestion`] as JSON in, a [`SeriesShift`] as JSON out.
+pub fn series_shift_json(input_json: &str) -> Result<String, serde_json::Error> {
+    let question: SeriesShiftQuestion = serde_json::from_str(input_json)?;
+    let answer = match NaiveDate::parse_from_str(&question.start, "%Y-%m-%d") {
+        Ok(start) => shift_series(&question.rrule, start, question.days, question.time_changes),
+        Err(_) => SeriesShift::Refused {
+            reason: ShiftRefusal::Unreadable,
+        },
+    };
+    serde_json::to_string(&answer)
+}
+
+/// One `KEY=value` part: the key uppercased for matching, the text as written.
+struct Part {
+    key: String,
+    value: String,
+    raw: String,
+}
+
+fn shift(
+    rrule: &str,
+    start: NaiveDate,
+    days: i32,
+    time_changes: bool,
+) -> Result<String, ShiftRefusal> {
+    use ShiftRefusal::*;
+
+    let trimmed = rrule.trim();
+    let (prefix, body) = match trimmed.get(..6) {
+        Some(p) if p.eq_ignore_ascii_case("RRULE:") => trimmed.split_at(6),
+        _ => ("", trimmed),
+    };
+    let mut parts = Vec::new();
+    for raw in body.split(';').filter(|p| !p.trim().is_empty()) {
+        let (key, value) = raw.split_once('=').ok_or(Unreadable)?;
+        parts.push(Part {
+            key: key.trim().to_ascii_uppercase(),
+            value: value.trim().to_string(),
+            raw: raw.to_string(),
+        });
+    }
+    let get = |key: &str| {
+        parts
+            .iter()
+            .find(|p| p.key == key)
+            .map(|p| p.value.as_str())
+    };
+
+    let freq = get("FREQ").ok_or(Unreadable)?.to_ascii_uppercase();
+    if !matches!(
+        freq.as_str(),
+        "SECONDLY" | "MINUTELY" | "HOURLY" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
+    ) {
+        return Err(Unreadable);
+    }
+    let has_time_parts = ["BYHOUR", "BYMINUTE", "BYSECOND"]
+        .iter()
+        .any(|k| get(k).is_some());
+    if time_changes && has_time_parts {
+        return Err(TimeOfDay);
+    }
+    if days == 0 {
+        return Ok(trimmed.to_string());
+    }
+    for part in &parts {
+        match part.key.as_str() {
+            "FREQ" | "INTERVAL" | "COUNT" | "UNTIL" | "BYDAY" | "BYMONTHDAY" | "BYMONTH"
+            | "WKST" | "BYHOUR" | "BYMINUTE" | "BYSECOND" => {}
+            "BYSETPOS" => return Err(SetPosition),
+            "BYYEARDAY" => return Err(YearDay),
+            "BYWEEKNO" => return Err(WeekNumber),
+            _ => return Err(UnknownPart),
+        }
+    }
+
+    let interval = match get("INTERVAL") {
+        Some(v) => v
+            .parse::<u32>()
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or(Unreadable)?,
+        None => 1,
+    };
+    let month_restricted = get("BYMONTH").is_some();
+    let new_start = start
+        .checked_add_signed(Duration::days(i64::from(days)))
+        .ok_or(Unreadable)?;
+    let mut replaced: Vec<(&str, String)> = Vec::new();
+
+    let by_day = match get("BYDAY") {
+        Some(value) => {
+            let tokens: Vec<String> = value
+                .split(',')
+                .map(|t| t.trim().to_ascii_uppercase())
+                .collect();
+            let mut moved = Vec::with_capacity(tokens.len());
+            for token in &tokens {
+                if !WEEKDAYS.contains(&token.as_str()) {
+                    let ordinal = token.len() > 2
+                        && token.is_ascii()
+                        && WEEKDAYS.contains(&&token[token.len() - 2..]);
+                    return Err(if ordinal { OrdinalWeekday } else { Unreadable });
+                }
+                moved.push(shift_weekday(token, days));
+            }
+            if month_restricted && matches!(freq.as_str(), "MONTHLY" | "YEARLY") {
+                // "Every Monday in March" moved by a day would take the last
+                // Monday of March into April.
+                return Err(MonthEnd);
+            }
+            replaced.push(("BYDAY", moved.join(",")));
+            Some(tokens)
+        }
+        None => None,
+    };
+
+    let by_month_day = get("BYMONTHDAY");
+    if let Some(value) = by_month_day {
+        let mut moved = Vec::new();
+        for token in value.split(',') {
+            let day: i32 = token.trim().parse().map_err(|_| Unreadable)?;
+            if day < 0 {
+                return Err(NegativeMonthDay);
+            }
+            let to = day + days;
+            if !(1..=28).contains(&day) || !(1..=28).contains(&to) {
+                return Err(MonthEnd);
+            }
+            moved.push(to.to_string());
+        }
+        replaced.push(("BYMONTHDAY", moved.join(",")));
+    }
+
+    let day_of_month_from_start = by_month_day.is_none()
+        && by_day.is_none()
+        && (freq == "MONTHLY" || (freq == "YEARLY" && month_restricted));
+    if day_of_month_from_start
+        && (start.day() > 28
+            || new_start.day() > 28
+            || (start.year(), start.month()) != (new_start.year(), new_start.month()))
+    {
+        return Err(MonthEnd);
+    }
+    if freq == "YEARLY"
+        && !month_restricted
+        && by_month_day.is_none()
+        && by_day.is_none()
+        && touches_end_of_february(start, new_start)
+    {
+        return Err(LeapDay);
+    }
+
+    if freq == "WEEKLY" && interval > 1 {
+        let several_days = by_day.as_ref().is_some_and(|t| t.len() > 1);
+        if let Some(week_start) = get("WKST") {
+            let week_start = week_start.to_ascii_uppercase();
+            if !WEEKDAYS.contains(&week_start.as_str()) {
+                return Err(Unreadable);
+            }
+            replaced.push(("WKST", shift_weekday(&week_start, days)));
+        } else if several_days {
+            // Every other week, on several days: the week's first day moves
+            // with them, or the days would pair up across a different week.
+            replaced.push(("WKST", shift_weekday("MO", days)));
+        }
+    }
+
+    if let Some(until) = get("UNTIL") {
+        replaced.push(("UNTIL", shift_until(until, days)?));
+    }
+
+    let mut out: Vec<String> = parts
+        .iter()
+        .map(|p| match replaced.iter().find(|(k, _)| *k == p.key) {
+            Some((k, v)) => format!("{k}={v}"),
+            None => p.raw.trim().to_string(),
+        })
+        .collect();
+    if let Some((_, v)) = replaced.iter().find(|(k, _)| *k == "WKST") {
+        if get("WKST").is_none() {
+            out.push(format!("WKST={v}"));
+        }
+    }
+    Ok(format!("{prefix}{}", out.join(";")))
+}
+
+fn shift_weekday(token: &str, days: i32) -> String {
+    let index = WEEKDAYS.iter().position(|w| *w == token).unwrap_or(0) as i64;
+    WEEKDAYS[(index + i64::from(days)).rem_euclid(7) as usize].to_string()
+}
+
+/// `UNTIL` moved by whole days: its date changes, its time and `Z` stay.
+fn shift_until(value: &str, days: i32) -> Result<String, ShiftRefusal> {
+    let date = value.get(..8).ok_or(ShiftRefusal::Unreadable)?;
+    let rest = &value[8..];
+    let rest_ok = rest.is_empty()
+        || (rest.len() >= 7
+            && rest.starts_with('T')
+            && rest[1..7].bytes().all(|b| b.is_ascii_digit())
+            && (rest.len() == 7 || &rest[7..] == "Z"));
+    if !rest_ok {
+        return Err(ShiftRefusal::Unreadable);
+    }
+    let parsed = NaiveDate::parse_from_str(date, "%Y%m%d").map_err(|_| ShiftRefusal::Unreadable)?;
+    let moved = parsed
+        .checked_add_signed(Duration::days(i64::from(days)))
+        .ok_or(ShiftRefusal::Unreadable)?;
+    Ok(format!("{}{rest}", moved.format("%Y%m%d")))
+}
+
+/// Whether moving a yearly date from `a` to `b` touches February 29 or crosses
+/// from February into March: then leap and common years disagree on the gap.
+fn touches_end_of_february(a: NaiveDate, b: NaiveDate) -> bool {
+    let leap_day = |d: NaiveDate| d.month() == 2 && d.day() == 29;
+    if leap_day(a) || leap_day(b) {
+        return true;
+    }
+    let (early, late) = if a <= b { (a, b) } else { (b, a) };
+    let mut year = early.year();
+    while year <= late.year() {
+        let end_of_feb = NaiveDate::from_ymd_opt(year, 3, 1)
+            .and_then(|d| d.pred_opt())
+            .unwrap_or(early);
+        if early <= end_of_feb && end_of_feb < late {
+            return true;
+        }
+        year += 1;
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(text: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(text, "%Y-%m-%d").expect("a test date")
+    }
+
+    fn shifted(rrule: &str, start: &str, days: i32) -> String {
+        match shift_series(rrule, day(start), days, false) {
+            SeriesShift::Shifted { rrule } => rrule,
+            SeriesShift::Refused { reason } => panic!("{rrule} +{days} was refused: {reason:?}"),
+        }
+    }
+
+    fn refused(rrule: &str, start: &str, days: i32, time_changes: bool) -> ShiftRefusal {
+        match shift_series(rrule, day(start), days, time_changes) {
+            SeriesShift::Refused { reason } => reason,
+            SeriesShift::Shifted { rrule: out } => panic!("{rrule} +{days} was shifted to {out}"),
+        }
+    }
+
+    #[test]
+    fn weekdays_move_round_the_week() {
+        assert_eq!(
+            shifted("FREQ=WEEKLY;BYDAY=MO", "2026-05-04", 1),
+            "FREQ=WEEKLY;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted("FREQ=WEEKLY;BYDAY=MO,WE", "2026-05-04", 1),
+            "FREQ=WEEKLY;BYDAY=TU,TH"
+        );
+        assert_eq!(
+            shifted("FREQ=WEEKLY;BYDAY=SU", "2026-05-03", 1),
+            "FREQ=WEEKLY;BYDAY=MO"
+        );
+        assert_eq!(
+            shifted("FREQ=WEEKLY;BYDAY=MO", "2026-05-04", -1),
+            "FREQ=WEEKLY;BYDAY=SU"
+        );
+        assert_eq!(
+            shifted("FREQ=WEEKLY;BYDAY=MO", "2026-05-04", 7),
+            "FREQ=WEEKLY;BYDAY=MO"
+        );
+        assert_eq!(
+            shifted("FREQ=MONTHLY;BYDAY=MO", "2026-05-04", 1),
+            "FREQ=MONTHLY;BYDAY=TU"
+        );
+    }
+
+    #[test]
+    fn every_other_week_moves_its_week_start_with_its_days() {
+        assert_eq!(
+            shifted("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU", "2026-05-04", 6),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=SU"
+        );
+        assert_eq!(
+            shifted(
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU",
+                "2026-05-03",
+                1
+            ),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;WKST=MO"
+        );
+        // One day a week: which days pair up does not depend on the week start.
+        assert_eq!(
+            shifted("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-05-04", 1),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+        );
+    }
+
+    #[test]
+    fn until_moves_with_the_series() {
+        assert_eq!(
+            shifted("FREQ=DAILY;UNTIL=20261231", "2026-05-04", 1),
+            "FREQ=DAILY;UNTIL=20270101"
+        );
+        assert_eq!(
+            shifted(
+                "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261130T235959Z",
+                "2026-05-04",
+                2
+            ),
+            "FREQ=WEEKLY;BYDAY=WE;UNTIL=20261202T235959Z"
+        );
+        assert_eq!(
+            shifted("FREQ=DAILY;UNTIL=20260503T090000", "2026-05-01", -2),
+            "FREQ=DAILY;UNTIL=20260501T090000"
+        );
+    }
+
+    #[test]
+    fn a_rule_that_follows_its_start_is_unchanged() {
+        assert_eq!(
+            shifted("FREQ=DAILY;COUNT=5", "2026-05-04", 3),
+            "FREQ=DAILY;COUNT=5"
+        );
+        assert_eq!(
+            shifted("FREQ=WEEKLY;INTERVAL=3", "2026-05-04", 2),
+            "FREQ=WEEKLY;INTERVAL=3"
+        );
+        assert_eq!(shifted("FREQ=MONTHLY", "2026-05-10", 3), "FREQ=MONTHLY");
+        assert_eq!(shifted("FREQ=YEARLY", "2026-03-30", 3), "FREQ=YEARLY");
+    }
+
+    #[test]
+    fn a_day_of_the_month_moves_within_the_month() {
+        assert_eq!(
+            shifted("FREQ=MONTHLY;BYMONTHDAY=10", "2026-05-10", 2),
+            "FREQ=MONTHLY;BYMONTHDAY=12"
+        );
+        assert_eq!(
+            shifted("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=10", "2026-03-10", 2),
+            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=12"
+        );
+        assert_eq!(
+            refused("FREQ=MONTHLY;BYMONTHDAY=27", "2026-05-27", 2, false),
+            ShiftRefusal::MonthEnd
+        );
+        assert_eq!(
+            refused("FREQ=MONTHLY;BYMONTHDAY=-1", "2026-05-31", 1, false),
+            ShiftRefusal::NegativeMonthDay
+        );
+        assert_eq!(
+            refused("FREQ=MONTHLY", "2026-05-27", 3, false),
+            ShiftRefusal::MonthEnd
+        );
+        assert_eq!(
+            refused("FREQ=MONTHLY", "2026-05-20", 15, false),
+            ShiftRefusal::MonthEnd
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY;BYMONTH=3", "2026-03-30", 3, false),
+            ShiftRefusal::MonthEnd
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY;BYMONTH=3;BYDAY=MO", "2026-03-02", 1, false),
+            ShiftRefusal::MonthEnd
+        );
+    }
+
+    #[test]
+    fn the_end_of_february_is_refused_for_a_yearly_date() {
+        assert_eq!(
+            refused("FREQ=YEARLY", "2026-02-27", 3, false),
+            ShiftRefusal::LeapDay
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY", "2028-02-29", 1, false),
+            ShiftRefusal::LeapDay
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY", "2026-03-02", -3, false),
+            ShiftRefusal::LeapDay
+        );
+    }
+
+    #[test]
+    fn rules_that_cannot_move_by_whole_days_are_refused() {
+        assert_eq!(
+            refused("FREQ=MONTHLY;BYDAY=2SU", "2026-05-10", 1, false),
+            ShiftRefusal::OrdinalWeekday
+        );
+        assert_eq!(
+            refused(
+                "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+                "2026-05-29",
+                1,
+                false
+            ),
+            ShiftRefusal::SetPosition
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY;BYYEARDAY=100", "2026-04-10", 1, false),
+            ShiftRefusal::YearDay
+        );
+        assert_eq!(
+            refused("FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO", "2026-05-11", 1, false),
+            ShiftRefusal::WeekNumber
+        );
+        assert_eq!(
+            refused("FREQ=DAILY;X-NAME=1", "2026-05-04", 1, false),
+            ShiftRefusal::UnknownPart
+        );
+        assert_eq!(
+            refused("BYDAY=MO", "2026-05-04", 1, false),
+            ShiftRefusal::Unreadable
+        );
+        assert_eq!(
+            refused("FREQ=FORTNIGHTLY", "2026-05-04", 1, false),
+            ShiftRefusal::Unreadable
+        );
+        assert_eq!(
+            refused("FREQ=DAILY;UNTIL=soon", "2026-05-04", 1, false),
+            ShiftRefusal::Unreadable
+        );
+    }
+
+    #[test]
+    fn time_of_day_parts_block_only_a_time_change() {
+        assert_eq!(
+            shifted("FREQ=DAILY;BYHOUR=9,17", "2026-05-04", 1),
+            "FREQ=DAILY;BYHOUR=9,17"
+        );
+        assert_eq!(
+            refused("FREQ=DAILY;BYHOUR=9,17", "2026-05-04", 0, true),
+            ShiftRefusal::TimeOfDay
+        );
+        assert_eq!(
+            refused("FREQ=DAILY;BYMINUTE=30", "2026-05-04", 1, true),
+            ShiftRefusal::TimeOfDay
+        );
+    }
+
+    #[test]
+    fn no_shift_leaves_the_rule_as_written() {
+        let odd = "FREQ=MONTHLY;BYSETPOS=1;BYDAY=MO";
+        assert_eq!(shifted(odd, "2026-05-04", 0), odd);
+        assert_eq!(
+            shifted("RRULE:FREQ=WEEKLY;BYDAY=MO;", "2026-05-04", 0),
+            "RRULE:FREQ=WEEKLY;BYDAY=MO;"
+        );
+    }
+
+    #[test]
+    fn a_prefix_and_lower_case_are_read() {
+        assert_eq!(
+            shifted("RRULE:FREQ=WEEKLY;BYDAY=MO", "2026-05-04", 1),
+            "RRULE:FREQ=WEEKLY;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted("freq=weekly;byday=mo;", "2026-05-04", 1),
+            "freq=weekly;BYDAY=TU"
+        );
+    }
+
+    #[test]
+    fn the_door_answers_in_json() {
+        assert_eq!(
+            series_shift_json(r#"{"rrule":"FREQ=WEEKLY;BYDAY=MO","start":"2026-05-04","days":1}"#)
+                .unwrap(),
+            r#"{"outcome":"shifted","rrule":"FREQ=WEEKLY;BYDAY=TU"}"#
+        );
+        assert_eq!(
+            series_shift_json(r#"{"rrule":"FREQ=MONTHLY;BYDAY=2SU","start":"2026-05-10","days":1,"time_changes":false}"#)
+                .unwrap(),
+            r#"{"outcome":"refused","reason":"ordinal_weekday"}"#
+        );
+        assert_eq!(
+            series_shift_json(r#"{"rrule":"FREQ=DAILY","start":"May 4","days":1}"#).unwrap(),
+            r#"{"outcome":"refused","reason":"unreadable"}"#
+        );
+    }
+}

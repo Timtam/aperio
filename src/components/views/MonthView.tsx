@@ -96,6 +96,8 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  SeriesShiftRefusedError,
+  type ShiftRefusal,
 } from '../../state/moveActions';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 
@@ -471,6 +473,8 @@ export function MonthView() {
   const [pendingEventDrop, setPendingEventDrop] = useState<{
     event: CalendarEvent;
     dayKey: string;
+    /** Why moving the whole series was refused, when it was. */
+    refused?: ShiftRefusal;
   } | null>(null);
   const performEventDrop = useCallback(
     async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
@@ -485,6 +489,11 @@ export function MonthView() {
         );
         invalidateData();
       } catch (err) {
+        if (err instanceof SeriesShiftRefusedError) {
+          // Ask again, offering only this occurrence.
+          setPendingEventDrop({ event: ev, dayKey, refused: err.reason });
+          return;
+        }
         announce(
           isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
         );
@@ -1327,6 +1336,7 @@ export function MonthView() {
         isOpen={pendingEventDrop !== null}
         onClose={() => setPendingEventDrop(null)}
         title={pendingEventDrop?.event.title ?? ''}
+        refused={pendingEventDrop?.refused ?? null}
         onOccurrence={() => {
           if (pendingEventDrop) {
             void performEventDrop(

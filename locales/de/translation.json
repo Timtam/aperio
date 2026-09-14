@@ -1379,7 +1379,20 @@
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie verschieben?",
       "occurrence": "Nur diesen Termin",
       "series": "Ganze Serie",
-      "cancel": "Abbrechen"
+      "cancel": "Abbrechen",
+      "refusedMessage": "„{{title}}\" lässt sich als ganze Serie nicht auf diesen Tag verschieben: {{reason}}. Nur diesen Termin verschieben?",
+      "refusal": {
+        "unreadable": "ihre Wiederholungsregel lässt sich nicht lesen",
+        "ordinal_weekday": "sie wiederholt sich an einem bestimmten Wochentag im Monat, etwa am zweiten Sonntag",
+        "set_position": "sie wählt eine Position im Zeitraum, etwa den letzten Werktag",
+        "year_day": "sie wiederholt sich an bestimmten Tagen im Jahr",
+        "week_number": "sie wiederholt sich in bestimmten Kalenderwochen",
+        "time_of_day": "ihre Regel legt eigene Uhrzeiten fest",
+        "negative_month_day": "sie zählt Tage vom Monatsende",
+        "month_end": "ihr Tag im Monat würde über ein Monatsende rutschen",
+        "leap_day": "sie liegt am Ende des Februars, wo Schaltjahre abweichen",
+        "unknown_part": "ihre Wiederholungsregel enthält einen Teil, den Aperio nicht verschieben kann"
+      }
     },
     "editScope": {
       "title": "Serientermin bearbeiten",

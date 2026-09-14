@@ -19,6 +19,7 @@ import {
   installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
+  installSeriesShiftRules,
 } from '@aperio/shared';
 
 import { App } from './App';
@@ -63,6 +64,7 @@ import {
   isImportantPriority,
   normalPriority,
   priorityRank,
+  seriesShiftJson,
 } from './wasm/coreRules';
 import i18n from './i18n';
 import './styles.css';
@@ -186,6 +188,7 @@ initCoreRules()
 
     // The task settings: how the stored preferences read, and what a change stores.
     installTaskSettingsRules({ taskSettingsJson });
+    installSeriesShiftRules({ seriesShiftJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

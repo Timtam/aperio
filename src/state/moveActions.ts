@@ -6,8 +6,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { differenceInCalendarDays } from 'date-fns';
 
 import {
+  moveSeriesInstant,
+  seriesDayKey,
+  shiftSeriesRule,
+  type ShiftRefusal,
+} from '@aperio/shared';
+
+import {
   addEventExdate,
   createEvent as apiCreateEvent,
+  getEventById,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
@@ -314,10 +322,10 @@ export async function moveOrCopyEvent(
  * day shifts (`setDate` keeps the local time across DST transitions).
  *
  * Recurrence scope mirrors §7.5:
- *  - **series** — update the MASTER row with the dragged occurrence's
- *    shifted dates, re-anchoring the whole series on the new day (the
- *    same master-row semantics `moveEventToCalendar` uses; works for
- *    external providers without needing to fetch the master).
+ *  - **series** — move every occurrence by the same distance: the master's
+ *    start, end and exceptions, and its rule through `cal_core::series_shift`
+ *    (see `moveSeries`). A rule that cannot move by whole days throws
+ *    `SeriesShiftRefusedError`.
  *  - **occurrence** — detach: create a STANDALONE event on the target
  *    day, then EXDATE the source occurrence (created first, excluded
  *    second, so a failed create never loses the occurrence).
@@ -410,11 +418,107 @@ export async function moveEventToSlot(
     return true;
   }
 
-  await apiUpdateEvent({
-    ...event,
-    id: seriesIdOf(event),
-    start: newStart,
-    end: newEnd,
-  });
+  if (!isSeriesOccurrence(event) && !event.recurrence?.rrule) {
+    await apiUpdateEvent({
+      ...event,
+      id: seriesIdOf(event),
+      start: newStart,
+      end: newEnd,
+    });
+    return true;
+  }
+  return moveSeries(event, delta, minute);
+}
+
+export type { ShiftRefusal };
+
+/** Moving a whole series was refused: its rule cannot move by whole days. The
+ *  surface says why and offers to move only the occurrence. */
+export class SeriesShiftRefusedError extends Error {
+  readonly reason: ShiftRefusal;
+
+  constructor(reason: ShiftRefusal) {
+    super(`the series cannot move by whole days (${reason})`);
+    this.name = 'SeriesShiftRefusedError';
+    this.reason = reason;
+  }
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Move a whole series by `delta` days and, when `minute` is given, to that time
+ * of day.
+ *
+ * Every occurrence moves by the same distance: the MASTER's start, end and
+ * exceptions, and — through `cal_core::series_shift` — its rule, so a Monday
+ * rule becomes a Tuesday rule and UNTIL moves along. The dragged row may be an
+ * occurrence or a provider override, whose start is not the series', so the
+ * master is loaded. A rule that cannot move by whole days throws
+ * {@link SeriesShiftRefusedError}, and nothing is written.
+ *
+ * The drop is placed on the device's clock, but the rule is read on the
+ * series' own clock (its zone, or UTC without one). A new time of day can land
+ * on another day there, so the days the rule moves by are counted on that clock.
+ */
+async function moveSeries(
+  event: CalendarEvent,
+  delta: number,
+  minute: number | null,
+): Promise<boolean> {
+  const seriesId = seriesIdOf(event);
+  const master =
+    event.id === seriesId && event.recurrence?.rrule
+      ? event
+      : await getEventById(seriesId, event.calendar_id);
+  const recurrence = master?.recurrence;
+  if (!master || !recurrence?.rrule) {
+    throw new Error(`the series ${seriesId} could not be loaded; nothing was moved`);
+  }
+  const placedMinute = master.all_day ? null : minute;
+  // Where the drop puts the series start, on the device's clock: the drag's
+  // days, and the dropped time of day when there is one.
+  const onDevice = (iso: string) => {
+    const when = new Date(iso);
+    when.setDate(when.getDate() + delta);
+    if (placedMinute !== null) {
+      when.setHours(Math.floor(placedMinute / 60), placedMinute % 60, 0, 0);
+    }
+    return when.toISOString();
+  };
+  const start = onDevice(master.start);
+
+  const { tzid } = recurrence;
+  const fromDay = seriesDayKey(master.start, tzid);
+  const days = Math.round((Date.parse(seriesDayKey(start, tzid)) - Date.parse(fromDay)) / DAY_MS);
+  // Moving by whole days on the series' clock misses the new start exactly when
+  // its time of day changed there.
+  const timeChanges = moveSeriesInstant(master.start, tzid, days) !== start;
+  if (days === 0 && !timeChanges) return false;
+
+  const answer = shiftSeriesRule(recurrence.rrule, fromDay, days, timeChanges);
+  if (answer.outcome === 'refused') {
+    throw new SeriesShiftRefusedError(answer.reason);
+  }
+  const durationMs = new Date(master.end).getTime() - new Date(master.start).getTime();
+  const end =
+    placedMinute === null
+      ? onDevice(master.end)
+      : new Date(new Date(start).getTime() + durationMs).toISOString();
+  await apiUpdateEvent(
+    {
+      ...master,
+      start,
+      end,
+      recurrence: {
+        ...recurrence,
+        rrule: answer.rrule,
+        // Each exception moves like the occurrence it cancels, so they still meet.
+        exceptions: recurrence.exceptions.map((iso) =>
+          moveSeriesInstant(iso, tzid, days, timeChanges ? start : undefined),
+        ),
+      },
+    },
+  );
   return true;
 }

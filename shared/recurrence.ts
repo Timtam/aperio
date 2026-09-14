@@ -263,6 +263,57 @@ function shiftUntilToWall(rruleBody: string, tzid: string): string {
   );
 }
 
+/** The zone a series is expanded in, or `null` for UTC — including a zone `Intl`
+ *  cannot resolve, which {@link zonedOccurrences} also expands in UTC. */
+function expansionZone(tzid: string | null | undefined): string | null {
+  const zone = zoneOrNull(tzid);
+  if (!zone) return null;
+  try {
+    zoneFormatter(zone);
+    return zone;
+  } catch {
+    return null;
+  }
+}
+
+/** An instant on the clock a series recurs in, as a Date whose UTC fields hold
+ *  that clock's reading. */
+function seriesWall(instant: Date, tzid: string | null | undefined): Date {
+  const zone = expansionZone(tzid);
+  return zone ? realToWall(instant, zone) : instant;
+}
+
+/**
+ * The `YYYY-MM-DD` day `iso` falls on in the clock a series recurs in: its zone,
+ * or UTC for a series without one (see {@link expandEvent}). A rule's weekdays
+ * and days of the month are read against this day, which can differ from the
+ * day the device shows.
+ */
+export function seriesDayKey(iso: string, tzid: string | null | undefined): string {
+  return seriesWall(new Date(iso), tzid).toISOString().slice(0, 10);
+}
+
+/**
+ * `iso` moved by `days` whole days on the clock a series recurs in, and placed
+ * at `timeOf`'s time of day on that clock when given. This is how each instant
+ * of a series (its start, its exceptions) moves when the whole series moves, so
+ * the exceptions still meet the occurrences they cancel.
+ */
+export function moveSeriesInstant(
+  iso: string,
+  tzid: string | null | undefined,
+  days: number,
+  timeOf?: string,
+): string {
+  const zone = expansionZone(tzid);
+  let moved = seriesWall(new Date(iso), tzid).getTime() + days * DAY_MS;
+  if (timeOf !== undefined) {
+    const timeOfDay = (ms: number) => ((ms % DAY_MS) + DAY_MS) % DAY_MS;
+    moved += timeOfDay(seriesWall(new Date(timeOf), tzid).getTime()) - timeOfDay(moved);
+  }
+  return (zone ? wallToReal(new Date(moved), zone) : new Date(moved)).toISOString();
+}
+
 /**
  * The host's current IANA time zone (e.g. `America/New_York`), or `null` when
  * the runtime can't report a usable one (or only reports plain UTC).

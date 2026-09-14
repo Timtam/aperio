@@ -52,6 +52,7 @@ mod task_grouping_gate {
         ));
     }
 }
+pub mod series_shift;
 pub mod task_occurrences;
 pub mod task_priority;
 pub mod task_settings;
@@ -100,6 +101,9 @@ pub use meeting_link_grouping::{
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
+pub use series_shift::{
+    series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,
+};
 pub use signatures::{
     apply_signature, apply_signature_json, signature_in, signature_in_json, strip_signature,
     strip_signature_json, ApplySignatureInput, SignatureTextInput, SIGNATURE_MARKER,

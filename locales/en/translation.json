@@ -1382,7 +1382,20 @@
       "message": "\"{{title}}\" is part of a series. Move just this occurrence, or the whole series?",
       "occurrence": "This occurrence only",
       "series": "Whole series",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "refusedMessage": "\"{{title}}\" cannot move to that day as a whole series: {{reason}}. Move just this occurrence?",
+      "refusal": {
+        "unreadable": "its repeat rule cannot be read",
+        "ordinal_weekday": "it repeats on a particular weekday of the month, such as the second Sunday",
+        "set_position": "it picks a position in each period, such as the last weekday",
+        "year_day": "it repeats on particular days of the year",
+        "week_number": "it repeats in particular calendar weeks",
+        "time_of_day": "its rule sets its own times of day",
+        "negative_month_day": "it counts days from the end of the month",
+        "month_end": "its day of the month would slip past the end of a month",
+        "leap_day": "it falls at the end of February, where leap years differ",
+        "unknown_part": "its repeat rule has a part Aperio cannot move"
+      }
     },
     "editScope": {
       "title": "Edit recurring event",

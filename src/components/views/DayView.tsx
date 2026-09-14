@@ -30,6 +30,8 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  SeriesShiftRefusedError,
+  type ShiftRefusal,
 } from '../../state/moveActions';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
@@ -748,6 +750,8 @@ export function DayView() {
   const [pendingEventDrop, setPendingEventDrop] = useState<{
     event: CalendarEvent;
     minute: number;
+    /** Why moving the whole series was refused, when it was. */
+    refused?: ShiftRefusal;
   } | null>(null);
 
   // Plain functions, like the drag handlers around them: `clockAt` is rebuilt
@@ -769,6 +773,11 @@ export function DayView() {
       );
       invalidateData();
     } catch (err) {
+      if (err instanceof SeriesShiftRefusedError) {
+        // Ask again, offering only this occurrence.
+        setPendingEventDrop({ event: ev, minute, refused: err.reason });
+        return;
+      }
       announce(
         isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
       );
@@ -1622,6 +1631,7 @@ export function DayView() {
         isOpen={pendingEventDrop !== null}
         onClose={() => setPendingEventDrop(null)}
         title={pendingEventDrop?.event.title ?? ''}
+        refused={pendingEventDrop?.refused ?? null}
         onOccurrence={() => {
           if (pendingEventDrop) {
             void performEventTimeDrop(

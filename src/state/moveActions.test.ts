@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import {
   EVENT_DND_TYPE,
+  SeriesShiftRefusedError,
   moveEventToDay,
   moveEventToSlot,
   moveOrCopyEvent,
@@ -276,17 +277,125 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     });
   });
 
-  it('series scope re-anchors the MASTER row on the target day', async () => {
-    const occ = occurrence();
-    const target = localKey(occ.start, 1);
-    await moveEventToDay(occ, target, 'series');
-    expect(invokeMock.mock.calls).toHaveLength(1);
-    const [cmd, args] = invokeMock.mock.calls[0];
-    expect(cmd).toBe('update_event');
-    expect(args.event.id).toBe('e1'); // master series id
-    expect(localKey(args.event.start)).toBe(target);
-    // The recurrence rule travels with the master.
-    expect(args.event.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+});
+
+describe('moving a whole series (dragged with the whole-series scope)', () => {
+  /** A weekly Monday series with an end date and one excluded Monday. */
+  const master = {
+    id: 'e1',
+    calendar_id: 'c1',
+    title: 'Standup',
+    start: '2026-06-15T07:00:00.000Z',
+    end: '2026-06-15T07:30:00.000Z',
+    all_day: false,
+    recurrence: {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20260831T235959Z',
+      exceptions: ['2026-06-29T07:00:00.000Z'],
+    },
+  } as unknown as CalendarEvent;
+
+  const occurrenceOf = (series: CalendarEvent, iso: string) =>
+    ({
+      ...series,
+      id: `e1@${iso}`,
+      series_id: 'e1',
+      occurrence_start: iso,
+      start: iso,
+      end: new Date(Date.parse(iso) + 30 * 60_000).toISOString(),
+    }) as unknown as CalendarEvent;
+
+  const localKey = (iso: string, plusDays = 0) => {
+    const d = new Date(iso);
+    d.setDate(d.getDate() + plusDays);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  };
+
+  const serving = (series: CalendarEvent | null) =>
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === 'get_event_by_id' ? series : {}),
+    );
+  const written = () => invokeMock.mock.calls.find((call) => call[0] === 'update_event')?.[1].event;
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    serving(master);
+  });
+
+  it('moves the start, the rule, the end date and the exceptions by the same number of days', async () => {
+    // Dragged from a later Monday: the series must not start there.
+    const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
+    expect(await moveEventToDay(occ, localKey(occ.start, 1), 'series')).toBe(true);
+    const row = written();
+    expect(row.id).toBe('e1');
+    expect(localKey(row.start)).toBe(localKey(master.start, 1));
+    expect(row.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T235959Z');
+    expect(row.recurrence.exceptions.map((e: string) => localKey(e))).toEqual([
+      localKey('2026-06-29T07:00:00.000Z', 1),
+    ]);
+  });
+
+  it('a new time of day keeps the days and moves the exceptions to that time', async () => {
+    const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
+    expect(await moveEventToSlot(occ, localKey(occ.start), 10 * 60 + 30, 'series')).toBe(true);
+    const row = written();
+    expect(row.recurrence.rrule).toBe(master.recurrence?.rrule);
+    expect(localKey(row.start)).toBe(localKey(master.start));
+    expect([new Date(row.start).getHours(), new Date(row.start).getMinutes()]).toEqual([10, 30]);
+    const exception = new Date(row.recurrence.exceptions[0]);
+    expect([exception.getHours(), exception.getMinutes()]).toEqual([10, 30]);
+    expect(new Date(row.end).getTime() - new Date(row.start).getTime()).toBe(30 * 60_000);
+  });
+
+  it('reads the rule on the series clock, where a new time can fall on another day', async () => {
+    // 23:00 on a Monday in Kiritimati (UTC+14). Two hours later it is Tuesday
+    // there, while the device (UTC on CI, Berlin here) still shows the same day.
+    const zoned = {
+      ...master,
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T09:30:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-06-22T09:00:00.000Z'],
+        tzid: 'Pacific/Kiritimati',
+      },
+    } as unknown as CalendarEvent;
+    serving(zoned);
+    const dropped = new Date('2026-06-15T11:00:00.000Z');
+    const minute = dropped.getHours() * 60 + dropped.getMinutes();
+    expect(await moveEventToSlot(zoned, localKey(dropped.toISOString()), minute, 'series')).toBe(true);
+    const row = written();
+    expect(row.start).toBe('2026-06-15T11:00:00.000Z');
+    expect(row.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(row.recurrence.exceptions).toEqual(['2026-06-22T11:00:00.000Z']);
+    expect(row.recurrence.tzid).toBe('Pacific/Kiritimati');
+  });
+
+  it('refuses a rule that cannot move by whole days and writes nothing', async () => {
+    const secondMonday = {
+      ...master,
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=2MO', exceptions: [] },
+    } as unknown as CalendarEvent;
+    serving(secondMonday);
+    const occ = occurrenceOf(secondMonday, '2026-07-13T07:00:00.000Z');
+    const move = moveEventToDay(occ, localKey(occ.start, 1), 'series');
+    await expect(move).rejects.toBeInstanceOf(SeriesShiftRefusedError);
+    await expect(move).rejects.toMatchObject({ reason: 'ordinal_weekday' });
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(false);
+  });
+
+  it('moves a dragged master row without loading it again', async () => {
+    expect(await moveEventToDay(master, localKey(master.start, 2), 'series')).toBe(true);
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'get_event_by_id')).toBe(false);
+    expect(written().recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=WE;UNTIL=20260902T235959Z');
+  });
+
+  it('writes nothing when the series cannot be loaded', async () => {
+    serving(null);
+    const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
+    await expect(moveEventToDay(occ, localKey(occ.start, 1), 'series')).rejects.toThrow(/could not be loaded/);
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(false);
   });
 });
 
