@@ -355,11 +355,11 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All four read `shared/contracts/`, the directory holding the contracts that
-/// BOTH languages check themselves against. Three of them are the app reading
-/// its own file and are correct as they stand.
+/// All of them read `shared/contracts/`, the directory holding the contracts
+/// that BOTH languages check themselves against. All but the last are the app
+/// reading its own file and are correct as they stand.
 ///
-/// The third is not, and is recorded here rather than fixed because fixing it
+/// The last is not, and is recorded here rather than fixed because fixing it
 /// costs different things depending on a decision that has not been made. If
 /// `adapter-caldav` reaches its own repository as a git SUBMODULE it keeps this
 /// relative path and nothing breaks; as a cargo GIT DEPENDENCY the crate is
@@ -367,7 +367,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 5] = [
+const KNOWN_REACHES: [(&str, &str); 6] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -382,6 +382,15 @@ const KNOWN_REACHES: [(&str, &str); 5] = [
     (
         "crates/host-core/src/reminders.rs",
         "shared/contracts/taskOwnership.json",
+    ),
+    // The reminder half of the event-occurrence pin: the table the views
+    // (`expandAll`) and the reminders (`expand_occurrences`) are both held to
+    // until the rule moves into cal-core. That move ends this reach: the table
+    // then sits beside the core's own fixtures and host-core stops reading it.
+    // Same crate, same reason as the two above.
+    (
+        "crates/host-core/src/reminders.rs",
+        "shared/contracts/eventOccurrences.json",
     ),
     // The birthday layer's id formats, which both frontends read to recognise
     // a synthesised calendar or event where only an id is at hand. Same crate,

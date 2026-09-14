@@ -781,6 +781,8 @@ Siehe DESIGN §4.2.
   Braucht eine sprachübergreifende Fixture, bevor irgendetwas
   Wiederholungs-Förmiges umzieht — und die läuft mangels Test-Runner nicht auf
   Mobile.
+  ↳ Gemessen 2026-09-14: `eventOccurrences.json`, siehe den Eintrag
+  „Termin-Wiederholung zieht in den Kern".
   ↳ Messlücke, ehrlich benannt: `collapseEventGroups` (202), `dayGridLayout`
   (269), `taskRecurrence` (178) und `taskAssignment` (87) liegen INNERHALB der
   vermessenen Abhängigkeiten und wurden nicht vermessen.
@@ -1869,6 +1871,53 @@ Siehe DESIGN §4.2.
   Provider-Doku). Widerlegt: eine Override-Tabelle mit Zahlen jenseits von
   f64, 128 Ebenen Tiefe oder einzelnen Surrogaten fällt ganz auf leer — kein
   Aperio-Schreiber erzeugt so etwas.
+- [~] **Termin-Wiederholung zieht in den Kern** — neuer Bogen (Toni,
+  2026-09-14), mit Entwurfsrunde. Vermessen: ZWEI Ausroller —
+  `shared/recurrence.ts` (`expandAll`, rrule.js) für alle Ansichten und das
+  Widget, `host-core`s `expand_occurrences` (rrule-Kiste) für die
+  Erinnerungen; UNTIL wird an neun Stellen gelesen, mindestens fünfmal
+  verschieden. Entschieden: (1) der Zeitzonen-Fehler der lokalen Erinnerungen
+  wird VORAB behoben — PR #66: `enumerate_local_triggers` las `rrule_tzid`
+  nicht und rollte in UTC aus, ab der Zeitumstellung am 25.10. eine Stunde zu
+  früh; (2) der Bogen beginnt mit dem Ausrollen, der Motor (rrule-Kiste oder
+  eigene Regel) wird erst nach dem Pin mit gemessener WASM-Größe gewählt.
+  ↳ **Schritt 1 (Pin): gebaut.** `shared/contracts/eventOccurrences.json`
+  (dort, weil host-core die Tabelle liest und nur von dort einbetten darf),
+  78 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
+  (auch zonierte Serien genau an den Rändern), UNTIL (auch das `T235959Z` des
+  Editors und ein zoniertes UNTIL über eine Zeitumstellung), Ausnahmen, Zonen,
+  ganztägig, Einzeländerungen, Größe. `expect` ist die Antwort der Ansichten
+  (`expandAll`); wo die Erinnerungen anders antworten — jeder Termin einzeln,
+  wie `event_triggers` ausrollt —, trägt die Zeile `reminders`. Verglichen
+  werden Zeitpunkte, sortiert nach Zeitpunkt und Position; die Reihenfolge von
+  `expandAll` (nach dem Text des Starts) zählt nicht. **22 Zeilen weichen ab**,
+  jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
+  vor dem Start (die rrule-Kiste nimmt die Regel nicht an, die Erinnerungen
+  behalten nur den Starttermin; rrule.js liest ohne Zone ein Datum als 00:00
+  UTC und eine Uhrzeit ohne `Z` als UTC, bei einer zonierten Serie beides als
+  Wanduhrzeit — eine ganztägige Serie westlich von UTC verliert so ihren
+  letzten Tag, `wasTypeScript`); ein Start mit Millisekunden (die Erinnerungen
+  verlieren sie und beginnen einen Tag später); ein abschließendes Semikolon
+  (rrule.js scheitert, die Kiste liest es); eine Ausnahme eine Millisekunde
+  daneben (die Erinnerungen löschen das Vorkommen trotzdem); ein Zonenname mit
+  Leerzeichen (host-core trimmt, Intl nicht) oder in Kleinbuchstaben (Intl
+  nimmt ihn, chrono-tz nicht); eine Zeitumstellung um Mitternacht (Santiago:
+  die Ansichten schieben 00:30 auf 01:30, die Erinnerungen lassen den Tag aus
+  und enden einen Tag später); Einzeländerungen, auch an einer zonierten Serie
+  nach der Umstellung (die Erinnerungen wenden keine an, der alte Platz
+  erinnert weiter); eine abgesagte Serie (die Erinnerungen überspringen sie,
+  gewollt); und die Kappe der Erinnerungen bei 500 Vorkommen. Auf beiden Seiten
+  gleich und gepinnt: die Sommerzeit-Lücke (vorwärts um die Lückenlänge), die
+  Überlappung (die frühere Lesung), zonierte Serien an den Bereichsrändern, ein
+  zoniertes UNTIL mit `Z` über eine Umstellung, WKST, ganztägige Serien ohne
+  Zone (steppen in UTC, nach der Umstellung um 23:00 am Vortag), das
+  `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behält
+  einen Tag zu viel — `wasTypeScript`) und ein Vorkommen, das vor dem Bereich
+  begann (fehlt, gewählt wird nach dem Start). Verträge:
+  `src/intl/eventOccurrences.contract.test.ts` (Ansichten) und
+  `event_occurrence_contract` in `host-core/src/reminders.rs` (Erinnerungen,
+  die abweichenden Zeilen namentlich). Die Prüfung von #67 fand die Lücken und
+  das Reihenfolge-Artefakt; die Tabelle wurde danach neu gemessen.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

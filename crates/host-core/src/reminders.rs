@@ -3363,4 +3363,152 @@ mod tests {
         // 2026-05-20, 05-27, 06-03 — 3 occurrences, 06-10 excluded.
         assert_eq!(triggers.len(), 3, "UNTIL=06-03 should leave three triggers");
     }
+
+    /// The reminder half of `shared/contracts/eventOccurrences.json`;
+    /// the views half is `src/intl/eventOccurrences.contract.test.ts`.
+    ///
+    /// Until the rule moves into the core, the reminder path is held to the same
+    /// table: to the views' answer (`expect`), or to its own where the row records
+    /// that the two differ (`reminders`). Each such row is a decision for the port.
+    mod event_occurrence_contract {
+        use super::*;
+        use serde_json::Value;
+
+        /// A missing table stops the crate compiling rather than skipping the contract.
+        const TABLE: &str = include_str!("../../../shared/contracts/eventOccurrences.json");
+
+        /// The rows where the reminders answer differently, by name: a count would
+        /// break on exactly the change it has to survive.
+        const DIFFERING: &[&str] = &[
+            "a-start-with-milliseconds",
+            "a-trailing-semicolon",
+            "a-date-only-until-without-a-zone",
+            "a-date-only-until-on-a-zoned-series",
+            "a-date-only-until-on-a-zoned-series-at-one-in-the-morning",
+            "an-until-without-z",
+            "an-until-without-z-on-a-zoned-series",
+            "an-until-without-z-before-the-wall-clock-time",
+            "an-until-before-the-start",
+            "an-all-day-series-west-of-utc-until-its-local-day",
+            "a-date-only-until-on-an-all-day-series-east-of-utc",
+            "an-exception-a-millisecond-off-keeps-the-occurrence",
+            "a-zone-with-surrounding-space",
+            "a-lowercase-zone",
+            "a-daily-series-across-a-change-at-midnight",
+            "a-moved-occurrence-stands-in-for-its-slot",
+            "a-cancelled-occurrence-removes-its-slot",
+            "a-moved-occurrence-of-a-zoned-series-after-the-change",
+            "an-override-slot-in-another-spelling",
+            "an-override-listed-before-its-series",
+            "a-cancelled-series",
+            "a-long-daily-series-in-a-wide-range",
+        ];
+
+        fn table() -> Value {
+            serde_json::from_str(TABLE).expect("the table parses")
+        }
+
+        fn instant(v: &Value) -> DateTime<Utc> {
+            v.as_str()
+                .expect("an instant")
+                .parse()
+                .expect("an RFC 3339 instant")
+        }
+
+        /// Every event on its own, as `event_triggers` expands it: a cancelled event
+        /// is skipped before anything expands, and an override is just another event.
+        /// Sorted by instant, then input index — the order the table records.
+        fn reminder_answer(input: &Value) -> Vec<(DateTime<Utc>, usize)> {
+            let lo = instant(&input["range"]["start"]);
+            let hi = instant(&input["range"]["end"]);
+            let mut rows = Vec::new();
+            for (i, ev) in input["events"]
+                .as_array()
+                .expect("events")
+                .iter()
+                .enumerate()
+            {
+                if ev["cancelled"].as_bool() == Some(true) {
+                    continue;
+                }
+                let start = instant(&ev["start"]);
+                let starts = match ev["recurrence"].as_object() {
+                    Some(rec) => {
+                        let exceptions: Vec<DateTime<Utc>> = rec["exceptions"]
+                            .as_array()
+                            .expect("exceptions")
+                            .iter()
+                            .map(instant)
+                            .collect();
+                        expand_occurrences(
+                            start,
+                            rec["rrule"].as_str().expect("a rule"),
+                            &exceptions,
+                            rec.get("tzid").and_then(Value::as_str),
+                            lo,
+                            hi,
+                        )
+                    }
+                    None => vec![start],
+                };
+                rows.extend(starts.into_iter().map(|s| (s, i)));
+            }
+            rows.sort();
+            rows
+        }
+
+        fn recorded(rows: &Value) -> Vec<(DateTime<Utc>, usize)> {
+            rows.as_array()
+                .expect("occurrences")
+                .iter()
+                .map(|r| {
+                    let event = r["event"].as_u64().expect("an event index");
+                    (
+                        instant(&r["start"]),
+                        usize::try_from(event).expect("an index"),
+                    )
+                })
+                .collect()
+        }
+
+        #[test]
+        fn still_carries_the_rows_the_reminders_differ_on() {
+            let t = table();
+            let cases = t["cases"].as_array().expect("cases");
+            for name in DIFFERING {
+                let case = cases
+                    .iter()
+                    .find(|c| c["name"] == *name)
+                    .unwrap_or_else(|| panic!("the table lost {name}"));
+                assert!(
+                    case.get("reminders").is_some(),
+                    "{name} no longer records a reminder answer"
+                );
+            }
+        }
+
+        #[test]
+        fn a_row_records_the_reminders_only_where_they_differ() {
+            let t = table();
+            for case in t["cases"].as_array().expect("cases") {
+                let name = &case["name"];
+                match case.get("reminders") {
+                    Some(reminders) => {
+                        assert_eq!(case["surfacesDiffer"], true, "{name}");
+                        assert_ne!(recorded(reminders), recorded(&case["expect"]), "{name}");
+                    }
+                    None => assert!(case.get("surfacesDiffer").is_none(), "{name}"),
+                }
+            }
+        }
+
+        #[test]
+        fn every_row_holds_for_the_reminders() {
+            let t = table();
+            for case in t["cases"].as_array().expect("cases") {
+                let want = recorded(case.get("reminders").unwrap_or(&case["expect"]));
+                assert_eq!(reminder_answer(&case["input"]), want, "{}", case["name"]);
+            }
+        }
+    }
 }
