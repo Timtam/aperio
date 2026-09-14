@@ -107,11 +107,11 @@ function deviceInBerlin() {
 }
 
 /** Open the event, make the given change, save, and return the recurrence that went out. */
-async function saveEdited(event: CalendarEvent, change?: () => void) {
+async function saveEdited(event: CalendarEvent, change?: () => void, initialScope?: 'series') {
   const { EventDialog } = await import('./EventDialog');
   render(
     <StrictMode>
-      <EventDialog isOpen onClose={() => {}} event={event} />
+      <EventDialog isOpen onClose={() => {}} event={event} initialScope={initialScope} />
     </StrictMode>,
   );
   await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
@@ -162,17 +162,42 @@ describe('EventDialog → editing a series as a whole', () => {
     expect(sent).toEqual({ rrule: 'FREQ=WEEKLY', exceptions: [], tzid: 'Europe/Berlin' });
   });
 
-  it('leaves an all-day series without a zone as it is', async () => {
+  it('gives an all-day event that becomes a series no zone', async () => {
+    // Fails if the editor hands the helper the wrong all-day state.
     deviceInBerlin();
-    const allDay = {
+    const allDayOneOff = {
       ...SERIES,
       start: '2026-06-14T22:00:00.000Z',
       end: '2026-06-15T22:00:00.000Z',
       all_day: true,
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [] },
+      recurrence: null,
     } as unknown as CalendarEvent;
-    const sent = await saveEdited(allDay);
+    const sent = await saveEdited(allDayOneOff, () => {
+      fireEvent.click(screen.getByRole('button', { name: 'weekly' }));
+    });
+    expect(sent).toEqual({ rrule: 'FREQ=WEEKLY', exceptions: [] });
+  });
+
+  it('does not treat an override opened as the whole series as a new series', async () => {
+    // A provider override (CalDAV, EWS) carries no rule of its own. Saved as
+    // the whole series it lands on the master, which may recur without a zone
+    // on purpose, so nothing is stamped.
+    deviceInBerlin();
+    const override = {
+      ...SERIES,
+      id: 'ev-series::rid::2026-06-22T23:30:00Z',
+      start: '2026-06-22T23:30:00.000Z',
+      end: '2026-06-23T00:30:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    const sent = await saveEdited(
+      override,
+      () => {
+        fireEvent.click(screen.getByRole('button', { name: 'weekly' }));
+      },
+      'series',
+    );
     expect(sent?.tzid ?? null).toBeNull();
-    expect(sent?.rrule).toMatch(/FREQ=WEEKLY/);
+    expect(sent?.rrule).toBe('FREQ=WEEKLY');
   });
 });
