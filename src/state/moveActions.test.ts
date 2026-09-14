@@ -18,6 +18,7 @@ import {
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
+  SeriesNotLoadedError,
 } from './moveActions';
 
 /** An expanded recurring occurrence (what the views/dialog hand in). */
@@ -229,8 +230,8 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
 
   it('writes nothing when the series cannot be loaded', async () => {
     serving(null);
-    await expect(moveOrCopyEvent(occurrence(), 'c2', 'move', 'series')).rejects.toThrow(
-      /could not be loaded/,
+    await expect(moveOrCopyEvent(occurrence(), 'c2', 'move', 'series')).rejects.toBeInstanceOf(
+      SeriesNotLoadedError,
     );
     await expect(moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series')).rejects.toThrow(
       /could not be loaded/,

@@ -272,7 +272,7 @@ async function seriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
   if (event.id === seriesId) return event;
   const master = await getEventById(seriesId, event.calendar_id);
   if (!master) {
-    throw new Error(`the series ${seriesId} could not be loaded; nothing was changed`);
+    throw new SeriesNotLoadedError(seriesId);
   }
   return master;
 }

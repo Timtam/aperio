@@ -44,6 +44,7 @@ import {
   readTaskDrag,
   TASK_DND_TYPE,
   type TaskDragPayload,
+  SeriesNotLoadedError,
 } from '../state/moveActions';
 import {
   accountTriState,
@@ -1976,6 +1977,10 @@ function LeafRow({
         invalidateData();
         announce(t('sidebar.dnd.eventMoved', { title: event.title }));
       } catch (err) {
+        if (err instanceof SeriesNotLoadedError) {
+          announce(t('dialogs.event.seriesLoadFailed', { title: event.title }));
+          return;
+        }
         announce(
           isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
         );

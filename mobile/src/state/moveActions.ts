@@ -194,7 +194,20 @@ async function seriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
   if (event.id === seriesId) return event;
   const master = await getEventById(seriesId, event.calendar_id);
   if (!master) {
-    throw new Error(`the series ${seriesId} could not be loaded; nothing was changed`);
+    throw new SeriesNotLoadedError(seriesId);
   }
   return master;
+}
+
+/** The series a row belongs to could not be loaded, so nothing was written:
+ *  an occurrence's own fields cannot stand in for the series. The surface names
+ *  the event in the user's language. */
+export class SeriesNotLoadedError extends Error {
+  readonly seriesId: string;
+
+  constructor(seriesId: string) {
+    super(`the series ${seriesId} could not be loaded; nothing was changed`);
+    this.name = 'SeriesNotLoadedError';
+    this.seriesId = seriesId;
+  }
 }
