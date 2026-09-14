@@ -102,11 +102,12 @@ steht sie eine Stunde zu früh oder zu spät, bei uns und in jedem anderen
 Programm, das den Kalender liest. In den Kalenderansichten sieht man es schon,
 wenn man über die nächste Umstellung hinaus blättert.
 
-Seit dieser Version behält der Editor die Zeitzone und gibt einer Serie ohne
-Zeitzone die deines Geräts. Um eine schon betroffene Serie zu reparieren, öffne
-in Aperio die **ganze Serie** (nicht ein einzelnes Vorkommen) und speichere sie
-einmal. Aperio legt sie dann mit der Zeitzone deines Geräts ab, und sie behält
-ihre Uhrzeit von da an über jede Zeitumstellung.
+Seit dieser Version behält der Editor die Zeitzone, und ein Termin, der zur
+Serie wird, bekommt die Zeitzone deines Geräts. Eine Serie, die ihre Zeitzone
+schon verloren hat, ändert Aperio nicht von selbst: Für Aperio sieht sie genauso
+aus wie eine Serie, die absichtlich in UTC geführt wird. Um eine betroffene
+Serie zu reparieren, lege sie neu an oder stelle ihre Zeitzone in dem Programm
+wieder ein, aus dem sie stammt.
 
 ## Einen Fehler melden
 

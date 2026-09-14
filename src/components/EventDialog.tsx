@@ -918,8 +918,8 @@ export function EventDialog({
         return;
       }
 
-      // The series keeps its exceptions and its zone; a timed series without a
-      // zone gets the device's zone, as a new one does.
+      // The series keeps its exceptions and its zone; an event that becomes a
+      // series here gets the device's zone, as a new one does.
       const recurrence = editedRecurrence(form.rrule, event?.recurrence, form.allDay);
 
       setSubmitting(true);

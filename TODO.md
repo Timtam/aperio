@@ -1929,11 +1929,13 @@ Siehe DESIGN §4.2.
   bearbeitet wurde; ein Termin, der im Editor zur Serie wurde, bekam nie eine.
   Jetzt fragen beide Editoren
   `editedRecurrence` (`shared/recurrence.ts`): die Regel aus dem Formular, die
-  Ausnahmen und die Zone der Serie. Eine zeitgebundene Serie ohne Zone bekommt
-  beim Speichern die Zone des Geräts, wie beim Anlegen — so repariert einmal
-  Öffnen und Speichern eine Serie, die ihre Zone schon verloren hat (Toni,
-  2026-09-14); eine ganztägige ohne Zone bleibt ohne. Die Hilfe beschreibt es
-  unter „Fehlerbehebung".
+  Ausnahmen und die Zone der Serie. Ein Termin, der im Editor zur Serie wird,
+  bekommt die Zone des Geräts wie eine neue Serie. Eine Serie, die schon ohne
+  Zone wiederholt, bleibt unverändert: eine verlorene Zone und eine gewollte
+  UTC-Serie sehen gleich aus, und das Stempeln verschöbe späte Termine auf einen
+  anderen Wochentag (Nachprüfung von #68; die zuerst gebaute Reparatur beim
+  Speichern ist deshalb zurückgenommen, Toni 2026-09-14). Die Hilfe beschreibt
+  das Verrutschen unter „Fehlersuche & Protokolle".
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

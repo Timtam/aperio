@@ -94,11 +94,11 @@ shows an hour early or late, here and in every other program that reads the
 calendar. In the calendar views you can see it already when you look past the
 next change.
 
-From this version the editor keeps the zone, and gives a series without one
-your device's time zone. To repair a series that is already affected, open the
-**whole series** in Aperio (not a single occurrence) and save it once. Aperio
-then stores it with your device's time zone, and from then on it keeps its time
-across every change of the clocks.
+From this version the editor keeps the zone, and an appointment that becomes a
+series gets your device's time zone. A series that has already lost its zone is
+not changed on its own: to Aperio it looks the same as a series that is meant to
+run in UTC. To fix an affected series, create it again, or set its time zone
+again in the program it came from.
 
 ## Reporting a bug
 

@@ -538,16 +538,17 @@ describe('editedRecurrence', () => {
     });
   });
 
-  it("gives a timed series without a zone the device's zone, as a new one gets", () => {
+  it('leaves a series without a zone as it is: it may be meant to run in UTC', () => {
+    // A lost zone and a UTC series look the same; stamping a late-evening
+    // weekly rule would move it to another weekday.
     deviceInBerlin();
     expect(
-      editedRecurrence('FREQ=DAILY', { exceptions: ['2026-06-22T07:00:00.000Z'], tzid: null }, false),
-    ).toEqual({ rrule: 'FREQ=DAILY', exceptions: ['2026-06-22T07:00:00.000Z'], tzid: 'Europe/Berlin' });
-    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] }, false)?.tzid).toBe('Europe/Berlin');
-  });
-
-  it('leaves an all-day series without a zone as it is', () => {
-    deviceInBerlin();
+      editedRecurrence('FREQ=WEEKLY;BYDAY=MO', { exceptions: ['2026-06-22T23:30:00.000Z'], tzid: null }, false),
+    ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: ['2026-06-22T23:30:00.000Z'] });
+    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] }, false)).toEqual({
+      rrule: 'FREQ=DAILY',
+      exceptions: [],
+    });
     expect(editedRecurrence('FREQ=DAILY', { exceptions: [] }, true)).toEqual({
       rrule: 'FREQ=DAILY',
       exceptions: [],

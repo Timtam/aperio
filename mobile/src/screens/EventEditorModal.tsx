@@ -818,8 +818,8 @@ export default function EventEditorModal({
         }).catch(() => undefined);
       }
     };
-    // Keep the series' EXDATE exceptions and its zone when editing; a timed
-    // series without a zone gets the device's zone, as a new one does.
+    // Keep the series' EXDATE exceptions and its zone when editing; an event
+    // that becomes a series here gets the device's zone, as a new one does.
     const recurrenceToSend = editedRecurrence(recurrence, original?.recurrence, allDay);
     setError(null);
     setSaving(true);

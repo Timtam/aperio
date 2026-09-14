@@ -13,9 +13,9 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * CalDAV, Google, Graph and EWS alike — and slid an hour at the next clock
  * change, in the views, in its reminders and in every other client.
  *
- * A timed series without a zone gets the device's zone when it is saved, as a
- * new one does: that repairs a series that already lost it, and gives one to an
- * event that becomes a series in the editor.
+ * An event that becomes a series in the editor gets the device's zone, as a new
+ * series does. A series that already recurs without a zone is left as it is: it
+ * may be meant to run in UTC.
  */
 
 const invokeMock = vi.hoisted(() =>
@@ -126,21 +126,31 @@ async function saveEdited(event: CalendarEvent, change?: () => void) {
 
 describe('EventDialog → editing a series as a whole', () => {
   it('keeps the zone and the exceptions of the series', async () => {
-    const sent = await saveEdited(SERIES);
-    expect(sent?.tzid).toBe('Europe/Berlin');
+    // A zone other than the device's, so replacing it would show.
+    deviceInBerlin();
+    const inNewYork = {
+      ...SERIES,
+      recurrence: { ...SERIES.recurrence, tzid: 'America/New_York' },
+    } as unknown as CalendarEvent;
+    const sent = await saveEdited(inNewYork);
+    expect(sent?.tzid).toBe('America/New_York');
     expect(sent?.exceptions).toEqual(['2026-06-22T07:00:00.000Z']);
     expect(sent?.rrule).toMatch(/FREQ=WEEKLY/);
   });
 
-  it("repairs a series that lost its zone: saving gives it the device's zone", async () => {
+  it('leaves a series without a zone as it is', async () => {
+    // It may be a UTC series (Google's Etc/UTC arrives without a zone); giving
+    // it the device's zone would move a late-evening rule to another weekday.
     deviceInBerlin();
-    const lost = {
+    const utc = {
       ...SERIES,
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: ['2026-06-22T07:00:00.000Z'] },
+      start: '2026-06-15T23:30:00.000Z',
+      end: '2026-06-16T00:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: ['2026-06-22T23:30:00.000Z'] },
     } as unknown as CalendarEvent;
-    const sent = await saveEdited(lost);
-    expect(sent?.tzid).toBe('Europe/Berlin');
-    expect(sent?.exceptions).toEqual(['2026-06-22T07:00:00.000Z']);
+    const sent = await saveEdited(utc);
+    expect(sent?.tzid ?? null).toBeNull();
+    expect(sent?.exceptions).toEqual(['2026-06-22T23:30:00.000Z']);
   });
 
   it("gives a one-off event that becomes a series the device's zone", async () => {
