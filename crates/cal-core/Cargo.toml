@@ -30,7 +30,11 @@ base64 = "0.22"
 # The Aperio-Extras codec (task::extras) serializes a forward-compatible
 # metadata bag to JSON before base64-ing it into a provider field, so
 # serde_json is a runtime dependency, not just a test one.
-serde_json.workspace = true
+#
+# float_roundtrip: the task-settings door reads numbers JavaScript wrote, in
+# JSON.stringify's shortest round-trip spelling. Without it a few of them read
+# back one ULP away, enough to snap a minute to the other half hour.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 # Folding two spellings of one join URL into the identity they share
 # (src/meeting_link_grouping.rs). A real parser rather than a hand-rolled
 # fold, because the fold has to resolve dot segments, drop a default port and

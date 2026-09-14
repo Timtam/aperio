@@ -15,6 +15,7 @@ import {
   installTaskAssignmentRules,
   installSignatureRules,
   installDayStartRules,
+  installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -160,6 +161,11 @@ installSignatureRules({
 // The day-start rules: overdue, slipped, pinned, reminded, and the fire gate.
 installDayStartRules({
   dayStartJson: (inputJson) => CalFfi.dayStart(inputJson),
+});
+
+// The task settings: how the stored preferences read, and what a change stores.
+installTaskSettingsRules({
+  taskSettingsJson: (inputJson) => CalFfi.taskSettings(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

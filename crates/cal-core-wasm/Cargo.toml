@@ -35,5 +35,11 @@ workspace = true
 # instructions are valid and every browser this app targets runs them; only the
 # bundled optimiser is behind. Telling it what it is looking at keeps the
 # optimisation rather than switching it off.
+#
+# The same holds for the saturating float-to-integer conversions (`as` from
+# f64, `i32.trunc_sat_f64_u`) that rustc's wasm32 target also emits by default
+# now: `cal_core::task_settings` clamps parsed numbers into whole days and
+# minutes, and the bundled optimiser rejects the instruction as a feature
+# it was not told about.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O", "--enable-bulk-memory"]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

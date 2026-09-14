@@ -16,6 +16,7 @@ import {
   installTaskAssignmentRules,
   installSignatureRules,
   installDayStartRules,
+  installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
 } from '@aperio/shared';
@@ -57,6 +58,7 @@ import {
   stripSignatureJson,
   applySignatureJson,
   dayStartJson,
+  taskSettingsJson,
   initCoreRules,
   isImportantPriority,
   normalPriority,
@@ -181,6 +183,9 @@ initCoreRules()
 
     // The day-start rules: overdue, slipped, pinned, reminded, and the fire gate.
     installDayStartRules({ dayStartJson });
+
+    // The task settings: how the stored preferences read, and what a change stores.
+    installTaskSettingsRules({ taskSettingsJson });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

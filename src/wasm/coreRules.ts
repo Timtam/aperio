@@ -55,6 +55,7 @@ import init, {
   stripSignature as wasmStripSignature,
   applySignature as wasmApplySignature,
   dayStart as wasmDayStart,
+  taskSettings as wasmTaskSettings,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -310,4 +311,10 @@ export function applySignatureJson(inputJson: string): string {
 export function dayStartJson(inputJson: string): string {
   assertReady();
   return wasmDayStart(inputJson);
+}
+
+/** See `cal_core::task_settings::task_settings_json`. */
+export function taskSettingsJson(inputJson: string): string {
+  assertReady();
+  return wasmTaskSettings(inputJson);
 }

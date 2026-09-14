@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api/client', () => ({
@@ -15,7 +17,6 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: () => Promise.resolve(() => {}),
 }));
 
-import contract from '../../crates/cal-core/tests/fixtures/taskSettings.json';
 import {
   answerCountdownWrite,
   answerDayWindowWrite,
@@ -29,14 +30,16 @@ import {
 } from './taskSettings.contractSupport';
 
 /**
- * The task settings, pinned as a table before they move.
+ * The task settings, as one table both surfaces answer.
  *
- * How each surface reads the stored task and calendar preferences, resolves a
- * list's effective settings, and normalises what it writes back. Today every
- * rule exists twice — the desktop `TaskCascadeProvider` and the mobile
- * `taskBehaviour.ts` — and this file runs BOTH on every case: a row where the
- * surfaces differ says so and carries the desktop's answer beside mobile's.
- * The Rust side will read the same file.
+ * How the stored task and calendar preferences read, how a list's effective
+ * settings resolve, and what a change writes back. The rules live once, in
+ * `cal_core::task_settings`, behind the door `shared/taskSettings.ts` asks;
+ * this file still runs BOTH surfaces — the desktop `TaskCascadeProvider` and
+ * the mobile `taskBehaviour.ts` — on every case, so each surface's wiring to
+ * the door is pinned as well. The rows were measured on the TypeScript before
+ * the port, no row carries a desktop answer any more, and the core's contract
+ * reads the same file.
  *
  * What stays out, and why, is written in the fixture's `notInThisTable`.
  */
@@ -48,7 +51,17 @@ interface Row<I> {
   desktop?: unknown;
 }
 
-/** A fixture section as rows; JSON infers a union of literal shapes. */
+/**
+ * The fixture, read with `JSON.parse` rather than imported. A JSON import is
+ * compiled into an object literal, where the key `__proto__` sets the
+ * prototype instead of making a field, so the row that keeps a list named
+ * `__proto__` would expect nothing where both surfaces now hold the list.
+ */
+const contract = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'crates/cal-core/tests/fixtures/taskSettings.json'), 'utf8'),
+) as Record<'read' | 'effective' | 'countdownWrite' | 'dayWindowWrite' | 'overrideUpdate', Row<unknown>[]>;
+
+/** A fixture section as rows of one input shape. */
 const rows = <I,>(section: unknown): Row<I>[] => section as Row<I>[];
 
 describe('taskSettings contract', () => {
@@ -66,11 +79,23 @@ describe('taskSettings contract', () => {
       'a-trigger-off-the-list-is-midnight',
       'a-bad-field-leaves-the-good-ones',
       'one-failed-read',
+      'countdown-days-too-long-for-a-number-is-the-default',
+      'a-list-named-proto-is-an-ordinary-list',
     );
-    named(contract.effective, 'an-override-wins-per-field');
+    named(contract.effective, 'an-override-wins-per-field', 'a-list-named-proto-is-an-ordinary-list');
     named(contract.countdownWrite, 'infinity-is-written-as-the-default');
-    named(contract.dayWindowWrite, 'an-edge-between-half-hours-snaps');
-    named(contract.overrideUpdate, 'an-update-keeps-its-place', 'fields-are-written-in-a-fixed-order');
+    named(
+      contract.dayWindowWrite,
+      'an-edge-between-half-hours-snaps',
+      'a-minute-just-below-a-midpoint-snaps-down',
+    );
+    named(
+      contract.overrideUpdate,
+      'an-update-keeps-its-place',
+      'fields-are-written-in-a-fixed-order',
+      'a-list-named-proto',
+      'array-index-ids-come-first',
+    );
   });
 
   const replay = <I, T>(

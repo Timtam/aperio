@@ -1825,6 +1825,50 @@ Siehe DESIGN §4.2.
   trotzdem. `taskSettings.contract.test.tsx` spielt beide Oberflächen zurück
   (89 Tests); rot bewiesen (mobile Klemme auf 29 → die fünf Zeilen, die auf 30
   klemmen, fallen für Mobile). Kein Produktionscode geändert.
+  Nachgetragen: die Testhilfe lud die mobilen Module statisch, und die
+  Desktop-Typprüfung folgte ihnen bis ins Expo-Brückenmodul — in der CI ohne
+  mobile Pakete rot. Jetzt über einen Pfad in einer Variablen geladen, dem
+  weder `tsc` noch der Bundler folgt.
+  ↳ **Schritt 2 (Folge-PR auf #64): gebaut.** `cal_core::task_settings` mit
+  EINER Tür `task_settings_json` und fünf Regeln: `read` (die gespeicherten
+  Zeichenketten → die Einstellungen), `effective` (die wirksamen Werte einer
+  Liste), `countdown_days_to_store`, `day_window_to_store` und
+  `with_list_override`. Gelesen wie JavaScript: `parseInt` (führender
+  JavaScript-Leerraum, Vorzeichen, ASCII-Ziffern), `Math.round` (halb nach
+  oben), Aufzählungen nur mit ihren Gliedern, die Überschreibungen in der
+  Schlüssel-Reihenfolge eines JavaScript-Objekts (Array-Index-Ids zuerst
+  aufsteigend, wiederholter Schlüssel: erster Platz, letzter Wert) — ein eigener
+  Deserializer, weil `serde_json` ohne `preserve_order` sortiert. Hülle
+  `shared/taskSettings.ts`; der Desktop-`TaskCascadeProvider` und die mobile
+  `taskBehaviour.ts` lesen und schreiben nur noch den Speicher, alle
+  Parse-Helfer beider Seiten sind weg, die Standardwerte fragen beide beim
+  Kern (mobil erst beim ersten Gebrauch, nie beim Import). ABSICHTLICH
+  geändert (Toni, 2026-09-13): **ein Lesefehler lässt nur diesen Wert auf den
+  Standard fallen** (mobil liest jetzt jeden Schlüssel mit eigenem `catch`);
+  **eine Lesart des Auslösers** — `host_core::reminders::day_start_time` fragt
+  `cal_core::day_start_trigger` (nur die fünf angebotenen Werte, sonst
+  `00:00`; vorher jede Uhrzeit, auch mit Sekunden), mit eigenem Host-Test; und
+  eine Liste `__proto__` ist eine gewöhnliche Liste. Fixture: vier Zeilen
+  geändert, eine neu (numerische Listen-Ids zuerst), 89 Zeilen, keine trägt
+  mehr eine Desktop-Antwort. Rust 12/12 und Host 1/1 beim ersten Lauf.
+  Nebenbei nötig: `wasm-opt` erlaubt jetzt auch `nontrapping-float-to-int`
+  (die Klemmen wandeln f64 in ganze Tage und Minuten, rustc erzeugt
+  `i32.trunc_sat_f64_u`, der gebündelte Optimierer lehnte es ab — wie zuvor
+  bulk-memory); und der TypeScript-Vertragstest liest seine Fixture mit
+  `JSON.parse` statt per Import, weil ein JSON-Import den Schlüssel
+  `__proto__` zum Prototyp macht.
+  Nach der Prüfung (drei Linsen: 8 bestätigt, 3 widerlegt) behoben: ein
+  Countdown, den `parseInt` als Unendlich liest (jenseits von 1,8e308, etwa
+  eine 1 mit 309 Nullen), las 30
+  statt des Standards 3 — jetzt wieder 3 wie im TypeScript; `serde_json` las
+  manche JavaScript-Zahlen eine ULP daneben (104.99999999999999 als 105, also
+  120 statt 90) — cal-core schaltet `float_roundtrip` ein. Je eine Zeile dazu
+  (91 Zeilen), die geänderten und neuen Zeilen stehen in beiden
+  Anti-Stille-Listen, vier veraltete Beschreibungen korrigiert (Notiz der
+  Auslöser-Zeile, `dayStart.json`, Kopf des TypeScript-Vertragstests,
+  Provider-Doku). Widerlegt: eine Override-Tabelle mit Zahlen jenseits von
+  f64, 128 Ebenen Tiefe oder einzelnen Surrogaten fällt ganz auf leer — kein
+  Aperio-Schreiber erzeugt so etwas.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

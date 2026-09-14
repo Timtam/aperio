@@ -39,7 +39,7 @@ import {
   effectiveForList,
   priorityScaleFor,
   readTaskBehaviour,
-  TASK_BEHAVIOUR_DEFAULTS,
+  taskBehaviourDefaults,
   type TaskBehaviour,
 } from '../state/taskBehaviour';
 import { setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
@@ -118,7 +118,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     };
   }, [visible]);
 
-  const beh = behaviour ?? TASK_BEHAVIOUR_DEFAULTS;
+  const beh = behaviour ?? taskBehaviourDefaults();
   const cascadeFor = useCallback(
     (listId: string) => effectiveForList(beh, listId).cascade,
     [beh],

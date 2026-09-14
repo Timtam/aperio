@@ -882,6 +882,8 @@ external fun uniffi_cal_ffi_checksum_func_task_assignment_mode(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_task_i18n_keys(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_task_settings(
+): Short
 external fun uniffi_cal_ffi_checksum_func_tasks_on_days(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_without_duplicate_meetings(
@@ -1712,6 +1714,8 @@ external fun uniffi_cal_ffi_fn_func_task_assignment_mode(`inputJson`: RustBuffer
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_i18n_keys(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_task_settings(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_tasks_on_days(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_without_duplicate_meetings(`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1935,6 +1939,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_task_i18n_keys() != 24750.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_task_settings() != 41630.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_tasks_on_days() != 23798.toShort()) {
@@ -10931,6 +10938,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_task_i18n_keys(
     
         _status)
+}
+    )
+    }
+    
+
+        /**
+         * One question to the task-settings rules, and its answer.
+         */
+    @Throws(StoreException::class) fun `taskSettings`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_task_settings(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }
