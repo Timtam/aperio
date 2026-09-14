@@ -165,6 +165,28 @@ describe('DialogState recurring-edit scope prompt', () => {
     expect(screen.getByTestId('event').textContent).toBe('evt-1');
   });
 
+  it('a load for a dismissed prompt does not unblock the prompt that replaced it', async () => {
+    const first = pendingLoad();
+    const second = pendingLoad();
+    invokeMock.mockReturnValueOnce(first.promise).mockReturnValue(second.promise);
+    renderProbe();
+    await click('open-occ');
+    await click('choose-series');
+    await click('cancel');
+    await click('open-occ');
+    await click('choose-series');
+    await act(async () => {
+      first.answer(series);
+    });
+    // The first prompt's load landed; the second prompt's is still running.
+    await click('choose-series');
+    expect(seriesLoads()).toBe(2);
+    await act(async () => {
+      second.answer(series);
+    });
+    expect(screen.getByTestId('event').textContent).toBe('evt-1');
+  });
+
   it('opens nothing when the prompt was cancelled while the series loaded', async () => {
     const load = pendingLoad();
     invokeMock.mockReturnValue(load.promise);

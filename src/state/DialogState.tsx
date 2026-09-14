@@ -483,7 +483,9 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     void getEventById(seriesIdOf(event), event.calendar_id)
       .catch(() => null)
       .then((series) => {
-        seriesLoadingFor.current = null;
+        // Only its own: a load for a prompt that was dismissed meanwhile must
+        // not unblock the prompt that replaced it.
+        if (seriesLoadingFor.current === prompt) seriesLoadingFor.current = null;
         swap(
           series
             ? { kind: 'event', event: series }

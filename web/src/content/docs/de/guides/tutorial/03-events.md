@@ -99,20 +99,17 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
   **doppelklicken** oder über das Kontextmenü **Bearbeiten** wählen.
 - **Verschieben:** Im Dialog die Zeiten ändern – das funktioniert
   zuverlässig und screenreader-freundlich. Per Maus kannst du einen Termin
-  auch auf einen **anderen Tag** in der Wochen- oder Monatsansicht ziehen
-  (Uhrzeit und Dauer bleiben erhalten) oder auf einen **Kalender in der
-  Seitenleiste**, um ihn in diesen Kalender zu verschieben. Bei
-  Serienterminen fragt Aperio, ob nur dieser Termin oder die ganze Serie
-  verschoben werden soll. Die ganze Serie verschiebt jeden Termin um
-  dieselbe Zahl von Tagen: Aus „jeden Montag“ wird „jeden Dienstag“, und
-  das Enddatum wandert mit. Manche Regeln lassen sich so nicht verschieben,
-  etwa „am zweiten Sonntag jedes Monats“ oder ein Tag nach dem 28.; dann sagt
-  Aperio, warum, und bietet an, nur diesen Termin zu verschieben. Vorsicht bei
-  einzelnen Terminen, die du in einem externen Kalender wie iCloud, Google oder
-  Exchange für sich geändert oder gelöscht hast: Sie wandern womöglich nicht
-  mit. Ein gelöschter Termin kann am neuen Tag wieder auftauchen, und ein
-  geänderter kann bleiben, wo er war, während die Serie ihn am neuen Tag noch
-  einmal zeigt. Lösche oder ändere diese Termine nach dem Verschieben erneut.
+  auch auf einen **anderen Tag** in der Wochen- oder Monatsansicht ziehen,
+  dann bleiben Uhrzeit und Dauer erhalten, oder in das Stundenraster der
+  Tages- oder Wochenansicht, dann bekommt er die Uhrzeit, an der du ihn
+  loslässt. Auf einen **Kalender in der Seitenleiste** gezogen, wandert er in
+  diesen Kalender. Bei Serienterminen fragt Aperio, ob nur dieser Termin oder
+  die ganze Serie verschoben werden soll. Die ganze Serie verschiebt jeden
+  Termin um dieselbe Zahl von Tagen: Aus „jeden Montag“ wird „jeden
+  Dienstag“, und das Enddatum wandert mit. Manche Regeln lassen sich so nicht
+  verschieben, etwa „am zweiten Sonntag jedes Monats“ oder ein Tag nach dem
+  28.; dann sagt Aperio, warum, und bietet an, nur diesen Termin zu
+  verschieben. Siehe auch **Einzeln geänderte oder gelöschte Termine** unten.
 - **Löschen:** Termin markieren und **Löschen** wählen (Standard: `Entf`).
   Vor dem Löschen wird nachgefragt.
 
@@ -133,6 +130,17 @@ entfernt (beim Löschen). **Die ganze Serie** öffnet die Serie selbst, mit ihre
 eigenen Beginn und Ende, auch wenn du sie von einem späteren Termin aus geöffnet
 hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
 Beginn der Serie.
+
+> **Einzeln geänderte oder gelöschte Termine:** Verschiebst du eine ganze Serie
+> auf einen anderen Tag oder eine andere Uhrzeit, per Ziehen oder im Dialog,
+> bleiben manche Einzeltermine an ihrem alten Datum hängen: Termine, die in
+> einem externen Kalender (iCloud, Google, Exchange) für sich geändert wurden,
+> und Termine, die in einem Google-Kalender gelöscht wurden, auch wenn du sie
+> in Aperio gelöscht hast (womöglich auch in Exchange). Nach dem Verschieben
+> kann ein gelöschter Termin wieder auftauchen, ein geänderter doppelt
+> erscheinen, und an der alten Stelle kann ein anderer Termin fehlen. Aperio
+> kann das nicht reparieren. Sieh dir die Serie danach in der App des Kalenders
+> an; dort lassen sich solche Einzeländerungen rückgängig machen.
 
 > **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
 > werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste

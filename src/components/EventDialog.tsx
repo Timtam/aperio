@@ -1362,7 +1362,9 @@ export function EventDialog({
         if (isCommandError(err)) {
           setError(`${err.code}: ${err.message}`);
         } else {
-          setError(String(err));
+          // Only the message: String() would put an English "Error: " in
+          // front of a translated sentence.
+          setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
         setSubmitting(false);
@@ -1424,7 +1426,9 @@ export function EventDialog({
         if (isCommandError(err)) {
           setError(`${err.code}: ${err.message}`);
         } else {
-          setError(String(err));
+          // Only the message: String() would put an English "Error: " in
+          // front of a translated sentence.
+          setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
         setSubmitting(false);

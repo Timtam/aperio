@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { exceptionsAtSeriesTime, seriesTimesFromOccurrenceEdit } from './recurrence';
+import { exceptionsAtSeriesTime, expandEvent, seriesTimesFromOccurrenceEdit } from './recurrence';
 
 // A weekly series at 09:00 New York time, written in June (EDT, UTC-4). The
 // zone is not the device's on any machine these run on, so the series' clock
@@ -63,6 +63,19 @@ describe('seriesTimesFromOccurrenceEdit', () => {
     });
   });
 
+  it('counts an untouched time by device days across a clock change near midnight', () => {
+    // A series without a zone at 23:30 UTC. Its October occurrence moved a week
+    // later on the device, time untouched: past the device's clock change that
+    // is 00:30 UTC the next day, but the series still moves by seven days.
+    const series = { start: '2026-06-15T23:30:00.000Z', end: '2026-06-16T00:30:00.000Z' };
+    const occurrence = { start: '2026-10-19T23:30:00.000Z', end: '2026-10-20T00:30:00.000Z' };
+    const edited = { start: onDevice(occurrence.start, 7), end: onDevice(occurrence.end, 7) };
+    expect(seriesTimesFromOccurrenceEdit(series, null, occurrence, edited, false)).toEqual({
+      start: '2026-06-22T23:30:00.000Z',
+      end: '2026-06-23T00:30:00.000Z',
+    });
+  });
+
   it('moves an all-day series by local days and keeps the edited length', () => {
     const local = (y: number, m: number, d: number) => new Date(y, m - 1, d).toISOString();
     const series = { start: local(2026, 6, 15), end: local(2026, 6, 16) };
@@ -100,6 +113,25 @@ describe('exceptionsAtSeriesTime', () => {
     expect(
       exceptionsAtSeriesTime(daily, '2026-06-15T01:00:00.000Z', '2026-06-15T05:00:00.000Z', false),
     ).toEqual({ ...daily, exceptions: ['2026-06-18T05:00:00.000Z'] });
+  });
+
+  it('keeps exceptions on their day for a rule that names its weekdays', () => {
+    // Mondays at 21:00 in New York, moved to 01:00 there: the editors write the
+    // rule back as it is, so the series stays on Mondays on its clock, and the
+    // exception has to stay on its Monday to cancel that occurrence.
+    const weekly = {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      exceptions: ['2026-06-23T01:00:00.000Z'],
+      tzid: NY,
+    };
+    const start = '2026-06-16T05:00:00.000Z';
+    const moved = exceptionsAtSeriesTime(weekly, '2026-06-16T01:00:00.000Z', start, false);
+    const occurrences = expandEvent(
+      { id: 's', start, end: '2026-06-16T06:00:00.000Z', recurrence: moved },
+      { start: new Date('2026-06-01T00:00:00.000Z'), end: new Date('2026-07-10T00:00:00.000Z') },
+    ).map((o) => o.start);
+    expect(occurrences).not.toContain('2026-06-22T05:00:00.000Z');
+    expect(occurrences).toContain('2026-06-29T05:00:00.000Z');
   });
 
   it('leaves the exceptions alone when only the date moved', () => {

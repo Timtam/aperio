@@ -1978,7 +1978,7 @@ function LeafRow({
         announce(t('sidebar.dnd.eventMoved', { title: event.title }));
       } catch (err) {
         if (err instanceof SeriesNotLoadedError) {
-          announce(t('dialogs.event.seriesLoadFailed', { title: event.title }));
+          announce(t('dialogs.moveScope.seriesLoadFailed', { title: event.title }));
           return;
         }
         announce(
