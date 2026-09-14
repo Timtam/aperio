@@ -281,7 +281,8 @@ export function localTimeZone(): string | null {
  * expands DST-correctly — a series created here at 19:00 keeps 19:00 across DST,
  * the same guarantee a zoned CalDAV series gets. Leaves all-day rules (they use
  * the date-based path), already-zoned rules, and non-recurring events untouched.
- * Use at CREATE time only; editing keeps whatever zone the series already has.
+ * Use at CREATE time only; an edit keeps the zone the series already has
+ * through {@link editedRecurrence}.
  */
 export function withCreatedRecurrenceZone<
   R extends { rrule: string; exceptions: string[]; tzid?: string | null },
@@ -291,6 +292,29 @@ export function withCreatedRecurrenceZone<
   }
   const tz = localTimeZone();
   return tz ? { ...recurrence, tzid: tz } : recurrence;
+}
+
+/**
+ * The recurrence an editor saves: the rule from the form, with the exceptions
+ * and the zone of the series it edits.
+ *
+ * The editors hold only the rule text, and rebuilding `{rrule, exceptions}`
+ * from it dropped the zone. Every writer stores what it is handed — the local
+ * store left `rrule_tzid` empty, and CalDAV, Google, Graph and EWS wrote the
+ * start in UTC — so a series edited as a whole slid an hour at the next clock
+ * change, in the views, in its reminders and in every other client. A series
+ * without a zone stays without one; a new series (no previous recurrence) is
+ * stamped by {@link withCreatedRecurrenceZone} when it is created.
+ */
+export function editedRecurrence(
+  rrule: string | null | undefined,
+  previous: { exceptions: string[]; tzid?: string | null } | null | undefined,
+): { rrule: string; exceptions: string[]; tzid?: string } | null {
+  if (!rrule) {
+    return null;
+  }
+  const exceptions = previous?.exceptions ?? [];
+  return previous?.tzid ? { rrule, exceptions, tzid: previous.tzid } : { rrule, exceptions };
 }
 
 /**

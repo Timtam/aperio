@@ -33,6 +33,7 @@ import {
   writeSeriesSplit,
   timeInput,
   toIso,
+  editedRecurrence,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -817,10 +818,9 @@ export default function EventEditorModal({
         }).catch(() => undefined);
       }
     };
-    // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
-    const recurrenceToSend = recurrence
-      ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
-      : null;
+    // Keep the series' EXDATE exceptions and its zone when editing; a new
+    // series is stamped with the device's zone when it is created.
+    const recurrenceToSend = editedRecurrence(recurrence, original?.recurrence);
     setError(null);
     setSaving(true);
     try {

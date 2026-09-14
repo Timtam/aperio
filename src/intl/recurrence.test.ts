@@ -10,6 +10,7 @@ import {
   truncateRRuleBefore,
   splitRRuleForEdit,
   withCreatedRecurrenceZone,
+  editedRecurrence,
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
 
@@ -511,6 +512,39 @@ describe('withCreatedRecurrenceZone', () => {
 
   it('passes a non-recurring event (null) through', () => {
     expect(withCreatedRecurrenceZone(null, false)).toBeNull();
+  });
+});
+
+describe('editedRecurrence', () => {
+  it('keeps the exceptions and the zone of the series it edits', () => {
+    const series = { exceptions: ['2026-06-22T07:00:00.000Z'], tzid: 'Europe/Berlin' };
+    expect(editedRecurrence('FREQ=WEEKLY;BYDAY=MO', series)).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      exceptions: ['2026-06-22T07:00:00.000Z'],
+      tzid: 'Europe/Berlin',
+    });
+  });
+
+  it('adds no zone to a series that had none', () => {
+    expect(editedRecurrence('FREQ=DAILY', { exceptions: [], tzid: null })).toEqual({
+      rrule: 'FREQ=DAILY',
+      exceptions: [],
+    });
+    expect(editedRecurrence('FREQ=DAILY', { exceptions: [] })).toEqual({
+      rrule: 'FREQ=DAILY',
+      exceptions: [],
+    });
+  });
+
+  it('leaves a new series to the stamp at create time', () => {
+    const fresh = editedRecurrence('FREQ=DAILY', null);
+    expect(fresh).toEqual({ rrule: 'FREQ=DAILY', exceptions: [] });
+    expect(withCreatedRecurrenceZone(fresh, false)?.tzid ?? null).toBe(localTimeZone());
+  });
+
+  it('is no recurrence when the form has no rule', () => {
+    expect(editedRecurrence('', { exceptions: [], tzid: 'Europe/Berlin' })).toBeNull();
+    expect(editedRecurrence(null, undefined)).toBeNull();
   });
 });
 

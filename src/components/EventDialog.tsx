@@ -37,6 +37,7 @@ import {
   planSeriesSplit,
   seriesIdOf,
   writeSeriesSplit,
+  editedRecurrence,
 } from '../intl/recurrence';
 import {
   eventPrefillFrom,
@@ -917,9 +918,9 @@ export function EventDialog({
         return;
       }
 
-      const recurrence = form.rrule
-        ? { rrule: form.rrule, exceptions: event?.recurrence?.exceptions ?? [] }
-        : null;
+      // The series keeps its exceptions and its zone; a new series is stamped
+      // with the device's zone when it is created.
+      const recurrence = editedRecurrence(form.rrule, event?.recurrence);
 
       setSubmitting(true);
       try {
