@@ -2054,7 +2054,7 @@
       "alsoKnownAs": "{{entry}} (auch {{alias}})",
       "count_one": "Eine Zeitzone",
       "count_other": "{{count}} Zeitzonen",
-      "noMatch": "Keine Zeitzone passt zu ‚{{query}}‘.",
+      "noMatch": "Keine Zeitzone passt zu „{{query}}“.",
       "region": {
         "africa": "Afrika",
         "america": "Amerika",
@@ -2065,9 +2065,7 @@
         "europe": "Europa",
         "indian": "Indischer Ozean",
         "pacific": "Pazifik"
-      },
-      "notInList": "{{name}} (nicht in Aperios Liste)",
-      "unreadable": "{{name}} (Aperio kann diese Zeitzone nicht lesen; die Serie wiederholt sich nach UTC)"
+      }
     }
   },
   "sidebar": {

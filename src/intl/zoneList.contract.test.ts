@@ -67,10 +67,31 @@ describe('zoneList contract (WebAssembly door and shared shell)', () => {
   // Anti-silence: named rows, not a count.
   it('still carries the rows the rules turn on', () => {
     const queries = new Set(searchRows.map((row) => row.query));
-    for (const query of ['kiev', 'Oslo', 'Montreal', 'Zuerich', 'Wien', 'Europa', 'GMT', '   ']) {
+    // The rows without offsets the core and the phone's door name too.
+    for (const query of [
+      'kiev',
+      'Oslo',
+      'Montreal',
+      'Zuerich',
+      'Wien',
+      'Europa',
+      'GMT',
+      '   ',
+      'berlin europa',
+      'enix',
+      'Europe/Kiev',
+    ]) {
       expect(queries, `table lost ${JSON.stringify(query)}`).toContain(query);
     }
     expect(choiceRows.some((row) => row.stored === 'Europe/Kiev')).toBe(true);
+    expect(choiceRows.some((row) => row.device === 'Asia/Calcutta')).toBe(true);
+    const labelled = contract.labels.map((row) => row.zone);
+    for (const zone of ['Europe/Berlin', 'America/Indiana/Indianapolis']) {
+      expect(labelled, `table lost the ${zone} label`).toContain(zone);
+    }
+    for (const name of ['EST5EDT', 'Europe/Oslo']) {
+      expect(contract.notListed, `table lost ${name} from notListed`).toContain(name);
+    }
   });
 
   for (const row of contract.labels) {

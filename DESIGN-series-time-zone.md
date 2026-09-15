@@ -85,7 +85,7 @@ keinen, dort ist die Wahl Tonis Sache.
   neben London, und jede Serie sieht dieselbe Reihenfolge, auch eine alte.
 - **30a — feste Reihenfolge.** Normalzeit, dann Stadt, wie oben. Im Sommer hört
   man dadurch manchmal einen kleineren Versatz nach einem größeren („Adak,
-  Amerika, UTC−09:00“ vor „Honolulu, Amerika, UTC−10:00“).
+  Amerika, UTC−09:00“ vor „Honolulu, Pazifik, UTC−10:00“).
 - **31a — „+5“ ist die volle Stunde.** Ein Versatz ohne Minuten findet nur
   UTC+05:00; für Indien tippt man „+5:30“.
 - **32a — tzdata 2025b.** Stufe 3 wird mit den Zeitzonendaten aus chrono-tz
@@ -216,20 +216,33 @@ UTC-Eintrag steht dort vor den Zonen mit Normalzeit UTC+00:00.
 
 **Die Suche** findet Teile von Stadt, Gebiet, Zonen-Id, alten Namen, Region in
 der Sprache der Oberfläche und Versatz („+2“, „+02:00“, „UTC+2“, „5:30“). Jedes
-Wort muss passen; eine Suche ohne Wort zeigt die ganze Liste. Ein Versatz
-braucht ein Vorzeichen, einen Doppelpunkt oder „UTC“ davor, und ohne Minuten gilt
-die volle Stunde: „+5“ findet UTC+05:00, nicht Kolkata (31a). Ohne Vorzeichen
-passt ein Versatz zu beiden Seiten („5:30“). Er passt zum Versatz, den der
-Eintrag am Beginn der Serie zeigt. Anfrage und Liste werden auf beiden Seiten
-gleich gefaltet: zerlegt und ohne kombinierende Zeichen (ä wird a), klein, ß zu
-ss, „ue/oe/ae“ zu u/o/a. So finden „Zürich“ und „Zuerich“ beide Zurich. Wird ein
-Eintrag über einen alten Namen gefunden, sagt er das: „Kyiv, Europa, UTC+03:00
-(auch Kiev)“. Zusammengelegte Orte und andere Schreibweisen heißen dabei nach
-ihrem letzten Teil („auch Oslo“), alle anderen alten Namen mit ihrer ganzen Id
-(„auch US/Pacific“, „auch CST6CDT“), weil ihr letzter Teil allein nichts sagt.
-Die Zählzeile sagt
-„Eine Zeitzone“ oder „12 Zeitzonen“, bei keinem Treffer „Keine Zeitzone passt zu
-‚{Suche}‘.“
+Wort muss passen; eine Suche ohne Wort zeigt die ganze Liste.
+
+Ein Versatz braucht ein Vorzeichen, einen Doppelpunkt oder „UTC“ davor, und ohne
+Minuten gilt die volle Stunde: „+5“ findet UTC+05:00, nicht Kolkata (31a). Ohne
+Vorzeichen passt ein Versatz zu beiden Seiten („5:30“). Er passt zu dem Versatz,
+den der Eintrag am Beginn der Serie zeigt, also in ganzen Minuten: Die Pariser
+Ortszeit von 1900 (+00:09:21) steht als „UTC+00:09“ in der Liste und wird mit
+„+00:09“ gefunden. Die Sekunden fallen zur Null hin weg; weniger als eine Minute
+westlich von UTC heißt „UTC+00:00“.
+
+Anfrage und Liste werden auf beiden Seiten gleich gefaltet: zerlegt und ohne
+kombinierende Zeichen (ä wird a), klein, ß zu ss, „ue/oe/ae“ zu u/o/a. So finden
+„Zürich“ und „Zuerich“ beide Zurich. Ein Wortteil passt auch, wenn er ohne die
+letzte Regel im Namen steht: „enix“ findet Phoenix, obwohl Phoenix gefaltet
+„phonix“ heißt.
+
+Alte Namen findet die Suche unter dem Namen, den die Liste ihnen gibt („Kiev“,
+„Oslo“, „US/Pacific“); ein Wort mit Schrägstrich findet sie auch als ganze Id
+(„Europe/Kiev“). Wird ein Eintrag über einen alten Namen gefunden, sagt er das:
+„Kyiv, Europa, UTC+03:00 (auch Kiev)“. Zusammengelegte Orte und andere
+Schreibweisen heißen dabei nach ihrem letzten Teil („auch Oslo“), außer der
+letzte Teil ist die Stadt selbst („auch Asia/Istanbul“). Alle anderen alten Namen
+heißen mit ihrer ganzen Id („auch US/Pacific“, „auch CST6CDT“), weil ihr letzter
+Teil allein nichts sagt.
+
+Die Zählzeile sagt „Eine Zeitzone“ oder „12 Zeitzonen“. Bei keinem Treffer sagt
+sie: Keine Zeitzone passt zu „{Suche}“.
 
 **Markierte Einträge** stehen in der Liste, lassen sich aber nicht wählen, und
 der Grund gehört zum Text:
@@ -627,8 +640,11 @@ Handy im selben PR.
   - Chisinau: die Umstellung eine Stunde später.
 
   Für diese Zonen zeigen die Liste und die Erinnerungen danach den alten
-  Versatz, während ein Gerät mit aktuellen Daten richtig anzeigt. Die Fixture
-  meidet diese Tage. Wie Aperio aktuelle Daten bekommt, ist eine eigene Aufgabe.
+  Versatz, während ein Gerät mit aktuellen Daten richtig anzeigt. In der
+  Fixture liegt kein Beginn auf diesen Tagen. Die Normalzeit und den Platz
+  dieser Zonen in der Liste hält sie nur fest, wo beide Datenstände
+  übereinstimmen, denn die Normalzeit liest das Jahr ab heute und reicht über
+  diese Tage. Wie Aperio aktuelle Daten bekommt, ist eine eigene Aufgabe.
 - **Erinnerungen folgen der Kern-Regel (26a).** Für zwei gespeicherte
   Schreibweisen ändern sie sich:
   - „europe/berlin“ erinnert jetzt nach Berlin statt nach UTC.
@@ -717,8 +733,9 @@ Handy im selben PR.
 - Abweichungen zwischen chrono-tz und den Intl-Daten der Handys. WebView2 152
   und Edge 154 stimmen überein; Node 24 (tzdata 2026b) weicht für Vancouver ab
   1. November 2026 und für Chisinau ab.
-- Größenzuwachs der nativen Bibliothek und Aufrufkosten auf dem Handy. Für
-  WebAssembly sind beide gemessen.
+- Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf
+  einem Handy kostet. Gemessen sind die Android-Bibliothek (mit einem Prototyp)
+  und WebAssembly (Stufe 3).
 - Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
   - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
     mit `/` umschreibt.

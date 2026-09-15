@@ -15,7 +15,8 @@ query: string,
  */
 region_names: Array<RegionName>, 
 /**
- * The offsets the list shows, from [`zone_offsets`]. Without them no word
- * matches an offset, and hits come in position order.
+ * The offsets the list shows, from [`zone_offsets`]. With them hits come in
+ * the list's order; without them no word matches an offset, and hits come
+ * with the UTC entry first and then by position.
  */
 offsets: ZoneOffsets | null, };

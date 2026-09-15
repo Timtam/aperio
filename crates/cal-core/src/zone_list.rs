@@ -111,9 +111,11 @@ pub enum OffsetSign {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ZoneOffset {
-    /// The whole offset. Old local mean times carry seconds; `hh` and `mm`
-    /// drop them.
+    /// The whole offset. Old local mean times carry seconds.
     pub seconds: i32,
+    /// `sign`, `hh` and `mm` write the offset in whole minutes, the seconds cut
+    /// toward zero: −00:44:30 is "−00:44", and less than a minute west of UTC
+    /// is "+00:00", never "−00:00". The search matches these minutes.
     pub sign: OffsetSign,
     /// Hours, two digits: `"05"`.
     pub hh: String,
@@ -123,17 +125,18 @@ pub struct ZoneOffset {
 
 impl ZoneOffset {
     pub fn from_seconds(seconds: i32) -> Self {
-        let sign = if seconds < 0 {
+        let minutes = seconds / 60;
+        let sign = if minutes < 0 {
             OffsetSign::Minus
         } else {
             OffsetSign::Plus
         };
-        let whole = seconds.unsigned_abs();
+        let whole = minutes.unsigned_abs();
         Self {
             seconds,
             sign,
-            hh: format!("{:02}", whole / 3600),
-            mm: format!("{:02}", whole % 3600 / 60),
+            hh: format!("{:02}", whole / 60),
+            mm: format!("{:02}", whole % 60),
         }
     }
 }
@@ -190,8 +193,9 @@ pub struct ZoneSearchQuestion {
     pub query: String,
     /// Every region's name in the surface's language; all nine are required.
     pub region_names: Vec<RegionName>,
-    /// The offsets the list shows, from [`zone_offsets`]. Without them no word
-    /// matches an offset, and hits come in position order.
+    /// The offsets the list shows, from [`zone_offsets`]. With them hits come in
+    /// the list's order; without them no word matches an offset, and hits come
+    /// with the UTC entry first and then by position.
     #[serde(default)]
     pub offsets: Option<ZoneOffsets>,
 }
@@ -341,17 +345,25 @@ pub fn zone_labels_json() -> Result<String, serde_json::Error> {
 /// removed after decomposition, lower case, `ß` as `ss`, and `ae`, `oe`, `ue`
 /// read as `a`, `o`, `u` — so "Zürich" and "Zuerich" both find Zurich.
 pub(crate) fn fold(text: &str) -> String {
+    collapse_umlaut_spellings(&bare(text))
+}
+
+/// The fold short of reading `ae`, `oe`, `ue` as one letter.
+fn bare(text: &str) -> String {
     let decomposed: Cow<str> = if text.is_ascii() {
         Cow::Borrowed(text)
     } else {
         icu_normalizer::DecomposingNormalizerBorrowed::new_nfd().normalize(text)
     };
-    let bare = decomposed
+    decomposed
         .chars()
         .filter(|c| !('\u{0300}'..='\u{036F}').contains(c))
         .collect::<String>()
         .to_lowercase()
-        .replace('ß', "ss");
+        .replace('ß', "ss")
+}
+
+fn collapse_umlaut_spellings(bare: &str) -> String {
     let mut out = String::with_capacity(bare.len());
     let mut chars = bare.chars().peekable();
     while let Some(c) = chars.next() {
@@ -361,6 +373,30 @@ pub(crate) fn fold(text: &str) -> String {
         }
     }
     out
+}
+
+/// A text in both forms a word is matched in.
+#[derive(Clone)]
+struct Folded {
+    folded: String,
+    bare: String,
+}
+
+impl Folded {
+    fn new(text: &str) -> Self {
+        let bare = bare(text);
+        Self {
+            folded: collapse_umlaut_spellings(&bare),
+            bare,
+        }
+    }
+
+    /// A word is part of a text when its fold is part of the text's fold
+    /// ("Zuerich" in "Zürich"), or its bare form part of the text's bare form:
+    /// "enix" keeps the `e` that folding "Phoenix" to "phonix" takes away.
+    fn contains(&self, word: &Folded) -> bool {
+        self.folded.contains(word.folded.as_str()) || self.bare.contains(word.bare.as_str())
+    }
 }
 
 /// How the list names another tzdata name of a zone whose city is
@@ -387,7 +423,11 @@ const UTC_IDS: [&str; 2] = ["UTC", "Etc/UTC"];
 
 struct Alias {
     alias: ZoneAlias,
-    folded: String,
+    /// The label, which every word is matched in.
+    label: Folded,
+    /// The whole tzdata name, which a word with a `/` is matched in too: so
+    /// "Europe/Kiev" finds Kyiv, as "US/Pacific" finds Los Angeles.
+    name: Folded,
 }
 
 /// The aliases of each listed zone by position, and those of the UTC entry.
@@ -403,7 +443,8 @@ fn aliases(labels: &[ListedZone]) -> (Vec<Vec<Alias>>, Vec<Alias>) {
                         label: name.to_string(),
                         kind,
                     },
-                    folded: fold(name),
+                    label: Folded::new(name),
+                    name: Folded::new(name),
                 });
             }
             continue;
@@ -414,7 +455,8 @@ fn aliases(labels: &[ListedZone]) -> (Vec<Vec<Alias>>, Vec<Alias>) {
         if let Some(position) = series_clock::listed_position(target) {
             let label = alias_label(name, kind, &labels[position].city);
             by_position[position].push(Alias {
-                folded: fold(&label),
+                label: Folded::new(&label),
+                name: Folded::new(name),
                 alias: ZoneAlias {
                     name: name.to_string(),
                     label,
@@ -431,16 +473,17 @@ enum Word {
     /// `+2`, `UTC+2`, `+02:00`, `−3:30`, `5:30`: an offset needs a sign, a colon
     /// or a `utc` in front, and without minutes means the whole hour (31a). An
     /// unsigned word matches both signs.
-    Offset {
-        sign: Option<i32>,
-        seconds: i32,
-    },
-    Text(String),
+    Offset { sign: Option<i32>, seconds: i32 },
+    /// Any other word, and whether it holds a `/`.
+    Text { text: Folded, id: bool },
 }
 
 impl Word {
     fn read(word: &str) -> Word {
-        offset_word(word).unwrap_or_else(|| Word::Text(fold(word)))
+        offset_word(word).unwrap_or_else(|| Word::Text {
+            text: Folded::new(word),
+            id: word.contains('/'),
+        })
     }
 }
 
@@ -496,7 +539,7 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
     let words: Vec<Word> = question.query.split_whitespace().map(Word::read).collect();
     let mut regions = BTreeMap::new();
     for named in &question.region_names {
-        regions.insert(named.region, fold(&named.name));
+        regions.insert(named.region, Folded::new(&named.name));
     }
     if let Some(missing) = ZoneRegion::ALL.iter().find(|r| !regions.contains_key(r)) {
         return Err(ZoneSearchError::MissingRegion(*missing));
@@ -517,12 +560,12 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
 
     let mut hits = Vec::new();
     for entry in order {
-        let (texts, entry_aliases, seconds): (Vec<(MatchField, String)>, &[Alias], Option<i32>) =
+        let (texts, entry_aliases, seconds): (Vec<(MatchField, Folded)>, &[Alias], Option<i32>) =
             match entry {
                 ZoneRef::Utc => (
                     UTC_IDS
                         .iter()
-                        .map(|id| (MatchField::ZoneId, fold(id)))
+                        .map(|id| (MatchField::ZoneId, Folded::new(id)))
                         .collect(),
                     &utc_aliases,
                     question.offsets.as_ref().map(|_| 0),
@@ -531,19 +574,21 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
                     let label = labels
                         .get(position)
                         .ok_or(ZoneSearchError::OffsetsDoNotFit)?;
-                    let mut texts = vec![(MatchField::City, fold(&label.city))];
+                    let mut texts = vec![(MatchField::City, Folded::new(&label.city))];
                     if let Some(area) = &label.area {
-                        texts.push((MatchField::Area, fold(area)));
+                        texts.push((MatchField::Area, Folded::new(area)));
                     }
                     texts.push((MatchField::Region, regions[&label.region].clone()));
-                    texts.push((MatchField::ZoneId, fold(&label.zone)));
+                    texts.push((MatchField::ZoneId, Folded::new(&label.zone)));
                     (
                         texts,
                         &zone_aliases[position],
+                        // The whole minutes the entry shows (`ZoneOffset`):
+                        // +00:09:21 is found as "+00:09", as it is written.
                         question
                             .offsets
                             .as_ref()
-                            .map(|o| o.zones[position].offset.seconds),
+                            .map(|o| o.zones[position].offset.seconds / 60 * 60),
                     )
                 }
             };
@@ -560,7 +605,7 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
 fn match_entry(
     entry: ZoneRef,
     words: &[Word],
-    texts: &[(MatchField, String)],
+    texts: &[(MatchField, Folded)],
     entry_aliases: &[Alias],
     seconds: Option<i32>,
 ) -> Option<ZoneHit> {
@@ -582,24 +627,21 @@ fn match_entry(
                 }
                 via.push(MatchField::Offset);
             }
-            Word::Text(folded) => {
-                if let Some((field, _)) = texts
-                    .iter()
-                    .find(|(_, text)| text.contains(folded.as_str()))
-                {
+            Word::Text { text: word, id } => {
+                if let Some((field, _)) = texts.iter().find(|(_, text)| text.contains(word)) {
                     via.push(*field);
                     continue;
                 }
                 let best = entry_aliases
                     .iter()
-                    .filter(|a| a.folded.contains(folded.as_str()))
+                    .filter(|a| a.label.contains(word) || (*id && a.name.contains(word)))
                     .min_by(|a, b| {
                         a.alias
                             .label
                             .chars()
                             .count()
                             .cmp(&b.alias.label.chars().count())
-                            .then_with(|| a.folded.cmp(&b.folded))
+                            .then_with(|| a.alias.name.cmp(&b.alias.name))
                     })?;
                 via.push(MatchField::Alias);
                 if also.is_none() {
@@ -664,7 +706,7 @@ pub fn zone_choice_json(input_json: &str) -> Result<String, serde_json::Error> {
 /// and the order of the list.
 ///
 /// The standard offset is the smallest offset in the 365 days from `today`,
-/// sampled every 15 days (decision 29a). It is read from total offsets only —
+/// sampled every 15 days and on the 365th (decision 29a). It is read from total offsets only —
 /// never from chrono-tz's split into base and daylight saving, which tzdata
 /// writes differently between its data forms (Dublin, Casablanca) — so Dublin
 /// sits at +00:00 beside London, and every series sees the same order.
@@ -685,7 +727,9 @@ pub fn zone_offsets(question: &ZoneOffsetsQuestion) -> ZoneOffsets {
                     .local_minus_utc()
             };
             let standard = (0..=24)
-                .map(|k| offset_at(question.today + TimeDelta::days(15 * k)))
+                .map(|k| 15 * k)
+                .chain(std::iter::once(365))
+                .map(|day| offset_at(question.today + TimeDelta::days(day)))
                 .min()
                 .unwrap_or_else(|| offset_at(question.today));
             ListedOffset {
@@ -763,6 +807,62 @@ mod table {
         assert!(!utc.iter().any(|a| UTC_IDS.contains(&a.alias.name.as_str())));
     }
 
+    #[test]
+    fn an_offset_is_written_in_whole_minutes() {
+        let written = |seconds: i32| {
+            let offset = ZoneOffset::from_seconds(seconds);
+            (offset.sign, offset.hh, offset.mm)
+        };
+        let plus = OffsetSign::Plus;
+        let minus = OffsetSign::Minus;
+        assert_eq!(written(0), (plus, "00".into(), "00".into()));
+        assert_eq!(
+            written(-30),
+            (plus, "00".into(), "00".into()),
+            "never −00:00"
+        );
+        assert_eq!(written(-60), (minus, "00".into(), "01".into()));
+        assert_eq!(written(-2670), (minus, "00".into(), "44".into()));
+        assert_eq!(written(561), (plus, "00".into(), "09".into()));
+        assert_eq!(written(-34200), (minus, "09".into(), "30".into()));
+    }
+
+    #[test]
+    fn a_search_the_core_cannot_answer_is_refused() {
+        let names = |skip: usize| -> Vec<RegionName> {
+            ZoneRegion::ALL
+                .iter()
+                .skip(skip)
+                .map(|&region| RegionName {
+                    region,
+                    name: format!("{region:?}"),
+                })
+                .collect()
+        };
+        let asked = |region_names, offsets| {
+            zone_search(&ZoneSearchQuestion {
+                query: "berlin".into(),
+                region_names,
+                offsets,
+            })
+        };
+        assert_eq!(
+            asked(names(1), None),
+            Err(ZoneSearchError::MissingRegion(ZoneRegion::ALL[0]))
+        );
+        let at = DateTime::<Utc>::UNIX_EPOCH;
+        let short = ZoneOffsets {
+            at,
+            today: at,
+            zones: Vec::new(),
+            order: Vec::new(),
+        };
+        assert_eq!(
+            asked(names(0), Some(short)),
+            Err(ZoneSearchError::OffsetsDoNotFit)
+        );
+    }
+
     #[cfg(feature = "zones")]
     #[test]
     fn the_table_is_chrono_tz_s_release_in_its_own_spelling() {
@@ -817,6 +917,7 @@ mod contract {
             .collect()
     }
 
+    #[cfg(feature = "zones")]
     fn instant(value: &Value) -> DateTime<Utc> {
         value
             .as_str()
@@ -897,6 +998,27 @@ mod contract {
     fn every_label_row_holds() {
         let doc = doc();
         let labels = listed_zone_labels();
+        // Anti-silence: the rows the rules turn on, by name.
+        for zone in ["Europe/Berlin", "America/Indiana/Indianapolis"] {
+            assert!(
+                doc["labels"]
+                    .as_array()
+                    .expect("labels")
+                    .iter()
+                    .any(|row| row["zone"] == zone),
+                "the contract lost the {zone} label row"
+            );
+        }
+        for name in ["EST5EDT", "Europe/Oslo"] {
+            assert!(
+                doc["notListed"]
+                    .as_array()
+                    .expect("notListed")
+                    .iter()
+                    .any(|listed| listed == name),
+                "the contract lost {name} from notListed"
+            );
+        }
         for row in doc["labels"].as_array().expect("labels") {
             let zone = row["zone"].as_str().expect("a zone");
             let label = &labels[position(zone)];
@@ -917,7 +1039,16 @@ mod contract {
 
     #[test]
     fn every_fold_row_holds() {
-        for row in doc()["fold"].as_array().expect("fold rows") {
+        let rows = doc()["fold"].as_array().expect("fold rows").clone();
+        // Anti-silence: the umlaut spelled out, the sharp s, the decomposed
+        // umlaut and the pair folding takes an `e` from.
+        for text in ["Zuerich", "Straße", "Zu\u{308}rich", "Phoenix"] {
+            assert!(
+                rows.iter().any(|row| row["text"] == text),
+                "the contract lost the {text:?} fold row"
+            );
+        }
+        for row in &rows {
             let text = row["text"].as_str().expect("a text");
             assert_eq!(
                 fold(text),
@@ -945,6 +1076,10 @@ mod contract {
             "−3:30",
             "+5",
             "berlin europa",
+            "enix",
+            "Europe/Kiev",
+            "+0",
+            "+00:09",
         ] {
             assert!(
                 rows.iter().any(|row| row["query"] == query),
@@ -1015,6 +1150,13 @@ mod contract {
                     "{zone} at {at}"
                 );
             }
+            if let Some(sign) = row.get("sign") {
+                assert_eq!(
+                    serde_json::to_value(listed.offset.sign).expect("a sign"),
+                    *sign,
+                    "{zone} at {at}"
+                );
+            }
             if let Some(standard) = row.get("standard") {
                 assert_eq!(
                     i64::from(listed.standard.seconds),
@@ -1029,7 +1171,13 @@ mod contract {
     #[cfg(feature = "zones")]
     #[test]
     fn the_order_rows_hold() {
-        for row in doc()["order"].as_array().expect("order rows") {
+        let rows = doc()["order"].as_array().expect("order rows").clone();
+        // Anti-silence: the one order row pins 30a.
+        assert!(
+            rows.iter().any(|row| row["utcBefore"] == "Africa/Abidjan"),
+            "the contract lost the order row"
+        );
+        for row in &rows {
             let answer = zone_offsets(&ZoneOffsetsQuestion {
                 at: instant(&row["at"]),
                 today: instant(&row["today"]),

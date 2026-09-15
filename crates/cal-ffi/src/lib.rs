@@ -760,8 +760,9 @@ mod tests {
         }
     }
 
-    /// Every row of the core's zone list table through the phone's doors: the
-    /// JSON each door reads and writes, which the core's own test never crosses.
+    /// The core's zone list table through the phone's doors, every section but
+    /// the fold, which no door hands out: the JSON each door reads and writes,
+    /// which the core's own test never crosses.
     #[test]
     fn zone_list_doors_answer_every_contract_row() {
         use serde_json::{json, Value};
@@ -780,8 +781,30 @@ mod tests {
             }
         };
 
-        for row in doc["labels"].as_array().expect("label rows") {
+        // Anti-silence, here and below: the rows the rules turn on, by name, the
+        // same the core names.
+        let label_rows = doc["labels"].as_array().expect("label rows");
+        for zone in ["Europe/Berlin", "America/Indiana/Indianapolis"] {
+            assert!(
+                label_rows.iter().any(|row| row["zone"] == zone),
+                "the contract lost the {zone} label row"
+            );
+        }
+        for row in label_rows {
             assert!(labels.contains(row), "{row}");
+        }
+        let not_listed = doc["notListed"].as_array().expect("notListed");
+        for name in ["EST5EDT", "Europe/Oslo"] {
+            assert!(
+                not_listed.iter().any(|listed| listed == name),
+                "the contract lost {name} from notListed"
+            );
+        }
+        for name in not_listed {
+            assert!(
+                labels.iter().all(|label| label["zone"] != *name),
+                "{name} is listed"
+            );
         }
 
         let rows = doc["search"].as_array().expect("search rows");
@@ -800,6 +823,10 @@ mod tests {
             "−3:30",
             "+5",
             "berlin europa",
+            "enix",
+            "Europe/Kiev",
+            "+0",
+            "+00:09",
         ] {
             assert!(
                 rows.iter().any(|row| row["query"] == query),
@@ -866,6 +893,20 @@ mod tests {
             }
         }
 
+        // A question the core refuses comes back as an error, not a panic.
+        let short: Vec<Value> = doc["regions"]["de"]
+            .as_object()
+            .expect("region names")
+            .iter()
+            .skip(1)
+            .map(|(region, name)| json!({ "region": region, "name": name }))
+            .collect();
+        let refused = zone_search(json!({ "query": "berlin", "region_names": short }).to_string());
+        assert!(
+            matches!(refused, Err(StoreError::InvalidField { .. })),
+            "{refused:?}"
+        );
+
         let plain = |choice: &Value| -> Value {
             let mut choice = choice.clone();
             if let Some(object) = choice.as_object_mut() {
@@ -926,9 +967,62 @@ mod tests {
                 .iter()
                 .position(|label| label["zone"] == row["zone"])
                 .expect("a listed zone");
+            let listed = &answer["zones"][position];
+            assert_eq!(listed["offset"]["seconds"], row["seconds"], "{row}");
+            for field in ["sign", "hh", "mm"] {
+                if let Some(want) = row.get(field) {
+                    assert_eq!(listed["offset"][field], *want, "{field} of {row}");
+                }
+            }
+            if let Some(standard) = row.get("standard") {
+                assert_eq!(
+                    listed["standard"]["seconds"], *standard,
+                    "standard of {row}"
+                );
+            }
+        }
+
+        let order_rows = doc["order"].as_array().expect("order rows");
+        assert!(
+            order_rows
+                .iter()
+                .any(|row| row["utcBefore"] == "Africa/Abidjan"),
+            "the contract lost the order row"
+        );
+        for row in order_rows {
+            let asked = json!({ "at": row["at"], "today": row["today"] });
+            let answer: Value =
+                serde_json::from_str(&zone_offsets(asked.to_string()).expect("the offsets"))
+                    .expect("offsets JSON");
+            let names: Vec<String> = answer["order"]
+                .as_array()
+                .expect("the order")
+                .iter()
+                .map(&zone_of)
+                .collect();
+            let zones = |key: &str| -> Vec<String> {
+                row[key]
+                    .as_array()
+                    .expect("zones")
+                    .iter()
+                    .map(|zone| zone.as_str().expect("a zone").to_string())
+                    .collect()
+            };
+            let head = zones("head");
+            let tail = zones("tail");
+            assert_eq!(names[..head.len()], head[..], "the head of the list");
             assert_eq!(
-                answer["zones"][position]["offset"]["seconds"], row["seconds"],
-                "{row}"
+                names[names.len() - tail.len()..],
+                tail[..],
+                "the tail of the list"
+            );
+            let utc = names
+                .iter()
+                .position(|name| name == "utc")
+                .expect("the UTC entry");
+            assert_eq!(
+                names[utc + 1],
+                row["utcBefore"].as_str().unwrap_or_default()
             );
         }
     }

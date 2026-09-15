@@ -6,10 +6,15 @@ import type { OffsetSign } from "./OffsetSign";
  */
 export type ZoneOffset = { 
 /**
- * The whole offset. Old local mean times carry seconds; `hh` and `mm`
- * drop them.
+ * The whole offset. Old local mean times carry seconds.
  */
-seconds: number, sign: OffsetSign, 
+seconds: number, 
+/**
+ * `sign`, `hh` and `mm` write the offset in whole minutes, the seconds cut
+ * toward zero: −00:44:30 is "−00:44", and less than a minute west of UTC
+ * is "+00:00", never "−00:00". The search matches these minutes.
+ */
+sign: OffsetSign, 
 /**
  * Hours, two digits: `"05"`.
  */

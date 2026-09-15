@@ -46,7 +46,7 @@ export interface ZoneListRules {
 type Translate = (key: string, vars?: Record<string, unknown>) => string;
 
 let installedRules: ZoneListRules | null = null;
-let labels: ListedZone[] | null = null;
+let labels: readonly ListedZone[] | null = null;
 
 /** Bind this surface's doors into the core. */
 export function installZoneListRules(rules: ZoneListRules): void {
@@ -79,10 +79,11 @@ export const ZONE_REGIONS: readonly ZoneRegion[] = [
   'pacific',
 ];
 
-/** Every listed zone, named in parts, by position. Read once per install. */
-export function listedZoneLabels(): ListedZone[] {
+/** Every listed zone, named in parts, by position. Read once per install and
+ *  frozen: every position the core hands out indexes this one array. */
+export function listedZoneLabels(): readonly ListedZone[] {
   if (labels === null) {
-    labels = JSON.parse(rules().zoneLabelsJson()) as ListedZone[];
+    labels = Object.freeze(JSON.parse(rules().zoneLabelsJson()) as ListedZone[]);
   }
   return labels;
 }

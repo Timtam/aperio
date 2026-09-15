@@ -76,7 +76,10 @@ ts-export = ["dep:ts-rs"]
 # above, and DESIGN §4.4.
 collation = ["dep:icu_collator", "dep:icu_locale_core"]
 # The offsets of the world zone list, from chrono-tz's tzdata. OFF by default,
-# and off in WebAssembly: chrono-tz costs the desktop's module about 879 KB,
-# while the two native bindings already link it through host-core (about
-# 15 KB more). The names and the search need none of it and stay on.
+# and off in WebAssembly: chrono-tz costs the desktop's module about 879 KB.
+# The phone's binding and the desktop host switch it on; both already link
+# chrono-tz through host-core, so only the list's own code is new there (a
+# prototype with the fold and the search: about 21.6 KB on arm64, see
+# DESIGN-series-time-zone.md, stage 3). The names and the search need none of
+# it and stay on.
 zones = ["dep:chrono-tz"]

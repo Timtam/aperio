@@ -792,10 +792,11 @@ type NameRow = (String, String, &'static str);
 ///
 /// A link's kind is the section of `backward` that declares it, read from the
 /// heading above the section's `# Link TARGET LINK-NAME` column line, or
-/// `Etcetera` for a link in `etcetera`. A link anywhere else, before the first
-/// section, or under a heading this reader does not know is an error too: the
-/// kind decides how the zone list names the link, and a guess would name it
-/// wrongly without a sound.
+/// `Etcetera` for a link in `etcetera`. A comment after a blank line starts a
+/// new heading and ends the section above it. A link anywhere else, before the
+/// first section, under a heading without its column line, or under a heading
+/// this reader does not know is an error too: the kind decides how the zone
+/// list names the link, and a guess would name it wrongly without a sound.
 fn read_tz_sources(sources: &[(String, String)]) -> Result<(BTreeSet<String>, Links), String> {
     let mut zones = BTreeSet::new();
     let mut links = Links::new();
@@ -803,9 +804,12 @@ fn read_tz_sources(sources: &[(String, String)]) -> Result<(BTreeSet<String>, Li
         let mut section: Option<&'static str> = None;
         let mut paragraph: Vec<&str> = Vec::new();
         let mut heading: Option<&str> = None;
+        let mut after_blank = false;
         for (at, raw) in text.lines().enumerate() {
             if file == "backward" {
                 let trimmed = raw.trim();
+                let blank_before = after_blank;
+                after_blank = trimmed.is_empty();
                 if trimmed.is_empty() {
                     if let Some(first) = paragraph.first() {
                         heading = Some(*first);
@@ -830,6 +834,11 @@ fn read_tz_sources(sources: &[(String, String)]) -> Result<(BTreeSet<String>, Li
                             })?;
                         section = Some(kind);
                     } else {
+                        if blank_before {
+                            // A new heading: the links below it are not the
+                            // previous section's until its column line says so.
+                            section = None;
+                        }
                         paragraph.push(comment);
                     }
                 }
@@ -852,7 +861,7 @@ fn read_tz_sources(sources: &[(String, String)]) -> Result<(BTreeSet<String>, Li
                         ("backward", Some(kind)) => kind,
                         ("backward", None) => {
                             return Err(format!(
-                                "{file}:{}: link {name} comes before any section this reader knows",
+                                "{file}:{}: link {name} is not under a section this reader knows",
                                 at + 1
                             ))
                         }
@@ -1852,7 +1861,7 @@ Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
         let early = read_tz_sources(&[pair("backward", "Link\tA/B\tC/D\n")])
             .expect_err("a link before any section");
         assert!(
-            early.contains("backward:1") && early.contains("before any section"),
+            early.contains("backward:1") && early.contains("not under a section"),
             "{early}"
         );
         let unknown = read_tz_sources(&[pair(
@@ -1863,6 +1872,17 @@ Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
         assert!(
             unknown.contains("backward:3") && unknown.contains("Brand-new reasons"),
             "{unknown}"
+        );
+        // A new heading without its column line: its links would otherwise take
+        // the kind of the section above.
+        let headless = read_tz_sources(&[pair(
+            "backward",
+            "# Pre-1993 naming conventions\n\n# Link\tTARGET\t\tLINK-NAME\nLink\tA/B\tC/D\n\n# Brand-new reasons\nLink\tE/F\tG/H\n",
+        )])
+        .expect_err("a link under a heading without its column line");
+        assert!(
+            headless.contains("backward:7") && headless.contains("not under a section"),
+            "{headless}"
         );
     }
 

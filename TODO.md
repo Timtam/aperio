@@ -2001,7 +2001,8 @@ Siehe DESIGN §4.2.
   ↻ **Mit dem nächsten Handy-Build:** die `.so` frisch erzeugen (vier neue
   Funktionen), dazu die Liste und die Suche einmal auf dem Gerät aufrufen.
   🚩 **Aktualität der Zeitzonendaten** (32a): Marokko ab 20.09.2026, Vancouver,
-  Edmonton und Inuvik ab 01.11.2026. Eigene Aufgabe.
+  Edmonton und Inuvik ab 01.11.2026, Chisinau stellt eine Stunde später um.
+  Eigene Aufgabe.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

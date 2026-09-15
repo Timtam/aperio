@@ -2065,9 +2065,7 @@
         "europe": "Europe",
         "indian": "Indian Ocean",
         "pacific": "Pacific"
-      },
-      "notInList": "{{name}} (not in Aperio's list)",
-      "unreadable": "{{name}} (Aperio cannot read this time zone; the series repeats in UTC)"
+      }
     }
   },
   "sidebar": {

@@ -236,7 +236,8 @@ pub fn zone_labels() -> Result<String, JsValue> {
 }
 
 /// A search over the world zone list: `{query, region_names, offsets}` in, the
-/// hits in list order out.
+/// hits out — in list order when offsets are given, else the UTC entry first
+/// and then by position.
 #[wasm_bindgen(js_name = zoneSearch)]
 pub fn zone_search(input_json: &str) -> Result<String, JsValue> {
     rules::zone_search(input_json).map_err(to_js)

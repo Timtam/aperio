@@ -3,12 +3,12 @@
   "why": "The list, its names and its search are rules, and each surface would otherwise write its own: a city split one way on the desktop and another on the phone, an umlaut folded here and not there, Dublin sorted beside London on one device and beside Paris on the other. One list in the core answers both, and a frontend that is not JavaScript.",
   "decidedBy": "DESIGN-series-time-zone.md, section \"Die Zonenliste\", and Toni's decisions 17b (the full list, generated from chrono-tz), 25b (merged places found by search as \"Berlin (auch Oslo)\"), 26a (one rule for zones), 29a (order by standard time as of today: the smallest offset in the year from today), 30a (a fixed order: standard offset, then city), 31a (\"+5\" means UTC+05:00 only) and 32a (built on tzdata 2025b).",
   "writtenBy": [
-    "By hand, from the tzdata chrono-tz 0.10.4 ships (release 2025b): the zone files for offsets, `backward` and `etcetera` for the links and their kinds. Chosen, not measured: the rules are new. Rows avoid the dates where newer tzdata releases disagree with 2025b (Casablanca and El_Aaiun from 2026-09-20; Vancouver, Edmonton and Inuvik from 2026-11-01), so a tzdata update does not turn them red for a reason that is not the code's."
+    "By hand, from the tzdata chrono-tz 0.10.4 ships (release 2025b): the zone files for offsets, `backward` and `etcetera` for the links and their kinds. Chosen, not measured: the rules are new. Newer tzdata releases disagree with 2025b for Casablanca and El_Aaiun from 2026-09-20, for Vancouver, Edmonton and Inuvik from 2026-11-01, and for Chisinau's transition times. No `at` instant falls on those dates. A standard offset reads the year after `today`, which does cross them, so no row pins the standard offset or the place in the order of those zones unless both releases agree (Casablanca's 0). A tzdata update then turns no row red for a reason that is not the code's."
   ],
   "readBy": [
-    "crates/cal-core/src/zone_list.rs (the `contract` test module; offset rows only with the `zones` feature)",
-    "crates/cal-ffi/src/lib.rs (every row through the phone's doors)",
-    "src/intl/zoneList.contract.test.ts (the rows without offsets, through the WebAssembly door and the shared shell)"
+    "crates/cal-core/src/zone_list.rs (every row; the offsets, the order and the search rows with offsets only with the `zones` feature)",
+    "crates/cal-ffi/src/lib.rs (labels, notListed, search with offsets, choice, offsets and order, through the phone's doors; the fold rows are the core's alone, since no door hands out the fold)",
+    "src/intl/zoneList.contract.test.ts (labels, notListed, the search rows without offsets and choice, through the WebAssembly door and the shared shell; the offsets come from the host there)"
   ],
   "whereItLives": {
     "note": "Inside cal-core, like seriesClock.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves. A crate reads its own files."
@@ -20,7 +20,7 @@
     "notListed": "names that must not be entries of the list",
     "fold": "[{text, folded}]: the search's folding, pinned on its own",
     "search": "[{query, regions, offsets?, hits? | count? | includes?, excludes?, note}]: `offsets` is {at, today} when the row needs the list's offsets (then only with the `zones` feature); `hits` is every hit, in list order; `count` the number of hits; `includes` hits that must be among them (order not pinned), `excludes` zones that must not be. A hit is {zone, via, also?}: zone is the tzdata id or \"utc\" for the UTC entry; via one match field per word; also {label, name?, kind?} the other name a word found it by.",
-    "offsets": "[{zone, at, today, seconds, hh?, mm?, standard?}]: a listed zone's offset at `at` and, when given, its standard offset as of `today` (seconds)",
+    "offsets": "[{zone, at, today, seconds, sign?, hh?, mm?, standard?, note?}]: a listed zone's offset at `at` (sign, hh and mm in whole minutes, as the list writes it) and, when given, its standard offset as of `today` (seconds)",
     "order": "[{at, today, head, tail, utcBefore}]: the first and last zones of the list, and the zone the UTC entry opens",
     "choice": "[{stored?, device?, expect}]: expect is {stored, device?} with each {kind: utc | listed | not_listed | unreadable, zone?, name?, canonical?}"
   },
@@ -121,6 +121,9 @@
     { "query": "   ", "regions": "de", "count": 313, "note": "No word to fail: every entry is a hit, the list as it stands." },
     { "query": "atlantic", "regions": "en", "includes": [{ "zone": "Atlantic/Azores", "via": ["region"] }], "excludes": ["Africa/Abidjan"], "note": "Abidjan's other name Atlantic/Reykjavik is labelled Reykjavik, so the region word does not find it." },
     { "query": "atlantic", "regions": "de", "includes": [{ "zone": "Atlantic/Azores", "via": ["zone_id"] }], "note": "On a German surface the region word is Atlantik; atlantic matches the id." },
+    { "query": "enix", "regions": "de", "hits": [{ "zone": "America/Phoenix", "via": ["city"] }], "note": "A part of a word: enix keeps the e that folding Phoenix to phonix takes away, so it is matched in the name without the ae/oe/ue rule too." },
+    { "query": "Europe/Kiev", "regions": "de", "hits": [{ "zone": "Europe/Kyiv", "via": ["alias"], "also": { "label": "Kiev", "name": "Europe/Kiev", "kind": "alternate" } }], "note": "A word with a slash finds an old name as a whole id too; the entry still names it by its label." },
+    { "query": "Asia/Istanbul", "regions": "de", "hits": [{ "zone": "Europe/Istanbul", "via": ["alias"], "also": { "label": "Asia/Istanbul", "name": "Asia/Istanbul", "kind": "alternate" } }], "note": "An alternate name whose last part is the city itself keeps its whole id: (auch Istanbul) would say nothing." },
     { "query": "+2", "regions": "de", "hits": [], "note": "Without offsets no word matches an offset." },
     { "query": "+2", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "Europe/Berlin", "via": ["offset"] }], "excludes": ["Europe/London", "Europe/Helsinki"], "note": "Summer time in Berlin at the start." },
     { "query": "+02:00", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "Europe/Berlin", "via": ["offset"] }], "note": "With minutes." },
@@ -132,20 +135,23 @@
     { "query": "-3:30", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [], "note": "St. John's is on summer time, UTC-02:30, at this start." },
     { "query": "-3:30", "regions": "de", "offsets": { "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "America/St_Johns", "via": ["offset"] }], "note": "The offset at the start is what matches." },
     { "query": "−3:30", "regions": "de", "offsets": { "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "America/St_Johns", "via": ["offset"] }], "note": "The real minus sign, U+2212, as the list writes it." },
-    { "query": "+0", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "utc", "via": ["offset"] }, { "zone": "Africa/Abidjan", "via": ["offset"] }], "excludes": ["Europe/London"], "note": "London is on summer time at this start." },
+    { "query": "+0", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [{ "zone": "Atlantic/Azores", "via": ["offset"] }, { "zone": "utc", "via": ["offset"] }, { "zone": "Africa/Abidjan", "via": ["offset"] }, { "zone": "Africa/Bissau", "via": ["offset"] }, { "zone": "America/Danmarkshavn", "via": ["offset"] }, { "zone": "Africa/Monrovia", "via": ["offset"] }, { "zone": "Africa/Sao_Tome", "via": ["offset"] }], "note": "Hits in the list's order, not by position: the Azores, on summer time with a standard offset of -01:00, come before the UTC entry, which opens the zero group; that group goes by city. London is on summer time at this start." },
     { "query": "+0530", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [], "note": "Minutes need a colon." },
     { "query": "berlin +2", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [{ "zone": "Europe/Berlin", "via": ["city", "offset"] }], "note": "A word and an offset." },
-    { "query": "berlin +1", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [], "note": "The offset at the start, not the standard offset." }
+    { "query": "berlin +1", "regions": "de", "offsets": { "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "hits": [], "note": "The offset at the start, not the standard offset." },
+    { "query": "+00:09", "regions": "de", "offsets": { "at": "1900-01-01T00:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "Europe/Paris", "via": ["offset"] }], "note": "Paris mean time, +00:09:21, is written UTC+00:09 and found as it is written: the search compares whole minutes." },
+    { "query": "-0:44", "regions": "de", "offsets": { "at": "1960-01-01T12:00:00Z", "today": "2026-09-14T12:00:00Z" }, "includes": [{ "zone": "Africa/Monrovia", "via": ["offset"] }], "note": "Monrovia mean time, -00:44:30, is written with the seconds cut toward zero and the sign kept." }
   ],
   "offsets": [
-    { "zone": "Europe/Berlin", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 7200, "hh": "02", "mm": "00", "standard": 3600 },
+    { "zone": "Europe/Berlin", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 7200, "sign": "plus", "hh": "02", "mm": "00", "standard": 3600 },
     { "zone": "Europe/Berlin", "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 3600 },
-    { "zone": "Asia/Kolkata", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 19800, "hh": "05", "mm": "30" },
+    { "zone": "Asia/Kolkata", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 19800, "sign": "plus", "hh": "05", "mm": "30" },
     { "zone": "Asia/Kathmandu", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 20700, "hh": "05", "mm": "45" },
-    { "zone": "Pacific/Marquesas", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -34200, "hh": "09", "mm": "30" },
+    { "zone": "Pacific/Marquesas", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -34200, "sign": "minus", "hh": "09", "mm": "30" },
     { "zone": "Pacific/Kiritimati", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 50400 },
     { "zone": "Pacific/Niue", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -39600 },
-    { "zone": "America/St_Johns", "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -12600 },
+    { "zone": "Africa/Abidjan", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 0, "sign": "plus", "hh": "00", "mm": "00", "standard": 0, "note": "Zero is written with a plus." },
+    { "zone": "America/St_Johns", "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -12600, "sign": "minus", "hh": "03", "mm": "30" },
     { "zone": "America/St_Johns", "at": "2026-07-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -9000 },
     { "zone": "Pacific/Chatham", "at": "2026-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 49500 },
     { "zone": "Pacific/Chatham", "at": "2026-07-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 45900 },
@@ -160,7 +166,10 @@
     { "zone": "America/Indiana/Indianapolis", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -14400, "standard": -18000 },
     { "zone": "Asia/Almaty", "at": "2026-09-14T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 18000, "standard": 18000 },
     { "zone": "Asia/Almaty", "at": "2022-01-15T12:00:00Z", "today": "2022-01-15T12:00:00Z", "seconds": 21600, "standard": 21600 },
-    { "zone": "Europe/Paris", "at": "1900-01-01T00:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 561, "hh": "00", "mm": "09" }
+    { "zone": "Asia/Almaty", "at": "2022-01-15T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 21600, "standard": 18000, "note": "The offset is read at the start, the standard offset from today: they are different questions." },
+    { "zone": "Asia/Almaty", "at": "2023-03-06T12:00:00Z", "today": "2023-03-06T12:00:00Z", "seconds": 21600, "standard": 18000, "note": "Almaty moved to +05:00 on 2024-02-29T18:00Z, 360 days and six hours after this today: the year from today reaches its 365th day." },
+    { "zone": "Europe/Paris", "at": "1900-01-01T00:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": 561, "sign": "plus", "hh": "00", "mm": "09" },
+    { "zone": "Africa/Monrovia", "at": "1960-01-01T12:00:00Z", "today": "2026-09-14T12:00:00Z", "seconds": -2670, "sign": "minus", "hh": "00", "mm": "44", "note": "The seconds are cut toward zero, the sign kept." }
   ],
   "order": [
     {

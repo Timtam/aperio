@@ -82,7 +82,29 @@ describe('the zone list in words', () => {
   it('counts, and says when nothing matches', () => {
     expect(zoneCountText(1, 'berlin', de)).toBe('Eine Zeitzone');
     expect(zoneCountText(12, 'b', de)).toBe('12 Zeitzonen');
-    expect(zoneCountText(0, 'xyz', de)).toBe('Keine Zeitzone passt zu ‚xyz‘.');
+    expect(zoneCountText(0, 'xyz', de)).toBe('Keine Zeitzone passt zu „xyz“.');
     expect(zoneCountText(12, 'b', en)).toBe('12 time zones');
+  });
+
+  // The desktop's offsets come from its host, which the tests do not run; these
+  // hand-made ones stand in, so the WebAssembly door is asked with the offsets
+  // a search carries.
+  it('matches an offset word against the offsets the search is handed', () => {
+    const offsets = offsetsWith('Europe/Berlin', offset(7200, 'plus', '02', '00'));
+    const { hits } = searchZones('berlin +2', zoneRegionNames(de), offsets);
+    expect(hits.map((hit) => [zoneHitText(hit, offsets, de), hit.via])).toEqual([
+      ['Berlin, Europa, UTC+02:00', ['city', 'offset']],
+    ]);
+    expect(searchZones('berlin +1', zoneRegionNames(de), offsets).hits).toEqual([]);
+  });
+
+  it('refuses, through the door, a search without every region name', () => {
+    let refusal: unknown = null;
+    try {
+      searchZones('berlin', zoneRegionNames(de).slice(1), null);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(String(refusal)).toMatch(/no name for the region/);
   });
 });
