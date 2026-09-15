@@ -268,6 +268,16 @@ jobs:
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask tz-list --check
 
+      # The Exchange zone table is generated from the CLDR windowsZones file
+      # pinned in the EWS adapter, with every name resolved through cal_core and
+      # a clock guard from chrono-tz. It runs after tz-list, so a stale
+      # zone_names.rs is reported there rather than as drift here. A CLDR pin or
+      # chrono-tz update is a red build until `cargo xtask windows-zones` is
+      # rerun and committed.
+      - name: Exchange zone table is generated from CLDR
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: cargo xtask windows-zones --check
+
       # chrono-tz stays out of the desktop's WebAssembly door: it would grow the
       # module by about 879 KB, and the zone list's offsets come from the host
       # there. A `zones` feature switched on anywhere in cal-core-wasm's graph

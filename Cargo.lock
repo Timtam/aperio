@@ -8988,10 +8988,13 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "cal-core",
  "chrono",
  "chrono-tz",
  "plugin-core",
+ "quick-xml 0.36.2",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

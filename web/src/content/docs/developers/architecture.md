@@ -105,6 +105,8 @@ Some of the rules that cross today:
 
   Both are plain strings, with `''` for none, because every expansion of a
   series asks. The names are generated from chrono-tz by `cargo xtask tz-list`.
+  The Exchange adapter's Windows zone ids are generated on top of them, from a
+  pinned CLDR file, by `cargo xtask windows-zones`.
 
 - **the world zone list**, `cal_core::zone_list`: `zoneLabels`, `zoneSearch`
   and `zoneChoice` give the names, the search and where a stored zone stands.

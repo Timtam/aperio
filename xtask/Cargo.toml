@@ -6,7 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — repository automation run as `cargo xtask <task>`: staging and packing the bundled plugins (DESIGN.md section 20.6), and generating the frontends' TypeScript declarations and the core's zone names."
+description = "Aperio — repository automation run as `cargo xtask <task>`: staging and packing the bundled plugins (DESIGN.md section 20.6), and generating the frontends' TypeScript declarations, the core's zone names and the Exchange zone table."
 publish = false
 
 [dependencies]
@@ -23,6 +23,12 @@ serde_json.workspace = true
 # and the adapters parse zones with.
 chrono.workspace = true
 chrono-tz.workspace = true
+# `windows-zones` resolves every name in the CLDR windowsZones file through
+# cal_core — the rule the EWS adapter asks at runtime — reads the file with the
+# XML reader the adapters already use, and checks it against its pinned sha256.
+cal-core.workspace = true
+quick-xml.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

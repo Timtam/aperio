@@ -1,350 +1,506 @@
-//! Windows ↔ IANA time-zone name translation.
+//! Windows ↔ tzdata time-zone names for Exchange.
 //!
-//! Exchange/EWS identifies time zones by WINDOWS names ("Eastern Standard
-//! Time"), not IANA names ("America/New_York"). The rest of Aperio — and
-//! `Intl` in the frontend recurrence expander — speaks IANA, so a recurring
-//! EWS master's zone must be translated to expand DST-correctly.
+//! Exchange (EWS) names a series' zone by its WINDOWS id ("W. Europe Standard
+//! Time"); the rest of Aperio speaks tzdata ("Europe/Berlin"). The translation
+//! is the Unicode CLDR `windowsZones` mapping, generated into
+//! `windows_tz/windows_zones.rs` by `cargo xtask windows-zones` from the file
+//! pinned in `cldr/` (release tag, sha256 and licence beside it). Nothing here
+//! is kept by hand: a hand-kept copy had drifted to three wrong rows and wrote
+//! 174 of the 312 listed zones without a zone.
 //!
-//! This is the CLDR `windowsZones` "001" (default-territory) mapping for the
-//! commonly-used zones. It is intentionally not exhaustive: an unmapped Windows
-//! name resolves to `None`, and the event then expands in UTC (the prior
-//! behaviour), never worse. Extend the table as needed.
+//! ## Reading a series' zone
 //!
-//! ## The two directions are not the same mapping
+//! A series created without a zone comes back from Exchange with the start zone
+//! `Greenwich Standard Time` and the end zone `tzone://Microsoft/Utc` (live
+//! test, DESIGN-series-time-zone.md stage 4). That end zone means no zone
+//! (decision 43b). Otherwise the start zone's id reads as the zone of its
+//! default ("001") row, in tzdata's canonical spelling: `India Standard Time`
+//! is `Asia/Kolkata`, not CLDR's `Asia/Calcutta`. Exchange keeps one id for a
+//! group of cities on one clock, so a Vienna series reads back as Berlin. The
+//! id `UTC`, and an id the table does not know — a custom definition, an id
+//! only a server's registry has — mean no zone: the series repeats in UTC.
 //!
-//! Windows to IANA is one-to-one: each Windows id has one default territory.
-//! IANA to Windows is MANY-to-one, and that asymmetry was a real bug. The
-//! reverse lookup used to search the table below, which stores only the
-//! default member, so Vienna, Zurich, Amsterdam, Stockholm, Madrid, Brussels,
-//! Rome, Copenhagen, Oslo, Lisbon and Dublin all resolved to `None` — and
-//! `mapping.rs` then wrote the appointment to Exchange with NO time zone at
-//! all. Half of Europe, silently, on every create and update.
+//! ## Writing a zone
 //!
-//! So the write direction has its own table of the CLDR MEMBERS that share a
-//! Windows id. It only needs the names a device is likely to report.
+//! A series' stored zone goes through the core's one rule for zones first
+//! (`cal_core::series_clock_zone`, then `cal_core::canonical_zone`): no zone, a
+//! UTC name or a name tzdata does not know writes no zone (decisions 14a, 26a);
+//! any spelling of a zone writes that zone's id, `Asia/Calcutta` as
+//! `India Standard Time`, and a merged place its target's (25b).
+//!
+//! A zone Exchange cannot store is written without one (22a): CLDR has no id
+//! for it, CLDR's id runs another clock than the zone in the five years after
+//! the pinned release, or the server does not know the id (41a). A server
+//! refuses an id it does not know with `ErrorTimeZone`, and the whole save
+//! fails; Exchange 2019 does not know `Sao Tome Standard Time`.
+//!
+//! ## The translation id
+//!
+//! Events the host caches were translated with one table and one reading rule.
+//! [`translation_id`] names both: the generated table's `TABLE_ID`, which the
+//! generator derives from the table's rows, and [`READ_RULE`], which is bumped
+//! by hand whenever the way an id becomes a series' zone changes outside the
+//! table — here in [`read_series_zone`], or in the read path of `mapping.rs`.
+//! The EWS delta sync compares it with the one in the host's token and emits
+//! every cached item again when they differ.
 
-/// (Windows zone id, primary IANA zone) pairs, grouped loosely by region.
-const WINDOWS_IANA: &[(&str, &str)] = &[
-    ("UTC", "Etc/UTC"),
-    // Europe / Africa
-    ("Greenwich Standard Time", "Atlantic/Reykjavik"),
-    ("GMT Standard Time", "Europe/London"),
-    ("W. Europe Standard Time", "Europe/Berlin"),
-    ("Central Europe Standard Time", "Europe/Budapest"),
-    ("Central European Standard Time", "Europe/Warsaw"),
-    ("Romance Standard Time", "Europe/Paris"),
-    ("W. Central Africa Standard Time", "Africa/Lagos"),
-    ("GTB Standard Time", "Europe/Bucharest"),
-    ("E. Europe Standard Time", "Europe/Chisinau"),
-    ("FLE Standard Time", "Europe/Kiev"),
-    ("Turkey Standard Time", "Europe/Istanbul"),
-    ("Israel Standard Time", "Asia/Jerusalem"),
-    ("Egypt Standard Time", "Africa/Cairo"),
-    ("South Africa Standard Time", "Africa/Johannesburg"),
-    ("Russian Standard Time", "Europe/Moscow"),
-    ("Belarus Standard Time", "Europe/Minsk"),
-    // Middle East / Asia
-    ("Arabic Standard Time", "Asia/Baghdad"),
-    ("Arab Standard Time", "Asia/Riyadh"),
-    ("Arabian Standard Time", "Asia/Dubai"),
-    ("Iran Standard Time", "Asia/Tehran"),
-    ("Pakistan Standard Time", "Asia/Karachi"),
-    ("India Standard Time", "Asia/Kolkata"),
-    ("Bangladesh Standard Time", "Asia/Dhaka"),
-    ("SE Asia Standard Time", "Asia/Bangkok"),
-    ("China Standard Time", "Asia/Shanghai"),
-    ("Singapore Standard Time", "Asia/Singapore"),
-    ("Taipei Standard Time", "Asia/Taipei"),
-    ("Tokyo Standard Time", "Asia/Tokyo"),
-    ("Korea Standard Time", "Asia/Seoul"),
-    // Australia / Pacific
-    ("W. Australia Standard Time", "Australia/Perth"),
-    ("Cen. Australia Standard Time", "Australia/Adelaide"),
-    ("AUS Central Standard Time", "Australia/Darwin"),
-    ("E. Australia Standard Time", "Australia/Brisbane"),
-    ("AUS Eastern Standard Time", "Australia/Sydney"),
-    ("Tasmania Standard Time", "Australia/Hobart"),
-    ("New Zealand Standard Time", "Pacific/Auckland"),
-    // Americas
-    ("Hawaiian Standard Time", "Pacific/Honolulu"),
-    ("Alaskan Standard Time", "America/Anchorage"),
-    ("Pacific Standard Time", "America/Los_Angeles"),
-    ("Pacific Standard Time (Mexico)", "America/Tijuana"),
-    ("US Mountain Standard Time", "America/Phoenix"),
-    ("Mountain Standard Time", "America/Denver"),
-    ("Mountain Standard Time (Mexico)", "America/Chihuahua"),
-    ("Central Standard Time", "America/Chicago"),
-    ("Central Standard Time (Mexico)", "America/Mexico_City"),
-    ("Canada Central Standard Time", "America/Regina"),
-    ("Eastern Standard Time", "America/New_York"),
-    ("Eastern Standard Time (Mexico)", "America/Cancun"),
-    ("US Eastern Standard Time", "America/Indiana/Indianapolis"),
-    ("Atlantic Standard Time", "America/Halifax"),
-    ("Newfoundland Standard Time", "America/St_Johns"),
-    ("SA Pacific Standard Time", "America/Bogota"),
-    ("SA Eastern Standard Time", "America/Cayenne"),
-    ("E. South America Standard Time", "America/Sao_Paulo"),
-    ("Argentina Standard Time", "America/Argentina/Buenos_Aires"),
-    ("SA Western Standard Time", "America/La_Paz"),
-    ("Venezuela Standard Time", "America/Caracas"),
-    ("Central America Standard Time", "America/Guatemala"),
-    ("Central Brazilian Standard Time", "America/Cuiaba"),
-    ("Pacific SA Standard Time", "America/Santiago"),
-    ("Paraguay Standard Time", "America/Asuncion"),
-    ("Montevideo Standard Time", "America/Montevideo"),
-    ("Cuba Standard Time", "America/Havana"),
-    ("Haiti Standard Time", "America/Port-au-Prince"),
-    ("Greenland Standard Time", "America/Nuuk"),
-    ("Aleutian Standard Time", "America/Adak"),
-    ("Yukon Standard Time", "America/Whitehorse"),
-    ("Dateline Standard Time", "Etc/GMT+12"),
-    ("UTC-11", "Etc/GMT+11"),
-    ("UTC-02", "Etc/GMT+2"),
-    ("UTC+12", "Etc/GMT-12"),
-    ("UTC+13", "Etc/GMT-13"),
-    // Extended coverage (less common but real populated zones).
-    ("Morocco Standard Time", "Africa/Casablanca"),
-    ("Libya Standard Time", "Africa/Tripoli"),
-    ("Namibia Standard Time", "Africa/Windhoek"),
-    ("E. Africa Standard Time", "Africa/Nairobi"),
-    ("Sudan Standard Time", "Africa/Khartoum"),
-    ("Azores Standard Time", "Atlantic/Azores"),
-    ("Cape Verde Standard Time", "Atlantic/Cape_Verde"),
-    ("Kaliningrad Standard Time", "Europe/Kaliningrad"),
-    ("Jordan Standard Time", "Asia/Amman"),
-    ("Syria Standard Time", "Asia/Damascus"),
-    ("Lebanon Standard Time", "Asia/Beirut"),
-    ("West Bank Standard Time", "Asia/Hebron"),
-    ("Georgian Standard Time", "Asia/Tbilisi"),
-    ("Caucasus Standard Time", "Asia/Yerevan"),
-    ("Azerbaijan Standard Time", "Asia/Baku"),
-    ("Afghanistan Standard Time", "Asia/Kabul"),
-    ("West Asia Standard Time", "Asia/Tashkent"),
-    ("Central Asia Standard Time", "Asia/Almaty"),
-    ("Sri Lanka Standard Time", "Asia/Colombo"),
-    ("Nepal Standard Time", "Asia/Kathmandu"),
-    ("Myanmar Standard Time", "Asia/Yangon"),
-    ("North Asia Standard Time", "Asia/Krasnoyarsk"),
-    ("North Asia East Standard Time", "Asia/Irkutsk"),
-    ("Yakutsk Standard Time", "Asia/Yakutsk"),
-    ("Vladivostok Standard Time", "Asia/Vladivostok"),
-    ("Magadan Standard Time", "Asia/Magadan"),
-    ("Ulaanbaatar Standard Time", "Asia/Ulaanbaatar"),
-    ("North Korea Standard Time", "Asia/Pyongyang"),
-    ("Mauritius Standard Time", "Indian/Mauritius"),
-    ("Lord Howe Standard Time", "Australia/Lord_Howe"),
-    ("Central Pacific Standard Time", "Pacific/Guadalcanal"),
-    ("Fiji Standard Time", "Pacific/Fiji"),
-    ("Tonga Standard Time", "Pacific/Tongatapu"),
-    ("Samoa Standard Time", "Pacific/Apia"),
-    ("Chatham Islands Standard Time", "Pacific/Chatham"),
-    ("Norfolk Standard Time", "Pacific/Norfolk"),
-];
+#[rustfmt::skip]
+mod windows_zones;
 
-/// Translate a Windows zone id (as EWS reports it) to its primary IANA name,
-/// or `None` when the name isn't in the table.
-pub fn windows_to_iana(windows: &str) -> Option<&'static str> {
-    WINDOWS_IANA
-        .iter()
-        .find(|(w, _)| w.eq_ignore_ascii_case(windows))
-        .map(|(_, iana)| *iana)
+pub use windows_zones::{CLDR_RELEASE, TZDATA_VERSION};
+
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
+
+use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
+
+/// The reading rule's version. Bump it when an id read from Exchange becomes
+/// a series' zone differently without the generated table changing, so every
+/// cached event is translated again.
+///
+/// 1: stage 4 — an id reads as its 001 zone, canonical; `UTC` and unknown ids
+/// are no zone.
+/// 2: stage 4 review — the end zone `tzone://Microsoft/Utc` means no zone.
+pub const READ_RULE: u32 = 2;
+
+/// The end zone Exchange stores for a series created without a zone.
+const NO_ZONE_END: &str = "tzone://Microsoft/Utc";
+
+/// Which translation cached events were made with: the table's rows and the
+/// reading rule.
+pub fn translation_id() -> String {
+    format!("{TABLE_ID}.{READ_RULE}")
 }
 
-/// The OTHER CLDR members of a Windows zone — the ones the table above does
-/// not store, because it keeps one default territory each.
-///
-/// Only the write direction needs these, and only for names a device actually
-/// reports: `Intl.DateTimeFormat().resolvedOptions().timeZone` on a machine in
-/// Vienna says `Europe/Vienna`, never `Europe/Berlin`.
-const IANA_MEMBERS: &[(&str, &str)] = &[
-    // UTC spellings that are not the canonical one.
-    ("Etc/GMT", "UTC"),
-    ("Etc/Universal", "UTC"),
-    ("Etc/Zulu", "UTC"),
-    ("UTC", "UTC"),
-    // GMT Standard Time — the British Isles, Portugal, the Atlantic isles.
-    ("Europe/Dublin", "GMT Standard Time"),
-    ("Europe/Lisbon", "GMT Standard Time"),
-    ("Europe/Guernsey", "GMT Standard Time"),
-    ("Europe/Isle_of_Man", "GMT Standard Time"),
-    ("Europe/Jersey", "GMT Standard Time"),
-    ("Atlantic/Canary", "GMT Standard Time"),
-    ("Atlantic/Faroe", "GMT Standard Time"),
-    ("Atlantic/Madeira", "GMT Standard Time"),
-    // W. Europe Standard Time — Germany's neighbours and the Alpine states.
-    ("Europe/Amsterdam", "W. Europe Standard Time"),
-    ("Europe/Andorra", "W. Europe Standard Time"),
-    ("Europe/Gibraltar", "W. Europe Standard Time"),
-    ("Europe/Luxembourg", "W. Europe Standard Time"),
-    ("Europe/Malta", "W. Europe Standard Time"),
-    ("Europe/Monaco", "W. Europe Standard Time"),
-    ("Europe/Oslo", "W. Europe Standard Time"),
-    ("Europe/Rome", "W. Europe Standard Time"),
-    ("Europe/San_Marino", "W. Europe Standard Time"),
-    ("Europe/Stockholm", "W. Europe Standard Time"),
-    ("Europe/Vaduz", "W. Europe Standard Time"),
-    ("Europe/Vatican", "W. Europe Standard Time"),
-    ("Europe/Vienna", "W. Europe Standard Time"),
-    ("Europe/Zurich", "W. Europe Standard Time"),
-    ("Europe/Busingen", "W. Europe Standard Time"),
-    ("Arctic/Longyearbyen", "W. Europe Standard Time"),
-    // Romance Standard Time.
-    ("Europe/Brussels", "Romance Standard Time"),
-    ("Europe/Copenhagen", "Romance Standard Time"),
-    ("Europe/Madrid", "Romance Standard Time"),
-    ("Africa/Ceuta", "Romance Standard Time"),
-    // Central Europe Standard Time.
-    ("Europe/Bratislava", "Central Europe Standard Time"),
-    ("Europe/Ljubljana", "Central Europe Standard Time"),
-    ("Europe/Podgorica", "Central Europe Standard Time"),
-    ("Europe/Prague", "Central Europe Standard Time"),
-    ("Europe/Tirane", "Central Europe Standard Time"),
-    ("Europe/Belgrade", "Central Europe Standard Time"),
-    // Central European Standard Time.
-    ("Europe/Sarajevo", "Central European Standard Time"),
-    ("Europe/Skopje", "Central European Standard Time"),
-    ("Europe/Zagreb", "Central European Standard Time"),
-    // FLE Standard Time — the Baltics, Finland, Ukraine, Bulgaria.
-    ("Europe/Helsinki", "FLE Standard Time"),
-    ("Europe/Mariehamn", "FLE Standard Time"),
-    ("Europe/Riga", "FLE Standard Time"),
-    ("Europe/Sofia", "FLE Standard Time"),
-    ("Europe/Tallinn", "FLE Standard Time"),
-    ("Europe/Vilnius", "FLE Standard Time"),
-    // `Europe/Kiev` became `Europe/Kyiv` in tzdata 2022b. The table above
-    // stores the old spelling because every runtime still resolves it; a
-    // device on current data reports the new one.
-    ("Europe/Kyiv", "FLE Standard Time"),
-    // GTB Standard Time.
-    ("Europe/Athens", "GTB Standard Time"),
-    ("Asia/Nicosia", "GTB Standard Time"),
-    ("Europe/Nicosia", "GTB Standard Time"),
-    // Greenwich Standard Time — West Africa, on UTC without DST.
-    ("Africa/Abidjan", "Greenwich Standard Time"),
-    ("Africa/Accra", "Greenwich Standard Time"),
-    ("Africa/Dakar", "Greenwich Standard Time"),
-    ("Atlantic/St_Helena", "Greenwich Standard Time"),
-    // North America.
-    ("America/Detroit", "Eastern Standard Time"),
-    ("America/Toronto", "Eastern Standard Time"),
-    ("America/Nassau", "Eastern Standard Time"),
-    ("America/Iqaluit", "Eastern Standard Time"),
-    ("America/Winnipeg", "Central Standard Time"),
-    ("America/Matamoros", "Central Standard Time"),
-    ("America/Boise", "Mountain Standard Time"),
-    ("America/Edmonton", "Mountain Standard Time"),
-    ("America/Vancouver", "Pacific Standard Time"),
-    ("America/Tijuana", "Pacific Standard Time"),
-    // Asia and the Pacific.
-    ("Asia/Hong_Kong", "China Standard Time"),
-    ("Asia/Macau", "China Standard Time"),
-    ("Australia/Melbourne", "AUS Eastern Standard Time"),
-];
+/// What a Windows zone id read from Exchange means for a series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsZoneRead {
+    /// A zone, in tzdata's canonical spelling.
+    Zone(&'static str),
+    /// No zone, so the series repeats in UTC: the id `UTC`, or a series
+    /// Exchange marks as created without a zone.
+    Utc,
+    /// An id the table does not know: empty, a custom definition, an id only a
+    /// server's registry has (`Kamchatka Standard Time`), or an invented one.
+    /// No zone either.
+    Unknown,
+}
 
-/// Translate an IANA zone to a Windows zone id for writing back to EWS, or
-/// `None` when there's no mapping (then we omit the zone rather than guess).
-///
-/// Checks the default-territory table first, then the other CLDR members —
-/// see the module docs for why the write direction needs its own table.
-pub fn iana_to_windows(iana: &str) -> Option<&'static str> {
-    WINDOWS_IANA
-        .iter()
-        .find(|(_, i)| i.eq_ignore_ascii_case(iana))
-        .map(|(w, _)| *w)
-        .or_else(|| {
-            IANA_MEMBERS
-                .iter()
-                .find(|(i, _)| i.eq_ignore_ascii_case(iana))
-                .map(|(_, w)| *w)
-        })
+/// What Exchange gets for a series' stored zone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsZoneWrite {
+    /// StartTimeZone and EndTimeZone with this id.
+    Id(&'static str),
+    /// No zone: none is stored, a UTC name, or a name tzdata does not know. The
+    /// series repeats in UTC.
+    NoZone,
+    /// A zone Exchange cannot store, written without one.
+    NotStorable {
+        zone: &'static str,
+        reason: NotStorable,
+    },
+}
+
+/// Why Exchange cannot store a zone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotStorable {
+    /// CLDR has no Windows id for it.
+    NoWindowsZone,
+    /// CLDR's id for it runs another clock in the years after the pinned
+    /// release, so Exchange would store another zone than the one chosen.
+    OtherClock { windows: &'static str },
+    /// The server does not know CLDR's id for it, and would refuse the save.
+    NotOnServer { windows: &'static str },
+}
+
+/// The Windows zone ids one Exchange server knows, from `GetServerTimeZones`,
+/// compared in ASCII case folded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerTimeZones(BTreeSet<String>);
+
+impl ServerTimeZones {
+    pub fn new<I, S>(ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self(
+            ids.into_iter()
+                .map(|id| id.as_ref().to_ascii_lowercase())
+                .collect(),
+        )
+    }
+
+    /// Whether the server knows `windows`.
+    pub fn knows(&self, windows: &str) -> bool {
+        self.0.contains(&windows.to_ascii_lowercase())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// A Windows zone id as Exchange reports it, in any ASCII case.
+pub fn read_windows_zone(id: &str) -> WindowsZoneRead {
+    match lookup(WINDOWS_ZONES, id) {
+        Some(zone) if cal_core::series_clock_zone(Some(zone)).is_none() => WindowsZoneRead::Utc,
+        Some(zone) => WindowsZoneRead::Zone(zone),
+        None => WindowsZoneRead::Unknown,
+    }
+}
+
+/// A series' zone from the StartTimeZone and EndTimeZone ids Exchange reports.
+/// The end zone `tzone://Microsoft/Utc`, in any ASCII case, means no zone
+/// whatever the start zone is (43b); otherwise the start id is read, and
+/// `None` means Exchange reported no start zone.
+pub fn read_series_zone(start: Option<&str>, end: Option<&str>) -> Option<WindowsZoneRead> {
+    if end.is_some_and(|end| end.eq_ignore_ascii_case(NO_ZONE_END)) {
+        return Some(WindowsZoneRead::Utc);
+    }
+    start.map(read_windows_zone)
+}
+
+/// The Windows id Exchange gets for a series' stored zone. `server` is the
+/// list the server knows; `None`, or an empty list, when it could not be asked.
+pub fn windows_zone_for(tzid: Option<&str>, server: Option<&ServerTimeZones>) -> WindowsZoneWrite {
+    let Some(zone) = cal_core::series_clock_zone(tzid).and_then(cal_core::canonical_zone) else {
+        return WindowsZoneWrite::NoZone;
+    };
+    if let Some(windows) = lookup(ZONE_WINDOWS, zone) {
+        return match server {
+            Some(server) if !server.is_empty() && !server.knows(windows) => {
+                WindowsZoneWrite::NotStorable {
+                    zone,
+                    reason: NotStorable::NotOnServer { windows },
+                }
+            }
+            _ => WindowsZoneWrite::Id(windows),
+        };
+    }
+    let reason = if let Some(windows) = lookup(OTHER_CLOCK, zone) {
+        NotStorable::OtherClock { windows }
+    } else {
+        if UNMAPPED.binary_search_by(|z| folded(z, zone)).is_err() {
+            // The generator places every zone of its tzdata in one of the three
+            // lists, and CI's `windows-zones --check` holds the committed table
+            // to that. A zone in none of them means a table generated from
+            // another tzdata release than the core's.
+            tracing::warn!(
+                target: "adapter_ews::zones",
+                zone,
+                table = TZDATA_VERSION,
+                core = cal_core::TZDATA_VERSION,
+                "the Exchange zone table has no row for this zone",
+            );
+        }
+        NotStorable::NoWindowsZone
+    };
+    WindowsZoneWrite::NotStorable { zone, reason }
+}
+
+/// ASCII case folded, the order the generated tables are sorted in.
+fn folded(a: &str, b: &str) -> Ordering {
+    a.bytes()
+        .map(|c| c.to_ascii_lowercase())
+        .cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
+}
+
+fn lookup(table: &'static [(&'static str, &'static str)], key: &str) -> Option<&'static str> {
+    table
+        .binary_search_by(|(k, _)| folded(k, key))
+        .ok()
+        .map(|at| table[at].1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{json, Value};
 
-    #[test]
-    fn maps_common_zones_both_ways() {
-        assert_eq!(
-            windows_to_iana("Eastern Standard Time"),
-            Some("America/New_York")
-        );
-        assert_eq!(
-            windows_to_iana("W. Europe Standard Time"),
-            Some("Europe/Berlin")
-        );
-        assert_eq!(windows_to_iana("Tokyo Standard Time"), Some("Asia/Tokyo"));
-        assert_eq!(
-            iana_to_windows("America/New_York"),
-            Some("Eastern Standard Time")
-        );
-        assert_eq!(
-            iana_to_windows("Europe/Berlin"),
-            Some("W. Europe Standard Time")
-        );
+    const CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/windowsZones.json"
+    ));
+
+    /// The rows the rules turn on, by name: a row that goes missing from the
+    /// fixture fails here by its name, and a row not named here fails too.
+    const MUST_RUN: &[&str] = &[
+        "berlin-default",
+        "vienna-member",
+        "lowercase-berlin",
+        "device-spelling-calcutta",
+        "merged-oslo",
+        "merged-amsterdam-takes-brussels",
+        "merged-copenhagen-takes-berlin",
+        "kyiv-only-through-kiev",
+        "kanton-through-enderbury",
+        "chihuahua-cldr43",
+        "almaty-cldr45",
+        "beirut-middle-east",
+        "coyhaique-cldr48",
+        "etc-gmt-minus-1",
+        "troll-no-windows-zone",
+        "scoresbysund-other-clock",
+        "utc-name-utc",
+        "utc-name-gmt",
+        "utc-name-etc-zulu",
+        "unknown-name",
+        "offset-string",
+        "padded-berlin",
+        "no-tzid",
+        "w-europe-berlin",
+        "lowercase-id",
+        "india-kolkata",
+        "fle-kyiv",
+        "greenwich-abidjan",
+        "greenwich-created-without-zone",
+        "utc-end-zone-in-any-case",
+        "utc-is-no-zone",
+        "utc-minus-02-etc",
+        "mountain-mexico-mazatlan",
+        "central-asia-bishkek",
+        "middle-east-beirut",
+        "kamchatka-registry-only",
+        "lebanon-not-an-id",
+        "custom-definition",
+        "empty-id",
+    ];
+
+    fn written(write: WindowsZoneWrite) -> Value {
+        match write {
+            WindowsZoneWrite::Id(id) => json!({ "id": id }),
+            WindowsZoneWrite::NoZone => json!({ "no_zone": true }),
+            WindowsZoneWrite::NotStorable {
+                reason: NotStorable::NoWindowsZone,
+                ..
+            } => json!({ "not_storable": "no_windows_zone" }),
+            WindowsZoneWrite::NotStorable {
+                reason: NotStorable::OtherClock { windows },
+                ..
+            } => json!({ "not_storable": "other_clock", "windows": windows }),
+            WindowsZoneWrite::NotStorable {
+                reason: NotStorable::NotOnServer { windows },
+                ..
+            } => json!({ "not_storable": "not_on_server", "windows": windows }),
+        }
     }
 
-    #[test]
-    fn the_write_direction_covers_the_other_members_of_a_windows_zone() {
-        // The bug this pins down: each of these is a CLDR member of a Windows
-        // zone whose DEFAULT member is another city, so the reverse lookup over
-        // the one-to-one table returned None — and `mapping.rs` then wrote the
-        // appointment to Exchange with no time zone at all.
-        for (iana, windows) in [
-            ("Europe/Vienna", "W. Europe Standard Time"),
-            ("Europe/Zurich", "W. Europe Standard Time"),
-            ("Europe/Amsterdam", "W. Europe Standard Time"),
-            ("Europe/Stockholm", "W. Europe Standard Time"),
-            ("Europe/Rome", "W. Europe Standard Time"),
-            ("Europe/Oslo", "W. Europe Standard Time"),
-            ("Europe/Madrid", "Romance Standard Time"),
-            ("Europe/Brussels", "Romance Standard Time"),
-            ("Europe/Copenhagen", "Romance Standard Time"),
-            ("Europe/Lisbon", "GMT Standard Time"),
-            ("Europe/Dublin", "GMT Standard Time"),
-            ("Europe/Prague", "Central Europe Standard Time"),
-            ("Europe/Helsinki", "FLE Standard Time"),
-            ("Europe/Athens", "GTB Standard Time"),
-            ("America/Toronto", "Eastern Standard Time"),
-            ("America/Vancouver", "Pacific Standard Time"),
-        ] {
-            assert_eq!(iana_to_windows(iana), Some(windows), "{iana}");
+    fn read(read: WindowsZoneRead) -> Value {
+        match read {
+            WindowsZoneRead::Zone(zone) => json!({ "zone": zone }),
+            WindowsZoneRead::Utc => json!({ "utc": true }),
+            WindowsZoneRead::Unknown => json!({ "unknown": true }),
         }
     }
 
     #[test]
-    fn the_renamed_ukrainian_zone_resolves_under_both_spellings() {
-        // tzdata 2022b renamed Europe/Kiev to Europe/Kyiv; a current runtime
-        // reports the new name, the table stores the old one.
-        assert_eq!(iana_to_windows("Europe/Kiev"), Some("FLE Standard Time"));
-        assert_eq!(iana_to_windows("Europe/Kyiv"), Some("FLE Standard Time"));
+    fn every_contract_row_holds() {
+        let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let mut seen = Vec::new();
+        for row in doc["write"].as_array().expect("write rows") {
+            let name = row["name"].as_str().expect("a row name");
+            seen.push(name);
+            assert_eq!(
+                written(windows_zone_for(row["tzid"].as_str(), None)),
+                row["expect"],
+                "{name}: {}",
+                row["note"]
+            );
+        }
+        for row in doc["read"].as_array().expect("read rows") {
+            let name = row["name"].as_str().expect("a row name");
+            seen.push(name);
+            let id = row["windows"].as_str().expect("a Windows id");
+            let zone = read_series_zone(Some(id), row["end"].as_str()).expect("a start zone");
+            assert_eq!(read(zone), row["expect"], "{name}: {}", row["note"]);
+        }
+        for name in MUST_RUN {
+            assert!(seen.contains(name), "the contract lost the {name} row");
+        }
+        for name in &seen {
+            assert!(
+                MUST_RUN.contains(name),
+                "{name} is not in MUST_RUN: name it there, so losing it is loud"
+            );
+        }
     }
 
     #[test]
-    fn a_default_member_still_wins_over_the_member_table() {
-        // Both tables are consulted; the default-territory one answers first,
-        // so a zone that is in both keeps its own Windows id.
+    fn a_series_without_a_start_zone_has_none() {
+        assert_eq!(read_series_zone(None, None), None);
+        // The end marker alone still says: no zone.
         assert_eq!(
-            iana_to_windows("Europe/Berlin"),
-            Some("W. Europe Standard Time")
-        );
-        assert_eq!(
-            iana_to_windows("Europe/Paris"),
-            Some("Romance Standard Time")
+            read_series_zone(None, Some(NO_ZONE_END)),
+            Some(WindowsZoneRead::Utc)
         );
     }
 
     #[test]
-    fn unknown_zone_is_none() {
-        assert_eq!(windows_to_iana("Totally Made Up Time"), None);
-        assert_eq!(iana_to_windows("Mars/Olympus_Mons"), None);
+    fn an_id_the_server_does_not_know_is_not_written() {
+        // Exchange 2019 (build 15.2.2562) knows 140 ids but not São Tomé's.
+        let server = ServerTimeZones::new(["W. Europe Standard Time", "UTC"]);
+        assert_eq!(
+            windows_zone_for(Some("Europe/Berlin"), Some(&server)),
+            WindowsZoneWrite::Id("W. Europe Standard Time")
+        );
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), Some(&server)),
+            WindowsZoneWrite::NotStorable {
+                zone: "Africa/Sao_Tome",
+                reason: NotStorable::NotOnServer {
+                    windows: "Sao Tome Standard Time"
+                },
+            }
+        );
+        // In any ASCII case.
+        let lower = ServerTimeZones::new(["w. europe standard time"]);
+        assert!(lower.knows("W. Europe Standard Time"));
+        // A server that could not be asked, or answered with nothing, does not
+        // stop a zone: the CLDR id is written as before.
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), Some(&ServerTimeZones::default())),
+            WindowsZoneWrite::Id("Sao Tome Standard Time")
+        );
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), None),
+            WindowsZoneWrite::Id("Sao Tome Standard Time")
+        );
     }
 
     #[test]
-    fn windows_lookup_is_case_insensitive() {
+    fn the_table_was_resolved_with_the_cores_tzdata() {
+        assert_eq!(TZDATA_VERSION, cal_core::TZDATA_VERSION);
+    }
+
+    #[test]
+    fn the_translation_id_names_the_table_and_the_reading_rule() {
+        assert_eq!(translation_id(), format!("{TABLE_ID}.{READ_RULE}"));
+        assert_eq!(TABLE_ID.len(), 16);
+        assert!(TABLE_ID.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn every_zone_in_the_table_is_spelled_as_tzdata_spells_it() {
+        let zones = WINDOWS_ZONES
+            .iter()
+            .map(|(_, zone)| *zone)
+            .chain(ZONE_WINDOWS.iter().map(|(zone, _)| *zone))
+            .chain(OTHER_CLOCK.iter().map(|(zone, _)| *zone))
+            .chain(UNMAPPED.iter().copied());
+        for zone in zones {
+            assert_eq!(cal_core::canonical_zone(zone), Some(zone), "{zone}");
+        }
+    }
+
+    #[test]
+    fn every_id_written_is_one_the_table_reads() {
+        for (zone, windows) in ZONE_WINDOWS.iter().chain(OTHER_CLOCK) {
+            assert!(
+                lookup(WINDOWS_ZONES, windows).is_some(),
+                "{zone} -> {windows}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tables_are_sorted_for_binary_search_and_unique() {
+        fn sorted(name: &str, keys: &[&str]) {
+            for pair in keys.windows(2) {
+                assert_eq!(
+                    folded(pair[0], pair[1]),
+                    Ordering::Less,
+                    "{name}: {} must sort before {}",
+                    pair[0],
+                    pair[1]
+                );
+            }
+        }
+        let keys = |table: &[(&'static str, &'static str)]| -> Vec<&'static str> {
+            table.iter().map(|(key, _)| *key).collect()
+        };
+        sorted("WINDOWS_ZONES", &keys(WINDOWS_ZONES));
+        sorted("ZONE_WINDOWS", &keys(ZONE_WINDOWS));
+        sorted("OTHER_CLOCK", &keys(OTHER_CLOCK));
+        sorted("UNMAPPED", UNMAPPED);
+    }
+
+    #[test]
+    fn no_zone_is_in_two_of_the_lists() {
+        for (zone, _) in ZONE_WINDOWS {
+            assert!(lookup(OTHER_CLOCK, zone).is_none(), "{zone}");
+            assert!(!UNMAPPED.contains(zone), "{zone}");
+        }
+        for (zone, _) in OTHER_CLOCK {
+            assert!(!UNMAPPED.contains(zone), "{zone}");
+        }
+    }
+
+    #[test]
+    fn every_listed_zone_is_written_or_named_as_unstorable() {
+        let mut unstorable = Vec::new();
+        for listed in cal_core::listed_zones() {
+            match windows_zone_for(Some(listed), None) {
+                WindowsZoneWrite::Id(_) => {}
+                WindowsZoneWrite::NotStorable { zone, .. } => unstorable.push(zone),
+                WindowsZoneWrite::NoZone => panic!("{listed} is a listed zone, not UTC"),
+            }
+        }
+        // A change here is a CLDR or tzdata update, and asks decision 22a
+        // again: these zones are marked in an Exchange calendar's list and
+        // cannot be chosen there.
         assert_eq!(
-            windows_to_iana("eastern standard time"),
-            Some("America/New_York")
+            unstorable,
+            [
+                "America/Scoresbysund",
+                "Antarctica/Casey",
+                "Antarctica/Troll",
+                "Antarctica/Vostok",
+            ]
         );
+    }
+
+    #[test]
+    fn every_fixed_offset_zone_is_written() {
+        // The 26 zones outside the list that are not UTC names: Etc/GMT-14 to
+        // Etc/GMT-1 and Etc/GMT+1 to Etc/GMT+12. Each follows its CLDR row.
+        let names = (1..=14)
+            .map(|n| format!("Etc/GMT-{n}"))
+            .chain((1..=12).map(|n| format!("Etc/GMT+{n}")));
+        let mut count = 0;
+        for name in names {
+            assert_eq!(
+                cal_core::canonical_zone(&name),
+                Some(name.as_str()),
+                "{name} is a zone"
+            );
+            assert!(
+                matches!(windows_zone_for(Some(&name), None), WindowsZoneWrite::Id(_)),
+                "{name}: {:?}",
+                windows_zone_for(Some(&name), None)
+            );
+            count += 1;
+        }
+        assert_eq!(count, 26);
+    }
+
+    #[test]
+    fn every_windows_id_writes_back_as_itself() {
+        for (windows, zone) in WINDOWS_ZONES {
+            let want = if *windows == "UTC" {
+                WindowsZoneWrite::NoZone
+            } else {
+                WindowsZoneWrite::Id(windows)
+            };
+            assert_eq!(
+                windows_zone_for(Some(zone), None),
+                want,
+                "{windows} reads as {zone}"
+            );
+        }
     }
 }

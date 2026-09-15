@@ -54,6 +54,7 @@ use tokio::sync::Mutex;
 
 use crate::api::SyncedFolderState;
 use crate::mapping::{to_event, ParsedItem};
+use crate::windows_tz::ServerTimeZones;
 
 pub use auth::BasicCredentials;
 pub use autodiscover::{discover, discover_client, DiscoveredEndpoints};
@@ -95,6 +96,9 @@ pub struct EwsAdapter {
     /// never sees the parallel double-walk.
     gal_cache: Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     gal_fetch_lock: Mutex<()>,
+    /// The Windows zone ids the server knows, asked on the first write that
+    /// needs them (decision 41a). `None` until then.
+    server_zones: Mutex<Option<ServerTimeZones>>,
     listing_ttl: chrono::Duration,
     gal_ttl: chrono::Duration,
     /// Per-folder cache for the Outlook-style `SyncFolderItems`
@@ -152,6 +156,7 @@ impl EwsAdapter {
             contact_lists_cache: Mutex::new(None),
             gal_cache: Mutex::new(None),
             gal_fetch_lock: Mutex::new(()),
+            server_zones: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
             gal_ttl: chrono::Duration::minutes(30),
             events_sync: Mutex::new(HashMap::new()),
@@ -402,25 +407,27 @@ impl EwsAdapter {
         // concurrent callers serialise on the second take.
         let prior = {
             let mut guard = self.events_sync.lock().await;
-            guard.remove(calendar_id).unwrap_or_default()
+            Self::from_current_parser(guard.remove(calendar_id).unwrap_or_default())
         };
-        let updated = match api::sync_events_to_completion(&self.client, calendar_id, prior).await {
-            Ok(s) => s,
-            Err(err) if is_sync_state_invalid(&err) => {
-                tracing::warn!(
-                    target: "adapter_ews::sync",
-                    calendar = %calendar_id,
-                    "SyncFolderItems cookie invalid; doing a full re-sync",
-                );
-                api::sync_events_to_completion(
-                    &self.client,
-                    calendar_id,
-                    SyncedFolderState::default(),
-                )
-                .await?
-            }
-            Err(err) => return Err(err),
-        };
+        let mut updated =
+            match api::sync_events_to_completion(&self.client, calendar_id, prior).await {
+                Ok(s) => s,
+                Err(err) if is_sync_state_invalid(&err) => {
+                    tracing::warn!(
+                        target: "adapter_ews::sync",
+                        calendar = %calendar_id,
+                        "SyncFolderItems cookie invalid; doing a full re-sync",
+                    );
+                    api::sync_events_to_completion(
+                        &self.client,
+                        calendar_id,
+                        SyncedFolderState::default(),
+                    )
+                    .await?
+                }
+                Err(err) => return Err(err),
+            };
+        updated.parser = api::ITEM_PARSER;
 
         // Translate cached items to cal-core Events. The map order
         // is non-deterministic; the frontend sorts events anyway,
@@ -493,6 +500,74 @@ impl EwsAdapter {
         Ok(out)
     }
 
+    /// Whether writing this event could name a zone: a series with one that is
+    /// not all-day (`cal_core::written_series_zone`, decision 46a).
+    fn writes_a_zone(recurrence: Option<&cal_core::EventRecurrence>, all_day: bool) -> bool {
+        cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day).is_some()
+    }
+
+    /// A folder state filled by an older item parser is dropped, so the folder
+    /// is drained again from scratch (see [`api::ITEM_PARSER`]).
+    fn from_current_parser(state: SyncedFolderState) -> SyncedFolderState {
+        if state.parser < api::ITEM_PARSER {
+            SyncedFolderState::default()
+        } else {
+            state
+        }
+    }
+
+    /// The Windows zone ids this server knows, asked once and kept for the
+    /// adapter's life (decision 41a). A server that answers with none is kept
+    /// as knowing none, and the CLDR ids are written as before. A failed
+    /// request, or an answer that cannot be read, is not kept: the CLDR ids
+    /// are written and the next save asks again.
+    async fn server_zones(&self) -> Option<ServerTimeZones> {
+        let mut known = self.server_zones.lock().await;
+        if known.is_none() {
+            match api::server_time_zones(&self.client).await {
+                Ok(zones) => {
+                    tracing::info!(
+                        target: "adapter_ews::zones",
+                        known = zones.len(),
+                        "the server's Windows time zones",
+                    );
+                    *known = Some(zones);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: "adapter_ews::zones",
+                        ?err,
+                        "could not ask the server which time zones it knows; writing CLDR ids",
+                    );
+                }
+            }
+        }
+        known.clone()
+    }
+
+    /// The token the host keeps for an EWS events folder:
+    /// `zt-{translation}:{cookie}` — the `SyncFolderItems` cookie, prefixed
+    /// with the zone translation ([`windows_tz::translation_id`]) the emitted
+    /// events were made with. The host stores a token only together with the
+    /// change set it came with, so a token naming this build's translation
+    /// proves the host holds events translated by it.
+    fn events_token(cookie: Option<&str>) -> Option<String> {
+        cookie.map(|cookie| format!("zt-{}:{cookie}", windows_tz::translation_id()))
+    }
+
+    /// A host token split into the zone translation it names, if any, and the
+    /// cookie. A token from a build before the prefix is the bare cookie; an
+    /// EWS cookie is base64, which has no `-` or `:`.
+    fn split_events_token(token: &str) -> (Option<&str>, &str) {
+        match token
+            .strip_prefix("zt-")
+            .and_then(|rest| rest.split_once(':'))
+        {
+            Some((translation, cookie)) => (Some(translation), cookie),
+            None => (None, token),
+        }
+    }
+
     /// Incremental sibling of [`refresh_and_read_events`] backing
     /// [`CalendarFeature::get_events_delta`]. Drives one `SyncFolderItems`
     /// delta, persists the merged per-folder state, and hands the host a
@@ -502,12 +577,14 @@ impl EwsAdapter {
     /// flag `full_resync`; in both cases `changes` must be the COMPLETE
     /// in-range set. We declare a full resync when our own per-folder
     /// state had no cookie (cold), when the host passed no `since_token`,
-    /// or when the server invalidated the cookie and we re-drained from
-    /// scratch. Otherwise the result is purely incremental: changed items
-    /// translated (masters keep their RRULE plus synthetic in-range
-    /// overrides) and the deleted EWS ItemIds verbatim — those are the
-    /// provider-native ids the host removes by `native_id`, which fans a
-    /// master's deletion out to its cached occurrence overrides.
+    /// when the server invalidated the cookie and we re-drained from
+    /// scratch, or when the host's token names another zone translation
+    /// than this build's (see [`Self::events_token`]; the cached folder is
+    /// emitted again without a re-drain). Otherwise the result is purely
+    /// incremental: changed items translated (masters keep their RRULE plus
+    /// synthetic in-range overrides) and the deleted EWS ItemIds verbatim —
+    /// those are the provider-native ids the host removes by `native_id`,
+    /// which fans a master's deletion out to its cached occurrence overrides.
     async fn refresh_events_delta(
         &self,
         calendar_id: &str,
@@ -516,7 +593,7 @@ impl EwsAdapter {
     ) -> EwsResult<ChangeSet<Event>> {
         let prior = {
             let mut guard = self.events_sync.lock().await;
-            guard.remove(calendar_id).unwrap_or_default()
+            Self::from_current_parser(guard.remove(calendar_id).unwrap_or_default())
         };
         // Host-authoritative cursor. The snapshot cache the host folds this
         // delta into is keyed to `since_token`, so we MUST drain from THAT,
@@ -533,7 +610,23 @@ impl EwsAdapter {
         // scratch instead.
         let adapter_warm = prior.sync_state.is_some();
         let mut force_full = since_token.is_none() || !adapter_warm;
-        let seed = match since_token {
+        // The host's snapshot holds events translated with the zone
+        // translation its token names. A token from another translation — an
+        // older build's, or one without the prefix — gets every cached item
+        // emitted again from what Exchange sent, so no view keeps a zone an
+        // old table read, and no edit writes that zone back to Exchange under
+        // a new id. Nothing is re-drained: the cookie inside the token still
+        // resumes the drain. The host stores a token only together with the
+        // change set it came with, so an emit it never stored is emitted again.
+        let (token_translation, cookie) = match since_token {
+            Some(token) => {
+                let (translation, cookie) = Self::split_events_token(token);
+                (translation, Some(cookie))
+            }
+            None => (None, None),
+        };
+        let translation_current = token_translation == Some(windows_tz::translation_id().as_str());
+        let seed = match cookie {
             Some(tok) if adapter_warm => SyncedFolderState {
                 sync_state: Some(tok.to_string()),
                 ..prior
@@ -570,7 +663,8 @@ impl EwsAdapter {
             chrono::DateTime::<chrono::Utc>::MIN_UTC,
             chrono::DateTime::<chrono::Utc>::MAX_UTC,
         );
-        let change_set = if force_full {
+        let emit_all = force_full || !translation_current;
+        let change_set = if emit_all {
             let mut changes = Vec::with_capacity(updated.items.len());
             for item in updated.items.values() {
                 emit_into(item, calendar_id, full, &mut changes);
@@ -578,7 +672,7 @@ impl EwsAdapter {
             ChangeSet {
                 changes,
                 deletions: Vec::new(),
-                new_token: updated.sync_state.clone(),
+                new_token: Self::events_token(updated.sync_state.as_deref()),
                 full_resync: true,
                 // EWS SyncFolderItems keeps the whole folder in `items`,
                 // and we emit it unfiltered above — the host may treat
@@ -596,7 +690,7 @@ impl EwsAdapter {
             ChangeSet {
                 changes,
                 deletions: deleted_ids,
-                new_token: updated.sync_state.clone(),
+                new_token: Self::events_token(updated.sync_state.as_deref()),
                 full_resync: false,
                 // Incremental, but still folder-complete: the cache holds
                 // the whole folder from the prior full sync and this merge
@@ -908,13 +1002,24 @@ impl CalendarFeature for EwsAdapter {
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
-        api::create_event(&self.client, calendar_id, event)
+        // Only a series with a zone asks the server which zones it knows.
+        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
+            self.server_zones().await
+        } else {
+            None
+        };
+        api::create_event(&self.client, calendar_id, event, zones.as_ref())
             .await
             .map_err(to_core_error)
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
-        api::update_event(&self.client, &event)
+        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
+            self.server_zones().await
+        } else {
+            None
+        };
+        api::update_event(&self.client, &event, zones.as_ref())
             .await
             .map_err(to_core_error)
     }
@@ -1574,15 +1679,15 @@ mod delta_read_tests {
         assert!(cold.full_resync, "first (token-less) call is a full resync");
         assert_eq!(cold.changes.len(), 2);
         assert!(cold.deletions.is_empty());
-        assert_eq!(cold.new_token.as_deref(), Some("COOKIE-1"));
+        assert_eq!(cold.new_token, EwsAdapter::events_token(Some("COOKIE-1")));
         let mut ids: Vec<&str> = cold.changes.iter().map(|e| e.id.as_str()).collect();
         ids.sort_unstable();
         assert_eq!(ids, ["S:A|CKA1", "S:B|CKB1"]);
 
-        // Warm call: prior cookie → incremental. Only A changed; B is a
-        // deletion carrying the raw native ItemId.
+        // Warm call: the token the cold call returned → incremental. Only A
+        // changed; B is a deletion carrying the raw native ItemId.
         let warm = adapter
-            .get_events_delta("FA|FCK", range(), Some("COOKIE-1"))
+            .get_events_delta("FA|FCK", range(), cold.new_token.as_deref())
             .await
             .unwrap();
         assert!(!warm.full_resync, "warm call with a token is incremental");
@@ -1592,7 +1697,7 @@ mod delta_read_tests {
         // Deletion is the bare EWS ItemId — matches the cached row's
         // native_id host-side.
         assert_eq!(warm.deletions, vec!["B".to_string()]);
-        assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
+        assert_eq!(warm.new_token, EwsAdapter::events_token(Some("COOKIE-2")));
     }
 
     /// Regression: the adapter's own SyncFolderItems cookie can be advanced
@@ -1650,6 +1755,7 @@ mod delta_read_tests {
             let mut guard = adapter.events_sync.lock().await;
             let mut state = SyncedFolderState {
                 sync_state: Some("ADAPTER-AHEAD".into()),
+                parser: api::ITEM_PARSER,
                 ..Default::default()
             };
             state.items.insert(
@@ -1663,15 +1769,278 @@ mod delta_read_tests {
             guard.insert("FA|FCK".into(), state);
         }
 
+        // The host's token, emitted by this build: incremental.
+        let host_token = EwsAdapter::events_token(Some("HOST-BEHIND"));
         let cs = adapter
-            .get_events_delta("FA|FCK", range(), Some("HOST-BEHIND"))
+            .get_events_delta("FA|FCK", range(), host_token.as_deref())
             .await
             .expect("delta must re-drain from the host token, not the adapter cookie");
         assert!(!cs.full_resync, "host has a token → incremental");
         assert_eq!(cs.changes.len(), 1);
         assert_eq!(cs.changes[0].id, "S:A|CKA2");
         assert_eq!(cs.changes[0].title, "Alpha v2");
-        assert_eq!(cs.new_token.as_deref(), Some("COOKIE-3"));
+        assert_eq!(cs.new_token, EwsAdapter::events_token(Some("COOKIE-3")));
+    }
+
+    /// A token from another zone translation — an older build's has no prefix
+    /// at all — means the host's snapshot holds zones another translation
+    /// read. The delta emits EVERY cached item again (from the raw Windows ids
+    /// Exchange sent), not only the changed one, and its new token names this
+    /// build's translation, so the next delta is incremental. Because that fact
+    /// lives in the host's token, an emit the host never stored is emitted
+    /// again. Without this, a series cached as `America/Chihuahua` by an old
+    /// table would keep that zone in the views and be written back to Exchange
+    /// under the new table's id on its next edit.
+    #[tokio::test]
+    async fn a_token_from_another_zone_translation_emits_every_cached_item() {
+        use mockito::Matcher;
+        let mut server = Server::new_async().await;
+        let update = r#"<t:Update><t:CalendarItem>
+                 <t:ItemId Id="A" ChangeKey="CKA2"/>
+                 <t:Subject>Alpha v2</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Update>"#;
+        let _first = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("HOST-TOKEN".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-4", update))
+            .expect(1)
+            .create_async()
+            .await;
+        let _second = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("COOKIE-4".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-5", ""))
+            .expect(1)
+            .create_async()
+            .await;
+        let _third = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("COOKIE-5".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-6", ""))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA2"/></t:CalendarItem>"#,
+            ))
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            let mut state = SyncedFolderState {
+                sync_state: Some("HOST-TOKEN".into()),
+                parser: api::ITEM_PARSER,
+                ..Default::default()
+            };
+            for (id, subject) in [("A", "Alpha"), ("B", "Bravo")] {
+                state.items.insert(
+                    id.into(),
+                    ParsedItem {
+                        item_id: id.into(),
+                        change_key: Some(format!("CK{id}")),
+                        subject: subject.into(),
+                        start: Some("2026-05-21T08:00:00Z".parse().unwrap()),
+                        end: Some("2026-05-21T09:00:00Z".parse().unwrap()),
+                        ..ParsedItem::default()
+                    },
+                );
+            }
+            guard.insert("FA|FCK".into(), state);
+        }
+        let titles = |cs: &ChangeSet<Event>| {
+            let mut titles: Vec<String> = cs.changes.iter().map(|e| e.title.clone()).collect();
+            titles.sort_unstable();
+            titles
+        };
+
+        // An older build's token: the bare cookie, naming no translation.
+        let first = adapter
+            .get_events_delta("FA|FCK", range(), Some("HOST-TOKEN"))
+            .await
+            .expect("first delta");
+        assert!(
+            first.full_resync,
+            "a token without this translation replaces the host's snapshot"
+        );
+        assert_eq!(
+            titles(&first),
+            ["Alpha v2", "Bravo"],
+            "the unchanged item is emitted too"
+        );
+        assert_eq!(first.new_token, EwsAdapter::events_token(Some("COOKIE-4")));
+
+        // The token it returned names this translation: incremental.
+        let second = adapter
+            .get_events_delta("FA|FCK", range(), first.new_token.as_deref())
+            .await
+            .expect("second delta");
+        assert!(
+            !second.full_resync,
+            "this translation's token is incremental"
+        );
+        assert!(second.changes.is_empty());
+
+        // A token another translation wrote: everything again.
+        let third = adapter
+            .get_events_delta("FA|FCK", range(), Some("zt-0000000000000000.0:COOKIE-5"))
+            .await
+            .expect("third delta");
+        assert!(
+            third.full_resync,
+            "another translation's token is a full resync"
+        );
+        assert_eq!(titles(&third), ["Alpha v2", "Bravo"]);
+    }
+
+    /// State filled by an older item parser lacks fields the read rule needs
+    /// (the end zone, 43b). It is dropped and the folder drained from scratch,
+    /// even under a current token: the result is a full resync with only what
+    /// the server now reports. Kept, the current token would have made the
+    /// delta incremental, and the stale item would have stayed.
+    #[tokio::test]
+    async fn state_from_an_older_item_parser_is_drained_again() {
+        let mut server = Server::new_async().await;
+        let create = r#"<t:Create><t:CalendarItem>
+                 <t:ItemId Id="B" ChangeKey="CKB1"/>
+                 <t:Subject>Bravo</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Create>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_page("FRESH-COOKIE", create))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="B" ChangeKey="CKB1"/></t:CalendarItem>"#,
+            ))
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            let mut state = SyncedFolderState {
+                sync_state: Some("OLD-COOKIE".into()),
+                parser: 0,
+                ..Default::default()
+            };
+            state.items.insert(
+                "A".into(),
+                ParsedItem {
+                    item_id: "A".into(),
+                    change_key: Some("CKA".into()),
+                    subject: "Alpha".into(),
+                    start: Some("2026-05-20T10:00:00Z".parse().unwrap()),
+                    end: Some("2026-05-20T11:00:00Z".parse().unwrap()),
+                    ..ParsedItem::default()
+                },
+            );
+            guard.insert("FA|FCK".into(), state);
+        }
+
+        let token = EwsAdapter::events_token(Some("OLD-COOKIE"));
+        let cs = adapter
+            .get_events_delta("FA|FCK", range(), token.as_deref())
+            .await
+            .expect("delta");
+        assert!(cs.full_resync, "an older parser's state is drained again");
+        let titles: Vec<&str> = cs.changes.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, ["Bravo"], "the stale cached item is gone");
+        assert_eq!(
+            adapter.events_sync.lock().await["FA|FCK"].parser,
+            api::ITEM_PARSER
+        );
+    }
+
+    /// The reminder scan's read (`get_events`) drops an older parser's state
+    /// the same way: the folder is drained from scratch, and the stale item,
+    /// which lies in the range, is not read.
+    #[tokio::test]
+    async fn get_events_drains_an_older_parsers_state_again() {
+        let mut server = Server::new_async().await;
+        let create = r#"<t:Create><t:CalendarItem>
+                 <t:ItemId Id="B" ChangeKey="CKB1"/>
+                 <t:Subject>Bravo</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Create>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_page("FRESH-COOKIE", create))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="B" ChangeKey="CKB1"/></t:CalendarItem>"#,
+            ))
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            let mut state = SyncedFolderState {
+                sync_state: Some("OLD-COOKIE".into()),
+                parser: 0,
+                ..Default::default()
+            };
+            state.items.insert(
+                "A".into(),
+                ParsedItem {
+                    item_id: "A".into(),
+                    change_key: Some("CKA".into()),
+                    subject: "Alpha".into(),
+                    start: Some("2026-05-20T10:00:00Z".parse().unwrap()),
+                    end: Some("2026-05-20T11:00:00Z".parse().unwrap()),
+                    ..ParsedItem::default()
+                },
+            );
+            guard.insert("FA|FCK".into(), state);
+        }
+
+        let events = adapter.get_events("FA|FCK", range()).await.expect("read");
+        let titles: Vec<&str> = events.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, ["Bravo"], "the stale cached item is gone");
+        let guard = adapter.events_sync.lock().await;
+        assert_eq!(guard["FA|FCK"].parser, api::ITEM_PARSER);
+        assert_eq!(guard["FA|FCK"].sync_state.as_deref(), Some("FRESH-COOKIE"));
     }
 }
 
@@ -1874,5 +2243,307 @@ mod occurrence_cancellation_tests {
             !master_ev.cancelled,
             "the series master stays not-cancelled"
         );
+    }
+}
+
+#[cfg(test)]
+mod server_zone_tests {
+    //! Decision 41a through the adapter: the server is asked once which
+    //! Windows zones it knows, only when a series with a zone is written, and
+    //! an id it does not know goes out without a zone.
+    use super::*;
+    use cal_core::EventRecurrence;
+    use mockito::Server;
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    const ZONES: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetServerTimeZonesResponse><m:ResponseMessages>
+    <m:GetServerTimeZonesResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:TimeZoneDefinitions>
+        <t:TimeZoneDefinition Name="(UTC+01:00) Amsterdam, Berlin" Id="W. Europe Standard Time"><t:Periods/></t:TimeZoneDefinition>
+        <t:TimeZoneDefinition Name="(UTC) Coordinated Universal Time" Id="UTC"><t:Periods/></t:TimeZoneDefinition>
+      </m:TimeZoneDefinitions>
+    </m:GetServerTimeZonesResponseMessage>
+  </m:ResponseMessages></m:GetServerTimeZonesResponse></s:Body>
+</s:Envelope>"#;
+
+    const CREATED: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:CreateItemResponse><m:ResponseMessages>
+    <m:CreateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="NEW" ChangeKey="CK"/></t:CalendarItem></m:Items>
+    </m:CreateItemResponseMessage>
+  </m:ResponseMessages></m:CreateItemResponse></s:Body>
+</s:Envelope>"#;
+
+    fn event(title: &str, tzid: Option<&str>) -> NewEvent {
+        NewEvent {
+            title: title.into(),
+            description: None,
+            location: None,
+            start: "2026-05-20T08:00:00Z".parse().unwrap(),
+            end: "2026-05-20T09:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: tzid.map(|tzid| EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_server_is_asked_once_and_unknown_ids_go_out_without_a_zone() {
+        let mut server = Server::new_async().await;
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _any = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("GetServerTimeZones") {
+                    ZONES
+                } else {
+                    CREATED
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(
+            server.url(),
+            BasicCredentials {
+                username: "alice".into(),
+                password: "pw".into(),
+            },
+        );
+        for (title, tzid) in [
+            ("Single", None),
+            ("Berlin", Some("Europe/Berlin")),
+            ("Sao Tome", Some("Africa/Sao_Tome")),
+            ("Berlin again", Some("Europe/Berlin")),
+        ] {
+            adapter
+                .create_event("FA|FCK", event(title, tzid))
+                .await
+                .unwrap_or_else(|err| panic!("create {title}: {err:?}"));
+        }
+
+        let requests = requests.lock().unwrap();
+        let kinds: Vec<&str> = requests
+            .iter()
+            .map(|body| {
+                if body.contains("GetServerTimeZones") {
+                    "zones"
+                } else if body.contains("Sao Tome") {
+                    "Sao Tome"
+                } else if body.contains("Berlin again") {
+                    "Berlin again"
+                } else if body.contains("Berlin") {
+                    "Berlin"
+                } else {
+                    "Single"
+                }
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["Single", "zones", "Berlin", "Sao Tome", "Berlin again"],
+            "asked once, before the first series with a zone"
+        );
+        let start = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
+        assert!(requests[2].contains(start), "Berlin: {}", requests[2]);
+        assert!(requests[4].contains(start), "Berlin again: {}", requests[4]);
+        assert!(
+            !requests[3].contains("TimeZone"),
+            "Sao Tome goes out without a zone: {}",
+            requests[3]
+        );
+    }
+
+    /// Serves each zone request from `zones(how many were asked before)` and
+    /// every other POST with `CREATED`, and records each request body.
+    async fn recording_server(
+        server: &mut Server,
+        zones: impl Fn(usize) -> String + Send + Sync + 'static,
+    ) -> (mockito::Mock, Arc<StdMutex<Vec<String>>>) {
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let mut seen = seen.lock().unwrap();
+                let answer = if body.contains("GetServerTimeZones") {
+                    let asked = seen
+                        .iter()
+                        .filter(|b| b.contains("GetServerTimeZones"))
+                        .count();
+                    zones(asked)
+                } else {
+                    CREATED.to_string()
+                };
+                seen.push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        (mock, requests)
+    }
+
+    fn alice() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    /// What each recorded request was: a zone request, a create naming
+    /// São Tomé's id, or a create without a zone.
+    fn shapes(requests: &[String]) -> Vec<&'static str> {
+        requests
+            .iter()
+            .map(|body| {
+                if body.contains("GetServerTimeZones") {
+                    "zones"
+                } else if body.contains(r#"<t:StartTimeZone Id="Sao Tome Standard Time"/>"#) {
+                    "with id"
+                } else if body.contains("TimeZone") {
+                    "other zone"
+                } else {
+                    "no zone"
+                }
+            })
+            .collect()
+    }
+
+    /// A zone request that fails is not kept: the save writes CLDR's id, and
+    /// the next save asks again and follows the answer.
+    #[tokio::test]
+    async fn a_failed_zone_request_is_asked_again_on_the_next_save() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |asked| {
+            if asked == 0 {
+                ZONES
+                    .replace(r#"ResponseClass="Success""#, r#"ResponseClass="Error""#)
+                    .replace(
+                        "<m:ResponseCode>NoError",
+                        "<m:ResponseCode>ErrorInternalServerError",
+                    )
+            } else {
+                ZONES.to_string()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        for _ in 0..3 {
+            adapter
+                .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
+                .await
+                .expect("create");
+        }
+        assert_eq!(
+            shapes(&requests.lock().unwrap()),
+            ["zones", "with id", "zones", "no zone", "no zone"]
+        );
+    }
+
+    /// A server that knows no zones is kept as knowing none: it is asked once,
+    /// and CLDR's ids are written.
+    #[tokio::test]
+    async fn an_empty_zone_answer_is_kept() {
+        let mut server = Server::new_async().await;
+        let empty = ZONES
+            .lines()
+            .filter(|line| !line.contains("TimeZoneDefinition "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_mock, requests) = recording_server(&mut server, move |_| empty.clone()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        for _ in 0..2 {
+            adapter
+                .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
+                .await
+                .expect("create");
+        }
+        assert_eq!(
+            shapes(&requests.lock().unwrap()),
+            ["zones", "with id", "with id"]
+        );
+    }
+
+    /// Decision 46a through the adapter: an all-day series with a stored zone
+    /// neither asks the server for its zones nor writes one.
+    #[tokio::test]
+    async fn an_all_day_series_neither_asks_for_nor_writes_a_zone() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let mut all_day = event("All-day Berlin", Some("Europe/Berlin"));
+        all_day.all_day = true;
+        all_day.start = "2026-10-18T22:00:00Z".parse().unwrap();
+        all_day.end = "2026-10-19T22:00:00Z".parse().unwrap();
+        adapter
+            .create_event("FA|FCK", all_day)
+            .await
+            .expect("create");
+        assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
+    }
+
+    /// The same on update: saving an all-day series that stores Outlook's zone
+    /// neither asks the server nor writes the zone back.
+    #[tokio::test]
+    async fn updating_an_all_day_series_neither_asks_for_nor_writes_a_zone() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
+        let series = Event {
+            id: "S:IID|CK".into(),
+            calendar_id: "FA|FCK".into(),
+            title: "All-day Berlin".into(),
+            description: None,
+            location: None,
+            start: "2026-10-18T22:00:00Z".parse().unwrap(),
+            end: "2026-10-19T22:00:00Z".parse().unwrap(),
+            all_day: true,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: stamp,
+            updated_at: stamp,
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        };
+        adapter.update_event(series).await.expect("update");
+        assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
     }
 }

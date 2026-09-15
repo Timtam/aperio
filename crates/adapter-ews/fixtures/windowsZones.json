@@ -1,0 +1,58 @@
+{
+  "what": "What Exchange gets for a series' stored zone, and what a Windows zone id read from Exchange means — the answers crates/adapter-ews/src/windows_tz.rs must give.",
+  "why": "Exchange names a series' zone by a Windows id, the rest of Aperio by tzdata. The translation decides whether a series reaches Exchange with its clock, with another city's, or with none, and what a series from Outlook repeats on. A hand-kept table had drifted: three wrong rows, and 174 of the 312 listed zones written without a zone.",
+  "decidedBy": "DESIGN-series-time-zone.md, stage 4, and decisions 14a (no zone repeats in UTC), 22a (zones Exchange cannot store), 25b (a merged place is stored as its target) and 26a (one rule for zones).",
+  "writtenBy": [
+    "By hand, from the CLDR release-48-2 windowsZones.xml pinned in crates/adapter-ews/cldr/ and from tzdata 2025b. Chosen, not measured: each row pins one reason the rule exists. The generated table they are checked against is crates/adapter-ews/src/windows_tz/windows_zones.rs."
+  ],
+  "readBy": [
+    "crates/adapter-ews/src/windows_tz.rs (the `every_contract_row_holds` test; its MUST_RUN list names every row)"
+  ],
+  "shape": {
+    "write": "[{name, tzid, expect, note}]: tzid is the series' stored zone or null; expect is {id} (StartTimeZone and EndTimeZone with this id), {no_zone: true}, or {not_storable: no_windows_zone | other_clock, windows?}",
+    "read": "[{name, windows, expect, note}]: windows is the StartTimeZone Id Exchange reports; expect is {zone}, {utc: true} or {unknown: true}"
+  },
+  "write": [
+    { "name": "berlin-default", "tzid": "Europe/Berlin", "expect": { "id": "W. Europe Standard Time" }, "note": "The default zone of its id." },
+    { "name": "vienna-member", "tzid": "Europe/Vienna", "expect": { "id": "W. Europe Standard Time" }, "note": "Another city under the same id: the hand table once wrote Vienna without a zone." },
+    { "name": "lowercase-berlin", "tzid": "europe/berlin", "expect": { "id": "W. Europe Standard Time" }, "note": "Any ASCII case, as the core resolves it." },
+    { "name": "device-spelling-calcutta", "tzid": "Asia/Calcutta", "expect": { "id": "India Standard Time" }, "note": "The spelling WebView2 reports resolves through the core first; the hand table wrote no zone." },
+    { "name": "merged-oslo", "tzid": "Europe/Oslo", "expect": { "id": "W. Europe Standard Time" }, "note": "A merged place writes its target's id (25b)." },
+    { "name": "merged-amsterdam-takes-brussels", "tzid": "Europe/Amsterdam", "expect": { "id": "Romance Standard Time" }, "note": "CLDR files Amsterdam under W. Europe, but tzdata merged it into Brussels, which CLDR files under Romance: the stored target's id wins (25b). Same clock since 1970." },
+    { "name": "merged-copenhagen-takes-berlin", "tzid": "Europe/Copenhagen", "expect": { "id": "W. Europe Standard Time" }, "note": "The other way round: CLDR files Copenhagen under Romance, its target Berlin under W. Europe." },
+    { "name": "kyiv-only-through-kiev", "tzid": "Europe/Kyiv", "expect": { "id": "FLE Standard Time" }, "note": "CLDR still spells it Europe/Kiev; the zone takes the one id its spellings agree on." },
+    { "name": "kanton-through-enderbury", "tzid": "Pacific/Kanton", "expect": { "id": "UTC+13" }, "note": "Only CLDR's old name Pacific/Enderbury is in the file." },
+    { "name": "chihuahua-cldr43", "tzid": "America/Chihuahua", "expect": { "id": "Central Standard Time (Mexico)" }, "note": "CLDR 43 moved it after Mexico's 2022 change; the hand table wrote Mountain Standard Time (Mexico). The CLDR row ends in a space." },
+    { "name": "almaty-cldr45", "tzid": "Asia/Almaty", "expect": { "id": "West Asia Standard Time" }, "note": "Kazakhstan went to +05:00 in 2024 and CLDR 45 followed; the hand table wrote Central Asia Standard Time." },
+    { "name": "beirut-middle-east", "tzid": "Asia/Beirut", "expect": { "id": "Middle East Standard Time" }, "note": "The hand table wrote Lebanon Standard Time, which is not a Windows id at all." },
+    { "name": "coyhaique-cldr48", "tzid": "America/Coyhaique", "expect": { "id": "Magallanes Standard Time" }, "note": "A zone tzdata 2025b added, which CLDR 48 files." },
+    { "name": "etc-gmt-minus-1", "tzid": "Etc/GMT-1", "expect": { "id": "W. Central Africa Standard Time" }, "note": "A fixed offset follows its CLDR row, on the same clock." },
+    { "name": "troll-no-windows-zone", "tzid": "Antarctica/Troll", "expect": { "not_storable": "no_windows_zone" }, "note": "The one listed zone CLDR has no id for (22a)." },
+    { "name": "scoresbysund-other-clock", "tzid": "America/Scoresbysund", "expect": { "not_storable": "other_clock", "windows": "Azores Standard Time" }, "note": "CLDR files it under the Azores' id, but since 2024 it runs -02:00/-01:00 and the Azores -01:00/+00:00: Exchange would store another clock (22a)." },
+    { "name": "utc-name-utc", "tzid": "UTC", "expect": { "no_zone": true }, "note": "A UTC name is no zone (26a); the hand table wrote Id=\"UTC\" for five of the eighteen spellings." },
+    { "name": "utc-name-gmt", "tzid": "GMT", "expect": { "no_zone": true }, "note": "Another UTC name." },
+    { "name": "utc-name-etc-zulu", "tzid": "Etc/Zulu", "expect": { "no_zone": true }, "note": "Another UTC name." },
+    { "name": "unknown-name", "tzid": "Mars/Olympus_Mons", "expect": { "no_zone": true }, "note": "A name tzdata does not know repeats in UTC (26a)." },
+    { "name": "offset-string", "tzid": "+05:30", "expect": { "no_zone": true }, "note": "An offset is not a tzdata name." },
+    { "name": "padded-berlin", "tzid": " Europe/Berlin ", "expect": { "no_zone": true }, "note": "The core does not trim: a padded name is not a zone." },
+    { "name": "no-tzid", "tzid": null, "expect": { "no_zone": true }, "note": "A series without a zone." }
+  ],
+  "read": [
+    { "name": "w-europe-berlin", "windows": "W. Europe Standard Time", "expect": { "zone": "Europe/Berlin" }, "note": "An id reads as its default zone." },
+    { "name": "lowercase-id", "windows": "eastern standard time", "expect": { "zone": "America/New_York" }, "note": "Any ASCII case." },
+    { "name": "india-kolkata", "windows": "India Standard Time", "expect": { "zone": "Asia/Kolkata" }, "note": "CLDR's default Asia/Calcutta, in tzdata's canonical spelling." },
+    { "name": "fle-kyiv", "windows": "FLE Standard Time", "expect": { "zone": "Europe/Kyiv" }, "note": "CLDR's default Europe/Kiev, canonical; the hand table read Europe/Kiev." },
+    { "name": "greenwich-abidjan", "windows": "Greenwich Standard Time", "end": "Greenwich Standard Time", "expect": { "zone": "Africa/Abidjan" }, "note": "CLDR's default Atlantic/Reykjavik is merged into Abidjan (25b). Aperio writes the same id as the end zone; any end zone but the no-zone marker leaves the start id to decide." },
+    { "name": "greenwich-created-without-zone", "windows": "Greenwich Standard Time", "end": "tzone://Microsoft/Utc", "expect": { "utc": true }, "note": "Live test A2: Exchange 2019 stores a series created without a zone with this start and end zone. The end zone means no zone (43b)." },
+    { "name": "utc-end-zone-in-any-case", "windows": "W. Europe Standard Time", "end": "TZONE://microsoft/utc", "expect": { "utc": true }, "note": "The end marker is read in any ASCII case, and it wins over the start zone." },
+    { "name": "utc-is-no-zone", "windows": "UTC", "expect": { "utc": true }, "note": "The UTC id is no zone; the hand table read Etc/UTC." },
+    { "name": "utc-minus-02-etc", "windows": "UTC-02", "expect": { "zone": "Etc/GMT+2" }, "note": "A UTC-offset id reads as its fixed offset, a zone of its own." },
+    { "name": "mountain-mexico-mazatlan", "windows": "Mountain Standard Time (Mexico)", "expect": { "zone": "America/Mazatlan" }, "note": "CLDR 43 made Mazatlan the default; the hand table read Chihuahua." },
+    { "name": "central-asia-bishkek", "windows": "Central Asia Standard Time", "expect": { "zone": "Asia/Bishkek" }, "note": "CLDR 45 made Bishkek the default; the hand table read Almaty." },
+    { "name": "middle-east-beirut", "windows": "Middle East Standard Time", "expect": { "zone": "Asia/Beirut" }, "note": "One of 31 ids the hand table did not read, so such series repeated in UTC." },
+    { "name": "kamchatka-registry-only", "windows": "Kamchatka Standard Time", "expect": { "unknown": true }, "note": "In the Windows registry, not in CLDR." },
+    { "name": "lebanon-not-an-id", "windows": "Lebanon Standard Time", "expect": { "unknown": true }, "note": "The id the hand table invented." },
+    { "name": "custom-definition", "windows": "tzone://Microsoft/Custom", "expect": { "unknown": true }, "note": "A custom time zone definition." },
+    { "name": "empty-id", "windows": "", "expect": { "unknown": true }, "note": "An empty Id attribute." }
+  ]
+}

@@ -949,7 +949,11 @@ pub struct GraphDateTimeWrite {
 }
 
 pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
-    let tzid = new.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
+    // The core's rule: an all-day series hands Graph no zone (decision 46a).
+    let tzid = cal_core::written_series_zone(
+        new.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        new.all_day,
+    );
     let body = EventWriteBody {
         subject: Some(new.title.clone()),
         body: new.description.clone().map(|c| EventBodyWrite {
@@ -975,7 +979,11 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
 }
 
 pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
-    let tzid = ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
+    // The core's rule: an all-day series hands Graph no zone (decision 46a).
+    let tzid = cal_core::written_series_zone(
+        ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        ev.all_day,
+    );
     Ok(EventWriteBody {
         subject: Some(ev.title.clone()),
         body: ev.description.clone().map(|c| EventBodyWrite {
@@ -2179,6 +2187,37 @@ mod tests {
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
         assert_eq!(json["start"]["dateTime"], "2025-12-14T19:00:00");
+    }
+
+    /// Decision 46a: an all-day series hands Graph no zone, whatever it stores;
+    /// its days go out as midnights in UTC.
+    #[test]
+    fn new_event_to_body_sends_no_zone_for_an_all_day_series() {
+        let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
+        let new = NewEvent {
+            title: "All-day".into(),
+            description: None,
+            location: None,
+            start: midnight.with_timezone(&Utc),
+            end: (midnight + chrono::Duration::days(1)).with_timezone(&Utc),
+            all_day: true,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: Vec::new(),
+                tzid: Some("America/New_York".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        };
+        let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
+        for side in ["start", "end"] {
+            assert_eq!(json[side]["timeZone"], "UTC", "{side}: {json}");
+        }
+        assert_eq!(json["start"]["dateTime"], "2026-10-19T00:00:00");
     }
 
     #[test]

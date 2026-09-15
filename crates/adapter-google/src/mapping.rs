@@ -569,7 +569,11 @@ pub struct EventRemindersWrite {
 
 /// Convert a `NewEvent` (caller's payload) into Google's wire body.
 pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
-    let tzid = new.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
+    // The core's rule: an all-day series hands Google no zone (decision 46a).
+    let tzid = cal_core::written_series_zone(
+        new.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        new.all_day,
+    );
     EventWriteBody {
         summary: Some(new.title.clone()),
         description: new.description.clone(),
@@ -590,7 +594,11 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
 /// replacement of the user-visible state — simpler than computing
 /// a diff and Google handles it the same.
 pub fn event_to_body(ev: &Event) -> EventWriteBody {
-    let tzid = ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
+    // The core's rule: an all-day series hands Google no zone (decision 46a).
+    let tzid = cal_core::written_series_zone(
+        ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        ev.all_day,
+    );
     EventWriteBody {
         summary: Some(ev.title.clone()),
         description: ev.description.clone(),
@@ -968,6 +976,47 @@ mod tests {
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
         assert_eq!(json["end"]["timeZone"], "America/New_York");
+    }
+
+    /// Decision 46a: an all-day series hands Google no zone, whatever it
+    /// stores; its days go out as dates.
+    #[test]
+    fn event_to_body_sends_no_zone_for_an_all_day_series() {
+        let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
+        let ev = Event {
+            id: "ev-all-day".into(),
+            calendar_id: "primary".into(),
+            title: "All-day".into(),
+            description: None,
+            location: None,
+            start: midnight.with_timezone(&Utc),
+            end: (midnight + chrono::Duration::days(1)).with_timezone(&Utc),
+            all_day: true,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: vec![],
+                tzid: Some("America/New_York".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: Utc.with_ymd_and_hms(2026, 9, 15, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 9, 15, 0, 0, 0).unwrap(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            cancelled: false,
+        };
+        let json = serde_json::to_value(event_to_body(&ev)).unwrap();
+        for side in ["start", "end"] {
+            assert_eq!(json[side]["timeZone"], "Etc/UTC", "{side}: {json}");
+            assert!(json[side]["dateTime"].is_null(), "{side}: {json}");
+        }
+        assert_eq!(json["start"]["date"], "2026-10-19");
     }
 
     #[test]

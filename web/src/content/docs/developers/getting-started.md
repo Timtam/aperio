@@ -60,6 +60,13 @@ cargo fmt --all -- --check                              # CI's first gate
 # TypeScript declarations the frontends parse. CI checks they are current.
 cargo xtask ts-types
 cargo xtask ts-types --check                            # what CI runs
+
+# After a chrono-tz update, or a new CLDR windowsZones file in
+# crates/adapter-ews/cldr/: regenerate the zone tables, in this order.
+# CI checks both are current.
+cargo xtask tz-list
+cargo xtask windows-zones
+cargo xtask tz-list --check && cargo xtask windows-zones --check   # what CI runs
 ```
 
 > **Match CI locally.** CI runs `clippy --workspace --all-targets -D
