@@ -2077,14 +2077,18 @@ Siehe DESIGN §4.2.
   mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
   vorher ohne Zone.
   🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
-  🚩 **Live-Test Runde 3** (49a):
+  🚩 **Live-Test Runde 3** (49a), vorbereitet:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
   - ein Termin in der Zone Tokio;
   - eine tägliche ganztägige Serie;
   - eine geänderte Ausnahme.
 
-  Toni meldet Wochentag und Länge in Outlook und in Aperio.
+  Die Anfragen schreibt der ignorierte Test `live_test_requests_round_3` im
+  EWS-Adapter aus Aperios eigenem Lese- und Schreibpfad. Ein Skript außerhalb
+  des Repositorys liest Tonis Outlook-Termine zuerst. Weicht ihre Form ab,
+  stoppt es, bevor es schreibt. Toni legt die Termine in Outlook selbst an
+  (51a und 52a) und meldet die kurze Liste (53a).
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

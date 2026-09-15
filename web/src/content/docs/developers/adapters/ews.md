@@ -98,4 +98,8 @@ folder-complete emit. The zone translation is pinned by
 `fixtures/windowsZones.json`, whose rows are named in the test; the adapter
 tests ask the mocked server for its zones once and drain an older parser's
 state again. Live testing
-needs an Exchange/365 mailbox that still exposes EWS.
+needs an Exchange/365 mailbox that still exposes EWS. The ignored tests
+`live_test_requests` and `live_test_requests_round_3` write the requests of
+the live zone tests as Aperio builds them, into the directory
+`APERIO_LIVE_TEST_DIR` names; each file's header comment says which requests
+are not Aperio's rule yet.
