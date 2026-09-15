@@ -59,8 +59,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
   `Sao Tome Standard Time`. The adapter asks each server once
   (`GetServerTimeZones`) and writes only ids it knows. An unknown one goes out
-  without a zone and is logged. If the server cannot be asked, the CLDR ids are
-  written.
+  without a zone and is logged. An update without a zone keeps the series' old
+  zone in Exchange, so an update to an unknown zone leaves the old one there.
+  If the server cannot be asked, or its answer cannot be read, the CLDR ids are
+  written and the next save asks again.
 - **Writing.** A stored zone first goes through the core's rule for zones
   (`series_clock_zone`, then `canonical_zone`): no zone, a UTC name or an
   unknown name writes no zone; any spelling of a zone writes that zone's id.

@@ -154,8 +154,10 @@ pub fn read_windows_zone(id: &str) -> WindowsZoneRead {
     }
 }
 
-/// A series' zone from the StartTimeZone and EndTimeZone ids Exchange reports;
-/// `None` when it reports no start zone.
+/// A series' zone from the StartTimeZone and EndTimeZone ids Exchange reports.
+/// The end zone `tzone://Microsoft/Utc`, in any ASCII case, means no zone
+/// whatever the start zone is (43b); otherwise the start id is read, and
+/// `None` means Exchange reported no start zone.
 pub fn read_series_zone(start: Option<&str>, end: Option<&str>) -> Option<WindowsZoneRead> {
     if end.is_some_and(|end| end.eq_ignore_ascii_case(NO_ZONE_END)) {
         return Some(WindowsZoneRead::Utc);

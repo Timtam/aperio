@@ -516,10 +516,10 @@ impl EwsAdapter {
     }
 
     /// The Windows zone ids this server knows, asked once and kept for the
-    /// adapter's life (decision 41a). A server that answers with none — or
-    /// whose answer cannot be read — is kept as knowing none, and the CLDR ids
-    /// are written as before. A failed request is not kept: the next save
-    /// asks again.
+    /// adapter's life (decision 41a). A server that answers with none is kept
+    /// as knowing none, and the CLDR ids are written as before. A failed
+    /// request, or an answer that cannot be read, is not kept: the CLDR ids
+    /// are written and the next save asks again.
     async fn server_zones(&self) -> Option<ServerTimeZones> {
         let mut known = self.server_zones.lock().await;
         if known.is_none() {
@@ -1957,7 +1957,10 @@ mod delta_read_tests {
                 "A".into(),
                 ParsedItem {
                     item_id: "A".into(),
+                    change_key: Some("CKA".into()),
                     subject: "Alpha".into(),
+                    start: Some("2026-05-20T10:00:00Z".parse().unwrap()),
+                    end: Some("2026-05-20T11:00:00Z".parse().unwrap()),
                     ..ParsedItem::default()
                 },
             );
@@ -1976,6 +1979,67 @@ mod delta_read_tests {
             adapter.events_sync.lock().await["FA|FCK"].parser,
             api::ITEM_PARSER
         );
+    }
+
+    /// The reminder scan's read (`get_events`) drops an older parser's state
+    /// the same way: the folder is drained from scratch, and the stale item,
+    /// which lies in the range, is not read.
+    #[tokio::test]
+    async fn get_events_drains_an_older_parsers_state_again() {
+        let mut server = Server::new_async().await;
+        let create = r#"<t:Create><t:CalendarItem>
+                 <t:ItemId Id="B" ChangeKey="CKB1"/>
+                 <t:Subject>Bravo</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Create>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_page("FRESH-COOKIE", create))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="B" ChangeKey="CKB1"/></t:CalendarItem>"#,
+            ))
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            let mut state = SyncedFolderState {
+                sync_state: Some("OLD-COOKIE".into()),
+                parser: 0,
+                ..Default::default()
+            };
+            state.items.insert(
+                "A".into(),
+                ParsedItem {
+                    item_id: "A".into(),
+                    change_key: Some("CKA".into()),
+                    subject: "Alpha".into(),
+                    start: Some("2026-05-20T10:00:00Z".parse().unwrap()),
+                    end: Some("2026-05-20T11:00:00Z".parse().unwrap()),
+                    ..ParsedItem::default()
+                },
+            );
+            guard.insert("FA|FCK".into(), state);
+        }
+
+        let events = adapter.get_events("FA|FCK", range()).await.expect("read");
+        let titles: Vec<&str> = events.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, ["Bravo"], "the stale cached item is gone");
+        let guard = adapter.events_sync.lock().await;
+        assert_eq!(guard["FA|FCK"].parser, api::ITEM_PARSER);
+        assert_eq!(guard["FA|FCK"].sync_state.as_deref(), Some("FRESH-COOKIE"));
     }
 }
 
@@ -2309,6 +2373,118 @@ mod server_zone_tests {
             !requests[3].contains("TimeZone"),
             "Sao Tome goes out without a zone: {}",
             requests[3]
+        );
+    }
+
+    /// Serves each zone request from `zones(how many were asked before)` and
+    /// every other POST with `CREATED`, and records each request body.
+    async fn recording_server(
+        server: &mut Server,
+        zones: impl Fn(usize) -> String + Send + Sync + 'static,
+    ) -> (mockito::Mock, Arc<StdMutex<Vec<String>>>) {
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let mut seen = seen.lock().unwrap();
+                let answer = if body.contains("GetServerTimeZones") {
+                    let asked = seen
+                        .iter()
+                        .filter(|b| b.contains("GetServerTimeZones"))
+                        .count();
+                    zones(asked)
+                } else {
+                    CREATED.to_string()
+                };
+                seen.push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        (mock, requests)
+    }
+
+    fn alice() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    /// What each recorded request was: a zone request, a create naming
+    /// São Tomé's id, or a create without a zone.
+    fn shapes(requests: &[String]) -> Vec<&'static str> {
+        requests
+            .iter()
+            .map(|body| {
+                if body.contains("GetServerTimeZones") {
+                    "zones"
+                } else if body.contains(r#"<t:StartTimeZone Id="Sao Tome Standard Time"/>"#) {
+                    "with id"
+                } else if body.contains("TimeZone") {
+                    "other zone"
+                } else {
+                    "no zone"
+                }
+            })
+            .collect()
+    }
+
+    /// A zone request that fails is not kept: the save writes CLDR's id, and
+    /// the next save asks again and follows the answer.
+    #[tokio::test]
+    async fn a_failed_zone_request_is_asked_again_on_the_next_save() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |asked| {
+            if asked == 0 {
+                ZONES
+                    .replace(r#"ResponseClass="Success""#, r#"ResponseClass="Error""#)
+                    .replace(
+                        "<m:ResponseCode>NoError",
+                        "<m:ResponseCode>ErrorInternalServerError",
+                    )
+            } else {
+                ZONES.to_string()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        for _ in 0..3 {
+            adapter
+                .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
+                .await
+                .expect("create");
+        }
+        assert_eq!(
+            shapes(&requests.lock().unwrap()),
+            ["zones", "with id", "zones", "no zone", "no zone"]
+        );
+    }
+
+    /// A server that knows no zones is kept as knowing none: it is asked once,
+    /// and CLDR's ids are written.
+    #[tokio::test]
+    async fn an_empty_zone_answer_is_kept() {
+        let mut server = Server::new_async().await;
+        let empty = ZONES
+            .lines()
+            .filter(|line| !line.contains("TimeZoneDefinition "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_mock, requests) = recording_server(&mut server, move |_| empty.clone()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        for _ in 0..2 {
+            adapter
+                .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
+                .await
+                .expect("create");
+        }
+        assert_eq!(
+            shapes(&requests.lock().unwrap()),
+            ["zones", "with id", "with id"]
         );
     }
 }

@@ -1157,6 +1157,23 @@ mod tests {
         assert!(body.contains(r#"Id="FID""#));
     }
 
+    /// Both requests that fill the item cache ask for the end zone as well as
+    /// the start zone: without the end zone a series created without one reads
+    /// as Abidjan (43b).
+    #[test]
+    fn item_requests_ask_for_both_zone_fields() {
+        let sync = sync_folder_items("FID", None, None, 100);
+        let detail = get_calendar_items_with_recurrence(&[("IID".into(), None)]);
+        for (name, body) in [("SyncFolderItems", &sync), ("GetItem", &detail)] {
+            for field in ["calendar:StartTimeZone", "calendar:EndTimeZone"] {
+                assert!(
+                    body.contains(&format!(r#"FieldURI="{field}""#)),
+                    "{name} asks for {field}: {body}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn check_for_fault_passes_on_success_response() {
         let body = r#"<?xml version="1.0"?>

@@ -5470,6 +5470,42 @@ mod tests {
         );
     }
 
+    /// 43b through `to_event`: the master's zone comes from both zone fields.
+    /// A series Exchange stored without a zone (Greenwich start, the
+    /// `tzone://Microsoft/Utc` end) repeats in UTC; the same start with a
+    /// Greenwich end is an Abidjan series.
+    #[test]
+    fn to_event_reads_the_series_zone_from_start_and_end_zone() {
+        let master = |end: &str| ParsedItem {
+            item_id: "M".into(),
+            change_key: Some("CK".into()),
+            subject: "Weekly".into(),
+            start: Some("2026-05-20T08:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T09:00:00Z".parse().unwrap()),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            start_time_zone: Some("Greenwich Standard Time".into()),
+            end_time_zone: Some(end.into()),
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 7 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            ..ParsedItem::default()
+        };
+        let tzid = |end: &str| {
+            to_event(master(end), "FID|CK")
+                .unwrap()
+                .recurrence
+                .expect("a master keeps its recurrence")
+                .tzid
+        };
+        assert_eq!(tzid("tzone://Microsoft/Utc"), None);
+        assert_eq!(
+            tzid("Greenwich Standard Time").as_deref(),
+            Some("Africa/Abidjan")
+        );
+    }
+
     #[test]
     fn parse_sync_response_captures_modified_occurrences() {
         // A master with one moved instance. Critical regression
