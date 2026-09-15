@@ -119,7 +119,8 @@ pub fn series_clock_zone(tzid: Option<&str>) -> Option<&str> {
 /// An all-day series has no zone of its own (DESIGN-series-time-zone.md, 13b),
 /// and a zone does harm on the wire: Exchange moves an all-day series to that
 /// zone's midnights and stretches it over more days (live test round 2,
-/// decision 46a). Every adapter asks this, so the rule lives here once.
+/// decision 46a). Every adapter that writes a series' zone asks this —
+/// Exchange, Microsoft 365, Google and CalDAV — so the rule lives here once.
 pub fn written_series_zone(tzid: Option<&str>, all_day: bool) -> Option<&str> {
     if all_day {
         None

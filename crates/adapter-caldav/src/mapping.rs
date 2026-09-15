@@ -784,10 +784,11 @@ pub fn new_event_to_ical(uid: &str, event: &NewEvent, organizer: Option<&str>) -
 /// them). No `TZID` emitted → nothing to inject, so the string is returned
 /// unchanged for all-day and non-recurring (bare-UTC) events.
 fn with_vtimezone(mut ical: String, event: &NewEvent) -> String {
-    if event.all_day {
-        return ical;
-    }
-    let Some(tzid) = event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()) else {
+    // The core's rule: an all-day series writes no zone (decision 46a).
+    let Some(tzid) = cal_core::written_series_zone(
+        event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        event.all_day,
+    ) else {
         return ical;
     };
     // Seed the DST-rule probe with the event's start year. A yearly rule is
@@ -880,11 +881,11 @@ fn apply_common(
         // the local day of `event.end` is exactly the right exclusive
         // boundary.
         ical_ev.ends(event.end.with_timezone(&Local).date_naive());
-    } else if let Some(tzid) = event
-        .recurrence
-        .as_ref()
-        .and_then(|r| r.tzid.as_deref())
-        .filter(|t| !t.eq_ignore_ascii_case("UTC"))
+    } else if let Some(tzid) = cal_core::written_series_zone(
+        event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+        event.all_day,
+    )
+    .filter(|t| !t.eq_ignore_ascii_case("UTC"))
     {
         // A zoned recurring master must keep its TZID on write-back, else the
         // next read flattens DTSTART to a bare UTC instant, drops the zone, and
@@ -1448,6 +1449,34 @@ END:VCALENDAR\r
             !event_to_ical(&ev, None).contains("VTIMEZONE"),
             "an all-day recurring event must not carry a VTIMEZONE"
         );
+    }
+
+    /// Decision 46a: an all-day series that stores a zone, for example one
+    /// kept after switching a timed series to all-day, still writes DATE
+    /// values with no TZID and no VTIMEZONE (the core's `written_series_zone`).
+    #[test]
+    fn an_all_day_series_with_a_stored_zone_gets_no_vtimezone() {
+        let all_day = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:standup@aperio\r
+SUMMARY:Standup\r
+DTSTART;VALUE=DATE:20260520\r
+RRULE:FREQ=WEEKLY;COUNT=4\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let mut ev = parse_calendar_data(all_day, "cal-1").unwrap().remove(0);
+        assert!(ev.all_day);
+        ev.recurrence
+            .as_mut()
+            .expect("the series keeps its rule")
+            .tzid = Some("Europe/Berlin".into());
+        let ical = event_to_ical(&ev, None);
+        assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE:\n{ical}");
+        assert!(!ical.contains("TZID="), "no TZID:\n{ical}");
+        assert!(ical.contains("DTSTART;VALUE=DATE:"), "DATE start:\n{ical}");
     }
 
     #[test]

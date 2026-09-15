@@ -2072,9 +2072,10 @@ Siehe DESIGN §4.2.
   - 49a: Es gibt eine gezielte dritte Runde des Live-Tests.
 
   Der Schutz aus 46a ist gebaut. Die Regel steht im Kern
-  (`written_series_zone`), und Exchange, Microsoft 365 und Google fragen sie.
-  Exchange fragt für eine ganztägige Serie auch keine Serverzonen mehr ab.
-  Microsoft 365 und Google schrieben ganztägige Tage schon vorher ohne Zone.
+  (`written_series_zone`), und Exchange, Microsoft 365, Google und CalDAV
+  fragen sie. Exchange fragt für eine ganztägige Serie auch keine Serverzonen
+  mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
+  vorher ohne Zone.
   🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
   🚩 **Live-Test Runde 3** (49a):
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert

@@ -2506,4 +2506,44 @@ mod server_zone_tests {
             .expect("create");
         assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
     }
+
+    /// The same on update: saving an all-day series that stores Outlook's zone
+    /// neither asks the server nor writes the zone back.
+    #[tokio::test]
+    async fn updating_an_all_day_series_neither_asks_for_nor_writes_a_zone() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
+        let series = Event {
+            id: "S:IID|CK".into(),
+            calendar_id: "FA|FCK".into(),
+            title: "All-day Berlin".into(),
+            description: None,
+            location: None,
+            start: "2026-10-18T22:00:00Z".parse().unwrap(),
+            end: "2026-10-19T22:00:00Z".parse().unwrap(),
+            all_day: true,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: stamp,
+            updated_at: stamp,
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        };
+        adapter.update_event(series).await.expect("update");
+        assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
+    }
 }

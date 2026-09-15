@@ -651,9 +651,10 @@ Handy im selben PR.
      Server nicht gefragt werden, gehen die CLDR-Namen raus, und das nächste
      Speichern fragt erneut.
    - Eine ganztägige Serie schreibt nie eine Zone (46a). Die Regel steht im Kern
-     (`written_series_zone`), und Exchange, Microsoft 365 und Google fragen sie.
-     Microsoft 365 und Google schreiben ganztägige Tage ohnehin als Datum ohne
-     Zone. Exchange fragt für eine ganztägige Serie auch nicht mehr, welche
+     (`written_series_zone`), und Exchange, Microsoft 365, Google und CalDAV
+     fragen sie. Microsoft 365 schreibt ganztägige Tage ohnehin als
+     Mitternacht in UTC, Google und CalDAV als Datum; die Zone der Serie ging
+     bei keinem der drei mit. Exchange fragt für eine ganztägige Serie auch nicht mehr, welche
      Zonen der Server kennt.
    - Die Termine im Speicher des Adapters kannten die Endzone nicht. Der
      Zustand eines Ordners trägt deshalb eine Leser-Version (`ITEM_PARSER`);
