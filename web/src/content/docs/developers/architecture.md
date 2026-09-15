@@ -106,7 +106,13 @@ Some of the rules that cross today:
   Both are plain strings, with `''` for none, because every expansion of a
   series asks. The names are generated from chrono-tz by `cargo xtask tz-list`.
 
-`src/wasm/coreRules.ts` holds every door.
+- **the world zone list**, `cal_core::zone_list`: `zoneLabels`, `zoneSearch`
+  and `zoneChoice` give the names, the search and where a stored zone stands.
+  Its offsets need chrono-tz, and they are the one part that does not cross
+  here: the desktop asks its host (`zone_offsets`, a Tauri command) and the
+  phone its native core.
+
+`src/wasm/coreRules.ts` holds every WebAssembly door.
 
 **Do not reach for `localeCompare`.** Use `compareNames` / `compareTitles`
 from `@aperio/shared` for text a person reads — each surface installs its own
@@ -118,6 +124,12 @@ which is a plain codepoint compare and needs no collation at all.
 The collation data is a megabyte of baked CLDR, so `cal-core`'s `collation`
 feature is off by default for the same reason `ts-export` is: only the two
 frontend bindings switch it on.
+
+The `zones` feature (chrono-tz, for the zone list's offsets) is off by default
+too, and it stays off in the WebAssembly door, where it would cost about
+879 KB. The phone's binding and the desktop host switch it on; both link
+chrono-tz already. CI checks that the WebAssembly door's dependency graph
+stays without chrono-tz.
 
 **A module behind an optional feature needs `#[cfg(feature = "…")]` on both
 the `pub mod` and its `pub use`.** `cargo build --workspace` will not tell you

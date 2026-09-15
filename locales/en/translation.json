@@ -2039,6 +2039,33 @@
       "removed": "Signature removed.",
       "calendarLabel": "Signature for this calendar",
       "calendarHint": "New appointments in this calendar carry it automatically. You can still pick a different one, or none, in the editor."
+    },
+    "seriesTimeZone": {
+      "entry": "{{city}}, {{region}}, {{offset}}",
+      "entryWithArea": "{{city}} ({{area}}), {{region}}, {{offset}}",
+      "entryNoOffset": "{{city}}, {{region}}",
+      "entryWithAreaNoOffset": "{{city}} ({{area}}), {{region}}",
+      "utcEntry": "UTC (no daylight saving time)",
+      "offset": "UTC{{sign}}{{hh}}:{{mm}}",
+      "offsetSign": {
+        "plus": "+",
+        "minus": "−"
+      },
+      "alsoKnownAs": "{{entry}} (also {{alias}})",
+      "count_one": "One time zone",
+      "count_other": "{{count}} time zones",
+      "noMatch": "No time zone matches “{{query}}”.",
+      "region": {
+        "africa": "Africa",
+        "america": "America",
+        "antarctica": "Antarctica",
+        "asia": "Asia",
+        "atlantic": "Atlantic",
+        "australia": "Australia",
+        "europe": "Europe",
+        "indian": "Indian Ocean",
+        "pacific": "Pacific"
+      }
     }
   },
   "sidebar": {

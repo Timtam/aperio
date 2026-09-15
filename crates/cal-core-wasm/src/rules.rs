@@ -192,6 +192,21 @@ pub fn canonical_zone(name: &str) -> String {
     cal_core::canonical_zone(name).unwrap_or("").to_string()
 }
 
+/// See [`crate::zoneLabels`].
+pub fn zone_labels() -> Result<String, WireError> {
+    cal_core::zone_labels_json().map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::zoneSearch`].
+pub fn zone_search(input_json: &str) -> Result<String, WireError> {
+    cal_core::zone_search_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::zoneChoice`].
+pub fn zone_choice(input_json: &str) -> Result<String, WireError> {
+    cal_core::zone_choice_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 /// See [`crate::collapseEventGroups`].
 pub fn collapse_event_groups(input_json: &str) -> Result<String, WireError> {
     cal_core::collapse_event_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))

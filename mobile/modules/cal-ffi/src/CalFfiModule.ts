@@ -75,6 +75,20 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  does not know. Synchronous. See `cal_core::canonical_zone`. */
   canonicalZone(name: string): string;
 
+  /** The world zone list's names by position, as JSON. Synchronous. See
+   *  `cal_core::zone_list`. */
+  zoneLabels(): string;
+
+  /** A search over the world zone list, as JSON. Synchronous. */
+  zoneSearch(inputJson: string): string;
+
+  /** Where a stored zone and the device's zone stand in the list, as JSON.
+   *  Synchronous. */
+  zoneChoice(inputJson: string): string;
+
+  /** Every listed zone's offsets and the list's order, as JSON. Synchronous. */
+  zoneOffsets(inputJson: string): string;
+
   /** Fold each group's members into a single row. `{events[], groups[]}` in,
    *  one row per surviving slot out. Synchronous. See
    *  `cal_core::event_group_fold`. */

@@ -185,6 +185,7 @@ ts-rs = { version = "12", features = ["chrono-impl"] }
 # default: the baked CLDR data weighs about a megabyte and twelve adapter
 # repositories compile against cal-core without ever sorting a list.
 icu_collator = { version = "2", features = ["compiled_data"] }
+icu_normalizer = { version = "2", features = ["compiled_data"] }
 icu_locale_core = "2"
 
 # HTTP / Protokolle

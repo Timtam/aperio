@@ -248,6 +248,24 @@ public class CalFfiModule: Module {
       canonicalZone(name: name)
     }
 
+    // The world zone list: its names, the search, where a stored or device
+    // zone stands, and the offsets.
+    Function("zoneLabels") { () -> String in
+      try zoneLabels()
+    }
+
+    Function("zoneSearch") { (inputJson: String) -> String in
+      try zoneSearch(inputJson: inputJson)
+    }
+
+    Function("zoneChoice") { (inputJson: String) -> String in
+      try zoneChoice(inputJson: inputJson)
+    }
+
+    Function("zoneOffsets") { (inputJson: String) -> String in
+      try zoneOffsets(inputJson: inputJson)
+    }
+
     // Folding a group into one row — what a day actually looks like.
     Function("collapseEventGroups") { (inputJson: String) -> String in
       try collapseEventGroups(inputJson: inputJson)

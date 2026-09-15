@@ -911,6 +911,7 @@ pub fn run() {
             commands::attach_meeting,
             commands::detach_meeting,
             commands::event_meeting,
+            commands::zone_offsets,
             commands::inspect_event_meeting,
             commands::adopt_meeting,
             commands::get_meeting,

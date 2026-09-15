@@ -1980,6 +1980,29 @@ Siehe DESIGN §4.2.
   - In einem Dev-Build `resolvedOptions().timeZone` für UTC, Indien und die
     Ukraine auf iOS und Android notieren (DESIGN-series-time-zone.md,
     „Ungeprüft“).
+  ↳ **Die Weltliste im Kern (Zeitzonen-Auswahl, Stufe 3, 2026-09-15):**
+  `cal_core::zone_list` benennt die 312 Zonen (Stadt, Gebiet, Region), sucht
+  darin und ordnet eine gespeicherte Zone oder die Gerätezone ein. Toni hat
+  entschieden (29a bis 32a):
+  - sortiert wird nach der Normalzeit ab heute, fest;
+  - „+5“ findet nur die volle Stunde;
+  - gebaut wird mit tzdata 2025b;
+  - der Versatz lautet „UTC−04:00“ mit echtem Minuszeichen.
+
+  Der Generator schreibt jetzt zu jedem Namen seine Art, gelesen aus den
+  Abschnitten von tzdatas `backward`. Namen ohne Schrägstrich (`EST5EDT`) kommen
+  nie in die Liste.
+
+  Namen und Suche laufen im normalen Kern, auf dem Desktop über WebAssembly. Nur
+  die Versätze brauchen chrono-tz (Feature `zones`): auf dem Desktop ein
+  Tauri-Befehl, auf dem Handy eine synchrone Tür. CI prüft, dass chrono-tz nicht
+  ins WebAssembly-Modul gerät. Die Fixture `timeZoneFilter.json` lesen Kern,
+  Handy-Tür und WebAssembly-Tür.
+  ↻ **Mit dem nächsten Handy-Build:** die `.so` frisch erzeugen (vier neue
+  Funktionen), dazu die Liste und die Suche einmal auf dem Gerät aufrufen.
+  🚩 **Aktualität der Zeitzonendaten** (32a): Marokko ab 20.09.2026, Vancouver,
+  Edmonton und Inuvik ab 01.11.2026, Chisinau stellt eine Stunde später um.
+  Eigene Aufgabe.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.

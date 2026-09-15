@@ -39,6 +39,32 @@ mod zone_names;
 
 use std::cmp::Ordering;
 
+use serde::Serialize;
+
+/// What kind of tzdata name an entry of the table is: a zone, or a link and
+/// the reason tzdata keeps it — the section of tzdata's `backward` file that
+/// declares it, or `etcetera`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum NameKind {
+    /// A zone of its own.
+    Zone,
+    /// A pre-1993 naming convention: `US/Eastern`, `EST5EDT`.
+    Pre1993,
+    /// A two-part name renamed to three parts in 1995: `America/Buenos_Aires`.
+    Renamed1995,
+    /// A place tzdata merged into another whose clocks have agreed since 1970,
+    /// and which had a zone.tab line of its own: `Europe/Oslo`.
+    MergedZoneTab,
+    /// A merged place without a zone.tab line: `America/Montreal`.
+    MergedNonZoneTab,
+    /// Another name for the same place: `Europe/Kiev`, `Asia/Calcutta`.
+    Alternate,
+    /// A UTC alias from `etcetera`: `GMT`.
+    Etcetera,
+}
+
 /// The IANA tzdata release the zone names were generated from.
 pub const TZDATA_VERSION: &str = zone_names::TZDATA_VERSION;
 
@@ -51,9 +77,22 @@ pub const TZDATA_VERSION: &str = zone_names::TZDATA_VERSION;
 /// `Europe/Berlin`, `UTC` is `Etc/UTC` — and `Etc/GMT+8` is a zone of its own.
 pub fn canonical_zone(name: &str) -> Option<&'static str> {
     zone_names::NAMES
-        .binary_search_by(|(entry, _)| ascii_folded(entry, name))
+        .binary_search_by(|(entry, _, _)| ascii_folded(entry, name))
         .ok()
         .map(|at| zone_names::NAMES[at].1)
+}
+
+/// Every tzdata name with the zone it resolves to and its kind, sorted by the
+/// name with ASCII case folded.
+pub(crate) fn names() -> &'static [(&'static str, &'static str, NameKind)] {
+    zone_names::NAMES
+}
+
+/// A listed zone's position in [`listed_zones`], for its id in any ASCII case.
+pub(crate) fn listed_position(zone: &str) -> Option<usize> {
+    zone_names::LISTED
+        .binary_search_by(|entry| ascii_folded(entry, zone))
+        .ok()
 }
 
 /// The zone a series repeats on, as the series stores it, or `None` when it
@@ -73,8 +112,10 @@ pub fn series_clock_zone(tzid: Option<&str>) -> Option<&str> {
     }
 }
 
-/// The zones outside `Etc/`, in tzdata's spelling and in the order the names
-/// sort with ASCII case folded — the zones a series' zone is chosen from.
+/// The zones outside `Etc/` with a region part, in tzdata's spelling and in
+/// the order the names sort with ASCII case folded — the zones a series' zone
+/// is chosen from. The region part keeps out the POSIX-style names such as
+/// `EST5EDT`, which tzdata 2026d turns from links back into zones.
 pub fn listed_zones() -> &'static [&'static str] {
     zone_names::LISTED
 }
@@ -106,7 +147,7 @@ mod table {
 
     #[test]
     fn every_name_resolves_to_a_zone_that_resolves_to_itself() {
-        for (name, target) in zone_names::NAMES {
+        for (name, target, _) in zone_names::NAMES {
             assert_eq!(canonical_zone(name), Some(*target), "{name}");
             assert_eq!(canonical_zone(target), Some(*target), "{name} -> {target}");
         }
@@ -119,8 +160,10 @@ mod table {
         }
         let zones: Vec<&str> = zone_names::NAMES
             .iter()
-            .filter(|(name, target)| name == target && !name.starts_with("Etc/"))
-            .map(|(name, _)| *name)
+            .filter(|(name, target, _)| {
+                name == target && name.contains('/') && !name.starts_with("Etc/")
+            })
+            .map(|(name, _, _)| *name)
             .collect();
         assert_eq!(listed_zones(), zones.as_slice());
         // Named rather than counted: a tzdata release that adds a zone must not
@@ -140,8 +183,8 @@ mod table {
     fn exactly_the_eighteen_utc_names_repeat_on_utc() {
         let mut utc: Vec<&str> = zone_names::NAMES
             .iter()
-            .filter(|(_, target)| matches!(*target, "Etc/UTC" | "Etc/GMT"))
-            .map(|(name, _)| *name)
+            .filter(|(_, target, _)| matches!(*target, "Etc/UTC" | "Etc/GMT"))
+            .map(|(name, _, _)| *name)
             .collect();
         utc.sort_unstable();
         assert_eq!(
@@ -167,6 +210,42 @@ mod table {
                 "Zulu",
             ],
         );
+    }
+
+    #[test]
+    fn the_posix_style_names_are_never_listed() {
+        // tzdata 2026d turns these from links back into zones; the list keeps
+        // the zones with a region part only.
+        for name in ["CST6CDT", "EST5EDT", "MST7MDT", "PST8PDT"] {
+            assert!(!listed_zones().contains(&name), "{name} is listed");
+            assert!(canonical_zone(name).is_some(), "{name} no longer resolves");
+        }
+    }
+
+    #[test]
+    fn every_link_has_a_reason_and_every_zone_is_itself() {
+        for (name, target, kind) in zone_names::NAMES {
+            assert_eq!(
+                name == target,
+                *kind == NameKind::Zone,
+                "{name} -> {target} ({kind:?})"
+            );
+        }
+        // Named, one link per kind: a reader that lost a section fails here.
+        for (name, kind) in [
+            ("US/Eastern", NameKind::Pre1993),
+            ("America/Buenos_Aires", NameKind::Renamed1995),
+            ("Europe/Oslo", NameKind::MergedZoneTab),
+            ("America/Montreal", NameKind::MergedNonZoneTab),
+            ("Europe/Kiev", NameKind::Alternate),
+            ("GMT", NameKind::Etcetera),
+        ] {
+            let found = zone_names::NAMES
+                .iter()
+                .find(|(entry, _, _)| *entry == name)
+                .map(|(_, _, kind)| *kind);
+            assert_eq!(found, Some(kind), "{name}");
+        }
     }
 
     #[test]

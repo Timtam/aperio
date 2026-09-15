@@ -894,6 +894,14 @@ external fun uniffi_cal_ffi_checksum_func_tasks_on_days(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_without_duplicate_meetings(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_zone_choice(
+): Short
+external fun uniffi_cal_ffi_checksum_func_zone_labels(
+): Short
+external fun uniffi_cal_ffi_checksum_func_zone_offsets(
+): Short
+external fun uniffi_cal_ffi_checksum_func_zone_search(
+): Short
 external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status(
@@ -1732,6 +1740,14 @@ external fun uniffi_cal_ffi_fn_func_tasks_on_days(`inputJson`: RustBuffer.ByValu
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_without_duplicate_meetings(`eventsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_zone_choice(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_zone_labels(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_zone_offsets(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_zone_search(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun ffi_cal_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun ffi_cal_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1969,6 +1985,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_without_duplicate_meetings() != 42105.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_zone_choice() != 58906.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_zone_labels() != 37823.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_zone_offsets() != 34519.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_zone_search() != 204.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated() != 38470.toShort()) {
@@ -11042,6 +11070,64 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_without_duplicate_meetings(
     
         FfiConverterString.lower(`eventsJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Where a stored zone and the device's zone stand in the list, as JSON. See
+         * cal_core::zone_choice.
+         */
+    @Throws(StoreException::class) fun `zoneChoice`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_zone_choice(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The world zone list's names by position, as JSON. See cal_core::zone_list.
+         */
+    @Throws(StoreException::class) fun `zoneLabels`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_zone_labels(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Every listed zone's offsets and the order of the list, as JSON. See
+         * cal_core::zone_offsets.
+         */
+    @Throws(StoreException::class) fun `zoneOffsets`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_zone_offsets(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A search over the world zone list, as JSON. See cal_core::zone_search.
+         */
+    @Throws(StoreException::class) fun `zoneSearch`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_zone_search(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }

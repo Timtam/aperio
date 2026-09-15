@@ -51,7 +51,10 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 anyhow.workspace = true
 
-cal-core.workspace = true
+# `zones` on: the world zone list's offsets are a command here
+# (src/commands/time_zones.rs), because the WebAssembly door leaves chrono-tz
+# out and this binary links it already through host-core.
+cal-core = { workspace = true, features = ["zones"] }
 adapter-local.workspace = true
 host-core.workspace = true
 sync-core.workspace = true

@@ -18,6 +18,8 @@ import {
   installTaskSettingsRules,
   installSeriesShiftRules,
   installSeriesClockRules,
+  installZoneListRules,
+  type ZoneOffsets,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -183,6 +185,17 @@ installSeriesShiftRules({
 installSeriesClockRules({
   seriesClockZone: (tzid) => CalFfi.seriesClockZone(tzid),
   canonicalZone: (name) => CalFfi.canonicalZone(name),
+});
+
+// The world zone list a series' zone is chosen from. The offsets answer
+// synchronously here; the shell takes a Promise because the desktop asks its
+// host for them.
+installZoneListRules({
+  zoneLabelsJson: () => CalFfi.zoneLabels(),
+  zoneSearchJson: (inputJson) => CalFfi.zoneSearch(inputJson),
+  zoneChoiceJson: (inputJson) => CalFfi.zoneChoice(inputJson),
+  zoneOffsets: async (question) =>
+    JSON.parse(CalFfi.zoneOffsets(JSON.stringify(question))) as ZoneOffsets,
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

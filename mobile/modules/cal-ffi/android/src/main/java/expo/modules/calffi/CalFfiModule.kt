@@ -56,6 +56,10 @@ import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
 import uniffi.cal_ffi.normalizeJoinUrl as uniffiNormalizeJoinUrl
 import uniffi.cal_ffi.seriesClockZone as uniffiSeriesClockZone
 import uniffi.cal_ffi.canonicalZone as uniffiCanonicalZone
+import uniffi.cal_ffi.zoneLabels as uniffiZoneLabels
+import uniffi.cal_ffi.zoneSearch as uniffiZoneSearch
+import uniffi.cal_ffi.zoneChoice as uniffiZoneChoice
+import uniffi.cal_ffi.zoneOffsets as uniffiZoneOffsets
 import uniffi.cal_ffi.occurrenceCarryFields as uniffiOccurrenceCarryFields
 import uniffi.cal_ffi.planCarry as uniffiPlanCarry
 import uniffi.cal_ffi.isImportantPriority as uniffiIsImportantPriority
@@ -340,6 +344,25 @@ class CalFfiModule : Module() {
 
     Function("canonicalZone") { name: String ->
       uniffiCanonicalZone(name)
+    }
+
+    // The world zone list: its names, the search, where a stored or device
+    // zone stands, and the offsets. Synchronous like every rule door; the
+    // offsets cost well under a millisecond on the desktop's native build.
+    Function("zoneLabels") {
+      uniffiZoneLabels()
+    }
+
+    Function("zoneSearch") { inputJson: String ->
+      uniffiZoneSearch(inputJson)
+    }
+
+    Function("zoneChoice") { inputJson: String ->
+      uniffiZoneChoice(inputJson)
+    }
+
+    Function("zoneOffsets") { inputJson: String ->
+      uniffiZoneOffsets(inputJson)
     }
 
     // Folding a group into one row — what a day actually looks like.
