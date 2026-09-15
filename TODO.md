@@ -2070,6 +2070,13 @@ Siehe DESIGN §4.2.
   - 48a: Der Lesefehler wird ein eigener PR mit einer Kern-Regel: Eine
     ganztägige Serie wiederholt sich an den Kalendertagen des Geräts.
   - 49a: Es gibt eine gezielte dritte Runde des Live-Tests.
+  - 51a: Toni legt die Serien S1 bis S3 und die Termine T1 und T2 selbst in
+    Outlook im Web an.
+  - 52a: Toni macht das Vorkommen von S3 am 26.10. selbst in Outlook zur
+    Ausnahme.
+  - 53a: Toni meldet eine kurze Liste zurück: die letzte Zeile des Skripts,
+    welches Outlook und welcher Aperio-Stand, den Tokio-Termin in Outlook, die
+    Termine, die das Skript nennt, und vier Blicke in Aperio.
 
   Der Schutz aus 46a ist gebaut. Die Regel steht im Kern
   (`written_series_zone`), und Exchange, Microsoft 365, Google und CalDAV
@@ -2077,14 +2084,18 @@ Siehe DESIGN §4.2.
   mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
   vorher ohne Zone.
   🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
-  🚩 **Live-Test Runde 3** (49a):
+  🚩 **Live-Test Runde 3** (49a), vorbereitet:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
   - ein Termin in der Zone Tokio;
   - eine tägliche ganztägige Serie;
   - eine geänderte Ausnahme.
 
-  Toni meldet Wochentag und Länge in Outlook und in Aperio.
+  Die Anfragen schreibt der ignorierte Test `live_test_requests_round_3` im
+  EWS-Adapter aus Aperios eigenem Lese- und Schreibpfad. Ein Skript außerhalb
+  des Repositorys liest Tonis Outlook-Termine zuerst. Weicht ihre Form ab,
+  stoppt es, bevor es schreibt. Toni legt die Termine in Outlook selbst an
+  (51a und 52a) und meldet die kurze Liste (53a).
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.
