@@ -49,9 +49,9 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   `src/windows_tz/windows_zones.rs` from it; CI runs it with `--check`.
 - **Reading.** An id reads as the zone of its default ("001") row, in tzdata's
   canonical spelling (`India Standard Time` → `Asia/Kolkata`). Exchange keeps
-  one id per clock, so a Vienna series reads back as Berlin. `UTC`, and an id
-  the table does not know (custom definitions, registry-only ids), mean no
-  zone; the series repeats in UTC.
+  one id for a group of cities on one clock, so a Vienna series reads back as
+  Berlin. `UTC`, and an id the table does not know (custom definitions,
+  registry-only ids), mean no zone; the series repeats in UTC.
 - **Writing.** A stored zone first goes through the core's rule for zones
   (`series_clock_zone`, then `canonical_zone`): no zone, a UTC name or an
   unknown name writes no zone; any spelling of a zone writes that zone's id.
@@ -60,10 +60,16 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,
   `Antarctica/Vostok`). The generator's clock guard finds these; the table
   lists them.
-- **Updating CLDR.** Replace `windowsZones.xml`, `LICENSE` and `SOURCE` from
-  one CLDR release tag, run `cargo xtask windows-zones`, commit. A new table
-  changes `TABLE_ID`, and the next delta sync emits every cached item again,
-  so no view keeps a zone the old table read.
+- **Updating CLDR.** Take `windowsZones.xml` and `LICENSE` from one CLDR
+  release tag, write that tag, its publication date, both URLs and the XML's
+  sha256 into `SOURCE`, run `cargo xtask windows-zones`, commit.
+- **Cached events follow the translation.** The events token the host keeps
+  is `zt-{translation}:{cookie}`, where the translation is the generated
+  `TABLE_ID` (hashed from the table's rows) plus `READ_RULE` in
+  `windows_tz.rs`. Bump `READ_RULE` whenever an id becomes a series' zone
+  differently without the table changing. A delta whose token names another
+  translation emits every cached item again, without re-reading Exchange, so
+  no view keeps a zone the old translation read.
 
 ## Testing
 

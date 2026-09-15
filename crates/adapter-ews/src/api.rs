@@ -181,11 +181,6 @@ pub struct SyncedFolderState {
     /// Server cookie to pass back on the next sync. `None` only
     /// when this state has never seen a successful round.
     pub sync_state: Option<String>,
-    /// The Exchange zone table (`windows_tz::TABLE_ID`) the host's snapshot
-    /// was last emitted with. `None` for state written by an older build, or
-    /// never emitted: the next delta then emits every cached item again.
-    #[serde(default)]
-    pub zone_table: Option<String>,
 }
 
 /// How many changes to ask for per `SyncFolderItems` request.

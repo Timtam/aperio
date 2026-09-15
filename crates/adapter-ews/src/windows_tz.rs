@@ -28,15 +28,39 @@
 //! A zone Exchange cannot store is written without one (22a): CLDR has no id
 //! for it, or CLDR's id runs another clock than the zone in the five years
 //! after the pinned release. See DESIGN-series-time-zone.md, stage 4.
+//!
+//! ## The translation id
+//!
+//! Events the host caches were translated with one table and one reading rule.
+//! [`translation_id`] names both: the generated table's `TABLE_ID`, which the
+//! generator derives from the table's rows, and [`READ_RULE`], which is bumped
+//! by hand whenever the way an id becomes a series' zone changes outside the
+//! table — here in [`read_windows_zone`], or in the read path of `mapping.rs`.
+//! The EWS delta sync compares it with the one in the host's token and emits
+//! every cached item again when they differ.
 
 #[rustfmt::skip]
 mod windows_zones;
 
-pub use windows_zones::{CLDR_RELEASE, TABLE_ID, TZDATA_VERSION};
+pub use windows_zones::{CLDR_RELEASE, TZDATA_VERSION};
 
 use std::cmp::Ordering;
 
-use windows_zones::{OTHER_CLOCK, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
+use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
+
+/// The reading rule's version. Bump it when an id read from Exchange becomes
+/// a series' zone differently without the generated table changing, so every
+/// cached event is translated again.
+///
+/// 1: stage 4 — an id reads as its 001 zone, canonical; `UTC` and unknown ids
+/// are no zone.
+pub const READ_RULE: u32 = 1;
+
+/// Which translation cached events were made with: the table's rows and the
+/// reading rule.
+pub fn translation_id() -> String {
+    format!("{TABLE_ID}.{READ_RULE}")
+}
 
 /// What a Windows zone id read from Exchange means for a series.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +121,10 @@ pub fn windows_zone_for(tzid: Option<&str>) -> WindowsZoneWrite {
         NotStorable::OtherClock { windows }
     } else {
         if UNMAPPED.binary_search_by(|z| folded(z, zone)).is_err() {
-            // Every zone of the core's tzdata is in one of the three lists (a
-            // test proves it), so this is a table from another release.
+            // The generator places every zone of its tzdata in one of the three
+            // lists, and CI's `windows-zones --check` holds the committed table
+            // to that. A zone in none of them means a table generated from
+            // another tzdata release than the core's.
             tracing::warn!(
                 target: "adapter_ews::zones",
                 zone,
@@ -243,6 +269,13 @@ mod tests {
     }
 
     #[test]
+    fn the_translation_id_names_the_table_and_the_reading_rule() {
+        assert_eq!(translation_id(), format!("{TABLE_ID}.{READ_RULE}"));
+        assert_eq!(TABLE_ID.len(), 16);
+        assert!(TABLE_ID.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+
+    #[test]
     fn every_zone_in_the_table_is_spelled_as_tzdata_spells_it() {
         let zones = WINDOWS_ZONES
             .iter()
@@ -320,6 +353,30 @@ mod tests {
                 "Antarctica/Vostok",
             ]
         );
+    }
+
+    #[test]
+    fn every_fixed_offset_zone_is_written() {
+        // The 26 zones outside the list that are not UTC names: Etc/GMT-14 to
+        // Etc/GMT-1 and Etc/GMT+1 to Etc/GMT+12. Each follows its CLDR row.
+        let names = (1..=14)
+            .map(|n| format!("Etc/GMT-{n}"))
+            .chain((1..=12).map(|n| format!("Etc/GMT+{n}")));
+        let mut count = 0;
+        for name in names {
+            assert_eq!(
+                cal_core::canonical_zone(&name),
+                Some(name.as_str()),
+                "{name} is a zone"
+            );
+            assert!(
+                matches!(windows_zone_for(Some(&name)), WindowsZoneWrite::Id(_)),
+                "{name}: {:?}",
+                windows_zone_for(Some(&name))
+            );
+            count += 1;
+        }
+        assert_eq!(count, 26);
     }
 
     #[test]

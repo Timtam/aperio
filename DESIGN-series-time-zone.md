@@ -486,17 +486,18 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   auf UTC es. Sonst steht „UTC (ohne Sommerzeit)“ in einer Exchange-Serie mit
   Zone markiert in der Liste: „UTC (ohne Sommerzeit) (Exchange kann die Zone
   dieser Serie nicht entfernen)“, und lässt sich nicht wählen.
-- **Zonen, die Aperios Windows-Tabelle nicht abbilden kann,** sind nach 22a
-  markiert und nicht wählbar. Seit Stufe 4 sind es vier:
+- **Zonen, die Exchange nicht speichern kann,** sind nach 22a markiert und
+  nicht wählbar. Seit Stufe 4 sind es vier:
   - Antarctica/Troll, für das CLDR keinen Windows-Namen hat;
   - America/Scoresbysund, Antarctica/Casey und Antarctica/Vostok, deren
     Windows-Name in CLDR eine andere Uhr hat. Exchange würde dort eine andere
     Zone speichern als die gewählte.
 
-  Die Tabelle nennt sie, und ein Test hält die Liste fest. Eine neue Serie mit so einer Gerätezone beginnt auf
-  UTC; nach der Endzeit steht dann „Exchange kann die Zeitzone {Stadt} nicht
-  speichern; die Serie steht auf UTC.“ Kopieren oder Verschieben nach Exchange
-  wird mit der Zone im Grund abgelehnt.
+  Die erzeugte Tabelle nennt sie, und ein Test hält die Liste fest. Eine neue
+  Serie mit so einer Gerätezone beginnt auf UTC; nach der Endzeit steht dann
+  „Exchange kann die Zeitzone {Stadt} nicht speichern; die Serie steht auf
+  UTC.“ Kopieren oder Verschieben nach Exchange wird mit der Zone im Grund
+  abgelehnt.
 - **Exchange und Microsoft 365** leiten Start- und Enddatum und die Standard-Tage
   heute aus dem UTC-Datum ab. Beide müssen sie auf der Uhr der Serie lesen, bevor
   die Editoren Beginn und UNTIL auf diese Uhr stellen.
@@ -615,29 +616,38 @@ Handy im selben PR.
    - Ein Uhr-Wächter vergleicht jede Zone fünf Jahre ab der Veröffentlichung
      des Releases mit der Standardzone ihres Windows-Namens. Weicht die Uhr ab,
      wird die Zone nicht geschrieben (22a).
-   - Ein Fingerabdruck der Tabelle im Sync-Zustand lässt nach einem Update alle
-     zwischengespeicherten Exchange-Termine einmal neu ausgeben. Sonst behielte
-     die Ansicht eine Zone, die die alte Tabelle gelesen hat, und das nächste
-     Bearbeiten schriebe sie unter dem neuen Namen an Exchange.
+   - Der Sync-Token, den der Host speichert, trägt einen Fingerabdruck der
+     Zonen-Übersetzung: die Zeilen der Tabelle und eine Nummer für die Leseregel.
+     Nennt der Token eine andere Übersetzung, gibt der Adapter alle
+     zwischengespeicherten Exchange-Termine einmal neu aus, ohne Exchange neu zu
+     lesen. Sonst behielte die Ansicht eine Zone, die die alte Tabelle gelesen
+     hat, und das nächste Bearbeiten schriebe sie unter dem neuen Namen an
+     Exchange. Weil der Host einen Token nur zusammen mit seinen Terminen
+     speichert, geht eine Neuausgabe nicht verloren, wenn eine Übertragung
+     scheitert.
 
    Gemessen:
    - CLDR 48.2 (`release-48-2`, 17. März 2026) ist aktuell. `windowsZones.xml`
      ist von 48 bis 49-alpha2 byte-gleich und auf dem Stand von tzdata 2025b; sie
      kennt 139 Windows-Namen.
-   - 311 der 312 gelisteten Zonen und 596 der 597 Namen sind abbildbar, nur
-     Antarctica/Troll nicht. 15 Zonen stehen in CLDR nur unter einer alten
-     Schreibweise, etwa Kolkata als Calcutta und Kyiv als Kiev.
+   - 311 der 312 gelisteten Zonen und 596 der 597 Namen haben in CLDR einen
+     Windows-Namen, nur Antarctica/Troll nicht. 15 Zonen stehen dort nur unter
+     einer alten Schreibweise, etwa Kolkata als Calcutta und Kyiv als Kiev.
    - Drei Zonen stehen unter einem Windows-Namen mit anderer Uhr: Scoresbysund,
-     Casey und Vostok. Geschrieben werden also 308 gelistete Zonen und die 26
+     Casey und Vostok. Speicherbar sind also 308 gelistete Zonen, dazu die 26
      festen Versätze `Etc/GMT±N`. Der erste Lauf des Generators fand genau diese
      Zahlen.
+   - Auf einem Windows-11-Rechner (Build 26220, TzVersion 7ea0002) ergeben die
+     Windows-Regeln aller 139 Windows-Namen im Januar und im Juli 2026 dieselben
+     Versätze wie ihre Standardzone. Darauf stützt sich der Uhr-Wächter.
+     Exchanges eigene Tabellen sind nicht gemessen.
    - Die alte Handtabelle schrieb 138 gelistete Zonen. Drei Zeilen waren
      falsch: Chihuahua, Almaty und Beirut mit dem erfundenen Namen
      „Lebanon Standard Time“. 31 Windows-Namen las sie nicht, und sie
      kanonisierte nicht: `Asia/Calcutta` bekam keine Zone.
-   - Beim Zurücklesen kommen 131 Zonen als sie selbst zurück und 180 als eine
-     andere Stadt auf derselben Uhr, etwa Wien als Berlin. 11 davon kommen als
-     `Etc/GMT±N` zurück.
+   - Beim Zurücklesen kommen von den 308 speicherbaren gelisteten Zonen 131 als
+     sie selbst zurück und 177 als eine andere Zone auf derselben Uhr, etwa Wien
+     als Berlin. 11 davon kommen als `Etc/GMT±N` zurück.
    - Microsoft dokumentiert: Ein Anlegen ohne Zone ist UTC. Eine Zeit mit `Z`
      zusammen mit StartTimeZone gilt als UTC. Nur die Zone zu ändern verschiebt
      die gespeicherten Zeitpunkte. Was ein Update ohne StartTimeZone macht, ist
@@ -645,9 +655,12 @@ Handy im selben PR.
    - EWS in Exchange Online wird ab Oktober 2026 abgeschaltet und ab April 2027
      ganz. Tonis Testserver ist ein eigener (39).
    - Vor dem Merge testet Toni an seinem Exchange-Server (38a):
-     - ob der Server die neuen Windows-Namen kennt;
-     - was ein unbekannter Name bewirkt;
+     - welche Windows-Namen der Server kennt (GetServerTimeZones), und ob er die
+       Namen annimmt, die Aperio zum ersten Mal schickt;
+     - welche Antwort ein erfundener Name bekommt;
      - ob ein Update ohne Zone die Zone behält;
+     - ob ein Update, das Beginn und Ende vor einer neuen Zone setzt, die
+       Zeitpunkte verschiebt;
      - was eine ganztägige Serie mit Zone macht.
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Danach messen, wie Microsoft 365 recurrenceTimeZone beim Zurücklesen behandelt.
@@ -657,7 +670,7 @@ Handy im selben PR.
    genauso liest, wird vorher geprüft.
 7. **Exchange sagt, was es nicht speichern kann** — `fix(ews): keep what Exchange can store, and say when it cannot`.
    Nach der Messung aus Stufe 4, und vor den Editoren, damit ein Wechsel auf UTC
-   oder eine nicht abbildbare Zone nie still verpufft.
+   oder eine nicht speicherbare Zone nie still verpufft.
 8. **Datum, Uhrzeit und Regel auf einer Serien-Uhr** — `feat(shared): dates, times and repeat rules on a series clock`.
    Umrechnung mit Lücke und Doppelstunde, Formularfelder mit Uhr, Regel-Ableitung
    aus dem Tages-Schlüssel, WKST, UNTIL. Noch unsichtbar. Fixture
@@ -737,9 +750,10 @@ Handy im selben PR.
   geschickt wird, und lässt sie sich nicht entfernen, muss dieser Wechsel
   abgelehnt werden.
 - **Städtenamen aus Exchange.** Eine Wiener Serie kommt nach dem Aktualisieren
-  als Berlin zurück (dieselbe Uhr). Gezählt in Stufe 4: 180 der 311
-  abbildbaren Zonen kommen als eine andere Stadt zurück. 11 davon kommen als
-  fester Versatz `Etc/GMT±N`, der nicht in der Liste steht.
+  als Berlin zurück (dieselbe Uhr). Gezählt in Stufe 4: Von den 308
+  speicherbaren gelisteten Zonen kommen 177 als eine andere Zone auf derselben
+  Uhr zurück. 11 davon kommen als fester Versatz `Etc/GMT±N`, der nicht in der
+  Liste steht.
 - **CLDR hinter tzdata.** CLDR ordnet manche Zonen einer Windows-Zone mit
   anderer Uhr zu, und der Uhr-Wächter nimmt sie aus der Tabelle. Ein neuer
   tzdata-Stand kann so auch verbreitete Zonen aus Exchange nehmen, bis CLDR und
@@ -811,7 +825,9 @@ Handy im selben PR.
 
   Ungeprüft bleibt, ob Exchange eigene Zonendefinitionen und Namen, die nur in
   der Windows-Registry stehen (Kamchatka, Mid-Atlantic), so zurückgibt, wie
-  Aperio sie liest: als keine Zone.
+  Aperio sie liest: als keine Zone. Ungeprüft ist auch, ob Exchanges eigene
+  Zeitzonen-Regeln denen von Windows gleichen, an denen der Uhr-Wächter über die
+  Standardzonen gemessen ist.
 - Ob der Desktop die eingebauten Manifeste für die Wiederholungs-Fähigkeiten
   genauso liest wie das Handy (src-tauri commands/calendars.rs).
 - Wie Microsoft 365 recurrenceTimeZone nach Stufe 5 beim Zurücklesen behandelt.

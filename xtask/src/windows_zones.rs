@@ -12,11 +12,12 @@
 //!
 //! # What it refuses, each by name and line
 //!
-//! A file that does not match its pin; an element or attribute the reader does
-//! not know; a Windows id without exactly one default ("001") zone; a name
-//! tzdata does not know; a name under two ids; a zone whose other spellings sit
-//! under different ids; a default zone that is a UTC name for an id other than
-//! `UTC`.
+//! A file that does not match its pin; an element the format does not have, in
+//! a place the format does not put it, or with an attribute it does not carry;
+//! text between the elements; a Windows id without exactly one default ("001")
+//! zone; a name tzdata does not know; a name under two ids; a zone whose other
+//! spellings sit under different ids; a default zone that is a UTC name for an
+//! id other than `UTC`.
 //!
 //! # The clock guard
 //!
@@ -24,10 +25,12 @@
 //! CLDR files it under the Azores' id (−01:00/+00:00). A zone whose id's
 //! default zone reads another offset at any time in the five years from the
 //! release's publication is not written, because Exchange would store another
-//! clock (decision 22a). The default zone stands in for Windows' own rules,
-//! which a measurement found equal for all 139 ids (DESIGN-series-time-zone.md,
-//! stage 4). Offsets are compared at the start of every UTC day, and every hour
-//! of a day on which either clock changes.
+//! clock (decision 22a). The default zone stands in for Windows' own rules: on
+//! one Windows 11 machine their offsets matched for all 139 ids in January and
+//! July 2026 (DESIGN-series-time-zone.md, stage 4); Exchange's own tables are
+//! not measured. Offsets are compared at the start of every UTC day, and every
+//! hour of a day on which either clock changes, so a difference that starts
+//! and ends between two whole hours goes unseen.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -48,6 +51,20 @@ const WINDOWS_ZONES: &str = "crates/adapter-ews/src/windows_tz/windows_zones.rs"
 
 /// How long the clock guard looks ahead of the pinned release's publication.
 const CLOCK_MONTHS: u32 = 60;
+
+/// Every element the windowsZones format has: its name, the element it sits
+/// in (empty for the document's root), and the attributes it may carry.
+const FORMAT: &[(&str, &str, &[&str])] = &[
+    ("supplementalData", "", &[]),
+    ("version", "supplementalData", &["number"]),
+    ("windowsZones", "supplementalData", &[]),
+    (
+        "mapTimezones",
+        "windowsZones",
+        &["otherVersion", "typeVersion"],
+    ),
+    ("mapZone", "mapTimezones", &["other", "territory", "type"]),
+];
 
 /// Reading rows every generation must hold, by name. A read that went wrong
 /// would otherwise write a table that compiles and translates nothing.
@@ -100,14 +117,14 @@ pub(crate) fn windows_zones(args: &[String]) -> Result<String, String> {
         fs::read_to_string(dir.join(name)).map_err(|e| format!("reading {CLDR_DIR}/{name}: {e}"))
     };
     let source = read_source(&read("SOURCE")?)?;
-    let xml = read("windowsZones.xml")?.replace("\r\n", "\n");
+    let xml = read("windowsZones.xml")?;
     if read("LICENSE")?.trim().is_empty() {
         return Err(format!(
             "{CLDR_DIR}/LICENSE is empty: the CLDR licence travels with its data"
         ));
     }
     check_pin(&xml, &source)?;
-    let rows = read_map_zones(&xml)?;
+    let rows = read_map_zones(&xml.replace("\r\n", "\n"))?;
     let window = clock_window(source.published)?;
     let tables = build_tables(&rows, &canonical_zones(), window)?;
     holds_must_have(&tables)?;
@@ -207,16 +224,18 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// The XML is the file `SOURCE` pins, read with LF line endings.
+/// The XML is the file `SOURCE` pins. Its line endings are read as LF, so a
+/// checkout that turned them into CRLF still matches.
 fn check_pin(xml: &str, source: &Source) -> Result<(), String> {
-    let have = sha256_hex(xml.as_bytes());
+    let have = sha256_hex(xml.replace("\r\n", "\n").as_bytes());
     if have == source.sha256 {
         Ok(())
     } else {
         Err(format!(
             "{CLDR_DIR}/windowsZones.xml does not match {CLDR_DIR}/SOURCE: its sha256 is {have}, \
-             SOURCE pins {}. Take windowsZones.xml, SOURCE and LICENSE from one CLDR release \
-             together; never edit the XML.",
+             SOURCE pins {}. Take windowsZones.xml and LICENSE from one CLDR release tag, and \
+             write that tag, its publication date, both URLs and the XML's sha256 into SOURCE; \
+             never edit the XML.",
             source.sha256
         ))
     }
@@ -231,92 +250,113 @@ struct MapZone {
     line: usize,
 }
 
-/// Every `<mapZone>` row, read strictly: only the elements and attributes the
-/// windowsZones format has. `type` is a list separated by whitespace, and since
-/// CLDR 43 one row ends in a space.
+/// Every `<mapZone>` row, read strictly: only the elements of the windowsZones
+/// format, each in its place and with its attributes, and no text between
+/// them. `type` is a list separated by whitespace, and since CLDR 43 one row
+/// ends in a space.
 fn read_map_zones(xml: &str) -> Result<Vec<MapZone>, String> {
-    const ELEMENTS: &[&[u8]] = &[
-        b"supplementalData",
-        b"version",
-        b"windowsZones",
-        b"mapTimezones",
-        b"mapZone",
-    ];
     let line_at = |pos: u64| {
         let end = usize::try_from(pos).map_or(xml.len(), |pos| pos.min(xml.len()));
         xml[..end].matches('\n').count() + 1
     };
+    let place = |element: &str| {
+        if element.is_empty() {
+            "the document".to_string()
+        } else {
+            format!("<{element}>")
+        }
+    };
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut rows = Vec::new();
+    let mut open: Vec<String> = Vec::new();
     let mut map_timezones = 0;
     loop {
-        let before = reader.buffer_position();
         let event = match reader.read_event() {
             Ok(event) => event,
-            Err(e) => return Err(format!("windowsZones.xml:{}: {e}", line_at(before))),
+            Err(e) => {
+                return Err(format!(
+                    "windowsZones.xml:{}: {e}",
+                    line_at(reader.error_position())
+                ))
+            }
         };
         let line = line_at(reader.buffer_position());
-        match event {
-            XmlEvent::Start(e) | XmlEvent::Empty(e) => {
-                let name = e.name();
-                if !ELEMENTS.contains(&name.as_ref()) {
-                    return Err(format!(
-                        "windowsZones.xml:{line}: an element this reader does not know: <{}>",
-                        String::from_utf8_lossy(name.as_ref())
-                    ));
-                }
-                if name.as_ref() == b"mapTimezones" {
-                    map_timezones += 1;
-                }
-                if name.as_ref() != b"mapZone" {
-                    continue;
-                }
-                let (mut windows, mut territory, mut zones) = (None, None, None);
-                for attribute in e.attributes() {
-                    let attribute = attribute
-                        .map_err(|e| format!("windowsZones.xml:{line}: <mapZone>: {e}"))?;
-                    let value = attribute
-                        .unescape_value()
-                        .map_err(|e| format!("windowsZones.xml:{line}: <mapZone>: {e}"))?
-                        .into_owned();
-                    match attribute.key.as_ref() {
-                        b"other" => windows = Some(value),
-                        b"territory" => territory = Some(value),
-                        b"type" => zones = Some(value),
-                        key => {
-                            return Err(format!(
-                                "windowsZones.xml:{line}: <mapZone> has an attribute this reader \
-                                 does not know: {}",
-                                String::from_utf8_lossy(key)
-                            ))
-                        }
-                    }
-                }
-                let missing =
-                    |what: &str| format!("windowsZones.xml:{line}: <mapZone> has no {what}");
-                rows.push(MapZone {
-                    windows: windows.ok_or_else(|| missing("other"))?,
-                    territory: territory.ok_or_else(|| missing("territory"))?,
-                    zones: zones
-                        .ok_or_else(|| missing("type"))?
-                        .split_ascii_whitespace()
-                        .map(str::to_string)
-                        .collect(),
-                    line,
-                });
+        let (element, empty) = match event {
+            XmlEvent::Start(element) => (element, false),
+            XmlEvent::Empty(element) => (element, true),
+            XmlEvent::End(_) => {
+                open.pop();
+                continue;
             }
-            XmlEvent::End(_)
-            | XmlEvent::Decl(_)
-            | XmlEvent::DocType(_)
-            | XmlEvent::Comment(_)
-            | XmlEvent::Text(_) => {}
+            XmlEvent::Decl(_) | XmlEvent::DocType(_) | XmlEvent::Comment(_) => continue,
             XmlEvent::Eof => break,
+            XmlEvent::Text(text) => {
+                return Err(format!(
+                    "windowsZones.xml:{line}: text this reader does not know: {:?}",
+                    String::from_utf8_lossy(&text)
+                ))
+            }
             other => {
                 return Err(format!(
                     "windowsZones.xml:{line}: something this reader does not know: {other:?}"
                 ))
             }
+        };
+        let name = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+        let parent = open.last().map(String::as_str).unwrap_or("");
+        let Some((_, within, allowed)) = FORMAT.iter().find(|(known, _, _)| *known == name) else {
+            return Err(format!(
+                "windowsZones.xml:{line}: an element this reader does not know: <{name}>"
+            ));
+        };
+        if *within != parent {
+            return Err(format!(
+                "windowsZones.xml:{line}: <{name}> belongs in {}, not in {}",
+                place(within),
+                place(parent)
+            ));
+        }
+        let mut values: BTreeMap<String, String> = BTreeMap::new();
+        for attribute in element.attributes() {
+            let attribute =
+                attribute.map_err(|e| format!("windowsZones.xml:{line}: <{name}>: {e}"))?;
+            let key = String::from_utf8_lossy(attribute.key.as_ref()).into_owned();
+            if !allowed.contains(&key.as_str()) {
+                return Err(format!(
+                    "windowsZones.xml:{line}: <{name}> has an attribute this reader does not know: {key}"
+                ));
+            }
+            let value = attribute
+                .unescape_value()
+                .map_err(|e| format!("windowsZones.xml:{line}: <{name}>: {e}"))?
+                .into_owned();
+            values.insert(key, value);
+        }
+        if name == "mapTimezones" {
+            map_timezones += 1;
+        }
+        if name == "mapZone" {
+            if !empty {
+                return Err(format!("windowsZones.xml:{line}: <mapZone> must be empty"));
+            }
+            let missing = |what: &str| format!("windowsZones.xml:{line}: <mapZone> has no {what}");
+            rows.push(MapZone {
+                windows: values.remove("other").ok_or_else(|| missing("other"))?,
+                territory: values
+                    .remove("territory")
+                    .ok_or_else(|| missing("territory"))?,
+                zones: values
+                    .remove("type")
+                    .ok_or_else(|| missing("type"))?
+                    .split_ascii_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+                line,
+            });
+        }
+        if !empty {
+            open.push(name);
         }
     }
     if map_timezones != 1 {
@@ -457,16 +497,12 @@ fn build_tables(
         let windows = match spellings.get(zone) {
             Some((windows, _)) => Some(windows.to_string()),
             None => {
-                let under: BTreeMap<&str, Vec<&str>> = spellings
-                    .iter()
-                    .filter(|(spelling, _)| cal_core::canonical_zone(spelling) == Some(zone))
-                    .fold(BTreeMap::new(), |mut by_id, (spelling, (windows, _))| {
-                        by_id
-                            .entry(*windows)
-                            .or_insert_with(Vec::new)
-                            .push(*spelling);
-                        by_id
-                    });
+                let mut under: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+                for (spelling, (windows, _)) in &spellings {
+                    if cal_core::canonical_zone(spelling) == Some(zone) {
+                        under.entry(*windows).or_default().push(*spelling);
+                    }
+                }
                 match under.len() {
                     0 => None,
                     1 => under.keys().next().map(|windows| windows.to_string()),
@@ -607,6 +643,26 @@ fn folded_order<T>(rows: impl IntoIterator<Item = (String, T)>) -> Vec<(String, 
     rows
 }
 
+/// The first 16 hex digits of the sha256 of the table's rows — the pairs and
+/// the names, not the comments or the window they were compared in — so the
+/// id changes exactly when a translation does.
+fn table_id(tables: &WindowsTables) -> String {
+    let mut rows = String::new();
+    for (windows, zone) in folded_order(tables.read.iter().map(|(w, z)| (w.clone(), *z))) {
+        rows.push_str(&format!("read\t{windows}\t{zone}\n"));
+    }
+    for (zone, windows) in folded_order(tables.write.iter().map(|(z, w)| (z.to_string(), w))) {
+        rows.push_str(&format!("write\t{zone}\t{windows}\n"));
+    }
+    for (zone, other) in folded_order(tables.other_clock.iter().map(|(z, o)| (z.to_string(), o))) {
+        rows.push_str(&format!("other clock\t{zone}\t{}\n", other.windows));
+    }
+    for (zone, _) in folded_order(tables.unmapped.iter().map(|z| (z.to_string(), ()))) {
+        rows.push_str(&format!("unmapped\t{zone}\n"));
+    }
+    sha256_hex(rows.as_bytes())[..16].to_string()
+}
+
 /// The generated Rust file. One row per line, so an update reads as a diff of
 /// the rows it touched.
 fn render_windows_zones(
@@ -614,54 +670,10 @@ fn render_windows_zones(
     tables: &WindowsTables,
     (from, until): (DateTime<Utc>, DateTime<Utc>),
 ) -> String {
-    let mut body = String::from(
-        "/// Windows id → the zone of its default (001) row, resolved to tzdata's zone.\n\
-         /// Sorted by the id with ASCII letters lowercased, which is how it is searched.\n\
-         pub const WINDOWS_ZONES: &[(&str, &str)] = &[\n",
-    );
-    for (windows, zone) in folded_order(tables.read.iter().map(|(w, z)| (w.clone(), *z))) {
-        body.push_str(&format!("    (\"{windows}\", \"{zone}\"),\n"));
-    }
-    body.push_str(
-        "];\n\n\
-         /// Canonical tzdata zone → the Windows id Exchange stores it under.\n\
-         /// Sorted by the zone with ASCII letters lowercased.\n\
-         pub const ZONE_WINDOWS: &[(&str, &str)] = &[\n",
-    );
-    for (zone, windows) in folded_order(tables.write.iter().map(|(z, w)| (z.to_string(), w))) {
-        body.push_str(&format!("    (\"{zone}\", \"{windows}\"),\n"));
-    }
-    body.push_str(
-        "];\n\n\
-         /// Canonical zones whose CLDR Windows id runs another clock, with that id:\n\
-         /// Exchange cannot store them (decision 22a). Sorted like ZONE_WINDOWS.\n\
-         pub const OTHER_CLOCK: &[(&str, &str)] = &[\n",
-    );
-    for (zone, other) in folded_order(tables.other_clock.iter().map(|(z, o)| (z.to_string(), o))) {
-        body.push_str(&format!(
-            "    (\"{zone}\", \"{}\"), // from {}: {} here, {} on the Windows zone\n",
-            other.windows,
-            other.at.format("%Y-%m-%dT%H:%MZ"),
-            written_offset(other.zone_seconds),
-            written_offset(other.windows_seconds),
-        ));
-    }
-    body.push_str(
-        "];\n\n\
-         /// Canonical zones CLDR has no Windows id for: Exchange cannot store them\n\
-         /// (decision 22a). Sorted like ZONE_WINDOWS.\n\
-         pub const UNMAPPED: &[&str] = &[\n",
-    );
-    for (zone, _) in folded_order(tables.unmapped.iter().map(|z| (z.to_string(), ()))) {
-        body.push_str(&format!("    \"{zone}\",\n"));
-    }
-    body.push_str("];\n");
-
-    let table_id = &sha256_hex(body.as_bytes())[..16];
-    format!(
+    let mut out = format!(
         "// @generated by `cargo xtask windows-zones` from Unicode CLDR {release}\n\
-         // common/supplemental/windowsZones.xml (sha256 {sha}), names resolved with\n\
-         // cal_core (IANA tzdata {tzdata}), clocks compared {from} to {until}.\n\
+         // common/supplemental/windowsZones.xml (sha256 {sha}),\n\
+         // names resolved with cal_core (IANA tzdata {tzdata}), clocks compared {from} to {until}.\n\
          // CLDR data © Unicode, Inc., Unicode License V3: see ../../cldr/LICENSE.\n\
          // Do not edit: run the task and commit what it writes. See ../windows_tz.rs.\n\
          \n\
@@ -671,17 +683,58 @@ fn render_windows_zones(
          /// The IANA tzdata release the names were resolved with.\n\
          pub const TZDATA_VERSION: &str = \"{tzdata}\";\n\
          \n\
-         /// The first 16 hex digits of the sha256 of the tables below: which table\n\
-         /// the cached events were translated with.\n\
+         /// The first 16 hex digits of the sha256 of the rows below (not their\n\
+         /// comments): which table the cached events were translated with.\n\
          pub const TABLE_ID: &str = \"{table_id}\";\n\
          \n\
-         {body}",
+         /// Windows id → the zone of its default (001) row, resolved to tzdata's zone.\n\
+         /// Sorted by the id with ASCII letters lowercased, which is how it is searched.\n\
+         pub const WINDOWS_ZONES: &[(&str, &str)] = &[\n",
         release = source.release,
         sha = source.sha256,
         tzdata = cal_core::TZDATA_VERSION,
         from = from.format("%Y-%m-%d"),
         until = until.format("%Y-%m-%d"),
-    )
+        table_id = table_id(tables),
+    );
+    for (windows, zone) in folded_order(tables.read.iter().map(|(w, z)| (w.clone(), *z))) {
+        out.push_str(&format!("    (\"{windows}\", \"{zone}\"),\n"));
+    }
+    out.push_str(
+        "];\n\n\
+         /// Canonical tzdata zone → the Windows id Exchange stores it under.\n\
+         /// Sorted by the zone with ASCII letters lowercased.\n\
+         pub const ZONE_WINDOWS: &[(&str, &str)] = &[\n",
+    );
+    for (zone, windows) in folded_order(tables.write.iter().map(|(z, w)| (z.to_string(), w))) {
+        out.push_str(&format!("    (\"{zone}\", \"{windows}\"),\n"));
+    }
+    out.push_str(
+        "];\n\n\
+         /// Canonical zones whose CLDR Windows id runs another clock, with that id:\n\
+         /// Exchange cannot store them (decision 22a). Sorted like ZONE_WINDOWS.\n\
+         pub const OTHER_CLOCK: &[(&str, &str)] = &[\n",
+    );
+    for (zone, other) in folded_order(tables.other_clock.iter().map(|(z, o)| (z.to_string(), o))) {
+        out.push_str(&format!(
+            "    (\"{zone}\", \"{}\"), // from {}: {} here, {} on the Windows zone\n",
+            other.windows,
+            other.at.format("%Y-%m-%dT%H:%MZ"),
+            written_offset(other.zone_seconds),
+            written_offset(other.windows_seconds),
+        ));
+    }
+    out.push_str(
+        "];\n\n\
+         /// Canonical zones CLDR has no Windows id for: Exchange cannot store them\n\
+         /// (decision 22a). Sorted like ZONE_WINDOWS.\n\
+         pub const UNMAPPED: &[&str] = &[\n",
+    );
+    for (zone, _) in folded_order(tables.unmapped.iter().map(|z| (z.to_string(), ()))) {
+        out.push_str(&format!("    \"{zone}\",\n"));
+    }
+    out.push_str("];\n");
+    out
 }
 
 /// A generated file read back.
@@ -691,7 +744,8 @@ struct GeneratedWindows {
     tzdata: Option<String>,
     read: BTreeMap<String, String>,
     write: BTreeMap<String, String>,
-    other_clock: BTreeMap<String, String>,
+    /// Zone → its Windows id and the comment on its row.
+    other_clock: BTreeMap<String, (String, String)>,
     unmapped: BTreeSet<String>,
 }
 
@@ -701,10 +755,9 @@ fn read_generated_windows(text: &str) -> GeneratedWindows {
         line.strip_prefix(&format!("pub const {name}: &str = "))
             .map(|value| value.trim_end_matches(';').trim_matches('"').to_string())
     };
-    let pair = |line: &str| {
-        line.split(" //")
-            .next()
-            .and_then(|row| row.trim_end().strip_prefix("(\""))
+    let pair = |row: &str| {
+        row.trim_end()
+            .strip_prefix("(\"")
             .and_then(|row| row.strip_suffix("\"),"))
             .and_then(|row| row.split_once("\", \""))
             .map(|(a, b)| (a.to_string(), b.to_string()))
@@ -729,14 +782,26 @@ fn read_generated_windows(text: &str) -> GeneratedWindows {
             if let Some(zone) = line.strip_prefix('"').and_then(|z| z.strip_suffix("\",")) {
                 out.unmapped.insert(zone.to_string());
             }
-        } else if let Some((key, value)) = pair(line) {
-            let table = match section {
-                "read" => &mut out.read,
-                "write" => &mut out.write,
-                "other" => &mut out.other_clock,
-                _ => continue,
+        } else {
+            let (row, note) = match line.split_once(" // ") {
+                Some((row, note)) => (row, note.to_string()),
+                None => (line, String::new()),
             };
-            table.insert(key, value);
+            let Some((key, value)) = pair(row) else {
+                continue;
+            };
+            match section {
+                "read" => {
+                    out.read.insert(key, value);
+                }
+                "write" => {
+                    out.write.insert(key, value);
+                }
+                "other" => {
+                    out.other_clock.insert(key, (value, note));
+                }
+                _ => {}
+            }
         }
     }
     out
@@ -798,16 +863,21 @@ fn describe_windows_drift(have: &str, fresh: &str) -> Option<String> {
     {
         lines.push(format!("  not written: {zone} (was {was})"));
     }
-    for (zone, windows) in new
-        .other_clock
-        .iter()
-        .filter(|(z, _)| !old.other_clock.contains_key(*z))
-    {
-        lines.push(format!(
-            "  other clock: +{zone} ({windows}) — no longer written to Exchange"
-        ));
+    for (zone, (windows, note)) in &new.other_clock {
+        match old.other_clock.get(zone) {
+            None => lines.push(format!(
+                "  other clock: +{zone} ({windows}) — no longer written to Exchange"
+            )),
+            Some((was, _)) if was != windows => {
+                lines.push(format!("  other clock: {zone} -> {windows} (was {was})"))
+            }
+            Some((_, was_note)) if was_note != note => {
+                lines.push(format!("  other clock: {zone} {note} (was {was_note})"))
+            }
+            Some(_) => {}
+        }
     }
-    for (zone, windows) in old
+    for (zone, (windows, _)) in old
         .other_clock
         .iter()
         .filter(|(z, _)| !new.other_clock.contains_key(*z))
@@ -837,7 +907,9 @@ mod tests {
         let rows: String = rows
             .iter()
             .map(|(windows, territory, zones)| {
-                format!("\t\t\t<mapZone other=\"{windows}\" territory=\"{territory}\" type=\"{zones}\"/>\n")
+                format!(
+                    "\t\t\t<mapZone other=\"{windows}\" territory=\"{territory}\" type=\"{zones}\"/>\n"
+                )
             })
             .collect();
         format!(
@@ -862,6 +934,15 @@ mod tests {
     fn tables(rows: &[(&str, &str, &str)]) -> Result<WindowsTables, String> {
         let read = read_map_zones(&xml(rows)).expect("the test file reads");
         build_tables(&read, &canonical_zones(), window())
+    }
+
+    fn source(release: &str, published: (i32, u32, u32)) -> Source {
+        Source {
+            release: release.into(),
+            published: NaiveDate::from_ymd_opt(published.0, published.1, published.2)
+                .expect("a date"),
+            sha256: "abc".into(),
+        }
     }
 
     #[test]
@@ -892,10 +973,56 @@ mod tests {
     }
 
     #[test]
-    fn the_reader_refuses_an_attribute_it_does_not_know() {
-        let text = xml(&[("UTC", "001", "Etc/UTC")]).replace("territory=", "alt=\"x\" territory=");
-        let err = read_map_zones(&text).expect_err("an unknown attribute");
-        assert!(err.contains("alt"), "{err}");
+    fn the_reader_refuses_an_attribute_it_does_not_know_on_any_element() {
+        let base = xml(&[("UTC", "001", "Etc/UTC")]);
+        let err = read_map_zones(&base.replace("territory=", "alt=\"x\" territory="))
+            .expect_err("an unknown attribute on a row");
+        assert!(
+            err.contains("<mapZone> has an attribute") && err.contains("alt"),
+            "{err}"
+        );
+        let err =
+            read_map_zones(&base.replace("typeVersion=", "draft=\"provisional\" typeVersion="))
+                .expect_err("an unknown attribute on mapTimezones");
+        assert!(
+            err.contains("<mapTimezones> has an attribute") && err.contains("draft"),
+            "{err}"
+        );
+        let err =
+            read_map_zones(&base.replace("<supplementalData>", "<supplementalData bogus=\"1\">"))
+                .expect_err("an unknown attribute on the root");
+        assert!(err.contains("bogus"), "{err}");
+    }
+
+    #[test]
+    fn the_reader_refuses_text_and_rows_out_of_place() {
+        let base = xml(&[("UTC", "001", "Etc/UTC")]);
+        let err = read_map_zones(
+            &base.replace("\t\t</mapTimezones>", "stray words\n\t\t</mapTimezones>"),
+        )
+        .expect_err("text between the rows");
+        assert!(err.contains("stray words"), "{err}");
+        let err = read_map_zones(&base.replace(
+            "\t</windowsZones>",
+            "\t\t<mapZone other=\"UTC\" territory=\"ZZ\" type=\"Etc/UTC\"/>\n\t</windowsZones>",
+        ))
+        .expect_err("a row outside mapTimezones");
+        assert!(
+            err.contains("<mapZone> belongs in <mapTimezones>, not in <windowsZones>"),
+            "{err}"
+        );
+        let err =
+            read_map_zones(&base.replace("type=\"Etc/UTC\"/>", "type=\"Etc/UTC\"></mapZone>"))
+                .expect_err("a row with content");
+        assert!(err.contains("<mapZone> must be empty"), "{err}");
+    }
+
+    #[test]
+    fn an_xml_error_names_its_own_line() {
+        let text =
+            xml(&[("UTC", "001", "Etc/UTC")]).replace("\t\t</mapTimezones>", "\t\t</mapTimezone>");
+        let err = read_map_zones(&text).expect_err("a mistyped end tag");
+        assert!(err.contains("windowsZones.xml:9"), "{err}");
     }
 
     #[test]
@@ -1050,7 +1177,9 @@ mod tests {
             sha256: sha256_hex(b"<x/>\n"),
             ..source
         };
-        assert!(check_pin(&"<x/>\r\n".replace("\r\n", "\n"), &pinned).is_ok());
+        // The pin is checked on LF line endings, whatever the checkout wrote.
+        assert!(check_pin("<x/>\r\n", &pinned).is_ok());
+        assert!(check_pin("<x/>\n", &pinned).is_ok());
         let err = read_source("release = r\n").expect_err("keys missing");
         assert!(err.contains("has no `url`"), "{err}");
         let err = read_source("colour = red\n").expect_err("an unknown key");
@@ -1071,26 +1200,62 @@ mod tests {
     }
 
     #[test]
-    fn the_generated_table_reads_back_and_its_drift_is_named() {
-        let source = Source {
-            release: "release-48-2".into(),
-            published: NaiveDate::from_ymd_opt(2026, 1, 1).expect("a date"),
-            sha256: "abc".into(),
+    fn the_table_id_follows_the_rows_not_the_text() {
+        let rows = [
+            ("W. Europe Standard Time", "001", "Europe/Berlin"),
+            ("Azores Standard Time", "001", "Atlantic/Azores"),
+            ("Azores Standard Time", "GL", "America/Scoresbysund"),
+        ];
+        let t = tables(&rows).expect("reads");
+        let id = |text: &str| {
+            text.lines()
+                .find_map(|line| constant_value(line, "TABLE_ID"))
+                .expect("a TABLE_ID")
         };
+        // The same rows under another release and window: other comments, same id.
+        let first = render_windows_zones(&source("release-48-2", (2026, 1, 1)), &t, window());
+        let later_window =
+            clock_window(NaiveDate::from_ymd_opt(2026, 10, 1).expect("a date")).expect("a window");
+        let second = render_windows_zones(&source("release-49", (2026, 10, 1)), &t, later_window);
+        assert_ne!(first, second);
+        assert_eq!(id(&first), id(&second));
+        // A moved row is another translation.
+        let moved = tables(&[
+            ("W. Europe Standard Time", "001", "Europe/Berlin"),
+            ("W. Europe Standard Time", "AT", "Europe/Vienna"),
+            ("Azores Standard Time", "001", "Atlantic/Azores"),
+            ("Azores Standard Time", "GL", "America/Scoresbysund"),
+        ])
+        .expect("reads");
+        let third = render_windows_zones(&source("release-48-2", (2026, 1, 1)), &moved, window());
+        assert_ne!(id(&first), id(&third));
+    }
+
+    fn constant_value(line: &str, name: &str) -> Option<String> {
+        line.strip_prefix(&format!("pub const {name}: &str = "))
+            .map(|value| value.trim_end_matches(';').trim_matches('"').to_string())
+    }
+
+    #[test]
+    fn the_generated_table_reads_back_and_its_drift_is_named() {
         let rows = [
             ("W. Europe Standard Time", "001", "Europe/Berlin"),
             ("W. Europe Standard Time", "AT", "Europe/Vienna"),
             ("Azores Standard Time", "001", "Atlantic/Azores"),
             ("Azores Standard Time", "GL", "America/Scoresbysund"),
         ];
-        let old = render_windows_zones(&source, &tables(&rows).expect("reads"), window());
+        let old = render_windows_zones(
+            &source("release-48-2", (2026, 1, 1)),
+            &tables(&rows).expect("reads"),
+            window(),
+        );
         let back = read_generated_windows(&old);
         assert_eq!(back.release.as_deref(), Some("release-48-2"));
         assert_eq!(back.tzdata.as_deref(), Some(cal_core::TZDATA_VERSION));
         assert_eq!(back.read["W. Europe Standard Time"], "Europe/Berlin");
         assert_eq!(back.write["Europe/Vienna"], "W. Europe Standard Time");
         assert_eq!(
-            back.other_clock["America/Scoresbysund"],
+            back.other_clock["America/Scoresbysund"].0,
             "Azores Standard Time"
         );
         assert!(back.unmapped.contains("Antarctica/Troll"));
@@ -1102,11 +1267,11 @@ mod tests {
             ("Romance Standard Time", "AT", "Europe/Vienna"),
             ("Azores Standard Time", "001", "Atlantic/Azores"),
         ];
-        let newer = Source {
-            release: "release-49".into(),
-            ..source
-        };
-        let fresh = render_windows_zones(&newer, &tables(&moved).expect("reads"), window());
+        let fresh = render_windows_zones(
+            &source("release-49", (2026, 1, 1)),
+            &tables(&moved).expect("reads"),
+            window(),
+        );
         let drift = describe_windows_drift(&old, &fresh).expect("rows moved");
         assert!(
             drift.contains("source:      release-48-2 -> release-49"),
@@ -1130,6 +1295,27 @@ mod tests {
             drift.contains("unmapped:    +America/Scoresbysund"),
             "{drift}"
         );
+
+        // A zone that stays on another clock, but under another id or with
+        // another difference, is named too.
+        let other_id = old.replace(
+            "(\"America/Scoresbysund\", \"Azores Standard Time\")",
+            "(\"America/Scoresbysund\", \"Cape Verde Standard Time\")",
+        );
+        let drift = describe_windows_drift(&old, &other_id).expect("the id moved");
+        assert!(
+            drift.contains(
+                "other clock: America/Scoresbysund -> Cape Verde Standard Time (was Azores Standard Time)"
+            ),
+            "{drift}"
+        );
+        let other_note = old.replace("from 2026-01-01T00:00Z", "from 2027-03-28T01:00Z");
+        let drift = describe_windows_drift(&old, &other_note).expect("the note moved");
+        assert!(
+            drift.contains("other clock: America/Scoresbysund from 2027-03-28T01:00Z"),
+            "{drift}"
+        );
+
         assert!(describe_windows_drift(
             &old,
             &old.replace("// Do not edit", "// Please do not edit")

@@ -2016,8 +2016,9 @@ Siehe DESIGN §4.2.
   - Die alte Tabelle hatte drei falsche Zeilen: Chihuahua, Almaty und Beirut
     mit dem erfundenen Namen „Lebanon Standard Time“. 31 Windows-Namen las sie
     gar nicht.
-  - Ein Fingerabdruck der Tabelle im Sync-Zustand lässt nach dem Update alle
-    zwischengespeicherten Exchange-Termine einmal neu ausgeben.
+  - Der Sync-Token, den der Host speichert, trägt einen Fingerabdruck der
+    Zonen-Übersetzung. Nach einem Update gibt der Adapter deshalb alle
+    zwischengespeicherten Exchange-Termine einmal neu aus.
 
   Toni hat entschieden (38a, 39, 40a): Live-Test vor dem Merge an seinem eigenen
   Exchange-Server, Lizenzhinweis bei den Daten.

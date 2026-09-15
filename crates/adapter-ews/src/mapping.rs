@@ -3971,7 +3971,10 @@ mod tests {
                 tzid: Some(tzid.into()),
             });
             let xml = new_event_to_calendar_item_xml(&create).unwrap();
-            let (set, _del) = event_to_update_field_xml(&zoned_master(Some(tzid))).unwrap();
+            let (set, del) = event_to_update_field_xml(&zoned_master(Some(tzid))).unwrap();
+            // Whatever the zone, an update never deletes the zone fields: what
+            // Exchange keeps when none is sent is the live test's question.
+            assert!(!del.contains("TimeZone"), "update {tzid} deletes: {del}");
             match windows {
                 Some(windows) => {
                     let start = format!(r#"<t:StartTimeZone Id="{windows}"/>"#);
@@ -3994,14 +3997,16 @@ mod tests {
     }
 
     /// Writes the create and update requests of the live Exchange test
-    /// (DESIGN-series-time-zone.md, stage 4, decision 38a) byte for byte as
-    /// Aperio builds them, into the directory `APERIO_LIVE_TEST_DIR` names:
+    /// (DESIGN-series-time-zone.md, stage 4, decision 38a) as Aperio builds
+    /// them, into the directory `APERIO_LIVE_TEST_DIR` names:
     ///
     /// `APERIO_LIVE_TEST_DIR=<dir> cargo test -p adapter-ews --lib live_test_requests -- --ignored`
     ///
-    /// The one change from Aperio's bytes: the series go into the mailbox's
-    /// own calendar (`DistinguishedFolderId calendar`) instead of a folder id,
-    /// and the updates carry `ITEM_ID` and `CHANGEKEY` placeholders.
+    /// Three changes from Aperio's bytes: the series go into the mailbox's own
+    /// calendar (`DistinguishedFolderId calendar`) instead of a folder id, the
+    /// updates carry `ITEM_ID` and `CHANGEKEY` placeholders, and each file
+    /// starts with an XML comment naming its step. A9 is not Aperio's rule at
+    /// all: the A1 request with an invented id, to see what an unknown id gets.
     #[test]
     #[ignore = "writes the live Exchange test requests; see the doc comment"]
     fn live_test_requests() {
@@ -4108,16 +4113,43 @@ mod tests {
                 series(subject, Some(tzid)),
             );
         }
+        // All-day as the app sends it: the local midnights of 19 and 20 October
+        // on the machine that writes the file, whose offset the comment names.
+        let offset = Local.offset_from_utc_datetime(&local_midnight(2026, 10, 19).naive_utc());
         create(
             "A8-create-allday-los-angeles.xml",
-            "Step A8: an all-day weekly series with a zone. Which weekday does OWA show, and which Start values come back?",
+            &format!(
+                "Step A8: an all-day weekly series with a zone, written on a machine at UTC{offset}. \
+                 Which weekday does OWA show, and which Start values come back?"
+            ),
             NewEvent {
-                start: "2026-10-19T00:00:00Z".parse().unwrap(),
-                end: "2026-10-20T00:00:00Z".parse().unwrap(),
+                start: local_midnight(2026, 10, 19),
+                end: local_midnight(2026, 10, 20),
                 all_day: true,
                 recurrence: Some(rule(Some("America/Los_Angeles"))),
                 ..new_event_min("Aperio zone test A8 all-day")
             },
+        );
+        // Not Aperio's rule: the A1 request with an id no server knows.
+        let invented = new_event_to_calendar_item_xml(&series(
+            "Aperio zone test A9 invented id",
+            Some("Europe/Berlin"),
+        ))
+        .unwrap()
+        .replace(
+            r#"Id="W. Europe Standard Time""#,
+            r#"Id="Lebanon Standard Time""#,
+        );
+        assert!(invented.contains(r#"<t:StartTimeZone Id="Lebanon Standard Time"/>"#));
+        write(
+            "A9-create-invented-id.xml",
+            "Step A9: NOT Aperio's rule. The A1 request with the invented id Lebanon Standard Time, \
+             which the old table wrote for Beirut. Which ResponseCode does an unknown id get?"
+                .to_string(),
+            crate::soap::create_calendar_item("CALENDAR", None, &invented, false).replace(
+                r#"<t:FolderId Id="CALENDAR"/>"#,
+                r#"<t:DistinguishedFolderId Id="calendar"/>"#,
+            ),
         );
         update(
             "B1-update-berlin-without-zone.xml",

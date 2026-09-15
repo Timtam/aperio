@@ -493,6 +493,29 @@ impl EwsAdapter {
         Ok(out)
     }
 
+    /// The token the host keeps for an EWS events folder:
+    /// `zt-{translation}:{cookie}` — the `SyncFolderItems` cookie, prefixed
+    /// with the zone translation ([`windows_tz::translation_id`]) the emitted
+    /// events were made with. The host stores a token only together with the
+    /// change set it came with, so a token naming this build's translation
+    /// proves the host holds events translated by it.
+    fn events_token(cookie: Option<&str>) -> Option<String> {
+        cookie.map(|cookie| format!("zt-{}:{cookie}", windows_tz::translation_id()))
+    }
+
+    /// A host token split into the zone translation it names, if any, and the
+    /// cookie. A token from a build before the prefix is the bare cookie; an
+    /// EWS cookie is base64, which has no `-` or `:`.
+    fn split_events_token(token: &str) -> (Option<&str>, &str) {
+        match token
+            .strip_prefix("zt-")
+            .and_then(|rest| rest.split_once(':'))
+        {
+            Some((translation, cookie)) => (Some(translation), cookie),
+            None => (None, token),
+        }
+    }
+
     /// Incremental sibling of [`refresh_and_read_events`] backing
     /// [`CalendarFeature::get_events_delta`]. Drives one `SyncFolderItems`
     /// delta, persists the merged per-folder state, and hands the host a
@@ -502,12 +525,14 @@ impl EwsAdapter {
     /// flag `full_resync`; in both cases `changes` must be the COMPLETE
     /// in-range set. We declare a full resync when our own per-folder
     /// state had no cookie (cold), when the host passed no `since_token`,
-    /// or when the server invalidated the cookie and we re-drained from
-    /// scratch. Otherwise the result is purely incremental: changed items
-    /// translated (masters keep their RRULE plus synthetic in-range
-    /// overrides) and the deleted EWS ItemIds verbatim — those are the
-    /// provider-native ids the host removes by `native_id`, which fans a
-    /// master's deletion out to its cached occurrence overrides.
+    /// when the server invalidated the cookie and we re-drained from
+    /// scratch, or when the host's token names another zone translation
+    /// than this build's (see [`Self::events_token`]; the cached folder is
+    /// emitted again without a re-drain). Otherwise the result is purely
+    /// incremental: changed items translated (masters keep their RRULE plus
+    /// synthetic in-range overrides) and the deleted EWS ItemIds verbatim —
+    /// those are the provider-native ids the host removes by `native_id`,
+    /// which fans a master's deletion out to its cached occurrence overrides.
     async fn refresh_events_delta(
         &self,
         calendar_id: &str,
@@ -533,20 +558,30 @@ impl EwsAdapter {
         // scratch instead.
         let adapter_warm = prior.sync_state.is_some();
         let mut force_full = since_token.is_none() || !adapter_warm;
-        // The host's snapshot holds events translated with the zone table of
-        // the build that emitted them. After an update that changed the table,
-        // every cached item is emitted again from what Exchange sent, so no
-        // view keeps a zone the old table read — and no edit writes that zone
-        // back to Exchange under the new table's id. Nothing is re-drained.
-        let table_current = prior.zone_table.as_deref() == Some(windows_tz::TABLE_ID);
-        let seed = match since_token {
+        // The host's snapshot holds events translated with the zone
+        // translation its token names. A token from another translation — an
+        // older build's, or one without the prefix — gets every cached item
+        // emitted again from what Exchange sent, so no view keeps a zone an
+        // old table read, and no edit writes that zone back to Exchange under
+        // a new id. Nothing is re-drained: the cookie inside the token still
+        // resumes the drain. The host stores a token only together with the
+        // change set it came with, so an emit it never stored is emitted again.
+        let (token_translation, cookie) = match since_token {
+            Some(token) => {
+                let (translation, cookie) = Self::split_events_token(token);
+                (translation, Some(cookie))
+            }
+            None => (None, None),
+        };
+        let translation_current = token_translation == Some(windows_tz::translation_id().as_str());
+        let seed = match cookie {
             Some(tok) if adapter_warm => SyncedFolderState {
                 sync_state: Some(tok.to_string()),
                 ..prior
             },
             _ => SyncedFolderState::default(),
         };
-        let (mut updated, changed_ids, deleted_ids) =
+        let (updated, changed_ids, deleted_ids) =
             match api::sync_events_delta(&self.client, calendar_id, seed).await {
                 Ok(t) => t,
                 Err(err) if is_sync_state_invalid(&err) => {
@@ -576,8 +611,7 @@ impl EwsAdapter {
             chrono::DateTime::<chrono::Utc>::MIN_UTC,
             chrono::DateTime::<chrono::Utc>::MAX_UTC,
         );
-        let emit_all = force_full || !table_current;
-        updated.zone_table = Some(windows_tz::TABLE_ID.to_string());
+        let emit_all = force_full || !translation_current;
         let change_set = if emit_all {
             let mut changes = Vec::with_capacity(updated.items.len());
             for item in updated.items.values() {
@@ -586,7 +620,7 @@ impl EwsAdapter {
             ChangeSet {
                 changes,
                 deletions: Vec::new(),
-                new_token: updated.sync_state.clone(),
+                new_token: Self::events_token(updated.sync_state.as_deref()),
                 full_resync: true,
                 // EWS SyncFolderItems keeps the whole folder in `items`,
                 // and we emit it unfiltered above — the host may treat
@@ -604,7 +638,7 @@ impl EwsAdapter {
             ChangeSet {
                 changes,
                 deletions: deleted_ids,
-                new_token: updated.sync_state.clone(),
+                new_token: Self::events_token(updated.sync_state.as_deref()),
                 full_resync: false,
                 // Incremental, but still folder-complete: the cache holds
                 // the whole folder from the prior full sync and this merge
@@ -1582,15 +1616,15 @@ mod delta_read_tests {
         assert!(cold.full_resync, "first (token-less) call is a full resync");
         assert_eq!(cold.changes.len(), 2);
         assert!(cold.deletions.is_empty());
-        assert_eq!(cold.new_token.as_deref(), Some("COOKIE-1"));
+        assert_eq!(cold.new_token, EwsAdapter::events_token(Some("COOKIE-1")));
         let mut ids: Vec<&str> = cold.changes.iter().map(|e| e.id.as_str()).collect();
         ids.sort_unstable();
         assert_eq!(ids, ["S:A|CKA1", "S:B|CKB1"]);
 
-        // Warm call: prior cookie → incremental. Only A changed; B is a
-        // deletion carrying the raw native ItemId.
+        // Warm call: the token the cold call returned → incremental. Only A
+        // changed; B is a deletion carrying the raw native ItemId.
         let warm = adapter
-            .get_events_delta("FA|FCK", range(), Some("COOKIE-1"))
+            .get_events_delta("FA|FCK", range(), cold.new_token.as_deref())
             .await
             .unwrap();
         assert!(!warm.full_resync, "warm call with a token is incremental");
@@ -1600,7 +1634,7 @@ mod delta_read_tests {
         // Deletion is the bare EWS ItemId — matches the cached row's
         // native_id host-side.
         assert_eq!(warm.deletions, vec!["B".to_string()]);
-        assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
+        assert_eq!(warm.new_token, EwsAdapter::events_token(Some("COOKIE-2")));
     }
 
     /// Regression: the adapter's own SyncFolderItems cookie can be advanced
@@ -1658,9 +1692,6 @@ mod delta_read_tests {
             let mut guard = adapter.events_sync.lock().await;
             let mut state = SyncedFolderState {
                 sync_state: Some("ADAPTER-AHEAD".into()),
-                // Emitted with this build's zone table, so the delta stays
-                // incremental.
-                zone_table: Some(windows_tz::TABLE_ID.into()),
                 ..Default::default()
             };
             state.items.insert(
@@ -1674,26 +1705,30 @@ mod delta_read_tests {
             guard.insert("FA|FCK".into(), state);
         }
 
+        // The host's token, emitted by this build: incremental.
+        let host_token = EwsAdapter::events_token(Some("HOST-BEHIND"));
         let cs = adapter
-            .get_events_delta("FA|FCK", range(), Some("HOST-BEHIND"))
+            .get_events_delta("FA|FCK", range(), host_token.as_deref())
             .await
             .expect("delta must re-drain from the host token, not the adapter cookie");
         assert!(!cs.full_resync, "host has a token → incremental");
         assert_eq!(cs.changes.len(), 1);
         assert_eq!(cs.changes[0].id, "S:A|CKA2");
         assert_eq!(cs.changes[0].title, "Alpha v2");
-        assert_eq!(cs.new_token.as_deref(), Some("COOKIE-3"));
+        assert_eq!(cs.new_token, EwsAdapter::events_token(Some("COOKIE-3")));
     }
 
-    /// State persisted by a build with another Exchange zone table: the host's
-    /// snapshot holds zones the old table read, so the next delta emits EVERY
-    /// cached item again (from the raw Windows ids Exchange sent), not only the
-    /// changed one, and records the table. Without this, a series cached as
-    /// `America/Chihuahua` by the old table would keep that zone in the views
-    /// and be written back to Exchange under the new table's id on its next
-    /// edit.
+    /// A token from another zone translation — an older build's has no prefix
+    /// at all — means the host's snapshot holds zones another translation
+    /// read. The delta emits EVERY cached item again (from the raw Windows ids
+    /// Exchange sent), not only the changed one, and its new token names this
+    /// build's translation, so the next delta is incremental. Because that fact
+    /// lives in the host's token, an emit the host never stored is emitted
+    /// again. Without this, a series cached as `America/Chihuahua` by an old
+    /// table would keep that zone in the views and be written back to Exchange
+    /// under the new table's id on its next edit.
     #[tokio::test]
-    async fn a_new_zone_table_emits_every_cached_item_once() {
+    async fn a_token_from_another_zone_translation_emits_every_cached_item() {
         use mockito::Matcher;
         let mut server = Server::new_async().await;
         let update = r#"<t:Update><t:CalendarItem>
@@ -1703,7 +1738,7 @@ mod delta_read_tests {
                  <t:End>2026-05-20T09:30:00Z</t:End>
                  <t:CalendarItemType>Single</t:CalendarItemType>
                </t:CalendarItem></t:Update>"#;
-        let _sync = server
+        let _first = server
             .mock("POST", "/")
             .match_body(Matcher::AllOf(vec![
                 Matcher::Regex("SyncFolderItems".into()),
@@ -1711,6 +1746,28 @@ mod delta_read_tests {
             ]))
             .with_status(200)
             .with_body(sync_page("COOKIE-4", update))
+            .expect(1)
+            .create_async()
+            .await;
+        let _second = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("COOKIE-4".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-5", ""))
+            .expect(1)
+            .create_async()
+            .await;
+        let _third = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("COOKIE-5".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-6", ""))
             .expect(1)
             .create_async()
             .await;
@@ -1727,7 +1784,6 @@ mod delta_read_tests {
         let adapter = EwsAdapter::new(server.url(), creds());
         {
             let mut guard = adapter.events_sync.lock().await;
-            // Written before the zone table existed: no `zone_table`.
             let mut state = SyncedFolderState {
                 sync_state: Some("HOST-TOKEN".into()),
                 ..Default::default()
@@ -1747,27 +1803,49 @@ mod delta_read_tests {
             }
             guard.insert("FA|FCK".into(), state);
         }
+        let titles = |cs: &ChangeSet<Event>| {
+            let mut titles: Vec<String> = cs.changes.iter().map(|e| e.title.clone()).collect();
+            titles.sort_unstable();
+            titles
+        };
 
-        let cs = adapter
+        // An older build's token: the bare cookie, naming no translation.
+        let first = adapter
             .get_events_delta("FA|FCK", range(), Some("HOST-TOKEN"))
             .await
-            .expect("delta");
+            .expect("first delta");
         assert!(
-            cs.full_resync,
-            "a table change replaces the host's snapshot wholesale"
+            first.full_resync,
+            "a token without this translation replaces the host's snapshot"
         );
-        let mut titles: Vec<&str> = cs.changes.iter().map(|e| e.title.as_str()).collect();
-        titles.sort_unstable();
         assert_eq!(
-            titles,
+            titles(&first),
             ["Alpha v2", "Bravo"],
             "the unchanged item is emitted too"
         );
-        assert_eq!(cs.new_token.as_deref(), Some("COOKIE-4"));
-        let recorded = adapter.events_sync.lock().await["FA|FCK"]
-            .zone_table
-            .clone();
-        assert_eq!(recorded.as_deref(), Some(windows_tz::TABLE_ID));
+        assert_eq!(first.new_token, EwsAdapter::events_token(Some("COOKIE-4")));
+
+        // The token it returned names this translation: incremental.
+        let second = adapter
+            .get_events_delta("FA|FCK", range(), first.new_token.as_deref())
+            .await
+            .expect("second delta");
+        assert!(
+            !second.full_resync,
+            "this translation's token is incremental"
+        );
+        assert!(second.changes.is_empty());
+
+        // A token another translation wrote: everything again.
+        let third = adapter
+            .get_events_delta("FA|FCK", range(), Some("zt-0000000000000000.0:COOKIE-5"))
+            .await
+            .expect("third delta");
+        assert!(
+            third.full_resync,
+            "another translation's token is a full resync"
+        );
+        assert_eq!(titles(&third), ["Alpha v2", "Bravo"]);
     }
 }
 

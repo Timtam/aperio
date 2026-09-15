@@ -141,8 +141,9 @@ Tasks:
         cldr/SOURCE). Names resolve through cal_core, so run tz-list first after
         a chrono-tz update. Zones CLDR has no Windows id for, and zones whose
         Windows id runs another clock in the five years after the release, are
-        listed and never written. To update CLDR, replace windowsZones.xml,
-        LICENSE and SOURCE from one release tag, then run this.
+        listed and never written. To update CLDR, take windowsZones.xml and
+        LICENSE from one release tag, write that tag, its publication date,
+        both URLs and the XML's sha256 into SOURCE, then run this.
 
         --check   generate in memory and compare, changing nothing. For CI, so a
                   CLDR or chrono-tz update is a red build until the table is
