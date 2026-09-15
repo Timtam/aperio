@@ -263,6 +263,44 @@ pub fn canonical_zone(name: String) -> String {
     cal_core::canonical_zone(&name).unwrap_or("").to_string()
 }
 
+/// The world zone list's names by position, as JSON. See cal_core::zone_list.
+#[uniffi::export]
+pub fn zone_labels() -> Result<String, StoreError> {
+    cal_core::zone_labels_json().map_err(|e| StoreError::InvalidField {
+        field: "zone labels".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// A search over the world zone list, as JSON. See cal_core::zone_search.
+#[uniffi::export]
+pub fn zone_search(input_json: String) -> Result<String, StoreError> {
+    cal_core::zone_search_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "zone search question".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// Where a stored zone and the device's zone stand in the list, as JSON. See
+/// cal_core::zone_choice.
+#[uniffi::export]
+pub fn zone_choice(input_json: String) -> Result<String, StoreError> {
+    cal_core::zone_choice_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "zone choice question".into(),
+        detail: e.to_string(),
+    })
+}
+
+/// Every listed zone's offsets and the order of the list, as JSON. See
+/// cal_core::zone_offsets.
+#[uniffi::export]
+pub fn zone_offsets(input_json: String) -> Result<String, StoreError> {
+    cal_core::zone_offsets_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "zone offsets question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// Fold each group's members into a single row, as JSON.
 ///
 /// `input_json` is `{events[], groups[]}`; the answer is one row per surviving
@@ -719,6 +757,179 @@ mod tests {
                 .to_string();
             let want = row["canonical"].as_str().unwrap_or("");
             assert_eq!(canonical_zone(name.clone()), want, "{name:?}");
+        }
+    }
+
+    /// Every row of the core's zone list table through the phone's doors: the
+    /// JSON each door reads and writes, which the core's own test never crosses.
+    #[test]
+    fn zone_list_doors_answer_every_contract_row() {
+        use serde_json::{json, Value};
+
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/timeZoneFilter.json");
+        let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let labels: Vec<Value> =
+            serde_json::from_str(&zone_labels().expect("the labels")).expect("a list");
+        let zone_of = |entry: &Value| -> String {
+            match entry["position"].as_u64() {
+                Some(position) => labels[position as usize]["zone"]
+                    .as_str()
+                    .expect("a zone")
+                    .to_string(),
+                None => "utc".to_string(),
+            }
+        };
+
+        for row in doc["labels"].as_array().expect("label rows") {
+            assert!(labels.contains(row), "{row}");
+        }
+
+        let rows = doc["search"].as_array().expect("search rows");
+        // Anti-silence: the same rows the core names, since this door runs
+        // every one of them, offsets included.
+        for query in [
+            "kiev",
+            "Oslo",
+            "Montreal",
+            "Zuerich",
+            "Wien",
+            "Europa",
+            "GMT",
+            "   ",
+            "5:30",
+            "−3:30",
+            "+5",
+            "berlin europa",
+        ] {
+            assert!(
+                rows.iter().any(|row| row["query"] == query),
+                "the contract lost the {query:?} row"
+            );
+        }
+        for row in rows {
+            let query = row["query"].as_str().expect("a query");
+            let regions: Vec<Value> = doc["regions"][row["regions"].as_str().expect("a set")]
+                .as_object()
+                .expect("region names")
+                .iter()
+                .map(|(region, name)| json!({ "region": region, "name": name }))
+                .collect();
+            let offsets = match row.get("offsets") {
+                Some(asked) => serde_json::from_str::<Value>(
+                    &zone_offsets(asked.to_string()).expect("the offsets"),
+                )
+                .expect("offsets JSON"),
+                None => Value::Null,
+            };
+            let question = json!({ "query": query, "region_names": regions, "offsets": offsets });
+            let answer: Value =
+                serde_json::from_str(&zone_search(question.to_string()).expect("a search"))
+                    .expect("an answer");
+            let hits = answer["hits"].as_array().expect("hits");
+            let hit_is = |hit: &Value, want: &Value| {
+                zone_of(&hit["entry"]) == want["zone"].as_str().unwrap_or_default()
+                    && hit["via"] == want["via"]
+                    && match want.get("also") {
+                        None => hit["also"].is_null(),
+                        Some(also) => {
+                            hit["also"]["label"] == also["label"]
+                                && also
+                                    .get("name")
+                                    .is_none_or(|name| hit["also"]["name"] == *name)
+                                && also
+                                    .get("kind")
+                                    .is_none_or(|kind| hit["also"]["kind"] == *kind)
+                        }
+                    }
+            };
+            if let Some(want) = row["hits"].as_array() {
+                assert_eq!(hits.len(), want.len(), "{query:?}");
+                for (hit, want) in hits.iter().zip(want) {
+                    assert!(hit_is(hit, want), "{query:?}: got {hit}, want {want}");
+                }
+            }
+            if let Some(count) = row["count"].as_u64() {
+                assert_eq!(hits.len() as u64, count, "{query:?}");
+            }
+            for want in row["includes"].as_array().into_iter().flatten() {
+                assert!(
+                    hits.iter().any(|hit| hit_is(hit, want)),
+                    "{query:?}: missing {want}"
+                );
+            }
+            for zone in row["excludes"].as_array().into_iter().flatten() {
+                let zone = zone.as_str().unwrap_or_default();
+                assert!(
+                    hits.iter().all(|hit| zone_of(&hit["entry"]) != zone),
+                    "{query:?}: {zone} must not be a hit"
+                );
+            }
+        }
+
+        let plain = |choice: &Value| -> Value {
+            let mut choice = choice.clone();
+            if let Some(object) = choice.as_object_mut() {
+                if let Some(position) = object.remove("position") {
+                    let position = position.as_u64().expect("a position") as usize;
+                    object.insert("zone".to_string(), labels[position]["zone"].clone());
+                }
+            }
+            choice
+        };
+        let choices = doc["choice"].as_array().expect("choice rows");
+        assert!(
+            choices.iter().any(|row| row["stored"] == "Europe/Kiev"),
+            "the contract lost the stored Europe/Kiev row"
+        );
+        assert!(
+            choices.iter().any(|row| row["device"] == "Asia/Calcutta"),
+            "the contract lost the device Asia/Calcutta row"
+        );
+        for row in choices {
+            let question = json!({
+                "stored": row["stored"],
+                "device": row.get("device").cloned().unwrap_or(Value::Null),
+            });
+            let answer: Value =
+                serde_json::from_str(&zone_choice(question.to_string()).expect("a choice"))
+                    .expect("an answer");
+            assert_eq!(
+                plain(&answer["stored"]),
+                row["expect"]["stored"],
+                "{question}"
+            );
+            assert_eq!(
+                plain(&answer["device"]),
+                row["expect"].get("device").cloned().unwrap_or(Value::Null),
+                "{question}"
+            );
+        }
+
+        let offset_rows = doc["offsets"].as_array().expect("offset rows");
+        for zone in [
+            "Europe/Dublin",
+            "Australia/Lord_Howe",
+            "Europe/Paris",
+            "Asia/Almaty",
+        ] {
+            assert!(
+                offset_rows.iter().any(|row| row["zone"] == zone),
+                "the contract lost the {zone} rows"
+            );
+        }
+        for row in offset_rows {
+            let asked = json!({ "at": row["at"], "today": row["today"] });
+            let answer: Value =
+                serde_json::from_str(&zone_offsets(asked.to_string()).expect("the offsets"))
+                    .expect("offsets JSON");
+            let position = labels
+                .iter()
+                .position(|label| label["zone"] == row["zone"])
+                .expect("a listed zone");
+            assert_eq!(
+                answer["zones"][position]["offset"]["seconds"], row["seconds"],
+                "{row}"
+            );
         }
     }
 }

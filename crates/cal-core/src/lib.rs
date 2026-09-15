@@ -47,7 +47,7 @@ mod task_grouping_gate {
         panic!(concat!(
             "cal_core::task_grouping, cal_core::task_day and their fixture contracts ",
             "are behind the `collation` feature and were not compiled: run ",
-            "`cargo test -p cal-core --features collation` (or the workspace run, ",
+            "`cargo test -p cal-core --features collation,zones` (or the workspace run, ",
             "which enables it through cal-core-wasm and cal-ffi)"
         ));
     }
@@ -59,6 +59,23 @@ pub mod task_priority;
 pub mod task_settings;
 pub mod task_status;
 pub mod types;
+// The names and the search are in every build; the offsets are behind the
+// `zones` feature, which pulls in chrono-tz.
+pub mod zone_list;
+// Anti-silence, as for `collation` above: without the feature the offsets and
+// their fixture rows are compiled out, and a green run would have run none.
+#[cfg(all(test, not(feature = "zones")))]
+mod zone_offsets_gate {
+    #[test]
+    fn the_zone_offsets_contract_needs_the_zones_feature() {
+        panic!(concat!(
+            "cal_core::zone_list::zone_offsets and its fixture rows are behind the `zones` ",
+            "feature and were not compiled: run ",
+            "`cargo test -p cal-core --features collation,zones` (or the workspace run, ",
+            "which enables it through cal-ffi and the desktop)"
+        ));
+    }
+}
 
 pub use adapter::{
     Adapter, AdapterSource, AuthToken, CalendarFeature, Capability, ChangeSet, ContactsFeature,
@@ -102,7 +119,7 @@ pub use meeting_link_grouping::{
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
-pub use series_clock::{canonical_zone, listed_zones, series_clock_zone, TZDATA_VERSION};
+pub use series_clock::{canonical_zone, listed_zones, series_clock_zone, NameKind, TZDATA_VERSION};
 pub use series_shift::{
     series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,
 };
@@ -160,3 +177,12 @@ pub use types::{
     RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
     TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };
+pub use zone_list::{
+    listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
+    zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,
+    ZoneChoice, ZoneChoiceAnswer, ZoneChoiceQuestion, ZoneHit, ZoneOffset, ZoneOffsets,
+    ZoneOffsetsQuestion, ZoneRef, ZoneRegion, ZoneSearchAnswer, ZoneSearchError,
+    ZoneSearchQuestion,
+};
+#[cfg(feature = "zones")]
+pub use zone_list::{zone_offsets, zone_offsets_json};

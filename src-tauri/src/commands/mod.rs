@@ -27,6 +27,7 @@ mod search;
 mod sounds;
 mod sync;
 mod tasks;
+mod time_zones;
 mod user_prefs;
 mod videoconference;
 
@@ -55,6 +56,7 @@ pub use search::*;
 pub use sounds::*;
 pub use sync::*;
 pub use tasks::*;
+pub use time_zones::*;
 pub use user_prefs::*;
 pub use videoconference::*;
 

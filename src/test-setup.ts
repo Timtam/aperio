@@ -57,6 +57,7 @@ import {
   installTextCollation,
   installSeriesShiftRules,
   installSeriesClockRules,
+  installZoneListRules,
 } from '@aperio/shared';
 
 import { initSync } from '../crates/cal-core-wasm/pkg/cal_core_wasm';
@@ -101,6 +102,9 @@ import {
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
+  zoneLabelsJson,
+  zoneSearchJson,
+  zoneChoiceJson,
 } from './wasm/coreRules';
 
 initSync({
@@ -170,4 +174,13 @@ installSeriesShiftRules({ seriesShiftJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,
+});
+installZoneListRules({
+  zoneLabelsJson,
+  zoneSearchJson,
+  zoneChoiceJson,
+  // The offsets come from the desktop host, which the tests do not run; a test
+  // that needs them installs its own.
+  zoneOffsets: () =>
+    Promise.reject(new Error('zone offsets come from the desktop host, which tests do not run')),
 });

@@ -1,8 +1,9 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufe 1 gebaut (#72), Stufe 2 in Arbeit (#73).** Toni hat
-die Form am 14. September 2026 festgelegt (Entscheidungen 13b, 14a, 15a, 16b,
-17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b und 26a). Die Planung lief in zwei
+Status: **entschieden; Stufen 1 und 2 gebaut (#72, #73), Stufe 3 in Arbeit.** Toni
+hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b, 14a,
+15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a und 29a bis 32a, dazu die
+Vorlese-Form F). Die Planung lief in zwei
 Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
 Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
 Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
@@ -79,6 +80,18 @@ keinen, dort ist die Wahl Tonis Sache.
   3. Die Erinnerungen fragen dieselbe Regel wie die Ansichten.
   4. Bis Stufe 10 bekommt eine neue Serie die Gerätezone in der Schreibweise des
      Geräts, etwa `Asia/Calcutta`.
+- **29a — Normalzeit ab heute.** Die Liste sortiert nach dem kleinsten Versatz
+  einer Zone im Jahr ab heute. Dublin und Casablanca stehen damit bei UTC+00:00
+  neben London, und jede Serie sieht dieselbe Reihenfolge, auch eine alte.
+- **30a — feste Reihenfolge.** Normalzeit, dann Stadt, wie oben. Im Sommer hört
+  man dadurch manchmal einen kleineren Versatz nach einem größeren („Adak,
+  Amerika, UTC−09:00“ vor „Honolulu, Amerika, UTC−10:00“).
+- **31a — „+5“ ist die volle Stunde.** Ein Versatz ohne Minuten findet nur
+  UTC+05:00; für Indien tippt man „+5:30“.
+- **32a — tzdata 2025b.** Stufe 3 wird mit den Zeitzonendaten aus chrono-tz
+  gebaut. Die Aktualität der Daten ist eine eigene Aufgabe (siehe „Risiken“).
+- **Vorlese-Form F.** Der Versatz lautet „UTC−04:00“ mit echtem Minuszeichen
+  (U+2212); Toni hat die Formen mit NVDA und VoiceOver verglichen.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -177,7 +190,9 @@ Auswählen.“
 **313 Einträge:** 312 kanonische Zonen ohne `Etc/*` und ein UTC-Eintrag. Ein
 Eintrag lautet „Stadt, Region, UTC±hh:mm“, zum Beispiel „Berlin, Europa,
 UTC+02:00“. Dreistufige Namen lauten „Indianapolis (Indiana), Amerika,
-UTC-04:00“.
+UTC−04:00“. Das Minus ist das echte Minuszeichen U+2212 (Form F). Die Stadt ist
+der letzte Teil der Id mit `_` als Leerzeichen; Namen ohne Schrägstrich wie
+`EST5EDT` stehen nie in der Liste, auch wenn tzdata sie wieder zu Zonen macht.
 
 **Städte stehen unter ihrem Namen aus der Zonen-Datenbank** (Vienna, Moscow,
 Kyiv); nur die Region steht in der Sprache der Oberfläche. „Wien“ findet deshalb
@@ -193,15 +208,26 @@ Antwort steht der Eintrag ohne Versatz.
 
 **Oben stehen, solange die Suche leer ist:** „Aktuell: {Eintrag}“ (wenn die Zone
 weder die des Geräts noch UTC ist), „Dieses Gerät: {Eintrag}“ (außer das Gerät
-läuft auf UTC oder auf einer Zone, die tzdata nicht kennt) und der UTC-Eintrag. Danach folgen alle Einträge nach
-Standard-Versatz, dann nach Stadt.
+läuft auf UTC oder auf einer Zone, die tzdata nicht kennt) und der UTC-Eintrag.
+Danach folgen alle Einträge nach Normalzeit, dann nach Stadt. Die Normalzeit ist
+der kleinste Versatz einer Zone im Jahr ab heute (29a); die Reihenfolge bleibt
+fest, auch wenn der angezeigte Versatz im Sommer größer ist (30a). Der
+UTC-Eintrag steht dort vor den Zonen mit Normalzeit UTC+00:00.
 
-**Die Suche** findet Teile von Stadt, Zonen-Id, alten Namen, Region in der
-Sprache der Oberfläche und Versatz („+2“, „+02:00“, „5:30“). Anfrage und Liste
-werden auf beiden Seiten mit derselben festen Tabelle gefaltet: klein, ä/ö/ü zu
-a/o/u, „ue/oe/ae“ zu u/o/a, ß zu ss, kombinierende Zeichen weg. So finden
-„Zürich“ und „Zuerich“ beide Zurich. Wird ein Eintrag über einen alten Namen
-gefunden, sagt er das: „Kyiv, Europa, UTC+03:00 (auch Kiev)“. Die Zählzeile sagt
+**Die Suche** findet Teile von Stadt, Gebiet, Zonen-Id, alten Namen, Region in
+der Sprache der Oberfläche und Versatz („+2“, „+02:00“, „UTC+2“, „5:30“). Jedes
+Wort muss passen; eine Suche ohne Wort zeigt die ganze Liste. Ein Versatz
+braucht ein Vorzeichen, einen Doppelpunkt oder „UTC“ davor, und ohne Minuten gilt
+die volle Stunde: „+5“ findet UTC+05:00, nicht Kolkata (31a). Ohne Vorzeichen
+passt ein Versatz zu beiden Seiten („5:30“). Er passt zum Versatz, den der
+Eintrag am Beginn der Serie zeigt. Anfrage und Liste werden auf beiden Seiten
+gleich gefaltet: zerlegt und ohne kombinierende Zeichen (ä wird a), klein, ß zu
+ss, „ue/oe/ae“ zu u/o/a. So finden „Zürich“ und „Zuerich“ beide Zurich. Wird ein
+Eintrag über einen alten Namen gefunden, sagt er das: „Kyiv, Europa, UTC+03:00
+(auch Kiev)“. Zusammengelegte Orte und andere Schreibweisen heißen dabei nach
+ihrem letzten Teil („auch Oslo“), alle anderen alten Namen mit ihrer ganzen Id
+(„auch US/Pacific“, „auch CST6CDT“), weil ihr letzter Teil allein nichts sagt.
+Die Zählzeile sagt
 „Eine Zeitzone“ oder „12 Zeitzonen“, bei keinem Treffer „Keine Zeitzone passt zu
 ‚{Suche}‘.“
 
@@ -508,14 +534,40 @@ Handy im selben PR.
    - Hermes auf iOS und Android ist nur aus dem Quelltext gelesen. Das prüft der
      nächste Handy-Build.
 3. **Die Weltliste mit Versatz und Suche** — `feat(core): the world zone list with offsets, and its search`.
-   Kern-Feature `zones` (in WebAssembly aus): Versatz und Suche mit
-   Faltungstabelle auf der Namens-Tabelle aus Stufe 2 (`zone_names.rs`,
-   `listed_zones`); die Aliase für „(auch Oslo)“ kommen aus dieser Tabelle.
-   Desktop über einen Tauri-Befehl, Handy über
-   cal-ffi. Fixture `timeZoneFilter.json`. Vorher messen: Größenzuwachs nativ,
-   Abweichungen zwischen chrono-tz und Intl der Geräte, welche Namen Hermes auf
-   alten Geräten ablehnt, wie NVDA und VoiceOver „UTC+02:00“ und „UTC+05:30“
-   lesen.
+   `cal_core::zone_list` baut auf der Namens-Tabelle aus Stufe 2 auf. Der
+   Generator schreibt dafür zu jedem Namen seine Art, gelesen aus den
+   Abschnitten von tzdatas `backward`.
+   - Namen, Suche und die Einordnung einer gespeicherten Zone oder der Gerätezone
+     brauchen keine Zeitzonen-Regeln. Sie stehen im normalen Kern, auf dem
+     Desktop synchron über WebAssembly.
+   - Nur die Versätze und die Reihenfolge brauchen chrono-tz. Sie stehen hinter
+     dem Kern-Feature `zones`: auf dem Desktop ein Tauri-Befehl (`zone_offsets`),
+     auf dem Handy eine synchrone cal-ffi-Tür. CI prüft, dass chrono-tz nicht in
+     die WebAssembly-Tür gerät.
+
+   Die Fixture `timeZoneFilter.json` lesen Kern, Handy-Tür und WebAssembly-Tür
+   (diese ohne die Zeilen mit Versatz).
+
+   Gemessen:
+   - chrono-tz im WebAssembly-Modul kostete etwa 879 KB, deshalb bleibt es dort
+     aus. Stufe 3 ohne chrono-tz: +85,8 KB roh, +33,4 KB gzip, +18,7 KB brotli;
+     davon die Unicode-Zerlegung der Faltung 21,5 KB roh, 1,5 KB brotli.
+   - Die native Handy-Bibliothek enthält chrono-tz schon heute (über host-core
+     und die Adapter). Ein Prototyp mit Feature, Faltung und Suche wuchs um
+     etwa 21,6 KB (arm64 `.so`), gepackt um etwa 5,3 KB.
+   - Ein einfacher Prototyp auf dem Desktop (x64, release) brauchte für die
+     Liste mit Versätzen etwa 0,45 ms und für eine Suche etwa 1,2 ms. Er
+     rechnete dabei die Versätze bei jeder Suche neu; der gebaute Kern trennt
+     beides, die Suche bekommt die Versätze mitgegeben.
+   - Noch nicht gemessen: der Zuwachs der iOS-App und was ein Aufruf der
+     Versätze für 312 Zonen auf einem Handy kostet.
+   - WebView2 152 und Edge 154 (tzdata 2025c) stimmen mit chrono-tz 2025b
+     überein.
+   - Alte Android-Versionen kennen einzelne Zonen nicht. Von den 597 Namen
+     fehlen Android 7.0 elf, 7.1.2 sieben, 8 und 9 sechs und 10 ohne
+     Aktualisierung fünf; alle sind gelistete Zonen. Das ist aus AOSP-Dateien
+     abgeleitet, nicht auf Geräten gemessen.
+   - Die Vorlese-Form hat Toni gewählt: Form F, „UTC−04:00“.
 4. **Exchange-Zonentabelle aus CLDR** — `feat(ews): Windows zone table generated from CLDR windowsZones`.
    Vorher messen: wie viele der 312 Zonen danach abbildbar sind, und was Exchange
    mit einem Update ohne StartTimeZone macht.
@@ -567,6 +619,16 @@ Handy im selben PR.
   - Die tzdata in Node (2026b) ist neuer als die in chrono-tz (2025b).
   - Eine Zone, die neuer ist als Aperios tzdata, wiederholt sich nach UTC, bis
     chrono-tz aktualisiert ist.
+- **Zeitzonendaten hinter der Wirklichkeit (32a).** chrono-tz 0.10.4 enthält
+  tzdata 2025b, und eine neuere Version gibt es nicht. Neuere tzdata-Versionen
+  ändern:
+  - Casablanca und El Aaiun: ab 20. September 2026 dauerhaft UTC+00:00;
+  - Vancouver, Edmonton und Inuvik: ab 1. November 2026 keine Rückstellung mehr;
+  - Chisinau: die Umstellung eine Stunde später.
+
+  Für diese Zonen zeigen die Liste und die Erinnerungen danach den alten
+  Versatz, während ein Gerät mit aktuellen Daten richtig anzeigt. Die Fixture
+  meidet diese Tage. Wie Aperio aktuelle Daten bekommt, ist eine eigene Aufgabe.
 - **Erinnerungen folgen der Kern-Regel (26a).** Für zwei gespeicherte
   Schreibweisen ändern sie sich:
   - „europe/berlin“ erinnert jetzt nach Berlin statt nach UTC.
@@ -580,9 +642,11 @@ Handy im selben PR.
   Beginn aber als UTC-Zeit, und Microsoft 365 schreibt sie als UTC. Das war
   schon vor Stufe 2 so. Behoben ist es erst, wenn die Adapter die Kern-Regel
   fragen.
-- **Versatz-Ansagen ungetestet.** Liest ein Screenreader „UTC+02:00“ schlecht,
-  sind 313 ähnliche Einträge schwer zu unterscheiden. Die Form steckt in einem
-  Übersetzungsschlüssel und lässt sich ohne Rust ändern.
+- **Versatz-Ansagen.** Toni hat die Form „UTC−04:00“ mit echtem Minuszeichen
+  gewählt (Vorlese-Vergleich mit NVDA und VoiceOver, 15. September 2026). Wie
+  313 ähnliche Einträge in einer langen Liste klingen, ist erst mit den Dialogen
+  aus Stufe 11 zu hören. Die Form steckt in einem Übersetzungsschlüssel und lässt
+  sich ohne Rust ändern.
 - **Ausnahmen gegen die Regel im Formular.** Ob eine Ausnahme einen Termin
   streicht, prüft Aperio gegen Regel, Uhr und Ausnahmen, wie sie gerade im
   Formular stehen. Wurde die Regel in derselben Sitzung vorher geändert, kann eine
@@ -622,8 +686,9 @@ Handy im selben PR.
 
 ## Ungeprüft
 
-- Wie NVDA (deutsche und englische Stimme) und VoiceOver die Versatz-Texte,
-  „Startzeit (New York)“ und die Einträge mit Kommas lesen.
+- Wie NVDA (deutsche und englische Stimme) und VoiceOver „Startzeit (New York)“
+  und ganze Einträge mit Kommas in einer langen Liste lesen. Die Versatz-Form
+  selbst hat Toni verglichen (Form F).
 - NVDA im verschachtelten Dialog mit Suchfeld und Liste; ob der Fokus-Rücksprung
   das Schließen der Auswahl und das Öffnen der Frage übersteht.
 - Ob WebView2 bei jedem Pfeil im geschlossenen Wiederholungs-Feld ein
@@ -631,7 +696,8 @@ Handy im selben PR.
 - iOS: ob eine Ansage nach dem Schließen eines Dialogs gehört wird. Android: ob
   das Öffnen einen Moment später mit TalkBack funktioniert. Ob Listenzeilen per
   Wischen erreichbar bleiben.
-- Welche Zonen-Namen Intl auf Android 7 bis 9 und iOS 16.4 ablehnt.
+- Welche Zonen-Namen Intl auf Android 7 bis 10 und iOS 16.4 wirklich ablehnt.
+  Für Android ist es aus AOSP-Dateien abgeleitet (Stufe 3), für iOS unbekannt.
 - Welche Gerätezone iOS und Android für UTC, Indien und die Ukraine melden.
   Gemessen ist nur WebView2 152: `UTC`, `Asia/Calcutta` und `Europe/Kiev`, für
   eine emulierte Gerätezone `GMT` (ICU) `+00:00`.
@@ -648,7 +714,9 @@ Handy im selben PR.
   zusätzlichen ersten Termin zeigen.
 - Ob das Aufklappen mit rrule.js und die Passung im Kern für gezählte Wochentage
   und negative Monatstage übereinstimmen.
-- Abweichungen zwischen chrono-tz und den Intl-Daten der Geräte.
+- Abweichungen zwischen chrono-tz und den Intl-Daten der Handys. WebView2 152
+  und Edge 154 stimmen überein; Node 24 (tzdata 2026b) weicht für Vancouver ab
+  1. November 2026 und für Chisinau ab.
 - Größenzuwachs der nativen Bibliothek und Aufrufkosten auf dem Handy. Für
   WebAssembly sind beide gemessen.
 - Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.

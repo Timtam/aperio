@@ -59,6 +59,9 @@ import init, {
   seriesShift as wasmSeriesShift,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
+  zoneLabels as wasmZoneLabels,
+  zoneSearch as wasmZoneSearch,
+  zoneChoice as wasmZoneChoice,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -338,4 +341,22 @@ export function seriesClockZoneThroughCore(tzid: string): string {
 export function canonicalZoneThroughCore(name: string): string {
   assertReady();
   return wasmCanonicalZone(name);
+}
+
+/** See `cal_core::zone_labels_json`. */
+export function zoneLabelsJson(): string {
+  assertReady();
+  return wasmZoneLabels();
+}
+
+/** See `cal_core::zone_search_json`. */
+export function zoneSearchJson(inputJson: string): string {
+  assertReady();
+  return wasmZoneSearch(inputJson);
+}
+
+/** See `cal_core::zone_choice_json`. */
+export function zoneChoiceJson(inputJson: string): string {
+  assertReady();
+  return wasmZoneChoice(inputJson);
 }

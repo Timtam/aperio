@@ -2039,6 +2039,35 @@
       "removed": "Signatur entfernt.",
       "calendarLabel": "Signatur für diesen Kalender",
       "calendarHint": "Neue Termine in diesem Kalender tragen sie automatisch. Im Editor kannst du trotzdem eine andere wählen oder keine."
+    },
+    "seriesTimeZone": {
+      "entry": "{{city}}, {{region}}, {{offset}}",
+      "entryWithArea": "{{city}} ({{area}}), {{region}}, {{offset}}",
+      "entryNoOffset": "{{city}}, {{region}}",
+      "entryWithAreaNoOffset": "{{city}} ({{area}}), {{region}}",
+      "utcEntry": "UTC (ohne Sommerzeit)",
+      "offset": "UTC{{sign}}{{hh}}:{{mm}}",
+      "offsetSign": {
+        "plus": "+",
+        "minus": "−"
+      },
+      "alsoKnownAs": "{{entry}} (auch {{alias}})",
+      "count_one": "Eine Zeitzone",
+      "count_other": "{{count}} Zeitzonen",
+      "noMatch": "Keine Zeitzone passt zu ‚{{query}}‘.",
+      "region": {
+        "africa": "Afrika",
+        "america": "Amerika",
+        "antarctica": "Antarktis",
+        "asia": "Asien",
+        "atlantic": "Atlantik",
+        "australia": "Australien",
+        "europe": "Europa",
+        "indian": "Indischer Ozean",
+        "pacific": "Pazifik"
+      },
+      "notInList": "{{name}} (nicht in Aperios Liste)",
+      "unreadable": "{{name}} (Aperio kann diese Zeitzone nicht lesen; die Serie wiederholt sich nach UTC)"
     }
   },
   "sidebar": {

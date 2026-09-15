@@ -5,7 +5,11 @@
 // `Request` structs.
 
 import { invoke } from '@tauri-apps/api/core';
-import { localizeBirthdayCalendarName } from '@aperio/shared';
+import {
+  localizeBirthdayCalendarName,
+  type ZoneOffsets,
+  type ZoneOffsetsQuestion,
+} from '@aperio/shared';
 import i18n from '../i18n';
 import { withCreatedRecurrenceZone } from '../intl/recurrence';
 import { notifyDayMarkersChanged } from '../state/dayMarkersChanged';
@@ -2262,3 +2266,10 @@ export const listRemotePlugins = () =>
  *  werden"-section of the Settings → Plugins panel. */
 export const listFailedPlugins = () =>
   invoke<FailedPluginInfo[]>('list_failed_plugins');
+
+/** Every listed zone's offset at a series' start and its standard offset as of
+ *  today, and the order of the world zone list. A host command rather than a
+ *  WebAssembly door: the offsets need chrono-tz, which the module leaves out
+ *  (src-tauri/src/commands/time_zones.rs). */
+export const zoneOffsets = (question: ZoneOffsetsQuestion) =>
+  invoke<ZoneOffsets>('zone_offsets', { question });

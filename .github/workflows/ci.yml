@@ -242,6 +242,7 @@ jobs:
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: |
           cargo check -p cal-core
+          cargo check -p cal-core --features zones
           cargo check -p plugin-core
           cargo check -p plugin-sdk
 
@@ -266,6 +267,22 @@ jobs:
       - name: Zone names are generated from chrono-tz
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask tz-list --check
+
+      # chrono-tz stays out of the desktop's WebAssembly door: it would grow the
+      # module by about 879 KB, and the zone list's offsets come from the host
+      # there. A `zones` feature switched on anywhere in cal-core-wasm's graph
+      # would pull it in without a sound, so the graph is asked. The first line
+      # is the control: it fails if the question is asked of the wrong graph.
+      - name: chrono-tz stays out of the WebAssembly door
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: |
+          cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i cal-core > /dev/null
+          if out=$(cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i chrono-tz 2>&1); then
+            echo "chrono-tz is in the WebAssembly door's dependency graph:"
+            echo "$out"
+            exit 1
+          fi
+          echo "$out" | grep -q "did not match any packages"
 
   # The Rust host, the committed UniFFI bindings, and the Kotlin + Swift bridges
   # agree about every method and its arity. Deliberately its own job rather than

@@ -21,8 +21,10 @@ import {
   installTextCollation,
   installSeriesShiftRules,
   installSeriesClockRules,
+  installZoneListRules,
 } from '@aperio/shared';
 
+import { zoneOffsets } from './api/client';
 import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
@@ -68,6 +70,9 @@ import {
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
+  zoneLabelsJson,
+  zoneSearchJson,
+  zoneChoiceJson,
 } from './wasm/coreRules';
 import i18n from './i18n';
 import './styles.css';
@@ -198,6 +203,10 @@ initCoreRules()
       seriesClockZone: seriesClockZoneThroughCore,
       canonicalZone: canonicalZoneThroughCore,
     });
+
+    // The world zone list: its names and search from the core in WebAssembly,
+    // its offsets from the host.
+    installZoneListRules({ zoneLabelsJson, zoneSearchJson, zoneChoiceJson, zoneOffsets });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

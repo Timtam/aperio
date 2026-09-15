@@ -227,6 +227,27 @@ pub fn canonical_zone(name: &str) -> String {
     rules::canonical_zone(name)
 }
 
+/// The world zone list's names: every listed zone's id, city, area and region,
+/// by position. See `cal_core::zone_list`. The offsets are not here: they need
+/// chrono-tz, which this module leaves out, and the desktop asks its host.
+#[wasm_bindgen(js_name = zoneLabels)]
+pub fn zone_labels() -> Result<String, JsValue> {
+    rules::zone_labels().map_err(to_js)
+}
+
+/// A search over the world zone list: `{query, region_names, offsets}` in, the
+/// hits in list order out.
+#[wasm_bindgen(js_name = zoneSearch)]
+pub fn zone_search(input_json: &str) -> Result<String, JsValue> {
+    rules::zone_search(input_json).map_err(to_js)
+}
+
+/// Where a stored zone and the device's zone stand in the list.
+#[wasm_bindgen(js_name = zoneChoice)]
+pub fn zone_choice(input_json: &str) -> Result<String, JsValue> {
+    rules::zone_choice(input_json).map_err(to_js)
+}
+
 /// Fold each group's members into a single row, keeping the input order.
 ///
 /// `{events[], groups[]}` in, one row per surviving slot out — each naming the

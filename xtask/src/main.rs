@@ -664,7 +664,7 @@ fn tz_list(args: &[String]) -> Result<String, String> {
     let names = zone_table(&zones, &links)?;
     agrees_with_chrono_tz(&names, &news)?;
     let fresh = render_zone_names(&names, &crate_version);
-    let listed = names.iter().filter(|(n, t)| is_listed(n, t)).count();
+    let listed = names.iter().filter(|(n, t, _)| is_listed(n, t)).count();
     let tzdata = chrono_tz::IANA_TZDB_VERSION;
 
     let target = root.join(ZONE_NAMES);
@@ -759,18 +759,81 @@ fn read_tz_dir(dir: &Path) -> Result<Vec<(String, String)>, String> {
     Ok(out)
 }
 
-/// The zones and the links (name → target) tzdata's source files declare.
+/// The sections of tzdata's `backward` file, by the first line of their
+/// heading, and the kind of name each one keeps (`cal_core::series_clock::NameKind`).
+const BACKWARD_SECTIONS: &[(&str, &str)] = &[
+    ("Pre-1993 naming conventions", "Pre1993"),
+    (
+        "Two-part names that were renamed mostly to three-part names in 1995",
+        "Renamed1995",
+    ),
+    (
+        "Pre-2013 practice, which typically had a Zone per zone.tab line",
+        "MergedZoneTab",
+    ),
+    (
+        "Non-zone.tab locations with timestamps since 1970 that duplicate",
+        "MergedNonZoneTab",
+    ),
+    ("Alternate names for the same location", "Alternate"),
+];
+
+/// Links by name: the zone each points at, and the kind of name it is.
+type Links = BTreeMap<String, (String, &'static str)>;
+
+/// A tzdata name, the zone it resolves to, and its kind (`Zone` for a zone).
+type NameRow = (String, String, &'static str);
+
+/// The zones and the links tzdata's source files declare.
 ///
 /// Only three kinds of line start at column 0: `Rule`, `Zone` and `Link`.
 /// Indented lines continue a zone, and `#` starts a comment. Any other line is
 /// an error that names its file and line, rather than a line skipped.
-fn read_tz_sources(
-    sources: &[(String, String)],
-) -> Result<(BTreeSet<String>, BTreeMap<String, String>), String> {
+///
+/// A link's kind is the section of `backward` that declares it, read from the
+/// heading above the section's `# Link TARGET LINK-NAME` column line, or
+/// `Etcetera` for a link in `etcetera`. A link anywhere else, before the first
+/// section, or under a heading this reader does not know is an error too: the
+/// kind decides how the zone list names the link, and a guess would name it
+/// wrongly without a sound.
+fn read_tz_sources(sources: &[(String, String)]) -> Result<(BTreeSet<String>, Links), String> {
     let mut zones = BTreeSet::new();
-    let mut links = BTreeMap::new();
+    let mut links = Links::new();
     for (file, text) in sources {
+        let mut section: Option<&'static str> = None;
+        let mut paragraph: Vec<&str> = Vec::new();
+        let mut heading: Option<&str> = None;
         for (at, raw) in text.lines().enumerate() {
+            if file == "backward" {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    if let Some(first) = paragraph.first() {
+                        heading = Some(*first);
+                    }
+                    paragraph.clear();
+                } else if let Some(comment) = trimmed.strip_prefix('#') {
+                    let comment = comment.trim();
+                    if comment.starts_with("Link")
+                        && comment.contains("TARGET")
+                        && comment.contains("LINK-NAME")
+                    {
+                        let title = paragraph.first().copied().or(heading).unwrap_or("");
+                        let kind = BACKWARD_SECTIONS
+                            .iter()
+                            .find(|(known, _)| *known == title)
+                            .map(|(_, kind)| *kind)
+                            .ok_or_else(|| {
+                                format!(
+                                    "{file}:{}: a section this reader does not know: {title:?}",
+                                    at + 1
+                                )
+                            })?;
+                        section = Some(kind);
+                    } else {
+                        paragraph.push(comment);
+                    }
+                }
+            }
             let line = raw.split('#').next().unwrap_or("");
             if line.trim().is_empty() || line.starts_with(char::is_whitespace) {
                 continue;
@@ -784,7 +847,27 @@ fn read_tz_sources(
                     }
                 }
                 ["Link", target, name, ..] => {
-                    if links.insert(name.to_string(), target.to_string()).is_some() {
+                    let kind = match (file.as_str(), section) {
+                        ("etcetera", _) => "Etcetera",
+                        ("backward", Some(kind)) => kind,
+                        ("backward", None) => {
+                            return Err(format!(
+                                "{file}:{}: link {name} comes before any section this reader knows",
+                                at + 1
+                            ))
+                        }
+                        _ => {
+                            return Err(format!(
+                                "{file}:{}: link {name} is outside `backward` and `etcetera`, so \
+                                 this reader cannot say what kind of name it is",
+                                at + 1
+                            ))
+                        }
+                    };
+                    if links
+                        .insert(name.to_string(), (target.to_string(), kind))
+                        .is_some()
+                    {
                         return Err(format!("{file}:{}: link {name} is declared twice", at + 1));
                     }
                 }
@@ -808,12 +891,9 @@ fn read_tz_sources(
 /// lookup could not follow), two names that differ only in ASCII case (the
 /// lookup could not tell them apart), and a name that is empty, not ASCII, or
 /// holds whitespace, a quote or a backslash.
-fn zone_table(
-    zones: &BTreeSet<String>,
-    links: &BTreeMap<String, String>,
-) -> Result<Vec<(String, String)>, String> {
+fn zone_table(zones: &BTreeSet<String>, links: &Links) -> Result<Vec<NameRow>, String> {
     let mut problems = Vec::new();
-    for (name, target) in links {
+    for (name, (target, _)) in links {
         if zones.contains(name) {
             problems.push(format!("{name} is both a zone and a link"));
         }
@@ -828,16 +908,16 @@ fn zone_table(
             ));
         }
     }
-    let mut names: Vec<(String, String)> = zones
+    let mut names: Vec<NameRow> = zones
         .iter()
-        .map(|zone| (zone.clone(), zone.clone()))
+        .map(|zone| (zone.clone(), zone.clone(), "Zone"))
         .chain(
             links
                 .iter()
-                .map(|(name, target)| (name.clone(), target.clone())),
+                .map(|(name, (target, kind))| (name.clone(), target.clone(), *kind)),
         )
         .collect();
-    names.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    names.sort_by_key(|(name, _, _)| name.to_ascii_lowercase());
     for pair in names.windows(2) {
         if pair[0].0.eq_ignore_ascii_case(&pair[1].0) {
             problems.push(format!(
@@ -846,7 +926,7 @@ fn zone_table(
             ));
         }
     }
-    for (name, _) in &names {
+    for (name, _, _) in &names {
         if name.is_empty()
             || !name.is_ascii()
             || name.contains(|c: char| c.is_whitespace() || c == '"' || c == '\\')
@@ -866,7 +946,7 @@ fn zone_table(
 
 /// The names read agree with the zones chrono-tz was built with, from the
 /// same release, and the UTC rule's premise holds on chrono-tz's own offsets.
-fn agrees_with_chrono_tz(names: &[(String, String)], news: &str) -> Result<(), String> {
+fn agrees_with_chrono_tz(names: &[NameRow], news: &str) -> Result<(), String> {
     let mut problems = Vec::new();
 
     let release = news
@@ -881,7 +961,7 @@ fn agrees_with_chrono_tz(names: &[(String, String)], news: &str) -> Result<(), S
         ));
     }
 
-    let read: BTreeSet<&str> = names.iter().map(|(name, _)| name.as_str()).collect();
+    let read: BTreeSet<&str> = names.iter().map(|(name, _, _)| name.as_str()).collect();
     let built: BTreeSet<&str> = chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect();
     for name in read.difference(&built) {
         problems.push(format!(
@@ -896,8 +976,8 @@ fn agrees_with_chrono_tz(names: &[(String, String)], news: &str) -> Result<(), S
 
     let linked: BTreeSet<&str> = names
         .iter()
-        .filter(|(_, target)| target == "Etc/UTC" || target == "Etc/GMT")
-        .map(|(name, _)| name.as_str())
+        .filter(|(_, target, _)| target == "Etc/UTC" || target == "Etc/GMT")
+        .map(|(name, _, _)| name.as_str())
         .collect();
     let measured: BTreeSet<&str> = chrono_tz::TZ_VARIANTS
         .iter()
@@ -945,36 +1025,42 @@ fn keeps_utc(tz: chrono_tz::Tz) -> bool {
     })
 }
 
-/// A zone the list of a series' zone is chosen from: a zone, not a link, and
-/// not one of tzdata's `Etc/` fixed offsets and UTC names.
+/// A zone the list of a series' zone is chosen from: a zone, not a link, with a
+/// region part, and not one of tzdata's `Etc/` fixed offsets and UTC names. The
+/// region part keeps out the POSIX-style names (`EST5EDT`), which tzdata 2026d
+/// turns from links back into zones.
 fn is_listed(name: &str, target: &str) -> bool {
-    name == target && !name.starts_with("Etc/")
+    name == target && name.contains('/') && !name.starts_with("Etc/")
 }
 
 /// The generated Rust file. One entry per line, so a tzdata update reads as a
 /// diff of the names it touched.
-fn render_zone_names(names: &[(String, String)], crate_version: &str) -> String {
+fn render_zone_names(names: &[NameRow], crate_version: &str) -> String {
     let tzdata = chrono_tz::IANA_TZDB_VERSION;
     let mut out = format!(
         "// @generated by `cargo xtask tz-list` from chrono-tz {crate_version} (IANA tzdata {tzdata}).\n\
          // Do not edit: run the task and commit what it writes. See ../series_clock.rs.\n\
          \n\
+         use super::NameKind::{{self, *}};\n\
+         \n\
          /// The IANA tzdata release these names were read from.\n\
          pub const TZDATA_VERSION: &str = \"{tzdata}\";\n\
          \n\
-         /// Every tzdata name, zones and links, with the zone it resolves to. Sorted\n\
-         /// by the name with ASCII letters lowercased, which is how it is searched.\n\
-         pub const NAMES: &[(&str, &str)] = &[\n"
+         /// Every tzdata name, zones and links, with the zone it resolves to and its\n\
+         /// kind. Sorted by the name with ASCII letters lowercased, which is how it is\n\
+         /// searched.\n\
+         pub const NAMES: &[(&str, &str, NameKind)] = &[\n"
     );
-    for (name, target) in names {
-        out.push_str(&format!("    (\"{name}\", \"{target}\"),\n"));
+    for (name, target, kind) in names {
+        out.push_str(&format!("    (\"{name}\", \"{target}\", {kind}),\n"));
     }
     out.push_str(
-        "];\n\n/// The zones outside `Etc/`, in the same order.\npub const LISTED: &[&str] = &[\n",
+        "];\n\n/// The zones outside `Etc/` with a region part, in the same order.\n\
+         pub const LISTED: &[&str] = &[\n",
     );
-    for (name, _) in names
+    for (name, _, _) in names
         .iter()
-        .filter(|(name, target)| is_listed(name, target))
+        .filter(|(name, target, _)| is_listed(name, target))
     {
         out.push_str(&format!("    \"{name}\",\n"));
     }
@@ -982,10 +1068,11 @@ fn render_zone_names(names: &[(String, String)], crate_version: &str) -> String 
     out
 }
 
-/// A generated file read back: its tzdata release, names and listed zones.
+/// A generated file read back: its tzdata release, names (with target and
+/// kind) and listed zones.
 struct GeneratedZones {
     tzdata: Option<String>,
-    names: BTreeMap<String, String>,
+    names: BTreeMap<String, (String, String)>,
     listed: BTreeSet<String>,
 }
 
@@ -1006,12 +1093,17 @@ fn read_zone_names(text: &str) -> GeneratedZones {
         } else if line == "];" {
             section = "";
         } else if section == "names" {
-            let pair = line
+            let row = line
                 .strip_prefix("(\"")
-                .and_then(|rest| rest.strip_suffix("\"),"))
-                .and_then(|inner| inner.split_once("\", \""));
-            if let Some((name, target)) = pair {
-                out.names.insert(name.to_string(), target.to_string());
+                .and_then(|rest| rest.strip_suffix("),"))
+                .and_then(|inner| inner.split_once("\", \""))
+                .and_then(|(name, rest)| {
+                    rest.rsplit_once("\", ")
+                        .map(|(target, kind)| (name, target, kind))
+                });
+            if let Some((name, target, kind)) = row {
+                out.names
+                    .insert(name.to_string(), (target.to_string(), kind.to_string()));
             }
         } else if section == "listed" {
             if let Some(name) = line
@@ -1043,11 +1135,14 @@ fn describe_zone_drift(have: &str, fresh: &str) -> Option<String> {
             new.tzdata.as_deref().unwrap_or("none"),
         ));
     }
-    for (name, target) in &new.names {
+    for (name, (target, kind)) in &new.names {
         match old.names.get(name) {
-            None => lines.push(format!("  added:    {name} -> {target}")),
-            Some(was) if was != target => {
+            None => lines.push(format!("  added:    {name} -> {target} ({kind})")),
+            Some((was, _)) if was != target => {
                 lines.push(format!("  moved:    {name} -> {target} (was {was})"))
+            }
+            Some((_, was_kind)) if was_kind != kind => {
+                lines.push(format!("  kind:     {name} {was_kind} -> {kind}"))
             }
             Some(_) => {}
         }
@@ -1689,32 +1784,97 @@ mod tests {
         assert_eq!(found[0].cdylib_crate, "adapter-x-cdylib");
     }
 
-    /// Shaped like the real files: a rule, a zone with a continuation line, a
-    /// trailing comment, and a link commented out.
-    const TZ_SNIPPET: &str = "\
+    /// Shaped like the real files: a rule and zones with a continuation line.
+    const TZ_ZONES: &str = "\
 # A comment line
 Rule\tEU\t1981\tmax\t-\tMar\tlastSun\t 1:00u\t1:00\tS
 Zone\tEurope/Berlin\t0:53:28 -\tLMT\t1893 Apr
 \t\t\t1:00\tEU\tCE%sT
 Zone\tEtc/UTC\t0\t-\tUTC
+Zone\tAmerica/New_York\t-5:00\tUS\tE%sT
+";
+
+    /// Shaped like tzdata's `backward`: two sections, each a heading, a blank
+    /// line and a column line; a trailing comment, a sub-comment and a link
+    /// commented out.
+    const TZ_BACKWARD: &str = "\
+# Links and zones for backward compatibility
+
+
+# Pre-1993 naming conventions
+
+# Link\tTARGET\t\t\tLINK-NAME\t#= TARGET1
+Link\tAmerica/New_York\tUS/Eastern
+
+
+# Pre-2013 practice, which typically had a Zone per zone.tab line
+
+# Link\tTARGET\t\t\tLINK-NAME
 Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
-Link\tEtc/UTC\t\tZulu
+# Vanguard section, for most .zi parsers.
 #Link\tEtc/UTC\t\tCommented/Out
 ";
 
     #[test]
-    fn the_tz_reader_takes_zones_and_links_and_nothing_else() {
-        let (zones, links) = read_tz_sources(&[pair("europe", TZ_SNIPPET)]).expect("readable");
+    fn the_tz_reader_takes_zones_and_links_with_their_kind() {
+        let (zones, links) = read_tz_sources(&[
+            pair("europe", TZ_ZONES),
+            pair("backward", TZ_BACKWARD),
+            pair("etcetera", "Link\tEtc/UTC\t\tZulu\n"),
+        ])
+        .expect("readable");
         assert_eq!(
             zones.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["Etc/UTC", "Europe/Berlin"],
+            ["America/New_York", "Etc/UTC", "Europe/Berlin"],
         );
+        let link = |name: &str| {
+            links
+                .get(name)
+                .map(|(target, kind)| (target.as_str(), *kind))
+        };
         assert_eq!(
-            links.get("Europe/Oslo").map(String::as_str),
-            Some("Europe/Berlin")
+            link("Europe/Oslo"),
+            Some(("Europe/Berlin", "MergedZoneTab"))
         );
-        assert_eq!(links.get("Zulu").map(String::as_str), Some("Etc/UTC"));
+        assert_eq!(link("US/Eastern"), Some(("America/New_York", "Pre1993")));
+        assert_eq!(link("Zulu"), Some(("Etc/UTC", "Etcetera")));
         assert!(!links.contains_key("Commented/Out"));
+    }
+
+    #[test]
+    fn the_tz_reader_refuses_a_link_it_cannot_give_a_kind() {
+        let outside = read_tz_sources(&[pair("europe", "Link\tA/B\tC/D\n")])
+            .expect_err("a link outside backward and etcetera");
+        assert!(
+            outside.contains("europe:1") && outside.contains("outside"),
+            "{outside}"
+        );
+        let early = read_tz_sources(&[pair("backward", "Link\tA/B\tC/D\n")])
+            .expect_err("a link before any section");
+        assert!(
+            early.contains("backward:1") && early.contains("before any section"),
+            "{early}"
+        );
+        let unknown = read_tz_sources(&[pair(
+            "backward",
+            "# Brand-new reasons\n\n# Link\tTARGET\t\tLINK-NAME\nLink\tA/B\tC/D\n",
+        )])
+        .expect_err("a section this reader does not know");
+        assert!(
+            unknown.contains("backward:3") && unknown.contains("Brand-new reasons"),
+            "{unknown}"
+        );
+    }
+
+    #[test]
+    fn the_list_keeps_zones_with_a_region_part_only() {
+        assert!(is_listed("Europe/Berlin", "Europe/Berlin"));
+        assert!(
+            !is_listed("EST5EDT", "EST5EDT"),
+            "tzdata 2026d makes the POSIX names zones again"
+        );
+        assert!(!is_listed("Etc/GMT+8", "Etc/GMT+8"));
+        assert!(!is_listed("Europe/Oslo", "Europe/Berlin"));
     }
 
     #[test]
@@ -1727,10 +1887,13 @@ Link\tEtc/UTC\t\tZulu
     #[test]
     fn a_link_must_point_at_a_zone() {
         let zones: BTreeSet<String> = ["Etc/UTC".to_string()].into();
-        let links: BTreeMap<String, String> = [
-            ("UTC".to_string(), "Zulu".to_string()),
-            ("Zulu".to_string(), "Etc/UTC".to_string()),
-            ("Gone".to_string(), "Nowhere/Else".to_string()),
+        let links: Links = [
+            ("UTC".to_string(), ("Zulu".to_string(), "Etcetera")),
+            ("Zulu".to_string(), ("Etc/UTC".to_string(), "Etcetera")),
+            (
+                "Gone".to_string(),
+                ("Nowhere/Else".to_string(), "Alternate"),
+            ),
         ]
         .into();
         let err = zone_table(&zones, &links).expect_err("two links go nowhere");
@@ -1747,20 +1910,37 @@ Link\tEtc/UTC\t\tZulu
     #[test]
     fn names_that_differ_only_in_case_are_refused() {
         let zones: BTreeSet<String> = ["Etc/UTC".to_string(), "etc/utc".to_string()].into();
-        let err = zone_table(&zones, &BTreeMap::new()).expect_err("a case collision");
+        let err = zone_table(&zones, &Links::new()).expect_err("a case collision");
         assert!(err.contains("differ only in ASCII case"), "{err}");
     }
 
     #[test]
     fn the_generated_table_reads_back_and_its_drift_is_named() {
-        let names = vec![
-            ("Etc/UTC".to_string(), "Etc/UTC".to_string()),
-            ("Europe/Berlin".to_string(), "Europe/Berlin".to_string()),
-            ("Europe/Oslo".to_string(), "Europe/Berlin".to_string()),
+        let names: Vec<NameRow> = vec![
+            ("Etc/UTC".to_string(), "Etc/UTC".to_string(), "Zone"),
+            (
+                "EST5EDT".to_string(),
+                "America/New_York".to_string(),
+                "Pre1993",
+            ),
+            (
+                "Europe/Berlin".to_string(),
+                "Europe/Berlin".to_string(),
+                "Zone",
+            ),
+            (
+                "Europe/Oslo".to_string(),
+                "Europe/Berlin".to_string(),
+                "MergedZoneTab",
+            ),
         ];
         let text = render_zone_names(&names, "0.0.0");
         let read = read_zone_names(&text);
-        assert_eq!(read.names.len(), 3);
+        assert_eq!(read.names.len(), 4);
+        assert_eq!(
+            read.names.get("Europe/Oslo"),
+            Some(&("Europe/Berlin".to_string(), "MergedZoneTab".to_string()))
+        );
         assert_eq!(read.tzdata.as_deref(), Some(chrono_tz::IANA_TZDB_VERSION));
         assert_eq!(
             read.listed.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -1769,13 +1949,19 @@ Link\tEtc/UTC\t\tZulu
         assert_eq!(describe_zone_drift(&text, &text), None);
 
         let mut changed = names.clone();
-        changed[2].1 = "Europe/Oslo".to_string();
+        changed[3].1 = "Europe/Oslo".to_string();
+        changed[3].2 = "Zone";
+        changed[1].2 = "Alternate";
         changed.remove(0);
-        changed.push(("Europe/Kyiv".to_string(), "Europe/Kyiv".to_string()));
+        changed.push(("Europe/Kyiv".to_string(), "Europe/Kyiv".to_string(), "Zone"));
         let report =
             describe_zone_drift(&text, &render_zone_names(&changed, "0.0.0")).expect("drift");
         assert!(
             report.contains("moved:    Europe/Oslo -> Europe/Oslo (was Europe/Berlin)"),
+            "{report}"
+        );
+        assert!(
+            report.contains("kind:     EST5EDT Pre1993 -> Alternate"),
             "{report}"
         );
         assert!(

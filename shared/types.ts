@@ -140,6 +140,24 @@ export type { TaskSettingsStored } from './generated/TaskSettingsStored';
 export type { SeriesShift } from './generated/SeriesShift';
 export type { SeriesShiftQuestion } from './generated/SeriesShiftQuestion';
 export type { ShiftRefusal } from './generated/ShiftRefusal';
+export type { NameKind } from './generated/NameKind';
+export type { ListedZone } from './generated/ListedZone';
+export type { ListedOffset } from './generated/ListedOffset';
+export type { MatchField } from './generated/MatchField';
+export type { OffsetSign } from './generated/OffsetSign';
+export type { RegionName } from './generated/RegionName';
+export type { ZoneAlias } from './generated/ZoneAlias';
+export type { ZoneChoice } from './generated/ZoneChoice';
+export type { ZoneChoiceAnswer } from './generated/ZoneChoiceAnswer';
+export type { ZoneChoiceQuestion } from './generated/ZoneChoiceQuestion';
+export type { ZoneHit } from './generated/ZoneHit';
+export type { ZoneOffset } from './generated/ZoneOffset';
+export type { ZoneOffsets } from './generated/ZoneOffsets';
+export type { ZoneOffsetsQuestion } from './generated/ZoneOffsetsQuestion';
+export type { ZoneRef } from './generated/ZoneRef';
+export type { ZoneRegion } from './generated/ZoneRegion';
+export type { ZoneSearchAnswer } from './generated/ZoneSearchAnswer';
+export type { ZoneSearchQuestion } from './generated/ZoneSearchQuestion';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the
