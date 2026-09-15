@@ -2070,6 +2070,13 @@ Siehe DESIGN §4.2.
   - 48a: Der Lesefehler wird ein eigener PR mit einer Kern-Regel: Eine
     ganztägige Serie wiederholt sich an den Kalendertagen des Geräts.
   - 49a: Es gibt eine gezielte dritte Runde des Live-Tests.
+  - 51a: Toni legt die Serien S1 bis S3 und die Termine T1 und T2 selbst in
+    Outlook im Web an.
+  - 52a: Toni macht das Vorkommen von S3 am 26.10. selbst in Outlook zur
+    Ausnahme.
+  - 53a: Toni meldet eine kurze Liste zurück: die letzte Zeile des Skripts,
+    welches Outlook und welcher Aperio-Stand, den Tokio-Termin in Outlook, die
+    Termine, die das Skript nennt, und vier Blicke in Aperio.
 
   Der Schutz aus 46a ist gebaut. Die Regel steht im Kern
   (`written_series_zone`), und Exchange, Microsoft 365, Google und CalDAV

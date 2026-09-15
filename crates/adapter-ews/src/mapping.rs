@@ -4252,7 +4252,10 @@ mod tests {
         };
         let create = |name: &str, what: &str, event: NewEvent| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
+            let zone = crate::windows_tz::windows_zone_for(
+                cal_core::written_series_zone(tzid.as_deref(), event.all_day),
+                None,
+            );
             let envelope = crate::soap::create_calendar_item(
                 "CALENDAR",
                 None,
@@ -4274,7 +4277,10 @@ mod tests {
         };
         let update = |name: &str, what: &str, event: Event| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
+            let zone = crate::windows_tz::windows_zone_for(
+                cal_core::written_series_zone(tzid.as_deref(), event.all_day),
+                None,
+            );
             let (set, del) = event_to_update_field_xml(&event).unwrap();
             let envelope =
                 crate::soap::update_calendar_item("ITEM_ID", Some("CHANGEKEY"), &set, &del, false);
@@ -4500,7 +4506,8 @@ mod tests {
     /// The owner creates all-day series and singles in Outlook on a Berlin clock.
     /// The updates start from Aperio's own read of that planned stored shape (a
     /// SyncFolderItems row through `parse_sync_folder_items_response` and
-    /// `to_event`), so they are what Aperio sends after reading those items. The
+    /// `to_event`), so they are what Aperio sends after reading those items as
+    /// the owner is asked to create them: no reminder, location or body. The
     /// requests marked "NOT Aperio's rule" differ on purpose:
     /// - the 47a prototype puts Start and End on midnights of the stored zone
     ///   instead of the UTC midnights of the day;
@@ -4710,7 +4717,7 @@ mod tests {
         write(
             "R3-4-update-t2-today.xml",
             &format!(
-                "Step R3-4: Aperio's update of Outlook's T2 single with a new title, byte for byte as \
+                "Step R3-4: Aperio's update of Outlook's T2 single with a new title, for the planned item (no reminder, location or body) byte for byte as \
                  main sends it. {REPLACE}"
             ),
             update(&set, &del),

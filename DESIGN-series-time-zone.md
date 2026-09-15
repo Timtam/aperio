@@ -3,7 +3,7 @@
 Status: **entschieden; Stufen 1 bis 3 gebaut (#72, #73, #74), Stufe 4 in Arbeit.**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
-bis 43b und 46a bis 49a, dazu die Vorlese-Form F). Die Planung lief in zwei
+bis 43b, 46a bis 49a und 51a bis 53a, dazu die Vorlese-Form F). Die Planung lief in zwei
 Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
 Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
 Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
@@ -134,6 +134,10 @@ keinen, dort ist die Wahl Tonis Sache.
   Zone sie trägt. Ansichten, Erinnerungen, Widget und Badge fragen dieselbe
   Regel. Das wird ein eigener PR.
 - **49a — eine gezielte dritte Runde.** Siehe Stufe 4, „Gemessen“.
+- **51a bis 53a — wie die dritte Runde läuft.** Toni legt die ganztägigen
+  Serien und Termine selbst in Outlook im Web an (51a) und macht die Ausnahme
+  selbst (52a). Er meldet eine kurze Liste zurück (53a). Die übrigen
+  gespeicherten Werte liest das Skript selbst nach.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
