@@ -23,17 +23,26 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use crate::auth::{basic_auth_header, BasicCredentials};
 use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
-    decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
-    parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    parse_get_user_availability, parse_sync_folder_items_counts, parse_sync_folder_items_response,
-    split_calendar_id, to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
+    decode_event_id, encode_event_id, event_to_update_field_xml_on,
+    new_event_to_calendar_item_xml_on, parse_find_folder_response, parse_find_item_response,
+    parse_first_item_id, parse_get_user_availability, parse_server_time_zones,
+    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
+    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, delete_occurrence_item,
     find_calendar_folders, find_items_in_range, get_occurrence_item, get_recurring_master,
-    get_user_availability, respond_to_meeting, sync_folder_items, sync_folder_items_idonly,
-    update_calendar_item, update_folder_displayname,
+    get_server_time_zones, get_user_availability, respond_to_meeting, sync_folder_items,
+    sync_folder_items_idonly, update_calendar_item, update_folder_displayname,
 };
+use crate::windows_tz::ServerTimeZones;
+
+/// The Windows zone ids this server knows (`GetServerTimeZones`), for writing
+/// only ids it accepts (decision 41a).
+pub async fn server_time_zones(client: &EwsClient) -> EwsResult<ServerTimeZones> {
+    let response = client.post_soap(get_server_time_zones()).await?;
+    parse_server_time_zones(&response)
+}
 
 /// State carried by the adapter — endpoint + credentials + reqwest
 /// client. `Clone` because the trait impls hand it off to async tasks.
@@ -181,7 +190,18 @@ pub struct SyncedFolderState {
     /// Server cookie to pass back on the next sync. `None` only
     /// when this state has never seen a successful round.
     pub sync_state: Option<String>,
+    /// Which item parser filled `items` ([`ITEM_PARSER`]). `0` for state
+    /// written before the field existed.
+    #[serde(default)]
+    pub parser: u32,
 }
+
+/// The item parser's version. A cached item from an older parser lacks fields
+/// the read rule needs, so a folder state with a lower `parser` is dropped and
+/// the folder drained from scratch once.
+///
+/// 1: stage 4 review — items carry `end_time_zone` (decision 43b).
+pub const ITEM_PARSER: u32 = 1;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -359,6 +379,9 @@ pub async fn sync_events_delta(
                 .into_iter()
                 .filter(|id| !state.items.contains_key(id))
                 .collect();
+            // Every cached item now comes from the current parser: the caller
+            // hands in a state from it or an empty one (`ITEM_PARSER`).
+            state.parser = ITEM_PARSER;
             return Ok((state, changed_ids, deleted_ids));
         }
     }
@@ -611,9 +634,10 @@ pub async fn create_event(
     client: &EwsClient,
     calendar_id: &str,
     event: NewEvent,
+    server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<Event> {
     let (folder_id, folder_change_key) = split_calendar_id(calendar_id);
-    let item_xml = new_event_to_calendar_item_xml(&event)?;
+    let item_xml = new_event_to_calendar_item_xml_on(&event, server_zones)?;
     // Only ask Exchange to send when the user opted in AND there are
     // attendees to notify — `SendToAllAndSaveCopy` on an attendee-less item
     // would still drop a stray copy into Sent Items for nothing.
@@ -649,10 +673,14 @@ pub async fn create_event(
 /// = edit the whole series" semantics. Per-occurrence overrides go
 /// through a separate flow (`add_event_exdate` for skips, or a
 /// future exception-override-create API).
-pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event> {
+pub async fn update_event(
+    client: &EwsClient,
+    event: &Event,
+    server_zones: Option<&ServerTimeZones>,
+) -> EwsResult<Event> {
     let decoded = decode_event_id(&event.id);
     let target = resolve_write_target(client, &decoded).await?;
-    let (set_xml, delete_xml) = event_to_update_field_xml(event)?;
+    let (set_xml, delete_xml) = event_to_update_field_xml_on(event, server_zones)?;
     let notify = event.send_invitations && !event.attendees.is_empty();
     let envelope = update_calendar_item(
         &target.item_id,
@@ -1503,7 +1531,7 @@ mod tests {
             .create_async()
             .await;
         let client = client_for(&server);
-        let event = create_event(&client, "FOLDER-ID|FCK", new_event("Lunch"))
+        let event = create_event(&client, "FOLDER-ID|FCK", new_event("Lunch"), None)
             .await
             .unwrap();
         // Non-recurring create → Single, so the id carries the
@@ -1537,7 +1565,7 @@ mod tests {
             .with_body(fault_body)
             .create_async()
             .await;
-        let err = create_event(&client_for(&server), "FOLDER-ID|FCK", new_event("X"))
+        let err = create_event(&client_for(&server), "FOLDER-ID|FCK", new_event("X"), None)
             .await
             .unwrap_err();
         match err {
@@ -1598,7 +1626,9 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
         };
-        let updated = update_event(&client_for(&server), &starting).await.unwrap();
+        let updated = update_event(&client_for(&server), &starting, None)
+            .await
+            .unwrap();
         // ChangeKey advances on every successful UpdateItem; the
         // kind stays Single (no master-lookup happens for `S:` ids).
         assert_eq!(updated.id, "S:ITEM-ID|CK-V2");
@@ -1803,7 +1833,9 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
         };
-        let updated = update_event(&client_for(&server), &starting).await.unwrap();
+        let updated = update_event(&client_for(&server), &starting, None)
+            .await
+            .unwrap();
         // After series-wide write the kind flips to RecurringMaster
         // (`M:`), and the id holds the freshly rotated ChangeKey.
         assert_eq!(updated.id, "M:MASTER-ID|MCK-V2");

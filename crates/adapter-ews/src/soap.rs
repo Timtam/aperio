@@ -37,6 +37,14 @@ fn wrap(body: &str) -> String {
     format!("{ENVELOPE_PRELUDE}\n{body}\n{ENVELOPE_EPILOGUE}")
 }
 
+/// SOAP body for `GetServerTimeZones` without the full definitions: the
+/// Windows zone ids this server knows. A server refuses a save naming an id it
+/// does not know (`ErrorTimeZone`), so the adapter asks once and writes only
+/// these (decision 41a).
+pub fn get_server_time_zones() -> String {
+    wrap(r#"    <m:GetServerTimeZones ReturnFullTimeZoneData="false"/>"#)
+}
+
 /// SOAP body for `FindFolder`: enumerate every folder under the
 /// mailbox root, restricted to ones whose `FolderClass` is
 /// `IPF.Appointment` (= a calendar).
@@ -125,6 +133,7 @@ pub fn sync_folder_items(
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
           <t:FieldURI FieldURI="calendar:StartTimeZone"/>
+          <t:FieldURI FieldURI="calendar:EndTimeZone"/>
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
         </t:AdditionalProperties>
@@ -580,6 +589,7 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
           <t:FieldURI FieldURI="calendar:StartTimeZone"/>
+          <t:FieldURI FieldURI="calendar:EndTimeZone"/>
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
           <t:FieldURI FieldURI="calendar:Organizer"/>

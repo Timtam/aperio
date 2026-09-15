@@ -8,14 +8,17 @@
 //! is kept by hand: a hand-kept copy had drifted to three wrong rows and wrote
 //! 174 of the 312 listed zones without a zone.
 //!
-//! ## Reading an id
+//! ## Reading a series' zone
 //!
-//! An id reads as the zone of its default ("001") row, in tzdata's canonical
-//! spelling: `India Standard Time` is `Asia/Kolkata`, not CLDR's
-//! `Asia/Calcutta`. Exchange keeps one id for a group of cities on one clock,
-//! so a Vienna series reads back as Berlin. The id `UTC`, and an id the table
-//! does not know — a custom definition, an id only a server's registry has —
-//! mean no zone: the series repeats in UTC.
+//! A series created without a zone comes back from Exchange with the start zone
+//! `Greenwich Standard Time` and the end zone `tzone://Microsoft/Utc` (live
+//! test, DESIGN-series-time-zone.md stage 4). That end zone means no zone
+//! (decision 43b). Otherwise the start zone's id reads as the zone of its
+//! default ("001") row, in tzdata's canonical spelling: `India Standard Time`
+//! is `Asia/Kolkata`, not CLDR's `Asia/Calcutta`. Exchange keeps one id for a
+//! group of cities on one clock, so a Vienna series reads back as Berlin. The
+//! id `UTC`, and an id the table does not know — a custom definition, an id
+//! only a server's registry has — mean no zone: the series repeats in UTC.
 //!
 //! ## Writing a zone
 //!
@@ -26,8 +29,10 @@
 //! `India Standard Time`, and a merged place its target's (25b).
 //!
 //! A zone Exchange cannot store is written without one (22a): CLDR has no id
-//! for it, or CLDR's id runs another clock than the zone in the five years
-//! after the pinned release. See DESIGN-series-time-zone.md, stage 4.
+//! for it, CLDR's id runs another clock than the zone in the five years after
+//! the pinned release, or the server does not know the id (41a). A server
+//! refuses an id it does not know with `ErrorTimeZone`, and the whole save
+//! fails; Exchange 2019 does not know `Sao Tome Standard Time`.
 //!
 //! ## The translation id
 //!
@@ -35,7 +40,7 @@
 //! [`translation_id`] names both: the generated table's `TABLE_ID`, which the
 //! generator derives from the table's rows, and [`READ_RULE`], which is bumped
 //! by hand whenever the way an id becomes a series' zone changes outside the
-//! table — here in [`read_windows_zone`], or in the read path of `mapping.rs`.
+//! table — here in [`read_series_zone`], or in the read path of `mapping.rs`.
 //! The EWS delta sync compares it with the one in the host's token and emits
 //! every cached item again when they differ.
 
@@ -45,6 +50,7 @@ mod windows_zones;
 pub use windows_zones::{CLDR_RELEASE, TZDATA_VERSION};
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
 
@@ -54,7 +60,11 @@ use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS
 ///
 /// 1: stage 4 — an id reads as its 001 zone, canonical; `UTC` and unknown ids
 /// are no zone.
-pub const READ_RULE: u32 = 1;
+/// 2: stage 4 review — the end zone `tzone://Microsoft/Utc` means no zone.
+pub const READ_RULE: u32 = 2;
+
+/// The end zone Exchange stores for a series created without a zone.
+const NO_ZONE_END: &str = "tzone://Microsoft/Utc";
 
 /// Which translation cached events were made with: the table's rows and the
 /// reading rule.
@@ -67,7 +77,8 @@ pub fn translation_id() -> String {
 pub enum WindowsZoneRead {
     /// A zone, in tzdata's canonical spelling.
     Zone(&'static str),
-    /// The id `UTC`: no zone, so the series repeats in UTC.
+    /// No zone, so the series repeats in UTC: the id `UTC`, or a series
+    /// Exchange marks as created without a zone.
     Utc,
     /// An id the table does not know: empty, a custom definition, an id only a
     /// server's registry has (`Kamchatka Standard Time`), or an invented one.
@@ -98,6 +109,40 @@ pub enum NotStorable {
     /// CLDR's id for it runs another clock in the years after the pinned
     /// release, so Exchange would store another zone than the one chosen.
     OtherClock { windows: &'static str },
+    /// The server does not know CLDR's id for it, and would refuse the save.
+    NotOnServer { windows: &'static str },
+}
+
+/// The Windows zone ids one Exchange server knows, from `GetServerTimeZones`,
+/// compared in ASCII case folded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerTimeZones(BTreeSet<String>);
+
+impl ServerTimeZones {
+    pub fn new<I, S>(ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self(
+            ids.into_iter()
+                .map(|id| id.as_ref().to_ascii_lowercase())
+                .collect(),
+        )
+    }
+
+    /// Whether the server knows `windows`.
+    pub fn knows(&self, windows: &str) -> bool {
+        self.0.contains(&windows.to_ascii_lowercase())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// A Windows zone id as Exchange reports it, in any ASCII case.
@@ -109,13 +154,31 @@ pub fn read_windows_zone(id: &str) -> WindowsZoneRead {
     }
 }
 
-/// The Windows id Exchange gets for a series' stored zone.
-pub fn windows_zone_for(tzid: Option<&str>) -> WindowsZoneWrite {
+/// A series' zone from the StartTimeZone and EndTimeZone ids Exchange reports;
+/// `None` when it reports no start zone.
+pub fn read_series_zone(start: Option<&str>, end: Option<&str>) -> Option<WindowsZoneRead> {
+    if end.is_some_and(|end| end.eq_ignore_ascii_case(NO_ZONE_END)) {
+        return Some(WindowsZoneRead::Utc);
+    }
+    start.map(read_windows_zone)
+}
+
+/// The Windows id Exchange gets for a series' stored zone. `server` is the
+/// list the server knows; `None`, or an empty list, when it could not be asked.
+pub fn windows_zone_for(tzid: Option<&str>, server: Option<&ServerTimeZones>) -> WindowsZoneWrite {
     let Some(zone) = cal_core::series_clock_zone(tzid).and_then(cal_core::canonical_zone) else {
         return WindowsZoneWrite::NoZone;
     };
     if let Some(windows) = lookup(ZONE_WINDOWS, zone) {
-        return WindowsZoneWrite::Id(windows);
+        return match server {
+            Some(server) if !server.is_empty() && !server.knows(windows) => {
+                WindowsZoneWrite::NotStorable {
+                    zone,
+                    reason: NotStorable::NotOnServer { windows },
+                }
+            }
+            _ => WindowsZoneWrite::Id(windows),
+        };
     }
     let reason = if let Some(windows) = lookup(OTHER_CLOCK, zone) {
         NotStorable::OtherClock { windows }
@@ -193,6 +256,8 @@ mod tests {
         "india-kolkata",
         "fle-kyiv",
         "greenwich-abidjan",
+        "greenwich-created-without-zone",
+        "utc-end-zone-in-any-case",
         "utc-is-no-zone",
         "utc-minus-02-etc",
         "mountain-mexico-mazatlan",
@@ -216,6 +281,10 @@ mod tests {
                 reason: NotStorable::OtherClock { windows },
                 ..
             } => json!({ "not_storable": "other_clock", "windows": windows }),
+            WindowsZoneWrite::NotStorable {
+                reason: NotStorable::NotOnServer { windows },
+                ..
+            } => json!({ "not_storable": "not_on_server", "windows": windows }),
         }
     }
 
@@ -235,7 +304,7 @@ mod tests {
             let name = row["name"].as_str().expect("a row name");
             seen.push(name);
             assert_eq!(
-                written(windows_zone_for(row["tzid"].as_str())),
+                written(windows_zone_for(row["tzid"].as_str(), None)),
                 row["expect"],
                 "{name}: {}",
                 row["note"]
@@ -245,12 +314,8 @@ mod tests {
             let name = row["name"].as_str().expect("a row name");
             seen.push(name);
             let id = row["windows"].as_str().expect("a Windows id");
-            assert_eq!(
-                read(read_windows_zone(id)),
-                row["expect"],
-                "{name}: {}",
-                row["note"]
-            );
+            let zone = read_series_zone(Some(id), row["end"].as_str()).expect("a start zone");
+            assert_eq!(read(zone), row["expect"], "{name}: {}", row["note"]);
         }
         for name in MUST_RUN {
             assert!(seen.contains(name), "the contract lost the {name} row");
@@ -261,6 +326,48 @@ mod tests {
                 "{name} is not in MUST_RUN: name it there, so losing it is loud"
             );
         }
+    }
+
+    #[test]
+    fn a_series_without_a_start_zone_has_none() {
+        assert_eq!(read_series_zone(None, None), None);
+        // The end marker alone still says: no zone.
+        assert_eq!(
+            read_series_zone(None, Some(NO_ZONE_END)),
+            Some(WindowsZoneRead::Utc)
+        );
+    }
+
+    #[test]
+    fn an_id_the_server_does_not_know_is_not_written() {
+        // Exchange 2019 (build 15.2.2562) knows 140 ids but not São Tomé's.
+        let server = ServerTimeZones::new(["W. Europe Standard Time", "UTC"]);
+        assert_eq!(
+            windows_zone_for(Some("Europe/Berlin"), Some(&server)),
+            WindowsZoneWrite::Id("W. Europe Standard Time")
+        );
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), Some(&server)),
+            WindowsZoneWrite::NotStorable {
+                zone: "Africa/Sao_Tome",
+                reason: NotStorable::NotOnServer {
+                    windows: "Sao Tome Standard Time"
+                },
+            }
+        );
+        // In any ASCII case.
+        let lower = ServerTimeZones::new(["w. europe standard time"]);
+        assert!(lower.knows("W. Europe Standard Time"));
+        // A server that could not be asked, or answered with nothing, does not
+        // stop a zone: the CLDR id is written as before.
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), Some(&ServerTimeZones::default())),
+            WindowsZoneWrite::Id("Sao Tome Standard Time")
+        );
+        assert_eq!(
+            windows_zone_for(Some("Africa/Sao_Tome"), None),
+            WindowsZoneWrite::Id("Sao Tome Standard Time")
+        );
     }
 
     #[test]
@@ -335,7 +442,7 @@ mod tests {
     fn every_listed_zone_is_written_or_named_as_unstorable() {
         let mut unstorable = Vec::new();
         for listed in cal_core::listed_zones() {
-            match windows_zone_for(Some(listed)) {
+            match windows_zone_for(Some(listed), None) {
                 WindowsZoneWrite::Id(_) => {}
                 WindowsZoneWrite::NotStorable { zone, .. } => unstorable.push(zone),
                 WindowsZoneWrite::NoZone => panic!("{listed} is a listed zone, not UTC"),
@@ -370,9 +477,9 @@ mod tests {
                 "{name} is a zone"
             );
             assert!(
-                matches!(windows_zone_for(Some(&name)), WindowsZoneWrite::Id(_)),
+                matches!(windows_zone_for(Some(&name), None), WindowsZoneWrite::Id(_)),
                 "{name}: {:?}",
-                windows_zone_for(Some(&name))
+                windows_zone_for(Some(&name), None)
             );
             count += 1;
         }
@@ -388,7 +495,7 @@ mod tests {
                 WindowsZoneWrite::Id(windows)
             };
             assert_eq!(
-                windows_zone_for(Some(zone)),
+                windows_zone_for(Some(zone), None),
                 want,
                 "{windows} reads as {zone}"
             );

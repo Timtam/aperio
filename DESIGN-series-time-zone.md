@@ -103,6 +103,19 @@ keinen, dort ist die Wahl Tonis Sache.
   Unicode-Lizenz V3 und einer Herkunftsdatei in `crates/adapter-ews/cldr/`, und
   der Kopf der erzeugten Tabelle nennt sie. Eine Seite mit Open-Source-Hinweisen
   in beiden Apps ist eine eigene Aufgabe.
+- **41a — der Server wird gefragt.** Ein Exchange-Server lehnt einen
+  Windows-Namen, den er nicht kennt, mit `ErrorTimeZone` ab, und das ganze
+  Speichern scheitert. Der Adapter fragt deshalb pro Konto einmal, welche Namen
+  der Server kennt (`GetServerTimeZones`), und schreibt nur diese. Eine Zone,
+  deren Name der Server nicht kennt, geht ohne Zone raus; Stufe 7 sagt es der
+  Person.
+- **42a — ganztägige Serien erst nach einem zweiten Test.** Eine ganztägige
+  Serie mit Zone verschiebt Exchange auf die Tagesgrenzen der Zone. Welche Regel
+  eine ganztägige Serie auf ihrem Tag lässt, klärt ein zweiter kurzer
+  Live-Test; bestehende kaputte Serien repariert Stufe 5.
+- **43b — die Endzone wird gelesen.** Eine Serie ohne Zone speichert Exchange
+  mit der Startzone `Greenwich Standard Time` und der Endzone
+  `tzone://Microsoft/Utc`. Diese Endzone heißt: keine Zone.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -608,11 +621,21 @@ Handy im selben PR.
    (Release, Datum, sha256) in `crates/adapter-ews/cldr/`, und CI prüft die
    Tabelle mit `--check`. Jeder Name läuft dabei durch `cal_core`, also durch
    dieselbe Regel, die der Adapter beim Schreiben fragt.
-   - Lesen: Ein Windows-Name liest sich als die Zone seiner Standardzeile, in
+   - Lesen: Die Endzone `tzone://Microsoft/Utc` heißt keine Zone (43b). Sonst
+     liest sich der Name der Startzone als die Zone seiner Standardzeile, in
      tzdatas kanonischer Schreibweise. `UTC` und unbekannte Namen heißen keine
      Zone.
    - Schreiben: erst die Kern-Regel (26a), dann der Windows-Name der Zone. Ein
-     zusammengelegter Ort schreibt den Namen seines Ziels (25b).
+     zusammengelegter Ort schreibt den Namen seines Ziels (25b). Vor dem ersten
+     Speichern einer Serie mit Zone fragt der Adapter den Server einmal, welche
+     Namen er kennt (41a). Einen Namen, den er nicht kennt, bekommt er nicht:
+     Die Serie geht ohne Zone raus, und das Protokoll nennt sie. Kann der
+     Server nicht gefragt werden, gehen die CLDR-Namen raus, und das nächste
+     Speichern fragt erneut.
+   - Die Termine im Speicher des Adapters kannten die Endzone nicht. Der
+     Zustand eines Ordners trägt deshalb eine Leser-Version (`ITEM_PARSER`);
+     ein Zustand von einem älteren Leser wird verworfen, und der Ordner wird
+     einmal von vorn gelesen.
    - Ein Uhr-Wächter vergleicht jede Zone fünf Jahre ab der Veröffentlichung
      des Releases mit der Standardzone ihres Windows-Namens. Weicht die Uhr ab,
      wird die Zone nicht geschrieben (22a).
@@ -654,14 +677,27 @@ Handy im selben PR.
      nicht dokumentiert.
    - EWS in Exchange Online wird ab Oktober 2026 abgeschaltet und ab April 2027
      ganz. Tonis Testserver ist ein eigener (39).
-   - Vor dem Merge testet Toni an seinem Exchange-Server (38a):
-     - welche Windows-Namen der Server kennt (GetServerTimeZones), und ob er die
-       Namen annimmt, die Aperio zum ersten Mal schickt;
-     - welche Antwort ein erfundener Name bekommt;
-     - ob ein Update ohne Zone die Zone behält;
-     - ob ein Update, das Beginn und Ende vor einer neuen Zone setzt, die
-       Zeitpunkte verschiebt;
-     - was eine ganztägige Serie mit Zone macht.
+   - Live-Test an Tonis Exchange-Server (38a; Exchange 2019, Build 15.2.2562,
+     15. September 2026). Die Anfragen erzeugt ein ignorierter Test aus Aperios
+     Code:
+     - Der Server kennt 140 Windows-Namen: alle aus CLDR außer
+       „Sao Tome Standard Time“, dazu Kamchatka und Mid-Atlantic.
+     - Ein erfundener Name bekommt `ErrorTimeZone`, und das ganze Anlegen
+       scheitert. Daraus folgt 41a.
+     - Berlin, Beirut, Wolgograd, Juba, Qyzylorda und Punta Arenas werden mit
+       ihrer Zone angenommen, die Termine liegen vor und nach der Zeitumstellung
+       richtig.
+     - Ein Update ohne Zone lässt die Zone und die Zeitpunkte, wie sie sind.
+     - Ein Update, das Beginn und Ende vor einer neuen Zone setzt, verschiebt
+       die Zeitpunkte: Exchange behält die Uhrzeit und gibt ihr die neue Zone
+       (08:00Z wurde zu 01:00Z). Ein Zonenwechsel muss die Zone deshalb vor
+       Beginn und Ende oder getrennt senden (Stufen 9 und 12).
+     - Eine Serie ohne Zone kommt mit der Startzone `Greenwich Standard Time`
+       und der Endzone `tzone://Microsoft/Utc` zurück. Daraus folgt 43b.
+     - Eine ganztägige Serie mit Zone legt Exchange auf die Tagesgrenzen dieser
+       Zone und macht zwei Tage daraus; Outlook im Web zeigt sie am Dienstag
+       statt am Montag. Das trifft heute schon jede ganztägige Serie in einer
+       der 138 Zonen der alten Tabelle. Daraus folgt 42a.
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Danach messen, wie Microsoft 365 recurrenceTimeZone beim Zurücklesen behandelt.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
@@ -813,15 +849,14 @@ Handy im selben PR.
   Gemessen ist nur WebView2 152: `UTC`, `Asia/Calcutta` und `Europe/Kiev`, für
   eine emulierte Gerätezone `GMT` (ICU) `+00:00`.
 - Ob der Datums-Picker auf dem Handy eine feste Zone annimmt.
-- Was Exchange bei einem Update ohne StartTimeZone macht und ob sich das Feld
-  entfernen lässt. Der Live-Test vor dem Merge von Stufe 4 (38a) misst das, und
-  dazu:
-  - ob Exchange die Zeitpunkte verschiebt, wenn im selben Update Beginn, Ende
-    und eine neue Zone kommen;
-  - welche Antwort ein Windows-Name bekommt, den der Server nicht kennt;
-  - welche Windows-Namen der Server kennt (GetServerTimeZones). Kerio Connect
-    und Zimbra bleiben ungeprüft;
-  - was eine ganztägige Serie mit Zone macht.
+- Ob sich die Zone einer Exchange-Serie entfernen lässt. Was ein Update ohne
+  Zone, ein unbekannter Name und die Reihenfolge von Beginn, Ende und Zone
+  bewirken, hat die erste Runde des Live-Tests an Exchange 2019 gemessen
+  (Stufe 4). Offen bleiben:
+  - wie ganztägige Serien ohne Zone, mit UTC und nach einem Zonenwechsel
+    landen (zweite Runde, 42a);
+  - welche Namen Kerio Connect und Zimbra kennen und was sie mit einem
+    unbekannten Namen tun.
 
   Ungeprüft bleibt, ob Exchange eigene Zonendefinitionen und Namen, die nur in
   der Windows-Registry stehen (Kamchatka, Mid-Atlantic), so zurückgibt, wie

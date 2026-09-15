@@ -2022,8 +2022,25 @@ Siehe DESIGN §4.2.
 
   Toni hat entschieden (38a, 39, 40a): Live-Test vor dem Merge an seinem eigenen
   Exchange-Server, Lizenzhinweis bei den Daten.
-  🚩 **Live-Test Exchange** (38a): Anleitung und Anfragen stehen im PR. Der Test
-  blockiert den Merge.
+  Live-Test Runde 1 an Tonis Exchange 2019 (15.09.2026): Der Server kennt alle
+  CLDR-Namen außer São Tomé, ein unbekannter Name lässt das Speichern scheitern,
+  ein Update ohne Zone behält die Zone, eine Zone nach Beginn und Ende verschiebt
+  die Zeitpunkte, eine Serie ohne Zone kommt als Greenwich mit der Endzone
+  `tzone://Microsoft/Utc` zurück, und eine ganztägige Serie mit Zone landet auf
+  zwei Tagen. Toni hat daraufhin entschieden:
+  - 41a: Der Adapter fragt jeden Server einmal nach seinen Zonennamen und
+    schreibt nur diese;
+  - 42a: Für ganztägige Serien kommt erst ein zweiter Test;
+  - 43b: Die Endzone `tzone://Microsoft/Utc` heißt keine Zone.
+
+  41a und 43b sind gebaut: Der Adapter fragt vor dem ersten Speichern einer
+  Serie mit Zone `GetServerTimeZones` und schickt einen unbekannten Namen ohne
+  Zone. Er liest die Endzone mit. Weil sein Speicher die Endzone nicht kannte,
+  liest er jeden Exchange-Kalender nach dem Update einmal von vorn.
+
+  🚩 **Live-Test Runde 2** (42a): ganztägige Serien ohne Zone, mit UTC und die
+  Reparatur einer kaputten Serie. Danach die Regel für ganztägige Serien, dann
+  Merge.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

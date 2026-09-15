@@ -44,6 +44,7 @@ use cal_core::{
 };
 
 use crate::error::{EwsError, EwsResult};
+use crate::windows_tz::ServerTimeZones;
 
 /// One calendar folder pulled from a `FindFolder` response.
 #[derive(Debug, Clone)]
@@ -424,6 +425,13 @@ pub struct ParsedItem {
     /// so older persisted sync state loads without forcing a full re-sync.
     #[serde(default)]
     pub start_time_zone: Option<String>,
+    /// Windows zone id from `<t:EndTimeZone>`. Exchange writes
+    /// `tzone://Microsoft/Utc` here for a series created without a zone, while
+    /// its start zone reads `Greenwich Standard Time` (decision 43b).
+    /// `#[serde(default)]` so older persisted state loads; that state is
+    /// drained again anyway (`api::ITEM_PARSER`).
+    #[serde(default)]
+    pub end_time_zone: Option<String>,
     /// On a RecurringMaster row from `SyncFolderItems`, the
     /// `<t:Recurrence>` element parses to this. `None` on singles
     /// and on read paths that don't request the field (the legacy
@@ -875,6 +883,18 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                             }
                         }
                     }
+                    // The end zone's own id, where Exchange marks a series
+                    // created without a zone as `tzone://Microsoft/Utc`
+                    // (decision 43b). Only the element's own id is read; a
+                    // nested full definition belongs to the start zone above.
+                    b"endtimezone" if inside_item => {
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.end_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
                     b"timezonedefinition"
                         if inside_start_timezone && current.start_time_zone.is_none() =>
                     {
@@ -1317,6 +1337,15 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             }
                         }
                     }
+                    // As in the sync parser: the end zone's own id only.
+                    b"endtimezone" if inside_item => {
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.end_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
                     b"timezonedefinition"
                         if inside_start_timezone && current.start_time_zone.is_none() =>
                     {
@@ -1708,27 +1737,29 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EventRecurrence {
             rrule: r.to_rrule(),
             exceptions,
-            // EWS reports the master's zone as a Windows id; the generated CLDR
-            // table turns it into tzdata's zone (`windows_tz`). The id `UTC`, an
-            // id the table does not know, or none at all: no zone, so the
-            // series repeats in UTC.
-            tzid: item.start_time_zone.as_deref().and_then(|id| {
-                match crate::windows_tz::read_windows_zone(id) {
-                    crate::windows_tz::WindowsZoneRead::Zone(zone) => Some(zone.to_string()),
-                    crate::windows_tz::WindowsZoneRead::Utc => None,
-                    crate::windows_tz::WindowsZoneRead::Unknown => {
-                        // Debug, not warn: this runs for every cached item on
-                        // every reminder scan.
-                        tracing::debug!(
-                            target: "adapter_ews::zones",
-                            item_id = %item.item_id,
-                            windows_zone = id,
-                            "not a CLDR Windows zone id; the series repeats in UTC",
-                        );
-                        None
-                    }
+            // EWS reports the master's zone as Windows ids, read by `windows_tz`:
+            // the end zone `tzone://Microsoft/Utc` marks a series created
+            // without a zone (43b), and otherwise the start zone becomes
+            // tzdata's zone. The id `UTC`, an id the table does not know, or none
+            // at all: no zone, so the series repeats in UTC.
+            tzid: match crate::windows_tz::read_series_zone(
+                item.start_time_zone.as_deref(),
+                item.end_time_zone.as_deref(),
+            ) {
+                Some(crate::windows_tz::WindowsZoneRead::Zone(zone)) => Some(zone.to_string()),
+                Some(crate::windows_tz::WindowsZoneRead::Utc) | None => None,
+                Some(crate::windows_tz::WindowsZoneRead::Unknown) => {
+                    // Debug, not warn: this runs for every cached item on
+                    // every reminder scan.
+                    tracing::debug!(
+                        target: "adapter_ews::zones",
+                        item_id = %item.item_id,
+                        windows_zone = ?item.start_time_zone,
+                        "not a CLDR Windows zone id; the series repeats in UTC",
+                    );
+                    None
                 }
-            }),
+            },
         }
     });
 
@@ -1845,6 +1876,15 @@ use crate::soap::escape_xml;
 /// clear "this rule isn't supported by EWS" message rather than a
 /// silently-non-recurring event.
 pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
+    new_event_to_calendar_item_xml_on(event, None)
+}
+
+/// [`new_event_to_calendar_item_xml`] for a server whose known Windows zone
+/// ids are `server_zones` (decision 41a); `None` when they are unknown.
+pub fn new_event_to_calendar_item_xml_on(
+    event: &NewEvent,
+    server_zones: Option<&ServerTimeZones>,
+) -> EwsResult<String> {
     let mut out = String::new();
     out.push_str("        <t:CalendarItem>\n");
     out.push_str(&format!(
@@ -1913,7 +1953,7 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
     // so it expands the series on that clock server-side. Per the EWS
     // CalendarItemType element order, StartTimeZone/EndTimeZone follow
     // <t:Recurrence>.
-    if let Some(windows) = series_windows_zone(event.recurrence.as_ref()) {
+    if let Some(windows) = series_windows_zone(event.recurrence.as_ref(), server_zones) {
         out.push_str(&format!(
             "          <t:StartTimeZone Id=\"{}\"/>\n",
             escape_xml(windows)
@@ -1928,11 +1968,14 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
 }
 
 /// The Windows id a series is written with, by `windows_tz`'s rule; `None`
-/// writes no zone. A zone Exchange cannot store is logged by name, once per
-/// write.
-fn series_windows_zone(recurrence: Option<&EventRecurrence>) -> Option<&'static str> {
+/// writes no zone. A zone Exchange cannot store — here, or on this server — is
+/// logged by name, once per write.
+fn series_windows_zone(
+    recurrence: Option<&EventRecurrence>,
+    server_zones: Option<&ServerTimeZones>,
+) -> Option<&'static str> {
     use crate::windows_tz::{windows_zone_for, WindowsZoneWrite};
-    match windows_zone_for(recurrence.and_then(|r| r.tzid.as_deref())) {
+    match windows_zone_for(recurrence.and_then(|r| r.tzid.as_deref()), server_zones) {
         WindowsZoneWrite::Id(windows) => Some(windows),
         WindowsZoneWrite::NoZone => None,
         WindowsZoneWrite::NotStorable { zone, reason } => {
@@ -1984,6 +2027,15 @@ fn required_attendees_xml(attendees: &[String]) -> String {
 /// every field that was set on the previous version but is now empty
 /// becomes a `<t:DeleteItemField>` so EWS clears it server-side.
 pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
+    event_to_update_field_xml_on(event, None)
+}
+
+/// [`event_to_update_field_xml`] for a server whose known Windows zone ids are
+/// `server_zones` (decision 41a); `None` when they are unknown.
+pub fn event_to_update_field_xml_on(
+    event: &Event,
+    server_zones: Option<&ServerTimeZones>,
+) -> EwsResult<(String, String)> {
     let mut set = String::new();
     let mut del = String::new();
 
@@ -2077,7 +2129,7 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
     }
     // Keep the zone on a zoned recurring master so a server-side edit doesn't
     // drop it and re-expand the series in UTC, by the same rule as a create.
-    if let Some(windows) = series_windows_zone(event.recurrence.as_ref()) {
+    if let Some(windows) = series_windows_zone(event.recurrence.as_ref(), server_zones) {
         let win = escape_xml(windows);
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
@@ -3506,6 +3558,47 @@ pub fn parse_first_item_id(xml: &str) -> EwsResult<ItemRef> {
     ))
 }
 
+/// Parse a `GetServerTimeZonesResponse` into the Windows zone ids the server
+/// knows: the `Id` of every `<t:TimeZoneDefinition>`. The display `Name` is in
+/// the server's language and is not read. `check_for_fault` already ran.
+pub fn parse_server_time_zones(xml: &str) -> EwsResult<ServerTimeZones> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut ids = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                if e.local_name()
+                    .as_ref()
+                    .eq_ignore_ascii_case(b"TimeZoneDefinition")
+                {
+                    let id = e
+                        .attributes()
+                        .flatten()
+                        .find(|a| a.key.as_ref().eq_ignore_ascii_case(b"Id"))
+                        .map(|a| String::from_utf8_lossy(&a.value).into_owned());
+                    match id {
+                        Some(id) if !id.is_empty() => ids.push(id),
+                        _ => {
+                            return Err(EwsError::Protocol(
+                                "TimeZoneDefinition element missing Id attribute".into(),
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => {
+                return Err(EwsError::Protocol(format!("xml parse: {err}")));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(ServerTimeZones::new(ids))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3741,6 +3834,7 @@ mod tests {
             last_modified: Some("2026-05-19T09:00:00Z".parse().unwrap()),
             item_type: None,
             start_time_zone: None,
+            end_time_zone: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -3996,6 +4090,80 @@ mod tests {
         }
     }
 
+    /// Decision 41a: an id the server does not know goes out without a zone,
+    /// because Exchange 2019 refuses the whole save over it (live test A9).
+    /// The ids it knows are written, in the server's case or not; a server
+    /// that could not be asked, or knows none, gets the CLDR ids.
+    #[test]
+    fn a_zone_the_server_does_not_know_is_written_without_a_zone() {
+        let server = ServerTimeZones::new(["w. europe standard time", "UTC"]);
+        let written = |tzid: &str, zones: Option<&ServerTimeZones>| {
+            let mut create = new_event_min("Zoned");
+            create.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let xml = new_event_to_calendar_item_xml_on(&create, zones).unwrap();
+            let (set, _) = event_to_update_field_xml_on(&zoned_master(Some(tzid)), zones).unwrap();
+            (xml, set)
+        };
+
+        let (xml, set) = written("Europe/Berlin", Some(&server));
+        let start = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
+        assert!(xml.contains(start), "create Berlin: {xml}");
+        assert!(set.contains(start), "update Berlin: {set}");
+
+        let (xml, set) = written("Africa/Sao_Tome", Some(&server));
+        assert!(!xml.contains("TimeZone"), "create Sao Tome: {xml}");
+        assert!(!set.contains("TimeZone"), "update Sao Tome: {set}");
+
+        for zones in [None, Some(&ServerTimeZones::default())] {
+            let (xml, _) = written("Africa/Sao_Tome", zones);
+            assert!(
+                xml.contains(r#"<t:StartTimeZone Id="Sao Tome Standard Time"/>"#),
+                "create Sao Tome, server list {zones:?}: {xml}"
+            );
+        }
+    }
+
+    /// The shape Exchange 2019 answered in the live test: each definition
+    /// carries (empty) child elements and a display name in the server's
+    /// language. Only the ids are kept.
+    #[test]
+    fn parse_server_time_zones_reads_the_definition_ids() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <m:GetServerTimeZonesResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+      <m:ResponseMessages>
+        <m:GetServerTimeZonesResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:TimeZoneDefinitions>
+            <t:TimeZoneDefinition Name="(UTC-12:00) Internationale Datumsgrenze West" Id="Dateline Standard Time"><t:Periods/><t:TransitionsGroups/></t:TimeZoneDefinition>
+            <t:TimeZoneDefinition Name="(UTC+01:00) Amsterdam, Berlin" Id="W. Europe Standard Time"><t:Periods/><t:TransitionsGroups/></t:TimeZoneDefinition>
+            <t:TimeZoneDefinition Name="(UTC) Koordinierte Weltzeit" Id="UTC"/>
+          </m:TimeZoneDefinitions>
+        </m:GetServerTimeZonesResponseMessage>
+      </m:ResponseMessages>
+    </m:GetServerTimeZonesResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let zones = parse_server_time_zones(xml).unwrap();
+        assert_eq!(zones.len(), 3);
+        for id in ["Dateline Standard Time", "W. Europe Standard Time", "UTC"] {
+            assert!(zones.knows(id), "{id}");
+        }
+        assert!(!zones.knows("Sao Tome Standard Time"));
+        assert!(
+            !zones.knows("(UTC) Koordinierte Weltzeit"),
+            "names are not ids"
+        );
+
+        let missing = xml.replace(r#" Id="UTC""#, "");
+        assert!(parse_server_time_zones(&missing).is_err());
+    }
+
     /// Writes the create and update requests of the live Exchange test
     /// (DESIGN-series-time-zone.md, stage 4, decision 38a) as Aperio builds
     /// them, into the directory `APERIO_LIVE_TEST_DIR` names:
@@ -4035,7 +4203,7 @@ mod tests {
         };
         let create = |name: &str, what: &str, event: NewEvent| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref());
+            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
             let envelope = crate::soap::create_calendar_item(
                 "CALENDAR",
                 None,
@@ -4057,7 +4225,7 @@ mod tests {
         };
         let update = |name: &str, what: &str, event: Event| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref());
+            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
             let (set, del) = event_to_update_field_xml(&event).unwrap();
             let envelope =
                 crate::soap::update_calendar_item("ITEM_ID", Some("CHANGEKEY"), &set, &del, false);
@@ -4174,6 +4342,103 @@ mod tests {
                 recurrence: Some(rule(Some("Asia/Bangkok"))),
                 ..zoned_master(None)
             },
+        );
+
+        // Second round (decision 42a): which all-day series keep their day.
+        let envelope = |item_xml: &str| {
+            crate::soap::create_calendar_item("CALENDAR", None, item_xml, false).replace(
+                r#"<t:FolderId Id="CALENDAR"/>"#,
+                r#"<t:DistinguishedFolderId Id="calendar"/>"#,
+            )
+        };
+        let all_day = |subject: &str, tzid: Option<&str>| NewEvent {
+            start: local_midnight(2026, 10, 19),
+            end: local_midnight(2026, 10, 20),
+            all_day: true,
+            recurrence: Some(rule(tzid)),
+            ..new_event_min(subject)
+        };
+        let zone_fields = |id: &str| {
+            format!(
+                "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{id}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{id}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n"
+            )
+        };
+        create(
+            "A10-create-allday-no-zone.xml",
+            &format!(
+                "Step A10: an all-day weekly series without a zone, written on a machine at \
+                 UTC{offset}. Which weekday does OWA show?"
+            ),
+            all_day("Aperio zone test A10 all-day no zone", None),
+        );
+        let utc = new_event_to_calendar_item_xml(&all_day("Aperio zone test A11 all-day UTC", None))
+            .unwrap()
+            .replace(
+                "        </t:CalendarItem>",
+                "          <t:StartTimeZone Id=\"UTC\"/>\n          <t:EndTimeZone Id=\"UTC\"/>\n        </t:CalendarItem>",
+            );
+        assert!(utc.contains(r#"<t:StartTimeZone Id="UTC"/>"#));
+        write(
+            "A11-create-allday-utc.xml",
+            format!(
+                "Step A11: NOT Aperio's rule yet. The A10 request with the zone UTC written \
+                 explicitly, on a machine at UTC{offset}. Which weekday does OWA show?"
+            ),
+            envelope(&utc),
+        );
+        create(
+            "A12-create-abidjan.xml",
+            "Step A12: a series in Africa/Abidjan (Greenwich Standard Time), to see whether a real \
+             Greenwich series keeps Greenwich as its EndTimeZone, unlike A2 without a zone.",
+            series("Aperio zone test A12 Abidjan", Some("Africa/Abidjan")),
+        );
+        create(
+            "A13-create-allday-los-angeles-again.xml",
+            "Step A13: a second all-day series with a zone, like A8, for step B4.",
+            all_day("Aperio zone test A13 all-day", Some("America/Los_Angeles")),
+        );
+        let repaired = |title: &str| Event {
+            id: "ITEM_ID|CHANGEKEY".into(),
+            title: title.into(),
+            start: local_midnight(2026, 10, 19),
+            end: local_midnight(2026, 10, 20),
+            all_day: true,
+            recurrence: Some(rule(None)),
+            ..zoned_master(None)
+        };
+        let (set, del) =
+            event_to_update_field_xml(&repaired("Aperio zone test A8 all-day (UTC after start)"))
+                .unwrap();
+        write(
+            "B3-update-allday-utc-after-start.xml",
+            "Step B3: NOT Aperio's rule yet. Update the A8 series with all-day Start and End and \
+             the zone UTC set after them, in Aperio's field order. Replace ITEM_ID and CHANGEKEY. \
+             Which weekday does OWA show afterwards?"
+                .to_string(),
+            crate::soap::update_calendar_item(
+                "ITEM_ID",
+                Some("CHANGEKEY"),
+                &format!("{set}{}", zone_fields("UTC")),
+                &del,
+                false,
+            ),
+        );
+        let (set, del) =
+            event_to_update_field_xml(&repaired("Aperio zone test A13 all-day (UTC before start)"))
+                .unwrap();
+        write(
+            "B4-update-allday-utc-before-start.xml",
+            "Step B4: NOT Aperio's rule yet. Update the A13 series with the zone UTC set BEFORE \
+             the all-day Start and End. Replace ITEM_ID and CHANGEKEY. Which weekday does OWA \
+             show afterwards?"
+                .to_string(),
+            crate::soap::update_calendar_item(
+                "ITEM_ID",
+                Some("CHANGEKEY"),
+                &format!("{}{set}", zone_fields("UTC")),
+                &del,
+                false,
+            ),
         );
     }
 
@@ -4543,6 +4808,7 @@ mod tests {
             last_modified: None,
             item_type: item_type.map(String::from),
             start_time_zone: None,
+            end_time_zone: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -5190,6 +5456,9 @@ mod tests {
             item.start_time_zone.as_deref(),
             Some("Eastern Standard Time")
         );
+        // The end zone is captured on its own: it tells a series created
+        // without a zone (`tzone://Microsoft/Utc`) from a Greenwich one.
+        assert_eq!(item.end_time_zone.as_deref(), Some("Eastern Standard Time"));
         assert_eq!(
             item.start.unwrap().to_rfc3339(),
             "2025-12-15T00:00:00+00:00"
