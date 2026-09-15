@@ -533,6 +533,12 @@ impl EwsAdapter {
         // scratch instead.
         let adapter_warm = prior.sync_state.is_some();
         let mut force_full = since_token.is_none() || !adapter_warm;
+        // The host's snapshot holds events translated with the zone table of
+        // the build that emitted them. After an update that changed the table,
+        // every cached item is emitted again from what Exchange sent, so no
+        // view keeps a zone the old table read — and no edit writes that zone
+        // back to Exchange under the new table's id. Nothing is re-drained.
+        let table_current = prior.zone_table.as_deref() == Some(windows_tz::TABLE_ID);
         let seed = match since_token {
             Some(tok) if adapter_warm => SyncedFolderState {
                 sync_state: Some(tok.to_string()),
@@ -540,7 +546,7 @@ impl EwsAdapter {
             },
             _ => SyncedFolderState::default(),
         };
-        let (updated, changed_ids, deleted_ids) =
+        let (mut updated, changed_ids, deleted_ids) =
             match api::sync_events_delta(&self.client, calendar_id, seed).await {
                 Ok(t) => t,
                 Err(err) if is_sync_state_invalid(&err) => {
@@ -570,7 +576,9 @@ impl EwsAdapter {
             chrono::DateTime::<chrono::Utc>::MIN_UTC,
             chrono::DateTime::<chrono::Utc>::MAX_UTC,
         );
-        let change_set = if force_full {
+        let emit_all = force_full || !table_current;
+        updated.zone_table = Some(windows_tz::TABLE_ID.to_string());
+        let change_set = if emit_all {
             let mut changes = Vec::with_capacity(updated.items.len());
             for item in updated.items.values() {
                 emit_into(item, calendar_id, full, &mut changes);
@@ -1650,6 +1658,9 @@ mod delta_read_tests {
             let mut guard = adapter.events_sync.lock().await;
             let mut state = SyncedFolderState {
                 sync_state: Some("ADAPTER-AHEAD".into()),
+                // Emitted with this build's zone table, so the delta stays
+                // incremental.
+                zone_table: Some(windows_tz::TABLE_ID.into()),
                 ..Default::default()
             };
             state.items.insert(
@@ -1672,6 +1683,91 @@ mod delta_read_tests {
         assert_eq!(cs.changes[0].id, "S:A|CKA2");
         assert_eq!(cs.changes[0].title, "Alpha v2");
         assert_eq!(cs.new_token.as_deref(), Some("COOKIE-3"));
+    }
+
+    /// State persisted by a build with another Exchange zone table: the host's
+    /// snapshot holds zones the old table read, so the next delta emits EVERY
+    /// cached item again (from the raw Windows ids Exchange sent), not only the
+    /// changed one, and records the table. Without this, a series cached as
+    /// `America/Chihuahua` by the old table would keep that zone in the views
+    /// and be written back to Exchange under the new table's id on its next
+    /// edit.
+    #[tokio::test]
+    async fn a_new_zone_table_emits_every_cached_item_once() {
+        use mockito::Matcher;
+        let mut server = Server::new_async().await;
+        let update = r#"<t:Update><t:CalendarItem>
+                 <t:ItemId Id="A" ChangeKey="CKA2"/>
+                 <t:Subject>Alpha v2</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Update>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("HOST-TOKEN".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-4", update))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA2"/></t:CalendarItem>"#,
+            ))
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            // Written before the zone table existed: no `zone_table`.
+            let mut state = SyncedFolderState {
+                sync_state: Some("HOST-TOKEN".into()),
+                ..Default::default()
+            };
+            for (id, subject) in [("A", "Alpha"), ("B", "Bravo")] {
+                state.items.insert(
+                    id.into(),
+                    ParsedItem {
+                        item_id: id.into(),
+                        change_key: Some(format!("CK{id}")),
+                        subject: subject.into(),
+                        start: Some("2026-05-21T08:00:00Z".parse().unwrap()),
+                        end: Some("2026-05-21T09:00:00Z".parse().unwrap()),
+                        ..ParsedItem::default()
+                    },
+                );
+            }
+            guard.insert("FA|FCK".into(), state);
+        }
+
+        let cs = adapter
+            .get_events_delta("FA|FCK", range(), Some("HOST-TOKEN"))
+            .await
+            .expect("delta");
+        assert!(
+            cs.full_resync,
+            "a table change replaces the host's snapshot wholesale"
+        );
+        let mut titles: Vec<&str> = cs.changes.iter().map(|e| e.title.as_str()).collect();
+        titles.sort_unstable();
+        assert_eq!(
+            titles,
+            ["Alpha v2", "Bravo"],
+            "the unchanged item is emitted too"
+        );
+        assert_eq!(cs.new_token.as_deref(), Some("COOKIE-4"));
+        let recorded = adapter.events_sync.lock().await["FA|FCK"]
+            .zone_table
+            .clone();
+        assert_eq!(recorded.as_deref(), Some(windows_tz::TABLE_ID));
     }
 }
 

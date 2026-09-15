@@ -1,0 +1,23 @@
+# The Unicode CLDR file the Exchange zone table is generated from, pinned.
+#
+# `cargo xtask windows-zones` reads this file, checks windowsZones.xml against
+# sha256 (reading CRLF as LF), and writes the release into the generated table,
+# crates/adapter-ews/src/windows_tz/windows_zones.rs. The XML's own version
+# attributes (typeVersion="2021a", otherVersion="7e11800") were never updated
+# upstream, so the release tag is the version. The file's last data change is
+# CLDR commit c33a1f0a23 (2025-04-10, "Update CLDR data to TZDB 2025b"), and it
+# is byte-identical from release-48 to release-49-alpha2.
+#
+# The clock guard compares every zone with its Windows zone for five years from
+# `published`.
+#
+# Never edit windowsZones.xml by hand. To update: take windowsZones.xml and
+# LICENSE from one CLDR release tag, write that tag, its publication date, both
+# URLs and the XML's sha256 here, run `cargo xtask windows-zones`, and commit
+# all of it together.
+
+release = release-48-2
+published = 2026-03-17
+url = https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/supplemental/windowsZones.xml
+licence = https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/LICENSE
+sha256 = 9cf3db6a31fb382fee21b70be6feba1e82766b0fcd06e6261fb7936a73e537ff

@@ -1708,14 +1708,27 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EventRecurrence {
             rrule: r.to_rrule(),
             exceptions,
-            // EWS reports the master's zone as a WINDOWS name; translate it to
-            // IANA so the frontend expands the series DST-correctly. Unmapped /
-            // absent → None (UTC expansion, as before).
-            tzid: item
-                .start_time_zone
-                .as_deref()
-                .and_then(crate::windows_tz::windows_to_iana)
-                .map(str::to_string),
+            // EWS reports the master's zone as a Windows id; the generated CLDR
+            // table turns it into tzdata's zone (`windows_tz`). The id `UTC`, an
+            // id the table does not know, or none at all: no zone, so the
+            // series repeats in UTC.
+            tzid: item.start_time_zone.as_deref().and_then(|id| {
+                match crate::windows_tz::read_windows_zone(id) {
+                    crate::windows_tz::WindowsZoneRead::Zone(zone) => Some(zone.to_string()),
+                    crate::windows_tz::WindowsZoneRead::Utc => None,
+                    crate::windows_tz::WindowsZoneRead::Unknown => {
+                        // Debug, not warn: this runs for every cached item on
+                        // every reminder scan.
+                        tracing::debug!(
+                            target: "adapter_ews::zones",
+                            item_id = %item.item_id,
+                            windows_zone = id,
+                            "not a CLDR Windows zone id; the series repeats in UTC",
+                        );
+                        None
+                    }
+                }
+            }),
         }
     });
 
@@ -1896,15 +1909,11 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
         out.push_str(&rec_xml);
         out.push('\n');
     }
-    // A zoned recurring master: tell Exchange the series' zone (as a Windows id)
-    // so it expands DST-correctly server-side. Per the EWS CalendarItemType
-    // element order, StartTimeZone/EndTimeZone follow <t:Recurrence>.
-    if let Some(windows) = event
-        .recurrence
-        .as_ref()
-        .and_then(|r| r.tzid.as_deref())
-        .and_then(crate::windows_tz::iana_to_windows)
-    {
+    // A zoned recurring master: tell Exchange the series' zone as a Windows id,
+    // so it expands the series on that clock server-side. Per the EWS
+    // CalendarItemType element order, StartTimeZone/EndTimeZone follow
+    // <t:Recurrence>.
+    if let Some(windows) = series_windows_zone(event.recurrence.as_ref()) {
         out.push_str(&format!(
             "          <t:StartTimeZone Id=\"{}\"/>\n",
             escape_xml(windows)
@@ -1916,6 +1925,26 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
     }
     out.push_str("        </t:CalendarItem>");
     Ok(out)
+}
+
+/// The Windows id a series is written with, by `windows_tz`'s rule; `None`
+/// writes no zone. A zone Exchange cannot store is logged by name, once per
+/// write.
+fn series_windows_zone(recurrence: Option<&EventRecurrence>) -> Option<&'static str> {
+    use crate::windows_tz::{windows_zone_for, WindowsZoneWrite};
+    match windows_zone_for(recurrence.and_then(|r| r.tzid.as_deref())) {
+        WindowsZoneWrite::Id(windows) => Some(windows),
+        WindowsZoneWrite::NoZone => None,
+        WindowsZoneWrite::NotStorable { zone, reason } => {
+            tracing::warn!(
+                target: "adapter_ews::zones",
+                zone,
+                ?reason,
+                "Exchange cannot store this series time zone; the series is written without one",
+            );
+            None
+        }
+    }
 }
 
 /// Render the `<t:RequiredAttendees>` block for a CalendarItem from Aperio's
@@ -2047,14 +2076,8 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
         del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
     }
     // Keep the zone on a zoned recurring master so a server-side edit doesn't
-    // drop it and re-expand the series in UTC. Field-by-field SetItemField, so
-    // ordering is irrelevant; only when the IANA zone maps to a Windows id.
-    if let Some(windows) = event
-        .recurrence
-        .as_ref()
-        .and_then(|r| r.tzid.as_deref())
-        .and_then(crate::windows_tz::iana_to_windows)
-    {
+    // drop it and re-expand the series in UTC, by the same rule as a create.
+    if let Some(windows) = series_windows_zone(event.recurrence.as_ref()) {
         let win = escape_xml(windows);
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
@@ -3893,6 +3916,235 @@ mod tests {
         assert!(tz_pos > rec_pos, "StartTimeZone must follow Recurrence");
     }
 
+    /// A weekly master with `tzid`, for the update tests.
+    fn zoned_master(tzid: Option<&str>) -> Event {
+        Event {
+            id: "IID|CK".into(),
+            calendar_id: "FID|FK".into(),
+            title: "Weekly".into(),
+            description: None,
+            location: None,
+            start: "2026-05-20T08:00:00Z".parse().unwrap(),
+            end: "2026-05-20T09:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: tzid.map(str::to_string),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
+    }
+
+    /// A create and an update write the zone by `windows_tz`'s one rule: a
+    /// device spelling resolves first, a merged place writes its target's id,
+    /// the ids the hand table got wrong are CLDR's, and a zone Exchange cannot
+    /// store or a UTC name writes none.
+    #[test]
+    fn create_and_update_write_the_zone_by_the_one_rule() {
+        let cases = [
+            ("Asia/Calcutta", Some("India Standard Time")),
+            ("Asia/Beirut", Some("Middle East Standard Time")),
+            ("Europe/Amsterdam", Some("Romance Standard Time")),
+            ("Antarctica/Troll", None),
+            ("America/Scoresbysund", None),
+            ("UTC", None),
+            ("Etc/UTC", None),
+        ];
+        for (tzid, windows) in cases {
+            let mut create = new_event_min("Zoned");
+            create.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=MONTHLY;BYDAY=2SU".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let xml = new_event_to_calendar_item_xml(&create).unwrap();
+            let (set, _del) = event_to_update_field_xml(&zoned_master(Some(tzid))).unwrap();
+            match windows {
+                Some(windows) => {
+                    let start = format!(r#"<t:StartTimeZone Id="{windows}"/>"#);
+                    let end = format!(r#"<t:EndTimeZone Id="{windows}"/>"#);
+                    assert!(
+                        xml.contains(&start) && xml.contains(&end),
+                        "create {tzid}: {xml}"
+                    );
+                    assert!(
+                        set.contains(&start) && set.contains(&end),
+                        "update {tzid}: {set}"
+                    );
+                }
+                None => {
+                    assert!(!xml.contains("TimeZone"), "create {tzid}: {xml}");
+                    assert!(!set.contains("TimeZone"), "update {tzid}: {set}");
+                }
+            }
+        }
+    }
+
+    /// Writes the create and update requests of the live Exchange test
+    /// (DESIGN-series-time-zone.md, stage 4, decision 38a) byte for byte as
+    /// Aperio builds them, into the directory `APERIO_LIVE_TEST_DIR` names:
+    ///
+    /// `APERIO_LIVE_TEST_DIR=<dir> cargo test -p adapter-ews --lib live_test_requests -- --ignored`
+    ///
+    /// The one change from Aperio's bytes: the series go into the mailbox's
+    /// own calendar (`DistinguishedFolderId calendar`) instead of a folder id,
+    /// and the updates carry `ITEM_ID` and `CHANGEKEY` placeholders.
+    #[test]
+    #[ignore = "writes the live Exchange test requests; see the doc comment"]
+    fn live_test_requests() {
+        let dir = std::path::PathBuf::from(
+            std::env::var("APERIO_LIVE_TEST_DIR")
+                .expect("APERIO_LIVE_TEST_DIR names the output directory"),
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        // Mondays from 19 October 2026, four of them: on a Berlin clock the
+        // last three fall after the change on 25 October.
+        let rule = |tzid: Option<&str>| EventRecurrence {
+            rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=4".into(),
+            exceptions: Vec::new(),
+            tzid: tzid.map(str::to_string),
+        };
+        let series = |subject: &str, tzid: Option<&str>| NewEvent {
+            start: "2026-10-19T08:00:00Z".parse().unwrap(),
+            end: "2026-10-19T09:00:00Z".parse().unwrap(),
+            recurrence: Some(rule(tzid)),
+            ..new_event_min(subject)
+        };
+        let write = |name: &str, comment: String, envelope: String| {
+            let prelude = "<?xml version=\"1.0\" encoding=\"utf-8\"?>";
+            let envelope = envelope.replacen(prelude, &format!("{prelude}\n<!-- {comment} -->"), 1);
+            std::fs::write(dir.join(name), envelope).unwrap();
+        };
+        let create = |name: &str, what: &str, event: NewEvent| {
+            let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
+            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref());
+            let envelope = crate::soap::create_calendar_item(
+                "CALENDAR",
+                None,
+                &new_event_to_calendar_item_xml(&event).unwrap(),
+                false,
+            )
+            .replace(
+                r#"<t:FolderId Id="CALENDAR"/>"#,
+                r#"<t:DistinguishedFolderId Id="calendar"/>"#,
+            );
+            write(
+                name,
+                format!(
+                    "{what} Subject: {}. Aperio's zone: {tzid:?} -> {zone:?}.",
+                    event.title
+                ),
+                envelope,
+            );
+        };
+        let update = |name: &str, what: &str, event: Event| {
+            let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
+            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref());
+            let (set, del) = event_to_update_field_xml(&event).unwrap();
+            let envelope =
+                crate::soap::update_calendar_item("ITEM_ID", Some("CHANGEKEY"), &set, &del, false);
+            write(
+                name,
+                format!(
+                    "{what} Aperio's zone: {tzid:?} -> {zone:?}. Replace ITEM_ID and CHANGEKEY."
+                ),
+                envelope,
+            );
+        };
+
+        create(
+            "A1-create-berlin.xml",
+            "Step A1: a weekly Berlin series as Aperio creates it.",
+            series("Aperio zone test A1 Berlin", Some("Europe/Berlin")),
+        );
+        create(
+            "A2-create-no-zone.xml",
+            "Step A2: a series without a zone, as Aperio creates one for every UTC name.",
+            series("Aperio zone test A2 no zone", None),
+        );
+        create(
+            "A3-create-beirut.xml",
+            "Step A3: Beirut, which the old table wrote as the invented id Lebanon Standard Time.",
+            series("Aperio zone test A3 Beirut", Some("Asia/Beirut")),
+        );
+        for (name, subject, tzid) in [
+            (
+                "A4-create-volgograd.xml",
+                "Aperio zone test A4 Volgograd",
+                "Europe/Volgograd",
+            ),
+            (
+                "A5-create-juba.xml",
+                "Aperio zone test A5 Juba",
+                "Africa/Juba",
+            ),
+            (
+                "A6-create-qyzylorda.xml",
+                "Aperio zone test A6 Qyzylorda",
+                "Asia/Qyzylorda",
+            ),
+            (
+                "A7-create-punta-arenas.xml",
+                "Aperio zone test A7 Punta Arenas",
+                "America/Punta_Arenas",
+            ),
+        ] {
+            create(
+                name,
+                "A Windows id Aperio writes for the first time: does this server know it?",
+                series(subject, Some(tzid)),
+            );
+        }
+        create(
+            "A8-create-allday-los-angeles.xml",
+            "Step A8: an all-day weekly series with a zone. Which weekday does OWA show, and which Start values come back?",
+            NewEvent {
+                start: "2026-10-19T00:00:00Z".parse().unwrap(),
+                end: "2026-10-20T00:00:00Z".parse().unwrap(),
+                all_day: true,
+                recurrence: Some(rule(Some("America/Los_Angeles"))),
+                ..new_event_min("Aperio zone test A8 all-day")
+            },
+        );
+        update(
+            "B1-update-berlin-without-zone.xml",
+            "Step B1: update the A1 Berlin series as Aperio does for a series that now has no zone. Is the zone kept?",
+            Event {
+                id: "ITEM_ID|CHANGEKEY".into(),
+                title: "Aperio zone test A1 Berlin (updated without zone)".into(),
+                start: "2026-10-19T08:00:00Z".parse().unwrap(),
+                end: "2026-10-19T09:00:00Z".parse().unwrap(),
+                recurrence: Some(rule(None)),
+                ..zoned_master(None)
+            },
+        );
+        update(
+            "B2-update-no-zone-to-bangkok.xml",
+            "Step B2: update the A2 series with a zone, in Aperio's field order (Start and End before the zone). Do the occurrences stay at 08:00Z?",
+            Event {
+                id: "ITEM_ID|CHANGEKEY".into(),
+                title: "Aperio zone test A2 no zone (updated to Bangkok)".into(),
+                start: "2026-10-19T08:00:00Z".parse().unwrap(),
+                end: "2026-10-19T09:00:00Z".parse().unwrap(),
+                recurrence: Some(rule(Some("Asia/Bangkok"))),
+                ..zoned_master(None)
+            },
+        );
+    }
+
     #[test]
     fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
         let ev = Event {
@@ -4910,10 +5162,10 @@ mod tests {
             item.start.unwrap().to_rfc3339(),
             "2025-12-15T00:00:00+00:00"
         );
-        // …and it translates to IANA for the frontend expander.
+        // …and it reads as tzdata's zone for the frontend expander.
         assert_eq!(
-            crate::windows_tz::windows_to_iana(item.start_time_zone.as_deref().unwrap()),
-            Some("America/New_York")
+            crate::windows_tz::read_windows_zone(item.start_time_zone.as_deref().unwrap()),
+            crate::windows_tz::WindowsZoneRead::Zone("America/New_York")
         );
     }
 

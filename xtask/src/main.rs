@@ -54,6 +54,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod windows_zones;
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let task = args.first().map(String::as_str);
@@ -62,6 +64,7 @@ fn main() -> ExitCode {
         Some("pack-plugins") => run(pack_plugins(&args[1..])),
         Some("ts-types") => run(ts_types(&args[1..])),
         Some("tz-list") => run(tz_list(&args[1..])),
+        Some("windows-zones") => run(windows_zones::windows_zones(&args[1..])),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
@@ -129,7 +132,21 @@ Tasks:
 
         --check   generate in memory and compare, changing nothing. For CI, so
                   the core never resolves zone names from another tzdata
-                  release than the one host-core and the adapters parse with.";
+                  release than the one host-core and the adapters parse with.
+
+  windows-zones [--check]
+        Regenerate crates/adapter-ews/src/windows_tz/windows_zones.rs — the
+        Windows time-zone ids Exchange speaks — from the CLDR windowsZones.xml
+        pinned in crates/adapter-ews/cldr/ (release, date and sha256 in
+        cldr/SOURCE). Names resolve through cal_core, so run tz-list first after
+        a chrono-tz update. Zones CLDR has no Windows id for, and zones whose
+        Windows id runs another clock in the five years after the release, are
+        listed and never written. To update CLDR, replace windowsZones.xml,
+        LICENSE and SOURCE from one release tag, then run this.
+
+        --check   generate in memory and compare, changing nothing. For CI, so a
+                  CLDR or chrono-tz update is a red build until the table is
+                  regenerated.";
 
 /// One bundled plugin, as the workspace describes it.
 struct Bundled {

@@ -36,9 +36,39 @@ The endpoint is discovered or user-supplied.
   `ChangeKey` embedded in the composite id, so the cache purges the whole
   native group before re-inserting (avoids stale duplicates).
 
+## Time zones
+
+EWS names a recurring series' zone by a **Windows id** (`W. Europe Standard
+Time`); the rest of Aperio uses tzdata names. The translation lives in
+`windows_tz.rs`, over a table generated from the Unicode CLDR
+`windowsZones.xml`:
+
+- **The data is pinned.** `crates/adapter-ews/cldr/` holds the XML, its
+  Unicode License V3 and `SOURCE` (release tag, publication date, URLs,
+  sha256). `cargo xtask windows-zones` generates
+  `src/windows_tz/windows_zones.rs` from it; CI runs it with `--check`.
+- **Reading.** An id reads as the zone of its default ("001") row, in tzdata's
+  canonical spelling (`India Standard Time` → `Asia/Kolkata`). Exchange keeps
+  one id per clock, so a Vienna series reads back as Berlin. `UTC`, and an id
+  the table does not know (custom definitions, registry-only ids), mean no
+  zone; the series repeats in UTC.
+- **Writing.** A stored zone first goes through the core's rule for zones
+  (`series_clock_zone`, then `canonical_zone`): no zone, a UTC name or an
+  unknown name writes no zone; any spelling of a zone writes that zone's id.
+- **Zones Exchange cannot store** are written without a zone: CLDR has no id
+  for them (`Antarctica/Troll`), or the id runs another clock in the five
+  years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,
+  `Antarctica/Vostok`). The generator's clock guard finds these; the table
+  lists them.
+- **Updating CLDR.** Replace `windowsZones.xml`, `LICENSE` and `SOURCE` from
+  one CLDR release tag, run `cargo xtask windows-zones`, commit. A new table
+  changes `TABLE_ID`, and the next delta sync emits every cached item again,
+  so no view keeps a zone the old table read.
+
 ## Testing
 
 `mockito` (or fixture XML) for the SOAP envelopes. Tests cover the
 id-only folder-sync probe/drain, the count parsing, and the
-folder-complete emit. Live testing needs an Exchange/365 mailbox that still
-exposes EWS.
+folder-complete emit. The zone translation is pinned by
+`fixtures/windowsZones.json`, whose rows are named in the test. Live testing
+needs an Exchange/365 mailbox that still exposes EWS.

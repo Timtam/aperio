@@ -2003,6 +2003,33 @@ Siehe DESIGN §4.2.
   🚩 **Aktualität der Zeitzonendaten** (32a): Marokko ab 20.09.2026, Vancouver,
   Edmonton und Inuvik ab 01.11.2026, Chisinau stellt eine Stunde später um.
   Eigene Aufgabe.
+  ↳ **Die Exchange-Zonentabelle aus CLDR (Zeitzonen-Auswahl, Stufe 4,
+  2026-09-15):** `cargo xtask windows-zones` erzeugt die Windows-Zonennamen für
+  Exchange aus der CLDR-Datei `windowsZones.xml` (release-48-2). Sie liegt mit
+  Lizenz und Prüfsumme in `crates/adapter-ews/cldr/`. Die handgeschriebene
+  Tabelle ist weg.
+  - 311 der 312 Zonen haben einen Windows-Namen, Antarctica/Troll nicht.
+  - Scoresbysund, Casey und Vostok stehen in CLDR unter einer Windows-Zone mit
+    anderer Uhr. Ein Uhr-Wächter im Generator findet sie, und sie gelten wie
+    Troll als nicht speicherbar (22a).
+  - Geschrieben werden jetzt 308 gelistete Zonen, bisher waren es 138.
+  - Die alte Tabelle hatte drei falsche Zeilen: Chihuahua, Almaty und Beirut
+    mit dem erfundenen Namen „Lebanon Standard Time“. 31 Windows-Namen las sie
+    gar nicht.
+  - Ein Fingerabdruck der Tabelle im Sync-Zustand lässt nach dem Update alle
+    zwischengespeicherten Exchange-Termine einmal neu ausgeben.
+
+  Toni hat entschieden (38a, 39, 40a): Live-Test vor dem Merge an seinem eigenen
+  Exchange-Server, Lizenzhinweis bei den Daten.
+  🚩 **Live-Test Exchange** (38a): Anleitung und Anfragen stehen im PR. Der Test
+  blockiert den Merge.
+  🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
+  die eingebauten ICU4X-Bibliotheken nennen.
+  🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die
+  erzeugte Tabelle und `cargo xtask windows-zones` mitgehen. Sonst fällt die
+  Prüfung still weg.
+  ↻ **Mit dem nächsten Handy-Build:** die `.so` frisch erzeugen. Rust im
+  EWS-Adapter hat sich geändert, neue FFI-Funktionen gibt es nicht.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
