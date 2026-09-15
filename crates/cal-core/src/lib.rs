@@ -119,7 +119,9 @@ pub use meeting_link_grouping::{
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
-pub use series_clock::{canonical_zone, listed_zones, series_clock_zone, NameKind, TZDATA_VERSION};
+pub use series_clock::{
+    canonical_zone, listed_zones, series_clock_zone, written_series_zone, NameKind, TZDATA_VERSION,
+};
 pub use series_shift::{
     series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,
 };

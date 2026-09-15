@@ -2038,9 +2038,55 @@ Siehe DESIGN §4.2.
   Zone. Er liest die Endzone mit. Weil sein Speicher die Endzone nicht kannte,
   liest er jeden Exchange-Kalender nach dem Update einmal von vorn.
 
-  🚩 **Live-Test Runde 2** (42a): ganztägige Serien ohne Zone, mit UTC und die
-  Reparatur einer kaputten Serie. Danach die Regel für ganztägige Serien, dann
-  Merge.
+  Live-Test Runde 2 (15.09.2026), Wochentage in Outlook und in Aperio
+  abgelesen:
+  - Ganztägige Serien ohne Zone und mit UTC speichert Exchange auf
+    UTC-Mitternacht, und Outlook zeigt sie am richtigen Tag.
+  - Eine Zone bei einer ganztägigen Serie verlängert sie: Mit Los Angeles
+    werden es zwei Tage.
+  - Eine kaputte Serie lässt sich mit UTC nur reparieren, wenn die Zone vor
+    Beginn und Ende kommt. Kommt sie danach, werden es drei Tage.
+  - Eine echte Greenwich-Serie behält die Endzone Greenwich (43b bestätigt).
+  - Aperio selbst zeigt alle diese Serien einen Tag zu spät. Das ist ein
+    Lesefehler in Aperio. Auch der „Dienstag“ aus Runde 1 war in Aperio
+    abgelesen.
+
+  Die Analyse danach hat gezeigt:
+  - Der Lesefehler steckt in Aperios Kern, nicht nur bei Exchange. Aperio
+    wiederholt ganztägige Serien in UTC statt an Kalendertagen. Östlich von
+    UTC landet ein genannter Wochentag deshalb einen Tag zu spät. Das betrifft
+    lokale Kalender, CalDAV, Google und Exchange, auf Desktop und Handy, und
+    war schon auf main.
+  - Ändert Aperio einen ganztägigen Exchange-Termin, der schon eine Zone trägt,
+    schickt es UTC-Mitternacht ohne Zone. Exchange rundet dann in seiner Zone.
+    Das ist abgeleitet, nicht gemessen.
+
+  Toni hat entschieden (15.09.2026):
+  - 46a: In PR #75 kommt nur der Schutz dazu: Eine ganztägige Serie schreibt
+    nie eine Zone.
+  - 47a: Ändert Aperio einen ganztägigen Exchange-Termin mit Zone, gehen Beginn
+    und Ende auf Mitternacht in der gespeicherten Zone, und die Zone bleibt
+    unberührt.
+  - 48a: Der Lesefehler wird ein eigener PR mit einer Kern-Regel: Eine
+    ganztägige Serie wiederholt sich an den Kalendertagen des Geräts.
+  - 49a: Es gibt eine gezielte dritte Runde des Live-Tests.
+
+  Der Schutz aus 46a ist gebaut. Die Regel steht im Kern
+  (`written_series_zone`), und Exchange, Microsoft 365 und Google fragen sie.
+  Exchange fragt für eine ganztägige Serie auch keine Serverzonen mehr ab.
+  Microsoft 365 und Google schrieben ganztägige Tage schon vorher ohne Zone.
+  🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
+  🚩 **Live-Test Runde 3** (49a):
+  - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
+    nach der Regel aus 47a und nach der heutigen;
+  - ein Termin in der Zone Tokio;
+  - eine tägliche ganztägige Serie;
+  - eine geänderte Ausnahme.
+
+  Toni meldet Wochentag und Länge in Outlook und in Aperio.
+  🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
+  **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
+  UTC-Datum): eigene PRs nach Runde 3.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

@@ -63,9 +63,12 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   zone in Exchange, so an update to an unknown zone leaves the old one there.
   If the server cannot be asked, or its answer cannot be read, the CLDR ids are
   written and the next save asks again.
-- **Writing.** A stored zone first goes through the core's rule for zones
-  (`series_clock_zone`, then `canonical_zone`): no zone, a UTC name or an
-  unknown name writes no zone; any spelling of a zone writes that zone's id.
+- **Writing.** An all-day series writes no zone (`cal_core::written_series_zone`).
+  A zone makes Exchange move an all-day series to that zone's midnights and
+  stretch it over more days (live test). Any other series' stored zone goes
+  through the core's rule for zones (`series_clock_zone`, then
+  `canonical_zone`): no zone, a UTC name or an unknown name writes no zone; any
+  spelling of a zone writes that zone's id.
 - **Zones Exchange cannot store** are written without a zone: CLDR has no id
   for them (`Antarctica/Troll`), or the id runs another clock in the five
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,

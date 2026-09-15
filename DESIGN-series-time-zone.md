@@ -2,8 +2,8 @@
 
 Status: **entschieden; Stufen 1 bis 3 gebaut (#72, #73, #74), Stufe 4 in Arbeit.**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
-14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a und 38a
-bis 40a, dazu die Vorlese-Form F). Die Planung lief in zwei
+14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
+bis 43b und 46a bis 49a, dazu die Vorlese-Form F). Die Planung lief in zwei
 Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
 Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
 Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
@@ -116,6 +116,24 @@ keinen, dort ist die Wahl Tonis Sache.
 - **43b — die Endzone wird gelesen.** Eine Serie ohne Zone speichert Exchange
   mit der Startzone `Greenwich Standard Time` und der Endzone
   `tzone://Microsoft/Utc`. Diese Endzone heißt: keine Zone.
+- **46a — eine ganztägige Serie schreibt nie eine Zone.** Die zweite Runde hat
+  gezeigt: Eine Zone macht eine ganztägige Exchange-Serie länger. Stufe 4 bekommt
+  deshalb nur diesen Schutz. Die Regel steht einmal im Kern, und die Adapter
+  fragen sie. Lesefehler, Update-Regel und Datumsfehler werden eigene Stufen
+  nach der dritten Runde.
+- **47a — Änderungen behalten die gespeicherte Zone.** Ändert Aperio einen
+  ganztägigen Exchange-Termin, der schon eine Zone trägt, etwa aus Outlook,
+  gehen Beginn und Ende auf Mitternacht in dieser Zone. Die Zone selbst bleibt
+  unberührt. Das passt zu 18a und dazu, dass Unberührtes wörtlich bleibt. Die
+  dritte Runde bestätigt es vor dem Bau.
+- **48a — ganztägige Serien wiederholen sich an Kalendertagen.** Aperio
+  wiederholt ganztägige Serien heute in UTC. Östlich von UTC landet ein
+  genannter Wochentag deshalb einen Tag zu spät, bei jedem Anbieter außer
+  Microsoft 365 und dem Gerätekalender. Eine Kern-Regel behebt das: Eine
+  ganztägige Serie wiederholt sich an den Kalendertagen des Geräts, egal welche
+  Zone sie trägt. Ansichten, Erinnerungen, Widget und Badge fragen dieselbe
+  Regel. Das wird ein eigener PR.
+- **49a — eine gezielte dritte Runde.** Siehe Stufe 4, „Gemessen“.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -632,6 +650,11 @@ Handy im selben PR.
      Die Serie geht ohne Zone raus, und das Protokoll nennt sie. Kann der
      Server nicht gefragt werden, gehen die CLDR-Namen raus, und das nächste
      Speichern fragt erneut.
+   - Eine ganztägige Serie schreibt nie eine Zone (46a). Die Regel steht im Kern
+     (`written_series_zone`), und Exchange, Microsoft 365 und Google fragen sie.
+     Microsoft 365 und Google schreiben ganztägige Tage ohnehin als Datum ohne
+     Zone. Exchange fragt für eine ganztägige Serie auch nicht mehr, welche
+     Zonen der Server kennt.
    - Die Termine im Speicher des Adapters kannten die Endzone nicht. Der
      Zustand eines Ordners trägt deshalb eine Leser-Version (`ITEM_PARSER`);
      ein Zustand von einem älteren Leser wird verworfen, und der Ordner wird
@@ -695,9 +718,28 @@ Handy im selben PR.
      - Eine Serie ohne Zone kommt mit der Startzone `Greenwich Standard Time`
        und der Endzone `tzone://Microsoft/Utc` zurück. Daraus folgt 43b.
      - Eine ganztägige Serie mit Zone legt Exchange auf die Tagesgrenzen dieser
-       Zone und macht zwei Tage daraus; Outlook im Web zeigt sie am Dienstag
-       statt am Montag. Das trifft heute schon jede ganztägige Serie in einer
-       der 138 Zonen der alten Tabelle. Daraus folgt 42a.
+       Zone und macht zwei Tage daraus. Outlook zeigt sie am Montag, aber über
+       zwei Tage. Der „Dienstag“, der zuerst gemeldet wurde, war in Aperio
+       abgelesen (siehe Runde 2). Das trifft heute schon jede ganztägige Serie
+       in einer der 138 Zonen der alten Tabelle. Daraus folgt 42a.
+
+   Live-Test Runde 2 (15. September 2026, derselbe Server). Gemeint war jeweils
+   eine wöchentliche ganztägige Serie ab Montag, dem 19. Oktober 2026. Aperio
+   schickt Beginn und Ende als UTC-Mitternacht. Die Wochentage wurden in Outlook
+   und in Aperio abgelesen:
+   - Ohne Zone (A10) und mit der Zone UTC (A11) speichert Exchange 00:00Z bis
+     00:00Z am nächsten Tag. Outlook zeigt die Serie am Montag, einen Tag lang.
+     Ohne Zone kommen wieder die Startzone Greenwich und die Endzone
+     `tzone://Microsoft/Utc` zurück.
+   - Eine Serie in Abidjan mit Uhrzeit (A12) behält die Endzone `Greenwich
+     Standard Time`. Die Endzone trennt sie also von einer Serie ohne Zone
+     (43b).
+   - Reparatur einer Serie mit Zone Los Angeles durch ein Update auf UTC:
+     - Kommt die Zone nach Beginn und Ende (B3), speichert Exchange drei Tage,
+       und Outlook zeigt Montag bis Mittwoch.
+     - Kommt die Zone zuerst (B4), ist die Serie danach sauber: Montag, ein Tag.
+   - Aperio zeigt jede dieser Serien einen Tag zu spät, also am Dienstag. Das
+     ist ein Lesefehler in Aperio, nicht in Exchange.
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Danach messen, wie Microsoft 365 recurrenceTimeZone beim Zurücklesen behandelt.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
@@ -853,8 +895,18 @@ Handy im selben PR.
   Zone, ein unbekannter Name und die Reihenfolge von Beginn, Ende und Zone
   bewirken, hat die erste Runde des Live-Tests an Exchange 2019 gemessen
   (Stufe 4). Offen bleiben:
-  - wie ganztägige Serien ohne Zone, mit UTC und nach einem Zonenwechsel
-    landen (zweite Runde, 42a);
+  - welche Anzeigeregel Outlook für ganztägige Termine anwendet. Alle
+    Beobachtungen stammen aus Berlin. Sie passen zur Regel „schwebend in der
+    gespeicherten Zone“ (MS-OXOCAL 3.1.5.5.1), aber auch zu einem Abschneiden
+    auf das Datum. Die dritte Runde prüft das mit einem Termin in der Zone
+    Tokio (49a);
+  - ob ein Update ohne Zone bei einem ganztägigen Termin aus Outlook die Zone
+    behält und ihn verlängert, und ob Mitternacht in der gespeicherten Zone ihn
+    auf seinem Tag lässt (47a, dritte Runde);
+  - ob Zone zuerst auch bei einer Serie mit Uhrzeit die Zeitpunkte stehen
+    lässt. Gemessen ist das nur an einer ganztägigen Serie (Stufen 9 und 12);
+  - wie ganztägige Termine mit Teilnehmern angezeigt werden; für sie gilt die
+    Regel „schwebend“ nicht;
   - welche Namen Kerio Connect und Zimbra kennen und was sie mit einem
     unbekannten Namen tun.
 

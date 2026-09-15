@@ -112,6 +112,22 @@ pub fn series_clock_zone(tzid: Option<&str>) -> Option<&str> {
     }
 }
 
+/// The zone a series hands a provider when it is written: none for an all-day
+/// series, otherwise its stored zone as stored, for the adapter's own rule
+/// (such as [`series_clock_zone`]) to read.
+///
+/// An all-day series has no zone of its own (DESIGN-series-time-zone.md, 13b),
+/// and a zone does harm on the wire: Exchange moves an all-day series to that
+/// zone's midnights and stretches it over more days (live test round 2,
+/// decision 46a). Every adapter asks this, so the rule lives here once.
+pub fn written_series_zone(tzid: Option<&str>, all_day: bool) -> Option<&str> {
+    if all_day {
+        None
+    } else {
+        tzid
+    }
+}
+
 /// The zones outside `Etc/` with a region part, in tzdata's spelling and in
 /// the order the names sort with ASCII case folded — the zones a series' zone
 /// is chosen from. The region part keeps out the POSIX-style names such as
@@ -245,6 +261,21 @@ mod table {
                 .find(|(entry, _, _)| *entry == name)
                 .map(|(_, _, kind)| *kind);
             assert_eq!(found, Some(kind), "{name}");
+        }
+    }
+
+    /// Decision 46a: an all-day series writes no zone, whatever it stores; any
+    /// other series hands its stored zone on unchanged, in its own spelling.
+    #[test]
+    fn an_all_day_series_writes_no_zone() {
+        for tzid in [
+            Some("Europe/Berlin"),
+            Some("asia/calcutta"),
+            Some("UTC"),
+            None,
+        ] {
+            assert_eq!(written_series_zone(tzid, true), None, "all-day {tzid:?}");
+            assert_eq!(written_series_zone(tzid, false), tzid, "timed {tzid:?}");
         }
     }
 

@@ -1953,7 +1953,9 @@ pub fn new_event_to_calendar_item_xml_on(
     // so it expands the series on that clock server-side. Per the EWS
     // CalendarItemType element order, StartTimeZone/EndTimeZone follow
     // <t:Recurrence>.
-    if let Some(windows) = series_windows_zone(event.recurrence.as_ref(), server_zones) {
+    if let Some(windows) =
+        series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
+    {
         out.push_str(&format!(
             "          <t:StartTimeZone Id=\"{}\"/>\n",
             escape_xml(windows)
@@ -1968,14 +1970,18 @@ pub fn new_event_to_calendar_item_xml_on(
 }
 
 /// The Windows id a series is written with, by `windows_tz`'s rule; `None`
-/// writes no zone. A zone Exchange cannot store — here, or on this server — is
-/// logged by name, once per write.
+/// writes no zone. An all-day series writes none (the core's
+/// `written_series_zone`, decision 46a): Exchange would move it to the zone's
+/// midnights and stretch it over more days. A zone Exchange cannot store —
+/// here, or on this server — is logged by name, once per write.
 fn series_windows_zone(
+    all_day: bool,
     recurrence: Option<&EventRecurrence>,
     server_zones: Option<&ServerTimeZones>,
 ) -> Option<&'static str> {
     use crate::windows_tz::{windows_zone_for, WindowsZoneWrite};
-    match windows_zone_for(recurrence.and_then(|r| r.tzid.as_deref()), server_zones) {
+    let tzid = cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day);
+    match windows_zone_for(tzid, server_zones) {
         WindowsZoneWrite::Id(windows) => Some(windows),
         WindowsZoneWrite::NoZone => None,
         WindowsZoneWrite::NotStorable { zone, reason } => {
@@ -2129,7 +2135,9 @@ pub fn event_to_update_field_xml_on(
     }
     // Keep the zone on a zoned recurring master so a server-side edit doesn't
     // drop it and re-expand the series in UTC, by the same rule as a create.
-    if let Some(windows) = series_windows_zone(event.recurrence.as_ref(), server_zones) {
+    if let Some(windows) =
+        series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
+    {
         let win = escape_xml(windows);
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
@@ -4087,6 +4095,47 @@ mod tests {
                     assert!(!set.contains("TimeZone"), "update {tzid}: {set}");
                 }
             }
+        }
+    }
+
+    /// Decision 46a: an all-day series writes no zone on create or update,
+    /// whatever zone it stores (Outlook's, or one kept from a timed series).
+    /// Live test round 2: a zone makes Exchange stretch it over more days.
+    #[test]
+    fn an_all_day_series_writes_no_zone() {
+        for tzid in ["Europe/Berlin", "America/Los_Angeles", "Asia/Calcutta"] {
+            let mut create = new_event_min("All-day");
+            create.all_day = true;
+            create.start = "2026-10-18T22:00:00Z".parse().unwrap();
+            create.end = "2026-10-19T22:00:00Z".parse().unwrap();
+            create.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let xml = new_event_to_calendar_item_xml(&create).unwrap();
+            assert!(
+                xml.contains("<t:IsAllDayEvent>true</t:IsAllDayEvent>"),
+                "{xml}"
+            );
+            assert!(!xml.contains("TimeZone"), "create all-day {tzid}: {xml}");
+
+            let mut master = zoned_master(Some(tzid));
+            master.all_day = true;
+            let (set, del) = event_to_update_field_xml(&master).unwrap();
+            assert!(!set.contains("TimeZone"), "update all-day {tzid}: {set}");
+            assert!(
+                !del.contains("TimeZone"),
+                "update all-day {tzid} deletes: {del}"
+            );
+
+            // The same series with a time still writes its zone.
+            master.all_day = false;
+            let (set, _) = event_to_update_field_xml(&master).unwrap();
+            assert!(
+                set.contains("<t:StartTimeZone Id="),
+                "update timed {tzid}: {set}"
+            );
         }
     }
 

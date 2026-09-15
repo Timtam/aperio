@@ -500,9 +500,10 @@ impl EwsAdapter {
         Ok(out)
     }
 
-    /// Whether writing this event could name a zone: a series with one.
-    fn writes_a_zone(recurrence: Option<&cal_core::EventRecurrence>) -> bool {
-        recurrence.is_some_and(|r| r.tzid.is_some())
+    /// Whether writing this event could name a zone: a series with one that is
+    /// not all-day (`cal_core::written_series_zone`, decision 46a).
+    fn writes_a_zone(recurrence: Option<&cal_core::EventRecurrence>, all_day: bool) -> bool {
+        cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day).is_some()
     }
 
     /// A folder state filled by an older item parser is dropped, so the folder
@@ -1002,7 +1003,7 @@ impl CalendarFeature for EwsAdapter {
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         // Only a series with a zone asks the server which zones it knows.
-        let zones = if Self::writes_a_zone(event.recurrence.as_ref()) {
+        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
             self.server_zones().await
         } else {
             None
@@ -1013,7 +1014,7 @@ impl CalendarFeature for EwsAdapter {
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
-        let zones = if Self::writes_a_zone(event.recurrence.as_ref()) {
+        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
             self.server_zones().await
         } else {
             None
@@ -2486,5 +2487,23 @@ mod server_zone_tests {
             shapes(&requests.lock().unwrap()),
             ["zones", "with id", "with id"]
         );
+    }
+
+    /// Decision 46a through the adapter: an all-day series with a stored zone
+    /// neither asks the server for its zones nor writes one.
+    #[tokio::test]
+    async fn an_all_day_series_neither_asks_for_nor_writes_a_zone() {
+        let mut server = Server::new_async().await;
+        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let mut all_day = event("All-day Berlin", Some("Europe/Berlin"));
+        all_day.all_day = true;
+        all_day.start = "2026-10-18T22:00:00Z".parse().unwrap();
+        all_day.end = "2026-10-19T22:00:00Z".parse().unwrap();
+        adapter
+            .create_event("FA|FCK", all_day)
+            .await
+            .expect("create");
+        assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
     }
 }
