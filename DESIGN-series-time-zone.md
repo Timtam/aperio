@@ -3,7 +3,7 @@
 Status: **entschieden; Stufen 1 bis 3 gebaut (#72, #73, #74), Stufe 4 in Arbeit.**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
-bis 43b und 46a bis 49a, dazu die Vorlese-Form F). Die Planung lief in zwei
+bis 43b, 46a bis 49a, 51a bis 53a, 57a und 58a, dazu die Vorlese-Form F). Die Planung lief in zwei
 Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
 Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
 Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
@@ -134,6 +134,17 @@ keinen, dort ist die Wahl Tonis Sache.
   Zone sie trägt. Ansichten, Erinnerungen, Widget und Badge fragen dieselbe
   Regel. Das wird ein eigener PR.
 - **49a — eine gezielte dritte Runde.** Siehe Stufe 4, „Gemessen“.
+- **51a bis 53a — wie die dritte Runde läuft.** Toni legt die ganztägigen
+  Serien und Termine selbst in Outlook im Web an (51a) und macht die Ausnahme
+  selbst (52a). Er meldet eine kurze Liste zurück (53a). Die übrigen
+  gespeicherten Werte liest das Skript selbst nach.
+- **57a — die Reihenfolge nach der dritten Runde.** Zuerst kommt ein eigener
+  kleiner PR für den Ausnahme-Fehler, den die dritte Runde gefunden hat. Danach
+  folgt der Lesefehler im Kern (48a). Dann kommt der Exchange-Schreiber mit 47a
+  und dem Datumsfehler, danach die weiteren Stufen.
+- **58a — der Betreff einer Ausnahme** ist eine eigene, spätere Aufgabe
+  außerhalb dieses Entwurfs. Heute zeigt Aperio eine Ausnahme unter dem Betreff
+  der Serie.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -741,6 +752,38 @@ Handy im selben PR.
      - Kommt die Zone zuerst (B4), ist die Serie danach sauber: Montag, ein Tag.
    - Aperio zeigt jede dieser Serien einen Tag zu spät, also am Dienstag. Das
      ist ein Lesefehler in Aperio, nicht in Exchange.
+
+   Live-Test Runde 3 (18. September 2026, derselbe Server). Toni hat die
+   Termine in Outlook classic angelegt und dort und in einem Aperio-Build vom
+   5. September nachgesehen. Gemeint war jeweils Montag, der 19. Oktober 2026:
+   - Outlook speichert einen ganztägigen Termin als 18T22:00Z bis 19T22:00Z mit
+     der Zone W. Europe, mit Erinnerung und leerem HTML-Text.
+   - Regel 47a lässt solche Termine auf ihrem Tag:
+     - Eine Serie mit neuem Titel bleibt unverändert.
+     - Ein Einzeltermin und eine Ausnahme, die auf Dienstag verschoben werden,
+       liegen danach genau einen Tag am Dienstag.
+     - Die Zone bleibt in allen drei Fällen.
+   - Die heutige Regel beschädigt solche Termine. Aperio schickt
+     UTC-Mitternacht ohne Zone, Exchange rundet in der gespeicherten Zone, und
+     Serie wie Einzeltermin belegen in Outlook danach Montag und Dienstag.
+     Dabei ändert Exchange auch die Zone: beim Einzeltermin auf
+     `tzone://Microsoft/Utc`, bei der Serie die Startzone auf Greenwich.
+   - Exchange rundet in der gespeicherten Zone, nicht in der Zone des
+     Postfachs. Ein Einzeltermin in Tokio wurde auf Tokioter Mitternacht
+     gerundet (18T15Z bis 20T15Z).
+   - Ein ganztägiger Termin auf Tokioter Mitternacht steht in Outlook in Berlin
+     am Montag, einen Tag lang. Das widerlegt die Regeln, die nur auf das
+     Datum abschneiden.
+   - Eine tägliche ganztägige Serie mit dem Startdatum, das Aperio heute
+     schickt (18. Oktober für Montag, den 19.), beginnt in Exchange am Sonntag,
+     dem 18. Oktober.
+   - Aperios Änderung einer Ausnahme scheitert. Exchange lehnt das Löschen der
+     Wiederholung an einer Ausnahme ab (`ErrorInvalidPropertyDelete`), und die
+     ganze Änderung schlägt fehl. Ohne dieses Löschen geht sie durch. Das
+     betrifft auch main.
+   - Aperio zeigt eine Ausnahme unter dem Betreff der Serie, nicht unter ihrem
+     eigenen. Die verschobene Ausnahme steht richtig nur am Dienstag.
+   - Aperio zeigt die beschädigte Serie einen Tag zu spät (Lesefehler, 48a).
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Danach messen, wie Microsoft 365 recurrenceTimeZone beim Zurücklesen behandelt.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
@@ -896,14 +939,11 @@ Handy im selben PR.
   Zone, ein unbekannter Name und die Reihenfolge von Beginn, Ende und Zone
   bewirken, hat die erste Runde des Live-Tests an Exchange 2019 gemessen
   (Stufe 4). Offen bleiben:
-  - welche Anzeigeregel Outlook für ganztägige Termine anwendet. Alle
-    Beobachtungen stammen aus Berlin. Sie passen zur Regel „schwebend in der
-    gespeicherten Zone“ (MS-OXOCAL 3.1.5.5.1), aber auch zu einem Abschneiden
-    auf das Datum. Die dritte Runde prüft das mit einem Termin in der Zone
-    Tokio (49a);
-  - ob ein Update ohne Zone bei einem ganztägigen Termin aus Outlook die Zone
-    behält und ihn verlängert, und ob Mitternacht in der gespeicherten Zone ihn
-    auf seinem Tag lässt (47a, dritte Runde);
+  - welche Anzeigeregel Outlook für ganztägige Termine anwendet: „schwebend in
+    der gespeicherten Zone“ (MS-OXOCAL 3.1.5.5.1) oder „nächste Mitternacht“
+    beim Betrachter. Die dritte Runde hat die Regeln widerlegt, die nur auf das
+    Datum abschneiden. Unterscheiden würde die beiden ein Termin in einer Zone
+    wie UTC−11;
   - ob Zone zuerst auch bei einer Serie mit Uhrzeit die Zeitpunkte stehen
     lässt. Gemessen ist das nur an einer ganztägigen Serie (Stufen 9 und 12);
   - wie ganztägige Termine mit Teilnehmern angezeigt werden; für sie gilt die

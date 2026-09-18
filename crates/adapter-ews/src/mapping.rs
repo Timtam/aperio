@@ -4265,7 +4265,10 @@ mod tests {
         };
         let create = |name: &str, what: &str, event: NewEvent| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
+            let zone = crate::windows_tz::windows_zone_for(
+                cal_core::written_series_zone(tzid.as_deref(), event.all_day),
+                None,
+            );
             let envelope = crate::soap::create_calendar_item(
                 "CALENDAR",
                 None,
@@ -4287,7 +4290,10 @@ mod tests {
         };
         let update = |name: &str, what: &str, event: Event| {
             let tzid = event.recurrence.as_ref().and_then(|r| r.tzid.clone());
-            let zone = crate::windows_tz::windows_zone_for(tzid.as_deref(), None);
+            let zone = crate::windows_tz::windows_zone_for(
+                cal_core::written_series_zone(tzid.as_deref(), event.all_day),
+                None,
+            );
             let (set, del) = event_to_update_field_xml(&event).unwrap();
             let envelope =
                 crate::soap::update_calendar_item("ITEM_ID", Some("CHANGEKEY"), &set, &del, false);
@@ -4501,6 +4507,354 @@ mod tests {
                 &del,
                 false,
             ),
+        );
+    }
+
+    /// Writes the requests of live test round 3 (decisions 47a and 49a) as
+    /// Aperio builds them, into the directory `APERIO_LIVE_TEST_DIR` names, for
+    /// the owner's `R3-run.ps1`:
+    ///
+    /// `APERIO_LIVE_TEST_DIR=<dir> cargo test -p adapter-ews --lib live_test_requests_round_3 -- --ignored`
+    ///
+    /// The owner creates all-day series and singles in Outlook on a Berlin clock.
+    /// The updates start from Aperio's own read of that planned stored shape (a
+    /// SyncFolderItems row through `parse_sync_folder_items_response` and
+    /// `to_event`), so they are what Aperio sends after reading those items as
+    /// the owner is asked to create them: no reminder, location or body. The
+    /// requests marked "NOT Aperio's rule" differ on purpose:
+    /// - the 47a prototype puts Start and End on midnights of the stored zone
+    ///   instead of the UTC midnights of the day;
+    /// - the Tokyo items carry a zone on an all-day single;
+    /// - R3-7b leaves out the Recurrence delete.
+    #[test]
+    #[ignore = "writes the live Exchange test requests of round 3; see the doc comment"]
+    fn live_test_requests_round_3() {
+        const BERLIN: &str = "W. Europe Standard Time";
+        const TOKYO: &str = "Tokyo Standard Time";
+        const WEEKLY: &str = "<t:Recurrence><t:WeeklyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Monday</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence><t:NumberedRecurrence><t:StartDate>2026-10-19+02:00</t:StartDate><t:NumberOfOccurrences>4</t:NumberOfOccurrences></t:NumberedRecurrence></t:Recurrence>";
+        const REPLACE: &str = "Replace ITEM_ID and CHANGEKEY.";
+
+        let dir = std::path::PathBuf::from(
+            std::env::var("APERIO_LIVE_TEST_DIR")
+                .expect("APERIO_LIVE_TEST_DIR names the output directory"),
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        let utc = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        // The owner's items are stored in W. Europe, so "midnight in the stored
+        // zone" is the Berlin clock these files must be written on.
+        assert_eq!(
+            local_midnight(2026, 10, 19),
+            utc("2026-10-18T22:00:00Z"),
+            "write round 3 on a Berlin clock"
+        );
+        assert_eq!(
+            local_midnight(2026, 10, 26),
+            utc("2026-10-25T23:00:00Z"),
+            "write round 3 on a Berlin clock"
+        );
+
+        let write = |name: &str, comment: &str, envelope: String| {
+            let prelude = "<?xml version=\"1.0\" encoding=\"utf-8\"?>";
+            assert!(envelope.contains(prelude), "{name}");
+            assert!(
+                !comment.contains("--"),
+                "an XML comment cannot hold --: {comment}"
+            );
+            let envelope = envelope.replacen(prelude, &format!("{prelude}\n<!-- {comment} -->"), 1);
+            std::fs::write(dir.join(name), envelope).unwrap();
+        };
+
+        // Aperio's read of an item stored in the planned shape. The cache takes
+        // an item's all-day flag, zones and type from its SyncFolderItems row
+        // (the GetItem parser reads no IsAllDayEvent), so the item goes through
+        // that parser, with the recurrence GetItem would add already in the row.
+        let read = |kind: &str, start: &str, end: &str, zone: &str, recurrence: &str| {
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <m:SyncFolderItemsResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>ROUND-3</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+            <t:CalendarItem>
+              <t:ItemId Id="ITEM" ChangeKey="CK"/>
+              <t:Subject>Outlook</t:Subject>
+              <t:Start>{start}</t:Start>
+              <t:End>{end}</t:End>
+              <t:IsAllDayEvent>true</t:IsAllDayEvent>
+              <t:CalendarItemType>{kind}</t:CalendarItemType>
+              {recurrence}
+              <t:StartTimeZone Id="{zone}"/>
+              <t:EndTimeZone Id="{zone}"/>
+            </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </s:Body>
+</s:Envelope>"#
+            );
+            let mut result = parse_sync_folder_items_response(&xml).unwrap();
+            assert_eq!(result.changes.len(), 1, "{kind}");
+            match result.changes.remove(0) {
+                SyncChange::Create(item) => to_event(item, "CALENDAR").unwrap(),
+                other => panic!("expected a Create for {kind}, got {other:?}"),
+            }
+        };
+        let master = read(
+            "RecurringMaster",
+            "2026-10-18T22:00:00Z",
+            "2026-10-19T22:00:00Z",
+            BERLIN,
+            WEEKLY,
+        );
+        assert!(master.all_day);
+        assert_eq!(
+            (master.start, master.end),
+            (utc("2026-10-18T22:00:00Z"), utc("2026-10-19T22:00:00Z"))
+        );
+        let rule = master
+            .recurrence
+            .clone()
+            .expect("a master reads with its rule");
+        assert_eq!(rule.tzid.as_deref(), Some("Europe/Berlin"));
+        for part in ["FREQ=WEEKLY", "BYDAY=MO", "COUNT=4"] {
+            assert!(rule.rrule.contains(part), "{}", rule.rrule);
+        }
+        let single = read(
+            "Single",
+            "2026-10-18T22:00:00Z",
+            "2026-10-19T22:00:00Z",
+            BERLIN,
+            "",
+        );
+        assert!(single.all_day && single.recurrence.is_none());
+        let exception = read(
+            "Exception",
+            "2026-10-25T23:00:00Z",
+            "2026-10-26T23:00:00Z",
+            BERLIN,
+            "",
+        );
+        assert!(exception.all_day && exception.recurrence.is_none());
+        assert_eq!(
+            (exception.start, exception.end),
+            (utc("2026-10-25T23:00:00Z"), utc("2026-10-26T23:00:00Z"))
+        );
+        let tokyo = read(
+            "Single",
+            "2026-10-18T15:00:00Z",
+            "2026-10-19T15:00:00Z",
+            TOKYO,
+            "",
+        );
+        assert_eq!(
+            (tokyo.start, tokyo.end),
+            (utc("2026-10-18T22:00:00Z"), utc("2026-10-19T22:00:00Z")),
+            "the anchor reads Tokyo's day on the Berlin clock"
+        );
+
+        // Aperio's update fields for an edited item; no all-day write names a zone (46a).
+        let fields = |event: &Event| {
+            let (set, del) = event_to_update_field_xml(event).unwrap();
+            assert!(
+                !set.contains("TimeZone") && !del.contains("TimeZone"),
+                "{set}{del}"
+            );
+            (set, del)
+        };
+        // The 47a prototype: Start and End on midnights of the stored zone (for
+        // these items, this Berlin clock) instead of the UTC midnights of the day.
+        let on_stored_midnights = |event: &Event, mut set: String| {
+            for (tag, when) in [("Start", event.start), ("End", event.end)] {
+                let today = format!(
+                    "<t:{tag}>{}</t:{tag}>",
+                    format_ews_datetime(ews_all_day_boundary(when))
+                );
+                let prototype = format!("<t:{tag}>{}</t:{tag}>", format_ews_datetime(when));
+                assert_eq!(set.matches(&today).count(), 1, "{tag} in {set}");
+                set = set.replace(&today, &prototype);
+            }
+            set
+        };
+        let update = |set: &str, del: &str| {
+            crate::soap::update_calendar_item("ITEM_ID", Some("CHANGEKEY"), set, del, false)
+        };
+        let edited = |event: &Event, title: &str| Event {
+            title: title.into(),
+            ..event.clone()
+        };
+
+        let s1 = edited(&master, "Aperio zone test S1 series (47a)");
+        let (set, del) = fields(&s1);
+        write(
+            "R3-1-update-s1-47a.xml",
+            &format!(
+                "Step R3-1: NOT Aperio's rule yet (47a prototype). Aperio's update of Outlook's S1 \
+                 series with a new title, Start and End moved to midnights of the stored zone. {REPLACE}"
+            ),
+            update(&on_stored_midnights(&s1, set), &del),
+        );
+        let s2 = edited(&master, "Aperio zone test S2 series (today's rule)");
+        let (set, del) = fields(&s2);
+        write(
+            "R3-2-update-s2-today.xml",
+            &format!(
+                "Step R3-2: Aperio's update of Outlook's S2 series with a new title, as this build \
+                 sends it (all-day series write no zone, 46a). {REPLACE}"
+            ),
+            update(&set, &del),
+        );
+        let t1 = Event {
+            start: local_midnight(2026, 10, 20),
+            end: local_midnight(2026, 10, 21),
+            ..edited(&single, "Aperio zone test T1 single (47a, Tuesday)")
+        };
+        let (set, del) = fields(&t1);
+        write(
+            "R3-3-update-t1-47a.xml",
+            &format!(
+                "Step R3-3: NOT Aperio's rule yet (47a prototype). Aperio's update of Outlook's T1 \
+                 single moved to Tuesday 20 October, Start and End on midnights of the stored zone. {REPLACE}"
+            ),
+            update(&on_stored_midnights(&t1, set), &del),
+        );
+        let t2 = edited(&single, "Aperio zone test T2 single (today's rule)");
+        let (set, del) = fields(&t2);
+        write(
+            "R3-4-update-t2-today.xml",
+            &format!(
+                "Step R3-4: Aperio's update of Outlook's T2 single with a new title, for the planned item (no reminder, location or body) byte for byte as \
+                 main sends it. {REPLACE}"
+            ),
+            update(&set, &del),
+        );
+        let tokyo_update = edited(&tokyo, "Aperio zone test R3-5b Tokyo update (today's rule)");
+        let (set, del) = fields(&tokyo_update);
+        assert!(
+            set.contains("<t:Start>2026-10-19T00:00:00Z</t:Start>"),
+            "{set}"
+        );
+        write(
+            "R3-5b-u-update-tokyo-today.xml",
+            &format!(
+                "Step R3-5b-u: Aperio's update of the Tokyo single R3-5b with a new title, as it sends \
+                 it today. In which zone does Exchange round its UTC midnights? {REPLACE}"
+            ),
+            update(&set, &del),
+        );
+        let moved = Event {
+            start: local_midnight(2026, 10, 27),
+            end: local_midnight(2026, 10, 28),
+            ..edited(&exception, "Aperio zone test S3 exception (47a, Tuesday)")
+        };
+        let (set, del) = fields(&moved);
+        assert!(del.contains(r#"FieldURI="calendar:Recurrence""#), "{del}");
+        write(
+            "R3-7-update-s3-exception-47a.xml",
+            &format!(
+                "Step R3-7: NOT Aperio's rule yet (47a prototype). Aperio's override update of the S3 \
+                 exception moved to Tuesday 27 October, Start and End on midnights of the stored zone, \
+                 with the Recurrence delete the override path sends. {REPLACE}"
+            ),
+            update(&on_stored_midnights(&moved, set.clone()), &del),
+        );
+        let at = del.find(r#"FieldURI="calendar:Recurrence""#).unwrap();
+        let open = del[..at].rfind("<t:DeleteItemField>").unwrap();
+        let close =
+            at + del[at..].find("</t:DeleteItemField>").unwrap() + "</t:DeleteItemField>".len();
+        let del_without_rule = format!("{}{}", &del[..open], &del[close..]);
+        assert!(
+            !del_without_rule.contains("calendar:Recurrence"),
+            "{del_without_rule}"
+        );
+        assert!(
+            del_without_rule.contains("calendar:Location"),
+            "{del_without_rule}"
+        );
+        write(
+            "R3-7b-update-s3-exception-no-recurrence-delete.xml",
+            &format!(
+                "Step R3-7b: NOT Aperio's request. R3-7 without the Recurrence delete, sent only if \
+                 Exchange refuses R3-7. {REPLACE}"
+            ),
+            update(&on_stored_midnights(&moved, set), &del_without_rule),
+        );
+
+        let envelope = |item_xml: &str| {
+            crate::soap::create_calendar_item("CALENDAR", None, item_xml, false).replace(
+                r#"<t:FolderId Id="CALENDAR"/>"#,
+                r#"<t:DistinguishedFolderId Id="calendar"/>"#,
+            )
+        };
+        let all_day_single = |subject: &str| NewEvent {
+            start: local_midnight(2026, 10, 19),
+            end: local_midnight(2026, 10, 20),
+            all_day: true,
+            ..new_event_min(subject)
+        };
+        let tokyo_create = |subject: &str| {
+            let xml = new_event_to_calendar_item_xml(&all_day_single(subject))
+                .unwrap()
+                .replace(
+                    "<t:Start>2026-10-19T00:00:00Z</t:Start>",
+                    "<t:Start>2026-10-18T15:00:00Z</t:Start>",
+                )
+                .replace(
+                    "<t:End>2026-10-20T00:00:00Z</t:End>",
+                    "<t:End>2026-10-19T15:00:00Z</t:End>",
+                )
+                .replace(
+                    "        </t:CalendarItem>",
+                    &format!(
+                        "          <t:StartTimeZone Id=\"{TOKYO}\"/>\n          <t:EndTimeZone Id=\"{TOKYO}\"/>\n        </t:CalendarItem>"
+                    ),
+                );
+            for part in [
+                "<t:Start>2026-10-18T15:00:00Z</t:Start>",
+                "<t:End>2026-10-19T15:00:00Z</t:End>",
+                "<t:StartTimeZone Id=\"Tokyo Standard Time\"/>",
+            ] {
+                assert!(xml.contains(part), "{part}: {xml}");
+            }
+            envelope(&xml)
+        };
+        write(
+            "R3-5-create-tokyo-display.xml",
+            "Step R3-5: NOT Aperio's rule (a zone on an all-day single). An all-day single on the \
+             midnights of Monday 19 October in Tokyo. Which weekday and how many days does Outlook \
+             show in Berlin?",
+            tokyo_create("Aperio zone test R3-5 Tokyo display"),
+        );
+        write(
+            "R3-5b-create-tokyo-update.xml",
+            "Step R3-5b: NOT Aperio's rule. The same Tokyo single, as the item R3-5b-u updates.",
+            tokyo_create("Aperio zone test R3-5b Tokyo update"),
+        );
+        let daily = NewEvent {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=DAILY;COUNT=4".into(),
+                exceptions: Vec::new(),
+                tzid: None,
+            }),
+            ..all_day_single("Aperio zone test R3-6 daily")
+        };
+        let daily_xml = new_event_to_calendar_item_xml(&daily).unwrap();
+        assert!(
+            daily_xml.contains("<t:StartDate>2026-10-18</t:StartDate>"),
+            "{daily_xml}"
+        );
+        write(
+            "R3-6-create-daily.xml",
+            "Step R3-6: a daily all-day series from Aperio's create builder, as main sends it: \
+             StartDate 2026-10-18 for Monday 19 October. On which day does Exchange start it?",
+            envelope(&daily_xml),
         );
     }
 
