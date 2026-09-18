@@ -3148,8 +3148,9 @@ impl Host {
         // editor open an external event at all: without it the lookup was
         // local-only, so an external event opened EMPTY and a save then created a
         // duplicate. A cold cache (rare: a deep-link before any list read) falls
-        // back to `null`, exactly as before. `id` is the series master id (the
-        // editor passes seriesIdOf), which is what the cache stores (un-expanded).
+        // back to `null`, exactly as before. `id` is whatever row the editor
+        // loads: the series master (it passes seriesIdOf), or a provider override
+        // by its own `{series}::rid::{slot}` id. The cache stores both, un-expanded.
         // Gate on locality (not `route`, which would Err on a non-live external
         // adapter): the cache read needs only the resolved ACCOUNT, so an
         // external event resolves even when its adapter isn't currently live. An
