@@ -90,7 +90,9 @@ pub use day_start::{
     DayStartPlan, DayStartQuestion, DayStartReminderGroups, DayStartReminderSettings, DayStartTask,
 };
 pub use error::{Error, Result};
-pub use event_anchor::{plan_repairs, series_master_id, Anchored, Repair};
+pub use event_anchor::{
+    plan_repairs, series_master_id, split_override_id, Anchored, Repair, OVERRIDE_ID_MARKER,
+};
 pub use event_group::{normalized_title, EventGroup, EventGroupMember};
 pub use event_group_fold::{
     collapse_event_groups, collapse_event_groups_json, CollapsedRow, FoldableEvent,

@@ -67,6 +67,20 @@ when caching:
 > recur into it). Microsoft Graph is the exception — it uses
 > `/calendarView`, which expands occurrences server-side.
 
+> **A changed occurrence has an id of its own.** CalDAV, Google and EWS keep
+> an occurrence somebody changed apart from its series, and their adapters
+> return it as an override with the id `{series}::rid::{slot}`. The slot is
+> the instant the rule gives the occurrence, and it stays put when the
+> occurrence is moved (`cal_core::split_override_id` reads it).
+> `update_event` with such an id writes that one occurrence, and
+> `delete_event` with it removes that one occurrence, so the series skips
+> the slot from then on. That is also how a changed occurrence moved to
+> another calendar leaves its source. An adapter that cannot find the
+> occurrence in its slot fails the call. It never writes to or deletes the
+> series instead, because a provider keeps no copy of what that overwrites.
+> `add_event_exdate` on a slot that holds an override removes the override
+> too, however far it was moved.
+
 > **Attendee scheduling is server-side, never client SMTP.** When the user
 > opts to notify, the adapter asks the *provider* to email attendees:
 > EWS flips `SendMeetingInvitations*` to `SendToAllAndSaveCopy`, Google

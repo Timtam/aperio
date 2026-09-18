@@ -98,12 +98,13 @@ pub fn decode_event_id(event_id: &str) -> (Option<&str>, &str) {
     }
 }
 
-/// Separator in an override instance's id between the recurring series'
-/// `{href}|{uid}` and the RECURRENCE-ID instant it replaces — e.g.
-/// `…|uid::rid::2026-06-14T13:00:00Z`. Chosen so it can't appear in a CalDAV
-/// href/UID; the frontend (`shared/recurrence.ts`, kept in sync) splits a series
-/// id back out of it and skips the master occurrence the override stands in for.
-const RECURRENCE_ID_MARKER: &str = "::rid::";
+// Separator in an override instance's id between the recurring series'
+// `{href}|{uid}` and the RECURRENCE-ID instant it replaces — e.g.
+// `…|uid::rid::2026-06-14T13:00:00Z`. Chosen so it can't appear in a CalDAV
+// href/UID; the frontend (`shared/recurrence.ts`, kept in sync) splits a series
+// id back out of it and skips the master occurrence the override stands in for.
+// One marker for every adapter, kept in the core.
+use cal_core::OVERRIDE_ID_MARKER as RECURRENCE_ID_MARKER;
 
 fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> CaldavResult<Event> {
     let uid = ev
@@ -349,10 +350,23 @@ impl PriorAlarms {
     /// Read the alarms off the MASTER VEVENT of a resource body.
     ///
     /// Overrides (the VEVENTs carrying RECURRENCE-ID) are skipped on purpose:
-    /// [`event_to_ical`] only ever writes the master, and an override's alarms
-    /// belong to that one occurrence. A body we cannot parse yields nothing,
-    /// which costs only the preservation — never the write.
+    /// an override's alarms belong to that one occurrence, and a write of that
+    /// occurrence reads them with [`Self::read_occurrence`]. A body we cannot
+    /// parse yields nothing, which costs only the preservation — never the
+    /// write.
     pub fn read(body: &str) -> Self {
+        Self::read_where(body, |ev| ev.property_value("RECURRENCE-ID").is_none())
+    }
+
+    /// Read the alarms off the override VEVENT that stands in for the
+    /// occurrence at `slot`, for a write of that one occurrence.
+    pub fn read_occurrence(body: &str, slot: DateTime<Utc>) -> Self {
+        Self::read_where(body, |ev| {
+            ev.get_recurrence_id().map(|d| datetime_to_utc(d).0) == Some(slot)
+        })
+    }
+
+    fn read_where(body: &str, wanted: impl Fn(&icalendar::Event) -> bool) -> Self {
         let Ok(parsed) = body.parse::<ICalendar>() else {
             return Self::default();
         };
@@ -360,7 +374,7 @@ impl PriorAlarms {
             let icalendar::CalendarComponent::Event(ev) = comp else {
                 continue;
             };
-            if ev.property_value("RECURRENCE-ID").is_some() {
+            if !wanted(ev) {
                 continue;
             }
             return Self {
@@ -544,11 +558,10 @@ fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
 /// the provider's RECURRENCE-ID, zone-corrected), so it's exact even for a
 /// `TZID`-qualified or all-day RECURRENCE-ID.
 pub(crate) fn override_recurrence_id(event_id: &str) -> Option<DateTime<Utc>> {
-    let idx = event_id.find(RECURRENCE_ID_MARKER)?;
-    let iso = &event_id[idx + RECURRENCE_ID_MARKER.len()..];
-    DateTime::parse_from_rfc3339(iso)
+    cal_core::split_override_id(event_id)
         .ok()
-        .map(|dt| dt.with_timezone(&Utc))
+        .flatten()
+        .map(|(_, slot)| slot)
 }
 
 /// Parse an RFC 5545 ISO 8601 `DURATION` string into Aperio's
@@ -852,6 +865,49 @@ pub fn event_to_ical_preserving(
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     with_vtimezone(cal.to_string(), &new)
+}
+
+/// Render `event`, one changed occurrence, as the VEVENT that stands in for it
+/// in its series' resource.
+///
+/// `series_id` is the series' own id (`{href}|{uid}`): an override shares its
+/// master's UID. `recurrence_id` is the RECURRENCE-ID property exactly as the
+/// server's copy spells it, folded lines and line endings included. It has to
+/// match the master's DTSTART in kind and zone, and copying it is the one way
+/// to be sure it still does. The rest is rebuilt from core fields, as for a
+/// master, and keeps the alarms `prior` recognises.
+///
+/// Returns the VEVENT block alone, without the VCALENDAR around it.
+pub fn override_to_vevent(
+    event: &Event,
+    series_id: &str,
+    recurrence_id: &str,
+    organizer: Option<&str>,
+    prior: PriorAlarms,
+) -> String {
+    let mut occurrence = event.clone();
+    occurrence.id = series_id.to_string();
+    // One occurrence carries no rule of its own.
+    occurrence.recurrence = None;
+    let vcal = event_to_ical_preserving(&occurrence, organizer, prior);
+    let begin = "BEGIN:VEVENT\r\n";
+    let end = "END:VEVENT\r\n";
+    // The LAST `END:VEVENT`: a text value can end in those very characters, and
+    // only `END:VCALENDAR` follows the one VEVENT's own end line. Its `BEGIN`
+    // comes before any text value, so the first one is the right one.
+    let (Some(from), Some(to)) = (vcal.find(begin), vcal.rfind(end)) else {
+        // `icalendar` always writes both lines; this is unreachable short of a
+        // change in that crate, and the caller's PUT would then fail loudly.
+        return vcal;
+    };
+    let mut block = String::with_capacity(to + end.len() - from + recurrence_id.len() + 2);
+    block.push_str(begin);
+    block.push_str(recurrence_id);
+    if !recurrence_id.ends_with('\n') {
+        block.push_str("\r\n");
+    }
+    block.push_str(&vcal[from + begin.len()..to + end.len()]);
+    block
 }
 
 fn apply_common(
@@ -2646,5 +2702,38 @@ END:VCALENDAR\r
         let body = new_event_to_ical("rt-uid", &color_new_event(Some("#34a853")), None);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         assert_eq!(parsed[0].color_hex.as_deref(), Some("#34a853"));
+    }
+
+    /// A text value may end in the very characters of the end line. Cut there,
+    /// the block would lose its start, its UID and its end, and the PUT the
+    /// whole series goes out in would carry a broken VEVENT.
+    #[test]
+    fn an_override_block_ends_at_its_own_end_line() {
+        let mut event = event_with_reminders(Vec::new());
+        event.description = Some("pasted from a file\nEND:VEVENT".into());
+        event.location = Some("END:VEVENT".into());
+        let block = override_to_vevent(
+            &event,
+            "/cal/e.ics|series-1",
+            "RECURRENCE-ID:20260615T070000Z\r\n",
+            None,
+            PriorAlarms::default(),
+        );
+        assert!(
+            block.starts_with("BEGIN:VEVENT\r\nRECURRENCE-ID:"),
+            "{block}"
+        );
+        assert!(block.ends_with("\r\nEND:VEVENT\r\n"), "{block}");
+        assert!(block.contains("\r\nDTSTART"), "{block}");
+        assert!(block.contains("\r\nUID:series-1\r\n"), "{block}");
+        assert_eq!(
+            block
+                .split("\r\n")
+                .filter(|line| *line == "END:VEVENT")
+                .count(),
+            1,
+            "{block}"
+        );
+        assert!(!block.contains("END:VCALENDAR"), "{block}");
     }
 }

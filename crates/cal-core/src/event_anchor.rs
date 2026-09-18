@@ -22,13 +22,20 @@ use chrono::{DateTime, Utc};
 
 use crate::Event;
 
+/// The marker between a series id and the slot in an override id:
+/// `{series}::rid::{slot}`.
+///
+/// The CalDAV, Google and Exchange adapters mint such an id for a provider-sent
+/// override, the one changed occurrence a provider keeps apart from its series.
+/// `shared/recurrence.ts` splits it the same way on the frontend.
+pub const OVERRIDE_ID_MARKER: &str = "::rid::";
+
 /// The id of the SERIES this event belongs to.
 ///
 /// A provider-sent override for one modified occurrence carries the master's
 /// id in front of the marker; everything keyed per event — private reminders,
 /// colour overrides, group membership — is keyed by the master, because a
-/// recurring appointment is one appointment. The marker is minted by the
-/// CalDAV adapter (`RECURRENCE_ID_MARKER` in `adapter-caldav`'s mapping).
+/// recurring appointment is one appointment. See [`OVERRIDE_ID_MARKER`].
 ///
 /// # It is NOT the whole of the frontend's `seriesIdOf`
 ///
@@ -45,10 +52,36 @@ use crate::Event;
 /// unexpanded one — which is why anchoring a table of such signatures has to
 /// happen where the expansion is.
 pub fn series_master_id(event_id: &str) -> &str {
-    match event_id.find("::rid::") {
+    match event_id.find(OVERRIDE_ID_MARKER) {
         Some(idx) => &event_id[..idx],
         None => event_id,
     }
+}
+
+/// The series id and the slot an override id names, or `None` for any other
+/// id.
+///
+/// The slot is the instant the series rule gives the occurrence, RFC 3339 after
+/// the marker. It stays put when somebody moves the occurrence, so it is what an
+/// adapter looks the occurrence up by.
+///
+/// Every adapter that writes through such an id follows one contract, see
+/// [`crate::CalendarFeature::update_event`]: the write reaches this one
+/// occurrence or fails. An id that carries the marker but no readable slot is an
+/// error rather than `None` for that reason. Read as a plain id, it would name
+/// the series in front of the marker, and the write would reach every
+/// occurrence.
+pub fn split_override_id(event_id: &str) -> crate::Result<Option<(&str, DateTime<Utc>)>> {
+    let Some(idx) = event_id.find(OVERRIDE_ID_MARKER) else {
+        return Ok(None);
+    };
+    let slot = &event_id[idx + OVERRIDE_ID_MARKER.len()..];
+    let slot = DateTime::parse_from_rfc3339(slot).map_err(|err| {
+        crate::Error::invalid_input(format!(
+            "the occurrence id '{event_id}' names no readable slot: {err}"
+        ))
+    })?;
+    Ok(Some((&event_id[..idx], slot.with_timezone(&Utc))))
 }
 
 /// One stored row, reduced to what deciding needs.
@@ -299,6 +332,40 @@ mod tests {
             series_master_id("https://dav/e.ics|uid-1::rid::2026-06-15T09:00:00+00:00"),
             "https://dav/e.ics|uid-1"
         );
+    }
+
+    /// An override id splits into its series and its slot, whichever of the
+    /// two RFC 3339 spellings of UTC the adapter wrote.
+    #[test]
+    fn an_override_id_splits_into_series_and_slot() {
+        let slot = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        assert_eq!(
+            split_override_id("/cal/e.ics|uid-1::rid::2026-06-15T09:00:00Z").unwrap(),
+            Some(("/cal/e.ics|uid-1", slot))
+        );
+        assert_eq!(
+            split_override_id("master::rid::2026-06-15T11:00:00+02:00").unwrap(),
+            Some(("master", slot))
+        );
+    }
+
+    /// Any other id is no override, the expanded occurrence included.
+    #[test]
+    fn a_plain_id_is_no_override() {
+        assert_eq!(split_override_id("/cal/e.ics|uid-1").unwrap(), None);
+        assert_eq!(
+            split_override_id("/cal/e.ics|uid-1@2026-06-15T09:00:00.000Z").unwrap(),
+            None
+        );
+    }
+
+    /// The marker without a readable slot is an error. As `None` it would read
+    /// as the series in front of the marker, and a write through it would reach
+    /// every occurrence.
+    #[test]
+    fn an_override_id_without_a_readable_slot_is_an_error() {
+        assert!(split_override_id("/cal/e.ics|uid-1::rid::").is_err());
+        assert!(split_override_id("/cal/e.ics|uid-1::rid::monday").is_err());
     }
 
     /// The half this function does NOT do, written down so the gap is a

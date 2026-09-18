@@ -34,6 +34,17 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   `timeMin` on the full read).
 - **410 → resync.** Treat an invalid `syncToken` as "start over with a full
   list", then resume delta from the new token.
+- **One occurrence is found by its slot.** Google keeps a changed or
+  cancelled occurrence as an instance with an id of its own, and it rejects
+  an instance id a client builds itself (HTTP 400). Updating an override,
+  deleting one, and skipping an occurrence all look the instance up with
+  `events/{master}/instances?originalStart=…&showDeleted=true`, which
+  returns the instance in that slot however far it was moved. The adapter
+  then writes to the id Google returned. The slot is an RFC 3339 instant,
+  or a date for an all-day series, and the answer is compared as a parsed
+  instant, because Google replies in the event's own zone. An empty slot is
+  an error: nothing is cancelled or written, and a neighbouring occurrence
+  is never touched.
 
 ## Testing
 
