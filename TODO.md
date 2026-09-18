@@ -2231,6 +2231,23 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 ---
 
+### B8 · 🚩 Das macOS-Artefakt ist ein Entwicklungs-Build `[ ]`
+Gefunden bei der Prüfung von #81. `build-artifacts.yml` baut macOS mit
+`cargo build --workspace --release` für beide Architekturen und fügt sie mit
+`lipo` zusammen, am Tauri-CLI vorbei. Nur das CLI schaltet das Tauri-Feature
+`custom-protocol` ein. Ohne es kompiliert Tauri im Entwicklungsmodus: Die
+Oberfläche aus `dist/` wird nicht eingebettet, und das Fenster zeigt auf die
+`devUrl`. So ein Build zeigt nichts an und prüft auch nie die CSP.
+Vorschlag aus der Prüfung:
+- In `src-tauri/Cargo.toml` ein Feature `custom-protocol = ["tauri/custom-protocol"]`
+  anlegen.
+- Beide `cargo build` in `build-artifacts.yml` mit `--features
+  aperio/custom-protocol` aufrufen.
+- Den Kommentar dort korrigieren.
+- Eine CI-Probe ergänzen, dass die Binärdatei die Oberfläche enthält.
+Windows und Linux laufen über `npm run tauri -- build` und sind nicht
+betroffen.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)
