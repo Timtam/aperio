@@ -133,6 +133,16 @@ occurrence, and a new date moves the start of the series.
 > cannot repair this. Check the series afterwards in the calendar's own app,
 > where such single changes can be undone.
 
+> **Changing an occurrence that was already changed:** An occurrence changed
+> on its own in the calendar's own app (iCloud, Google, Exchange) stays part of
+> its series when you change or move only this occurrence again: in the event
+> dialog on the desktop and in the mobile app, and by dragging it on the
+> desktop. An occurrence you changed on its own in Aperio already is an
+> appointment of its own. Exchange is the exception: there such an occurrence may not move onto or
+> past another occurrence of the same series. Aperio then makes it an
+> appointment of its own at the new time, as it does with any other occurrence
+> you move on its own.
+
 > **Tip:** Recurring events from external calendars (e.g. iCloud) expand
 > correctly in every view – even when the first occurrence lies in the past.
 

@@ -361,6 +361,39 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     );
   });
 
+  it('a colour kept on the device follows an exception Exchange detaches', async () => {
+    // Exchange will not move an exception past a neighbouring occurrence; the
+    // adapter answers with a new single. The colour sat under the override's
+    // id, which names nothing afterwards.
+    const override = {
+      id: 'M:MASTER|MCK::rid::2026-06-15T09:00:00Z',
+      calendar_id: 'c1',
+      title: 'Standup, moved',
+      description: null,
+      location: null,
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T09:30:00.000Z',
+      all_day: false,
+      recurrence: null,
+      color_label: 'red',
+      reminders: [],
+      sound: null,
+      attendees: [],
+    } as unknown as CalendarEvent;
+    invokeMock.mockImplementation((cmd: string, args: { event?: CalendarEvent }) =>
+      Promise.resolve(
+        cmd === 'update_event' ? { ...args.event, id: 'S:NEW|NCK' } : undefined,
+      ),
+    );
+    expect(await moveEventToDay(override, localKey(override.start, 3), 'occurrence')).toBe(true);
+    const colours = invokeMock.mock.calls
+      .filter(([cmd]) => cmd === 'set_event_color')
+      .map(([, args]) => args);
+    expect(colours).toEqual([
+      { eventId: 'S:NEW|NCK', calendarId: 'c1', colorLabelId: 'red' },
+      { eventId: override.id, calendarId: 'c1', colorLabelId: null },
+    ]);
+  });
 });
 
 describe('moving a whole series (dragged with the whole-series scope)', () => {

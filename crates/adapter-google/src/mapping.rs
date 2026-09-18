@@ -255,11 +255,11 @@ impl EventDateTime {
     }
 }
 
-/// Separator between a recurring series' id and the RECURRENCE-ID instant an
-/// override replaces — e.g. `{master}::rid::2026-06-14T13:00:00Z`. Must match the
-/// CalDAV adapter and `shared/recurrence.ts`, which split the series id back out
-/// and skip the master occurrence the override stands in for.
-const RECURRENCE_ID_MARKER: &str = "::rid::";
+// Separator between a recurring series' id and the RECURRENCE-ID instant an
+// override replaces — e.g. `{master}::rid::2026-06-14T13:00:00Z`. One marker for
+// every adapter, kept in the core; `shared/recurrence.ts` splits the series id
+// back out and skips the master occurrence the override stands in for.
+use cal_core::OVERRIDE_ID_MARKER as RECURRENCE_ID_MARKER;
 
 /// The cal-core id for `entry`: a MODIFIED single instance of a recurring event
 /// (carrying `recurringEventId` + `originalStartTime`) becomes

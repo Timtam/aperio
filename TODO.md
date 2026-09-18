@@ -2149,6 +2149,31 @@ Siehe DESIGN §4.2.
   in einen anderen Kalender, auf Desktop und Handy. Bei CalDAV und Google
   braucht das Ziehen PR #80; bei Exchange löst #80 eine Ausnahme, die nicht
   über ein Nachbar-Vorkommen darf, aus der Serie (64a).
+  ↻ **Eine geänderte Ausnahme traf bei CalDAV und Google die ganze Serie**
+  (Prüfung von #78; 62b, 63a), behoben in PR #80. Die Override-Id
+  `{Serie}::rid::{Platz}` konnte nur Exchange adressieren. Bei CalDAV/iCloud
+  überschrieb „nur dieses Vorkommen“ speichern die ganze Serie mit einem
+  einzelnen Termin, und ein Kalenderwechsel löschte die Serie. Bei Google
+  scheiterte das Speichern, und ein Kalenderwechsel ließ ein Duplikat zurück.
+  Der Desktop hatte das seit 4179edfe. Jetzt:
+  - CalDAV schreibt nur den Block der Ausnahme und legt den Rest der Ressource
+    byte-genau zurück. Ein einzelnes Vorkommen löschen behält die übrigen
+    Ausnahmen und ihre Zeitzonen und nimmt die Ausnahme im Platz mit.
+  - Google sucht die Instanz über ihren Platz (`originalStart`). Dadurch findet
+    das Löschen auch eine weit verschobene Ausnahme, und es trifft in einer
+    täglichen Serie nie mehr das Nachbar-Vorkommen.
+  - Löschen über eine Override-Id nimmt bei allen dreien nur dieses Vorkommen
+    heraus.
+  - Exchange löst eine Ausnahme, die es nicht über ein Nachbar-Vorkommen
+    schieben will, selbst aus der Serie (64a).
+  Wartet auf den Live-Test: Googles Schreibweise von `originalStart` für
+  ganztägige Serien ist nicht dokumentiert; iCloud; die Exchange-Grenze.
+  🚩 **CalDAV: Ändern des Serienkopfs schreibt nur den Kopf.** `put_master_only`
+  verlässt sich darauf, dass der Server die übrigen Ausnahmen der Ressource
+  wieder anhängt (Kommentar in `events.rs` seit 27f9fcd1). Das ist nicht
+  belegt; ein Server, der sich an RFC 4791 hält, verwirft sie. Live messen
+  (iCloud, Nextcloud) und bei Bedarf auf das Zusammenführen umstellen, das
+  #80 für Ausnahmen gebaut hat.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

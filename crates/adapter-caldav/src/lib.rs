@@ -1057,7 +1057,15 @@ impl CalendarFeature for CaldavAdapter {
         }))
     }
 
-    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
+        // An override id names one occurrence, and deleting it skips that slot
+        // (see the trait). It lives in the resource of its whole series, so the
+        // DELETE below would take the series with it.
+        if let Some((series_id, slot)) = cal_core::split_override_id(event_id)? {
+            return self
+                .add_event_exdate(series_id, slot, send_cancellations)
+                .await;
+        }
         // `send_cancellations` is not honoured here: CalDAV scheduling is
         // SERVER-driven (RFC 6638 implicit scheduling). On a scheduling-aware
         // collection (e.g. iCloud) the server itself emails a CANCEL to every
@@ -1771,6 +1779,60 @@ mod tests {
         assert_eq!(first.len(), second.len());
         assert_eq!(first[0].name, "Work");
         m.assert_async().await;
+    }
+
+    /// Moving a changed occurrence to another calendar deletes it from the
+    /// source by its override id. That id's resource is the whole series, so a
+    /// DELETE of it took every occurrence along.
+    #[tokio::test]
+    async fn deleting_an_override_skips_its_slot_and_keeps_the_series() {
+        let mut server = Server::new_async().await;
+        mock_discovery_chain(&mut server).await;
+        server
+            .mock("PROPFIND", "/calendars/alice/")
+            .with_status(207)
+            .with_body(HOME_LISTING_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/calendars/alice/work/series.ics")
+            .with_status(200)
+            .with_header("etag", "\"server-etag\"")
+            .with_body(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20260615T070000Z\r\n\
+DTSTART:20260618T120000Z\r\nDTEND:20260618T123000Z\r\nSUMMARY:Moved far\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n",
+            )
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", "/calendars/alice/work/series.ics")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("RRULE:FREQ=WEEKLY;BYDAY=MO".into()),
+                mockito::Matcher::Regex("EXDATE:20260615T070000Z".into()),
+            ]))
+            .with_status(204)
+            .create_async()
+            .await;
+        let delete = server
+            .mock("DELETE", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        adapter
+            .delete_event(
+                "/calendars/alice/work/series.ics|series-1::rid::2026-06-15T07:00:00Z",
+                false,
+            )
+            .await
+            .unwrap();
+        put.assert_async().await;
+        delete.assert_async().await;
     }
 
     #[tokio::test]

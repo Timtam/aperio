@@ -638,9 +638,38 @@ pub async fn create_event(
 /// event. Google accepts a partial body, but we send the full
 /// user-visible state so the local copy and the server stay in
 /// step without diffing.
+///
+/// An override id (`{master}::rid::{slot}`) is no Google id. It is resolved to
+/// the instance Google keeps in that slot, see [`instance_in_slot`], and the
+/// PATCH goes to that instance's own id; the answer maps back to the same
+/// override id. An empty or cancelled slot is refused: the write would have
+/// nowhere to go but the whole series.
 pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let cal_enc = urlencoding(&ev.calendar_id);
-    let ev_enc = urlencoding(&ev.id);
+    let target = match cal_core::split_override_id(&ev.id)
+        .map_err(|e| GoogleError::Protocol(e.to_string()))?
+    {
+        Some((master_id, slot)) => {
+            let master: EventEntry = state
+                .get_json(&format!(
+                    "/calendars/{cal_enc}/events/{}",
+                    urlencoding(master_id)
+                ))
+                .await?;
+            match instance_in_slot(state, &cal_enc, &master, slot).await? {
+                Some(instance) if instance.status.as_deref() != Some("cancelled") => instance.id,
+                _ => {
+                    return Err(GoogleError::Protocol(format!(
+                        "the occurrence of {master_id} at {} is no longer in its series; \
+                         refusing to write the whole series instead",
+                        slot.to_rfc3339(),
+                    )))
+                }
+            }
+        }
+        None => ev.id.clone(),
+    };
+    let ev_enc = urlencoding(&target);
     let su = send_updates_param(ev.send_invitations && !ev.attendees.is_empty());
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
@@ -953,9 +982,10 @@ pub enum ExdateOutcome {
 /// as an EXDATE on the master. Patching the master's `recurrence` with a UTC
 /// EXDATE is silently dropped for a zoned series (RFC 5545 wants the EXDATE in the
 /// DTSTART zone) and isn't Google's mechanism anyway, so it was a no-op. Instead
-/// we DELETE the instance `{master}_{originalStart}` — the exact id shape
-/// [`map_event`] turns back into a `{master}::rid::{start}` cancelled override, so
-/// the next read suppresses the occurrence. Never rewrites the master.
+/// we cancel the instance Google keeps in the slot, found by [`instance_in_slot`]
+/// however far it was moved. [`map_event`] turns the cancelled instance back into
+/// a `{master}::rid::{start}` cancelled override, so the next read suppresses the
+/// occurrence. Never rewrites the master.
 pub async fn add_event_exdate(
     state: &ApiState,
     calendar_id: &str,
@@ -965,56 +995,30 @@ pub async fn add_event_exdate(
 ) -> GoogleResult<ExdateOutcome> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
-    // The master's presence on THIS calendar tells "wrong calendar" (keep walking)
-    // apart from a real failure (surface it) — a 404 here is the only thing that
-    // lets the walk continue; anything else propagates.
-    match state
+    // Cancel one occurrence the way Google documents: look the instance up and
+    // cancel the id GOOGLE returns — do NOT build `{master}_{time}` ourselves. A
+    // self-constructed instance id is rejected with HTTP 400 ("invalid resource
+    // id") even when the UTC instant is correct; only an id the API handed back is
+    // a valid address.
+    let master = match state
         .get_json::<EventEntry>(&format!("/calendars/{cal_enc}/events/{ev_enc}"))
         .await
     {
-        Ok(_) => {}
+        Ok(master) => master,
+        // The master's presence on THIS calendar tells "wrong calendar" (keep
+        // walking) apart from a real failure (surface it) — a 404 here is the
+        // only thing that lets the walk continue; anything else propagates.
         Err(GoogleError::Http { status: 404, .. }) => return Ok(ExdateOutcome::MasterNotHere),
         Err(e) => return Err(e),
-    }
-    // Cancel one occurrence the way Google documents: expand the master over the
-    // occurrence's day and cancel the instance id GOOGLE returns — do NOT build
-    // `{master}_{time}` ourselves. A self-constructed instance id is rejected with
-    // HTTP 400 ("invalid resource id") even when the UTC instant is correct; only an
-    // id the API handed back is a valid address. Google returns each instance's
-    // start in the EVENT's zone (e.g. `2026-07-23T13:00:00+02:00`), so we match on
-    // the parsed-to-UTC instant, never the wall-clock digits. `showDeleted=true`
-    // keeps an already-cancelled slot visible so a re-delete stays idempotent.
-    let lo = occurrence - Duration::days(1);
-    let hi = occurrence + Duration::days(1);
-    let path = format!(
-        "/calendars/{cal_enc}/events/{ev_enc}/instances\
-         ?showDeleted=true&maxResults=250&timeMin={}&timeMax={}",
-        urlencoding(&lo.to_rfc3339()),
-        urlencoding(&hi.to_rfc3339()),
-    );
-    let resp: EventListResponse = state.get_json(&path).await?;
-    // Nearest instance by resolved (offset-parsed) start to the wanted occurrence.
-    let target = resp
-        .items
-        .iter()
-        .filter_map(|it| {
-            let src = it.original_start_time.as_ref().unwrap_or(&it.start);
-            let (got, _) = src.resolve().ok()?;
-            Some((it, (got - occurrence).num_seconds().abs()))
-        })
-        .min_by_key(|(_, dist)| *dist);
-    let matched = target.map(|(it, dist)| format!("{} (delta {dist}s)", it.id));
-    debug!(
-        event_id,
-        occurrence = %occurrence,
-        instances = resp.items.len(),
-        ?matched,
-        "add_event_exdate: instance lookup"
-    );
-    let Some((instance, _)) = target else {
-        // No instance for that day — already cancelled or never materialised; the
-        // occurrence is gone either way, so a delete is an idempotent success.
-        return Ok(ExdateOutcome::Cancelled);
+    };
+    let Some(instance) = instance_in_slot(state, &cal_enc, &master, occurrence).await? else {
+        // With `showDeleted=true` a slot cancelled before is found, and answered
+        // below. No instance at all means the slot is not one Google's copy of
+        // the rule makes, and the occurrence the user sees is still there.
+        return Err(GoogleError::Protocol(format!(
+            "Google has no occurrence of {event_id} at {}; nothing was cancelled",
+            occurrence.to_rfc3339(),
+        )));
     };
     if instance.status.as_deref() == Some("cancelled") {
         return Ok(ExdateOutcome::Cancelled);
@@ -1044,6 +1048,73 @@ pub async fn add_event_exdate(
         }) => Ok(ExdateOutcome::Cancelled),
         Err(e) => Err(e),
     }
+}
+
+/// The instance of `master` in the slot `slot`, as Google hands it back, or
+/// `None` if Google has none there.
+///
+/// `GET …/events/{master}/instances?originalStart=…` is Google's own answer for
+/// a client that expands a series itself: it returns "either zero or one item,
+/// depending on whether the instance with the exact original start date
+/// exists". It asks by the ORIGINAL start, the slot, so an instance moved any
+/// distance is found; a `timeMin`/`timeMax` window filters by where an instance
+/// is now and misses one moved out of it. `showDeleted=true` keeps a cancelled
+/// slot visible, so a second delete of it stays idempotent.
+///
+/// The master says how its slots are spelled. A timed series' slot is an
+/// instant, sent as RFC 3339; Google answers in the event's own zone
+/// (`2026-07-23T13:00:00+02:00`), so the answer is compared as a parsed instant,
+/// never by its digits. An all-day series' slot is a day, sent and compared as
+/// a date: see [`all_day_slot`]. The answer is never trusted unchecked.
+async fn instance_in_slot(
+    state: &ApiState,
+    cal_enc: &str,
+    master: &EventEntry,
+    slot: DateTime<Utc>,
+) -> GoogleResult<Option<EventEntry>> {
+    let day = master.start.date.is_some().then(|| all_day_slot(slot));
+    let original_start = match day {
+        Some(day) => day.format("%Y-%m-%d").to_string(),
+        None => slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    };
+    let path = format!(
+        "/calendars/{cal_enc}/events/{}/instances?showDeleted=true&originalStart={}",
+        urlencoding(&master.id),
+        urlencoding(&original_start),
+    );
+    let resp: EventListResponse = state.get_json(&path).await?;
+    let found = resp.items.len();
+    let instance = resp.items.into_iter().find(|it| {
+        let src = it.original_start_time.as_ref().unwrap_or(&it.start);
+        match (day, src.date) {
+            (Some(want), Some(got)) => got == want,
+            _ => src.resolve().is_ok_and(|(start, _)| start == slot),
+        }
+    });
+    debug!(
+        master = %master.id,
+        %original_start,
+        found,
+        matched = ?instance.as_ref().map(|it| &it.id),
+        "instance lookup by original start"
+    );
+    Ok(instance)
+}
+
+/// The day an all-day slot names.
+///
+/// Aperio anchors an all-day date at local midnight, but a slot does not always
+/// sit there. The views expand an all-day series in plain UTC from its first
+/// date, so across a clock change its slots lie an hour or two off local
+/// midnight. A date whose midnight a clock change skips resolves to that date's
+/// UTC midnight (`EventDateTime::resolve`), which west of UTC reads as the
+/// evening before. Both stay within hours of the local midnight they stand for,
+/// so the day is the one whose midnight lies nearest: twelve hours on, then the
+/// local date.
+fn all_day_slot(slot: DateTime<Utc>) -> chrono::NaiveDate {
+    (slot + Duration::hours(12))
+        .with_timezone(&chrono::Local)
+        .date_naive()
 }
 
 /// `PATCH /calendars/{id}` with `{ "summary": "..." }`. Google's
@@ -1658,16 +1729,15 @@ mod tests {
             )
             .create_async()
             .await;
-        // Expand the day → Google returns the instance in the EVENT'S ZONE (+02:00)
-        // with its own id. We must match on the parsed-to-UTC instant (18:00Z), not
-        // the wall-clock "20:00" — the bug that made the earlier lookup find nothing.
+        // Ask for the slot → Google returns the instance in the EVENT'S ZONE
+        // (+02:00) with its own id. We must match on the parsed-to-UTC instant
+        // (18:00Z), not the wall-clock "20:00" — the bug that made an earlier
+        // lookup find nothing.
         let get_instances = server
             .mock(
                 "GET",
-                mockito::Matcher::Regex(
-                    r"^/calendars/primary/events/master-1/instances\?.*showDeleted=true"
-                        .to_string(),
-                ),
+                "/calendars/primary/events/master-1/instances\
+                 ?showDeleted=true&originalStart=2026-06-01T18%3A00%3A00Z",
             )
             .with_status(200)
             .with_body(
@@ -1716,12 +1786,12 @@ mod tests {
             )
             .create_async()
             .await;
+        // An all-day series spells its slots as dates.
         server
             .mock(
                 "GET",
-                mockito::Matcher::Regex(
-                    r"^/calendars/primary/events/bday-1/instances\?.*".to_string(),
-                ),
+                "/calendars/primary/events/bday-1/instances\
+                 ?showDeleted=true&originalStart=2026-06-01",
             )
             .with_status(200)
             .with_body(
@@ -1753,6 +1823,62 @@ mod tests {
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
         patch.assert_async().await;
+    }
+
+    /// Past a clock change the views hand in an all-day slot an hour off local
+    /// midnight (they expand an all-day series in plain UTC). It still names
+    /// its day, and Google answers that day with a date.
+    #[tokio::test]
+    async fn add_event_exdate_reads_an_all_day_slot_as_its_day() {
+        for drift in [1, -1] {
+            let mut server = mockito::Server::new_async().await;
+            server
+                .mock("GET", "/calendars/primary/events/bday-1")
+                .with_status(200)
+                .with_body(
+                    r##"{"id":"bday-1","start":{"date":"2026-03-02"},"end":{"date":"2026-03-03"},
+                         "recurrence":["RRULE:FREQ=DAILY"]}"##,
+                )
+                .create_async()
+                .await;
+            let lookup = server
+                .mock(
+                    "GET",
+                    "/calendars/primary/events/bday-1/instances\
+                     ?showDeleted=true&originalStart=2026-06-01",
+                )
+                .with_status(200)
+                .with_body(
+                    r##"{"items":[
+                      {"id":"bday-1_20260601","status":"confirmed",
+                       "originalStartTime":{"date":"2026-06-01"}}
+                    ]}"##,
+                )
+                .create_async()
+                .await;
+            let patch = server
+                .mock(
+                    "PATCH",
+                    "/calendars/primary/events/bday-1_20260601?sendUpdates=none",
+                )
+                .with_status(200)
+                .with_body(r#"{"id":"bday-1_20260601","status":"cancelled"}"#)
+                .create_async()
+                .await;
+
+            let state = fixture_state(&server.url());
+            let slot = chrono::Local
+                .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+                + chrono::Duration::hours(drift);
+            let outcome = add_event_exdate(&state, "primary", "bday-1", slot, false)
+                .await
+                .unwrap();
+            assert!(matches!(outcome, ExdateOutcome::Cancelled), "drift {drift}");
+            lookup.assert_async().await;
+            patch.assert_async().await;
+        }
     }
 
     #[tokio::test]
@@ -1848,6 +1974,212 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
+    }
+
+    /// A weekly master whose 1 June 18:00Z instance was moved three days on.
+    async fn serve_moved_instance(server: &mut mockito::Server) {
+        server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=WEEKLY"]}"##,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "GET",
+                "/calendars/primary/events/master-1/instances\
+                 ?showDeleted=true&originalStart=2026-06-01T18%3A00%3A00Z",
+            )
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1_20260601T180000Z","status":"confirmed",
+                   "recurringEventId":"master-1",
+                   "start":{"dateTime":"2026-06-04T20:00:00+02:00"},
+                   "end":{"dateTime":"2026-06-04T21:00:00+02:00"},
+                   "originalStartTime":{"dateTime":"2026-06-01T20:00:00+02:00"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_finds_an_instance_moved_far_by_its_slot() {
+        // A window around the slot misses an instance moved out of it, and in a
+        // daily series its nearest neighbour sat inside the window instead.
+        let mut server = mockito::Server::new_async().await;
+        serve_moved_instance(&mut server).await;
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=none",
+            )
+            .match_body(mockito::Matcher::Regex(
+                r#""status":"cancelled""#.to_string(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":"master-1_20260601T180000Z","status":"cancelled"}"#)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let slot = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
+        let outcome = add_event_exdate(&state, "primary", "master-1", slot, false)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ExdateOutcome::Cancelled));
+        patch.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_never_cancels_another_slot() {
+        // Whatever comes back, only the exact slot is cancelled. Nothing in it
+        // is an error, not a success: the occurrence the user sees is still there.
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=DAILY"]}"##,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/master-1/instances\?".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1_20260531T180000Z","status":"confirmed",
+                   "originalStartTime":{"dateTime":"2026-05-31T18:00:00Z"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        let patch = server
+            .mock("PATCH", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let slot = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
+        let err = add_event_exdate(&state, "primary", "master-1", slot, false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("nothing was cancelled"), "{err}");
+        patch.assert_async().await;
+    }
+
+    fn moved_override() -> Event {
+        Event {
+            id: "master-1::rid::2026-06-01T18:00:00Z".into(),
+            calendar_id: "primary".into(),
+            title: "Moved again".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 6, 5, 18, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2026, 6, 5, 19, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            cancelled: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_event_on_an_override_patches_the_instance_in_its_slot() {
+        let mut server = mockito::Server::new_async().await;
+        serve_moved_instance(&mut server).await;
+        let sent = Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = Arc::clone(&sent);
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=none",
+            )
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                *sink.lock().unwrap() = request.utf8_lossy_body().unwrap().into_owned();
+                br##"{"id":"master-1_20260601T180000Z","status":"confirmed",
+                     "summary":"Moved again","recurringEventId":"master-1",
+                     "start":{"dateTime":"2026-06-05T18:00:00Z"},
+                     "end":{"dateTime":"2026-06-05T19:00:00Z"},
+                     "originalStartTime":{"dateTime":"2026-06-01T18:00:00Z"}}"##
+                    .to_vec()
+            })
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let updated = update_event(&state, &moved_override()).await.unwrap();
+        patch.assert_async().await;
+        let sent = sent.lock().unwrap().clone();
+        assert!(sent.contains(r#""summary":"Moved again""#), "{sent}");
+        assert!(
+            !sent.contains("recurrence"),
+            "one occurrence carries no rule of its own: {sent}"
+        );
+        assert_eq!(updated.id, moved_override().id, "keeps its override id");
+        assert_eq!(updated.title, "Moved again");
+    }
+
+    #[tokio::test]
+    async fn update_event_on_an_override_refuses_an_empty_slot() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=WEEKLY"]}"##,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/master-1/instances\?".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(r#"{"items":[]}"#)
+            .create_async()
+            .await;
+        let patch = server
+            .mock("PATCH", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let err = update_event(&state, &moved_override()).await.unwrap_err();
+        assert!(err.to_string().contains("refusing"), "{err}");
+        patch.assert_async().await;
     }
 
     #[tokio::test]

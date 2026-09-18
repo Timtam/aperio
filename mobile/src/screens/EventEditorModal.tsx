@@ -857,10 +857,20 @@ export default function EventEditorModal({
           attendees,
           send_invitations: sendInvitations,
         };
+        // What comes back is normally the override itself. Exchange may instead
+        // detach it as a single of its own, when it will not move an exception
+        // past a neighbouring occurrence, so the colour and the carry follow
+        // the row that came back. The private reminders stay on the series,
+        // where an override's belong: keyed by the single, the save would
+        // empty the series' own row. Mirrors the desktop EventDialog.
         const updated = await updateEvent(overrideRow, original.calendar_id);
-        await savePrivate(updated);
+        await savePrivate(overrideRow);
         if (!isLocalCal) {
           await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
+          if (updated.id !== overrideRow.id) {
+            // The override's id names nothing any more.
+            await setEventColor(overrideRow.id, calId, null).catch(() => undefined);
+          }
         }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),

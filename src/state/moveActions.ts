@@ -17,6 +17,7 @@ import {
   addEventExdate,
   createEvent as apiCreateEvent,
   getEventById,
+  setEventColor,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
@@ -425,13 +426,22 @@ export async function moveEventToSlot(
     // An override IS the occurrence, and the series already skips its slot.
     // Carving it out created a copy next to it, and on Exchange an exception
     // moved far from its slot then stayed behind as a duplicate.
-    await apiUpdateEvent({
+    const landed = await apiUpdateEvent({
       ...event,
       start: newStart,
       end: newEnd,
       // Stays null: an override is one instance and owns no rule.
       recurrence: null,
     });
+    // Exchange will not move an exception past a neighbouring occurrence and
+    // detaches it as a single with an id of its own. A colour Aperio keeps on
+    // the device, keyed by the override's id, follows it there.
+    if (landed?.id && landed.id !== event.id && event.color_label) {
+      await setEventColor(landed.id, landed.calendar_id, event.color_label);
+      await setEventColor(event.id, event.calendar_id, null).catch(
+        () => undefined,
+      );
+    }
     return true;
   }
 

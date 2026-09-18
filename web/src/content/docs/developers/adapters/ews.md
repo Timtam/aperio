@@ -41,6 +41,14 @@ The endpoint is discovered or user-supplied.
   calendar:Recurrence`: Exchange refuses it on an exception
   (`ErrorInvalidPropertyDelete`) and fails the whole update. The returned event
   keeps the override id.
+- **An exception cannot pass its neighbours.** Exchange refuses to move an
+  exception onto or past a neighbouring occurrence of its series
+  (`ErrorOccurrenceCrossingBoundary`; Outlook has the same rule). The adapter
+  then detaches it the way Aperio moves any unchanged occurrence on its own:
+  it creates a single at the new time and deletes the exception's item
+  without a cancellation. The event that comes back is the new single. If the
+  delete fails, the move stands and the failure is logged; a duplicate may
+  remain.
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by
