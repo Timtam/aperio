@@ -1569,13 +1569,13 @@ export function EventDialog({
   // The scope chosen in the up-front prompt is part of WHAT this dialog edits,
   // so the title says it, and a screen reader reads it out on open. The form
   // repeats it as a read-only field, a stop that Tab reaches.
+  // Every choice counts, the whole series too: it opens the series itself,
+  // which is no occurrence, so the scope is what tells it apart.
   const chosenScope =
-    isEdit && isOccurrence && initialScope != null
-      ? t(SCOPE_LABEL_KEY[editScope])
-      : null;
+    isEdit && initialScope != null ? t(SCOPE_LABEL_KEY[editScope]) : null;
   const title = !isEdit
     ? t('dialogs.event.newTitle')
-    : isOccurrence && initialScope != null
+    : initialScope != null
       ? t(SCOPE_TITLE_KEY[editScope])
       : t('dialogs.event.editTitle');
 
@@ -1990,7 +1990,8 @@ export function EventDialog({
           </fieldset>
         )}
 
-        {isEdit && event?.recurrence && !isOccurrence && (
+        {/* Not beside the "Apply to" field, which says the same. */}
+        {isEdit && event?.recurrence && !isOccurrence && chosenScope == null && (
           <p className="form__hint">
             {t('dialogs.event.recurrence.editsSeries')}
           </p>

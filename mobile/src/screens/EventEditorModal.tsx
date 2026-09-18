@@ -185,13 +185,16 @@ export default function EventEditorModal({
   // which part of a series the edit reaches, as on the desktop.
   useEffect(() => {
     navigation.setOptions({
-      title: !editing
-        ? t('dialogs.event.newTitle')
-        : isOccurrence && initialScope != null
-          ? t(SCOPE_TITLE_KEY[editScope])
-          : t('dialogs.event.editTitle'),
+      title:
+        eventId != null && isBirthdayEventId(eventId)
+          ? t('dialogs.event.birthdayTitle')
+          : !editing
+            ? t('dialogs.event.newTitle')
+            : initialScope != null
+              ? t(SCOPE_TITLE_KEY[editScope])
+              : t('dialogs.event.editTitle'),
     });
-  }, [editScope, editing, initialScope, isOccurrence, navigation, t]);
+  }, [editScope, editing, eventId, initialScope, navigation, t]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1476,11 +1479,13 @@ export default function EventEditorModal({
           editor confirms it read-only — one clear choice beats a control a
           screen-reader user could miss. The segmented control stays as a fallback
           for any path that opens an occurrence without the prompt. */}
-      {isOccurrence &&
-        original != null &&
-        // A provider override opened in place has no rule of its own; the
-        // scope the user chose still applies, as on the desktop.
-        (original.recurrence != null || isProviderOverride(original)) &&
+      {original != null &&
+        // The whole series opens the series itself, no occurrence. A provider
+        // override opened in place has no rule of its own; the scope the user
+        // chose still applies, as on the desktop.
+        (!isOccurrence ||
+          original.recurrence != null ||
+          isProviderOverride(original)) &&
         initialScope != null && (
         <Text style={styles.muted}>
           {t('dialogs.event.scope.label')}:{' '}
@@ -1511,7 +1516,8 @@ export default function EventEditorModal({
 
       {/* Editing a whole recurring series: say so, so a change to the times or
           the rule isn't mistaken for a one-off edit. Mirrors the desktop hint. */}
-      {editing && original?.recurrence != null && !isOccurrence && (
+      {/* Not beside the scope line above, which says the same. */}
+      {editing && original?.recurrence != null && !isOccurrence && initialScope == null && (
         <Text style={styles.hint}>
           {t('dialogs.event.recurrence.editsSeries')}
         </Text>

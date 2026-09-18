@@ -118,7 +118,9 @@ describe('DialogState recurring-edit scope prompt', () => {
     });
     expect(screen.getByTestId('kind').textContent).toBe('event');
     expect(screen.getByTestId('event').textContent).toBe('evt-1');
-    expect(screen.getByTestId('scope').textContent).toBe('none');
+    // The choice rides along, so the editor can name it: the series itself is
+    // no occurrence, and nothing else would tell this edit from any other.
+    expect(screen.getByTestId('scope').textContent).toBe('series');
   });
 
   it('keeps the prompt and says so when the series cannot be loaded', async () => {

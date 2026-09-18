@@ -356,6 +356,23 @@ describe('EventDialog → the scope chosen up front', () => {
     expect(field.tabIndex).toBe(0);
   });
 
+  it('names the whole series, which opens the series itself', async () => {
+    deviceInBerlin();
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={SERIES} initialScope="series" />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
+    expect(
+      screen.getByRole('dialog', { name: /^(ganze serie bearbeiten|edit the whole series)$/i }),
+    ).toBeTruthy();
+    const field = screen.getByRole('textbox', { name: /^(anwenden auf|apply to)$/i }) as HTMLInputElement;
+    expect(field.readOnly).toBe(true);
+    expect(field.value).toMatch(/^(ganze serie|whole series)$/i);
+  });
+
   it('keeps the plain title for an event that is no occurrence', async () => {
     deviceInBerlin();
     const { EventDialog } = await import('./EventDialog');
