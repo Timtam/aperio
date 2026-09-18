@@ -2106,10 +2106,12 @@ Siehe DESIGN §4.2.
   - Eine tägliche ganztägige Serie beginnt wegen des Startdatums einen Tag
     früher, am Sonntag.
 
-  🚩 **Eine Ausnahme in Exchange zu ändern scheitert** (auch auf main). Aperio
-  schickt beim Ändern eines einzeln geänderten Termins `DeleteItemField
-  calendar:Recurrence`. Exchange lehnt das an einer Ausnahme mit
-  `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheitert.
+  ↻ **Eine Ausnahme in Exchange zu ändern scheiterte**, behoben in PR #77.
+  Aperio schickte beim Ändern eines einzeln geänderten Termins
+  `DeleteItemField calendar:Recurrence`. Exchange lehnt das an einer Ausnahme
+  mit `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheiterte.
+  Jetzt bleibt das Löschen bei einer Ausnahme weg. Die zurückgegebene Ausnahme
+  behält ihre Override-Id. Auf dem Handy wirkt das mit dem nächsten Build.
   🚩 **Ausnahmen zeigen den Betreff der Serie.** Aperio baut eine Ausnahme aus
   der Serie und liest ihren eigenen Betreff, Ort und Text nicht nach. Das ist
   eine eigene, spätere Aufgabe außerhalb der Zeitzonen (58a).
@@ -2119,6 +2121,21 @@ Siehe DESIGN §4.2.
   2. der Lesefehler im Kern (48a);
   3. der Exchange-Schreiber mit 47a und dem Datumsfehler zusammen;
   4. danach die weiteren Stufen des Entwurfs.
+
+  Die Prüfung des Ausnahme-Fixes hat zwei ältere Fehler gefunden. Toni hat sie
+  direkt danach eingereiht, noch vor 48a (61a):
+  🚩 **A: Das Handy ändert eine Exchange-Ausnahme nicht direkt.** Für „nur
+  dieses Vorkommen“ öffnet es den Serienkopf. Dann löscht es die Ausnahme und
+  legt einen neuen Einzeltermin an, oder das Speichern scheitert. Der Desktop
+  ändert die Ausnahme direkt (`EventDialog.tsx`). Das Handy braucht denselben
+  Weg (`eventEditScope.ts`, `EventEditorModal.tsx`).
+  🚩 **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat.** Auf dem
+  Desktop legt Verschieben oder Ziehen einer geänderten Ausnahme einen neuen
+  Einzeltermin an und nimmt den Platz aus der Serie heraus. Die Ausnahme selbst
+  ändert es nie (`moveActions.ts`). Die Suche nach dem Vorkommen in Exchange
+  vergleicht dabei `Start` statt `OriginalStart`. Ist eine Ausnahme um mehr als
+  sechs Stunden verschoben, wird sie nicht herausgenommen und bleibt doppelt
+  stehen.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

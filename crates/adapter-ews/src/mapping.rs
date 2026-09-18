@@ -4761,7 +4761,7 @@ mod tests {
             &format!(
                 "Step R3-7: NOT Aperio's rule yet (47a prototype). Aperio's override update of the S3 \
                  exception moved to Tuesday 27 October, Start and End on midnights of the stored zone, \
-                 with the Recurrence delete the override path sends. {REPLACE}"
+                 with the Recurrence delete the override path sent until PR #77. {REPLACE}"
             ),
             update(&on_stored_midnights(&moved, set.clone()), &del),
         );
@@ -4781,7 +4781,7 @@ mod tests {
         write(
             "R3-7b-update-s3-exception-no-recurrence-delete.xml",
             &format!(
-                "Step R3-7b: NOT Aperio's request. R3-7 without the Recurrence delete, sent only if \
+                "Step R3-7b: NOT Aperio's request. R3-7 without the Recurrence delete, as the override path writes since PR #77; sent only if \
                  Exchange refuses R3-7. {REPLACE}"
             ),
             update(&on_stored_midnights(&moved, set), &del_without_rule),
