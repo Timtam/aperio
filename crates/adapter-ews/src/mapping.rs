@@ -2032,15 +2032,20 @@ fn required_attendees_xml(attendees: &[String]) -> String {
 /// — every field that has a value becomes a `<t:SetItemField>`, and
 /// every field that was set on the previous version but is now empty
 /// becomes a `<t:DeleteItemField>` so EWS clears it server-side.
+///
+/// For a single item or a series head; an exception takes
+/// [`event_to_update_field_xml_on`] with [`EventIdKind::Exception`].
 pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
-    event_to_update_field_xml_on(event, None)
+    event_to_update_field_xml_on(event, None, EventIdKind::Single)
 }
 
 /// [`event_to_update_field_xml`] for a server whose known Windows zone ids are
-/// `server_zones` (decision 41a); `None` when they are unknown.
+/// `server_zones` (decision 41a); `None` when they are unknown. `target` is the
+/// kind of item the update is written to, as `resolve_write_target` found it.
 pub fn event_to_update_field_xml_on(
     event: &Event,
     server_zones: Option<&ServerTimeZones>,
+    target: EventIdKind,
 ) -> EwsResult<(String, String)> {
     let mut set = String::new();
     let mut del = String::new();
@@ -2130,7 +2135,10 @@ pub fn event_to_update_field_xml_on(
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:Recurrence\"/>\n              <t:CalendarItem>\n                {rec_xml}\n              </t:CalendarItem>\n            </t:SetItemField>\n",
         ));
-    } else {
+    } else if target != EventIdKind::Exception {
+        // An exception has no rule of its own to clear. Exchange refuses to
+        // delete one there (`ErrorInvalidPropertyDelete`, live test round 3),
+        // and the whole update fails with it.
         del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
     }
     // Keep the zone on a zoned recurring master so a server-side edit doesn't
@@ -4154,7 +4162,12 @@ mod tests {
                 tzid: Some(tzid.into()),
             });
             let xml = new_event_to_calendar_item_xml_on(&create, zones).unwrap();
-            let (set, _) = event_to_update_field_xml_on(&zoned_master(Some(tzid)), zones).unwrap();
+            let (set, _) = event_to_update_field_xml_on(
+                &zoned_master(Some(tzid)),
+                zones,
+                EventIdKind::RecurringMaster,
+            )
+            .unwrap();
             (xml, set)
         };
 
@@ -4801,6 +4814,29 @@ mod tests {
         // become DeleteItemField blocks when cleared.
         assert!(del.contains("FieldURI=\"calendar:Location\""));
         assert!(del.contains("FieldURI=\"calendar:Recurrence\""));
+    }
+
+    /// Live test round 3: Exchange refuses `DeleteItemField calendar:Recurrence`
+    /// on an exception (`ErrorInvalidPropertyDelete`) and fails the whole
+    /// update. An override edit carries no rule, so the delete must stay out
+    /// for an exception target, and stay in for every other kind.
+    #[test]
+    fn an_update_of_an_exception_never_deletes_its_rule() {
+        let override_edit = Event {
+            recurrence: None,
+            ..zoned_master(None)
+        };
+        let (_, del) =
+            event_to_update_field_xml_on(&override_edit, None, EventIdKind::Exception).unwrap();
+        assert!(!del.contains("calendar:Recurrence"), "{del}");
+        assert!(del.contains(r#"FieldURI="calendar:Location""#), "{del}");
+        for kind in [EventIdKind::Single, EventIdKind::RecurringMaster] {
+            let (_, del) = event_to_update_field_xml_on(&override_edit, None, kind).unwrap();
+            assert!(
+                del.contains(r#"FieldURI="calendar:Recurrence""#),
+                "{kind:?}: {del}"
+            );
+        }
     }
 
     #[test]
