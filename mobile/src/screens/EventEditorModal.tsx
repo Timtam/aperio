@@ -143,6 +143,13 @@ function privateRows(rows: readonly EditableReminder[]): Reminder[] {
     .map(({ kind, sound }) => ({ kind, sound }));
 }
 
+/** The editor's title for each scope of a series edit. */
+const SCOPE_TITLE_KEY = {
+  occurrence: 'dialogs.event.editTitleScope.occurrence',
+  this_and_future: 'dialogs.event.editTitleScope.thisAndFuture',
+  series: 'dialogs.event.editTitleScope.series',
+} as const;
+
 export default function EventEditorModal({
   route,
   navigation,
@@ -173,6 +180,18 @@ export default function EventEditorModal({
   const [editScope, setEditScope] = useState<
     'occurrence' | 'series' | 'this_and_future'
   >(initialScope ?? 'occurrence');
+  // The header title is read out when the editor opens. It says whether this
+  // is a new event or an edit and, when the up-front prompt chose a scope,
+  // which part of a series the edit reaches, as on the desktop.
+  useEffect(() => {
+    navigation.setOptions({
+      title: !editing
+        ? t('dialogs.event.newTitle')
+        : isOccurrence && initialScope != null
+          ? t(SCOPE_TITLE_KEY[editScope])
+          : t('dialogs.event.editTitle'),
+    });
+  }, [editScope, editing, initialScope, isOccurrence, navigation, t]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

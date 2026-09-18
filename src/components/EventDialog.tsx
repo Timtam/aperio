@@ -210,6 +210,18 @@ interface FormState {
  */
 type EditScope = 'series' | 'occurrence' | 'this_and_future';
 
+/** How each scope is named in the form, and in the dialog's title. */
+const SCOPE_LABEL_KEY = {
+  occurrence: 'dialogs.event.scope.occurrence',
+  this_and_future: 'dialogs.event.scope.thisAndFuture',
+  series: 'dialogs.event.scope.series',
+} as const satisfies Record<EditScope, string>;
+const SCOPE_TITLE_KEY = {
+  occurrence: 'dialogs.event.editTitleScope.occurrence',
+  this_and_future: 'dialogs.event.editTitleScope.thisAndFuture',
+  series: 'dialogs.event.editTitleScope.series',
+} as const satisfies Record<EditScope, string>;
+
 /** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
 export function EventDialog({
   isOpen,
@@ -1554,7 +1566,18 @@ export function EventDialog({
     performThisAndFutureDelete,
   ]);
 
-  const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
+  // The scope chosen in the up-front prompt is part of WHAT this dialog edits,
+  // so the title says it, and a screen reader reads it out on open. The form
+  // repeats it as a read-only field, a stop that Tab reaches.
+  const chosenScope =
+    isEdit && isOccurrence && initialScope != null
+      ? t(SCOPE_LABEL_KEY[editScope])
+      : null;
+  const title = !isEdit
+    ? t('dialogs.event.newTitle')
+    : isOccurrence && initialScope != null
+      ? t(SCOPE_TITLE_KEY[editScope])
+      : t('dialogs.event.editTitle');
 
   // Birthday events (DESIGN.md §10.3) are synthesised from
   // contacts. The full edit form would let the user type into
@@ -1920,19 +1943,17 @@ export function EventDialog({
         {/* The recurring-edit scope is normally chosen in the up-front
             prompt (see EditEventScopeDialog), so the editor just confirms it
             read-only — one clear choice beats a radio group a screen-reader
-            user could miss. The radios remain as a fallback for any path that
-            opens an occurrence without going through the prompt. */}
-        {isOccurrence && initialScope != null && (
-          <p className="form__hint">
-            {t('dialogs.event.scope.label')}:{' '}
-            {t(
-              editScope === 'occurrence'
-                ? 'dialogs.event.scope.occurrence'
-                : editScope === 'this_and_future'
-                  ? 'dialogs.event.scope.thisAndFuture'
-                  : 'dialogs.event.scope.series',
-            )}
-          </p>
+            user could miss. A read-only field rather than a line of text, so
+            Tab reaches it like every other field of the form. The radios
+            remain as a fallback for any path that opens an occurrence
+            without going through the prompt. */}
+        {chosenScope != null && (
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.event.scope.label')}
+            </span>
+            <input type="text" readOnly value={chosenScope} />
+          </label>
         )}
         {isOccurrence && initialScope == null && (
           <fieldset className="form__field">

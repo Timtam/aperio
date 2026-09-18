@@ -129,7 +129,10 @@ spätere werden geändert (beim Bearbeiten übernimmt ab hier eine neue Serie) o
 entfernt (beim Löschen). **Die ganze Serie** öffnet die Serie selbst, mit ihrem
 eigenen Beginn und Ende, auch wenn du sie von einem späteren Termin aus geöffnet
 hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
-Beginn der Serie.
+Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
+Termin bearbeiten**, und wird beim Öffnen vorgelesen. Am Desktop wiederholt das
+Formular sie im schreibgeschützten Feld **Anwenden auf**, das du wie jedes andere
+Feld mit `Tab` erreichst.
 
 > **Einzeln geänderte oder gelöschte Termine:** Verschiebst du eine ganze Serie
 > auf einen anderen Tag oder eine andere Uhrzeit, per Ziehen oder im Dialog,

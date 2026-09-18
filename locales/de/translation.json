@@ -1458,6 +1458,11 @@
     "event": {
       "newTitle": "Neuer Termin",
       "editTitle": "Termin bearbeiten",
+      "editTitleScope": {
+        "occurrence": "Nur diesen Termin bearbeiten",
+        "thisAndFuture": "Diesen und alle folgenden bearbeiten",
+        "series": "Ganze Serie bearbeiten"
+      },
       "titleRequired": "Bitte gib einen Titel ein.",
       "calendarRequired": "Bitte wähle einen Kalender.",
       "dateInvalid": "Das angegebene Datum ist ungültig.",
