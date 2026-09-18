@@ -142,6 +142,14 @@ Beginn der Serie.
 > kann das nicht reparieren. Sieh dir die Serie danach in der App des Kalenders
 > an; dort lassen sich solche Einzeländerungen rückgängig machen.
 
+> **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
+> schon für sich geändert wurde (in Aperio oder in der App des Kalenders:
+> iCloud, Google, Exchange), bleibt Teil seiner Serie, wenn du wieder nur diesen
+> Termin im Dialog änderst. Eine Ausnahme macht Exchange: Dort darf so ein
+> Termin nicht auf oder über einen anderen Termin derselben Serie rücken. Aperio
+> macht ihn dann zu einem eigenen Termin zur neuen Zeit, so wie jeden anderen
+> Termin, den du einzeln verschiebst.
+
 > **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
 > werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste
 > Wiederholung in der Vergangenheit liegt.

@@ -71,6 +71,22 @@ Apple's well-known endpoints.
   fails the delta fails too (token not advanced) rather than caching a
   falsified flat parent. Writes strip the composite id back to the UID;
   removing the parent just regenerates the VTODO without the property.
+- **A changed occurrence lives in its series' resource.** The server keeps it
+  as a second VEVENT beside the master, with the same UID and a
+  `RECURRENCE-ID` naming its slot. A PUT replaces the whole resource, so any
+  write to one occurrence reads the resource and puts back everything it
+  does not change, byte for byte:
+  - Updating an override swaps its VEVENT for the rewritten one. The
+    `RECURRENCE-ID` line is copied exactly as the server wrote it, because it
+    has to match the master's `DTSTART` in kind and zone. If the resource
+    cannot be read block by block, or the slot holds no override any more,
+    nothing is written.
+  - Skipping an occurrence (`add_event_exdate`, and `delete_event` with an
+    override id) adds the `EXDATE` to the master and drops the override in
+    that slot. The other overrides stay, and so does every `VTIMEZONE` they
+    name. A resource that holds overrides without their master (an
+    invitation to single occurrences) loses the one block, and the resource
+    itself goes with its last block.
 - **Keep recurring masters.** The folder-complete sync keeps every event
   regardless of date; the legacy windowed fallback still keeps any event
   with a recurrence even when its first occurrence is outside the window

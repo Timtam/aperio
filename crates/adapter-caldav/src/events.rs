@@ -27,9 +27,10 @@ use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
 use crate::mapping::{
     decode_event_id, event_to_ical_preserving, new_event_to_ical, override_recurrence_id,
-    parse_calendar_data, parse_calendar_data_with_href, PriorAlarms,
+    override_to_vevent, parse_calendar_data, parse_calendar_data_with_href, PriorAlarms,
 };
 use crate::xml::parse_multistatus;
+use std::ops::Range;
 
 /// Read every event in `range` from the calendar collection at
 /// `calendar_url`. Returns one [`Event`] per VEVENT the server sent
@@ -205,12 +206,23 @@ pub async fn create_event(
 /// caller's copy carries one so a 412 surfaces conflicts the user
 /// needs to resolve. Returns the updated event with the new ETag
 /// the server emitted in the response.
+///
+/// An override id (`{href}|{uid}::rid::{slot}`) writes that one occurrence
+/// and nothing else, see [`update_override`].
 pub async fn update_event(
     client: &Client,
     event: Event,
     credentials: &Credentials,
     organizer: Option<&str>,
 ) -> CaldavResult<Event> {
+    // First, and never falling through: the plain PUT below would write the
+    // occurrence over its whole series' resource.
+    if let Some((series_id, slot)) =
+        cal_core::split_override_id(&event.id).map_err(|e| CaldavError::Config(e.to_string()))?
+    {
+        let series_id = series_id.to_string();
+        return update_override(client, event, &series_id, slot, credentials, organizer).await;
+    }
     // "This and all following" truncation: the master's rule now ends earlier, so
     // any RECURRENCE-ID override in the dropped tail must go too. The plain
     // master-only PUT below leaves them (the server reattaches its other
@@ -325,6 +337,180 @@ async fn put_master_only(
     })
 }
 
+/// Write one changed occurrence, `event`, into its series' resource.
+///
+/// The server keeps a changed occurrence as an override: a VEVENT of its own in
+/// the series' resource, with the series' UID and a RECURRENCE-ID that names the
+/// slot. A PUT replaces the whole resource, so this reads the resource, swaps
+/// that one block for the rewritten occurrence, and puts everything else back
+/// byte for byte: the master, the other overrides, the time zones.
+///
+/// Refused rather than widened. If the resource cannot be read block by block,
+/// or no override stands in the slot any more, nothing is written: the only
+/// other write left would be one over the whole series.
+///
+/// If-Match carries the caller's ETag when there is one, as for a master: the
+/// question is still whether anything changed since the user last saw it.
+async fn update_override(
+    client: &Client,
+    event: Event,
+    series_id: &str,
+    slot: DateTime<Utc>,
+    credentials: &Credentials,
+    organizer: Option<&str>,
+) -> CaldavResult<Event> {
+    let cal_url = Url::parse(&event.calendar_id)
+        .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
+    let resource = resource_url_for_event(&cal_url, series_id)?;
+    let (body, server_etag) = get_resource(client, &resource, credentials).await?;
+    let refused = |why: &str| {
+        CaldavError::Protocol(format!(
+            "the occurrence of {series_id} at {}: {why}; refusing to write the whole series instead",
+            slot.to_rfc3339(),
+        ))
+    };
+    let blocks = vevent_blocks(&body, cal_url.as_str())
+        .ok_or_else(|| refused("its resource cannot be read block by block"))?;
+    let (_, uid) = decode_event_id(series_id);
+    let block = blocks
+        .iter()
+        .find(|b| {
+            override_recurrence_id(&b.event.id) == Some(slot)
+                && cal_core::series_master_id(&b.event.id) == uid
+        })
+        .ok_or_else(|| refused("it is no longer an exception in the series"))?;
+    let recurrence_id = recurrence_id_lines(&body[block.range.clone()])
+        .ok_or_else(|| refused("its block carries no RECURRENCE-ID"))?;
+    let rendered = override_to_vevent(
+        &event,
+        series_id,
+        &recurrence_id,
+        organizer,
+        PriorAlarms::read_occurrence(&body, slot),
+    );
+    let new_body = format!(
+        "{}{}{}",
+        &body[..block.range.start],
+        rendered,
+        &body[block.range.end..]
+    );
+
+    let mut headers = auth_header(credentials)?;
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/calendar; charset=utf-8"),
+    );
+    if let Some(tag) = event.etag.as_ref().or(server_etag.as_ref()) {
+        let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
+        headers.insert(IF_MATCH, value);
+    }
+    let response = client
+        .put(resource)
+        .headers(headers)
+        .body(new_body)
+        .send_retrying()
+        .await?;
+    expect_write_success(&response)?;
+    let new_etag = extract_etag(&response);
+
+    Ok(Event {
+        etag: new_etag.or(event.etag.clone()),
+        updated_at: Utc::now(),
+        ..event
+    })
+}
+
+/// GET a resource: its body and ETag. A 404 comes back as
+/// `CaldavError::Http { status: 404 }`, which the home-set walkers in `lib.rs`
+/// read as "not in this calendar".
+async fn get_resource(
+    client: &Client,
+    resource: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<(String, Option<String>)> {
+    let mut headers = auth_header(credentials)?;
+    headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
+    let response = client
+        .get(resource.clone())
+        .headers(headers)
+        .send_retrying()
+        .await?;
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return Err(CaldavError::Http {
+            status: 404,
+            message: format!("'{resource}' not found on server"),
+        });
+    }
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if body.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                body.chars().take(200).collect()
+            },
+        });
+    }
+    let etag = extract_etag(&response);
+    Ok((response.text().await?, etag))
+}
+
+/// One VEVENT of a resource body: where its text sits in the body, and the
+/// event it maps to.
+struct VeventBlock {
+    range: Range<usize>,
+    event: Event,
+}
+
+/// Read `body` block by block: every top-level VEVENT beside the event it maps
+/// to, in document order. `None` when the two don't line up one to one (a
+/// VEVENT the mapper skips, an odd shape), so no caller can mistake one block
+/// for another.
+fn vevent_blocks(body: &str, calendar_id: &str) -> Option<Vec<VeventBlock>> {
+    let parsed = parse_calendar_data(body, calendar_id).ok()?;
+    let ranges = component_ranges(body, "VEVENT");
+    if parsed.len() != ranges.len() {
+        return None;
+    }
+    Some(
+        ranges
+            .into_iter()
+            .zip(parsed)
+            .map(|(range, event)| VeventBlock { range, event })
+            .collect(),
+    )
+}
+
+/// The RECURRENCE-ID property of one VEVENT block, as the block spells it:
+/// the property line, its folded continuation lines and their line endings.
+fn recurrence_id_lines(block: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut inside = false;
+    for line in block.split_inclusive('\n') {
+        // A continuation line starts with a space or a tab (RFC 5545 §3.1).
+        let continued = line.starts_with(' ') || line.starts_with('\t');
+        if inside && continued {
+            out.push_str(line);
+            continue;
+        }
+        if inside {
+            break;
+        }
+        let name = line
+            .split([';', ':'])
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(['\r', '\n']);
+        if !continued && name.eq_ignore_ascii_case("RECURRENCE-ID") {
+            inside = true;
+            out.push_str(line);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// "This and all following" write: GET the resource, replace the master with the
 /// truncated `event`, KEEP every RECURRENCE-ID override at/before `until` verbatim
 /// (so per-instance edits/VALARMs/X-props survive byte-for-byte), and DROP the
@@ -362,11 +548,11 @@ async fn update_event_dropping_tail_overrides(
     // hand, so the master's untouched alarms keep their identity for free —
     // the overrides' alarms survive anyway, being spliced back verbatim.
     let master_vcal = event_to_ical_preserving(&event, organizer, PriorAlarms::read(&body));
-    let new_body = match merge_dropping_tail_overrides(&body, &master_vcal, until, cal_url.as_str())
-    {
-        Some(b) => b,
-        None => return put_master_only(client, event, credentials, organizer).await,
-    };
+    let new_body =
+        match merge_with_overrides(&body, &master_vcal, cal_url.as_str(), |rid| rid <= until) {
+            Some(b) => b,
+            None => return put_master_only(client, event, credentials, organizer).await,
+        };
 
     let mut put_headers = auth_header(credentials)?;
     put_headers.insert(
@@ -396,47 +582,52 @@ async fn update_event_dropping_tail_overrides(
     })
 }
 
-/// Rebuild the resource body for a "this and all following" truncation: the
-/// `master_vcal` (from `event_to_ical`, a full VCALENDAR holding just the new
-/// master) with the in-range RECURRENCE-ID overrides from `body` spliced back in
-/// and the tail overrides (RECURRENCE-ID after `until`) dropped.
+/// Rebuild a resource around a rewritten master: `master_vcal` (a VCALENDAR
+/// holding just the new master, from `event_to_ical`) with the RECURRENCE-ID
+/// overrides of `body` that `keep` accepts spliced back in, and the others
+/// dropped. A "this and all following" truncation keeps the overrides up to its
+/// cutoff; skipping one occurrence keeps all but the one in its slot.
 ///
 /// Overrides are identified from the MAPPED events (so a `TZID`/all-day
 /// RECURRENCE-ID is zone-resolved correctly) but their raw VEVENT text is kept
-/// byte-for-byte, so per-instance edits / VALARMs / X-props survive intact.
+/// byte-for-byte, so per-instance edits / VALARMs / X-props survive intact. A
+/// kept override may name a zone the new master does not, so every VTIMEZONE of
+/// `body` that `master_vcal` lacks comes along with them, byte-for-byte too.
 /// Returns `None` when the parsed events and raw blocks don't correspond 1:1 (an
 /// unmappable VEVENT, an odd shape) so the caller can fall back safely.
-fn merge_dropping_tail_overrides(
+fn merge_with_overrides(
     body: &str,
     master_vcal: &str,
-    until: DateTime<Utc>,
     calendar_id: &str,
+    keep: impl Fn(DateTime<Utc>) -> bool,
 ) -> Option<String> {
-    let parsed = parse_calendar_data(body, calendar_id).ok()?;
-    let blocks = split_vevent_blocks(body);
-    if parsed.len() != blocks.len() {
-        return None;
-    }
-    let kept: Vec<&str> = parsed
+    let blocks = vevent_blocks(body, calendar_id)?;
+    let kept: Vec<&str> = blocks
         .iter()
-        .zip(blocks.iter())
-        .filter_map(|(ev, block)| match override_recurrence_id(&ev.id) {
-            // Master VEVENT → replaced by the truncated master in `master_vcal`.
+        .filter_map(|b| match override_recurrence_id(&b.event.id) {
+            // Master VEVENT → replaced by the new master in `master_vcal`.
             None => None,
-            // In-range override → keep verbatim; tail override → drop.
-            Some(rid) if rid <= until => Some(block.as_str()),
+            Some(rid) if keep(rid) => Some(&body[b.range.clone()]),
             Some(_) => None,
         })
         .collect();
-    Some(splice_overrides_before_end(master_vcal, &kept))
+    if kept.is_empty() {
+        return Some(master_vcal.to_string());
+    }
+    let merged = splice_overrides_before_end(master_vcal, &kept);
+    Some(with_missing_vtimezones(merged, body))
 }
 
-/// Split a raw VCALENDAR body into its top-level `VEVENT` blocks (each retaining
-/// its own line endings), in document order. VALARM / VTIMEZONE sub-components
-/// stay inside their VEVENT block (they don't start with `BEGIN:VEVENT`).
-fn split_vevent_blocks(body: &str) -> Vec<String> {
-    let mut blocks = Vec::new();
-    let mut current: Option<String> = None;
+/// The byte ranges of the top-level `BEGIN:<name>` … `END:<name>` components
+/// of a raw VCALENDAR body, each with its own line endings, in document order.
+/// Sub-components (a VEVENT's VALARM, a VTIMEZONE's STANDARD) stay inside their
+/// parent's range, because they have other names.
+fn component_ranges(body: &str, name: &str) -> Vec<Range<usize>> {
+    let begin = format!("BEGIN:{name}");
+    let end = format!("END:{name}");
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut offset = 0;
     for line in body.split_inclusive('\n') {
         // Match the PHYSICAL line, stripping only the trailing CR/LF — NOT leading
         // whitespace. RFC-5545 folds long values onto continuation lines prefixed
@@ -444,19 +635,75 @@ fn split_vevent_blocks(body: &str) -> Vec<String> {
         // whitespace; `line.trim()` would misread a folded "…\r\n BEGIN:VEVENT"
         // inside a DESCRIPTION as a boundary and corrupt the block.
         let marker = line.trim_end_matches(['\r', '\n']);
-        if marker == "BEGIN:VEVENT" {
-            current = Some(String::new());
+        if marker == begin {
+            start = Some(offset);
         }
-        if let Some(buf) = current.as_mut() {
-            buf.push_str(line);
-        }
-        if marker == "END:VEVENT" {
-            if let Some(buf) = current.take() {
-                blocks.push(buf);
+        offset += line.len();
+        if marker == end {
+            if let Some(from) = start.take() {
+                ranges.push(from..offset);
             }
         }
     }
-    blocks
+    ranges
+}
+
+/// Split a raw VCALENDAR body into its top-level `VEVENT` blocks (each retaining
+/// its own line endings), in document order. VALARM / VTIMEZONE sub-components
+/// stay inside their VEVENT block (they don't start with `BEGIN:VEVENT`).
+#[cfg(test)]
+fn split_vevent_blocks(body: &str) -> Vec<String> {
+    component_ranges(body, "VEVENT")
+        .into_iter()
+        .map(|r| body[r].to_string())
+        .collect()
+}
+
+/// `vcal` with every VTIMEZONE of `body` it does not define yet, copied
+/// verbatim in front of its first VEVENT, where RFC 5545 wants a zone: before
+/// the components that name it.
+fn with_missing_vtimezones(mut vcal: String, body: &str) -> String {
+    let defined: Vec<String> = component_ranges(&vcal, "VTIMEZONE")
+        .into_iter()
+        .filter_map(|r| vtimezone_tzid(&vcal[r]))
+        .collect();
+    let missing: String = component_ranges(body, "VTIMEZONE")
+        .into_iter()
+        .filter(|r| vtimezone_tzid(&body[r.clone()]).is_some_and(|tzid| !defined.contains(&tzid)))
+        .map(|r| body[r].to_string())
+        .collect();
+    if missing.is_empty() {
+        return vcal;
+    }
+    if let Some(pos) = vcal.find("BEGIN:VEVENT") {
+        vcal.insert_str(pos, &missing);
+    }
+    vcal
+}
+
+/// The TZID a VTIMEZONE block defines, unfolded. Only the component itself
+/// carries one; its STANDARD and DAYLIGHT parts do not.
+fn vtimezone_tzid(block: &str) -> Option<String> {
+    let mut lines = block.split_inclusive('\n').peekable();
+    while let Some(line) = lines.next() {
+        let named_tzid = line.len() > 4
+            && line[..4].eq_ignore_ascii_case("TZID")
+            && line[4..].starts_with([':', ';']);
+        if !named_tzid {
+            continue;
+        }
+        let (_, value) = line.split_once(':')?;
+        let mut tzid = value.trim_end_matches(['\r', '\n']).to_string();
+        while let Some(next) = lines.peek() {
+            if !(next.starts_with(' ') || next.starts_with('\t')) {
+                break;
+            }
+            tzid.push_str(next[1..].trim_end_matches(['\r', '\n']));
+            lines.next();
+        }
+        return Some(tzid);
+    }
+    None
 }
 
 /// Insert the `overrides` VEVENT blocks just before the final `END:VCALENDAR` of
@@ -548,17 +795,25 @@ pub async fn delete_event(
     Ok(DeleteOutcome::Deleted)
 }
 
-/// Read the master VEVENT at `<calendar_url>/<uid>.ics`, append
-/// `occurrence` to its EXDATE list, and PUT the modified iCal body
-/// back. Mirrors the EXDATE handling that the local adapter has for
-/// "delete only this occurrence" of a recurring event.
+/// Skip one occurrence of a recurring series: append `occurrence` to the
+/// master's EXDATE list, and drop the override that stands in that slot if
+/// there is one. Mirrors the EXDATE handling that the local adapter has for
+/// "delete only this occurrence" of a recurring event. An override moved far
+/// from its slot is found all the same: it is recognised by its RECURRENCE-ID,
+/// the slot, not by where it now starts.
 ///
-/// The fetch + serialise round-trip lets the master keep its RRULE
-/// + every other property the server stored, so we don't
-/// accidentally drop iCloud-specific data on the way through. The
-/// final PUT uses If-Match against the freshly read ETag so a
-/// concurrent edit from another client surfaces as a 412 rather
-/// than a silent overwrite.
+/// A PUT replaces the whole resource. The master is re-serialised with its new
+/// EXDATE, keeping every other property the server stored and the alarms it
+/// had; every other override goes back byte for byte, and so do the time zones
+/// they name. A body that cannot be read block by block gets the master alone,
+/// as every body did before overrides were kept.
+///
+/// A resource can hold overrides without their master: an invitation to one
+/// occurrence of somebody else's series arrives that way. Skipping such an
+/// occurrence drops its block, and the resource goes with its last block.
+///
+/// The final write uses If-Match against the freshly read ETag so a concurrent
+/// edit from another client surfaces as a 412 rather than a silent overwrite.
 pub async fn add_event_exdate(
     client: &Client,
     calendar_url: &Url,
@@ -567,71 +822,54 @@ pub async fn add_event_exdate(
     credentials: &Credentials,
 ) -> CaldavResult<()> {
     let resource = resource_url_for_event(calendar_url, event_id)?;
+    let (body, etag) = get_resource(client, &resource, credentials).await?;
 
-    // Step 1: fetch the master body + its ETag.
-    let mut get_headers = auth_header(credentials)?;
-    get_headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
-    let response = client
-        .get(resource.clone())
-        .headers(get_headers)
-        .send_retrying()
-        .await?;
-    let status = response.status();
-    if status == StatusCode::NOT_FOUND {
-        return Err(CaldavError::Http {
-            status: 404,
-            message: format!("event '{event_id}' not found on server"),
-        });
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
-    }
-    let etag = extract_etag(&response);
-    let body = response.text().await?;
-
-    // Step 2: parse, locate the master VEVENT, append EXDATE.
-    let mut events = parse_calendar_data(&body, calendar_url.as_str())?;
     // Match on the UID component — `event_id` may be the composite
     // `{href}|{uid}` while the freshly-parsed bodies carry bare UIDs.
     let (_, want_uid) = decode_event_id(event_id);
-    let master = events
+    let mut events = parse_calendar_data(&body, calendar_url.as_str())?;
+    let new_body = match events
         .iter_mut()
         .find(|e| decode_event_id(&e.id).1 == want_uid)
-        .ok_or_else(|| {
-            CaldavError::Discovery(format!("event '{event_id}' missing from its own resource"))
-        })?;
-    if master.recurrence.is_none() {
-        return Err(CaldavError::Discovery(format!(
-            "event '{event_id}' is not recurring"
-        )));
-    }
-    let recurrence = master.recurrence.as_mut().unwrap();
-    if !recurrence.exceptions.contains(&occurrence) {
-        recurrence.exceptions.push(occurrence);
-    }
-    let master_clone = master.clone();
-    // The first event we found should be the master — drop any
-    // additional sub-components (overrides) and re-serialise just
-    // the master with its updated EXDATE list. Servers reattach
-    // their other components on the next round-trip.
-    // Re-serialising the master after an EXDATE skip — never a scheduling
-    // write, so no organizer. Skipping one occurrence changes nothing about
-    // the alarms, so they all come back exactly as the server had them: the
-    // body we just read is right here.
-    let serialised =
-        crate::mapping::event_to_ical_preserving(&master_clone, None, PriorAlarms::read(&body));
+    {
+        Some(master) => {
+            let Some(recurrence) = master.recurrence.as_mut() else {
+                return Err(CaldavError::Discovery(format!(
+                    "event '{event_id}' is not recurring"
+                )));
+            };
+            if !recurrence.exceptions.contains(&occurrence) {
+                recurrence.exceptions.push(occurrence);
+            }
+            // Re-serialising the master after an EXDATE skip — never a
+            // scheduling write, so no organizer. Skipping one occurrence changes
+            // nothing about the alarms, so they all come back exactly as the
+            // server had them: the body we just read is right here.
+            let master_vcal = event_to_ical_preserving(master, None, PriorAlarms::read(&body));
+            merge_with_overrides(&body, &master_vcal, calendar_url.as_str(), |rid| {
+                rid != occurrence
+            })
+            .unwrap_or(master_vcal)
+        }
+        None => {
+            let blocks = vevent_blocks(&body, calendar_url.as_str()).unwrap_or_default();
+            let Some(block) = blocks.iter().find(|b| {
+                override_recurrence_id(&b.event.id) == Some(occurrence)
+                    && cal_core::series_master_id(&b.event.id) == want_uid
+            }) else {
+                return Err(CaldavError::Discovery(format!(
+                    "event '{event_id}' missing from its own resource"
+                )));
+            };
+            if blocks.len() == 1 {
+                return delete_resource(client, &resource, etag.as_deref(), credentials).await;
+            }
+            format!("{}{}", &body[..block.range.start], &body[block.range.end..])
+        }
+    };
 
-    // Step 3: PUT the modified body back. If-Match guards against a
-    // race with a concurrent edit; without an ETag we send the
-    // request anyway — the server will still accept it.
+    // If-Match guards against a race with a concurrent edit; without an ETag
+    // we send the request anyway — the server will still accept it.
     let mut put_headers = auth_header(credentials)?;
     put_headers.insert(
         CONTENT_TYPE,
@@ -645,11 +883,36 @@ pub async fn add_event_exdate(
     let put = client
         .put(resource)
         .headers(put_headers)
-        .body(serialised)
+        .body(new_body)
         .send_retrying()
         .await?;
     expect_write_success(&put)?;
     Ok(())
+}
+
+/// DELETE a resource whose last occurrence was just skipped. A 404 means it is
+/// gone already, which is what was asked for.
+async fn delete_resource(
+    client: &Client,
+    resource: &Url,
+    etag: Option<&str>,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let mut headers = auth_header(credentials)?;
+    if let Some(tag) = etag {
+        if let Ok(v) = HeaderValue::from_str(tag) {
+            headers.insert(IF_MATCH, v);
+        }
+    }
+    let response = client
+        .delete(resource.clone())
+        .headers(headers)
+        .send_retrying()
+        .await?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    expect_write_success(&response)
 }
 
 #[allow(dead_code)]
@@ -1476,9 +1739,10 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         let master_vcal = event_to_ical(&master, None);
         let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();
 
-        let merged =
-            merge_dropping_tail_overrides(body, &master_vcal, until, "https://example.com/cal/")
-                .expect("body parses cleanly");
+        let merged = merge_with_overrides(body, &master_vcal, "https://example.com/cal/", |rid| {
+            rid <= until
+        })
+        .expect("body parses cleanly");
 
         // The in-range override is kept verbatim; the tail override is gone.
         assert!(
@@ -1530,9 +1794,340 @@ END:VCALENDAR\r\n";
 BEGIN:VEVENT\r\nDTSTART:20260803T090000Z\r\nSUMMARY:No UID\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let until = Utc.with_ymd_and_hms(2026, 8, 10, 0, 0, 0).unwrap();
         assert_eq!(
-            merge_dropping_tail_overrides(body, "MASTER", until, "https://example.com/cal/"),
+            merge_with_overrides(body, "MASTER", "https://example.com/cal/", |rid| rid
+                <= until),
             None,
         );
+    }
+
+    /// A zoned weekly series as an iPhone stores it: the zone, the master, and
+    /// two overrides. The first stands in for the 15 June slot and was moved
+    /// three days on; the second only got a new title.
+    const SERIES_BODY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+PRODID:-//Apple Inc.//iPhone OS 18//EN\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Europe/Berlin\r\n\
+BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nTZNAME:CET\r\nEND:STANDARD\r\n\
+BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nTZNAME:CEST\r\nEND:DAYLIGHT\r\n\
+END:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+DTSTART;TZID=Europe/Berlin:20260608T090000\r\nDTEND;TZID=Europe/Berlin:20260608T093000\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\n\
+X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+RECURRENCE-ID;TZID=Europe/Berlin:20260615T090000\r\n\
+DTSTART;TZID=Europe/Berlin:20260618T140000\r\nDTEND;TZID=Europe/Berlin:20260618T143000\r\n\
+SUMMARY:Moved far\r\n\
+BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Event reminder\r\nTRIGGER:-PT15M\r\n\
+UID:alarm-a\r\nEND:VALARM\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+RECURRENCE-ID;TZID=Europe/Berlin:20260622T090000\r\n\
+DTSTART;TZID=Europe/Berlin:20260622T090000\r\nDTEND;TZID=Europe/Berlin:20260622T093000\r\n\
+SUMMARY:Retitled\r\nX-CUSTOM-PROP:kept byte for byte\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+    /// The 15 June slot of [`SERIES_BODY`]: 09:00 in Berlin, summer time.
+    fn moved_slot() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 6, 15, 7, 0, 0).unwrap()
+    }
+
+    /// The block of [`SERIES_BODY`] that starts with `marker`'s VEVENT.
+    fn block_of<'a>(body: &'a str, marker: &str) -> &'a str {
+        let at = body.find(marker).expect("marker in body");
+        let from = body[..at].rfind("BEGIN:VEVENT").unwrap();
+        let to = at + body[at..].find("END:VEVENT\r\n").unwrap() + "END:VEVENT\r\n".len();
+        &body[from..to]
+    }
+
+    /// Mocks `GET` of the series resource with `body`, and a `PUT` of it that
+    /// records what it was sent and must come `puts` times. Returns the
+    /// recorder.
+    async fn serve_series(
+        server: &mut Server,
+        body: &'static str,
+        if_match: &str,
+        puts: usize,
+    ) -> (
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        mockito::Mock,
+        mockito::Mock,
+    ) {
+        use std::sync::{Arc, Mutex};
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let get = server
+            .mock("GET", "/calendars/alice/work/series.ics")
+            .with_status(200)
+            .with_header("etag", "\"server-etag\"")
+            .with_body(body)
+            .create_async()
+            .await;
+        let sink = Arc::clone(&seen);
+        let put = server
+            .mock("PUT", "/calendars/alice/work/series.ics")
+            .match_header("if-match", if_match)
+            .expect(puts)
+            .with_status(204)
+            .with_header("etag", "\"new-etag\"")
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                sink.lock().unwrap().push(body);
+                Vec::new()
+            })
+            .create_async()
+            .await;
+        (seen, get, put)
+    }
+
+    fn moved_override(cal_url: &Url) -> Event {
+        Event {
+            id: "/calendars/alice/work/series.ics|series-1::rid::2026-06-15T07:00:00Z".into(),
+            title: "Moved again".into(),
+            start: Utc.with_ymd_and_hms(2026, 6, 19, 12, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 6, 19, 12, 30, 0).unwrap(),
+            reminders: vec![cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 15 },
+                sound: None,
+            }],
+            etag: Some("\"res-etag\"".into()),
+            ..sample_existing_event(cal_url)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_override_update_rewrites_its_own_block_and_nothing_else() {
+        let mut server = Server::new_async().await;
+        // The caller's ETag, as for a master: a change since the user last
+        // looked still surfaces as a conflict.
+        let (seen, get, put) = serve_series(&mut server, SERIES_BODY, "\"res-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        let updated = update_event(
+            &client(),
+            moved_override(&cal_url),
+            &creds(&server.url()),
+            None,
+        )
+        .await
+        .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+
+        let sent = seen.lock().unwrap()[0].clone();
+        let old = block_of(SERIES_BODY, "RECURRENCE-ID;TZID=Europe/Berlin:20260615");
+        let from = SERIES_BODY.find(old).unwrap();
+        let (before, after) = (&SERIES_BODY[..from], &SERIES_BODY[from + old.len()..]);
+        // Everything but the one block goes back byte for byte: the zone, the
+        // master, the other override.
+        assert!(sent.starts_with(before), "{sent}");
+        assert!(sent.ends_with(after), "{sent}");
+        let block = &sent[before.len()..sent.len() - after.len()];
+        assert!(
+            block.starts_with(
+                "BEGIN:VEVENT\r\nRECURRENCE-ID;TZID=Europe/Berlin:20260615T090000\r\n"
+            ),
+            "the slot is copied as the server spelled it: {block}"
+        );
+        assert!(
+            block.contains("UID:series-1\r\n"),
+            "the bare series UID: {block}"
+        );
+        assert!(block.contains("SUMMARY:Moved again"), "{block}");
+        assert!(block.contains("DTSTART:20260619T120000Z"), "{block}");
+        assert!(
+            block.contains("UID:alarm-a"),
+            "the alarm keeps its identity: {block}"
+        );
+        assert!(
+            !block.contains("RRULE"),
+            "one occurrence has no rule: {block}"
+        );
+        assert!(
+            !sent.contains("::rid::"),
+            "no row id reaches the server: {sent}"
+        );
+        assert_eq!(sent.matches("BEGIN:VEVENT").count(), 3, "{sent}");
+
+        assert_eq!(
+            updated.id,
+            moved_override(&cal_url).id,
+            "keeps its override id"
+        );
+        assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
+    }
+
+    #[tokio::test]
+    async fn an_override_update_is_refused_when_the_slot_holds_no_override() {
+        // Someone deleted the exception since the row was read. The only write
+        // left would be one over the whole series, so there is none.
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) = serve_series(&mut server, body, "\"res-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        let err = update_event(
+            &client(),
+            moved_override(&cal_url),
+            &creds(&server.url()),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("refusing"), "{err}");
+        put.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn skipping_an_occurrence_drops_its_override_and_keeps_the_others() {
+        let mut server = Server::new_async().await;
+        // The fresh ETag: the body is merged on what was just read.
+        let (seen, _get, put) = serve_series(&mut server, SERIES_BODY, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|series-1",
+            moved_slot(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(sent.contains("EXDATE:20260615T070000Z"), "{sent}");
+        assert!(
+            !sent.contains("Moved far") && !sent.contains("Europe/Berlin:20260615"),
+            "the slot's own override goes, however far it was moved: {sent}"
+        );
+        let kept = block_of(SERIES_BODY, "RECURRENCE-ID;TZID=Europe/Berlin:20260622");
+        assert!(
+            sent.contains(kept),
+            "the other override byte for byte: {sent}"
+        );
+        assert_eq!(
+            sent.matches("TZID:Europe/Berlin\r\n").count(),
+            1,
+            "the zone once, not twice: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_kept_override_keeps_the_zone_it_names() {
+        // A zone name `chrono-tz` does not know: the master goes back in UTC
+        // and writes no zone of its own, but the override still names it.
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VTIMEZONE\r\nTZID:W. Europe Standard Time\r\n\
+BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
+END:STANDARD\r\nEND:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20260622T070000Z\r\n\
+DTSTART;TZID=W. Europe Standard Time:20260622T100000\r\n\
+DTEND;TZID=W. Europe Standard Time:20260622T103000\r\n\
+SUMMARY:Later\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, body, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|series-1",
+            moved_slot(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+
+        let sent = seen.lock().unwrap()[0].clone();
+        let zone = &body[body.find("BEGIN:VTIMEZONE").unwrap()
+            ..body.find("END:VTIMEZONE\r\n").unwrap() + "END:VTIMEZONE\r\n".len()];
+        assert!(sent.contains(zone), "the zone byte for byte: {sent}");
+        assert!(
+            sent.find(zone).unwrap() < sent.find("BEGIN:VEVENT").unwrap(),
+            "before the components that name it: {sent}"
+        );
+    }
+
+    /// An invitation to one occurrence of somebody else's series: overrides,
+    /// and no master.
+    const ORPHAN_BODY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20260615T070000Z\r\n\
+DTSTART:20260615T070000Z\r\nDTEND:20260615T073000Z\r\nSUMMARY:Invited once\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20260622T070000Z\r\n\
+DTSTART:20260622T070000Z\r\nDTEND:20260622T073000Z\r\nSUMMARY:Invited twice\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+    #[tokio::test]
+    async fn skipping_one_of_several_orphan_occurrences_keeps_the_rest() {
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, ORPHAN_BODY, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|series-1",
+            moved_slot(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+
+        let gone = block_of(ORPHAN_BODY, "SUMMARY:Invited once");
+        assert_eq!(
+            seen.lock().unwrap()[0],
+            ORPHAN_BODY.replace(gone, ""),
+            "the one block goes, the rest byte for byte"
+        );
+    }
+
+    #[tokio::test]
+    async fn skipping_the_last_orphan_occurrence_deletes_the_resource() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20260615T070000Z\r\n\
+DTSTART:20260615T070000Z\r\nDTEND:20260615T073000Z\r\nSUMMARY:Invited once\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) = serve_series(&mut server, body, "\"server-etag\"", 0).await;
+        let delete = server
+            .mock("DELETE", "/calendars/alice/work/series.ics")
+            .match_header("if-match", "\"server-etag\"")
+            .with_status(204)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|series-1",
+            moved_slot(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        delete.assert_async().await;
+        put.assert_async().await;
+    }
+
+    #[test]
+    fn recurrence_id_lines_keep_their_folding() {
+        let block = "BEGIN:VEVENT\r\nUID:a\r\nRECURRENCE-ID;TZID=America/Argentina/\r\n \
+Buenos_Aires:20260615T090000\r\nSUMMARY:x\r\nEND:VEVENT\r\n";
+        assert_eq!(
+            recurrence_id_lines(block).as_deref(),
+            Some("RECURRENCE-ID;TZID=America/Argentina/\r\n Buenos_Aires:20260615T090000\r\n")
+        );
+        // A folded value that happens to read like the property is no property.
+        let block = "BEGIN:VEVENT\r\nDESCRIPTION:see\r\n RECURRENCE-ID:x\r\nEND:VEVENT\r\n";
+        assert_eq!(recurrence_id_lines(block), None);
     }
 
     #[tokio::test]

@@ -77,12 +77,31 @@ pub trait CalendarFeature: Adapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>>;
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>>;
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event>;
+    /// Write `event` back to its provider.
+    ///
+    /// # An override id names one occurrence
+    ///
+    /// An adapter that mints override ids (`{series}::rid::{slot}`, see
+    /// [`crate::split_override_id`]) accepts them here and writes that one
+    /// occurrence, never its series. It finds the occurrence by its slot,
+    /// because the slot stays put when the occurrence is moved. If the
+    /// occurrence cannot be found, the call fails. Writing to the series
+    /// instead would turn "change this one" into "change all of them", and a
+    /// provider keeps no copy of the occurrences it overwrote.
+    ///
+    /// The event that comes back keeps its override id.
     async fn update_event(&self, event: Event) -> Result<Event>;
     /// Delete an event. When `send_cancellations` is `true` AND the event is
     /// a meeting the connected account organises, scheduling-capable
     /// providers email attendees a cancellation (EWS `SendToAllAndSaveCopy`,
     /// CalDAV RFC 6638, Google `sendUpdates=all`). Adapters without
     /// server-side scheduling ignore the flag.
+    ///
+    /// An override id (see [`Self::update_event`]) deletes that one
+    /// occurrence: the series stays and skips the slot from then on, as after
+    /// [`Self::add_event_exdate`]. Moving an event to another calendar ends in
+    /// this call on the source, so a changed occurrence moved on its own leaves
+    /// its series in place.
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> Result<()>;
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> Result<Vec<FreeBusy>>;
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor>;
@@ -100,6 +119,10 @@ pub trait CalendarFeature: Adapter {
     /// instance cancel). CalDAV scheduling is server-driven (RFC 6638), so the
     /// server decides regardless of the flag; adapters without server-side
     /// scheduling ignore it and simply drop the occurrence locally.
+    ///
+    /// The slot may hold a changed occurrence, an override the provider keeps
+    /// apart from the series. That override goes too, however far it was moved
+    /// from its slot, or the occurrence the user deleted would stay on screen.
     ///
     /// Default implementation returns `Unsupported`; adapters that own the event
     /// data (local SQLite, CalDAV, …) override it.

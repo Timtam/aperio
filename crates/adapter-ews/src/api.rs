@@ -676,6 +676,11 @@ pub async fn create_event(
 /// (`ErrorInvalidPropertyDelete`), and the event comes back with its override
 /// id unchanged and the exception's new ChangeKey as `etag`. Skipping an
 /// occurrence goes through `add_event_exdate`.
+///
+/// Exchange will not move an exception onto or past a neighbouring occurrence
+/// of its series (`ErrorOccurrenceCrossingBoundary`; Outlook has the same rule).
+/// Such an exception is detached instead, see [`detach_exception`], the way
+/// Aperio moves every unchanged occurrence on its own.
 pub async fn update_event(
     client: &EwsClient,
     event: &Event,
@@ -692,7 +697,15 @@ pub async fn update_event(
         &delete_xml,
         notify,
     );
-    let response = client.post_soap(envelope).await?;
+    let response = match client.post_soap(envelope).await {
+        Err(EwsError::Soap { code, .. })
+            if target.kind == EventIdKind::Exception
+                && code == "ErrorOccurrenceCrossingBoundary" =>
+        {
+            return detach_exception(client, event, &target, server_zones).await;
+        }
+        other => other?,
+    };
     let item_ref = parse_first_item_id(&response)?;
     // A single stays a single; a series-wide write (a master, or a master
     // resolved from an occurrence) ends on the master. An exception keeps the
@@ -719,6 +732,52 @@ pub async fn update_event(
         updated_at: Utc::now(),
         ..event.clone()
     })
+}
+
+/// Move an exception Exchange will not move: create `event` as a single
+/// appointment of its own, then delete the exception from its series.
+///
+/// This is how Aperio moves any unchanged occurrence "only this one": out of
+/// its series and on its own. It is reached only after Exchange refused the
+/// in-place move with `ErrorOccurrenceCrossingBoundary`, and that refusal
+/// wrote nothing, so the exception is still as it was.
+///
+/// Created first, so a failure halfway leaves a duplicate rather than a gap.
+/// The delete sends no cancellation: the appointment still exists, it only
+/// moved. A delete that fails is logged and the move stands, as for a move to
+/// another calendar; the event that comes back is the new single.
+async fn detach_exception(
+    client: &EwsClient,
+    event: &Event,
+    exception: &WriteTarget,
+    server_zones: Option<&ServerTimeZones>,
+) -> EwsResult<Event> {
+    let single = NewEvent {
+        title: event.title.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        start: event.start,
+        end: event.end,
+        all_day: event.all_day,
+        recurrence: None,
+        color_label: event.color_label.clone(),
+        color_hex: event.color_hex.clone(),
+        reminders: event.reminders.clone(),
+        sound: event.sound.clone(),
+        attendees: event.attendees.clone(),
+        send_invitations: event.send_invitations,
+    };
+    let created = create_event(client, &event.calendar_id, single, server_zones).await?;
+    let envelope = delete_calendar_item(&exception.item_id, exception.change_key.as_deref(), false);
+    if let Err(err) = client.post_soap(envelope).await {
+        tracing::warn!(
+            occurrence = %event.id,
+            single = %created.id,
+            %err,
+            "the exception was detached as a single but stays in its series; a duplicate may exist",
+        );
+    }
+    Ok(created)
 }
 
 /// Delete a calendar item. For non-recurring events this drops the
@@ -1970,6 +2029,178 @@ mod tests {
         );
         assert_eq!(updated.id, override_id, "the override keeps its id");
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
+    }
+
+    /// Answers an exception update with `update_code` and records every
+    /// request: the series GetItem, the UpdateItem, and whatever follows.
+    async fn refuse_exception_update(
+        server: &mut Server,
+        update_code: &'static str,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        use std::sync::{Arc, Mutex};
+        let envelope = |inner: String| {
+            format!(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>{inner}</s:Body>
+</s:Envelope>"#
+            )
+        };
+        let series = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2026-10-20T09:00:00Z</t:Start>
+          <t:End>2026-10-20T10:00:00Z</t:End>
+          <t:OriginalStart>2026-10-20T08:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#
+                .to_string(),
+        );
+        let refused = envelope(format!(
+            r#"<m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Error">
+      <m:MessageText>refused</m:MessageText>
+      <m:ResponseCode>{update_code}</m:ResponseCode>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse>"#
+        ));
+        let created = envelope(
+            r#"<m:CreateItemResponse><m:ResponseMessages>
+    <m:CreateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="NEW-ID" ChangeKey="NCK"/></t:CalendarItem></m:Items>
+    </m:CreateItemResponseMessage>
+  </m:ResponseMessages></m:CreateItemResponse>"#
+                .to_string(),
+        );
+        let deleted = envelope(
+            r#"<m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse>"#
+                .to_string(),
+        );
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("UpdateItem") {
+                    &refused
+                } else if body.contains("CreateItem") {
+                    &created
+                } else if body.contains("DeleteItem") {
+                    &deleted
+                } else {
+                    &series
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+        requests
+    }
+
+    /// The exception of the Tuesday 08:00Z slot, dragged to Thursday.
+    fn exception_moved_to_thursday() -> Event {
+        let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
+        Event {
+            id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Retitled".into(),
+            description: None,
+            location: None,
+            start: "2026-10-22T09:00:00Z".parse().unwrap(),
+            end: "2026-10-22T10:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            etag: Some("MCK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        }
+    }
+
+    /// Exchange will not move an exception past a neighbouring occurrence
+    /// (decision 64a). The exception is detached instead, as an unchanged
+    /// occurrence always is: a single at the new time, the exception gone
+    /// from its series without a cancellation.
+    #[tokio::test]
+    async fn an_exception_exchange_will_not_move_is_detached() {
+        let mut server = Server::new_async().await;
+        let requests =
+            refuse_exception_update(&mut server, "ErrorOccurrenceCrossingBoundary").await;
+
+        let updated = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            4,
+            "GetItem, UpdateItem, CreateItem, DeleteItem"
+        );
+        let create = &requests[2];
+        assert!(create.contains("CreateItem"), "{create}");
+        assert!(create.contains("Retitled"), "{create}");
+        assert!(create.contains("2026-10-22T09:00:00Z"), "{create}");
+        assert!(!create.contains("<t:Recurrence>"), "{create}");
+        let delete = &requests[3];
+        assert!(delete.contains("DeleteItem"), "{delete}");
+        assert!(
+            delete.contains(r#"<t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>"#),
+            "the exception's own item, never the series: {delete}"
+        );
+        assert!(delete.contains("SendToNone"), "{delete}");
+        assert_eq!(
+            updated.id,
+            encode_event_id(EventIdKind::Single, "NEW-ID", Some("NCK")),
+            "the event that comes back is the new single"
+        );
+    }
+
+    /// Any other refusal stays a refusal: nothing is created or deleted.
+    #[tokio::test]
+    async fn an_exception_update_refused_otherwise_is_an_error() {
+        let mut server = Server::new_async().await;
+        let requests = refuse_exception_update(&mut server, "ErrorIrresolvableConflict").await;
+
+        let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("ErrorIrresolvableConflict"),
+            "{err}"
+        );
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            2,
+            "GetItem and UpdateItem only"
+        );
     }
 
     #[tokio::test]

@@ -357,6 +357,14 @@ impl CalendarFeature for GoogleAdapter {
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
+        // An override id names one occurrence, and deleting it cancels that slot
+        // (see the trait). It is no Google id, so the DELETE below could only
+        // fail on every calendar.
+        if let Some((master_id, slot)) = cal_core::split_override_id(event_id)? {
+            return self
+                .add_event_exdate(master_id, slot, send_cancellations)
+                .await;
+        }
         // Aperio's command layer hands us the calendar_id alongside the event_id
         // when it can, but the legacy `delete_event(event_id)` trait method doesn't
         // carry it. We walk every calendar and try the delete against each. A 404 =
@@ -761,6 +769,67 @@ mod delta_tests {
             chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
             chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
         )
+    }
+
+    /// Moving a changed occurrence to another calendar deletes it from the
+    /// source by its override id, which is no Google id: the DELETE failed on
+    /// every calendar and the moved occurrence stayed behind as a duplicate.
+    #[tokio::test]
+    async fn deleting_an_override_cancels_the_instance_in_its_slot() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(r##"{"items":[{"id":"primary","summary":"Me","accessRole":"owner"}]}"##)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=WEEKLY"]}"##,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "GET",
+                "/calendars/primary/events/master-1/instances\
+                 ?showDeleted=true&originalStart=2026-06-01T18%3A00%3A00Z",
+            )
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1_20260601T180000Z","status":"confirmed",
+                   "originalStartTime":{"dateTime":"2026-06-01T18:00:00Z"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        let cancel = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=none",
+            )
+            .match_body(Matcher::Regex(r#""status":"cancelled""#.to_string()))
+            .with_status(200)
+            .with_body(r#"{"id":"master-1_20260601T180000Z","status":"cancelled"}"#)
+            .create_async()
+            .await;
+        let delete = server
+            .mock("DELETE", Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+
+        adapter_for(&server)
+            .delete_event("master-1::rid::2026-06-01T18:00:00Z", false)
+            .await
+            .unwrap();
+        cancel.assert_async().await;
+        delete.assert_async().await;
     }
 
     #[tokio::test]
