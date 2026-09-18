@@ -88,6 +88,8 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import {
+  isProviderOverride,
+  occurrenceIsoOf,
   planCarry,
   seriesIdOf,
   worthCarrying,
@@ -826,6 +828,55 @@ export default function EventEditorModal({
     setError(null);
     setSaving(true);
     try {
+      if (
+        editing &&
+        original != null &&
+        editScope === 'occurrence' &&
+        isProviderOverride(original)
+      ) {
+        // Already an override — the user is editing an occurrence they (or the
+        // provider) changed before. The row loaded here IS the exception, and
+        // the series already skips its slot, so update it in place by its own
+        // id. Mirrors the desktop EventDialog.
+        const overrideRow: CalendarEvent = {
+          ...original,
+          title: trimmedTitle,
+          calendar_id: calId,
+          start,
+          end,
+          all_day: allDay,
+          location: location.trim() || null,
+          description: description.trim() || null,
+          // Stays null: an override is one instance and owns no rule.
+          recurrence: null,
+          color_label: colorToSend,
+          reminders: remindersForWire,
+          attendees,
+          send_invitations: sendInvitations,
+        };
+        const updated = await updateEvent(overrideRow, original.calendar_id);
+        await savePrivate(updated);
+        if (!isLocalCal) {
+          await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
+        }
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+        );
+        // The other copies have a series each, so carrying this means carving
+        // the same occurrence out of them — not updating a row.
+        if (
+          await offerToCarry(
+            original,
+            updated,
+            'occurrence',
+            occurrenceIsoOf(original),
+          )
+        ) {
+          return;
+        }
+        navigation.goBack();
+        return;
+      }
       if (
         editing &&
         original != null &&

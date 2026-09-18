@@ -1,4 +1,9 @@
-import { isBirthdayEventId, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
+import {
+  isBirthdayEventId,
+  isProviderOverride,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '@aperio/shared';
 
 import { showEventScopeDialog } from './eventScopeDialog';
 import { CalendarEvent } from '../api/calendar';
@@ -35,12 +40,15 @@ export function editEventWithScope(
   navigate: (params: EditEventParams) => void,
 ): void {
   const occurrence = occurrenceIsoOf(ev);
-  /** Without `scoped` the editor opens the series itself. */
-  const open = (scoped?: {
-    occurrence: string;
-    initialScope: 'occurrence' | 'this_and_future';
-  }) => {
-    const eventId = seriesIdOf(ev);
+  /** Without `scoped` the editor opens the series itself. `eventId` is the row
+   *  the editor loads: the series, unless the row is edited in place. */
+  const open = (
+    scoped?: {
+      occurrence: string;
+      initialScope: 'occurrence' | 'this_and_future';
+    },
+    eventId: string = seriesIdOf(ev),
+  ) => {
     navigate({
       eventId,
       calendarId: ev.calendar_id,
@@ -69,7 +77,14 @@ export function editEventWithScope(
       {
         key: 'occurrence',
         label: t('dialogs.editScope.occurrence'),
-        run: () => open({ occurrence, initialScope: 'occurrence' }),
+        // A provider override IS the occurrence: the editor opens it by its own
+        // id and saves it in place, as the desktop does. Opened as the series,
+        // "just this one" deleted the provider's exception and made a copy.
+        run: () =>
+          open(
+            { occurrence, initialScope: 'occurrence' },
+            isProviderOverride(ev) ? ev.id : seriesIdOf(ev),
+          ),
       },
       {
         key: 'thisAndFuture',

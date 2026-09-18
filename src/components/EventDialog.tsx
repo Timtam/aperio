@@ -31,7 +31,7 @@ import {
 } from '../api/client';
 import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
 import {
-  isExpandedOccurrence,
+  isProviderOverride,
   isSeriesOccurrence,
   occurrenceIsoOf,
   planSeriesSplit,
@@ -1046,11 +1046,7 @@ export function EventDialog({
           // override to its master. "Just this one" would have rewritten the
           // whole series, which is the one outcome this dialog exists to
           // prevent.
-          if (
-            editScope === 'occurrence' &&
-            !isExpandedOccurrence(event) &&
-            occurrenceIsoOf(event) != null
-          ) {
+          if (editScope === 'occurrence' && isProviderOverride(event)) {
             const overrideRow: CalendarEvent = {
               ...event,
               title: trimmedTitle,

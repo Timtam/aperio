@@ -10,6 +10,7 @@ export {
   expandEvent,
   expandAll,
   isExpandedOccurrence,
+  isProviderOverride,
   isSeriesOccurrence,
   seriesIdOf,
   occurrenceIsoOf,
