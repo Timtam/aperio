@@ -892,7 +892,10 @@ pub fn override_to_vevent(
     let vcal = event_to_ical_preserving(&occurrence, organizer, prior);
     let begin = "BEGIN:VEVENT\r\n";
     let end = "END:VEVENT\r\n";
-    let (Some(from), Some(to)) = (vcal.find(begin), vcal.find(end)) else {
+    // The LAST `END:VEVENT`: a text value can end in those very characters, and
+    // only `END:VCALENDAR` follows the one VEVENT's own end line. Its `BEGIN`
+    // comes before any text value, so the first one is the right one.
+    let (Some(from), Some(to)) = (vcal.find(begin), vcal.rfind(end)) else {
         // `icalendar` always writes both lines; this is unreachable short of a
         // change in that crate, and the caller's PUT would then fail loudly.
         return vcal;
@@ -2699,5 +2702,38 @@ END:VCALENDAR\r
         let body = new_event_to_ical("rt-uid", &color_new_event(Some("#34a853")), None);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         assert_eq!(parsed[0].color_hex.as_deref(), Some("#34a853"));
+    }
+
+    /// A text value may end in the very characters of the end line. Cut there,
+    /// the block would lose its start, its UID and its end, and the PUT the
+    /// whole series goes out in would carry a broken VEVENT.
+    #[test]
+    fn an_override_block_ends_at_its_own_end_line() {
+        let mut event = event_with_reminders(Vec::new());
+        event.description = Some("pasted from a file\nEND:VEVENT".into());
+        event.location = Some("END:VEVENT".into());
+        let block = override_to_vevent(
+            &event,
+            "/cal/e.ics|series-1",
+            "RECURRENCE-ID:20260615T070000Z\r\n",
+            None,
+            PriorAlarms::default(),
+        );
+        assert!(
+            block.starts_with("BEGIN:VEVENT\r\nRECURRENCE-ID:"),
+            "{block}"
+        );
+        assert!(block.ends_with("\r\nEND:VEVENT\r\n"), "{block}");
+        assert!(block.contains("\r\nDTSTART"), "{block}");
+        assert!(block.contains("\r\nUID:series-1\r\n"), "{block}");
+        assert_eq!(
+            block
+                .split("\r\n")
+                .filter(|line| *line == "END:VEVENT")
+                .count(),
+            1,
+            "{block}"
+        );
+        assert!(!block.contains("END:VCALENDAR"), "{block}");
     }
 }

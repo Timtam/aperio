@@ -89,7 +89,11 @@ pub trait CalendarFeature: Adapter {
     /// instead would turn "change this one" into "change all of them", and a
     /// provider keeps no copy of the occurrences it overwrote.
     ///
-    /// The event that comes back keeps its override id.
+    /// The event that comes back normally keeps its override id. A provider
+    /// may refuse to move the occurrence where it was asked to go; the adapter
+    /// may then detach it as a single of its own and return that (EWS, see its
+    /// adapter docs). Callers key any follow-up write, such as a colour kept on
+    /// the device, by the id that came back.
     async fn update_event(&self, event: Event) -> Result<Event>;
     /// Delete an event. When `send_cancellations` is `true` AND the event is
     /// a meeting the connected account organises, scheduling-capable

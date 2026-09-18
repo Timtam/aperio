@@ -686,9 +686,14 @@ fn with_missing_vtimezones(mut vcal: String, body: &str) -> String {
 fn vtimezone_tzid(block: &str) -> Option<String> {
     let mut lines = block.split_inclusive('\n').peekable();
     while let Some(line) = lines.next() {
-        let named_tzid = line.len() > 4
-            && line[..4].eq_ignore_ascii_case("TZID")
-            && line[4..].starts_with([':', ';']);
+        // `get`, not slicing: a line of server text may hold a multi-byte
+        // character across byte 4.
+        let named_tzid = line
+            .get(..4)
+            .is_some_and(|n| n.eq_ignore_ascii_case("TZID"))
+            && line
+                .get(4..)
+                .is_some_and(|rest| rest.starts_with([':', ';']));
         if !named_tzid {
             continue;
         }
@@ -802,11 +807,12 @@ pub async fn delete_event(
 /// from its slot is found all the same: it is recognised by its RECURRENCE-ID,
 /// the slot, not by where it now starts.
 ///
-/// A PUT replaces the whole resource. The master is re-serialised with its new
-/// EXDATE, keeping every other property the server stored and the alarms it
-/// had; every other override goes back byte for byte, and so do the time zones
-/// they name. A body that cannot be read block by block gets the master alone,
-/// as every body did before overrides were kept.
+/// A PUT replaces the whole resource. The master is rebuilt from core fields
+/// with its new EXDATE, as for any master write: its alarms survive, properties
+/// Aperio does not model do not (see [`event_to_ical_preserving`]). Every other
+/// override goes back byte for byte, and so do the time zones they name. A body
+/// that cannot be read block by block gets the master alone, as every body did
+/// before overrides were kept.
 ///
 /// A resource can hold overrides without their master: an invitation to one
 /// occurrence of somebody else's series arrives that way. Skipping such an

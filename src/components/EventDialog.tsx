@@ -1067,14 +1067,30 @@ export function EventDialog({
               attendees: form.attendees,
               send_invitations: sendInvitations,
             };
-            await apiUpdateEvent(overrideRow, event.calendar_id);
+            // What comes back is normally the override itself. Exchange may
+            // instead detach it as a single of its own, when it will not move
+            // an exception past a neighbouring occurrence, so the colour and
+            // the carry follow the row that came back. The private reminders
+            // stay on the series, where an override's belong.
+            const landed = await apiUpdateEvent(
+              overrideRow,
+              event.calendar_id,
+            );
             await savePrivate(overrideRow);
             if (!storesColorNatively) {
               await setEventColor(
-                overrideRow.id,
-                overrideRow.calendar_id,
+                landed.id,
+                landed.calendar_id,
                 form.colorLabel,
               );
+              if (landed.id !== overrideRow.id) {
+                // The override's id names nothing any more.
+                await setEventColor(
+                  overrideRow.id,
+                  overrideRow.calendar_id,
+                  null,
+                ).catch(() => undefined);
+              }
             }
             announce(
               t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
@@ -1086,7 +1102,7 @@ export function EventDialog({
             if (
               !(await offerToCarry(
                 event,
-                overrideRow,
+                landed,
                 'occurrence',
                 occurrenceIsoOf(event),
               ))

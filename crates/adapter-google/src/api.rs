@@ -1061,24 +1061,21 @@ pub async fn add_event_exdate(
 /// is now and misses one moved out of it. `showDeleted=true` keeps a cancelled
 /// slot visible, so a second delete of it stays idempotent.
 ///
-/// The master says how its slots are spelled: a date for an all-day series (the
-/// day of the local midnight Aperio anchors every all-day slot at), an RFC 3339
-/// instant otherwise. Google answers an instant in the event's own zone
-/// (`2026-07-23T13:00:00+02:00`), so the answer is compared as a parsed instant
-/// against the slot, never by its digits, and never trusted unchecked.
+/// The master says how its slots are spelled. A timed series' slot is an
+/// instant, sent as RFC 3339; Google answers in the event's own zone
+/// (`2026-07-23T13:00:00+02:00`), so the answer is compared as a parsed instant,
+/// never by its digits. An all-day series' slot is a day, sent and compared as
+/// a date: see [`all_day_slot`]. The answer is never trusted unchecked.
 async fn instance_in_slot(
     state: &ApiState,
     cal_enc: &str,
     master: &EventEntry,
     slot: DateTime<Utc>,
 ) -> GoogleResult<Option<EventEntry>> {
-    let original_start = if master.start.date.is_some() {
-        slot.with_timezone(&chrono::Local)
-            .date_naive()
-            .format("%Y-%m-%d")
-            .to_string()
-    } else {
-        slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    let day = master.start.date.is_some().then(|| all_day_slot(slot));
+    let original_start = match day {
+        Some(day) => day.format("%Y-%m-%d").to_string(),
+        None => slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     };
     let path = format!(
         "/calendars/{cal_enc}/events/{}/instances?showDeleted=true&originalStart={}",
@@ -1089,7 +1086,10 @@ async fn instance_in_slot(
     let found = resp.items.len();
     let instance = resp.items.into_iter().find(|it| {
         let src = it.original_start_time.as_ref().unwrap_or(&it.start);
-        src.resolve().is_ok_and(|(start, _)| start == slot)
+        match (day, src.date) {
+            (Some(want), Some(got)) => got == want,
+            _ => src.resolve().is_ok_and(|(start, _)| start == slot),
+        }
     });
     debug!(
         master = %master.id,
@@ -1099,6 +1099,22 @@ async fn instance_in_slot(
         "instance lookup by original start"
     );
     Ok(instance)
+}
+
+/// The day an all-day slot names.
+///
+/// Aperio anchors an all-day date at local midnight, but a slot does not always
+/// sit there. The views expand an all-day series in plain UTC from its first
+/// date, so across a clock change its slots lie an hour or two off local
+/// midnight. A date whose midnight a clock change skips resolves to that date's
+/// UTC midnight (`EventDateTime::resolve`), which west of UTC reads as the
+/// evening before. Both stay within hours of the local midnight they stand for,
+/// so the day is the one whose midnight lies nearest: twelve hours on, then the
+/// local date.
+fn all_day_slot(slot: DateTime<Utc>) -> chrono::NaiveDate {
+    (slot + Duration::hours(12))
+        .with_timezone(&chrono::Local)
+        .date_naive()
 }
 
 /// `PATCH /calendars/{id}` with `{ "summary": "..." }`. Google's
@@ -1807,6 +1823,62 @@ mod tests {
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
         patch.assert_async().await;
+    }
+
+    /// Past a clock change the views hand in an all-day slot an hour off local
+    /// midnight (they expand an all-day series in plain UTC). It still names
+    /// its day, and Google answers that day with a date.
+    #[tokio::test]
+    async fn add_event_exdate_reads_an_all_day_slot_as_its_day() {
+        for drift in [1, -1] {
+            let mut server = mockito::Server::new_async().await;
+            server
+                .mock("GET", "/calendars/primary/events/bday-1")
+                .with_status(200)
+                .with_body(
+                    r##"{"id":"bday-1","start":{"date":"2026-03-02"},"end":{"date":"2026-03-03"},
+                         "recurrence":["RRULE:FREQ=DAILY"]}"##,
+                )
+                .create_async()
+                .await;
+            let lookup = server
+                .mock(
+                    "GET",
+                    "/calendars/primary/events/bday-1/instances\
+                     ?showDeleted=true&originalStart=2026-06-01",
+                )
+                .with_status(200)
+                .with_body(
+                    r##"{"items":[
+                      {"id":"bday-1_20260601","status":"confirmed",
+                       "originalStartTime":{"date":"2026-06-01"}}
+                    ]}"##,
+                )
+                .create_async()
+                .await;
+            let patch = server
+                .mock(
+                    "PATCH",
+                    "/calendars/primary/events/bday-1_20260601?sendUpdates=none",
+                )
+                .with_status(200)
+                .with_body(r#"{"id":"bday-1_20260601","status":"cancelled"}"#)
+                .create_async()
+                .await;
+
+            let state = fixture_state(&server.url());
+            let slot = chrono::Local
+                .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+                + chrono::Duration::hours(drift);
+            let outcome = add_event_exdate(&state, "primary", "bday-1", slot, false)
+                .await
+                .unwrap();
+            assert!(matches!(outcome, ExdateOutcome::Cancelled), "drift {drift}");
+            lookup.assert_async().await;
+            patch.assert_async().await;
+        }
     }
 
     #[tokio::test]

@@ -24,10 +24,11 @@ import type { Calendar, CalendarEvent } from '../api/types';
 
 const { invokeMock, onFile } = vi.hoisted(() => {
   /** What `get_event_by_id` answers: the series a row of a series belongs to. */
-  const onFile: { series: unknown } = { series: null };
+  const onFile: { series: unknown; updated: unknown } = { series: null, updated: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'update_event') {
-      return Promise.resolve((payload as { event: unknown }).event);
+      // What the provider answers: the event as sent, unless a test says otherwise.
+      return Promise.resolve(onFile.updated ?? (payload as { event: unknown }).event);
     }
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
@@ -115,6 +116,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   onFile.series = null;
+  onFile.updated = null;
   vi.restoreAllMocks();
 });
 
@@ -291,5 +293,43 @@ describe('EventDialog → a row of a series saved as the whole series', () => {
     const sent = await saveEditedEvent(override, undefined, 'series');
     expect(sent.recurrence).toEqual(SERIES.recurrence);
     expect(sent.start).toBe(SERIES.start);
+  });
+});
+
+describe('EventDialog → one changed occurrence saved in place', () => {
+  it('keys the colour by the row that came back', async () => {
+    // Exchange will not move an exception past a neighbouring occurrence and
+    // detaches it as a single with an id of its own. The colour went to the
+    // override's id, which names nothing afterwards.
+    deviceInBerlin();
+    const override = {
+      ...SERIES,
+      id: 'ev-series::rid::2026-07-06T07:00:00Z',
+      start: '2026-07-06T07:30:00.000Z',
+      end: '2026-07-06T08:30:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    onFile.updated = { ...override, id: 'S:NEW-ID|NCK' };
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={override} initialScope="occurrence" />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'set_event_color')).toBe(true),
+    );
+
+    const update = invokeMock.mock.calls.find((call) => call[0] === 'update_event');
+    expect((update?.[1] as { event: CalendarEvent }).event.id).toBe(override.id);
+    const colours = invokeMock.mock.calls
+      .filter((call) => call[0] === 'set_event_color')
+      .map((call) => call[1] as { eventId: string; colorLabelId: string | null });
+    expect(colours[0].eventId).toBe('S:NEW-ID|NCK');
+    expect(colours).toContainEqual(
+      expect.objectContaining({ eventId: override.id, colorLabelId: null }),
+    );
   });
 });

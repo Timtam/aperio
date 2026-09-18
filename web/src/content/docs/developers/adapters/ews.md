@@ -49,6 +49,12 @@ The endpoint is discovered or user-supplied.
   without a cancellation. The event that comes back is the new single. If the
   delete fails, the move stands and the failure is logged; a duplicate may
   remain.
+- **Skipping an exception by its series is not exact yet.** With the series id
+  and a slot, `add_event_exdate` finds the occurrence by its current `Start`
+  within six hours. An exception moved further cannot be skipped that way, and
+  another exception within six hours of the slot can be hit instead (TODO, B).
+  `delete_event` with the override id finds the exception by its slot and is
+  exact.
 
 ## Time zones
 
