@@ -2084,7 +2084,7 @@ Siehe DESIGN §4.2.
   mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
   vorher ohne Zone.
   🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
-  🚩 **Live-Test Runde 3** (49a), vorbereitet:
+  **Live-Test Runde 3** (49a), gelaufen am 18.09.2026:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
   - ein Termin in der Zone Tokio;
@@ -2096,6 +2096,29 @@ Siehe DESIGN §4.2.
   des Repositorys liest Tonis Outlook-Termine zuerst. Weicht ihre Form ab,
   stoppt es, bevor es schreibt. Toni legt die Termine in Outlook selbst an
   (51a und 52a) und meldet die kurze Liste (53a).
+
+  Ergebnisse (Einzelheiten in DESIGN, Stufe 4, „Gemessen“):
+  - Regel 47a lässt Outlook-Termine auf ihrem Tag. Das gilt für die Serie,
+    für einen Einzeltermin und für eine Ausnahme.
+  - Die heutige Regel macht aus einem ganztägigen Outlook-Termin zwei Tage,
+    und Exchange ändert dabei die Zone. Das betrifft auch main.
+  - Exchange rundet in der gespeicherten Zone. 47a bleibt deshalb so.
+  - Eine tägliche ganztägige Serie beginnt wegen des Startdatums einen Tag
+    früher, am Sonntag.
+
+  🚩 **Eine Ausnahme in Exchange zu ändern scheitert** (auch auf main). Aperio
+  schickt beim Ändern eines einzeln geänderten Termins `DeleteItemField
+  calendar:Recurrence`. Exchange lehnt das an einer Ausnahme mit
+  `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheitert.
+  🚩 **Ausnahmen zeigen den Betreff der Serie.** Aperio baut eine Ausnahme aus
+  der Serie und liest ihren eigenen Betreff, Ort und Text nicht nach. Das ist
+  eine eigene, spätere Aufgabe außerhalb der Zeitzonen (58a).
+
+  Toni hat die Reihenfolge festgelegt (57a):
+  1. der Ausnahme-Fehler als kleiner eigener PR;
+  2. der Lesefehler im Kern (48a);
+  3. der Exchange-Schreiber mit 47a und dem Datumsfehler zusammen;
+  4. danach die weiteren Stufen des Entwurfs.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.
