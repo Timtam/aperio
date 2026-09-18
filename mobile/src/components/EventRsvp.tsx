@@ -1,3 +1,4 @@
+import { seriesIdOf } from '@aperio/shared';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -108,9 +109,10 @@ export function EventRsvp({
     setPending(status);
     setError(null);
     try {
-      // Respond against the loaded event's id — `getEventById` loads the series
-      // master, so this is already the series id (no synthetic `@ISO` suffix).
-      await respondToEvent(event.calendar_id, event.id, status, true);
+      // Respond against the series id. The editor may have loaded a provider
+      // override (`…::rid::…`), an id the adapter minted and the provider does
+      // not know. Mirrors the desktop EventRsvp.
+      await respondToEvent(event.calendar_id, seriesIdOf(event), status, true);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.event.rsvp.responded', {
           status: t(`dialogs.event.rsvp.status.${status}`),
