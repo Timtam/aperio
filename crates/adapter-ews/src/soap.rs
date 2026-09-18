@@ -737,9 +737,10 @@ pub fn delete_calendar_item(
 }
 
 /// `GetItem` for ONE occurrence of a recurring series, addressed by
-/// `OccurrenceItemId(RecurringMasterId, InstanceIndex)` (1-based). Requests just
-/// the occurrence `Start` so the caller can binary-search the index space by the
-/// server's own dates. An index past the end of the series comes back as a
+/// `OccurrenceItemId(RecurringMasterId, InstanceIndex)` (1-based). Requests the
+/// occurrence's `Start` and, for an exception, its `OriginalStart` — the slot of
+/// the series it fills, which stays put when the exception is moved — so the
+/// caller can match the index against the server's own dates. An index past the end of the series comes back as a
 /// per-item `ResponseClass="Error"` (parsed as "no item"), which is how the
 /// search finds the upper bound.
 pub fn get_occurrence_item(
@@ -759,6 +760,7 @@ pub fn get_occurrence_item(
           <t:FieldURI FieldURI="calendar:Start"/>
           <t:FieldURI FieldURI="calendar:End"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
+          <t:FieldURI FieldURI="calendar:OriginalStart"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ItemIds>
@@ -1155,6 +1157,20 @@ mod tests {
         assert!(body.contains(r#"FieldURI="folder:DisplayName""#));
         assert!(body.contains("Work &amp; Play"));
         assert!(body.contains(r#"Id="FID""#));
+    }
+
+    /// The occurrence probe asks for the slot an exception fills, not only
+    /// where it now starts: an exception moved far from its slot is matched by
+    /// its `OriginalStart`.
+    #[test]
+    fn the_occurrence_probe_asks_for_the_original_start() {
+        let body = get_occurrence_item("MASTER", Some("CK"), 3);
+        assert!(body.contains(r#"FieldURI="calendar:Start""#), "{body}");
+        assert!(
+            body.contains(r#"FieldURI="calendar:OriginalStart""#),
+            "{body}"
+        );
+        assert!(body.contains(r#"InstanceIndex="3""#), "{body}");
     }
 
     /// Both requests that fill the item cache ask for the end zone as well as

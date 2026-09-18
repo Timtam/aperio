@@ -329,6 +329,38 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     });
   });
 
+  it('occurrence scope moves a provider override in place, by its own id', async () => {
+    // An occurrence changed before: the provider's row for slot 09:00, which
+    // now sits at 14:00. Dragging it must move that row, not create a copy
+    // and carve the slot out again.
+    const override = {
+      id: 'e1::rid::2026-06-15T09:00:00.000Z',
+      calendar_id: 'c1',
+      title: 'Standup, moved',
+      description: null,
+      location: null,
+      start: '2026-06-15T14:00:00.000Z',
+      end: '2026-06-15T14:30:00.000Z',
+      all_day: false,
+      recurrence: null,
+      color_label: null,
+      reminders: [],
+      sound: null,
+      attendees: [],
+    } as unknown as CalendarEvent;
+    const target = localKey(override.start, 3);
+    expect(await moveEventToDay(override, target, 'occurrence')).toBe(true);
+    const calls = invokeMock.mock.calls;
+    expect(calls.map(([cmd]) => cmd)).toEqual(['update_event']);
+    const [, args] = calls[0];
+    expect(args.event.id).toBe(override.id);
+    expect(args.event.recurrence).toBeNull();
+    expect(localKey(args.event.start)).toBe(target);
+    expect(new Date(args.event.end).getTime() - new Date(args.event.start).getTime()).toBe(
+      30 * 60 * 1000,
+    );
+  });
+
 });
 
 describe('moving a whole series (dragged with the whole-series scope)', () => {
