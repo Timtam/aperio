@@ -127,6 +127,12 @@ jobs:
               - 'crates/cal-core/**'
               - 'public/**'
               - 'index.html'
+              # `src/wasm/csp.test.ts` reads the shipped app's Content Security
+              # Policy from here and fails when the webview may not compile the
+              # core rules' WebAssembly. A commit that changes only this file is
+              # the one the guard exists for, and without this line it runs no
+              # Vitest at all.
+              - 'src-tauri/tauri.conf.json'
               - 'package.json'
               - 'package-lock.json'
               - 'tsconfig*.json'

@@ -19,11 +19,15 @@ describe('the desktop Content Security Policy', () => {
   const directives = new Map(
     conf.app.security.csp
       .split(';')
-      .map((d) => d.trim().split(/\s+/))
+      .map((d) => d.trim().toLowerCase().split(/\s+/))
       .filter((parts) => parts[0])
       .map(([name, ...sources]) => [name, sources] as const),
   );
-  const scriptSrc = directives.get('script-src') ?? directives.get('default-src') ?? [];
+  // No fallback to default-src, although a browser would take one: Tauri
+  // always writes its own script-src into the page's policy ('self' plus the
+  // hashes of the scripts it ships, `replace_csp_nonce` in tauri's manager),
+  // so a source that sits only in default-src never reaches the webview.
+  const scriptSrc = directives.get('script-src') ?? [];
 
   it('lets the webview compile WebAssembly', () => {
     expect(scriptSrc).toContain("'wasm-unsafe-eval'");
