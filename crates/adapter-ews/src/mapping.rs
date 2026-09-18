@@ -616,7 +616,6 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     }
                     Some("start") => current.start = parse_ews_datetime(s),
                     Some("end") => current.end = parse_ews_datetime(s),
-                    Some("original_start") => current.original_start = parse_ews_datetime(s),
                     Some("all_day") => {
                         current.is_all_day = s.eq_ignore_ascii_case("true");
                     }

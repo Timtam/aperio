@@ -2137,13 +2137,18 @@ Siehe DESIGN §4.2.
   unter der Serie (`EventDialog.tsx`, `seriesIdOf`). Ein am Desktop gewählter
   Klang erreicht die Ausnahme also nicht. Eine Regel festlegen, am besten im
   Kern (`sound.rs`: erst die Ausnahme, dann die Serie).
-  🚩 **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat.** Auf dem
-  Desktop legt Verschieben oder Ziehen einer geänderten Ausnahme einen neuen
-  Einzeltermin an und nimmt den Platz aus der Serie heraus. Die Ausnahme selbst
-  ändert es nie (`moveActions.ts`). Die Suche nach dem Vorkommen in Exchange
-  vergleicht dabei `Start` statt `OriginalStart`. Ist eine Ausnahme um mehr als
-  sechs Stunden verschoben, wird sie nicht herausgenommen und bleibt doppelt
-  stehen.
+  ↻ **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat**, behoben
+  in PR #79. Auf dem Desktop legte Verschieben oder Ziehen einer geänderten
+  Ausnahme einen neuen Einzeltermin an und nahm den Platz aus der Serie heraus;
+  die Ausnahme selbst änderte es nie (`moveActions.ts`). Die Suche nach dem
+  Vorkommen in Exchange verglich dabei `Start` statt `OriginalStart`, sodass
+  eine um mehr als sechs Stunden verschobene Ausnahme doppelt stehen blieb.
+  Jetzt verschiebt Ziehen „nur dieses Vorkommen“ die Ausnahme selbst, wie der
+  Dialog sie speichert, und die Exchange-Suche vergleicht `OriginalStart`. Das
+  gilt auch für das Löschen einer weit verschobenen Ausnahme und für den Umzug
+  in einen anderen Kalender, auf Desktop und Handy. Bei CalDAV und Google
+  braucht das Ziehen PR #80; bei Exchange löst #80 eine Ausnahme, die nicht
+  über ein Nachbar-Vorkommen darf, aus der Serie (64a).
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

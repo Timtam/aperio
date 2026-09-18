@@ -41,6 +41,10 @@ The endpoint is discovered or user-supplied.
   calendar:Recurrence`: Exchange refuses it on an exception
   (`ErrorInvalidPropertyDelete`) and fails the whole update. The returned event
   keeps the override id.
+- **Occurrences are found by their slot.** Skipping one occurrence
+  (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
+  It matches an exception by its `OriginalStart`, the slot it fills, not by
+  its `Start`, which moves when the exception is moved.
 
 ## Time zones
 
