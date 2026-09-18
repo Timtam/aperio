@@ -513,6 +513,13 @@ kompiliert statt in einem anderen Prozess. `crates/cal-core-wasm` ist diese Tür
 - **Ein Fehlschlag ist tödlich und wird gesagt**, nicht verschluckt: eine
   stille Rückfallebene wäre eine zweite Implementierung der Regel, also genau
   das, was hier abgeschafft werden soll.
+- **Die Content Security Policy muss es erlauben.** Ein Webview übersetzt
+  WebAssembly nur mit `'wasm-unsafe-eval'` in `script-src`
+  (`src-tauri/tauri.conf.json`). Das erlaubt WebAssembly und nichts sonst,
+  anders als `'unsafe-eval'`. Es fehlte vom 9. bis zum 18. September 2026: Jeder
+  Desktop-Build startete mit „Aperio konnte seine Kernregeln nicht laden“.
+  Weder `tauri dev` (ohne diese Policy) noch die Tests (Node) sahen es.
+  `src/wasm/csp.test.ts` wacht jetzt darüber.
 - **Die Kiste ist reines Marshalling.** Strings rein, Werte raus, jeder Rumpf
   ein `match`. Das ist eine Regel, keine Vorliebe: die Kiste zieht später ins
   **Desktop-Repo** um (eine Tauri-App ist ohnehin eine Rust-Binärdatei), und

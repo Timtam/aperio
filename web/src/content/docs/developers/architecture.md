@@ -93,6 +93,11 @@ synchronous Expo `Function`, and a future native frontend links it directly.
 `cal-core-wasm` is **pure marshalling**: strings in, values out, every body a
 `match`. No rule may live there — it exists so rules can live in the core.
 
+The app's Content Security Policy (`src-tauri/tauri.conf.json`) carries
+`'wasm-unsafe-eval'` in `script-src`: a webview compiles WebAssembly only with
+it, and it allows nothing broader (unlike `'unsafe-eval'`). `tauri dev` and the
+tests run without that policy, so `src/wasm/csp.test.ts` guards it.
+
 Some of the rules that cross today:
 
 - `priorityRank`, `isImportantPriority`, `normalPriority`;
