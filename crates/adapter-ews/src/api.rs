@@ -664,15 +664,18 @@ pub async fn create_event(
 }
 
 /// Update an existing calendar item with the supplied event payload.
-/// All fields are set; absent fields become DeleteItemField blocks
-/// so EWS clears them server-side.
+/// Fields with a value are set; some emptied ones become DeleteItemField
+/// blocks so EWS clears them server-side (see
+/// [`crate::mapping::event_to_update_field_xml_on`]).
 ///
-/// For occurrences of a recurring series, we resolve the master id
-/// first (via `GetItem` with `RecurringMasterItemId`) and run the
-/// UpdateItem against that — matching Aperio's "edit recurring event
-/// = edit the whole series" semantics. Per-occurrence overrides go
-/// through a separate flow (`add_event_exdate` for skips, or a
-/// future exception-override-create API).
+/// A plain occurrence id resolves to its series master (`GetItem` with
+/// `RecurringMasterItemId`), and the edit applies to the whole series. An
+/// override id (`{master}::rid::{original_start}`) resolves to the exception's
+/// own item through `resolve_override_target`; that update never deletes
+/// `calendar:Recurrence`, which Exchange refuses on an exception
+/// (`ErrorInvalidPropertyDelete`), and the event comes back with its override
+/// id unchanged and the exception's new ChangeKey as `etag`. Skipping an
+/// occurrence goes through `add_event_exdate`.
 pub async fn update_event(
     client: &EwsClient,
     event: &Event,
@@ -890,10 +893,13 @@ pub async fn delete_series_occurrence(
 
 /// Resolve the (id, change_key) pair to use when writing against a
 /// decoded Aperio event id. For Single / RecurringMaster the decoded
-/// id is the target directly; for Occurrence / Exception we ask the
-/// server "what's the master of this occurrence?" via a `GetItem`
-/// with the special `RecurringMasterItemId` form, then return the
-/// master's id pair.
+/// id is the target directly. An override id (`recurrence_id` set)
+/// resolves to the exception's own pair with kind `Exception` through
+/// [`resolve_override_target`], and an occurrence it cannot find is an
+/// error, never widened to the series. Any other Occurrence / Exception
+/// id asks the server for its master via a `GetItem` with the special
+/// `RecurringMasterItemId` form and returns the master's pair with kind
+/// `RecurringMaster`.
 async fn resolve_write_target(
     client: &EwsClient,
     decoded: &DecodedEventId,
@@ -1606,8 +1612,14 @@ mod tests {
     </m:UpdateItemResponse>
   </s:Body>
 </s:Envelope>"#;
+        // A single without a rule still clears one: only an exception target
+        // leaves the Recurrence delete out. Without it this mock does not
+        // match, and the update fails.
         let _m = server
             .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"<t:DeleteItemField>\s*<t:FieldURI FieldURI="calendar:Recurrence"/>"#.into(),
+            ))
             .with_status(200)
             .with_body(body)
             .create_async()
