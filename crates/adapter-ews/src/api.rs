@@ -664,15 +664,18 @@ pub async fn create_event(
 }
 
 /// Update an existing calendar item with the supplied event payload.
-/// All fields are set; absent fields become DeleteItemField blocks
-/// so EWS clears them server-side.
+/// Fields with a value are set; some emptied ones become DeleteItemField
+/// blocks so EWS clears them server-side (see
+/// [`crate::mapping::event_to_update_field_xml_on`]).
 ///
-/// For occurrences of a recurring series, we resolve the master id
-/// first (via `GetItem` with `RecurringMasterItemId`) and run the
-/// UpdateItem against that — matching Aperio's "edit recurring event
-/// = edit the whole series" semantics. Per-occurrence overrides go
-/// through a separate flow (`add_event_exdate` for skips, or a
-/// future exception-override-create API).
+/// A plain occurrence id resolves to its series master (`GetItem` with
+/// `RecurringMasterItemId`), and the edit applies to the whole series. An
+/// override id (`{master}::rid::{original_start}`) resolves to the exception's
+/// own item through `resolve_override_target`; that update never deletes
+/// `calendar:Recurrence`, which Exchange refuses on an exception
+/// (`ErrorInvalidPropertyDelete`), and the event comes back with its override
+/// id unchanged and the exception's new ChangeKey as `etag`. Skipping an
+/// occurrence goes through `add_event_exdate`.
 pub async fn update_event(
     client: &EwsClient,
     event: &Event,
@@ -680,7 +683,7 @@ pub async fn update_event(
 ) -> EwsResult<Event> {
     let decoded = decode_event_id(&event.id);
     let target = resolve_write_target(client, &decoded).await?;
-    let (set_xml, delete_xml) = event_to_update_field_xml_on(event, server_zones)?;
+    let (set_xml, delete_xml) = event_to_update_field_xml_on(event, server_zones, target.kind)?;
     let notify = event.send_invitations && !event.attendees.is_empty();
     let envelope = update_calendar_item(
         &target.item_id,
@@ -691,15 +694,25 @@ pub async fn update_event(
     );
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    // The kind we wrote against was `Single` (no recurrence) or
-    // `RecurringMaster` (resolved from an occurrence). On a series-
-    // wide update the row we ended up with is the master; otherwise
-    // it's the single event itself.
-    let returned_kind = match target.kind {
-        EventIdKind::Single => EventIdKind::Single,
-        _ => EventIdKind::RecurringMaster,
+    // A single stays a single; a series-wide write (a master, or a master
+    // resolved from an occurrence) ends on the master. An exception keeps the
+    // override id it was written through: that id names the occurrence, and its
+    // own ItemId is looked up live on every write (`resolve_override_target`).
+    // Minting a new id from the exception's ItemId would turn it into a series
+    // head for the next edit.
+    let new_id = match target.kind {
+        EventIdKind::Exception => event.id.clone(),
+        EventIdKind::Single => encode_event_id(
+            EventIdKind::Single,
+            &item_ref.id,
+            item_ref.change_key.as_deref(),
+        ),
+        _ => encode_event_id(
+            EventIdKind::RecurringMaster,
+            &item_ref.id,
+            item_ref.change_key.as_deref(),
+        ),
     };
-    let new_id = encode_event_id(returned_kind, &item_ref.id, item_ref.change_key.as_deref());
     Ok(Event {
         id: new_id,
         etag: item_ref.change_key,
@@ -880,10 +893,13 @@ pub async fn delete_series_occurrence(
 
 /// Resolve the (id, change_key) pair to use when writing against a
 /// decoded Aperio event id. For Single / RecurringMaster the decoded
-/// id is the target directly; for Occurrence / Exception we ask the
-/// server "what's the master of this occurrence?" via a `GetItem`
-/// with the special `RecurringMasterItemId` form, then return the
-/// master's id pair.
+/// id is the target directly. An override id (`recurrence_id` set)
+/// resolves to the exception's own pair with kind `Exception` through
+/// [`resolve_override_target`], and an occurrence it cannot find is an
+/// error, never widened to the series. Any other Occurrence / Exception
+/// id asks the server for its master via a `GetItem` with the special
+/// `RecurringMasterItemId` form and returns the master's pair with kind
+/// `RecurringMaster`.
 async fn resolve_write_target(
     client: &EwsClient,
     decoded: &DecodedEventId,
@@ -1596,8 +1612,14 @@ mod tests {
     </m:UpdateItemResponse>
   </s:Body>
 </s:Envelope>"#;
+        // A single without a rule still clears one: only an exception target
+        // leaves the Recurrence delete out. Without it this mock does not
+        // match, and the update fails.
         let _m = server
             .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"<t:DeleteItemField>\s*<t:FieldURI FieldURI="calendar:Recurrence"/>"#.into(),
+            ))
             .with_status(200)
             .with_body(body)
             .create_async()
@@ -1840,6 +1862,114 @@ mod tests {
         // (`M:`), and the id holds the freshly rotated ChangeKey.
         assert_eq!(updated.id, "M:MASTER-ID|MCK-V2");
         assert_eq!(updated.etag.as_deref(), Some("MCK-V2"));
+    }
+
+    /// Editing one changed occurrence (an override id): the exception is
+    /// resolved from the series head, the update goes to its own item without
+    /// deleting a rule Exchange refuses to delete there (live test round 3), and
+    /// the returned event keeps the override id.
+    #[tokio::test]
+    async fn update_event_on_an_override_writes_the_exception_and_keeps_its_id() {
+        use std::sync::{Arc, Mutex};
+        let mut server = Server::new_async().await;
+        let series = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2026-10-25T23:00:00Z</t:Start>
+          <t:End>2026-10-26T23:00:00Z</t:End>
+          <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let updated_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="EXC-ID" ChangeKey="ECK-V2"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _any = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("UpdateItem") {
+                    updated_body
+                } else {
+                    series
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+
+        let original_start: chrono::DateTime<chrono::Utc> = "2026-10-25T23:00:00Z".parse().unwrap();
+        let override_id =
+            crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
+        let edit = Event {
+            id: override_id.clone(),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Moved to Tuesday".into(),
+            description: None,
+            location: None,
+            start: "2026-10-26T23:00:00Z".parse().unwrap(),
+            end: "2026-10-27T23:00:00Z".parse().unwrap(),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            etag: Some("MCK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        };
+        let updated = update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one GetItem for the series, one UpdateItem"
+        );
+        let update = &requests[1];
+        assert!(update.contains("UpdateItem"), "{update}");
+        assert!(
+            update.contains(r#"<t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>"#),
+            "{update}"
+        );
+        assert!(!update.contains("calendar:Recurrence"), "{update}");
+        assert!(
+            update.contains(r#"FieldURI="calendar:Location""#),
+            "{update}"
+        );
+        assert_eq!(updated.id, override_id, "the override keeps its id");
+        assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
     }
 
     #[tokio::test]
