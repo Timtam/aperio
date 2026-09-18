@@ -3,7 +3,7 @@
 Status: **entschieden; Stufen 1 bis 3 gebaut (#72, #73, #74), Stufe 4 in Arbeit.**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
-bis 43b, 46a bis 49a, 51a bis 53a, 57a und 58a, dazu die Vorlese-Form F). Die Planung lief in zwei
+bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a und 61a, dazu die Vorlese-Form F). Die Planung lief in zwei
 Runden: drei Varianten mit je einer Gegenprüfung, dann zwei Planer (Bedienung,
 Unterbau) mit je einem Kritiker und einer Zusammenführung. Danach wurde dieses
 Dokument selbst gegen die Entscheidungen, den Code und die Planung geprüft. Die
@@ -145,6 +145,10 @@ keinen, dort ist die Wahl Tonis Sache.
 - **58a — der Betreff einer Ausnahme** ist eine eigene, spätere Aufgabe
   außerhalb dieses Entwurfs. Heute zeigt Aperio eine Ausnahme unter dem Betreff
   der Serie.
+- **61a — zwei ältere Ausnahme-Fehler vor 48a.** Die Prüfung des
+  Ausnahme-Fixes hat zwei ältere Fehler gefunden (siehe TODO): Das Handy ändert
+  eine Exchange-Ausnahme nicht direkt, und Verschieben „nur dieses Vorkommen“
+  kann ein Duplikat hinterlassen. Beide kommen direkt danach, noch vor 48a.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:

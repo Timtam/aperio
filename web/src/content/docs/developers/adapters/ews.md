@@ -35,6 +35,12 @@ The endpoint is discovered or user-supplied.
 - **ChangeKey churn.** An edited item keeps its item id but rotates the
   `ChangeKey` embedded in the composite id, so the cache purges the whole
   native group before re-inserting (avoids stale duplicates).
+- **Exceptions keep their rule field.** Editing one changed occurrence writes
+  to the exception's own item, which the override id finds from the series
+  head on every write. That update never sends `DeleteItemField
+  calendar:Recurrence`: Exchange refuses it on an exception
+  (`ErrorInvalidPropertyDelete`) and fails the whole update. The returned event
+  keeps the override id.
 
 ## Time zones
 
