@@ -56,6 +56,33 @@ describe('a repeat rule in words', () => {
     });
   }
 
+  it('has a sentence for every key the core emits, in both languages', () => {
+    // The core proves every key it can emit appears in a row (its own
+    // `every_key_the_core_emits_is_used_by_a_row`), so the rows are the whole
+    // set — and a key without a sentence here is a silent gap in the app.
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const expected = row.expected as {
+        key?: string;
+        every?: { key: string };
+        on?: { key: string };
+        end?: { key: string };
+      };
+      for (const key of [expected.key, expected.every?.key, expected.on?.key, expected.end?.key]) {
+        if (key !== undefined) keys.add(key);
+      }
+    }
+    expect(keys.size).toBeGreaterThan(20);
+    for (const language of ['en', 'de'] as const) {
+      const t = i18n.getFixedT(language);
+      for (const key of keys) {
+        const sentence = t(key, { count: 2 }) as unknown as string;
+        expect(sentence, `${language} has no sentence for ${key}`).not.toBe(key);
+        expect(sentence.trim()).not.toBe('');
+      }
+    }
+  });
+
   it('says what it cannot put into words, and how often that rule repeats', () => {
     const row = rows.find((r) => r.name === 'monthly_plain_byday');
     expect(row).toBeDefined();

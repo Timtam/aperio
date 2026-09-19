@@ -5,6 +5,11 @@ import type { UndescribedReason } from "./UndescribedReason";
 
 /**
  * The sentence, or why there is none.
+ *
+ * The described variant carries the sentence's parts and is much larger than
+ * the other two; it is built once per summary and handed straight to the
+ * surfaces, so boxing it would buy an allocation and cost the flat shape the
+ * wire and the fixture read.
  */
 export type RecurrenceSummary = { "outcome": "none" } | { "outcome": "described", key: string, every: Phrase, on?: Phrase, end?: Phrase, } | { "outcome": "undescribed", reason: UndescribedReason, 
 /**

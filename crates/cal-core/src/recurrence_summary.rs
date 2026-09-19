@@ -1109,6 +1109,11 @@ mod tests {
 /// The rules of `tests/fixtures/recurrenceSummary.json`, row by row: the same
 /// file the desktop reads through the WASM door and renders in both
 /// languages, so core and surfaces cannot drift apart.
+///
+/// Which key has a sentence is checked on the surfaces' side, against the
+/// real locale files (`src/intl/recurrenceSummary.contract.test.ts`): the
+/// core does not read the app's translations, and every key it can emit is
+/// in a row here, so a key without a sentence fails there.
 #[cfg(test)]
 mod contract {
     use super::*;
@@ -1118,15 +1123,6 @@ mod contract {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/recurrenceSummary.json"
     ));
-    const EN: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../locales/en/translation.json"
-    ));
-    const DE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../locales/de/translation.json"
-    ));
-
     fn rows() -> Vec<Value> {
         let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
         doc["rows"].as_array().expect("rows").clone()
@@ -1154,30 +1150,6 @@ mod contract {
                     matches!(describe_recurrence(&question), RecurrenceSummary::None),
                     "{name} ({language}): only \"no repeat\" has no sentence"
                 );
-            }
-        }
-    }
-
-    #[test]
-    fn every_key_the_core_emits_has_a_sentence_in_both_languages() {
-        for (language, file) in [("en", EN), ("de", DE)] {
-            let doc: Value = serde_json::from_str(file).expect("the locale file parses");
-            for key in SUMMARY_KEYS {
-                let mut node = &doc;
-                for part in key.split('.') {
-                    node = &node[part];
-                }
-                // A key with a plural has its forms instead of a bare value.
-                let present = node.is_string()
-                    || ["_one", "_other"].iter().all(|suffix| {
-                        let mut node = &doc;
-                        let parts: Vec<&str> = key.split('.').collect();
-                        for part in &parts[..parts.len() - 1] {
-                            node = &node[part];
-                        }
-                        node[format!("{}{suffix}", parts[parts.len() - 1])].is_string()
-                    });
-                assert!(present, "{language} has no sentence for {key}");
             }
         }
     }
