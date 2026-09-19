@@ -184,6 +184,12 @@ pub enum UndescribedReason {
 }
 
 /// The sentence, or why there is none.
+///
+/// The described variant carries the sentence's parts and is much larger than
+/// the other two; it is built once per summary and handed straight to the
+/// surfaces, so boxing it would buy an allocation and cost the flat shape the
+/// wire and the fixture read.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
@@ -577,7 +583,7 @@ fn month_days_phrase(value: &str, unit: Option<RepeatUnit>) -> Result<Phrase, Un
             .trim()
             .parse()
             .map_err(|_| undescribed(Unreadable, unit))?;
-        if day == 0 || day > 31 || day < -31 {
+        if day == 0 || !(-31..=31).contains(&day) {
             return Err(undescribed(Unreadable, unit));
         }
         if !days.contains(&day) {

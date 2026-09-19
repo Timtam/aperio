@@ -25,7 +25,10 @@ use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
-use crate::ical_raw::{component_lines, fold, insert_after_head, line_ending};
+use crate::ical_raw::{
+    component_lines, fold, insert_after_head, insert_before_end, line_ending, unfold,
+    without_ranges,
+};
 use crate::identity::OwnIdentity;
 use crate::mapping::{
     decode_event_id, event_to_ical_preserving, format_utc_compact, new_event_to_ical,
@@ -33,10 +36,13 @@ use crate::mapping::{
     strip_mailto_scheme, PriorAlarms,
 };
 use crate::scheduling::{
-    apply_to_block, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
+    apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
 };
 use crate::xml::{parse_multistatus, ResponseEntry};
+use cal_core::attendee::same_address;
 use cal_core::event_diff::changed_fields;
+use cal_core::invitation::{reply_only_verdict, ReplyOnlyVerdict};
+use cal_core::{Reminder, ReminderKind, WriteRefusal};
 use std::ops::Range;
 
 /// The `calendar-query` REPORT for every event in `range` of the calendar
@@ -338,6 +344,20 @@ async fn update_master(
     if !one_organizer(&body, &blocks) {
         return Err(refused("its components name different organizers"));
     }
+    if ctx.schedules && attendee_copy(&body[master.range.clone()], ctx)? {
+        return write_attendee_copy(
+            client,
+            &resource,
+            &body,
+            master.range.clone(),
+            &master.event,
+            event,
+            server_etag,
+            credentials,
+            ctx,
+        )
+        .await;
+    }
     let plan = plan_block(&body[master.range.clone()], &event, ctx)?;
     if cutoff.is_none()
         && plan.change == PeopleChange::Keep
@@ -368,6 +388,160 @@ async fn update_master(
         updated_at: Utc::now(),
         ..event
     })
+}
+
+/// Write the account's own copy of someone else's meeting (decision 77a).
+///
+/// On a scheduling server an attendee may change its reply and its own alarms
+/// and nothing else (RFC 6638 §3.2.2.1). So this writes the server's own block
+/// back byte for byte with only its VALARMs replaced: the organizer's lines,
+/// the zone spelling, `SEQUENCE`, `STATUS`, Apple's own properties and every
+/// line Aperio does not model stay exactly as the organizer wrote them.
+///
+/// A change to anything else is refused before any PUT — unless the caller
+/// edited a copy this account never saw, which makes it the organizer's change
+/// and a conflict (see [`cal_core::invitation::reply_only_verdict`]).
+#[allow(clippy::too_many_arguments)]
+async fn write_attendee_copy(
+    client: &Client,
+    resource: &Url,
+    body: &str,
+    block: Range<usize>,
+    fresh: &Event,
+    mut edit: Event,
+    server_etag: Option<String>,
+    credentials: &Credentials,
+    ctx: &WriteCtx,
+) -> CaldavResult<Event> {
+    // A colour the server sent back is not a change the account made when the
+    // account cannot store one there anyway (iCloud keeps it on the device).
+    if !ctx.writes_color {
+        edit.color_hex = fresh.color_hex.clone();
+    }
+    let same_version = edit.etag.is_some() && edit.etag == server_etag;
+    match reply_only_verdict(&edit, fresh, same_version) {
+        ReplyOnlyVerdict::Refused(field) => {
+            return Err(CaldavError::Forbidden(
+                WriteRefusal::ReplyOnlyInvitation.message(field.token()),
+            ));
+        }
+        ReplyOnlyVerdict::Stale => {
+            // The organizer changed the meeting between the read and this
+            // save. Telling the user they may not change it would name the
+            // wrong person and the wrong act.
+            return Err(CaldavError::Http {
+                status: 412,
+                message: "the meeting changed on the server since it was read".into(),
+            });
+        }
+        ReplyOnlyVerdict::Allowed => {}
+    }
+    let server_block = &body[block.clone()];
+    let summary = component_lines(server_block)
+        .iter()
+        .find(|line| line.name == "SUMMARY")
+        .map(|line| line.value.clone())
+        .unwrap_or_default();
+    let Some(new_block) = replace_alarms(server_block, &edit.reminders, &summary) else {
+        // Every PUT of a scheduling object reaches the organizer's server.
+        return Ok(Event {
+            etag: server_etag.or(edit.etag.clone()),
+            ..edit
+        });
+    };
+    // If-Match is the ETag just read, on purpose: the body being written IS
+    // the body just read, with the alarms swapped. That is what lets an
+    // answer and a reminder be saved one after the other without reopening.
+    let if_match = server_etag.as_deref().or(edit.etag.as_deref());
+    let new_body = replace_ranges(body, vec![(block, new_block)]);
+    let new_etag = put_resource(client, resource, new_body, if_match, credentials).await?;
+    Ok(Event {
+        etag: new_etag.or(server_etag).or(edit.etag.clone()),
+        updated_at: Utc::now(),
+        ..edit
+    })
+}
+
+/// `block` with its VALARMs replaced by `wanted`, or `None` when that changes
+/// nothing.
+///
+/// Per alarm on the server, read as the user saw it
+/// ([`crate::mapping::raw_alarm_reminder`]):
+///
+/// - a reminder the user still wants is **kept byte for byte**, with its UID,
+///   its `X-APPLE-DEFAULT-ALARM` mark and everything else it carries;
+/// - one they removed is dropped;
+/// - an alarm Aperio never showed is kept: an edit here never deletes what it
+///   could not display;
+/// - a reminder with no alarm left to claim is rendered, with the SERVER's
+///   summary, in the block's own line ending.
+///
+/// When alarms were added or removed, the event-level `X-APPLE-DEFAULT-ALARM`
+/// goes: the alarms are no longer the account's default set. That is the rule
+/// the rebuilding write follows too (`mapping::apply_common`).
+fn replace_alarms(block: &str, wanted: &[Reminder], server_summary: &str) -> Option<String> {
+    let ending = line_ending(block);
+    let mut unclaimed: Vec<&Reminder> = wanted
+        .iter()
+        .filter(|r| !matches!(r.kind, ReminderKind::AppStart))
+        .collect();
+    let mut drop: Vec<Range<usize>> = Vec::new();
+    for range in component_ranges(block, "VALARM") {
+        let Some(shown) = crate::mapping::raw_alarm_reminder(&block[range.clone()]) else {
+            continue;
+        };
+        match unclaimed.iter().position(|r| r.kind == shown.kind) {
+            // Claimed: the server's own text stays.
+            Some(index) => {
+                unclaimed.remove(index);
+            }
+            None => drop.push(range),
+        }
+    }
+    let added: String = unclaimed
+        .iter()
+        .filter_map(|reminder| render_alarm(reminder, server_summary, ending))
+        .collect();
+    if drop.is_empty() && added.is_empty() {
+        return None;
+    }
+    // The block's own default-alarm mark, if it has one.
+    if let Some(line) = component_lines(block)
+        .iter()
+        .find(|line| line.name == "X-APPLE-DEFAULT-ALARM")
+    {
+        drop.push(line.range.clone());
+    }
+    Some(insert_before_end(&without_ranges(block, &drop), &added))
+}
+
+/// One VALARM as text, in `ending`. `None` for a reminder no provider stores
+/// (an app-start reminder).
+fn render_alarm(reminder: &Reminder, summary: &str, ending: &str) -> Option<String> {
+    use icalendar::{Component, EventLike};
+    let alarm = crate::mapping::reminder_to_alarm(reminder, summary)?;
+    let mut carrier = icalendar::Event::new();
+    carrier.uid("alarm-carrier").alarm(alarm);
+    let rendered = icalendar::Calendar::new()
+        .push(carrier.done())
+        .done()
+        .to_string();
+    let range = component_ranges(&rendered, "VALARM").into_iter().next()?;
+    Some(
+        rendered[range]
+            .split_inclusive('\n')
+            // The serialiser stamps every component it writes, but a VALARM
+            // has no DTSTAMP (RFC 5545 §3.6.6), and a scheduling server may
+            // refuse a property that does not belong there.
+            .filter(|line| {
+                !line
+                    .trim_start()
+                    .to_ascii_uppercase()
+                    .starts_with("DTSTAMP")
+            })
+            .map(|line| format!("{}{ending}", line.trim_end_matches(['\r', '\n'])))
+            .collect(),
+    )
 }
 
 /// Whether the components of a resource name one organizer at most. RFC 6638
@@ -435,6 +609,20 @@ async fn update_override(
         })
         .ok_or_else(|| refused("it is no longer an exception in the series"))?;
     let server_block = &body[block.range.clone()];
+    if ctx.schedules && attendee_copy(server_block, ctx)? {
+        return write_attendee_copy(
+            client,
+            &resource,
+            &body,
+            block.range.clone(),
+            &block.event,
+            event,
+            server_etag,
+            credentials,
+            ctx,
+        )
+        .await;
+    }
     let plan = plan_block(server_block, &event, ctx)?;
     if plan.change == PeopleChange::Keep && changed_fields(&event, &block.event).is_empty() {
         return Ok(Event {
@@ -859,7 +1047,7 @@ pub async fn add_event_exdate(
                 let ending = line_ending(master_text);
                 insert_after_head(
                     master_text,
-                    &format!("EXDATE:{}{ending}", format_utc_compact(occurrence)),
+                    &format!("{}{ending}", exdate_line(master_text, occurrence)),
                 )
             };
             let mut edits = vec![(master.range.clone(), new_master)];
@@ -882,6 +1070,28 @@ pub async fn add_event_exdate(
     };
     put_resource(client, &resource, new_body, etag.as_deref(), credentials).await?;
     Ok(())
+}
+
+/// The `EXDATE` line that excludes `occurrence` from `master`.
+///
+/// An exception must be written the way the series names its occurrences
+/// (RFC 5545 §3.8.5.1): a series whose `DTSTART` is a date is excluded by a
+/// date, and a UTC date-time excludes nothing there — the occurrence comes
+/// back on the next read, and on a meeting the promised cancellation is never
+/// sent. An all-day start is local midnight as an instant, so its date is the
+/// date it shows.
+fn exdate_line(master: &str, occurrence: DateTime<Utc>) -> String {
+    let all_day = component_lines(master).iter().any(|line| {
+        line.name == "DTSTART"
+            && line
+                .param("VALUE")
+                .is_some_and(|value| value.eq_ignore_ascii_case("DATE"))
+    });
+    if all_day {
+        format!("EXDATE;VALUE=DATE:{}", occurrence.format("%Y%m%d"))
+    } else {
+        format!("EXDATE:{}", format_utc_compact(occurrence))
+    }
 }
 
 /// `body` with each range replaced by its text. The ranges must not overlap.
@@ -1022,35 +1232,36 @@ pub async fn respond_to_event(
 /// line, so we emit it unfolded and pass everything else through
 /// verbatim.
 fn set_self_partstat(body: &str, email: &str, partstat: &str) -> Option<String> {
-    let needle = email.trim().to_ascii_lowercase();
-    let mut out = String::with_capacity(body.len() + 16);
-    let mut changed = false;
-    let mut lines = body.split_inclusive('\n').peekable();
-    while let Some(phys) = lines.next() {
-        let trimmed = phys.trim_end_matches(['\r', '\n']);
-        if !trimmed.to_ascii_uppercase().starts_with("ATTENDEE") {
-            out.push_str(phys);
-            continue;
-        }
-        let ending = if phys.ends_with("\r\n") { "\r\n" } else { "\n" };
-        // Gather any continuation lines into one logical ATTENDEE line.
-        let mut logical = trimmed.to_string();
-        while let Some(next) = lines.peek() {
-            if next.starts_with(' ') || next.starts_with('\t') {
-                let cont = lines.next().unwrap();
-                logical.push_str(cont.trim_end_matches(['\r', '\n']).get(1..).unwrap_or(""));
-            } else {
-                break;
+    let mut edits: Vec<(Range<usize>, String)> = Vec::new();
+    for component in component_ranges(body, "VEVENT") {
+        let block = &body[component.clone()];
+        let ending = line_ending(block);
+        for line in component_lines(block) {
+            // Only the event's own rows: an `ACTION:EMAIL` alarm carries
+            // ATTENDEE lines of its own, and they have no PARTSTAT to set
+            // (RFC 5545 §3.6.6). `component_lines` skips nested components.
+            //
+            // And only the row that NAMES this address: a substring match
+            // would also flip `atoni@x` when answering as `toni@x`. A row
+            // written as a principal path carries the address in its EMAIL
+            // parameter, which is how iCloud writes it.
+            fn address(value: &str) -> &str {
+                strip_mailto_scheme(value).unwrap_or(value).trim()
             }
+            let names_self = same_address(address(&line.value), address(email))
+                || line
+                    .param("EMAIL")
+                    .is_some_and(|param| same_address(address(param), address(email)));
+            if line.name != "ATTENDEE" || !names_self {
+                continue;
+            }
+            let text = &block[line.range.clone()];
+            let rewritten = fold(&replace_partstat(&unfold(text), partstat), ending);
+            let at = component.start + line.range.start;
+            edits.push((at..component.start + line.range.end, rewritten));
         }
-        if logical.to_ascii_lowercase().contains(&needle) {
-            logical = replace_partstat(&logical, partstat);
-            changed = true;
-        }
-        out.push_str(&logical);
-        out.push_str(ending);
     }
-    changed.then_some(out)
+    (!edits.is_empty()).then(|| replace_ranges(body, edits))
 }
 
 /// Replace (or insert) the `PARTSTAT` parameter on a single logical
@@ -1715,6 +1926,7 @@ END:VCALENDAR\r
             identity: Some(crate::mapping::tests::icloud_identity()),
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
+            writes_color: false,
         }
     }
 
@@ -1882,6 +2094,421 @@ END:VCALENDAR\r
         .unwrap();
         get.assert_async().await;
         put.assert_async().await;
+    }
+
+    /// An invitation someone else organizes, read for this account, as the
+    /// host holds it before an edit.
+    fn invitation(cal_url: &Url, body: &'static str) -> Vec<Event> {
+        crate::mapping::parse_calendar_data_as(
+            body,
+            cal_url.as_str(),
+            Some("/calendars/alice/work/series.ics"),
+            &crate::mapping::tests::icloud_identity(),
+        )
+        .unwrap()
+    }
+
+    fn invitation_master(cal_url: &Url, body: &'static str) -> Event {
+        let mut event = invitation(cal_url, body).remove(0);
+        event.etag = Some("\"server-etag\"".into());
+        event
+    }
+
+    /// Decision 77a: a save of someone else's meeting writes the server's own
+    /// block back with only its alarms changed. Everything the organizer
+    /// wrote — the zone, SEQUENCE, STATUS, the people, Apple's own
+    /// properties, even DTSTAMP — goes back byte for byte.
+    #[tokio::test]
+    async fn an_invitation_reminder_edit_changes_only_its_alarms() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.reminders.push(cal_core::Reminder {
+            kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+            sound: Some(cal_core::SoundConfig {
+                source: cal_core::SoundSource::Silent,
+                volume: 20,
+            }),
+        });
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+
+        // The one new alarm, before the block's own end.
+        assert_eq!(sent.matches("BEGIN:VALARM").count(), 7, "{sent}");
+        // The serialiser writes a relative trigger in seconds.
+        assert!(sent.contains("TRIGGER:-PT3600S"), "{sent}");
+        assert!(
+            !sent.contains("BEGIN:VALARM\r\nDTSTAMP"),
+            "a VALARM has no DTSTAMP: {sent}"
+        );
+        let master_end = sent.find("END:VEVENT").unwrap();
+        assert!(
+            sent[..master_end].contains("TRIGGER:-PT3600S"),
+            "in the master's block: {sent}"
+        );
+        // The alarms the user kept are the server's own text, mark and all.
+        for kept in [
+            "UID:11111111-1111-4111-8111-111111111111",
+            "X-APPLE-DEFAULT-ALARM:TRUE\r\nEND:VALARM",
+            "ACTION:AUDIO",
+            "ATTACH;VALUE=URI:Basso",
+            "TRIGGER;RELATED=END:-PT5M",
+            "ATTENDEE:mailto:toni@example.org",
+            "TRIGGER:-P1W",
+        ] {
+            assert!(sent.contains(kept), "kept {kept}: {sent}");
+        }
+        // The event-level default mark goes: the alarms are no longer the
+        // account's default set.
+        assert!(
+            !sent.contains("X-APPLE-DEFAULT-ALARM:TRUE\r\nX-APPLE-TRAVEL"),
+            "the event-level mark is gone: {sent}"
+        );
+        // And everything else of the resource is untouched.
+        for line in [
+            "BEGIN:VTIMEZONE",
+            "TZID:Europe/Berlin",
+            "DTSTART;TZID=Europe/Berlin:20261109T160000",
+            "DTSTAMP:20260919T184800Z",
+            "CREATED:20260901T090000Z",
+            "LAST-MODIFIED:20260918T101500Z",
+            "ORGANIZER;CN=Boss;EMAIL=boss@example.net:mailto:boss@example.net",
+            "SEQUENCE:2",
+            "STATUS:CONFIRMED",
+            "TRANSP:OPAQUE",
+            "X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC",
+            "SUMMARY:Aperio R6 fremde, verschoben",
+        ] {
+            assert!(sent.contains(line), "kept {line}: {sent}");
+        }
+        assert_eq!(
+            sent.matches("ATTENDEE;CN=Boss").count(),
+            1,
+            "the people are not rewritten: {sent}"
+        );
+    }
+
+    /// An alarm the read shows as a reminder is claimed by that reminder,
+    /// whatever its ACTION or the end it is triggered from. Classifying it
+    /// more strictly would keep it AND render a second one beside it, and the
+    /// reminder would multiply on every save.
+    #[tokio::test]
+    async fn an_audio_or_end_related_alarm_is_claimed_not_duplicated() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        // What the editor shows for this invitation, plus one new reminder.
+        assert_eq!(
+            edit.reminders
+                .iter()
+                .map(|r| r.kind.clone())
+                .collect::<Vec<_>>(),
+            [
+                cal_core::ReminderKind::Relative { minutes_before: 15 },
+                cal_core::ReminderKind::Relative { minutes_before: 30 },
+                cal_core::ReminderKind::Email {
+                    minutes_before: 1440
+                },
+                cal_core::ReminderKind::Relative { minutes_before: 5 },
+            ],
+            "the read shows an audio alarm and an end-related one as reminders"
+        );
+        edit.reminders.push(cal_core::Reminder {
+            kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+            sound: None,
+        });
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert_eq!(sent.matches("ACTION:AUDIO").count(), 1, "{sent}");
+        assert_eq!(
+            sent.matches("TRIGGER;RELATED=END:-PT5M").count(),
+            1,
+            "{sent}"
+        );
+        assert_eq!(sent.matches("TRIGGER:-PT30M").count(), 1, "{sent}");
+        assert_eq!(sent.matches("ACTION:EMAIL").count(), 1, "{sent}");
+    }
+
+    /// A reminder the user removed goes; one Aperio never showed stays.
+    #[tokio::test]
+    async fn a_removed_reminder_goes_and_an_unshown_alarm_stays() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.reminders.retain(|r| {
+            !matches!(
+                r.kind,
+                cal_core::ReminderKind::Relative { minutes_before: 30 }
+            )
+        });
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(
+            !sent.contains("ACTION:AUDIO"),
+            "the removed one goes: {sent}"
+        );
+        assert!(
+            sent.contains("TRIGGER:-P1W"),
+            "an alarm Aperio never showed is not deleted by an Aperio edit: {sent}"
+        );
+    }
+
+    /// Only the organizer changes a meeting's title, time or people. The
+    /// refusal names the field and nothing is sent.
+    #[tokio::test]
+    async fn an_invitation_title_edit_is_refused_before_any_put() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.title = "Mein eigener Titel".into();
+        let err = update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap_err();
+        put.assert_async().await;
+        match err {
+            CaldavError::Forbidden(message) => {
+                assert_eq!(message, "reply-only-invitation: title");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// The same for a series the user tried to end early.
+    #[tokio::test]
+    async fn an_invitation_series_truncation_is_refused() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        if let Some(recurrence) = edit.recurrence.as_mut() {
+            recurrence.rrule = "FREQ=WEEKLY;UNTIL=20261123T150000Z".into();
+        }
+        let err = update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap_err();
+        put.assert_async().await;
+        assert!(
+            matches!(&err, CaldavError::Forbidden(m) if m == "reply-only-invitation: recurrence"),
+            "{err:?}"
+        );
+    }
+
+    /// A guest the organizer added while the editor was open is not the
+    /// user's doing: that is a conflict, not a refusal, and the user is asked
+    /// to look at the new copy rather than told they may not do what they did
+    /// not do.
+    #[tokio::test]
+    async fn a_guest_the_organizer_added_is_a_conflict_not_a_refusal() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        // The copy the user edited is older than the server's.
+        edit.etag = Some("\"older\"".into());
+        edit.attendees.push("carol@example.net".into());
+        let err = update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap_err();
+        put.assert_async().await;
+        assert!(
+            matches!(err, CaldavError::Http { status: 412, .. }),
+            "{err:?}"
+        );
+    }
+
+    /// And without any version at all the same rule holds: "unknown" is not
+    /// "unchanged".
+    #[tokio::test]
+    async fn an_invitation_edit_without_an_etag_is_a_conflict_not_a_refusal() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.etag = None;
+        edit.location = Some("Ein anderer Raum".into());
+        let err = update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap_err();
+        put.assert_async().await;
+        assert!(
+            matches!(err, CaldavError::Http { status: 412, .. }),
+            "{err:?}"
+        );
+    }
+
+    /// An invitation saved without a change sends nothing: every PUT of a
+    /// scheduling object is traffic on the organizer's server. A colour the
+    /// server sent back is no change either, because iCloud stores none.
+    #[tokio::test]
+    async fn an_invitation_save_that_changes_nothing_puts_nothing() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (_seen, get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.color_label = Some(cal_core::ColorLabelId("label".into()));
+        edit.color_hex = None;
+        edit.sound = None;
+        let saved = update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+        assert_eq!(saved.etag.as_deref(), Some("\"server-etag\""));
+    }
+
+    /// One changed occurrence of an invitation: its own block gets the
+    /// alarms, and the master and the other blocks are untouched.
+    #[tokio::test]
+    async fn an_invitation_occurrence_reminder_edit_touches_only_its_block() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut occurrence = invitation(&cal_url, ICLOUD_INVITATION).remove(1);
+        occurrence.etag = Some("\"server-etag\"".into());
+        occurrence.reminders.push(cal_core::Reminder {
+            kind: cal_core::ReminderKind::Relative { minutes_before: 90 },
+            sound: None,
+        });
+        update_event(&client(), occurrence, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        let master_end = sent.find("END:VEVENT").unwrap();
+        assert!(
+            !sent[..master_end].contains("TRIGGER:-PT5400S"),
+            "not in the master: {sent}"
+        );
+        assert!(
+            sent[master_end..].contains("TRIGGER:-PT5400S"),
+            "in the occurrence: {sent}"
+        );
+        assert!(
+            sent.contains("SUMMARY:Aperio R6 fremde, verschoben"),
+            "{sent}"
+        );
+        assert_eq!(sent.matches("BEGIN:VALARM").count(), 7, "{sent}");
+    }
+
+    /// An all-day series is excluded by a DATE, the way it names its own
+    /// occurrences. A UTC date-time excludes nothing there, so the occurrence
+    /// would come back — and on an invitation the promised decline would
+    /// never be sent.
+    #[tokio::test]
+    async fn an_all_day_occurrence_is_excluded_by_a_date_exdate() {
+        use crate::mapping::tests::ICLOUD_ALL_DAY_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_ALL_DAY_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1",
+            Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).unwrap(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(sent.contains("EXDATE;VALUE=DATE:20261116"), "{sent}");
+        assert!(!sent.contains("EXDATE:20261116T000000Z"), "{sent}");
+    }
+
+    /// Answering touches the event's own row and nothing else: an e-mail
+    /// alarm carries an ATTENDEE line of its own, which has no PARTSTAT, and
+    /// an address that merely contains the account's is somebody else.
+    #[tokio::test]
+    async fn an_answer_leaves_an_email_alarms_attendee_alone() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        respond_to_event(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1",
+            "toni@example.org",
+            AttendeeStatus::Accepted,
+            true,
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(
+            sent.contains("ATTENDEE:mailto:toni@example.org\r\n"),
+            "the e-mail alarm's own row keeps its text, PARTSTAT-free: {sent}"
+        );
+        // Read as the lines read: a rewritten row is folded again.
+        let flat = sent.replace("\r\n ", "");
+        assert_eq!(
+            flat.matches("PARTSTAT=ACCEPTED").count(),
+            3,
+            "the account's rows in both blocks, and the organizer's own: {flat}"
+        );
+        assert!(
+            flat.contains(
+                "EMAIL=toni@example.org;PARTSTAT=ACCEPTED;ROLE=REQ-PARTICIPANT:/aB1/principal/"
+            ),
+            "the account's own row in the master: {flat}"
+        );
+        assert!(
+            flat.contains("PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:boss@example.net"),
+            "the organizer's row is untouched: {flat}"
+        );
+    }
+
+    #[test]
+    fn an_answer_does_not_match_a_longer_address() {
+        let body = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\n\
+ATTENDEE;CN=Other;PARTSTAT=NEEDS-ACTION:mailto:atoni@example.org\r\n\
+ATTENDEE;CN=Me;PARTSTAT=NEEDS-ACTION:mailto:toni@example.org\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let out = set_self_partstat(body, "toni@example.org", "DECLINED").unwrap();
+        assert!(
+            out.contains("CN=Other;PARTSTAT=NEEDS-ACTION:mailto:atoni@example.org"),
+            "{out}"
+        );
+        assert!(
+            out.contains("CN=Me;PARTSTAT=DECLINED:mailto:toni@example.org"),
+            "{out}"
+        );
     }
 
     /// A 403 on a write is the server refusing that change, not the
