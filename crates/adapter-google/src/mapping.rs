@@ -11,8 +11,8 @@
 //! (`tasks` API, not Calendar API) land in Phase 6d.2.
 
 use cal_core::{
-    AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
-    EventRecurrence, NewEvent, Reminder, ReminderKind,
+    AttendeeStatus, Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent,
+    Reminder, ReminderKind,
 };
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -173,8 +173,8 @@ pub struct EventEntry {
     /// Invitees + their RSVP state. Empty on a non-meeting event.
     #[serde(default)]
     pub attendees: Vec<EventAttendeeRead>,
-    /// The meeting organizer. Present on meetings; carries the
-    /// organizer's email (and a `self` flag we don't need).
+    /// The organizer: their email, and `self` when the calendar this copy
+    /// appears on is theirs, the connected account's own (decision 70a).
     #[serde(default)]
     pub organizer: Option<EventOrganizer>,
 }
@@ -189,12 +189,19 @@ pub struct EventAttendeeRead {
     /// `needsAction` | `declined` | `tentative` | `accepted`.
     #[serde(default, rename = "responseStatus")]
     pub response_status: Option<String>,
+    /// Google marks the organizer's own row (decision 67a). Read-only.
+    #[serde(default)]
+    pub organizer: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct EventOrganizer {
     #[serde(default)]
     pub email: Option<String>,
+    /// The organizer is the calendar this copy appears on. Read-only; Google
+    /// leaves it out when false.
+    #[serde(default, rename = "self")]
+    pub is_self: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -381,30 +388,28 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         })
         .unwrap_or_default();
 
-    // Attendees: keep the editable flat list ("Name <email>" / bare
-    // email) AND the per-attendee RSVP state.
-    let mut attendees = Vec::new();
-    let mut attendee_responses = Vec::new();
-    for a in entry.attendees {
-        let Some(email) = a.email.filter(|e| !e.trim().is_empty()) else {
-            continue;
-        };
-        let name = a.display_name.filter(|n| !n.trim().is_empty());
-        attendees.push(format_attendee(name.as_deref(), &email));
-        attendee_responses.push(AttendeeResponse {
-            status: a
+    // Attendees: the editable flat list ("Name <email>" / bare email) AND the
+    // per-attendee RSVP state, without the organizer (decision 67a), whose row
+    // Google flags. `organizer.self` says whether the account organizes the
+    // event (decision 70a).
+    let organized_by_me = entry.organizer.as_ref().map(|o| o.is_self);
+    let people = cal_core::attendee::people_from_read(
+        entry.organizer.and_then(|o| o.email),
+        organized_by_me,
+        entry.attendees.into_iter().filter_map(|a| {
+            let status = a
                 .response_status
                 .as_deref()
                 .map(google_status)
-                .unwrap_or_default(),
-            name,
-            email,
-        });
-    }
-    let organizer = entry
-        .organizer
-        .and_then(|o| o.email)
-        .filter(|e| !e.trim().is_empty());
+                .unwrap_or_default();
+            Some(cal_core::attendee::ReadAttendee {
+                email: a.email?,
+                name: a.display_name,
+                status,
+                is_organizer: a.organizer,
+            })
+        }),
+    );
 
     let id = event_id_for(
         entry.id,
@@ -433,6 +438,9 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     }
 
     Ok(Some(Event {
+        keep_attendees: false,
+        clear_attendees: false,
+        organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
         id,
@@ -449,12 +457,12 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         color_hex: None,
         reminders,
         sound: None,
-        attendees,
+        attendees: people.attendees,
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
-        organizer,
-        attendee_responses,
+        organizer: people.organizer,
+        attendee_responses: people.attendee_responses,
         // `false` for a normal event; `true` for a cancelled recurring instance
         // surfaced as a suppressing override (a cancelled WHOLE event returned
         // `None` above).
@@ -469,16 +477,6 @@ fn google_status(s: &str) -> AttendeeStatus {
         "declined" => AttendeeStatus::Declined,
         "tentative" => AttendeeStatus::Tentative,
         _ => AttendeeStatus::NeedsAction,
-    }
-}
-
-/// Render an attendee for the editable flat list: `"Name <email>"` when
-/// a distinct display name exists, else the bare email — matching the
-/// format the AttendeePicker and the write path use.
-fn format_attendee(name: Option<&str>, email: &str) -> String {
-    match name {
-        Some(n) if n.trim() != email => format!("{} <{}>", n.trim(), email),
-        _ => email.to_string(),
     }
 }
 
@@ -513,11 +511,13 @@ pub struct EventWriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Vec<String>>,
     pub reminders: EventRemindersWrite,
-    /// Attendees are always written (Google stores them); whether Google
-    /// EMAILS them is governed by the `sendUpdates` query param on the
-    /// request, not the body.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub attendees: Vec<EventAttendeeWrite>,
+    /// Attendees are written whenever there are any (Google stores them);
+    /// whether Google EMAILS them is governed by the `sendUpdates` query
+    /// param on the request, not the body. `None` leaves the array out, so
+    /// Google keeps its own; `Some` of an empty list clears it, which only a
+    /// host-confirmed removal of every invitee asks for (decision 74a).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attendees: Option<Vec<EventAttendeeWrite>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -585,7 +585,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
             .as_ref()
             .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
         reminders: reminders_to_write(&new.reminders),
-        attendees: attendees_to_write(&new.attendees),
+        attendees: Some(attendees_to_write(&new.attendees)).filter(|list| !list.is_empty()),
     }
 }
 
@@ -610,7 +610,17 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
             .as_ref()
             .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
         reminders: reminders_to_write(&ev.reminders),
-        attendees: attendees_to_write(&ev.attendees),
+        // Left out of the PATCH when the edit did not change the invitees
+        // (decision 71a): a PATCH replaces the whole array, and Google's copy
+        // holds the organizer's row, which Aperio does not show. An empty
+        // array only when the host says every invitee was removed (74a).
+        attendees: if ev.keep_attendees {
+            None
+        } else if ev.clear_attendees {
+            Some(Vec::new())
+        } else {
+            Some(attendees_to_write(&ev.attendees)).filter(|list| !list.is_empty())
+        },
     }
 }
 
@@ -805,23 +815,82 @@ mod tests {
             "end":   { "dateTime": "2026-05-25T11:00:00Z" },
             "organizer": { "email": "boss@example.com", "self": false },
             "attendees": [
-              { "email": "boss@example.com", "displayName": "The Boss", "responseStatus": "accepted" },
-              { "email": "me@example.com", "responseStatus": "needsAction" },
+              { "email": "boss@example.com", "displayName": "The Boss", "responseStatus": "accepted", "organizer": true },
+              { "email": "me@example.com", "displayName": "Me", "responseStatus": "needsAction" },
               { "email": "skeptic@example.com", "responseStatus": "declined" }
             ]
         }"#;
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
-        // Flat editable list: "Name <email>" when named, bare otherwise.
-        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
-        assert_eq!(ev.attendees[1], "me@example.com");
-        // Per-attendee RSVP state.
-        assert_eq!(ev.attendee_responses.len(), 3);
-        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
-        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
-        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
-        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
+        // Flat editable list: "Name <email>" when named, bare otherwise; never
+        // the organizer (decision 67a).
+        assert_eq!(ev.attendees, ["Me <me@example.com>", "skeptic@example.com"]);
+        // Per-attendee RSVP state, in the same order.
+        assert_eq!(ev.attendee_responses.len(), 2);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::NeedsAction);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("Me"));
+        // The boss organizes it, not the account (decision 70a).
+        assert!(ev.organized_elsewhere);
+    }
+
+    /// Google flags the organizer's row, and the flag wins over the address:
+    /// the same account can be spelled gmail.com and googlemail.com.
+    #[test]
+    fn the_flagged_organizer_row_goes_whatever_its_spelling() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" },
+            "organizer": { "email": "toni@gmail.com", "self": true },
+            "attendees": [
+              { "email": "toni@googlemail.com", "responseStatus": "accepted", "organizer": true },
+              { "email": "bob@example.com", "responseStatus": "accepted" }
+            ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.attendees, ["bob@example.com"]);
+        assert!(!ev.organized_elsewhere, "the account organizes it");
+    }
+
+    /// An edit that left the invitees alone leaves them out of the PATCH,
+    /// which would replace Google's whole array (decision 71a).
+    #[test]
+    fn an_unchanged_attendee_list_stays_out_of_the_patch() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" },
+            "attendees": [ { "email": "bob@example.com", "responseStatus": "accepted" } ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        let body = serde_json::to_string(&event_to_body(&ev)).unwrap();
+        assert!(body.contains("bob@example.com"), "{body}");
+        ev.keep_attendees = true;
+        let body = serde_json::to_string(&event_to_body(&ev)).unwrap();
+        assert!(!body.contains("attendees"), "{body}");
+    }
+
+    /// Removing every invitee sends an empty array, which clears Google's,
+    /// but only when the host says so (decision 74a): an empty list alone
+    /// leaves the array out.
+    #[test]
+    fn removing_the_last_invitee_sends_an_empty_array() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert!(body.get("attendees").is_none(), "{body}");
+        ev.clear_attendees = true;
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert_eq!(body["attendees"], serde_json::json!([]));
     }
 
     #[test]
@@ -946,6 +1015,9 @@ mod tests {
         // A zoned recurring master writes its IANA zone so Google expands it
         // DST-correctly on its side (parity with the read path).
         let ev = Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "ev-z".into(),
             calendar_id: "primary".into(),
             title: "OAGDU".into(),
@@ -984,6 +1056,9 @@ mod tests {
     fn event_to_body_sends_no_zone_for_an_all_day_series() {
         let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
         let ev = Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "ev-all-day".into(),
             calendar_id: "primary".into(),
             title: "All-day".into(),
@@ -1106,6 +1181,8 @@ mod tests {
     #[test]
     fn new_event_to_body_round_trip_timed() {
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Standup".into(),
             description: Some("daily".into()),
             location: None,
@@ -1152,6 +1229,8 @@ mod tests {
                 .with_timezone(&Utc)
         };
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Urlaub".into(),
             description: None,
             location: None,
@@ -1178,6 +1257,9 @@ mod tests {
     #[test]
     fn event_to_body_serialises_recurrence_with_exdates() {
         let ev = Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "ev-1".into(),
             calendar_id: "primary".into(),
             title: "Yoga".into(),
@@ -1215,6 +1297,8 @@ mod tests {
     #[test]
     fn absolute_and_app_start_reminders_drop_on_write() {
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "x".into(),
             description: None,
             location: None,

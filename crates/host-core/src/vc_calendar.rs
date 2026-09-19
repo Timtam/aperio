@@ -93,6 +93,9 @@ impl VcCalendar {
         // appointment.
         let (start, end) = (meeting.start_time?, meeting.end_time?);
         Some(Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: format!("vc::{}", meeting.id),
             calendar_id: calendar_id_for(&self.account_id),
             title: meeting.title,
@@ -271,6 +274,9 @@ mod tests {
     fn sample_event() -> Event {
         let start = Utc.with_ymd_and_hms(2026, 7, 29, 9, 0, 0).unwrap();
         Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "vc::m1".into(),
             calendar_id: calendar_id_for("acc-1"),
             title: "Standup".into(),

@@ -93,6 +93,9 @@ pub struct Event {
     pub reminders: Vec<Reminder>,
     /// Sound override at the event level (section 14.4).
     pub sound: Option<SoundConfig>,
+    /// The invitees. Never the organizer (decision 67a): the adapters drop the
+    /// organizer's row on read (`attendee::people_from_read`), and the host
+    /// keeps it out of every write.
     pub attendees: Vec<String>,
     /// Transient organizer-side send intent for the pending write: when
     /// `true`, the adapter asks the provider to email attendees about this
@@ -114,6 +117,23 @@ pub struct Event {
     /// skip…)]` keeps it `false` and off the wire except on the split's update.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncate_tail_overrides: bool,
+    /// Transient write-only signal: the edit did not change who is invited, so
+    /// the adapter leaves the provider's attendee list exactly as it is
+    /// (decision 71a). The host sets it (`attendee::guard_update`) by comparing
+    /// with the event as last read; a title or time change then never rewrites
+    /// the list, and the organizer's own row, which Aperio does not show, stays
+    /// on the server. NOT persisted and meaningless on a read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_attendees: bool,
+    /// Transient write-only signal: the edit removed every invitee the event
+    /// had when it was last read, so the adapter writes the provider's list
+    /// empty. An empty [`attendees`](Self::attendees) alone never clears a
+    /// list, so an edit of an event read without its invitees cannot
+    /// uninvite anyone by accident. The host sets it
+    /// (`attendee::guard_update`); the removed guests may still be notified
+    /// (decision 74a). NOT persisted and meaningless on a read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_attendees: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
@@ -121,16 +141,29 @@ pub struct Event {
     /// The organizer's address (RFC 5545 `ORGANIZER`, `mailto:` stripped),
     /// when the provider exposes it on read. Lets the host decide "is the
     /// connected account an *attendee* of this meeting rather than its
-    /// organizer?" — the gate for showing RSVP buttons. Read-only: never
-    /// sent on a write. `#[serde(default, skip…)]` keeps it `None` and off
-    /// the wire on providers / stores that don't surface it.
+    /// organizer?" — the gate for showing RSVP buttons. Never a provider write
+    /// field; on an update the host uses it to keep the organizer out of
+    /// [`attendees`](Self::attendees) (`attendee::guard_update`).
+    /// `#[serde(default, skip…)]` keeps it `None` and off the wire on providers
+    /// / stores that don't surface it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organizer: Option<String>,
+    /// Someone other than the connected account organizes this event, or an
+    /// organizer is named and the provider does not say it is the account
+    /// (decision 70a). Only the organizer sends invitations and updates, so
+    /// the editors offer no "notify attendees" and the host clears any send
+    /// intent. Read-only, set by the adapter through
+    /// `attendee::people_from_read` (the rule is
+    /// `attendee::organized_elsewhere`); `false` for an event with no
+    /// organizer that the provider does not call someone else's.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub organized_elsewhere: bool,
     /// Per-attendee RSVP state, populated on read where the provider
     /// exposes it (CalDAV `ATTENDEE;PARTSTAT`, EWS `ResponseType`,
     /// Google/Graph `responseStatus`). Distinct from the flat, editable
-    /// [`attendees`](Self::attendees) list. Empty on write and on
-    /// providers that don't report response status.
+    /// [`attendees`](Self::attendees) list. Never holds the organizer's row
+    /// (decision 67a). Empty on write and on providers that don't report
+    /// response status.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attendee_responses: Vec<AttendeeResponse>,
     /// The meeting is CANCELLED (RFC 5545 `STATUS:CANCELLED`, EWS
@@ -191,6 +224,16 @@ pub struct NewEvent {
     /// Organizer-side send intent for this create — see [`Event::send_invitations`].
     #[serde(default, skip_serializing_if = "is_false")]
     pub send_invitations: bool,
+    /// For a create derived from an existing event (an occurrence carved out, a
+    /// copy, a carried or detached one): that event's organizer, so the host
+    /// keeps it out of [`attendees`](Self::attendees) (decision 72a). Never
+    /// sent to a provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organizer: Option<String>,
+    /// For a derived create: the source event was organized elsewhere — see
+    /// [`Event::organized_elsewhere`]. The host then clears the send intent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub organized_elsewhere: bool,
 }
 
 /// serde `skip_serializing_if` predicate: keep a `false` flag off the wire.

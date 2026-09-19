@@ -280,6 +280,8 @@ mod tests {
 
     fn make_event(title: &str) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: title.into(),
             description: None,
             location: None,

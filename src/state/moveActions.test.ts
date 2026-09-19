@@ -329,6 +329,21 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     });
   });
 
+  it("a detached occurrence names its series' organizer, so the host keeps it out", async () => {
+    // Decision 72a: the standalone copy is a create, and the provider may still
+    // list the organizer among the invitees the copy takes along.
+    const occ = {
+      ...occurrence(),
+      attendees: ['Boss <boss@example.com>', 'bob@example.com'],
+      organizer: 'boss@example.com',
+      organized_elsewhere: true,
+    } as unknown as CalendarEvent;
+    await moveEventToDay(occ, localKey(occ.start, 3), 'occurrence');
+    const request = invokeMock.mock.calls[0][1].request;
+    expect(request.organizer).toBe('boss@example.com');
+    expect(request.organized_elsewhere).toBe(true);
+  });
+
   it('occurrence scope moves a provider override in place, by its own id', async () => {
     // An occurrence changed before: the provider's row for slot 09:00, which
     // now sits at 14:00. Dragging it must move that row, not create a copy

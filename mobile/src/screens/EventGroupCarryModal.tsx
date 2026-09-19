@@ -7,6 +7,7 @@ import {
   firstOccurrenceFrom,
   futureCarryRow,
   occurrenceCarryRow,
+  organizerOf,
   planCarry,
   planSeriesSplit,
   seriesLeftTruncated,
@@ -213,6 +214,7 @@ export default function EventGroupCarryModal({
             sound: null,
             attendees: current.attendees,
             send_invitations: false,
+            ...organizerOf(current),
           });
           created.push({
             calendar_id: standalone.calendar_id,
@@ -315,6 +317,7 @@ export default function EventGroupCarryModal({
                       sound: null,
                       attendees: current.attendees,
                       send_invitations: false,
+                      ...organizerOf(current),
                     },
                     // A continuation of the copy's own series — its zone stays
                     // verbatim so both halves expand alike.

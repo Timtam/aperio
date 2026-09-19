@@ -67,8 +67,14 @@ export interface CalendarEvent {
    *  read. Lets the UI tell whether the connected account is an *attendee*
    *  of this meeting rather than its organizer — the gate for RSVP. */
   organizer?: string | null;
+  /** Someone other than the connected account organizes this event, or the
+   *  provider cannot confirm that the account does (decision 70a). Read-only.
+   *  Only the organizer notifies attendees, so the editors offer no "notify
+   *  attendees" then. Absent/false for an event with no organizer. */
+  organized_elsewhere?: boolean;
   /** Per-attendee RSVP state, populated on read where the provider reports
-   *  it. Read-only; absent/empty otherwise. */
+   *  it. Never the organizer's row (decision 67a). Read-only; absent/empty
+   *  otherwise. */
   attendee_responses?: AttendeeResponse[];
   /** The meeting is cancelled (RFC 5545 STATUS:CANCELLED / EWS IsCancelled /
    *  Graph isCancelled). Read-only. Cancelled events never fire reminders and
@@ -106,6 +112,11 @@ export interface NewEvent {
   attendees: string[];
   /** Organizer-side send intent for this create — see CalendarEvent. */
   send_invitations?: boolean;
+  /** For a create derived from an existing event: that event's organizer and
+   *  whether someone else organizes it (`organizerOf` in `@aperio/shared`,
+   *  decision 72a). Never sent to a provider. */
+  organizer?: string | null;
+  organized_elsewhere?: boolean;
 }
 
 /** One busy time block (ISO 8601 timestamps) from a free/busy query. */

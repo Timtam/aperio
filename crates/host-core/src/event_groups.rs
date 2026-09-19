@@ -1157,6 +1157,9 @@ mod tests {
         start: DateTime<Utc>,
     ) -> cal_core::Event {
         cal_core::Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: id.into(),
             calendar_id: calendar_id.into(),
             title: title.into(),
