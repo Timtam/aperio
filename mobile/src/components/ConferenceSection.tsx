@@ -106,12 +106,21 @@ export function ConferenceSection({
             value: detail.value,
           })}
         >
-          <Text style={styles.detailLabel} importantForAccessibility="no">
+          {/* Hidden from BOTH readers: `importantForAccessibility` is
+              Android's, `accessibilityElementsHidden` iOS's. With only the
+              first, VoiceOver read the label, the value and the row — three
+              stops for one detail. */}
+          <Text
+            style={styles.detailLabel}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+          >
             {detail.label}
           </Text>
           <Text
             style={styles.detailValue}
             importantForAccessibility="no"
+            accessibilityElementsHidden
             selectable
           >
             {detail.value}

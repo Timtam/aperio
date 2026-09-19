@@ -53,6 +53,7 @@ import {
 import {
   describeRecurrence,
   eventPrefillFrom,
+  eventWriteErrorMessage,
   invitationLocked,
   lastOccurrenceDayKey,
   planCarry,
@@ -945,7 +946,7 @@ export function EventDialog({
       );
     } catch (err) {
       setAvailabilityError(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        eventWriteErrorMessage(err, t),
       );
     } finally {
       setCheckingAvailability(false);
@@ -1594,7 +1595,7 @@ export function EventDialog({
         onClose();
       } catch (err) {
         setError(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+          eventWriteErrorMessage(err, t),
         );
       } finally {
         setSubmitting(false);
@@ -1622,7 +1623,7 @@ export function EventDialog({
         onClose();
       } catch (err) {
         setError(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+          eventWriteErrorMessage(err, t),
         );
       } finally {
         setSubmitting(false);

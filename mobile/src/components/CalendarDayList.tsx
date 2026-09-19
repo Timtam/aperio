@@ -1136,10 +1136,14 @@ export function CalendarDayList({
     (ev: CalendarEvent) =>
       // A recurring occurrence pops the "this occurrence vs whole series" prompt
       // first, then opens the editor locked to the choice (shared helper).
-      editEventWithScope(ev, t, (params) =>
-        navigation.navigate('EventEditor', params),
+      editEventWithScope(
+        ev,
+        t,
+        (params) => navigation.navigate('EventEditor', params),
+        // Someone else's meeting opens read-only, with no scope to choose.
+        { calendar: calendars.find((c) => c.id === ev.calendar_id) },
       ),
-    [navigation, t],
+    [navigation, t, calendars],
   );
 
   // Move / copy to another calendar — pass the full (possibly expanded) row so

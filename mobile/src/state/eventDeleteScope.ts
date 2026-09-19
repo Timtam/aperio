@@ -2,6 +2,9 @@ import { Alert } from 'react-native';
 
 import {
   cancellationNotice,
+  declineSentence,
+  eventWriteErrorMessage,
+  invitationLocked,
   notifierSentence,
   occurrenceIsoOf,
   seriesIdOf,
@@ -52,7 +55,9 @@ export function confirmDeleteEvent(
         await fn();
         onSuccess(message);
       } catch (err) {
-        onError(err instanceof Error ? err.message : String(err));
+        // The one place every mobile delete path reports from: a refusal is
+        // said in words, not as "forbidden: reply-only-invitation: …".
+        onError(eventWriteErrorMessage(err, t));
       }
     })();
   };
@@ -129,7 +134,9 @@ export function confirmDeleteEvent(
         })
       : showEventScopeDialog({
           title: t('dialogs.confirm.deleteEventTitle'),
-          message: t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+          message: `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
+            invitationLocked(opts.calendar, ev) ? ` ${t(declineSentence().key)}` : ''
+          }`,
           cancelLabel: t('mobile.cancel'),
           options: [
             {
@@ -137,11 +144,15 @@ export function confirmDeleteEvent(
               label: t('dialogs.event.scope.occurrence'),
               run: () => removeOccurrence(false),
             },
-            {
-              key: 'thisAndFuture',
-              label: t('dialogs.event.scope.thisAndFuture'),
-              run: () => removeThisAndFuture(false),
-            },
+            ...(invitationLocked(opts.calendar, ev)
+              ? []
+              : [
+                  {
+                    key: 'thisAndFuture',
+                    label: t('dialogs.event.scope.thisAndFuture'),
+                    run: () => removeThisAndFuture(false),
+                  },
+                ]),
             {
               // A whole-series delete can still email a cancellation; the
               // adapters tolerate send-cancellations from a non-organizer (fall
@@ -217,19 +228,27 @@ export function confirmDeleteEvent(
       ],
     );
 
-  const plainAlert = () =>
+  const plainAlert = () => {
+    // Removing the account's copy of someone else's meeting tells the
+    // organizer it is declined (83b), so the dialog says so and the button
+    // names it.
+    const declines = invitationLocked(opts.calendar, ev);
+    const sentence = declines ? t(declineSentence().key) : '';
     Alert.alert(
       t('dialogs.confirm.deleteEventTitle'),
-      t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+      `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
+        declines ? ` ${sentence}` : ''
+      }`,
       [
         { text: t('mobile.cancel'), style: 'cancel' },
         {
-          text: t('dialogs.event.delete'),
+          text: declines ? t('dialogs.event.deleteAndDecline') : t('dialogs.event.delete'),
           style: 'destructive',
           onPress: () => deleteWith(false),
         },
       ],
     );
+  };
 
   // Only a meeting we ORGANIZE on a scheduling provider asks about its
   // attendees; the adapter's reading (`organized_elsewhere`) says whether we

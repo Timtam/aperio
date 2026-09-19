@@ -1,3 +1,4 @@
+import { eventWriteErrorMessage } from '@aperio/shared';
 import { seriesIdOf } from '@aperio/shared';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -47,6 +48,11 @@ export function EventRsvp({
   const [myEmail, setMyEmail] = useState<string | null>(null);
   const [pending, setPending] = useState<AttendeeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The answer just sent. The row in hand is the one the list passed in, and
+  // a locked invitation stays open after answering (77a), so without this the
+  // pressed button would still say the old answer and a second tap would send
+  // it again.
+  const [answered, setAnswered] = useState<AttendeeStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +119,7 @@ export function EventRsvp({
       // override (`…::rid::…`), an id the adapter minted and the provider does
       // not know. Mirrors the desktop EventRsvp.
       await respondToEvent(event.calendar_id, seriesIdOf(event), status, true);
+      setAnswered(status);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.event.rsvp.responded', {
           status: t(`dialogs.event.rsvp.status.${status}`),
@@ -120,7 +127,11 @@ export function EventRsvp({
       );
       onResponded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // In words, and said: the error line below is a live region on Android
+      // only, so VoiceOver heard nothing at all.
+      const message = eventWriteErrorMessage(err, t);
+      setError(message);
+      AccessibilityInfo.announceForAccessibility(message);
     } finally {
       setPending(null);
     }
@@ -135,7 +146,7 @@ export function EventRsvp({
         style={styles.buttons}
       >
         {RESPONSE_ACTIONS.map((status) => {
-          const current = myResponse.status === status;
+          const current = (answered ?? myResponse.status) === status;
           return (
             <Pressable
               key={status}

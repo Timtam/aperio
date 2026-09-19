@@ -5,6 +5,7 @@ import {
   seriesIdOf,
 } from '@aperio/shared';
 
+import { invitationLocked, type NoticeCalendar } from '@aperio/shared';
 import { showEventScopeDialog } from './eventScopeDialog';
 import { CalendarEvent } from '../api/calendar';
 
@@ -38,6 +39,7 @@ export function editEventWithScope(
   ev: CalendarEvent,
   t: Tr,
   navigate: (params: EditEventParams) => void,
+  opts: { calendar?: NoticeCalendar | null } = {},
 ): void {
   const occurrence = occurrenceIsoOf(ev);
   /** Without `scoped` the editor opens the series itself. `eventId` is the row
@@ -63,6 +65,20 @@ export function editEventWithScope(
 
   if (occurrence == null) {
     open();
+    return;
+  }
+
+  // Someone else's meeting is read-only apart from the answer and the
+  // reminders (77a): there is nothing to scope, so it opens on the row that
+  // was tapped, with the scope its Delete will act on — and never on a
+  // silent per-occurrence skip.
+  if (invitationLocked(opts.calendar, ev)) {
+    open(
+      isProviderOverride(ev)
+        ? { occurrence, initialScope: 'occurrence' }
+        : { initialScope: 'series' },
+      isProviderOverride(ev) ? ev.id : seriesIdOf(ev),
+    );
     return;
   }
 

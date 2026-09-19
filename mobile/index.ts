@@ -16,6 +16,7 @@ import {
   installSignatureRules,
   installDayStartRules,
   installTaskSettingsRules,
+  installRecurrenceSummaryRules,
   installSeriesShiftRules,
   installSeriesClockRules,
   installZoneListRules,
@@ -182,7 +183,7 @@ installSeriesShiftRules({
 // A repeat rule in words (84a): the locked invitation shows it, and so does
 // the editor when the picker cannot rebuild the stored rule.
 installRecurrenceSummaryRules({
-  recurrenceSummaryJson: (inputJson) => CalFfi.recurrenceSummary(inputJson),
+  recurrenceSummaryJson: (inputJson: string) => CalFfi.recurrenceSummary(inputJson),
 });
 
 // The clock a series repeats on: which stored zone names are a zone. Every
