@@ -146,6 +146,8 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         // would email attendees on a COLOR-bearing PUT, so it keeps the
         // host-local override instead — see DESIGN / Stage 2).
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         color_label: None,
         id,
         name: entry

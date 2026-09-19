@@ -39,8 +39,8 @@ use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 
 use cal_core::{
-    AttendeeResponse, AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot,
-    Reminder, ReminderKind,
+    AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot, Reminder,
+    ReminderKind,
 };
 
 use crate::error::{EwsError, EwsResult};
@@ -157,6 +157,8 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         // No RFC 7986 per-event COLOR round-trip on EWS; per-event colors
         // stay host-local overrides.
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
@@ -469,6 +471,11 @@ pub struct ParsedItem {
     /// fan-out (the `SyncFolderItems`/`FindItem` shapes omit it).
     #[serde(default)]
     pub organizer: Option<String>,
+    /// `<t:MyResponseType>` — the connected mailbox's own response, which is
+    /// `Organizer` exactly when it organizes the item (decision 70a). Same
+    /// detail-fetch caveat as `organizer`.
+    #[serde(default)]
+    pub my_response_type: Option<String>,
     /// `<t:RequiredAttendees>` + `<t:OptionalAttendees>` — the invitees
     /// with their `<t:ResponseType>`. Same detail-fetch caveat as
     /// `organizer`.
@@ -1319,6 +1326,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     // (EmailAddress/Name) is shared by both, so the
                     // text targets are scoped by the enclosing flag.
                     b"organizer" if inside_item => inside_organizer = true,
+                    b"myresponsetype" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("my_response_type");
+                    }
                     b"requiredattendees" | b"optionalattendees" if inside_item => {
                         inside_attendees = true;
                     }
@@ -1458,6 +1468,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     Some("organizer_email") => {
                         current
                             .organizer
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("my_response_type") => {
+                        current
+                            .my_response_type
                             .get_or_insert_with(String::new)
                             .push_str(s);
                     }
@@ -1777,31 +1793,40 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         }
     });
 
-    // Attendees → editable flat list ("Name <email>" / bare) + RSVP state.
-    let mut attendees = Vec::new();
-    let mut attendee_responses = Vec::new();
-    for a in item.attendees {
-        if a.email.trim().is_empty() {
-            continue;
-        }
-        let name = a.name.filter(|n| !n.trim().is_empty());
-        attendees.push(match &name {
-            Some(n) if n != &a.email => format!("{n} <{}>", a.email),
-            _ => a.email.clone(),
-        });
-        attendee_responses.push(AttendeeResponse {
-            status: a
+    // Attendees → editable flat list ("Name <email>" / bare) + RSVP state,
+    // without the organizer (decision 67a). Exchange lists the organizer as a
+    // row whose ResponseType is "Organizer" — for an appointment made in
+    // Outlook, as the only row — and says through MyResponseType whether the
+    // connected mailbox organizes the item (decision 70a). "Unknown" says
+    // nothing, so it counts as no answer.
+    let organized_by_me = item
+        .my_response_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty() && *r != "Unknown")
+        .map(|r| r == "Organizer");
+    let people = cal_core::attendee::people_from_read(
+        item.organizer,
+        organized_by_me,
+        item.attendees.into_iter().map(|a| {
+            let status = a
                 .response_type
                 .as_deref()
                 .map(ews_response_type)
-                .unwrap_or_default(),
-            name,
-            email: a.email,
-        });
-    }
-    let organizer = item.organizer.filter(|s| !s.trim().is_empty());
+                .unwrap_or_default();
+            cal_core::attendee::ReadAttendee {
+                is_organizer: a.response_type.as_deref().map(str::trim) == Some("Organizer"),
+                email: a.email,
+                name: a.name,
+                status,
+            }
+        }),
+    );
 
     Ok(Event {
+        keep_attendees: false,
+        clear_attendees: false,
+        organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
         id,
@@ -1818,12 +1843,12 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         color_hex: None,
         reminders,
         sound: None,
-        attendees,
+        attendees: people.attendees,
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
-        organizer,
-        attendee_responses,
+        organizer: people.organizer,
+        attendee_responses: people.attendee_responses,
         cancelled,
     })
 }
@@ -2130,16 +2155,26 @@ pub fn event_to_update_field_xml_on(
     // "Die Löschaktion wird für diese Eigenschaft nicht unterstützt"
     // failure when editing a recurring series.)
 
-    // Attendees: SET when present (stored as a meeting). We do NOT emit a
-    // DeleteItemField for an empty list — clearing all attendees doesn't
-    // propagate (acceptable, and avoids an accidental mass-uninvite on edits
-    // that never touched the attendee list). Whether attendees are EMAILED is
-    // governed by the envelope's SendMeetingInvitationsOrCancellations.
-    let attendees_xml = required_attendees_xml(&event.attendees);
+    // Attendees: SET when present (stored as a meeting). An empty list alone
+    // emits no DeleteItemField, so an edit that never touched the attendee
+    // list cannot mass-uninvite. Whether attendees are EMAILED is governed by
+    // the envelope's SendMeetingInvitationsOrCancellations.
+    // Not at all when the edit left the invitees alone (decision 71a): the list
+    // on the server keeps what Aperio does not show, the organizer's own row.
+    // Cleared, both collections the read merges, only when the host says the
+    // edit removed every invitee it had read (decision 74a).
+    let attendees_xml = if event.keep_attendees {
+        String::new()
+    } else {
+        required_attendees_xml(&event.attendees)
+    };
     if !attendees_xml.is_empty() {
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:RequiredAttendees\"/>\n              <t:CalendarItem>\n{attendees_xml}              </t:CalendarItem>\n            </t:SetItemField>\n"
         ));
+    } else if event.clear_attendees && !event.keep_attendees {
+        del.push_str(delete_item_field_xml("calendar:RequiredAttendees").as_str());
+        del.push_str(delete_item_field_xml("calendar:OptionalAttendees").as_str());
     }
     if let Some(rec) = &event.recurrence {
         let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
@@ -3849,6 +3884,7 @@ mod tests {
     #[test]
     fn to_event_maps_reminder_and_etag() {
         let item = ParsedItem {
+            my_response_type: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "Lunch".into(),
@@ -3978,6 +4014,8 @@ mod tests {
 
     fn new_event_min(title: &str) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: title.into(),
             description: None,
             location: None,
@@ -4044,6 +4082,9 @@ mod tests {
     /// A weekly master with `tzid`, for the update tests.
     fn zoned_master(tzid: Option<&str>) -> Event {
         Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
             title: "Weekly".into(),
@@ -4876,6 +4917,9 @@ mod tests {
     #[test]
     fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
         let ev = Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
             title: "Weekly".into(),
@@ -4971,6 +5015,8 @@ mod tests {
         // Round-trip stability: writing the read event reproduces the
         // same wire days (no drift on repeated edits).
         let xml = new_event_to_calendar_item_xml(&NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: ev.title.clone(),
             description: None,
             location: None,
@@ -5140,6 +5186,9 @@ mod tests {
     #[test]
     fn event_to_update_field_xml_deletes_empty_optional_fields() {
         let ev = Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
             title: "Updated".into(),
@@ -5247,6 +5296,7 @@ mod tests {
     #[test]
     fn to_event_picks_kind_from_calendar_item_type() {
         let mk = |item_type: Option<&str>| ParsedItem {
+            my_response_type: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "X".into(),
@@ -6485,6 +6535,7 @@ mod tests {
                   <t:EmailAddress>boss@example.com</t:EmailAddress>
                 </t:Mailbox>
               </t:Organizer>
+              <t:MyResponseType>Tentative</t:MyResponseType>
               <t:RequiredAttendees>
                 <t:Attendee>
                   <t:Mailbox>
@@ -6536,17 +6587,174 @@ mod tests {
         assert_eq!(item.attendees[2].email, "maybe@example.com");
         assert_eq!(item.attendees[2].response_type.as_deref(), Some("Decline"));
 
-        // And the cal-core mapping normalises the response types.
+        assert_eq!(item.my_response_type.as_deref(), Some("Tentative"));
+
+        // The cal-core mapping normalises the response types and leaves the
+        // organizer out of the invitees (decision 67a). The mailbox answered
+        // Tentative, so someone else organizes this meeting (decision 70a).
         let mut full = item.clone();
         full.start = Some("2026-05-25T10:00:00Z".parse().unwrap());
         full.end = Some("2026-05-25T11:00:00Z".parse().unwrap());
         let ev = to_event(full, "cal-1").unwrap();
         assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
-        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
-        assert_eq!(ev.attendees[2], "maybe@example.com");
-        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
-        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Tentative);
-        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendees, ["Me <me@example.com>", "maybe@example.com"]);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Tentative);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses.len(), 2);
+        assert!(ev.organized_elsewhere);
+    }
+
+    /// An appointment made in Outlook: Exchange lists its organizer, the
+    /// mailbox itself, as the only attendee (live round 4, D6-D8). It has no
+    /// invitees, so an update writes no attendee list and a detach creates a
+    /// plain appointment, not a meeting.
+    #[test]
+    fn an_outlook_appointment_has_no_invitees() {
+        let mut item = ParsedItem {
+            subject: "Aperio R4 Exchange geaendert".into(),
+            start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+            end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+            organizer: Some("toni@example.com".into()),
+            my_response_type: Some("Organizer".into()),
+            ..ParsedItem::default()
+        };
+        item.item_id = "APPT-1".into();
+        item.attendees = vec![EwsAttendee {
+            email: "toni@example.com".into(),
+            name: Some("Toni".into()),
+            response_type: Some("Organizer".into()),
+        }];
+        let ev = to_event(item, "cal-1").unwrap();
+        assert!(ev.attendees.is_empty(), "{:?}", ev.attendees);
+        assert!(ev.attendee_responses.is_empty());
+        assert!(!ev.organized_elsewhere, "the mailbox organizes it");
+
+        let (set, _) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("calendar:RequiredAttendees"), "{set}");
+        let new = NewEvent {
+            title: ev.title.clone(),
+            description: None,
+            location: None,
+            start: ev.start,
+            end: ev.end,
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: ev.attendees.clone(),
+            send_invitations: false,
+            organizer: None,
+            organized_elsewhere: false,
+        };
+        let xml = new_event_to_calendar_item_xml(&new).unwrap();
+        assert!(!xml.contains("<t:RequiredAttendees>"), "{xml}");
+    }
+
+    /// An edit that left the invitees alone writes no attendee list, so the
+    /// server keeps its own, the organizer's row included (decision 71a).
+    #[test]
+    fn an_unchanged_attendee_list_is_not_written() {
+        let mut item = ParsedItem {
+            start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+            end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+            ..ParsedItem::default()
+        };
+        item.item_id = "MTG-3".into();
+        item.attendees = vec![EwsAttendee {
+            email: "bob@example.com".into(),
+            name: None,
+            response_type: Some("Accept".into()),
+        }];
+        let mut ev = to_event(item, "cal-1").unwrap();
+        let (set, _) = event_to_update_field_xml(&ev).unwrap();
+        assert!(set.contains("calendar:RequiredAttendees"), "{set}");
+        ev.keep_attendees = true;
+        let (set, _) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("calendar:RequiredAttendees"), "{set}");
+    }
+
+    /// Removing every invitee clears both collections the read merges, but
+    /// only when the host says so (decision 74a): an empty list alone
+    /// deletes nothing.
+    #[test]
+    fn removing_the_last_invitee_deletes_the_list() {
+        let mut item = ParsedItem {
+            start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+            end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+            ..ParsedItem::default()
+        };
+        item.item_id = "MTG-5".into();
+        let mut ev = to_event(item, "cal-1").unwrap();
+        assert!(ev.attendees.is_empty());
+        let (set, del) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("Attendees"), "{set}");
+        assert!(!del.contains("Attendees"), "{del}");
+
+        ev.clear_attendees = true;
+        let (set, del) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("Attendees"), "{set}");
+        assert!(del.contains("calendar:RequiredAttendees"), "{del}");
+        assert!(del.contains("calendar:OptionalAttendees"), "{del}");
+    }
+
+    /// The organizer's row is found by its flag, whatever address Exchange
+    /// names the organizer by: an Exchange-internal (EX) address does not
+    /// match the row's SMTP address.
+    #[test]
+    fn the_organizer_row_is_found_by_its_flag() {
+        let mut item = ParsedItem {
+            start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+            end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+            organizer: Some(
+                "/o=ExchangeLabs/ou=Exchange Administrative Group/cn=Recipients/cn=boss".into(),
+            ),
+            ..ParsedItem::default()
+        };
+        item.item_id = "MTG-2".into();
+        item.attendees = vec![
+            EwsAttendee {
+                email: "boss@example.com".into(),
+                name: Some("The Boss".into()),
+                response_type: Some("Organizer".into()),
+            },
+            EwsAttendee {
+                email: "bob@example.com".into(),
+                name: None,
+                response_type: Some("Accept".into()),
+            },
+        ];
+        let ev = to_event(item, "cal-1").unwrap();
+        assert_eq!(ev.attendees, ["bob@example.com"]);
+        assert!(ev.organized_elsewhere, "no MyResponseType: not confirmed");
+    }
+
+    /// MyResponseType is the mailbox's own answer and counts even when the
+    /// item names no organizer address. "Unknown" answers nothing.
+    #[test]
+    fn my_response_type_decides_without_an_organizer_address() {
+        let item_answering = |answer: &str| {
+            let mut item = ParsedItem {
+                start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+                end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+                my_response_type: Some(answer.into()),
+                ..ParsedItem::default()
+            };
+            item.item_id = "MTG-4".into();
+            item.attendees = vec![EwsAttendee {
+                email: "bob@example.com".into(),
+                name: None,
+                response_type: Some("Accept".into()),
+            }];
+            to_event(item, "cal-1").unwrap()
+        };
+        assert!(item_answering("Accept").organized_elsewhere);
+        assert!(!item_answering("Organizer").organized_elsewhere);
+        assert!(
+            !item_answering("Unknown").organized_elsewhere,
+            "no answer and no organizer: the mailbox's own"
+        );
     }
 
     #[test]

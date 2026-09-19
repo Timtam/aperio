@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { formatAttendee, primaryChannelValue } from '@aperio/shared';
+import type { AttendeeNotice } from '@aperio/shared';
 
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { parseAttendee } from '../api/calendar';
@@ -50,15 +51,25 @@ export function AttendeesEditor({
   onChange,
   notify,
   onNotifyChange,
-  showNotify,
+  notice,
+  noticeSentence,
+  addedNote,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
   notify: boolean;
   onNotifyChange: (next: boolean) => void;
-  /** Whether the "notify attendees" switch is meaningful (external calendar with
-   *  ≥1 attendee). Local calendars never send invitations. */
-  showNotify: boolean;
+  /** The shared rule (`attendeeNotice`): `'offer'` shows the "notify
+   *  attendees" switch, `'always'` the sentence that says who informs them
+   *  (decision 76a), `'none'` neither. */
+  notice: AttendeeNotice;
+  /** The sentence shown for `'always'`. */
+  noticeSentence: string;
+  /** A sentence to say right after "X added" about what the new list means,
+   *  or null: the editor's notice when the first guest makes the provider
+   *  mail them (decision 76a). One announcement, so neither cuts the other
+   *  off. */
+  addedNote?: (next: string[]) => string | null;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -91,13 +102,14 @@ export function AttendeesEditor({
       }
       setError(null);
       onAdd();
-      onChange([...value, trimmed]);
-      AccessibilityInfo.announceForAccessibility(
-        t('dialogs.event.attendees.added', { name: trimmed }),
-      );
+      const next = [...value, trimmed];
+      onChange(next);
+      const added = t('dialogs.event.attendees.added', { name: trimmed });
+      const note = addedNote?.(next);
+      AccessibilityInfo.announceForAccessibility(note ? `${added} ${note}` : added);
       return true;
     },
-    [value, onChange, onAdd, t],
+    [value, onChange, onAdd, addedNote, t],
   );
 
   const add = () => {
@@ -274,7 +286,13 @@ export function AttendeesEditor({
         </Text>
       )}
 
-      {showNotify && (
+      {notice === 'always' && (
+        <Text style={styles.switchLabel} accessible accessibilityRole="text">
+          {noticeSentence}
+        </Text>
+      )}
+
+      {notice === 'offer' && (
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: notify }}

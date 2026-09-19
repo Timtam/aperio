@@ -17,6 +17,7 @@ function calendar(id: string, hex: string | null): Calendar {
     recurrence_capabilities: DEFAULT_RECURRENCE_CAPABILITIES,
     supports_scheduling: false,
     supports_event_color: false,
+    always_notifies_attendees: false,
   };
 }
 

@@ -749,6 +749,8 @@ mod tests {
                 color_label: None,
                 supports_scheduling: false,
                 supports_event_color: false,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 id: "ical:42".into(),
                 name: "schulferien-sachsen-anhalt".into(),
                 color: None,
@@ -759,6 +761,8 @@ mod tests {
                 color_label: None,
                 supports_scheduling: false,
                 supports_event_color: true,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 id: "local-1".into(),
                 name: "Persönlich".into(),
                 color: None,
@@ -799,6 +803,8 @@ mod tests {
                 color_label: None,
                 supports_scheduling: false,
                 supports_event_color: false,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 id: "google:work".into(),
                 name: "Work".into(),
                 color: Some(cal_core::ContainerColor::native("#4285f4")),
@@ -809,6 +815,8 @@ mod tests {
                 color_label: None,
                 supports_scheduling: false,
                 supports_event_color: false,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 id: "google:other".into(),
                 name: "Other".into(),
                 color: None,
@@ -885,6 +893,9 @@ mod tests {
         start: chrono::DateTime<chrono::Utc>,
     ) -> cal_core::Event {
         cal_core::Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: id.into(),
             calendar_id: "icloud:cal".into(),
             title: title.into(),
@@ -931,6 +942,9 @@ mod tests {
         assert_eq!(all[0].color_label_id, "label-3");
 
         let mk = |id: &str| cal_core::Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: id.into(),
             calendar_id: "icloud:cal".into(),
             title: "Trip".into(),
@@ -1215,6 +1229,9 @@ mod tests {
         repo.set_event_color_label("dav:evt", "lbl-old").unwrap();
 
         let mut events = vec![cal_core::Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "dav:evt".into(),
             calendar_id: "dav:cal".into(),
             title: "Native".into(),

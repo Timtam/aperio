@@ -53,11 +53,26 @@ In the event dialog you can also set:
 
 **Save** creates the event; a live region confirms "Event saved".
 
-> **Notify attendees:** When an event has attendees and the calendar
-> supports server-side scheduling (iCloud, Google, Exchange/Outlook), a
-> **Notify attendees** checkbox appears (on by default). When ticked, the
-> provider sends invitations or updates automatically on save – Aperio
-> itself never sends email.
+> **Notify attendees:** When you organize an event, someone else is invited,
+> and the calendar supports server-side scheduling (iCloud, Google,
+> Exchange/Outlook, Microsoft 365), the provider can tell the attendees –
+> Aperio itself never sends email. On Google and Exchange/Outlook a **Notify
+> attendees** checkbox appears (on by default); when ticked, the provider
+> sends invitations or updates on save. iCloud and Microsoft 365 inform the
+> attendees of every change on their own and cannot save one silently, so
+> instead of the checkbox the dialog says so, for example "iCloud informs the
+> attendees of every change". That sentence is a stop Tab reaches, and it is
+> announced when it appears while you edit, say when you add the first
+> attendee.
+>
+> The organizer never counts as an attendee: an appointment you made in
+> Outlook, which Outlook lists with you as its only attendee, has no
+> attendees in Aperio. For a meeting someone else organizes, only they can
+> send updates, so neither the checkbox nor the sentence appears there. If
+> you remove the last attendee, the checkbox or the sentence stays, so the
+> person you removed can get a cancellation. When you only change the title
+> or the time, Aperio leaves the attendee list at the provider exactly as it
+> is, their answers included.
 >
 > When you delete a **meeting you organize** (with attendees, on an account
 > with server-side scheduling), Aperio asks in **one** dialog what should happen
@@ -69,13 +84,15 @@ In the event dialog you can also set:
 > chosen date onward (**this and all following** keeps the earlier occurrences
 > and drops this one plus every later one), or cancel all of it — and the radio
 > decides in each case whether an email goes out. A single event has just the
-> notify/silent choice. A meeting you were only invited to, or an event with no
-> attendees, is deleted without asking. (On iCloud/CalDAV the server decides
-> whether a cancellation goes out, so "without notifying" isn't guaranteed
-> there.)
+> notify/silent choice. On iCloud and Microsoft 365 deleting always sends the
+> cancellation, so there is no radio group: the dialog says who informs the
+> attendees, and every scope cancels. A meeting you were only invited to, or
+> an event with no attendees, is deleted without asking.
 
-> **Check availability:** Below that toggle sits a **Check availability**
-> button. It looks up, for the currently entered time window, which
+> **Check availability:** When an event has attendees on a calendar with
+> server-side scheduling, a **Check availability** button appears, below
+> **Notify attendees** when that is shown, and also for a meeting someone
+> else organizes. It looks up, for the currently entered time window, which
 > attendees are **free** or **busy**, and shows the result per attendee
 > with a summary (announced via the live region). If a provider can't
 > answer (missing permission), that attendee reads as "free/unknown".
@@ -85,7 +102,7 @@ In the event dialog you can also set:
 > at the top of the dialog with **Accept**, **Tentative** and **Decline**
 > buttons — your current reply is highlighted. Your answer is sent to the
 > organizer automatically. If you are the organizer, you instead see each
-> attendee's response status.
+> attendee's response status; the organizer is not among them.
 
 ## Editing, moving and deleting events
 

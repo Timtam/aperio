@@ -46,6 +46,9 @@ fn make_applier(db: &SharedConn, adapter: &Arc<LocalAdapter>, device: DeviceId) 
 
 fn fixture_event(id: &str, calendar_id: &str) -> Event {
     Event {
+        keep_attendees: false,
+        clear_attendees: false,
+        organized_elsewhere: false,
         id: id.into(),
         calendar_id: calendar_id.into(),
         title: "Synced from elsewhere".into(),
@@ -85,6 +88,8 @@ fn fixture_calendar(id: &str) -> Calendar {
         color_label: None,
         supports_scheduling: false,
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         id: id.into(),
         name: "From remote".into(),
         color: None,

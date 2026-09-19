@@ -29,13 +29,12 @@
 //! the zone itself, so it doesn't parse the `VTIMEZONE` body back. ATTENDEE
 //! mapping on read still lives behind a follow-up task.
 
-use cal_core::{
-    AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
-};
+use cal_core::{AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind};
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Property};
 
 use crate::error::{CaldavError, CaldavResult};
+use crate::identity::OwnIdentity;
 
 /// The one VALARM property Aperio insists on authoring: it is the event's own
 /// title, so it has to follow the title being written. Everything else on an
@@ -70,13 +69,26 @@ pub fn parse_calendar_data_with_href(
     calendar_id: &str,
     href: Option<&str>,
 ) -> CaldavResult<Vec<Event>> {
+    parse_calendar_data_as(body, calendar_id, href, &OwnIdentity::default())
+}
+
+/// [`parse_calendar_data_with_href`] for the account `own`: whether it
+/// organizes each event, and which of the event's rows are its own, is read
+/// from the server's own text (see `map_event`). An empty `own` knows no
+/// address: then an event with an ORGANIZER counts as someone else's.
+pub fn parse_calendar_data_as(
+    body: &str,
+    calendar_id: &str,
+    href: Option<&str>,
+    own: &OwnIdentity,
+) -> CaldavResult<Vec<Event>> {
     let parsed: ICalendar = body
         .parse()
         .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
     let mut out = Vec::new();
     for comp in parsed.components {
         if let icalendar::CalendarComponent::Event(ev) = comp {
-            match map_event(&ev, calendar_id, href) {
+            match map_event(&ev, calendar_id, href, own) {
                 Ok(event) => out.push(event),
                 Err(err) => {
                     tracing::warn!(?err, "skipping unmapped VEVENT");
@@ -106,7 +118,12 @@ pub fn decode_event_id(event_id: &str) -> (Option<&str>, &str) {
 // One marker for every adapter, kept in the core.
 use cal_core::OVERRIDE_ID_MARKER as RECURRENCE_ID_MARKER;
 
-fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> CaldavResult<Event> {
+fn map_event(
+    ev: &icalendar::Event,
+    calendar_id: &str,
+    href: Option<&str>,
+    own: &OwnIdentity,
+) -> CaldavResult<Event> {
     let uid = ev
         .get_uid()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without UID".to_string()))?;
@@ -177,41 +194,47 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     };
 
     // ORGANIZER + ATTENDEE;PARTSTAT (RFC 5545). ATTENDEE is multi-valued
-    // (one property per invitee, stored under `multi_properties`).
-    let organizer = ev
-        .properties()
-        .get("ORGANIZER")
-        .map(|p| strip_mailto(p.value()))
+    // (one property per invitee, stored under `multi_properties`). The
+    // organizer is never an invitee (decision 67a); RFC 5545 has no per-row
+    // flag for it, so its ATTENDEE is the one that names the same calendar
+    // user as ORGANIZER. A server may name a calendar user by a principal path
+    // or a urn rather than a `mailto:`, with the address in an EMAIL parameter
+    // (iCloud does, live measurement M1); see `calendar_user_address`.
+    // Whether the account organizes the event is read from the ORGANIZER
+    // line itself, its value or its EMAIL, against every address of the
+    // account (decision 70a): the same rule the write side uses
+    // (`scheduling::plan_block`). An empty `own` answers nothing.
+    let organizer_prop = ev.properties().get("ORGANIZER");
+    let organizer_value = organizer_prop.map(|p| p.value().trim().to_string());
+    let organizer = organizer_prop
+        .map(calendar_user_address)
         .filter(|s| !s.is_empty());
-    let mut attendees = Vec::new();
-    let mut attendee_responses = Vec::new();
-    if let Some(atts) = ev.multi_properties().get("ATTENDEE") {
-        for p in atts {
-            let email = strip_mailto(p.value());
-            if email.is_empty() {
-                continue;
-            }
-            let name = p
-                .params()
-                .get("CN")
-                .map(|c| c.value().trim().to_string())
-                .filter(|n| !n.is_empty());
-            let status = p
+    let organized_by_me = organizer_prop
+        .filter(|_| !own.is_empty())
+        .map(|p| own.names(p.value(), p.params().get("EMAIL").map(|e| e.value())));
+    let rows = ev
+        .multi_properties()
+        .get("ATTENDEE")
+        .into_iter()
+        .flatten()
+        .map(|p| cal_core::attendee::ReadAttendee {
+            email: calendar_user_address(p),
+            name: p.params().get("CN").map(|c| c.value().trim().to_string()),
+            status: p
                 .params()
                 .get("PARTSTAT")
                 .map(|c| caldav_partstat(c.value()))
-                .unwrap_or_default();
-            attendees.push(match &name {
-                Some(n) if n != &email => format!("{n} <{email}>"),
-                _ => email.clone(),
-            });
-            attendee_responses.push(AttendeeResponse {
-                email,
-                name,
-                status,
-            });
-        }
-    }
+                .unwrap_or_default(),
+            // The organizer's own row, and on the account's own meeting any
+            // row that names the account (iCloud's ROLE=CHAIR row): the host
+            // of a meeting is never its guest (67a).
+            is_organizer: organizer_value
+                .as_deref()
+                .is_some_and(|org| same_calendar_user(org, p.value()))
+                || (organized_by_me == Some(true)
+                    && own.names(p.value(), p.params().get("EMAIL").map(|e| e.value()))),
+        });
+    let people = cal_core::attendee::people_from_read(organizer, organized_by_me, rows);
 
     // RFC 5545 `STATUS:CANCELLED` — the event was cancelled. Aperio keeps it
     // visible (subject to the show-cancelled setting) but never schedules
@@ -222,6 +245,9 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         .unwrap_or(false);
 
     Ok(Event {
+        keep_attendees: false,
+        clear_attendees: false,
+        organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
         id,
@@ -237,25 +263,62 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         color_hex,
         reminders,
         sound: None,
-        attendees,
+        attendees: people.attendees,
         created_at: created,
         updated_at: updated,
         etag: None,
-        organizer,
-        attendee_responses,
+        organizer: people.organizer,
+        attendee_responses: people.attendee_responses,
         cancelled,
     })
 }
 
-/// Strip the `mailto:` scheme (case-insensitive) from a calendar-user
-/// address, leaving the bare email for display + RSVP matching.
-fn strip_mailto(s: &str) -> String {
-    let s = s.trim();
-    s.strip_prefix("mailto:")
-        .or_else(|| s.strip_prefix("MAILTO:"))
-        .unwrap_or(s)
-        .trim()
-        .to_string()
+/// Whether an iCalendar body has an ORGANIZER line at all: only then does a
+/// read need the account's own addresses. A property starts a line; a folded
+/// continuation starts with a space, so text inside a DESCRIPTION does not
+/// count.
+pub fn names_an_organizer(body: &str) -> bool {
+    body.split('\n').any(|line| {
+        line.get(..9)
+            .is_some_and(|name| name.eq_ignore_ascii_case("ORGANIZER"))
+            && line[9..].starts_with([';', ':'])
+    })
+}
+
+/// The address a calendar-user property (ORGANIZER, ATTENDEE) names, the way
+/// Aperio shows it: a `mailto:` value without its scheme; for any other value
+/// (a principal path, a urn) the EMAIL parameter, the server's own statement
+/// of the address (RFC 7986 §6.2); and the value itself when there is none.
+fn calendar_user_address(prop: &Property) -> String {
+    let value = prop.value().trim();
+    if let Some(address) = strip_mailto_scheme(value) {
+        return address.trim().to_string();
+    }
+    prop.params()
+        .get("EMAIL")
+        .map(|e| e.value().trim().to_string())
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| value.to_string())
+}
+
+/// Whether two calendar-user values name the same user: two `mailto:`s by
+/// address, anything else by its exact text apart from one trailing slash.
+pub(crate) fn same_calendar_user(a: &str, b: &str) -> bool {
+    let (a, b) = (a.trim(), b.trim());
+    match (strip_mailto_scheme(a), strip_mailto_scheme(b)) {
+        (Some(a), Some(b)) => cal_core::attendee::same_address(a, b),
+        (None, None) => !a.is_empty() && a.trim_end_matches('/') == b.trim_end_matches('/'),
+        _ => false,
+    }
+}
+
+/// The address after a `mailto:` scheme in any case, or `None` for another
+/// kind of value.
+pub(crate) fn strip_mailto_scheme(value: &str) -> Option<&str> {
+    value
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+        .then(|| &value[7..])
 }
 
 /// Map an RFC 5545 `PARTSTAT` to the normalised RSVP enum. DELEGATED and
@@ -765,22 +828,14 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
 /// emitting more would round-trip data the rest of Aperio can't see
 /// anyway and the next read would silently drop them.
 ///
-/// `organizer` is the user's `mailto:` calendar-user-address (from CalDAV
-/// discovery). When the event opts to notify attendees AND an organizer
-/// address is known, `ORGANIZER`/`ATTENDEE` are written so an RFC 6638
-/// server schedules the meeting; otherwise they're omitted (no scheduling).
-pub fn new_event_to_ical(uid: &str, event: &NewEvent, organizer: Option<&str>) -> String {
+/// Writes no ORGANIZER or ATTENDEE: the lines that make an event a meeting
+/// are the write path's to add (see [`crate::scheduling`]).
+pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
     let mut ical_ev = icalendar::Event::new();
     // A brand-new appointment has no previous copy, so there is nothing to
     // preserve — and Apple's default-alert marker is Apple's to apply, never
     // ours to forge.
-    apply_common(
-        &mut ical_ev,
-        uid,
-        event,
-        organizer,
-        &mut PriorAlarms::default(),
-    );
+    apply_common(&mut ical_ev, uid, event, &mut PriorAlarms::default());
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     with_vtimezone(cal.to_string(), event)
@@ -825,20 +880,22 @@ fn with_vtimezone(mut ical: String, event: &NewEvent) -> String {
 /// replaces. Callers that hold that copy should use
 /// [`event_to_ical_preserving`] instead: it keeps the parts of an unchanged
 /// alarm that Aperio does not model — Apple's default-alert marker above all.
-pub fn event_to_ical(event: &Event, organizer: Option<&str>) -> String {
-    event_to_ical_preserving(event, organizer, PriorAlarms::default())
+pub fn event_to_ical(event: &Event) -> String {
+    event_to_ical_preserving(event, PriorAlarms::default())
 }
 
 /// [`event_to_ical`], with the alarms of the server's current copy in hand.
 ///
 /// See [`PriorAlarms`] for what survives and why. `prior` is consumed because
 /// each of its alarms may be claimed only once.
-pub fn event_to_ical_preserving(
-    event: &Event,
-    organizer: Option<&str>,
-    mut prior: PriorAlarms,
-) -> String {
+///
+/// Like every renderer here it writes no ORGANIZER or ATTENDEE: a meeting's
+/// lines are carried from the server's copy by the write path (see
+/// [`crate::scheduling`]).
+pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String {
     let new = NewEvent {
+        organized_elsewhere: false,
+        organizer: None,
         title: event.title.clone(),
         description: event.description.clone(),
         location: event.location.clone(),
@@ -861,7 +918,7 @@ pub fn event_to_ical_preserving(
     // bare uid for both composite and legacy bare ids.
     let (_, uid) = decode_event_id(&event.id);
     let mut ical_ev = icalendar::Event::new();
-    apply_common(&mut ical_ev, uid, &new, organizer, &mut prior);
+    apply_common(&mut ical_ev, uid, &new, &mut prior);
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     with_vtimezone(cal.to_string(), &new)
@@ -882,14 +939,13 @@ pub fn override_to_vevent(
     event: &Event,
     series_id: &str,
     recurrence_id: &str,
-    organizer: Option<&str>,
     prior: PriorAlarms,
 ) -> String {
     let mut occurrence = event.clone();
     occurrence.id = series_id.to_string();
     // One occurrence carries no rule of its own.
     occurrence.recurrence = None;
-    let vcal = event_to_ical_preserving(&occurrence, organizer, prior);
+    let vcal = event_to_ical_preserving(&occurrence, prior);
     let begin = "BEGIN:VEVENT\r\n";
     let end = "END:VEVENT\r\n";
     // The LAST `END:VEVENT`: a text value can end in those very characters, and
@@ -914,7 +970,6 @@ fn apply_common(
     ical_ev: &mut icalendar::Event,
     uid: &str,
     event: &NewEvent,
-    organizer: Option<&str>,
     prior: &mut PriorAlarms,
 ) {
     ical_ev.uid(uid);
@@ -1024,34 +1079,9 @@ fn apply_common(
             ical_ev.append_property(marker);
         }
     }
-    // ORGANIZER + ATTENDEE drive RFC 6638 server-side scheduling. On an
-    // auto-scheduling server (iCloud) their mere presence makes the server
-    // email attendees — there is no per-PUT "store but don't send" — so we
-    // write them ONLY when the user opted to notify AND we know the
-    // organizer's calendar-user-address. With no organizer, or notify off,
-    // they're omitted (the event is stored without attendees, no mail).
-    if event.send_invitations && !event.attendees.is_empty() {
-        if let Some(org) = organizer {
-            ical_ev.add_property("ORGANIZER", org);
-            for entry in &event.attendees {
-                let (name, email) = cal_core::attendee::parse(entry);
-                if email.is_empty() {
-                    continue;
-                }
-                let mut att = icalendar::Property::new("ATTENDEE", format!("mailto:{email}"));
-                att.add_parameter("ROLE", "REQ-PARTICIPANT");
-                att.add_parameter("PARTSTAT", "NEEDS-ACTION");
-                att.add_parameter("RSVP", "TRUE");
-                if let Some(cn) = name.as_deref() {
-                    att.add_parameter("CN", cn);
-                }
-                // `append_multi_property` (not `append_property`) — ATTENDEE
-                // is multi-valued; the single-property map would otherwise
-                // keep only the last one.
-                ical_ev.append_multi_property(att);
-            }
-        }
-    }
+    // No ORGANIZER or ATTENDEE here. On an RFC 6638 server they are the
+    // invitation itself, so the write path carries them from the server's
+    // copy instead of rebuilding them (see `crate::scheduling`).
     // RFC 7986 COLOR. `color_hex` is only ever `Some` when the provider is
     // meant to store the color natively: the host resolves the event's color
     // label to a hex for color-capable calendars and leaves it `None` for
@@ -1102,7 +1132,7 @@ fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<ical
     }
 }
 
-fn format_utc_compact(dt: DateTime<Utc>) -> String {
+pub(crate) fn format_utc_compact(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 
@@ -1202,7 +1232,7 @@ fn css3_name_to_hex(name: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1225,14 +1255,178 @@ END:VCALENDAR\r
         let events = parse_calendar_data(body, "cal-1").unwrap();
         let ev = &events[0];
         assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
-        // Flat editable list: "Name <email>" when CN present, else bare.
-        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
-        assert_eq!(ev.attendees[2], "skeptic@example.com");
-        assert_eq!(ev.attendee_responses.len(), 3);
-        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
-        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
-        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
-        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
+        // Flat editable list: "Name <email>" when CN present, else bare; never
+        // the organizer, whose ATTENDEE is the one with ORGANIZER's address
+        // (decision 67a).
+        assert_eq!(ev.attendees, ["Me <me@example.com>", "skeptic@example.com"]);
+        assert_eq!(ev.attendee_responses.len(), 2);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::NeedsAction);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("Me"));
+        // Not yet known to be the account's: that takes its own address.
+        assert!(ev.organized_elsewhere);
+    }
+
+    /// The organizer's ATTENDEE matches ORGANIZER whatever its case and
+    /// `mailto:` spelling.
+    #[test]
+    fn the_organizers_attendee_goes_whatever_its_spelling() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mtg-2@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\n\
+ORGANIZER:MAILTO:Boss@Example.com\r\n\
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:boss@example.com\r\n\
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@example.com\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events[0].attendees, ["bob@example.com"]);
+    }
+
+    /// Whether the account organizes an event takes its own addresses (RFC
+    /// 6638 calendar-user-address-set): it organizes the event whose ORGANIZER
+    /// is any of them, not only the first.
+    #[test]
+    fn the_account_organizes_what_its_address_organizes() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mtg-3@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\n\
+ORGANIZER:mailto:me@example.com\r\nATTENDEE:mailto:bob@example.com\r\n\
+END:VEVENT\r\nBEGIN:VEVENT\r\nUID:own@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let own = |list: &[&str]| {
+            OwnIdentity::from_hrefs(
+                &list.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+                &url::Url::parse("https://dav.example.com/principals/me/").unwrap(),
+            )
+        };
+        let read =
+            |identity: &OwnIdentity| parse_calendar_data_as(body, "cal-1", None, identity).unwrap();
+        let events = read(&own(&["mailto:ME@example.com"]));
+        assert!(
+            !events[0].organized_elsewhere,
+            "its ORGANIZER is the account"
+        );
+        assert!(
+            !events[1].organized_elsewhere,
+            "no organizer: the account's own"
+        );
+        let events = read(&own(&["mailto:me@alias.example", "mailto:me@example.com"]));
+        assert!(
+            !events[0].organized_elsewhere,
+            "its ORGANIZER is the account's second address"
+        );
+        let events = read(&own(&["mailto:someone@example.com"]));
+        assert!(events[0].organized_elsewhere);
+        let events = read(&OwnIdentity::default());
+        assert!(
+            events[0].organized_elsewhere,
+            "none reported: not confirmed"
+        );
+        assert!(!events[1].organized_elsewhere);
+    }
+
+    /// A meeting the account organizes, the way iCloud stores it (live
+    /// measurement M1, anonymised): ORGANIZER and the account's own CHAIR row
+    /// name a principal path, with the address in EMAIL. Aperio shows the
+    /// organizer by that address, drops the CHAIR row from the invitees, and
+    /// recognises the account by its principal path.
+    pub(crate) const ICLOUD_MEETING: &str = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Apple Inc.//iPhone OS 26.0//EN\r\n\
+BEGIN:VEVENT\r\n\
+ATTENDEE;CN=Toni Barth;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;EMAIL=toni@example\r\n \
+.org;ROLE=CHAIR:/aB1/principal/\r\n\
+ATTENDEE;CN=Bob Guest;CUTYPE=INDIVIDUAL;EMAIL=bob@example.net;SCHEDULE-STATUS=\r\n \
+1.1:mailto:bob@example.net\r\n\
+DTEND;TZID=Europe/Berlin:20261109T163000\r\n\
+DTSTAMP:20260919T184800Z\r\n\
+DTSTART;TZID=Europe/Berlin:20261109T160000\r\n\
+ORGANIZER;CN=Toni Barth;EMAIL=toni@example.org:/aB1/principal/\r\n\
+SEQUENCE:0\r\n\
+SUMMARY:Aperio R6 eigene\r\n\
+UID:EBFB90D1-F3C9-4E8C-B18E-211595E15C22\r\n\
+X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\n\
+BEGIN:VALARM\r\n\
+ACTION:DISPLAY\r\n\
+DESCRIPTION:Reminder\r\n\
+TRIGGER:-PT15M\r\n\
+UID:5D446DBE-3179-48F1-AC45-96C95B46851B\r\n\
+END:VALARM\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+    /// The account's addresses as iCloud lists them (M1, anonymised).
+    pub(crate) fn icloud_identity() -> OwnIdentity {
+        OwnIdentity::from_hrefs(
+            &[
+                "/1974/principal".into(),
+                "/aB1/principal/".into(),
+                "urn:uuid:1974".into(),
+                "mailto:toni@example.org".into(),
+            ],
+            &url::Url::parse("https://p42-caldav.icloud.com/1974/principal/").unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_principal_spelled_organizer_is_the_accounts() {
+        let events =
+            parse_calendar_data_as(ICLOUD_MEETING, "cal-1", None, &icloud_identity()).unwrap();
+        assert_eq!(events[0].organizer.as_deref(), Some("toni@example.org"));
+        assert_eq!(events[0].attendees, ["Bob Guest <bob@example.net>"]);
+        assert_eq!(events[0].attendee_responses.len(), 1);
+        assert!(!events[0].organized_elsewhere);
+        // Another account sees the same copy as someone else's meeting.
+        let other = OwnIdentity::from_hrefs(
+            &["/zZ9/principal/".into(), "mailto:bob@example.net".into()],
+            &url::Url::parse("https://p42-caldav.icloud.com/9999/principal/").unwrap(),
+        );
+        let events = parse_calendar_data_as(ICLOUD_MEETING, "cal-1", None, &other).unwrap();
+        assert!(events[0].organized_elsewhere);
+    }
+
+    /// The read decides by the ORGANIZER line itself, as the write does: its
+    /// principal path names the account even when its EMAIL is an alias the
+    /// server did not list. And on the account's own meeting a row naming
+    /// another of its addresses is not a guest either.
+    #[test]
+    fn the_read_knows_the_account_by_the_organizer_line_itself() {
+        let body = ICLOUD_MEETING
+            .replace(
+                "ORGANIZER;CN=Toni Barth;EMAIL=toni@example.org:/aB1/principal/",
+                "ORGANIZER;CN=Toni Barth;EMAIL=alias@me.example:/aB1/principal/",
+            )
+            .replace(
+                "SEQUENCE:0\r\n",
+                "ATTENDEE;CN=Toni;PARTSTAT=ACCEPTED:urn:uuid:1974\r\nSEQUENCE:0\r\n",
+            );
+        let events = parse_calendar_data_as(&body, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(
+            !events[0].organized_elsewhere,
+            "the principal path is the account's"
+        );
+        assert_eq!(events[0].attendees, ["Bob Guest <bob@example.net>"]);
+        // Without the account's addresses nothing is known about it.
+        let events = parse_calendar_data(&body, "cal-1").unwrap();
+        assert!(events[0].organized_elsewhere);
+    }
+
+    #[test]
+    fn only_a_line_that_starts_with_organizer_names_one() {
+        assert!(names_an_organizer(ICLOUD_MEETING));
+        assert!(names_an_organizer("BEGIN:VEVENT\norganizer:mailto:a@x\n"));
+        assert!(!names_an_organizer(
+            "BEGIN:VEVENT\r\nDESCRIPTION:ask the\r\n ORGANIZER:first\r\nSUMMARY:x\r\n"
+        ));
+        assert!(!names_an_organizer("BEGIN:VEVENT\r\nORGANIZERS:x\r\n"));
+    }
+
+    #[test]
+    fn calendar_users_compare_by_their_own_rules() {
+        assert!(same_calendar_user("mailto:A@x", "MAILTO:a@x"));
+        assert!(same_calendar_user("/aB1/principal/", "/aB1/principal"));
+        assert!(!same_calendar_user("/aB1/principal/", "/ab1/principal/"));
+        assert!(!same_calendar_user("mailto:a@x", "/a@x/"));
+        assert!(!same_calendar_user("", ""));
     }
 
     #[test]
@@ -1415,7 +1609,7 @@ END:VEVENT\r
 END:VCALENDAR\r
 ";
         let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
-        let ical = event_to_ical(&ev, None);
+        let ical = event_to_ical(&ev);
         assert!(
             ical.contains("DTSTART;TZID=America/New_York"),
             "expected a zoned DTSTART in the PUT body, got:\n{ical}"
@@ -1449,7 +1643,7 @@ END:VEVENT\r
 END:VCALENDAR\r
 ";
         let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
-        let ical = event_to_ical(&ev, None);
+        let ical = event_to_ical(&ev);
 
         let vtz = ical
             .find("BEGIN:VTIMEZONE")
@@ -1484,7 +1678,7 @@ END:VCALENDAR\r
 ";
         let ev = parse_calendar_data(single, "cal-1").unwrap().remove(0);
         assert!(
-            !event_to_ical(&ev, None).contains("VTIMEZONE"),
+            !event_to_ical(&ev).contains("VTIMEZONE"),
             "a non-recurring UTC event must not carry a VTIMEZONE"
         );
 
@@ -1502,7 +1696,7 @@ END:VCALENDAR\r
 ";
         let ev = parse_calendar_data(all_day, "cal-1").unwrap().remove(0);
         assert!(
-            !event_to_ical(&ev, None).contains("VTIMEZONE"),
+            !event_to_ical(&ev).contains("VTIMEZONE"),
             "an all-day recurring event must not carry a VTIMEZONE"
         );
     }
@@ -1529,7 +1723,7 @@ END:VCALENDAR\r
             .as_mut()
             .expect("the series keeps its rule")
             .tzid = Some("Europe/Berlin".into());
-        let ical = event_to_ical(&ev, None);
+        let ical = event_to_ical(&ev);
         assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE:\n{ical}");
         assert!(!ical.contains("TZID="), "no TZID:\n{ical}");
         assert!(ical.contains("DTSTART;VALUE=DATE:"), "DATE start:\n{ical}");
@@ -1557,7 +1751,7 @@ END:VCALENDAR\r
         // Precondition: the reader really did surface tzid = Some("UTC").
         assert_eq!(ev.recurrence.as_ref().unwrap().tzid.as_deref(), Some("UTC"));
 
-        let ical = event_to_ical(&ev, None);
+        let ical = event_to_ical(&ev);
         assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE for UTC:\n{ical}");
         assert!(
             !ical.contains("TZID=UTC"),
@@ -1626,7 +1820,7 @@ END:VCALENDAR\r
         // Precondition: the row id is the composite, not the bare uid.
         assert_eq!(ev.id, format!("{href}|REAL-UID-9876"));
 
-        let ical = event_to_ical(ev, None);
+        let ical = event_to_ical(ev);
         assert!(
             ical.contains("UID:REAL-UID-9876"),
             "expected the bare UID in the PUT body, got:\n{ical}"
@@ -1697,6 +1891,8 @@ END:VCALENDAR\r
     #[test]
     fn write_then_read_roundtrips_an_event() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Sprint planning".into(),
             description: Some("agenda in the doc".into()),
             location: Some("room 3.12".into()),
@@ -1716,7 +1912,7 @@ END:VCALENDAR\r
             send_invitations: false,
         };
         let uid = "abcdef-12345@aperio";
-        let body = new_event_to_ical(uid, &event, None);
+        let body = new_event_to_ical(uid, &event);
         // The reader must see exactly the fields we wrote.
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         assert_eq!(parsed.len(), 1);
@@ -1743,6 +1939,8 @@ END:VCALENDAR\r
     #[test]
     fn write_all_day_uses_value_date() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Birthday".into(),
             description: None,
             location: None,
@@ -1759,7 +1957,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
         };
-        let body = new_event_to_ical("bday-uid", &event, None);
+        let body = new_event_to_ical("bday-uid", &event);
         assert!(
             body.contains("DTSTART;VALUE=DATE:20260520"),
             "expected VALUE=DATE DTSTART, got: {body}",
@@ -1777,6 +1975,8 @@ END:VCALENDAR\r
     #[test]
     fn write_two_day_all_day_keeps_local_days_and_exclusive_end() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Conference".into(),
             description: None,
             location: None,
@@ -1791,7 +1991,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
         };
-        let body = new_event_to_ical("conf-uid", &event, None);
+        let body = new_event_to_ical("conf-uid", &event);
         assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
         assert!(body.contains("DTEND;VALUE=DATE:20260612"), "{body}");
     }
@@ -1815,7 +2015,7 @@ END:VCALENDAR\r
         let events = parse_calendar_data(body, "cal-1").unwrap();
         let ev = &events[0];
         assert!(ev.all_day);
-        let rewritten = event_to_ical(ev, None);
+        let rewritten = event_to_ical(ev);
         assert!(
             rewritten.contains("DTSTART;VALUE=DATE:20260610"),
             "{rewritten}"
@@ -1826,9 +2026,13 @@ END:VCALENDAR\r
         );
     }
 
+    /// The renderer writes no meeting lines at all, whatever the event asks
+    /// for: they are the write path's to carry or add (`crate::scheduling`).
     #[test]
-    fn writes_organizer_and_attendees_only_when_notifying() {
-        let mut event = NewEvent {
+    fn the_renderer_writes_no_meeting_lines() {
+        let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Review".into(),
             description: None,
             location: None,
@@ -1843,26 +2047,9 @@ END:VCALENDAR\r
             attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
             send_invitations: true,
         };
-        let org = Some("mailto:me@example.com");
-        // Unfold iCal line-folding (CRLF + space) so long ATTENDEE lines
-        // don't split the substrings we assert on.
-        let body = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
-        assert!(body.contains("ORGANIZER:mailto:me@example.com"), "{body}");
-        assert!(body.contains("ATTENDEE"), "{body}");
-        assert!(body.contains("CN=Alice"), "BODY:\n{body}");
-        assert!(body.contains("mailto:alice@example.com"), "{body}");
-        assert!(body.contains("mailto:bob@example.com"));
-
-        // Notify OFF → no scheduling properties even with attendees + organizer.
-        event.send_invitations = false;
-        let silent = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
-        assert!(!silent.contains("ORGANIZER"));
-        assert!(!silent.contains("ATTENDEE"));
-
-        // Notify ON but no organizer (non-RFC-6638 server) → omitted.
-        event.send_invitations = true;
-        let no_org = new_event_to_ical("uid-1", &event, None).replace("\r\n ", "");
-        assert!(!no_org.contains("ORGANIZER"));
+        let body = new_event_to_ical("uid-1", &event);
+        assert!(!body.contains("ORGANIZER"), "{body}");
+        assert!(!body.contains("ATTENDEE"), "{body}");
     }
 
     #[test]
@@ -1997,6 +2184,8 @@ END:VCALENDAR\r
     #[test]
     fn round_trips_reminders_through_write_then_read() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Sync".into(),
             description: None,
             location: None,
@@ -2022,7 +2211,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
         };
-        let body = new_event_to_ical("round-trip-uid", &event, None);
+        let body = new_event_to_ical("round-trip-uid", &event);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         let reminders = &parsed[0].reminders;
         assert_eq!(reminders.len(), 2);
@@ -2145,7 +2334,7 @@ END:VCALENDAR\r
         // looking hand-made.
         let prior = PriorAlarms::read(icloud_body_with_default_alarm());
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         // Counted per LEVEL, not in total: two marks on the alarm and none on
         // the event would satisfy a bare count of two.
@@ -2185,7 +2374,7 @@ END:VCALENDAR\r
         // 60 → 30 is the user's choice, not the account's default any more.
         let prior = PriorAlarms::read(icloud_body_with_default_alarm());
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 30 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("X-APPLE-DEFAULT-ALARM"),
@@ -2208,7 +2397,7 @@ END:VCALENDAR\r
             ReminderKind::Relative { minutes_before: 60 },
             ReminderKind::Relative { minutes_before: 10 },
         ]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("X-APPLE-DEFAULT-ALARM"),
@@ -2222,7 +2411,7 @@ END:VCALENDAR\r
     fn removing_the_reminder_takes_the_mark_with_it() {
         let prior = PriorAlarms::read(icloud_body_with_default_alarm());
         let event = event_with_reminders(Vec::new());
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(!out.contains("BEGIN:VALARM"), "{out}");
         assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
@@ -2261,7 +2450,7 @@ END:VCALENDAR\r
             ReminderKind::Relative { minutes_before: 60 },
             ReminderKind::Relative { minutes_before: 60 },
         ]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(out.contains("UID:alarm-a"), "{out}");
         assert!(out.contains("UID:alarm-b"), "{out}");
@@ -2307,7 +2496,7 @@ END:VCALENDAR\r
 ";
         let prior = PriorAlarms::read(body);
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(out.contains("UID:alarm-master"), "{out}");
         assert!(!out.contains("alarm-override"), "{out}");
@@ -2318,7 +2507,7 @@ END:VCALENDAR\r
         // Apple's mark is Apple's to apply. A create has no previous copy, and
         // event_to_ical without one must behave exactly as it always did.
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical(&event, None);
+        let out = event_to_ical(&event);
         assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
         assert!(out.contains("TRIGGER:-PT3600S"), "{out}");
     }
@@ -2367,7 +2556,7 @@ END:VALARM\r
 ",
         ));
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("X-APPLE-DEFAULT-ALARM"),
@@ -2393,7 +2582,7 @@ END:VALARM\r
             ReminderKind::Relative { minutes_before: 15 },
             ReminderKind::Relative { minutes_before: 60 },
         ]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("UID:alarm-end"),
@@ -2427,7 +2616,7 @@ END:VCALENDAR\r
 ",
         );
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("ACTION:AUDIO"),
@@ -2464,7 +2653,7 @@ END:VCALENDAR\r
 ",
         );
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
 
         assert!(
             !out.contains("X-ADDRESS"),
@@ -2480,7 +2669,7 @@ END:VCALENDAR\r
     fn an_unreadable_previous_copy_costs_only_the_preservation() {
         let prior = PriorAlarms::read("not an icalendar body at all");
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
-        let out = event_to_ical_preserving(&event, None, prior);
+        let out = event_to_ical_preserving(&event, prior);
         assert!(
             out.contains("BEGIN:VALARM"),
             "the write itself must stand:\n{out}"
@@ -2542,6 +2731,8 @@ END:VCALENDAR\r
 
         fn new_appointment(reminders: Vec<Reminder>) -> NewEvent {
             NewEvent {
+                organized_elsewhere: false,
+                organizer: None,
                 title: "Zahnarzt".into(),
                 description: None,
                 location: None,
@@ -2562,7 +2753,7 @@ END:VCALENDAR\r
         fn a_calendar_default_reaches_the_wire_as_a_valarm() {
             let reminders = attached_reminders_of("mixed-list-both-placements");
             assert_eq!(reminders.len(), 1, "one attached entry in that sample");
-            let out = new_event_to_ical("evt-1", &new_appointment(reminders), None);
+            let out = new_event_to_ical("evt-1", &new_appointment(reminders));
 
             assert_eq!(
                 out.matches("BEGIN:VALARM").count(),
@@ -2583,14 +2774,14 @@ END:VCALENDAR\r
             // stay in Aperio must not put anything on the wire, or every
             // client of that calendar would ring for a setting the user
             // deliberately kept local.
-            let out = new_event_to_ical("evt-1", &new_appointment(Vec::new()), None);
+            let out = new_event_to_ical("evt-1", &new_appointment(Vec::new()));
             assert!(!out.contains("BEGIN:VALARM"), "{out}");
         }
 
         #[test]
         fn an_absolute_default_reaches_the_wire_at_its_exact_instant() {
             let reminders = attached_reminders_of("absolute");
-            let out = new_event_to_ical("evt-1", &new_appointment(reminders), None);
+            let out = new_event_to_ical("evt-1", &new_appointment(reminders));
             assert!(
                 out.contains("TRIGGER;VALUE=DATE-TIME:20260906T130000Z"),
                 "the fixed moment did not survive:\n{out}"
@@ -2615,6 +2806,8 @@ END:VCALENDAR\r
 
     fn color_new_event(color_hex: Option<&str>) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Painted".into(),
             description: None,
             location: None,
@@ -2633,13 +2826,13 @@ END:VCALENDAR\r
 
     #[test]
     fn writes_color_property_only_when_color_hex_set() {
-        let with = new_event_to_ical("uid-c", &color_new_event(Some("#4285f4")), None);
+        let with = new_event_to_ical("uid-c", &color_new_event(Some("#4285f4")));
         assert!(
             with.contains("COLOR:#4285f4"),
             "expected COLOR line, got:\n{with}"
         );
         // Absent color_hex → no COLOR property at all.
-        let without = new_event_to_ical("uid-c", &color_new_event(None), None);
+        let without = new_event_to_ical("uid-c", &color_new_event(None));
         assert!(
             !without.contains("COLOR:"),
             "unexpected COLOR line:\n{without}"
@@ -2699,7 +2892,7 @@ END:VCALENDAR\r
 
     #[test]
     fn color_round_trips_through_write_then_read() {
-        let body = new_event_to_ical("rt-uid", &color_new_event(Some("#34a853")), None);
+        let body = new_event_to_ical("rt-uid", &color_new_event(Some("#34a853")));
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         assert_eq!(parsed[0].color_hex.as_deref(), Some("#34a853"));
     }
@@ -2716,7 +2909,6 @@ END:VCALENDAR\r
             &event,
             "/cal/e.ics|series-1",
             "RECURRENCE-ID:20260615T070000Z\r\n",
-            None,
             PriorAlarms::default(),
         );
         assert!(

@@ -29,7 +29,7 @@ use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::SendRetrying;
-use crate::xml::extract_first_nested_href;
+use crate::xml::{extract_first_nested_href, extract_nested_hrefs, NestedHref};
 
 const PROPFIND: &str = "PROPFIND";
 
@@ -101,6 +101,19 @@ pub struct Discovery {
     /// `calendar-user-address-set`), used as `ORGANIZER` when writing a
     /// scheduled event. `None` when the server advertised none.
     pub calendar_user_address: Option<String>,
+    /// Every `mailto:` in `calendar-user-address-set`, the one the server
+    /// marks preferred first, then in the server's order; the first is
+    /// `calendar_user_address`.
+    pub calendar_user_addresses: Vec<String>,
+    /// Every href of `calendar-user-address-set`: the `mailto:`s, principal
+    /// paths and `urn:`s. RFC 6638 makes each of them the account's own, and
+    /// a server writes whichever it likes into ORGANIZER; iCloud writes a
+    /// principal path (live measurement M1). See [`crate::identity`].
+    pub calendar_user_hrefs: Vec<String>,
+    /// The scheduling probe failed for a reason that may pass: a network
+    /// error or a server error. Then the addresses above are unknown, not
+    /// absent, and the adapter asks again before it relies on them.
+    pub scheduling_probe_failed: bool,
     /// Absolute URL of the principal's `schedule-outbox-URL` (RFC 6638).
     /// We POST an iTIP `VFREEBUSY` request here to query attendees'
     /// availability. `None` when the server doesn't advertise an outbox
@@ -143,36 +156,82 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     // RFC 6638 scheduling support + organizer address. Best-effort: a
     // server without the properties (or an odd response) just means "no
     // scheduling", which hides the notify toggle rather than failing.
-    let (supports_scheduling, calendar_user_address, schedule_outbox_url) =
-        find_scheduling(client, &principal_url, credentials).await;
-    Ok(Discovery {
+    let mut discovery = Discovery {
         dav_root,
         principal_url,
         calendar_home_url,
         addressbook_home_url,
-        supports_scheduling,
-        calendar_user_address,
-        schedule_outbox_url,
-    })
+        supports_scheduling: false,
+        calendar_user_address: None,
+        calendar_user_addresses: Vec::new(),
+        calendar_user_hrefs: Vec::new(),
+        scheduling_probe_failed: false,
+        schedule_outbox_url: None,
+    };
+    let scheduling = probe_scheduling(client, &discovery.principal_url, credentials).await;
+    discovery.apply_scheduling(scheduling);
+    Ok(discovery)
 }
 
-/// Best-effort RFC 6638 probe on the principal. Returns
-/// `(supports_scheduling, organizer_mailto, schedule_outbox_url)`. Never
-/// errors — any network / parse failure, or a server that doesn't expose
-/// the properties, degrades to `(false, None, None)` so the rest of
-/// discovery still succeeds and the UI simply hides the "notify attendees"
-/// toggle for this account.
-async fn find_scheduling(
+impl Discovery {
+    /// Take over what a scheduling probe found.
+    pub fn apply_scheduling(&mut self, scheduling: Scheduling) {
+        self.supports_scheduling = scheduling.supports_scheduling;
+        self.calendar_user_address = scheduling.calendar_user_addresses.first().cloned();
+        self.calendar_user_addresses = scheduling.calendar_user_addresses;
+        self.calendar_user_hrefs = scheduling.calendar_user_hrefs;
+        self.schedule_outbox_url = scheduling.schedule_outbox_url;
+        self.scheduling_probe_failed = scheduling.failed;
+    }
+}
+
+/// What the RFC 6638 probe on the principal found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Scheduling {
+    /// The server auto-schedules (it has a `schedule-outbox-URL`) and names
+    /// a `mailto:` to write as `ORGANIZER`.
+    pub supports_scheduling: bool,
+    /// Every `mailto:` in `calendar-user-address-set`, the preferred one
+    /// first, each once.
+    pub calendar_user_addresses: Vec<String>,
+    /// Every href of `calendar-user-address-set`, in the server's order.
+    pub calendar_user_hrefs: Vec<String>,
+    pub schedule_outbox_url: Option<Url>,
+    /// A network error or a server error (5xx) stopped the probe, so it says
+    /// nothing about the server. A 4xx or an answer without the properties
+    /// is the server's answer: no scheduling, no addresses.
+    pub failed: bool,
+}
+
+/// Best-effort RFC 6638 probe on the principal. Never errors: any failure,
+/// or a server that doesn't expose the properties, degrades to "no
+/// scheduling" so the rest of discovery still succeeds and the UI simply
+/// hides the "notify attendees" toggle for this account. A failure that may
+/// pass is marked (`Scheduling::failed`) so the adapter can ask again.
+pub async fn probe_scheduling(
     client: &Client,
     principal_url: &Url,
     credentials: &Credentials,
-) -> (bool, Option<String>, Option<Url>) {
+) -> Scheduling {
     let body = match propfind(client, principal_url, SCHEDULING_BODY, credentials, 0).await {
         Ok(resp) => match expect_207(resp).await {
             Ok(b) => b,
-            Err(_) => return (false, None, None),
+            Err(err) => {
+                let failed = !matches!(err, CaldavError::Http { status, .. } if status < 500);
+                debug!(?err, failed, "scheduling probe answered with an error");
+                return Scheduling {
+                    failed,
+                    ..Scheduling::default()
+                };
+            }
         },
-        Err(_) => return (false, None, None),
+        Err(err) => {
+            debug!(?err, "scheduling probe failed");
+            return Scheduling {
+                failed: true,
+                ..Scheduling::default()
+            };
+        }
     };
     // Resolve the outbox href against the principal so it's absolute and
     // ready to POST to.
@@ -180,27 +239,41 @@ async fn find_scheduling(
         .ok()
         .flatten()
         .and_then(|href| principal_url.join(&href).ok());
-    let organizer = first_mailto(&body);
+    let hrefs = extract_nested_hrefs(&body, b"calendar-user-address-set").unwrap_or_default();
+    let addresses = mailtos(&hrefs);
     // Need BOTH server auto-scheduling AND a usable organizer address —
     // without the latter we can't write a valid ORGANIZER.
-    (
-        outbox_url.is_some() && organizer.is_some(),
-        organizer,
-        outbox_url,
-    )
+    Scheduling {
+        supports_scheduling: outbox_url.is_some() && !addresses.is_empty(),
+        calendar_user_addresses: addresses,
+        calendar_user_hrefs: hrefs.into_iter().map(|h| h.href).collect(),
+        schedule_outbox_url: outbox_url,
+        failed: false,
+    }
 }
 
-/// Pull the first `mailto:` calendar-user-address out of a PROPFIND body.
-/// `calendar-user-address-set` lists several addresses (principal paths and
-/// mailtos); `ORGANIZER`/`ATTENDEE` need the `mailto:` form.
-fn first_mailto(body: &str) -> Option<String> {
-    let start = body.find("mailto:")?;
-    let rest = &body[start..];
-    let end = rest
-        .find(|c: char| c == '<' || c == '"' || c.is_whitespace())
-        .unwrap_or(rest.len());
-    let addr = rest[..end].trim();
-    (addr.len() > "mailto:".len()).then(|| addr.to_string())
+/// The `mailto:` hrefs among `hrefs` (the scheme in any case), the one marked
+/// preferred first, each address once. `ORGANIZER`/`ATTENDEE` need the
+/// `mailto:` form.
+fn mailtos(hrefs: &[NestedHref]) -> Vec<String> {
+    let mut ordered: Vec<&NestedHref> = hrefs.iter().filter(|h| h.preferred).collect();
+    ordered.extend(hrefs.iter().filter(|h| !h.preferred));
+    let mut found: Vec<String> = Vec::new();
+    for href in ordered {
+        let addr = href.href.trim();
+        let is_mailto = addr
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mailto:"));
+        if is_mailto
+            && addr.len() > "mailto:".len()
+            && !found
+                .iter()
+                .any(|seen| cal_core::attendee::same_address(seen, addr))
+        {
+            found.push(addr.to_string());
+        }
+    }
+    found
 }
 
 fn parse_base_url(raw: &str) -> CaldavResult<Url> {
@@ -677,17 +750,75 @@ mod tests {
         assert!(matches!(err, CaldavError::Config(_)));
     }
 
-    #[test]
-    fn first_mailto_picks_the_mailto_address() {
-        let body = r#"<c:calendar-user-address-set>
-            <d:href>/principals/users/alice/</d:href>
-            <d:href>mailto:alice@example.com</d:href>
-          </c:calendar-user-address-set>"#;
-        assert_eq!(
-            first_mailto(body).as_deref(),
-            Some("mailto:alice@example.com")
+    fn address_set(inner: &str) -> Vec<NestedHref> {
+        let body = format!(
+            "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:response><d:propstat><d:prop><c:calendar-user-address-set>{inner}</c:calendar-user-address-set><c:schedule-outbox-URL><d:href>/outbox/</d:href></c:schedule-outbox-URL></d:prop></d:propstat></d:response></d:multistatus>"
         );
-        assert_eq!(first_mailto("<d:href>/no/mailto/here/</d:href>"), None);
+        extract_nested_hrefs(&body, b"calendar-user-address-set").unwrap()
+    }
+
+    #[test]
+    fn mailtos_picks_the_mailto_addresses() {
+        let hrefs = address_set(
+            "<d:href>/principals/users/alice/</d:href><d:href>mailto:alice@example.com</d:href>",
+        );
+        assert_eq!(mailtos(&hrefs), ["mailto:alice@example.com"]);
+        assert!(mailtos(&address_set("<d:href>/no/mailto/here/</d:href>")).is_empty());
+    }
+
+    /// The shape measured live (M1): principal paths, a urn and the mail
+    /// address marked preferred. Every href is kept; the preferred mailto
+    /// comes first, whatever its case, and each address once. The outbox
+    /// href of the same body is not one of them.
+    #[test]
+    fn the_address_set_keeps_every_href() {
+        let hrefs = address_set(
+            "<d:href>/1974/principal</d:href>\
+             <d:href>mailto:alice@me.com</d:href>\
+             <d:href>/aB1/principal/</d:href>\
+             <d:href>urn:uuid:1974</d:href>\
+             <d:href preferred=\"1\">MAILTO:alice@icloud.com</d:href>\
+             <d:href>mailto:ALICE@me.com</d:href>",
+        );
+        assert_eq!(
+            hrefs.iter().map(|h| h.href.as_str()).collect::<Vec<_>>(),
+            [
+                "/1974/principal",
+                "mailto:alice@me.com",
+                "/aB1/principal/",
+                "urn:uuid:1974",
+                "MAILTO:alice@icloud.com",
+                "mailto:ALICE@me.com"
+            ]
+        );
+        assert_eq!(
+            mailtos(&hrefs),
+            ["MAILTO:alice@icloud.com", "mailto:alice@me.com"]
+        );
+    }
+
+    async fn scheduling_probe_answering(status: usize) -> Scheduling {
+        let mut server = Server::new_async().await;
+        let _sched = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .with_status(status)
+            .create_async()
+            .await;
+        let principal = Url::parse(&format!("{}/principals/users/alice/", server.url())).unwrap();
+        probe_scheduling(&test_client(), &principal, &creds(&server.url())).await
+    }
+
+    /// A server error says nothing about the server, so the probe is marked
+    /// to be asked again. A refusal (4xx) is the server's answer.
+    #[tokio::test]
+    async fn only_a_passing_failure_marks_the_probe() {
+        let failed = scheduling_probe_answering(503).await;
+        assert!(failed.failed);
+        assert!(failed.calendar_user_addresses.is_empty());
+
+        let refused = scheduling_probe_answering(403).await;
+        assert!(!refused.failed);
+        assert!(!refused.supports_scheduling);
     }
 
     const SCHEDULING_RESPONSE: &str = r#"<?xml version="1.0"?>
@@ -742,9 +873,17 @@ mod tests {
         let client = test_client();
         let d = run(&client, &creds(&server.url())).await.unwrap();
         assert!(d.supports_scheduling);
+        assert!(!d.scheduling_probe_failed);
         assert_eq!(
             d.calendar_user_address.as_deref(),
             Some("mailto:alice@example.com")
+        );
+        assert_eq!(d.calendar_user_addresses, ["mailto:alice@example.com"]);
+        // Every href is the account's, the principal path too (see
+        // `identity`): iCloud writes ORGANIZER as a principal path.
+        assert_eq!(
+            d.calendar_user_hrefs,
+            ["mailto:alice@example.com", "/principals/users/alice/"]
         );
         // The outbox href is resolved to an absolute URL ready to POST to.
         let expected_outbox = format!("{}/calendars/alice/outbox/", server.url());

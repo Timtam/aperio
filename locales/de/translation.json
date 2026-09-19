@@ -1371,7 +1371,8 @@
       "notifyLegend": "Teilnehmer",
       "notifyAttendees": "Teilnehmer benachrichtigen",
       "notifySilent": "Ohne Benachrichtigung entfernen",
-      "notifyRevealed": "Du organisierst diesen Termin — wähle oben, ob Teilnehmer benachrichtigt werden.",
+      "notifyAlways": "Der Kalenderserver informiert die Teilnehmer über die Absage.",
+      "notifyAlwaysNamed": "{{service}} informiert die Teilnehmer über die Absage.",
       "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:"
     },
     "moveScope": {
@@ -1489,7 +1490,10 @@
         "cancelOccurrence": "Diesen Einzeltermin absagen & Teilnehmer benachrichtigen",
         "thisAndFutureMessage": "Du organisierst „{{title}}\". Diesen und alle folgenden Termine absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
         "cancelThisAndFuture": "Diesen und alle folgenden absagen & benachrichtigen",
-        "removeSilently": "Ohne Benachrichtigung entfernen"
+        "removeSilently": "Ohne Benachrichtigung entfernen",
+        "alwaysMessage": "Du organisierst „{{title}}\". Löschen sagt die Besprechung ab. {{sentence}}",
+        "alwaysOccurrenceMessage": "Du organisierst „{{title}}\". Löschen sagt diesen Termin ab. {{sentence}}",
+        "alwaysThisAndFutureMessage": "Du organisierst „{{title}}\". Löschen sagt diesen und alle folgenden Termine ab. {{sentence}}"
       },
       "birthdayTitle": "Geburtstag",
       "birthdayAge": "Wird {{age}} Jahre alt",
@@ -1513,6 +1517,8 @@
         "description": "Beschreibung",
         "attendees": "Teilnehmer",
         "notifyAttendees": "Teilnehmer benachrichtigen",
+        "notifyAlways": "Der Kalenderserver informiert die Teilnehmer über jede Änderung.",
+        "notifyAlwaysNamed": "{{service}} informiert die Teilnehmer über jede Änderung.",
         "colorLabel": "Farb-Label"
       },
       "attendees": {

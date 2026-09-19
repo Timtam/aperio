@@ -198,6 +198,8 @@ impl LocalAdapter {
             out.push(Calendar {
                 supports_scheduling: false,
                 supports_event_color: true,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
@@ -778,6 +780,9 @@ mod tests {
     fn fake_event(id: &str, calendar_id: &str) -> Event {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
         Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: id.into(),
             calendar_id: calendar_id.into(),
             title: "snapshot me".into(),
@@ -840,6 +845,8 @@ mod tests {
             color_label: None,
             supports_scheduling: false,
             supports_event_color: true,
+            always_notifies_attendees: false,
+            notifier_name: None,
             id: id.into(),
             name: name.into(),
             color: Some(container("#112233")),

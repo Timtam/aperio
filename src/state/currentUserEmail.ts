@@ -4,25 +4,18 @@ import { calendarCurrentUserEmail } from '../api/client';
  * Cache for "who am I on this calendar?" — the connected account's email.
  *
  * `calendarCurrentUserEmail` is a LIVE provider call (Graph `GET /me`, Google
- * `GET /calendars/primary`), not a local read, so calling it on an interaction
- * path (the chip context menu, which must open instantly) would stall the UI —
- * and hang while offline. We cache the answer per calendar so the first opener
- * of a meeting (EventRsvp, the editor) warms it and later callers read it
- * synchronously with {@link peekCalendarUserEmail}.
+ * `GET /calendars/primary`), not a local read, so we cache the answer per
+ * calendar. EventRsvp is its only user: it finds the account's own attendee
+ * row to answer an invitation. Whether the account organizes an event is not
+ * decided here but by the adapter on read (`organized_elsewhere`, decision
+ * 70a), which the delete paths and the chip menu read through the shared
+ * `cancellationNotice`.
  *
  * The identity is effectively immutable for the life of an account, so there's
  * no invalidation; the cache is dropped when the page reloads.
  */
 const cache = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();
-
-/** Synchronous peek. `undefined` until the email has been resolved at least
- *  once for this calendar; `string | null` once known. */
-export function peekCalendarUserEmail(
-  calendarId: string,
-): string | null | undefined {
-  return cache.has(calendarId) ? cache.get(calendarId) : undefined;
-}
 
 /** Resolve (and cache) the connected account's email for `calendarId`.
  *  Concurrent callers share one in-flight request. */
@@ -46,11 +39,4 @@ export function resolveCalendarUserEmail(
     });
   inflight.set(calendarId, p);
   return p;
-}
-
-/** Kick off a resolve to warm the cache; ignore the result/errors. Used to
- *  prime the cache off the interaction path (e.g. the first right-click on a
- *  meeting, so the cancel/notify choice is available on the next one). */
-export function warmCalendarUserEmail(calendarId: string): void {
-  void resolveCalendarUserEmail(calendarId).catch(() => {});
 }

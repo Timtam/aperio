@@ -189,6 +189,8 @@ fn map_calendar(d: DeviceCalendar) -> Calendar {
         default_sound: None,
         supports_scheduling: false,
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
     }
 }
 
@@ -204,6 +206,9 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         None => created_at,
     };
     Ok(Event {
+        keep_attendees: false,
+        clear_attendees: false,
+        organized_elsewhere: false,
         id: d.id,
         calendar_id: d.calendar_id,
         title: d.title,
@@ -780,6 +785,8 @@ mod tests {
 
     fn new_event() -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Meeting".into(),
             description: Some("desc".into()),
             location: Some("HQ".into()),

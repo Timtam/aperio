@@ -354,6 +354,8 @@ mod tests {
                 color_label: None,
                 supports_scheduling: false,
                 supports_event_color: false,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 id: "cal-x".into(),
                 name: "Test".into(),
                 color: Some(ContainerColor::custom("#abcdef")),

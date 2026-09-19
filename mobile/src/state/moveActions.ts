@@ -3,7 +3,12 @@
 // Pure async functions over the cal-ffi bridge; the MoveCopyModal drives them.
 
 import type { Task } from '@aperio/shared';
-import { isSeriesOccurrence, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
+import {
+  isSeriesOccurrence,
+  occurrenceIsoOf,
+  organizerOf,
+  seriesIdOf,
+} from '@aperio/shared';
 
 import {
   addEventExdate,
@@ -176,6 +181,7 @@ export async function moveOrCopyEvent(
     reminders: source.reminders,
     sound: source.sound,
     attendees: source.attendees,
+    ...organizerOf(source),
   });
 
   if (mode === 'move' && asOccurrence) {

@@ -1405,6 +1405,8 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Standup".into(),
             description: None,
             location: None,

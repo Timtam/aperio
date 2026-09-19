@@ -30,24 +30,15 @@ import type {
   TaskPriority,
   TaskStatus,
 } from '../api/types';
+import { cancellationNotice } from '@aperio/shared';
 import { duplicateTask } from '../components/duplicateActions';
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
-import {
-  peekCalendarUserEmail,
-  warmCalendarUserEmail,
-} from './currentUserEmail';
 import { surfaceTaskNow } from './moveActions';
 import { useTaskCascadeEnabled } from './taskCascadeContext';
 import { useTaskPriorityAction } from './useTaskPriority';
 import { useTaskStatusActions } from './useTaskStatusToggle';
-
-/** Lower-case, `mailto:`-stripped form for comparing addresses. */
-function normalizeEmail(value: string | null | undefined): string {
-  if (!value) return '';
-  return value.trim().replace(/^mailto:/i, '').toLowerCase();
-}
 
 /**
  * Native context menu for event chips and task rows. Mirrors the
@@ -184,23 +175,11 @@ export function useChipContextMenu(): ChipContextMenuActions {
         ],
       };
       // A meeting the connected account ORGANIZES (with attendees, on a
-      // scheduling-capable provider) can be CANCELLED with an attendee
-      // notification — offer that vs a silent remove as two menu items instead
-      // of a single Delete. "Who am I" is a LIVE provider call, so we NEVER
-      // await it here (that would stall the native menu / hang offline): read
-      // it synchronously from the cache (warmed whenever a meeting is opened),
-      // and if it's not warm yet, prime it and just show plain Delete this time.
-      const cal = calById.get(event.calendar_id);
-      let offersChoice = false;
-      if ((cal?.supports_scheduling ?? false) && event.attendees.length > 0) {
-        const cached = peekCalendarUserEmail(event.calendar_id);
-        if (cached === undefined) {
-          warmCalendarUserEmail(event.calendar_id);
-        } else {
-          const me = normalizeEmail(cached);
-          offersChoice = !!me && normalizeEmail(event.organizer) === me;
-        }
-      }
+      // scheduling-capable provider) is CANCELLED rather than deleted: with a
+      // choice between notifying and a silent remove where the provider can
+      // delete silently, and as the one "cancel & notify" entry where it
+      // cannot (decision 80a). The shared rule the dialogs use too.
+      const cancellation = cancellationNotice(calById.get(event.calendar_id), event);
       // A meeting link, if this event carries one. Joining is what someone
       // wants from a meeting five minutes before it starts, so it leads the
       // menu — and it puts joining one keystroke from the calendar, without
@@ -212,8 +191,8 @@ export function useChipContextMenu(): ChipContextMenuActions {
       // been grouped yet, and on an event that IS grouped it hid the fact that
       // this is also where the group is read, added to and taken apart.
       //
-      // A local read, unlike the who-am-I lookup below: one query against
-      // Aperio's own table, no provider, so the menu can wait for it.
+      // A local read: one query against Aperio's own table, no provider, so
+      // the menu can wait for it.
       let grouped = false;
       try {
         const found = await eventGroupsForEvents([
@@ -255,12 +234,14 @@ export function useChipContextMenu(): ChipContextMenuActions {
         },
         colorSubmenu,
         { kind: 'separator' },
-        ...(offersChoice
+        ...(cancellation === 'offer'
           ? [
               { id: 'cancel-notify', label: t('chipMenu.cancelNotify') },
               { id: 'cancel-silent', label: t('chipMenu.cancelSilent') },
             ]
-          : [{ id: 'delete', label: t('chipMenu.delete') }]),
+          : cancellation === 'always'
+            ? [{ id: 'cancel-notify', label: t('chipMenu.cancelNotify') }]
+            : [{ id: 'delete', label: t('chipMenu.delete') }]),
       ];
       let selected: string | null = null;
       try {
@@ -295,7 +276,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
         // keyboard handlers; keeping the menu simple is intentional.
         const id = seriesIdOf(event);
         // `cancel-notify`/`cancel-silent` only appear for a meeting we organize;
-        // plain `delete` keeps the prior heuristic (notify iff attendees — the
+        // plain `delete` keeps the prior rule (notify iff attendees — the
         // adapters tolerate that from a non-organizer, falling back to a plain
         // delete).
         const send =

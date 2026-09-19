@@ -1592,6 +1592,8 @@ mod tests {
 
     fn new_event_without_reminders() -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Dentist".into(),
             description: None,
             location: None,
@@ -2572,6 +2574,9 @@ mod tests {
 
     fn make_event(reminders: Vec<Reminder>) -> Event {
         Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
             id: "ev-1".into(),
             calendar_id: "cal-1".into(),
             title: "Meeting".into(),
