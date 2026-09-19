@@ -144,9 +144,10 @@ Beginn der Serie.
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,
-> bleibt Teil seiner Serie, wenn du im Termin-Dialog wieder nur diesen Termin
-> änderst, am Desktop wie in der Handy-App. Einen Termin, den du in Aperio für
-> sich geändert hast, hat Aperio schon zu einem eigenen Termin gemacht. Eine Ausnahme macht Exchange: Dort darf
+> bleibt Teil seiner Serie, wenn du wieder nur diesen Termin änderst oder
+> verschiebst: im Termin-Dialog am Desktop wie in der Handy-App und per Ziehen am
+> Desktop. Einen Termin, den du in Aperio für sich geändert hast, hat Aperio
+> schon zu einem eigenen Termin gemacht. Eine Ausnahme macht Exchange: Dort darf
 > so ein Termin nicht auf oder über einen anderen Termin derselben Serie rücken.
 > Aperio macht ihn dann zu einem eigenen Termin zur neuen Zeit, so wie jeden
 > anderen Termin, den du einzeln verschiebst.

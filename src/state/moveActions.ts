@@ -17,10 +17,12 @@ import {
   addEventExdate,
   createEvent as apiCreateEvent,
   getEventById,
+  setEventColor,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
 import {
+  isProviderOverride,
   isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
@@ -350,7 +352,9 @@ export async function moveOrCopyEvent(
  *    `SeriesShiftRefusedError`.
  *  - **occurrence** — detach: create a STANDALONE event on the target
  *    day, then EXDATE the source occurrence (created first, excluded
- *    second, so a failed create never loses the occurrence).
+ *    second, so a failed create never loses the occurrence). A provider
+ *    override — an occurrence changed before — moves in place instead, by
+ *    its own id, as the editor saves it.
  *
  * Returns false for a same-day drop (no-op — matches the task DnD
  * behaviour for the "dragged a few pixels" misfire).
@@ -417,6 +421,29 @@ export async function moveEventToSlot(
     minute === null
       ? shift(event.end)
       : new Date(new Date(newStart).getTime() + durationMs).toISOString();
+
+  if (scope === 'occurrence' && isProviderOverride(event)) {
+    // An override IS the occurrence, and the series already skips its slot.
+    // Carving it out created a copy next to it, and on Exchange an exception
+    // moved far from its slot then stayed behind as a duplicate.
+    const landed = await apiUpdateEvent({
+      ...event,
+      start: newStart,
+      end: newEnd,
+      // Stays null: an override is one instance and owns no rule.
+      recurrence: null,
+    });
+    // Exchange will not move an exception past a neighbouring occurrence and
+    // detaches it as a single with an id of its own. A colour Aperio keeps on
+    // the device, keyed by the override's id, follows it there.
+    if (landed?.id && landed.id !== event.id && event.color_label) {
+      await setEventColor(landed.id, landed.calendar_id, event.color_label);
+      await setEventColor(event.id, event.calendar_id, null).catch(
+        () => undefined,
+      );
+    }
+    return true;
+  }
 
   if (scope === 'occurrence' && isSeriesOccurrence(event)) {
     await apiCreateEvent({

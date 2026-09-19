@@ -432,6 +432,12 @@ pub struct ParsedItem {
     /// drained again anyway (`api::ITEM_PARSER`).
     #[serde(default)]
     pub end_time_zone: Option<String>,
+    /// `<t:OriginalStart>` on an occurrence or exception read by itself (the
+    /// occurrence probe): the slot of the series it fills, which stays put when
+    /// an exception is moved. `None` elsewhere. `#[serde(default)]` so older
+    /// persisted state loads.
+    #[serde(default)]
+    pub original_start: Option<DateTime<Utc>>,
     /// On a RecurringMaster row from `SyncFolderItems`, the
     /// `<t:Recurrence>` element parses to this. `None` on singles
     /// and on read paths that don't request the field (the legacy
@@ -844,6 +850,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"originalstart" if inside_modified_occurrence => {
                         text_target = Some("override_original_start");
                     }
+                    // An occurrence or exception read on its own: the slot it
+                    // fills (see `ParsedItem::original_start`).
+                    b"originalstart" if inside_item => text_target = Some("original_start"),
                     b"start" if inside_item => text_target = Some("start"),
                     b"end" if inside_item => text_target = Some("end"),
                     b"isalldayevent" if inside_item => {
@@ -1022,6 +1031,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     Some("start") => current.start = parse_ews_datetime(s),
                     Some("end") => current.end = parse_ews_datetime(s),
+                    Some("original_start") => current.original_start = parse_ews_datetime(s),
                     Some("deleted_occurrence_start") => {
                         if let Some(dt) = parse_ews_datetime(s) {
                             current.deleted_occurrence_starts.push(dt);
@@ -1292,6 +1302,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"originalstart" if inside_modified_occurrence => {
                         text_target = Some("override_original_start");
                     }
+                    // An occurrence or exception read on its own: the slot it
+                    // fills (see `ParsedItem::original_start`).
+                    b"originalstart" if inside_item => text_target = Some("original_start"),
                     b"start" if inside_item => text_target = Some("start"),
                     b"end" if inside_item => text_target = Some("end"),
                     b"isrecurring" if inside_item => text_target = Some("recurring"),
@@ -1455,6 +1468,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     }
                     Some("start") => current.start = parse_ews_datetime(s),
                     Some("end") => current.end = parse_ews_datetime(s),
+                    Some("original_start") => current.original_start = parse_ews_datetime(s),
                     Some("deleted_occurrence_start") => {
                         if let Some(dt) = parse_ews_datetime(s) {
                             current.deleted_occurrence_starts.push(dt);
@@ -3851,6 +3865,7 @@ mod tests {
             item_type: None,
             start_time_zone: None,
             end_time_zone: None,
+            original_start: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -5248,6 +5263,7 @@ mod tests {
             item_type: item_type.map(String::from),
             start_time_zone: None,
             end_time_zone: None,
+            original_start: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -5907,6 +5923,58 @@ mod tests {
             crate::windows_tz::read_windows_zone(item.start_time_zone.as_deref().unwrap()),
             crate::windows_tz::WindowsZoneRead::Zone("America/New_York")
         );
+    }
+
+    /// An exception read on its own carries the slot it fills as its own
+    /// `OriginalStart`; a master's `OriginalStart`s belong to its modified
+    /// occurrences and must not leak onto the master.
+    #[test]
+    fn get_item_reads_an_exceptions_own_original_start() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC" ChangeKey="ECK"/>
+        <t:Start>2026-07-23T15:00:00Z</t:Start>
+        <t:End>2026-07-23T16:00:00Z</t:End>
+        <t:CalendarItemType>Exception</t:CalendarItemType>
+        <t:OriginalStart>2026-07-20T09:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+        <t:Start>2026-07-06T09:00:00Z</t:Start>
+        <t:End>2026-07-06T10:00:00Z</t:End>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC" ChangeKey="ECK"/>
+          <t:Start>2026-07-23T15:00:00Z</t:Start>
+          <t:End>2026-07-23T16:00:00Z</t:End>
+          <t:OriginalStart>2026-07-20T09:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let items = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(items.len(), 2);
+        let slot: DateTime<Utc> = "2026-07-20T09:00:00Z".parse().unwrap();
+        assert_eq!(items[0].original_start, Some(slot));
+        assert_eq!(
+            items[0].start,
+            Some("2026-07-23T15:00:00Z".parse().unwrap())
+        );
+        assert_eq!(
+            items[1].original_start, None,
+            "the master has no slot of its own"
+        );
+        assert_eq!(items[1].modified_occurrences[0].original_start, slot);
     }
 
     /// 43b through `to_event`: the master's zone comes from both zone fields.

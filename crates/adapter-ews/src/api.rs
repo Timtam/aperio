@@ -834,10 +834,12 @@ pub async fn add_event_exdate(
     Ok(())
 }
 
-/// GetItem occurrence `index` (1-based) of a recurring master; `Ok(None)` when
-/// the index is past the end of the series (EWS returns a per-item
-/// `ResponseClass="Error"`, which parses to no CalendarItem). Uses
-/// `post_soap_raw` so that out-of-range Error doesn't abort via `check_for_fault`.
+/// The slot occurrence `index` (1-based) of a recurring master fills: its
+/// `OriginalStart` for an exception, which stays put when the exception is
+/// moved, else its `Start`. `Ok(None)` when the index is past the end of the
+/// series (EWS returns a per-item `ResponseClass="Error"`, which parses to no
+/// CalendarItem). Uses `post_soap_raw` so that out-of-range Error doesn't abort
+/// via `check_for_fault`.
 async fn occurrence_start(
     client: &EwsClient,
     master_id: &str,
@@ -848,7 +850,12 @@ async fn occurrence_start(
         .post_soap_raw(get_occurrence_item(master_id, change_key, index))
         .await?;
     let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
-    Ok(items.into_iter().find_map(|it| it.start))
+    // Without the OriginalStart, an exception moved more than the tolerance
+    // away from its slot never matched: the delete aborted, and a move that had
+    // already created the new event left the exception behind as a duplicate.
+    Ok(items
+        .into_iter()
+        .find_map(|it| it.original_start.or(it.start)))
 }
 
 /// The candidate InstanceIndexes to probe: the computed ordinal plus its
@@ -878,8 +885,9 @@ fn candidate_indices(candidate: u32) -> Vec<u32> {
 /// date-based search over live occurrences is defeated by those holes. We then
 /// GetItem-verify the candidate index — and its ±1 neighbours, to recover a
 /// UTC-vs-local off-by-one — against the SERVER: only if a probed occurrence's
-/// real Start lands within a few hours of `target` do we delete it, otherwise we
-/// ABORT rather than risk removing the wrong date. With `send_cancellations` the
+/// slot (an exception's `OriginalStart`, else its real Start) lands within a few
+/// hours of `target` do we delete it, otherwise we ABORT rather than risk
+/// removing the wrong date. With `send_cancellations` the
 /// deleted occurrence emails a per-occurrence CANCEL to attendees.
 pub async fn delete_series_occurrence(
     client: &EwsClient,
@@ -2442,6 +2450,88 @@ mod tests {
                 .await
                 .unwrap_err();
         assert!(matches!(err, EwsError::Protocol(_)));
+    }
+
+    /// An exception moved three days away from its slot is still the
+    /// occurrence of that slot: it is matched by its `OriginalStart`, not by
+    /// where it now starts. Matched by its Start it was never found, the delete
+    /// aborted, and a move that had already created the new event left the
+    /// exception behind as a duplicate.
+    #[tokio::test]
+    async fn delete_series_occurrence_finds_an_exception_moved_far_by_its_slot() {
+        let mut server = Server::new_async().await;
+        let _master = mock_master(&mut server).await;
+        for (idx, iso) in [(2, "2026-07-13T09:00:00Z"), (4, "2026-07-27T09:00:00Z")] {
+            let _m = server
+                .mock("POST", "/")
+                .match_body(mockito::Matcher::AllOf(vec![
+                    mockito::Matcher::Regex("m:GetItem".into()),
+                    mockito::Matcher::Regex(format!(r#"InstanceIndex="{idx}""#)),
+                ]))
+                .with_status(200)
+                .with_body(occurrence_get_response(iso))
+                .create_async()
+                .await;
+        }
+        // Index 3 is the exception: its slot is 07-20 09:00, but it now starts
+        // on 07-23 at 15:00. The probe only gets its OriginalStart when it asks
+        // for it, so this mock answers only such a probe.
+        let _m3 = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="3""#.into()),
+                mockito::Matcher::Regex(r#"FieldURI="calendar:OriginalStart""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC" ChangeKey="ECK"/>
+        <t:Start>2026-07-23T15:00:00Z</t:Start>
+        <t:End>2026-07-23T16:00:00Z</t:End>
+        <t:CalendarItemType>Exception</t:CalendarItemType>
+        <t:OriginalStart>2026-07-20T09:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .create_async()
+            .await;
+        let del = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="3""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let slot = "2026-07-20T09:00:00Z".parse().unwrap();
+        delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), slot, false)
+            .await
+            .unwrap();
+        del.assert_async().await;
     }
 
     #[tokio::test]
