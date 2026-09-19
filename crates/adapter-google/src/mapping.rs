@@ -61,6 +61,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // per-event colors stay host-local overrides.
         supports_event_color: false,
         always_notifies_attendees: false,
+        invitations_reply_only: false,
         notifier_name: None,
         color_label: None,
         id: entry.id,

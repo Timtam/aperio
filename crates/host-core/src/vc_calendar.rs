@@ -157,6 +157,7 @@ impl CalendarFeature for VcCalendar {
             supports_scheduling: false,
             supports_event_color: false,
             always_notifies_attendees: false,
+            invitations_reply_only: false,
             notifier_name: None,
         }])
     }

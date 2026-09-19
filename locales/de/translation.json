@@ -1333,7 +1333,8 @@
       "scopeFuture": "Betrifft dieses und alle folgenden Vorkommen. Die Serie jeder Kopie wird an derselben Stelle geteilt.",
       "regroupFailed_one": "Die Kopie wurde geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
-      "truncatedNotRestored": "Die Serie in {{calendar}} wurde gekürzt und konnte nicht wiederhergestellt werden — sie endet jetzt bei diesem Vorkommen."
+      "truncatedNotRestored": "Die Serie in {{calendar}} wurde gekürzt und konnte nicht wiederhergestellt werden — sie endet jetzt bei diesem Vorkommen.",
+      "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes."
     },
     "eventGroup": {
       "title": "Derselbe Termin",
@@ -1373,7 +1374,8 @@
       "notifySilent": "Ohne Benachrichtigung entfernen",
       "notifyAlways": "Der Kalenderserver informiert die Teilnehmer über die Absage.",
       "notifyAlwaysNamed": "{{service}} informiert die Teilnehmer über die Absage.",
-      "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:"
+      "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:",
+      "organizerGetsDecline": "Der Organisator bekommt eine Absage."
     },
     "moveScope": {
       "title": "Serientermin verschieben",
@@ -1607,14 +1609,29 @@
           "1": "ersten",
           "2": "zweiten",
           "3": "dritten",
-          "4": "vierten"
+          "4": "vierten",
+          "5": "fünften"
         },
         "unsupportedHint": "Vom Konto dieses Kalenders nicht unterstützt.",
         "relativeUnsupportedHint": "Dieses Konto kann nur an einem festen Tag im Monat wiederholen.",
         "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
       },
       "prefillCalendarReadOnly": "Der frühere Termin liegt in „{{calendar}}\", und dorthin lassen sich keine neuen Termine schreiben. Der Kalender unten bleibt, wie er ist.",
-      "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist."
+      "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist.",
+      "invitation": {
+        "title": "Einladung",
+        "hint": "Diese Besprechung organisiert jemand anderes, deshalb kann nur der Organisator ihre Angaben ändern. Was du für dich selbst festlegst, bleibt deins.",
+        "allDayValue": "{{date}}, ganztägig",
+        "moveRefused": "„{{title}}“ organisiert jemand anderes, deshalb kann nur der Organisator ihn auf einen anderen Tag oder eine andere Zeit verschieben. Es wurde nichts verschoben."
+      },
+      "writeError": {
+        "replyOnly": "Nur der Organisator kann diese Besprechung ändern. Es wurde nichts geändert.",
+        "serverRefused": "Der Kalenderserver hat diese Änderung abgelehnt ({{detail}}). Es wurde nichts geändert.",
+        "identityUnknown": "Aperio konnte die eigenen Adressen dieses Kontos auf dem Kalenderserver nicht lesen und kann dort deshalb keine Besprechung ändern. Es wurde nichts geändert.",
+        "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
+        "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen."
+      },
+      "deleteAndDecline": "Löschen und absagen"
     },
     "task": {
       "newTitle": "Neue Aufgabe",
@@ -1846,7 +1863,8 @@
       "moved": "„{{title}}\" wurde verschoben.",
       "copied": "„{{title}}\" wurde kopiert.",
       "subtasksIncluded_one": "Die Unteraufgabe wird mit übernommen.",
-      "subtasksIncluded_other": "Die {{count}} Unteraufgaben werden mit übernommen."
+      "subtasksIncluded_other": "Die {{count}} Unteraufgaben werden mit übernommen.",
+      "invitationMoveNotice": "Beim Verschieben wird deine Kopie gelöscht: Der Organisator bekommt eine Absage, und die verschobene Kopie hat keine Teilnehmer."
     },
     "accounts": {
       "title": "Konten verwalten",
@@ -2077,7 +2095,8 @@
         "indian": "Indischer Ozean",
         "pacific": "Pazifik"
       }
-    }
+    },
+    "readOnlyField": "{{label}}: {{value}}"
   },
   "sidebar": {
     "label": "Seitenleiste",
@@ -2374,5 +2393,82 @@
     "count_other": "{{count}} frühere Einträge, mit den Pfeiltasten erreichbar.",
     "applied": "Aus „{{title}}\" übernommen. Der Tag bleibt, wie er war.",
     "acceptHint": "Übernimmt alles außer dem Tag"
+  },
+  "recurrenceSummary": {
+    "sentence": {
+      "every": "{{every}}",
+      "everyOn": "{{every}} {{on}}",
+      "everyEnd": "{{every}}, {{end}}",
+      "everyOnEnd": "{{every}} {{on}}, {{end}}"
+    },
+    "every": {
+      "second": "jede Sekunde",
+      "minute": "jede Minute",
+      "hour": "jede Stunde",
+      "day": "jeden Tag",
+      "month": "jeden Monat",
+      "year": "jedes Jahr"
+    },
+    "interval": {
+      "second": "alle {{count}} Sekunden",
+      "minute": "alle {{count}} Minuten",
+      "hour": "alle {{count}} Stunden",
+      "day": "alle {{count}} Tage",
+      "week": "alle {{count}} Wochen",
+      "month": "alle {{count}} Monate",
+      "year": "alle {{count}} Jahre"
+    },
+    "weekly": {
+      "onDays": "jeden {{weekdays}}",
+      "workdays": "jeden Werktag, Montag bis Freitag"
+    },
+    "on": {
+      "weekdays": "am {{weekdays}}",
+      "monthDay_one": "am {{days}}",
+      "monthDay_other": "am {{days}}",
+      "lastDay": "am letzten Tag",
+      "nthWeekday": "am {{ordinal}} {{weekday}}",
+      "nthOfSet": "am {{ordinal}} {{set}}",
+      "dateInYear": "am {{day}} {{month}}",
+      "nthWeekdayInMonth": "am {{ordinal}} {{weekday}} im {{month}}"
+    },
+    "set": {
+      "weekday": "Werktag",
+      "weekendDay": "Wochenendtag"
+    },
+    "ordinal": {
+      "1": "ersten",
+      "2": "zweiten",
+      "3": "dritten",
+      "4": "vierten",
+      "5": "fünften",
+      "last": "letzten"
+    },
+    "day": {
+      "number": "{{day}}."
+    },
+    "end": {
+      "count_one": "einmal",
+      "count_other": "{{count}} Mal",
+      "lastOn": "letzter Termin am {{date}}",
+      "bounded": "mit Enddatum"
+    },
+    "list": {
+      "separator": ", ",
+      "and": "{{rest}} und {{last}}"
+    },
+    "undescribed": {
+      "known": "Wiederholt sich {{unit}} nach einer Regel, die Aperio nicht in Worte fassen kann.",
+      "unknown": "Wiederholt sich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    "unitAdverb": {
+      "second": "jede Sekunde",
+      "minute": "jede Minute",
+      "hour": "stündlich",
+      "day": "täglich",
+      "week": "wöchentlich",
+      "month": "monatlich",
+      "year": "jährlich"
+    }
   }
 }

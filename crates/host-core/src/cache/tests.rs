@@ -149,6 +149,7 @@ fn calendar(id: &str) -> Calendar {
         supports_scheduling: false,
         supports_event_color: false,
         always_notifies_attendees: false,
+        invitations_reply_only: false,
         notifier_name: None,
         id: id.into(),
         name: format!("Cal {id}"),
@@ -1397,9 +1398,10 @@ fn reconcile_cache_generation_resets_external_accounts_once() {
     );
 
     // A device that applied an older generation re-reads once more: 2 (the
-    // organizer is never an invitee, 67a) and 3 (CalDAV knows the account by
-    // every address it has, live round 5).
-    for older in ["1", "2"] {
+    // organizer is never an invitee, 67a), 3 (CalDAV knows the account by
+    // every address it has, live round 5) and 4 (calendars say whether an
+    // invitation is read-only, 77a).
+    for older in ["1", "2", "3"] {
         db.with_conn(|c| {
             c.execute(
                 "UPDATE cache_sync_state SET window_start = '2026-01-01T00:00:00Z' WHERE account_id = 'ext'",
@@ -1416,7 +1418,7 @@ fn reconcile_cache_generation_resets_external_accounts_once() {
         assert!(window_of("ext").is_none());
         assert_eq!(
             prefs.get(super::CACHE_GENERATION_KEY).unwrap().as_deref(),
-            Some("3")
+            Some(super::CACHE_GENERATION.to_string().as_str())
         );
     }
 }

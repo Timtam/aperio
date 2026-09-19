@@ -35,6 +35,25 @@ pub enum EventField {
     ColorHex,
 }
 
+impl EventField {
+    /// The name the refusal message carries, so a surface can say which field
+    /// was refused ([`crate::WriteRefusal`]).
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Description => "description",
+            Self::Location => "location",
+            Self::Start => "start",
+            Self::End => "end",
+            Self::AllDay => "all-day",
+            Self::Recurrence => "recurrence",
+            Self::Reminders => "reminders",
+            Self::Attendees => "attendees",
+            Self::ColorHex => "color",
+        }
+    }
+}
+
 /// The fields of `edit` that differ from `before`, in the order of
 /// [`EventField`]. Empty when saving `edit` over `before` changes nothing a
 /// provider stores. Host-local parts (colour label, sound) are not fields.
@@ -188,6 +207,40 @@ mod tests {
             .exceptions
             .push(before.start + chrono::Duration::weeks(1));
         assert_eq!(changed_fields(&edit, &before), []);
+    }
+
+    #[test]
+    fn every_field_has_a_stable_token() {
+        // The refusal message carries the token, and a surface looks its
+        // sentence up by it: a renamed token is a sentence nobody finds.
+        let all = [
+            EventField::Title,
+            EventField::Description,
+            EventField::Location,
+            EventField::Start,
+            EventField::End,
+            EventField::AllDay,
+            EventField::Recurrence,
+            EventField::Reminders,
+            EventField::Attendees,
+            EventField::ColorHex,
+        ];
+        let tokens: Vec<&str> = all.iter().map(|f| f.token()).collect();
+        assert_eq!(
+            tokens,
+            [
+                "title",
+                "description",
+                "location",
+                "start",
+                "end",
+                "all-day",
+                "recurrence",
+                "reminders",
+                "attendees",
+                "color"
+            ]
+        );
     }
 
     #[test]

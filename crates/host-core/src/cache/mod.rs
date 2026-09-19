@@ -57,7 +57,12 @@ mod tests;
 ///    someone else's (live round 5). Calendars carry
 ///    `always_notifies_attendees` (decisions 76a, 82b); re-bootstrapping reads
 ///    the calendar listings again too.
-pub const CACHE_GENERATION: u32 = 3;
+/// 4: Calendars carry `invitations_reply_only`, so the editors show a meeting
+///    someone else organizes on a scheduling CalDAV server read-only
+///    (decision 77a). A listing stored under generation 3 has no such flag,
+///    and the test devices already applied 3, so this needs its own
+///    generation rather than a note on that one.
+pub const CACHE_GENERATION: u32 = 4;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";

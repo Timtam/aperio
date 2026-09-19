@@ -56,6 +56,21 @@ supports_event_color: boolean,
  */
 always_notifies_attendees: boolean, 
 /**
+ * True when, on a meeting someone else organizes, the provider accepts
+ * only the attendee's own changes (RFC 6638 §3.2.2.1, implicit
+ * scheduling): the reply, the attendee's own alarms, skipping an
+ * occurrence, removing the copy. Everything else it refuses with a 403
+ * `allowed-attendee-scheduling-object-change`. The editors then show
+ * such a meeting read-only apart from those (decision 77a) and a delete
+ * says the organizer gets a decline (83b). CalDAV sets it on a
+ * scheduling server; every other adapter leaves it false — Microsoft
+ * Graph mails the guests by itself (82b) but takes an invitee's edits,
+ * so [`Calendar::always_notifies_attendees`] cannot double as this flag.
+ * `#[serde(default)]` keeps older payloads and stored listings
+ * deserialising as `false`.
+ */
+invitations_reply_only: boolean, 
+/**
  * The service the editors name when they say so ("iCloud informs the
  * attendees …"), as the adapter knows it; `None` reads as "the calendar
  * server". A display string only: no rule looks at it.

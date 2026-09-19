@@ -60,6 +60,9 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // every change and about its deletion; no request can stay silent
         // (decision 82b; per Microsoft's documentation, not measured live).
         always_notifies_attendees: true,
+        // Graph mails the guests by itself, but it takes an invitee's edits
+        // and keeps them local, so an invitation is not read-only here (77a).
+        invitations_reply_only: false,
         notifier_name: Some("Microsoft 365".into()),
         color_label: None,
         id: entry.id,

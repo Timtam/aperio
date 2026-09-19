@@ -23,7 +23,10 @@
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
-const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+// The rule is read once, for every module that asks (`rrule_parts`).
+use crate::rrule_parts::{
+    is_utc_date_time, parse_freq, parse_interval, parse_parts, part, Part, WEEKDAY_TOKENS,
+};
 
 /// Why a rule cannot move by whole days.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -125,13 +128,6 @@ pub fn series_shift_json(input_json: &str) -> Result<String, serde_json::Error> 
     serde_json::to_string(&answer)
 }
 
-/// One `KEY=value` part: the key uppercased for matching, the text as written.
-struct Part {
-    key: String,
-    value: String,
-    raw: String,
-}
-
 fn shift(
     rrule: &str,
     start: NaiveDate,
@@ -142,37 +138,11 @@ fn shift(
     use ShiftRefusal::*;
 
     let trimmed = rrule.trim();
-    let (prefix, body) = match trimmed.get(..6) {
-        Some(p) if p.eq_ignore_ascii_case("RRULE:") => trimmed.split_at(6),
-        _ => ("", trimmed),
-    };
-    let mut parts: Vec<Part> = Vec::new();
-    for raw in body.split(';').filter(|p| !p.trim().is_empty()) {
-        let (key, value) = raw.split_once('=').ok_or(Unreadable)?;
-        let key = key.trim().to_ascii_uppercase();
-        if parts.iter().any(|p| p.key == key) {
-            // Each part may be given once (RFC 5545); readers disagree on which
-            // copy wins, so there is no one rule to move.
-            return Err(Unreadable);
-        }
-        parts.push(Part {
-            key,
-            value: value.trim().to_string(),
-            raw: raw.to_string(),
-        });
-    }
-    let get = |key: &str| {
-        parts
-            .iter()
-            .find(|p| p.key == key)
-            .map(|p| p.value.as_str())
-    };
+    let (prefix, parts) = parse_parts(trimmed).map_err(|_| Unreadable)?;
+    let get = |key: &str| part(&parts, key);
 
     let freq = get("FREQ").ok_or(Unreadable)?.to_ascii_uppercase();
-    if !matches!(
-        freq.as_str(),
-        "SECONDLY" | "MINUTELY" | "HOURLY" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
-    ) {
+    if parse_freq(&freq).is_none() {
         return Err(Unreadable);
     }
     let has_time_parts = ["BYHOUR", "BYMINUTE", "BYSECOND"]
@@ -202,14 +172,7 @@ fn shift(
         }
     }
 
-    let interval = match get("INTERVAL") {
-        Some(v) => v
-            .parse::<u32>()
-            .ok()
-            .filter(|n| *n >= 1)
-            .ok_or(Unreadable)?,
-        None => 1,
-    };
+    let interval = parse_interval(get("INTERVAL")).ok_or(Unreadable)?;
     let month_restricted = get("BYMONTH").is_some();
     let by_months = matches!(freq.as_str(), "MONTHLY" | "YEARLY");
     if month_restricted && !by_months {
@@ -230,10 +193,10 @@ fn shift(
                 .collect();
             let mut moved = Vec::with_capacity(tokens.len());
             for token in &tokens {
-                if !WEEKDAYS.contains(&token.as_str()) {
+                if !WEEKDAY_TOKENS.contains(&token.as_str()) {
                     let ordinal = token.len() > 2
                         && token.is_ascii()
-                        && WEEKDAYS.contains(&&token[token.len() - 2..]);
+                        && WEEKDAY_TOKENS.contains(&&token[token.len() - 2..]);
                     return Err(if ordinal { OrdinalWeekday } else { Unreadable });
                 }
                 moved.push(shift_weekday(token, days));
@@ -302,7 +265,7 @@ fn shift(
     if freq == "WEEKLY" && interval > 1 {
         if let Some(week_start) = get("WKST") {
             let week_start = week_start.to_ascii_uppercase();
-            if !WEEKDAYS.contains(&week_start.as_str()) {
+            if !WEEKDAY_TOKENS.contains(&week_start.as_str()) {
                 return Err(Unreadable);
             }
             replaced.push(("WKST", shift_weekday(&week_start, days)));
@@ -344,8 +307,8 @@ fn write(prefix: &str, parts: &[Part], replaced: &[(&str, String)]) -> String {
 }
 
 fn shift_weekday(token: &str, days: i32) -> String {
-    let index = WEEKDAYS.iter().position(|w| *w == token).unwrap_or(0) as i64;
-    WEEKDAYS[(index + i64::from(days)).rem_euclid(7) as usize].to_string()
+    let index = WEEKDAY_TOKENS.iter().position(|w| *w == token).unwrap_or(0) as i64;
+    WEEKDAY_TOKENS[(index + i64::from(days)).rem_euclid(7) as usize].to_string()
 }
 
 /// Whether `a` and `b` fall in different months (`MONTHLY`) or years (`YEARLY`).
@@ -355,16 +318,6 @@ fn leaves_period(freq: &str, a: NaiveDate, b: NaiveDate) -> bool {
         "YEARLY" => a.year() != b.year(),
         _ => false,
     }
-}
-
-/// Whether an `UNTIL` value is a UTC date-time, `YYYYMMDDTHHMMSSZ`.
-fn is_utc_date_time(value: &str) -> bool {
-    let b = value.as_bytes();
-    b.len() == 16
-        && b[..8].iter().all(u8::is_ascii_digit)
-        && b[8].eq_ignore_ascii_case(&b'T')
-        && b[9..15].iter().all(u8::is_ascii_digit)
-        && b[15].eq_ignore_ascii_case(&b'Z')
 }
 
 /// The moved UTC bound the shell handed in, checked to be one.

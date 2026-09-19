@@ -257,6 +257,12 @@ pub fn guard_update(event: &mut Event, read: Option<&Event>) {
 /// may notify only if that event was the account's own (decision 72a).
 pub fn guard_create(event: &mut NewEvent) {
     event.attendees = without_organizer(&event.attendees, event.organizer.as_deref());
+    // Moving someone else's meeting to another calendar is a copy and a
+    // delete (81b): the guests belong to the organizer's copy, and the new
+    // one must not look like a meeting the account invited them to.
+    if event.organized_elsewhere {
+        event.attendees.clear();
+    }
     event.send_invitations &= !event.organized_elsewhere && !event.attendees.is_empty();
 }
 
@@ -623,11 +629,24 @@ mod tests {
             new.send_invitations = true;
             new.organized_elsewhere = true;
             guard_create(&mut new);
-            assert_eq!(new.attendees, ["bob@x"]);
+            assert!(
+                new.attendees.is_empty(),
+                "a copy of someone else's meeting invites nobody (81b)"
+            );
             assert!(
                 !new.send_invitations,
                 "a copy of someone else's meeting notifies nobody"
             );
+
+            // The account's own meeting keeps its guests when it is copied or
+            // moved: they were invited by this account.
+            new.attendees = vec!["bob@x".into()];
+            new.send_invitations = true;
+            new.organized_elsewhere = false;
+            new.organizer = None;
+            guard_create(&mut new);
+            assert_eq!(new.attendees, ["bob@x"]);
+            assert!(new.send_invitations);
         }
     }
 }

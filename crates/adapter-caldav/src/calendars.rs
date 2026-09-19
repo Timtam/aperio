@@ -147,6 +147,7 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         // host-local override instead — see DESIGN / Stage 2).
         supports_event_color: false,
         always_notifies_attendees: false,
+        invitations_reply_only: false,
         notifier_name: None,
         color_label: None,
         id,

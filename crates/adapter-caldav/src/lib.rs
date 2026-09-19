@@ -1014,6 +1014,11 @@ impl CalendarFeature for CaldavAdapter {
         for cal in &mut fresh {
             cal.supports_event_color = color_capable;
             cal.always_notifies_attendees = discovery.supports_scheduling;
+            // And the other way round: on someone else's meeting such a server
+            // takes only this account's own reply and alarms (§3.2.2.1), so
+            // the editors show it read-only (77a). Same source as the write
+            // path's `ctx.schedules`, so editor and adapter cannot disagree.
+            cal.invitations_reply_only = discovery.supports_scheduling;
             cal.notifier_name = notifier.clone();
         }
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {

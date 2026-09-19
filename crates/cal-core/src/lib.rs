@@ -23,10 +23,15 @@ pub mod event_local_reminders;
 pub mod extras;
 pub mod group_carry;
 pub mod group_suggestion;
+pub mod invitation;
 pub mod meeting_events;
 pub mod meeting_link_grouping;
 pub mod recurrence;
+pub mod recurrence_summary;
 pub mod reminder;
+// How an `RRULE` is read, once for the modules that ask. Only the words a
+// rule uses (`Weekday`, `Freq`) are public; the reading itself is in-crate.
+pub mod rrule_parts;
 pub mod signatures;
 pub mod spawn;
 pub mod suggestion_decline;
@@ -60,6 +65,7 @@ pub mod task_priority;
 pub mod task_settings;
 pub mod task_status;
 pub mod types;
+pub mod write_refusal;
 // The names and the search are in every build; the offsets are behind the
 // `zones` feature, which pulls in chrono-tz.
 pub mod zone_list;
@@ -112,6 +118,7 @@ pub use group_suggestion::{
     find_group_suggestions, find_group_suggestions_json, is_meeting_calendar, suggest_group_mate,
     suggest_group_mate_json, GroupSuggestion, SuggestibleEvent, MEETINGS_CALENDAR_SUFFIX,
 };
+pub use invitation::{invitation_locked, reply_only_change, reply_only_verdict, ReplyOnlyVerdict};
 pub use meeting_events::{
     join_url_of, meeting_join_url, without_duplicate_meetings, without_duplicate_meetings_json,
     MeetingFilterEvent,
@@ -121,6 +128,10 @@ pub use meeting_link_grouping::{
     MeetingLinkPair,
 };
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
+pub use recurrence_summary::{
+    describe_recurrence, recurrence_summary_json, DaySet, Phrase, RecurrenceSummary,
+    RecurrenceSummaryQuestion, RepeatUnit, UndescribedReason, SUMMARY_KEYS,
+};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use series_clock::{
     canonical_zone, listed_zones, series_clock_zone, written_series_zone, NameKind, TZDATA_VERSION,
@@ -182,6 +193,7 @@ pub use types::{
     RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
     TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };
+pub use write_refusal::WriteRefusal;
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
     zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,
