@@ -49,6 +49,11 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
   const [myEmail, setMyEmail] = useState<string | null>(null);
   const [pending, setPending] = useState<AttendeeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The answer this dialog just sent. The event in hand is the row the view
+  // passed in, and a locked invitation stays open after answering (77a), so
+  // without this the pressed button would still say the old answer and a
+  // second press would send it again.
+  const [answered, setAnswered] = useState<AttendeeStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +111,7 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
       // Respond against the series id so a recurring-occurrence's
       // synthetic `@ISO` suffix doesn't reach the provider.
       await respondToEvent(event.calendar_id, seriesIdOf(event), status, true);
+      setAnswered(status);
       announce(
         t('dialogs.event.rsvp.responded', {
           status: t(`dialogs.event.rsvp.status.${status}`),
@@ -132,7 +138,7 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
         aria-label={t('dialogs.event.rsvp.yourResponseLabel')}
       >
         {RESPONSE_ACTIONS.map((status) => {
-          const current = myResponse.status === status;
+          const current = (answered ?? myResponse.status) === status;
           return (
             <button
               key={status}

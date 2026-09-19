@@ -20,6 +20,7 @@ import {
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { useDateFormat } from '../intl/dateFormat';
 import { timeInputStep } from '../state/timeStep';
 import { useSignatures } from '../state/useSignatures';
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -50,8 +51,13 @@ import {
   seriesTimesFromOccurrenceEdit,
 } from '../intl/recurrence';
 import {
+  describeRecurrence,
   eventPrefillFrom,
+  invitationLocked,
+  lastOccurrenceDayKey,
   planCarry,
+  recurrenceSummaryText,
+  seriesDayKey,
   worthCarrying,
   type CarryableFields,
   type CarryScope,
@@ -65,6 +71,7 @@ import { useCancellationChoice } from '../state/useCancellationChoice';
 import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
+import { DeleteEventConfirm } from './DeleteEventConfirm';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { ConferenceSection } from './ConferenceSection';
 import { MeetingControls } from './MeetingControls';
@@ -231,6 +238,23 @@ const SCOPE_TITLE_KEY = {
 } as const satisfies Record<EditScope, string>;
 
 /** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
+/**
+ * One field of a locked invitation (77a): the form's own label, and the value
+ * as text a screen reader reaches with Tab.
+ *
+ * A read-only input, never `disabled` — a disabled control is skipped by the
+ * reading cursor, and the value is exactly what the user opened the dialog to
+ * hear.
+ */
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="form__field">
+      <span className="form__label">{label}</span>
+      <input type="text" readOnly value={value} />
+    </label>
+  );
+}
+
 export function EventDialog({
   isOpen,
   onClose,
@@ -243,13 +267,43 @@ export function EventDialog({
   prefillFrom,
   targetPinned,
 }: EventDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { openEventGroupCarry } = useDialogState();
+  const { openEventGroupCarry, invalidateData } = useDialogState();
   const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
   const { showHiddenCalendarTargets, timeStepMinutes } = useViewState();
 
   const isEdit = event !== null;
+  // 77a: someone else's meeting, on a provider that takes only this account's
+  // own reply and reminders. Read from the calendar the row came FROM, never
+  // the one the form points at: a locked invitation has no calendar picker.
+  const readCalendar = calendars.find((c) => c.id === event?.calendar_id);
+  const locked = isEdit && invitationLocked(readCalendar, event);
+  // A day of a locked invitation, written out. The editable form shows a
+  // date control; there is none here, so the value says the date in words.
+  const readOnlyDay = (dayKey: string): string => {
+    const date = new Date(`${dayKey}T00:00:00`);
+    const text = Number.isNaN(date.getTime()) ? dayKey : fmt.format(date, 'PPP');
+    return form.allDay
+      ? t('dialogs.event.invitation.allDayValue', { date: text })
+      : text;
+  };
+  // The repeat rule in words (84a): there are no controls to read in a locked
+  // invitation, and an expanded occurrence carries its series' rule.
+  const repeatSentence = useMemo(() => {
+    if (!locked || !event) return '';
+    const rrule = event.recurrence?.rrule?.trim();
+    if (!rrule) return t('dialogs.event.recurrence.none');
+    return recurrenceSummaryText(
+      describeRecurrence({
+        rrule,
+        start: seriesDayKey(event.start, event.recurrence?.tzid),
+        last_day: lastOccurrenceDayKey(event),
+      }),
+      { t, language: i18n.language },
+    );
+  }, [locked, event, t, i18n.language]);
   // Stable id for the attendees-picker label — used as the
   // combobox's `aria-labelledby` so the input announces "Teilnehmer,
   // Combobox" with the right name on every screen reader.
@@ -1033,6 +1087,37 @@ export function EventDialog({
           }
         };
 
+        // 77a: a locked invitation writes its own reminders and nothing else.
+        // The row goes back as the provider has it — the occurrence's own
+        // override by its id, otherwise the series — so no form value can
+        // reach the wire, and the adapter decides against the server's fresh
+        // copy whether anything is sent at all.
+        if (locked && event) {
+          const loaded = isProviderOverride(event)
+            ? event
+            : await getEventById(seriesIdOf(event), event.calendar_id);
+          if (!loaded) {
+            throw new Error(
+              t('dialogs.event.seriesLoadFailed', { title: event.title }),
+            );
+          }
+          const payload: CalendarEvent = {
+            ...loaded,
+            reminders: keepRemindersAsDefault ? [] : attachedRows(form.reminders),
+            send_invitations: false,
+          };
+          await apiUpdateEvent(payload, event.calendar_id);
+          await savePrivate(loaded);
+          await setEventColor(
+            seriesIdOf(loaded),
+            loaded.calendar_id,
+            form.colorLabel,
+          );
+          announce(t('dialogs.event.updated', { title: loaded.title }));
+          onClose();
+          return;
+        }
+
         // Notify attendees: the rule the checkbox and the sentence show
         // (`attendeeNotice`, decisions 70a, 74a and 76a).
         const targetCal = calendars.find((c) => c.id === form.calendarId);
@@ -1412,6 +1497,7 @@ export function EventDialog({
       submitting,
       isEdit,
       event,
+      locked,
       isOccurrence,
       editScope,
       keepRemindersAsDefault,
@@ -1446,6 +1532,7 @@ export function EventDialog({
   // says who informs the attendees where it cannot (decision 80a).
   const asksBeforeCancelling = offersChoice || alwaysNotifies;
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
   const [cancelChoiceScope, setCancelChoiceScope] = useState<
     'series' | 'occurrence' | 'this_and_future'
   >('series');
@@ -1580,6 +1667,12 @@ export function EventDialog({
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
+    // 77a/83b: removing the account's copy of someone else's meeting tells
+    // the organizer it is declined, so it asks first and says so.
+    if (locked) {
+      setDeclineOpen(true);
+      return;
+    }
     // Removing a single occurrence of a recurring event.
     if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
       // Organizer with attendees → offer "cancel this occurrence + notify" vs
@@ -1612,6 +1705,7 @@ export function EventDialog({
   }, [
     event,
     submitting,
+    locked,
     isOccurrence,
     editScope,
     asksBeforeCancelling,
@@ -1682,18 +1776,41 @@ export function EventDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={onSubmit} className="form">
-        {isEdit && event && (
-          <EventRsvp event={event} onResponded={onClose} />
+        {/* Why the fields below cannot be changed, before the first of them,
+            and the first stop in the dialog. */}
+        {locked && (
+          <FocusableNote className="form__hint form__hint--invitation">
+            {t('dialogs.event.invitation.hint')}
+          </FocusableNote>
         )}
-        <TitleSuggestBox
-          label={t('dialogs.event.fields.title')}
-          value={form.title}
-          onChange={(v) => update('title', v)}
-          options={titleOptions}
-          onAccept={acceptTitleSuggestion}
-          required
-        />
+        {isEdit && event && (
+          <EventRsvp
+            event={event}
+            // Answering leaves a locked invitation open: the reminders are
+            // the only thing left to save here, and closing would throw them
+            // away. The views still refresh.
+            onResponded={locked ? invalidateData : onClose}
+          />
+        )}
+        {locked ? (
+          <ReadOnlyField label={t('dialogs.event.fields.title')} value={form.title} />
+        ) : (
+          <TitleSuggestBox
+            label={t('dialogs.event.fields.title')}
+            value={form.title}
+            onChange={(v) => update('title', v)}
+            options={titleOptions}
+            onAccept={acceptTitleSuggestion}
+            required
+          />
+        )}
 
+        {locked ? (
+          <ReadOnlyField
+            label={t('dialogs.event.fields.calendar')}
+            value={readCalendar?.name ?? ''}
+          />
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.calendar')}
@@ -1731,16 +1848,47 @@ export function EventDialog({
             <span className="form__hint">{prefillCalendarNote}</span>
           )}
         </label>
+        )}
 
-        <label className="form__field form__field--inline">
-          <input
-            type="checkbox"
-            checked={form.allDay}
-            onChange={(e) => update('allDay', e.target.checked)}
-          />
-          <span>{t('dialogs.event.fields.allDay')}</span>
-        </label>
+        {!locked && (
+          <label className="form__field form__field--inline">
+            <input
+              type="checkbox"
+              checked={form.allDay}
+              onChange={(e) => update('allDay', e.target.checked)}
+            />
+            <span>{t('dialogs.event.fields.allDay')}</span>
+          </label>
+        )}
 
+        {locked ? (
+          <>
+            {/* The same labels as the editable form, so the dialog reads the
+                same way whoever organizes the meeting. An all-day invitation
+                has no times, exactly as the editable form has none. */}
+            <ReadOnlyField
+              label={t('dialogs.event.fields.startDate')}
+              value={readOnlyDay(form.startDate)}
+            />
+            {!form.allDay && (
+              <ReadOnlyField
+                label={t('dialogs.event.fields.startTime')}
+                value={form.startTime}
+              />
+            )}
+            <ReadOnlyField
+              label={t('dialogs.event.fields.endDate')}
+              value={readOnlyDay(form.endDate)}
+            />
+            {!form.allDay && (
+              <ReadOnlyField
+                label={t('dialogs.event.fields.endTime')}
+                value={form.endTime}
+              />
+            )}
+          </>
+        ) : (
+          <>
         <div className="form__row">
           <label className="form__field">
             <span className="form__label">
@@ -1796,7 +1944,17 @@ export function EventDialog({
             </label>
           )}
         </div>
+          </>
+        )}
 
+        {locked ? (
+          form.location.trim() !== '' && (
+            <ReadOnlyField
+              label={t('dialogs.event.fields.location')}
+              value={form.location}
+            />
+          )
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.location')}
@@ -1808,7 +1966,18 @@ export function EventDialog({
             autoComplete="off"
           />
         </label>
+        )}
 
+        {locked ? (
+          form.description.trim() !== '' && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.event.fields.description')}
+              </span>
+              <textarea readOnly value={form.description} rows={4} />
+            </label>
+          )
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.description')}
@@ -1826,6 +1995,7 @@ export function EventDialog({
             onChange={(next) => update('description', next)}
           />
         </label>
+        )}
         <DescriptionLinks text={form.description} />
         {/* Any conference in this event, whoever created it — an Outlook or
             eM Client invitation as readily as one Aperio made. Detection is
@@ -1838,14 +2008,32 @@ export function EventDialog({
         {/* Creating one, as opposed to joining one. Only for a meeting Aperio
             owns — an event carrying someone else's link gets Join above and no
             Remove here, because it is not ours to delete. */}
-        <MeetingControls
-          event={event ?? null}
-          onEventChanged={(saved) => {
-            update('location', saved.location ?? '');
-            update('description', saved.description ?? '');
-          }}
-        />
+        {/* Making one, as opposed to joining one: not on a meeting the
+            account does not organize. */}
+        {!locked && (
+          <MeetingControls
+            event={event ?? null}
+            onEventChanged={(saved) => {
+              update('location', saved.location ?? '');
+              update('description', saved.description ?? '');
+            }}
+          />
+        )}
 
+        {locked ? (
+          form.attendees.length > 0 && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.event.fields.attendees')}
+              </span>
+              <textarea
+                readOnly
+                value={form.attendees.join('\n')}
+                rows={Math.min(6, form.attendees.length)}
+              />
+            </label>
+          )
+        ) : (
         <div className="form__field">
           <span className="form__label" id={attendeesLabelId}>
             {t('dialogs.event.fields.attendees')}
@@ -1857,6 +2045,7 @@ export function EventDialog({
             addedNote={noticeAfterAdding}
           />
         </div>
+        )}
 
         {notice === 'offer' && (
           <label className="form__field form__field--inline">
@@ -1947,27 +2136,38 @@ export function EventDialog({
             </>
           )}
 
-        <label className="form__field">
-          <span className="form__label">
-            {t('dialogs.event.fields.colorLabel')}
-          </span>
-          <ColorLabelSelect
-            value={form.colorLabel}
-            onChange={(next) => update('colorLabel', next)}
-            labels={colorLabels}
-            noneLabel={t('dialogs.event.noColorLabel')}
-          />
-        </label>
+        {/* A colour is Aperio's own — except where the provider stores it,
+            and there an attendee may not write one. */}
+        {(!locked || readCalendar?.supports_event_color !== true) && (
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.event.fields.colorLabel')}
+            </span>
+            <ColorLabelSelect
+              value={form.colorLabel}
+              onChange={(next) => update('colorLabel', next)}
+              labels={colorLabels}
+              noneLabel={t('dialogs.event.noColorLabel')}
+            />
+          </label>
+        )}
 
-        <RecurrenceSelector
-          value={form.rrule}
-          onChange={(rrule) => update('rrule', rrule)}
-          start={recurrenceStartDate(form.startDate)}
-          capabilities={
-            calendars.find((c) => c.id === form.calendarId)
-              ?.recurrence_capabilities
-          }
-        />
+        {locked ? (
+          <ReadOnlyField
+            label={t('dialogs.event.recurrence.label')}
+            value={repeatSentence}
+          />
+        ) : (
+          <RecurrenceSelector
+            value={form.rrule}
+            onChange={(rrule) => update('rrule', rrule)}
+            start={recurrenceStartDate(form.startDate)}
+            capabilities={
+              calendars.find((c) => c.id === form.calendarId)
+                ?.recurrence_capabilities
+            }
+          />
+        )}
 
         <RemindersEditor
           value={form.reminders}
@@ -2103,6 +2303,21 @@ export function EventDialog({
         </div>
       </form>
     </Modal>
+    {event && (
+      <DeleteEventConfirm
+        event={declineOpen ? event : null}
+        onClose={() => setDeclineOpen(false)}
+        onDelete={(_ev, send) => {
+          // The dialogs close one after the other: a modal restores focus to
+          // what opened it, and unmounting both in one commit drops focus to
+          // the page.
+          setDeclineOpen(false);
+          void (isOccurrence && editScope === 'occurrence' && event.recurrence
+            ? performOccurrenceDelete(send)
+            : performDelete(send));
+        }}
+      />
+    )}
     {event && (
       <ConfirmDialog
         isOpen={cancelChoiceOpen}

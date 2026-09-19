@@ -21,6 +21,7 @@ import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
 import {
   EVENT_DND_TYPE,
+  InvitationLockedError,
   moveEventToSlot,
   readEventDrag,
   readTaskDrag,
@@ -295,11 +296,19 @@ export function DayView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
+  // The chip menu hands a locked invitation's delete to this view's own
+  // flow, which asks first (83b). The view defines it further down, so the
+  // menu gets a stable wrapper.
+  const requestDeleteRef = useRef<(event: CalendarEvent) => void>(() => {});
+  const requestDeleteFromMenu = useCallback(
+    (event: CalendarEvent) => requestDeleteRef.current(event),
+    [],
+  );
   const {
     openForEvent: openEventMenu,
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
-  } = useChipContextMenu();
+  } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
   const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
@@ -767,7 +776,13 @@ export function DayView() {
     targetDayKey: string,
   ) => {
     try {
-      const moved = await moveEventToSlot(ev, targetDayKey, minute, scope);
+      const moved = await moveEventToSlot(
+        ev,
+        targetDayKey,
+        minute,
+        scope,
+        calendarById.get(ev.calendar_id),
+      );
       if (!moved) return; // dropped back on its own time — nothing happened
       announce(
         t('views.eventMovedToTime', {
@@ -778,6 +793,12 @@ export function DayView() {
       );
       invalidateData();
     } catch (err) {
+      if (err instanceof InvitationLockedError) {
+        // 77a: only the organizer moves their meeting. Said, not silently
+        // swallowed, and nothing was written.
+        announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+        return;
+      }
       if (err instanceof SeriesShiftRefusedError) {
         if (isSeriesOccurrence(ev)) {
           // Ask again, offering only this occurrence.
@@ -968,6 +989,8 @@ export function DayView() {
       setConfirmTarget(ev);
     }
   }, []);
+  // The menu's hand-off points at this view's flow.
+  requestDeleteRef.current = requestDelete;
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -47,7 +47,7 @@ export function DeleteEventScopeDialog({
   onSeries,
 }: DeleteEventScopeDialogProps) {
   const { t } = useTranslation();
-  const { offersChoice, alwaysNotifies, sentence } = useCancellationChoice(event);
+  const { offersChoice, alwaysNotifies, declines, sentence } = useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const notifyRef = useRef<HTMLInputElement>(null);
   const messageId = useId();
@@ -99,7 +99,7 @@ export function DeleteEventScopeDialog({
             : 'dialogs.deleteScope.message',
           { title },
         )}
-        {alwaysNotifies && ` ${t(sentence.key, sentence.values)}`}
+        {(alwaysNotifies || declines) && ` ${t(sentence.key, sentence.values)}`}
       </p>
       {offersChoice && (
         <fieldset className="form__field">
@@ -143,13 +143,18 @@ export function DeleteEventScopeDialog({
         >
           {t('dialogs.deleteScope.occurrence')}
         </button>
-        <button
-          type="button"
-          onClick={() => run(onThisAndFuture)}
-          className="form__action form__action--danger"
-        >
-          {t('dialogs.deleteScope.thisAndFuture')}
-        </button>
+        {/* Ending someone else's series early would rewrite its rule, which
+            the provider refuses (77a): a button that can only fail is not
+            offered. */}
+        {!declines && (
+          <button
+            type="button"
+            onClick={() => run(onThisAndFuture)}
+            className="form__action form__action--danger"
+          >
+            {t('dialogs.deleteScope.thisAndFuture')}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => run(onSeries)}

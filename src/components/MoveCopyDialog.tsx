@@ -9,7 +9,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { selectableEventCalendars, selectableTaskLists } from '@aperio/shared';
+import {
+  invitationLocked,
+  selectableEventCalendars,
+  selectableTaskLists,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
@@ -26,6 +30,7 @@ import {
   SeriesNotLoadedError,
 } from '../state/moveActions';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { canAssignSection } from '../state/taskMoves';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
@@ -451,6 +456,20 @@ export function MoveCopyDialog({
             )}
           </div>
         )}
+
+        {/* Moving someone else's meeting is a copy and a delete (81b): the
+            organizer hears of it, and the copy has nobody invited. Said
+            before it happens, not afterwards. */}
+        {mode === 'move' &&
+          target.kind === 'event' &&
+          invitationLocked(
+            calendars.find((c) => c.id === target.event.calendar_id),
+            target.event,
+          ) && (
+            <FocusableNote className="form__hint form__hint--invitation">
+              {t('dialogs.moveCopy.invitationMoveNotice')}
+            </FocusableNote>
+          )}
 
         {target.kind === 'task' && children.length > 0 && (
           <p className="form__hint">

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 
+// The provider reads the calendar store to tell an invitation apart (77a).
+vi.mock('./calendarStoreContext', () => ({ useCalendarStore: () => ({ calendars: [] }) }));
+
 import { DialogStateProvider } from './DialogState';
 import type { DialogStateValue } from './DialogState';
 import { useDialogState } from './dialogStateContext';

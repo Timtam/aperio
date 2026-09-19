@@ -30,7 +30,7 @@ export function DeleteEventConfirm({
   onDelete: (event: CalendarEvent, sendCancellations: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { offersChoice, alwaysNotifies, sentence } = useCancellationChoice(event);
+  const { offersChoice, alwaysNotifies, declines, sentence } = useCancellationChoice(event);
   const title = event?.title ?? '';
   const asks = offersChoice || alwaysNotifies;
   return (
@@ -49,9 +49,19 @@ export function DeleteEventConfirm({
             })
           : offersChoice
             ? t('dialogs.event.cancelChoice.message', { title })
-            : t('dialogs.confirm.deleteEventMessage', { title })
+            : // Deleting the account's copy of someone else's meeting is an
+              // answer to the organizer, so the dialog says so (83b).
+              `${t('dialogs.confirm.deleteEventMessage', { title })}${
+                declines ? ` ${t(sentence.key, sentence.values)}` : ''
+              }`
       }
-      confirmLabel={asks ? t('dialogs.event.cancelChoice.cancelMeeting') : undefined}
+      confirmLabel={
+        asks
+          ? t('dialogs.event.cancelChoice.cancelMeeting')
+          : declines
+            ? t('dialogs.event.deleteAndDecline')
+            : undefined
+      }
       extraActions={
         offersChoice
           ? [

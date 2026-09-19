@@ -13,7 +13,7 @@ import i18n from '../i18n';
  */
 
 const t = (key: string, values?: Record<string, unknown>): string =>
-  i18n.getFixedT('de')(key, values as never) as string;
+  i18n.getFixedT('de')(key, values as never) as unknown as string;
 
 /** An error as the desktop host hands it over. */
 const command = (code: string, message: string) => ({ code, message });

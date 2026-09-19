@@ -39,7 +39,7 @@ const sentence = (row: Row, language: 'en' | 'de'): string => {
   expect(summary).toEqual(row.expected);
   const t = i18n.getFixedT(language);
   return recurrenceSummaryText(summary, {
-    t: (key, values) => t(key, values as never) as string,
+    t: (key, values) => t(key, values as never) as unknown as string,
     language,
   });
 };

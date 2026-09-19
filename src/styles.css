@@ -1790,6 +1790,30 @@ button[aria-disabled='true'] {
   margin-top: calc(-1 * var(--space-1));
 }
 
+/* An invitation someone else organizes (77a): why its fields cannot be
+   changed. A box rather than a line, because it explains the whole dialog
+   below it — not colour-only, the sentence says it. */
+.form__hint--invitation {
+  font-style: normal;
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+}
+
+/* A field the user can read but not change. Seen as well as heard: read-only
+   inputs had no style of their own, so a locked invitation looked editable to
+   a sighted user while a screen reader said "schreibgeschützt". Never
+   `disabled` — that would take the value out of the reading order. */
+.form__field input[readonly],
+.form__field textarea[readonly] {
+  color: var(--color-fg-muted);
+  background: var(--color-bg-elevated);
+  cursor: default;
+}
+
 /* A hint that warns rather than merely informs (e.g. staged subtasks the
    chosen list can't hold). Not colour-only — the message text carries it. */
 .form__hint--warning {

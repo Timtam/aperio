@@ -1,5 +1,7 @@
 import {
   cancellationNotice,
+  declineSentence,
+  invitationLocked,
   notifierSentence,
   type AttendeeNotice,
 } from '@aperio/shared';
@@ -27,15 +29,21 @@ export function useCancellationChoice(event: CalendarEvent | null): {
   notice: AttendeeNotice;
   offersChoice: boolean;
   alwaysNotifies: boolean;
+  declines: boolean;
   sentence: { key: string; values: Record<string, string> };
 } {
   const { calendars } = useCalendarStore();
   const calendar = calendars.find((c) => c.id === event?.calendar_id);
   const notice = cancellationNotice(calendar, event);
+  // Someone else's meeting has no attendees of the account's own to tell, so
+  // `cancellationNotice` says nothing about it — but removing the account's
+  // copy is an answer to the organizer (decision 83b).
+  const declines = invitationLocked(calendar, event);
   return {
     notice,
     offersChoice: notice === 'offer',
     alwaysNotifies: notice === 'always',
-    sentence: notifierSentence(calendar, 'cancellation'),
+    declines,
+    sentence: declines ? declineSentence() : notifierSentence(calendar, 'cancellation'),
   };
 }

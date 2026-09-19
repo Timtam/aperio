@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import {
   detectConference,
+  invitationLocked,
   isRecurringProjection,
   parseDefaultDate,
 } from '@aperio/shared';
@@ -122,7 +123,15 @@ export interface ChipContextMenuActions {
   ) => Promise<void>;
 }
 
-export function useChipContextMenu(): ChipContextMenuActions {
+export function useChipContextMenu(
+  options?: {
+    /** The view's own delete flow, which asks first. Deleting someone else's
+     *  meeting tells the organizer (83b), so the menu hands off to it instead
+     *  of doing it on one keystroke. */
+    requestDelete?: (event: CalendarEvent) => void;
+  },
+): ChipContextMenuActions {
+  const requestDelete = options?.requestDelete;
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const dateFormat = useDateFormat();
@@ -270,6 +279,13 @@ export function useChipContextMenu(): ChipContextMenuActions {
         selected === 'cancel-notify' ||
         selected === 'cancel-silent'
       ) {
+        // Someone else's meeting: removing the account's copy is an answer
+        // to the organizer, so the view's own dialog asks first.
+        const readCalendar = calendars.find((c) => c.id === event.calendar_id);
+        if (invitationLocked(readCalendar, event) && requestDelete) {
+          requestDelete(event);
+          return;
+        }
         // Recurring events: deleting via the chip context menu maps
         // to "delete the whole series". The per-occurrence variant
         // (DeleteEventScopeDialog) lives behind the per-view
@@ -340,6 +356,8 @@ export function useChipContextMenu(): ChipContextMenuActions {
       invalidateData,
       colorLabels,
       calById,
+      calendars,
+      requestDelete,
     ],
   );
 
