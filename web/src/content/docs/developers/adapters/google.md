@@ -45,6 +45,14 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   instant, because Google replies in the event's own zone. An empty slot is
   an error: nothing is cancelled or written, and a neighbouring occurrence
   is never touched.
+- **The organizer is flagged among the attendees.** Google marks the
+  organizer's row with `organizer: true`; the adapter drops it by that flag,
+  which also holds when the address is spelled otherwise (gmail.com and
+  googlemail.com). `organizer.self` says the calendar's own account organizes
+  the event; otherwise it is `organized_elsewhere` and only the organizer
+  notifies. A PATCH replaces the whole `attendees` array, so an update whose
+  invitees did not change (`keep_attendees`) leaves the array out, and
+  Google's list, the organizer's row included, stays as it is.
 
 ## Testing
 

@@ -593,6 +593,7 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
           <t:FieldURI FieldURI="calendar:Organizer"/>
+          <t:FieldURI FieldURI="calendar:MyResponseType"/>
           <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
           <t:FieldURI FieldURI="calendar:OptionalAttendees"/>
         </t:AdditionalProperties>

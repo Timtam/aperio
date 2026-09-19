@@ -3264,6 +3264,9 @@ impl Host {
     pub fn create_event_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: CreateEventRequest = from_json("request", &request_json)?;
         let mut event = req.event;
+        // The organizer is never an invitee, and only an event the account
+        // organizes may notify (decisions 67a, 72a). Mirrors the desktop.
+        host_core::event_write::guard_create(&mut event);
         // Same rule as the desktop command: a calendar set to "attach" writes
         // its default reminders into a new appointment left without any.
         host_core::reminders::apply_default_reminder_policy(
@@ -3317,7 +3320,27 @@ impl Host {
         event_json: String,
         previous_calendar_id: Option<String>,
     ) -> Result<String, StoreError> {
-        let event: Event = from_json("event", &event_json)?;
+        let mut event: Event = from_json("event", &event_json)?;
+        // Before anything reaches a store: the organizer is never an invitee,
+        // only an event the account organizes may notify, and a list the edit
+        // did not change stays as the provider has it (decisions 67a, 70a,
+        // 71a). Compared with the event as read, in the calendar it was read
+        // from. Mirrors the desktop `update_event`.
+        {
+            let read_calendar = previous_calendar_id
+                .clone()
+                .unwrap_or_else(|| event.calendar_id.clone());
+            let read_account = self
+                .registry
+                .account_for_calendar(&read_calendar)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            host_core::event_write::guard_update(
+                &self.cache,
+                &read_account,
+                &read_calendar,
+                &mut event,
+            );
+        }
 
         let target_local = self.is_local_calendar(&event.calendar_id);
         let is_move = previous_calendar_id
@@ -3358,7 +3381,11 @@ impl Host {
             // Cross-adapter move (at least one external side). Create on the
             // target FIRST; the source delete is best-effort (logged, not bubbled)
             // so a failed cleanup leaves a resolvable duplicate, not data loss.
-            let new_payload = NewEvent {
+            let mut new_payload = NewEvent {
+                // The moved event's organizer, so the create guard keeps it out
+                // of the invitees at the target too (decision 72a).
+                organized_elsewhere: event.organized_elsewhere,
+                organizer: event.organizer.clone(),
                 // A move re-creates at the target; the organizer-notify intent
                 // isn't carried through this path (matches the desktop).
                 send_invitations: false,
@@ -3375,6 +3402,7 @@ impl Host {
                 sound: event.sound.clone(),
                 attendees: event.attendees.clone(),
             };
+            host_core::event_write::guard_create(&mut new_payload);
             let target_calendar_id = event.calendar_id.clone();
             let source_event_id = event.id.clone();
             let created = self.runtime.block_on(async {
@@ -8013,7 +8041,11 @@ impl Host {
         // provider validates this field as an email and refuses the meeting
         // otherwise. Mirrors the desktop `attach_meeting`.
         let can_invite = self.calendar_can_invite(&req.calendar_id);
-        let guests = attendee_addresses(&event.attendees);
+        // Never the organizer, whom a cached row may still list (decision 67a).
+        let guests = attendee_addresses(&cal_core::attendee::without_organizer(
+            &event.attendees,
+            event.organizer.as_deref(),
+        ));
         let notify = should_provider_notify(&guests, can_invite);
         let meeting = self
             .runtime
@@ -10257,6 +10289,38 @@ mod tests {
         let reread: serde_json::Value =
             serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
         assert_eq!(reread["title"], "New");
+    }
+
+    /// Both writes pass the organizer rule before any store sees them
+    /// (decisions 67a, 72a): the organizer never stays among the invitees,
+    /// however its address is spelled.
+    #[test]
+    fn writes_keep_the_organizer_out_of_the_invitees() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let mut new: serde_json::Value =
+            serde_json::from_str(&new_event_json(&cal, "Sync")).unwrap();
+        new["organizer"] = serde_json::json!("boss@example.com");
+        new["attendees"] = serde_json::json!(["The Boss <Boss@Example.com>", "bob@example.com"]);
+        let created: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(new.to_string()).unwrap()).unwrap();
+        assert_eq!(created["attendees"], serde_json::json!(["bob@example.com"]));
+
+        let mut event = created;
+        event["organizer"] = serde_json::json!("boss@example.com");
+        event["attendees"] = serde_json::json!([
+            "mailto:BOSS@example.com",
+            "bob@example.com",
+            "carol@example.com"
+        ]);
+        host.update_event_json(event.to_string(), None).unwrap();
+        let id = event["id"].as_str().unwrap().to_string();
+        let reread: serde_json::Value =
+            serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
+        assert_eq!(
+            reread["attendees"],
+            serde_json::json!(["bob@example.com", "carol@example.com"])
+        );
     }
 
     #[test]

@@ -201,7 +201,9 @@ pub struct SyncedFolderState {
 /// the folder drained from scratch once.
 ///
 /// 1: stage 4 review — items carry `end_time_zone` (decision 43b).
-pub const ITEM_PARSER: u32 = 1;
+/// 2: items carry `my_response_type`, whether the mailbox organizes them
+///    (decision 70a).
+pub const ITEM_PARSER: u32 = 2;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -511,6 +513,7 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
             // or the read path renders every meeting with an empty
             // attendee list.
             cached.organizer = fresh.organizer;
+            cached.my_response_type = fresh.my_response_type;
             cached.attendees = fresh.attendees;
             cached.detail_fetched = true;
             // Refresh the ChangeKey if GetItem returned a newer one
@@ -752,7 +755,11 @@ async fn detach_exception(
     exception: &WriteTarget,
     server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<Event> {
-    let single = NewEvent {
+    let mut single = NewEvent {
+        // The exception's own organizer and who organizes it, so the rule
+        // below can keep the organizer out of the invitees (decision 72a).
+        organized_elsewhere: event.organized_elsewhere,
+        organizer: event.organizer.clone(),
         title: event.title.clone(),
         description: event.description.clone(),
         location: event.location.clone(),
@@ -767,6 +774,7 @@ async fn detach_exception(
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
     };
+    cal_core::attendee::guard_create(&mut single);
     let created = create_event(client, &event.calendar_id, single, server_zones).await?;
     let envelope = delete_calendar_item(&exception.item_id, exception.change_key.as_deref(), false);
     if let Err(err) = client.post_soap(envelope).await {
@@ -1184,6 +1192,8 @@ fn build_event_from_new(
     let now = Utc::now();
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
+        keep_attendees: false,
+        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         id: aperio_id,
@@ -1588,6 +1598,8 @@ mod tests {
 
     fn new_event(title: &str) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: title.into(),
             description: Some("notes".into()),
             location: Some("Online".into()),
@@ -1692,6 +1704,8 @@ mod tests {
             .create_async()
             .await;
         let starting = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "S:ITEM-ID|CK-V1".into(),
             calendar_id: "FOLDER-ID|FCK".into(),
             title: "Updated".into(),
@@ -1897,6 +1911,8 @@ mod tests {
             .await;
 
         let starting = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             // Occurrence-prefixed id — update_event should resolve
             // master via GetItem before issuing the UpdateItem.
             id: "O:OCC-ID|OCK".into(),
@@ -1991,6 +2007,8 @@ mod tests {
         let override_id =
             crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
         let edit = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: override_id.clone(),
             calendar_id: "FOLDER-ID|FCK".into(),
             title: "Moved to Tuesday".into(),
@@ -2126,6 +2144,8 @@ mod tests {
     fn exception_moved_to_thursday() -> Event {
         let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
         Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
             calendar_id: "FOLDER-ID|FCK".into(),
             title: "Retitled".into(),

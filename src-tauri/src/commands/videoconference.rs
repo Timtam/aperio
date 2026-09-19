@@ -133,7 +133,11 @@ pub async fn attach_meeting(
     // Addresses, not the display strings the event carries: a provider
     // validates this field as an email and refuses the meeting otherwise.
     let can_invite = calendar_can_invite(&registry, &cache, &request.calendar_id);
-    let guests = attendee_addresses(&event.attendees);
+    // Never the organizer, whom a cached row may still list (decision 67a).
+    let guests = attendee_addresses(&cal_core::attendee::without_organizer(
+        &event.attendees,
+        event.organizer.as_deref(),
+    ));
     let notify = should_provider_notify(&guests, can_invite);
     let meeting = vc
         .create_meeting(NewMeeting {

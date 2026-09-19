@@ -53,11 +53,16 @@ In the event dialog you can also set:
 
 **Save** creates the event; a live region confirms "Event saved".
 
-> **Notify attendees:** When an event has attendees and the calendar
-> supports server-side scheduling (iCloud, Google, Exchange/Outlook), a
-> **Notify attendees** checkbox appears (on by default). When ticked, the
-> provider sends invitations or updates automatically on save – Aperio
-> itself never sends email.
+> **Notify attendees:** When you organize an event, someone else is invited,
+> and the calendar supports server-side scheduling (iCloud, Google,
+> Exchange/Outlook), a **Notify attendees** checkbox appears (on by default).
+> When ticked, the provider sends invitations or updates automatically on
+> save – Aperio itself never sends email. The organizer never counts as an
+> attendee: an appointment you made in Outlook, which Outlook lists with you
+> as its only attendee, has no attendees in Aperio. For a meeting someone
+> else organizes, only they can send updates, so the checkbox does not appear
+> there. And when you only change the title or the time, Aperio leaves the
+> attendee list at the provider as it is.
 >
 > When you delete a **meeting you organize** (with attendees, on an account
 > with server-side scheduling), Aperio asks in **one** dialog what should happen
@@ -85,7 +90,7 @@ In the event dialog you can also set:
 > at the top of the dialog with **Accept**, **Tentative** and **Decline**
 > buttons — your current reply is highlighted. Your answer is sent to the
 > organizer automatically. If you are the organizer, you instead see each
-> attendee's response status.
+> attendee's response status; the organizer is not among them.
 
 ## Editing, moving and deleting events
 

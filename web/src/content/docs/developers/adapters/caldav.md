@@ -96,6 +96,17 @@ Apple's well-known endpoints.
   alpha is dropped to a plain hex.
 - **`getctag` fast-path.** When the collection's ctag is unchanged, the
   adapter can skip a full enumeration.
+- **The organizer's ATTENDEE is the one with ORGANIZER's address.** RFC 5545
+  has no per-row flag, so the read drops the `ATTENDEE` whose normalised
+  address (case and `mailto:` aside) equals `ORGANIZER`. The account organizes
+  an event whose `ORGANIZER` is its own calendar-user address from discovery;
+  otherwise, or while that address is unknown, the event is
+  `organized_elsewhere`. On a write the account's own address, which becomes
+  `ORGANIZER`, is never written as an `ATTENDEE`; with nobody else invited
+  there is no `ORGANIZER` either, just a plain appointment. Known gap: an
+  update rebuilds the VEVENT and writes `ATTENDEE` lines only when notifying,
+  so a plain edit of a meeting drops its attendees from the resource
+  (TODO). `keep_attendees` cannot help here yet.
 
 ## Testing
 

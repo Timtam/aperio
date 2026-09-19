@@ -42,12 +42,16 @@ mod tests;
 
 /// Bumped whenever the adapter event-mapping changes in a way that requires
 /// RE-FETCHING already-cached external events — i.e. when the same provider data
-/// would now map to a different `Event`. The first such bump is the
-/// recurrence-timezone fix: existing cached payloads lack `recurrence.tzid`, and
-/// a normal delta sync doesn't re-fetch unchanged events, so the fix would never
-/// reach them. [`reconcile_cache_generation`] re-bootstraps every external
-/// account once when this device's recorded generation is older.
-pub const CACHE_GENERATION: u32 = 1;
+/// would now map to a different `Event`. A normal delta sync doesn't re-fetch
+/// unchanged events, so without a bump a fix would never reach them.
+/// [`reconcile_cache_generation`] re-bootstraps every external account once when
+/// this device's recorded generation is older.
+///
+/// 1: the recurrence-timezone fix — cached payloads lacked `recurrence.tzid`.
+/// 2: the organizer is never an invitee (decision 67a), and whether someone else
+///    organizes an event is read (`organized_elsewhere`, decision 70a). An
+///    Exchange account then re-drains its folders from scratch, once.
+pub const CACHE_GENERATION: u32 = 2;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";
@@ -968,6 +972,19 @@ impl CacheStore {
         let now = now_ts();
         self.db
             .with_conn(|c| insert_event(c, account, calendar, event, &now))
+    }
+
+    /// The cached row of one event, by its id, if the cache holds it.
+    pub fn read_event(&self, account: &str, calendar: &str, id: &str) -> DbResult<Option<Event>> {
+        let events: Vec<Event> = self.db.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT payload FROM cache_events
+                 WHERE account_id = ?1 AND calendar_id = ?2 AND id = ?3",
+            )?;
+            let rows = stmt.query_map(params![account, calendar, id], |r| r.get::<_, String>(0))?;
+            rows_to_structs(rows, "cache_events")
+        })?;
+        Ok(events.into_iter().next())
     }
 
     pub fn remove_event(&self, account: &str, calendar: &str, id: &str) -> DbResult<()> {

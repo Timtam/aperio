@@ -2285,6 +2285,8 @@ mod server_zone_tests {
 
     fn event(title: &str, tzid: Option<&str>) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: title.into(),
             description: None,
             location: None,
@@ -2516,6 +2518,8 @@ mod server_zone_tests {
         let adapter = EwsAdapter::new(server.url(), alice());
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "S:IID|CK".into(),
             calendar_id: "FA|FCK".into(),
             title: "All-day Berlin".into(),

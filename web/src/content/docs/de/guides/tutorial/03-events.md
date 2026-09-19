@@ -57,11 +57,18 @@ Im Termin-Dialog kannst du außerdem festlegen:
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
 
-> **Teilnehmer benachrichtigen:** Hat ein Termin Teilnehmer und unterstützt
-> der Kalender den serverseitigen Versand (iCloud, Google, Exchange/Outlook),
-> erscheint das Kontrollkästchen **Teilnehmer benachrichtigen** (standardmäßig
-> aktiv). Ist es gesetzt, verschickt der Anbieter beim Speichern automatisch
-> Einladungen bzw. Aktualisierungen – Aperio selbst versendet keine E-Mails.
+> **Teilnehmer benachrichtigen:** Organisierst du einen Termin, ist jemand
+> anderes eingeladen und unterstützt der Kalender den serverseitigen Versand
+> (iCloud, Google, Exchange/Outlook), erscheint das Kontrollkästchen
+> **Teilnehmer benachrichtigen** (standardmäßig aktiv). Ist es gesetzt,
+> verschickt der Anbieter beim Speichern automatisch Einladungen bzw.
+> Aktualisierungen – Aperio selbst versendet keine E-Mails. Der Organisator
+> zählt nie als Teilnehmer: Ein Termin, den du in Outlook angelegt hast und bei
+> dem Outlook dich als einzigen Teilnehmer führt, hat in Aperio keine
+> Teilnehmer. Bei einer Besprechung, die jemand anderes organisiert, kann nur
+> diese Person Aktualisierungen verschicken; dort erscheint das
+> Kontrollkästchen nicht. Änderst du nur Titel oder Zeit, lässt Aperio die
+> Teilnehmerliste beim Anbieter, wie sie ist.
 >
 > Löschst du eine **Besprechung, die du organisierst** (mit Teilnehmern, auf
 > einem Konto mit Server-Terminplanung), fragt Aperio in **einem** Dialog nach –
@@ -91,7 +98,8 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Dialog **Deine Antwort** mit den Schaltflächen **Zusagen**, **Vorläufig**
 > und **Absagen** – die aktuelle Antwort ist hervorgehoben. Deine Antwort
 > geht automatisch an den Organisator. Bist du selbst der Organisator,
-> siehst du stattdessen den Antwortstatus aller Teilnehmer.
+> siehst du stattdessen den Antwortstatus aller Teilnehmer; der Organisator
+> ist nicht darunter.
 
 ## Termine bearbeiten, verschieben, löschen
 

@@ -281,6 +281,8 @@ mod tests {
 
     fn event(id: &str, calendar_id: &str, title: &str, start: DateTime<Utc>) -> Event {
         Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: id.into(),
             calendar_id: calendar_id.into(),
             title: title.into(),

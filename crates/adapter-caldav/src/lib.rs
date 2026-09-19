@@ -788,6 +788,19 @@ impl CaldavAdapter {
         self.discover().await
     }
 
+    /// Record on each event whether this account organizes it (decision 70a),
+    /// by its calendar-user address from discovery. Discovery is cached; a
+    /// failure leaves the address unknown, so no event with an organizer
+    /// counts as the account's and none offers to notify.
+    async fn mark_organized_by(&self, events: &mut [Event]) {
+        let own = self
+            .discover()
+            .await
+            .ok()
+            .and_then(|d| d.calendar_user_address);
+        mapping::mark_organized_by(events, own.as_deref());
+    }
+
     /// The user's `mailto:` organizer address for a write — but only when the
     /// caller opted to notify AND the server actually auto-schedules (RFC
     /// 6638). Otherwise `None`, so the mapper omits `ORGANIZER`/`ATTENDEE`
@@ -926,9 +939,11 @@ impl CalendarFeature for CaldavAdapter {
         // a join against the discovered home would be too lax.
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
-        events::get_events(&self.http, &cal_url, range, &self.credentials)
+        let mut events = events::get_events(&self.http, &cal_url, range, &self.credentials)
             .await
-            .map_err(to_core_error)
+            .map_err(to_core_error)?;
+        self.mark_organized_by(&mut events).await;
+        Ok(events)
     }
 
     async fn get_events_delta(
@@ -944,7 +959,7 @@ impl CalendarFeature for CaldavAdapter {
         //   `ctag:<ctag>`  → the CTag gate (server lacks sync-collection),
         //   None / bare    → bootstrap (legacy CTag tokens land here too,
         //                     and upgrade to `sync:` if the server supports it).
-        match since_token {
+        let mut changes = match since_token {
             Some(t) => {
                 if let Some(sync_token) = t.strip_prefix("sync:") {
                     self.events_sync_incremental(&cal_url, range, sync_token)
@@ -956,7 +971,9 @@ impl CalendarFeature for CaldavAdapter {
                 }
             }
             None => self.events_bootstrap(&cal_url, range).await,
-        }
+        }?;
+        self.mark_organized_by(&mut changes.changes).await;
+        Ok(changes)
     }
 
     async fn create_event(&self, calendar_id: &str, mut event: NewEvent) -> CoreResult<Event> {

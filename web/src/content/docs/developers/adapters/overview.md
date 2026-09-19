@@ -94,6 +94,31 @@ when caching:
 > data. Note: on iCloud and Graph, *storing* attendees and *emailing* them
 > are inseparable — they're written only when notifying.
 
+> **The organizer is never an attendee.** Providers list the organizer among
+> the attendees, and an appointment made in Outlook lists nobody else. The
+> rule lives in `cal_core::attendee`:
+> - **On read**, each adapter hands its rows to `people_from_read`, which
+>   drops the organizer's row from `attendees` and `attendee_responses`. The
+>   row is found by the provider's own flag (EWS `ResponseType` "Organizer",
+>   Graph response "organizer", Google `attendees[].organizer`), or, where
+>   there is none (CalDAV), by the normalised address equal to the organizer.
+>   An unknown organizer drops nothing.
+> - **Only the organizer notifies.** The adapter says whether the connected
+>   account organizes the event (EWS `MyResponseType`, Graph `isOrganizer`,
+>   Google `organizer.self`, CalDAV `ORGANIZER` equal to the account's
+>   calendar-user address). An event whose organizer is someone else, or
+>   whose organizer cannot be confirmed as the account, is
+>   `organized_elsewhere`; the editors then offer no "notify attendees".
+> - **On write**, both hosts run `host_core::event_write` before any store
+>   sees the event: `guard_update` drops the organizer, clears
+>   `send_invitations` unless the account organizes the event and someone
+>   else is invited, and sets `keep_attendees` when the edit left the
+>   invitees as the cache last read them. EWS, Google and Graph then leave the
+>   provider's attendee list alone, so a title or time change never rewrites
+>   it. `guard_create` does the same for a create; a create derived from an
+>   existing event carries that event's `organizer` and
+>   `organized_elsewhere` (never sent) so it applies there too.
+
 > **Free/busy lookup** runs through `get_free_busy(emails, range)` and the
 > host `query_free_busy` command (the dialog's "Check availability"
 > button). Each provider answers in its own dialect: EWS `GetUserAvailability`

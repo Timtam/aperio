@@ -29,9 +29,7 @@
 //! the zone itself, so it doesn't parse the `VTIMEZONE` body back. ATTENDEE
 //! mapping on read still lives behind a follow-up task.
 
-use cal_core::{
-    AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
-};
+use cal_core::{AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind};
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Property};
 
@@ -177,41 +175,32 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     };
 
     // ORGANIZER + ATTENDEE;PARTSTAT (RFC 5545). ATTENDEE is multi-valued
-    // (one property per invitee, stored under `multi_properties`).
+    // (one property per invitee, stored under `multi_properties`). The
+    // organizer is never an invitee (decision 67a); RFC 5545 has no per-row
+    // flag for it, so its ATTENDEE is the one whose address is ORGANIZER's.
+    // Whether the account organizes the event takes its own address, which the
+    // adapter knows from discovery (`mark_organized_by`); unknown until then.
     let organizer = ev
         .properties()
         .get("ORGANIZER")
         .map(|p| strip_mailto(p.value()))
         .filter(|s| !s.is_empty());
-    let mut attendees = Vec::new();
-    let mut attendee_responses = Vec::new();
-    if let Some(atts) = ev.multi_properties().get("ATTENDEE") {
-        for p in atts {
-            let email = strip_mailto(p.value());
-            if email.is_empty() {
-                continue;
-            }
-            let name = p
-                .params()
-                .get("CN")
-                .map(|c| c.value().trim().to_string())
-                .filter(|n| !n.is_empty());
-            let status = p
+    let rows = ev
+        .multi_properties()
+        .get("ATTENDEE")
+        .into_iter()
+        .flatten()
+        .map(|p| cal_core::attendee::ReadAttendee {
+            email: strip_mailto(p.value()),
+            name: p.params().get("CN").map(|c| c.value().trim().to_string()),
+            status: p
                 .params()
                 .get("PARTSTAT")
                 .map(|c| caldav_partstat(c.value()))
-                .unwrap_or_default();
-            attendees.push(match &name {
-                Some(n) if n != &email => format!("{n} <{email}>"),
-                _ => email.clone(),
-            });
-            attendee_responses.push(AttendeeResponse {
-                email,
-                name,
-                status,
-            });
-        }
-    }
+                .unwrap_or_default(),
+            is_organizer: false,
+        });
+    let people = cal_core::attendee::people_from_read(organizer, None, rows);
 
     // RFC 5545 `STATUS:CANCELLED` — the event was cancelled. Aperio keeps it
     // visible (subject to the show-cancelled setting) but never schedules
@@ -222,6 +211,8 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         .unwrap_or(false);
 
     Ok(Event {
+        keep_attendees: false,
+        organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
         id,
@@ -237,14 +228,30 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         color_hex,
         reminders,
         sound: None,
-        attendees,
+        attendees: people.attendees,
         created_at: created,
         updated_at: updated,
         etag: None,
-        organizer,
-        attendee_responses,
+        organizer: people.organizer,
+        attendee_responses: people.attendee_responses,
         cancelled,
     })
+}
+
+/// Record on each event whether the connected account organizes it (decision
+/// 70a). CalDAV has no flag for it: RFC 6638 names the account by its
+/// calendar-user address, so the account organizes an event whose ORGANIZER is
+/// that address. `own_address` is `None` when discovery did not report one;
+/// then no event with an organizer counts as the account's.
+pub fn mark_organized_by(events: &mut [Event], own_address: Option<&str>) {
+    for ev in events {
+        let organized_by_me = match (ev.organizer.as_deref(), own_address) {
+            (Some(organizer), Some(own)) => Some(cal_core::attendee::same_address(organizer, own)),
+            _ => None,
+        };
+        ev.organized_elsewhere =
+            cal_core::attendee::organized_elsewhere(ev.organizer.as_deref(), organized_by_me);
+    }
 }
 
 /// Strip the `mailto:` scheme (case-insensitive) from a calendar-user
@@ -839,6 +846,8 @@ pub fn event_to_ical_preserving(
     mut prior: PriorAlarms,
 ) -> String {
     let new = NewEvent {
+        organized_elsewhere: false,
+        organizer: None,
         title: event.title.clone(),
         description: event.description.clone(),
         location: event.location.clone(),
@@ -1030,26 +1039,33 @@ fn apply_common(
     // write them ONLY when the user opted to notify AND we know the
     // organizer's calendar-user-address. With no organizer, or notify off,
     // they're omitted (the event is stored without attendees, no mail).
-    if event.send_invitations && !event.attendees.is_empty() {
-        if let Some(org) = organizer {
-            ical_ev.add_property("ORGANIZER", org);
-            for entry in &event.attendees {
-                let (name, email) = cal_core::attendee::parse(entry);
-                if email.is_empty() {
-                    continue;
-                }
-                let mut att = icalendar::Property::new("ATTENDEE", format!("mailto:{email}"));
-                att.add_parameter("ROLE", "REQ-PARTICIPANT");
-                att.add_parameter("PARTSTAT", "NEEDS-ACTION");
-                att.add_parameter("RSVP", "TRUE");
-                if let Some(cn) = name.as_deref() {
-                    att.add_parameter("CN", cn);
-                }
-                // `append_multi_property` (not `append_property`) — ATTENDEE
-                // is multi-valued; the single-property map would otherwise
-                // keep only the last one.
-                ical_ev.append_multi_property(att);
+    // `org` is the account's own address, written as ORGANIZER, so it is never
+    // one of the invitees (decision 67a): an event whose only entry it is gets
+    // no ORGANIZER and no ATTENDEE at all, a plain appointment.
+    let invitees = match organizer {
+        Some(org) if event.send_invitations => {
+            cal_core::attendee::without_organizer(&event.attendees, Some(org))
+        }
+        _ => Vec::new(),
+    };
+    if let (Some(org), false) = (organizer, invitees.is_empty()) {
+        ical_ev.add_property("ORGANIZER", org);
+        for entry in &invitees {
+            let (name, email) = cal_core::attendee::parse(entry);
+            if email.is_empty() {
+                continue;
             }
+            let mut att = icalendar::Property::new("ATTENDEE", format!("mailto:{email}"));
+            att.add_parameter("ROLE", "REQ-PARTICIPANT");
+            att.add_parameter("PARTSTAT", "NEEDS-ACTION");
+            att.add_parameter("RSVP", "TRUE");
+            if let Some(cn) = name.as_deref() {
+                att.add_parameter("CN", cn);
+            }
+            // `append_multi_property` (not `append_property`) — ATTENDEE
+            // is multi-valued; the single-property map would otherwise
+            // keep only the last one.
+            ical_ev.append_multi_property(att);
         }
     }
     // RFC 7986 COLOR. `color_hex` is only ever `Some` when the provider is
@@ -1225,14 +1241,57 @@ END:VCALENDAR\r
         let events = parse_calendar_data(body, "cal-1").unwrap();
         let ev = &events[0];
         assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
-        // Flat editable list: "Name <email>" when CN present, else bare.
-        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
-        assert_eq!(ev.attendees[2], "skeptic@example.com");
-        assert_eq!(ev.attendee_responses.len(), 3);
-        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
-        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
-        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
-        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
+        // Flat editable list: "Name <email>" when CN present, else bare; never
+        // the organizer, whose ATTENDEE is the one with ORGANIZER's address
+        // (decision 67a).
+        assert_eq!(ev.attendees, ["Me <me@example.com>", "skeptic@example.com"]);
+        assert_eq!(ev.attendee_responses.len(), 2);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::NeedsAction);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("Me"));
+        // Not yet known to be the account's: that takes its own address.
+        assert!(ev.organized_elsewhere);
+    }
+
+    /// The organizer's ATTENDEE matches ORGANIZER whatever its case and
+    /// `mailto:` spelling.
+    #[test]
+    fn the_organizers_attendee_goes_whatever_its_spelling() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mtg-2@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\n\
+ORGANIZER:MAILTO:Boss@Example.com\r\n\
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:boss@example.com\r\n\
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@example.com\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events[0].attendees, ["bob@example.com"]);
+    }
+
+    /// Whether the account organizes an event takes its own address (RFC 6638
+    /// calendar-user address): it organizes the event whose ORGANIZER that is.
+    #[test]
+    fn the_account_organizes_what_its_address_organizes() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mtg-3@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\n\
+ORGANIZER:mailto:me@example.com\r\nATTENDEE:mailto:bob@example.com\r\n\
+END:VEVENT\r\nBEGIN:VEVENT\r\nUID:own@aperio\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let mut events = parse_calendar_data(body, "cal-1").unwrap();
+        mark_organized_by(&mut events, Some("mailto:ME@example.com"));
+        assert!(
+            !events[0].organized_elsewhere,
+            "its ORGANIZER is the account"
+        );
+        assert!(
+            !events[1].organized_elsewhere,
+            "no organizer: the account's own"
+        );
+        mark_organized_by(&mut events, Some("mailto:someone@example.com"));
+        assert!(events[0].organized_elsewhere);
+        mark_organized_by(&mut events, None);
+        assert!(events[0].organized_elsewhere, "unknown: not confirmed");
+        assert!(!events[1].organized_elsewhere);
     }
 
     #[test]
@@ -1697,6 +1756,8 @@ END:VCALENDAR\r
     #[test]
     fn write_then_read_roundtrips_an_event() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Sprint planning".into(),
             description: Some("agenda in the doc".into()),
             location: Some("room 3.12".into()),
@@ -1743,6 +1804,8 @@ END:VCALENDAR\r
     #[test]
     fn write_all_day_uses_value_date() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Birthday".into(),
             description: None,
             location: None,
@@ -1777,6 +1840,8 @@ END:VCALENDAR\r
     #[test]
     fn write_two_day_all_day_keeps_local_days_and_exclusive_end() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Conference".into(),
             description: None,
             location: None,
@@ -1829,6 +1894,8 @@ END:VCALENDAR\r
     #[test]
     fn writes_organizer_and_attendees_only_when_notifying() {
         let mut event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Review".into(),
             description: None,
             location: None,
@@ -1863,6 +1930,18 @@ END:VCALENDAR\r
         event.send_invitations = true;
         let no_org = new_event_to_ical("uid-1", &event, None).replace("\r\n ", "");
         assert!(!no_org.contains("ORGANIZER"));
+
+        // The account's own address is never an invitee (decision 67a).
+        event.attendees = vec!["Me <ME@example.com>".into(), "bob@example.com".into()];
+        let body = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
+        assert_eq!(body.matches("ATTENDEE").count(), 1, "{body}");
+        assert!(body.contains("mailto:bob@example.com"), "{body}");
+        // With nobody else invited there is nothing to schedule: a plain
+        // appointment.
+        event.attendees = vec!["me@example.com".into()];
+        let alone = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
+        assert!(!alone.contains("ORGANIZER"), "{alone}");
+        assert!(!alone.contains("ATTENDEE"), "{alone}");
     }
 
     #[test]
@@ -1997,6 +2076,8 @@ END:VCALENDAR\r
     #[test]
     fn round_trips_reminders_through_write_then_read() {
         let event = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Sync".into(),
             description: None,
             location: None,
@@ -2542,6 +2623,8 @@ END:VCALENDAR\r
 
         fn new_appointment(reminders: Vec<Reminder>) -> NewEvent {
             NewEvent {
+                organized_elsewhere: false,
+                organizer: None,
                 title: "Zahnarzt".into(),
                 description: None,
                 location: None,
@@ -2615,6 +2698,8 @@ END:VCALENDAR\r
 
     fn color_new_event(color_hex: Option<&str>) -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Painted".into(),
             description: None,
             location: None,

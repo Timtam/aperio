@@ -1192,6 +1192,42 @@ wenn der Zielkalender `supports_scheduling` meldet und Teilnehmer vorhanden sind
 **laufzeit-erkannt** (nur RFC-6638-fähige Server wie iCloud). Bei iCloud/Graph gilt
 „Teilnehmer im Datensatz = es wird gemailt" (keine stille Speicherung).
 
+**Der Organisator ist nie Teilnehmer (67a, 70a bis 72a, Live-Runde 4).** Die
+Anbieter führen den Organisator in der Teilnehmerliste. Ein in Outlook angelegter
+Termin führt dort nur den Organisator selbst. Aperio las ihn als Gast, bot
+„Teilnehmer benachrichtigen“ an, und Exchange lehnte das Speichern mit
+`ErrorInvalidRecipients` ab, weil der einzige Empfänger der Absender war. Die
+Regel steht einmal im Kern, in `cal_core::attendee`:
+
+- **Lesen (67a):** `people_from_read` nimmt die Zeile des Organisators aus
+  `attendees` und `attendee_responses`. Erkannt wird sie am ausdrücklichen
+  Merkmal des Anbieters (EWS `ResponseType` „Organizer“, Graph „organizer“,
+  Google `attendees[].organizer`). Wo es keines gibt (CalDAV), zählt die
+  normalisierte Adresse gleich dem Organisator. Ist der Organisator unbekannt,
+  wird nichts entfernt.
+- **Benachrichtigen darf nur, wer organisiert (70a):** Der Adapter sagt, ob das
+  Konto den Termin organisiert (EWS `MyResponseType`, Graph `isOrganizer`,
+  Google `organizer.self`, CalDAV `ORGANIZER` gleich der eigenen
+  calendar-user-address). Sonst, oder wenn es sich nicht bestätigen lässt, ist
+  der Termin `organized_elsewhere`. Der Schalter erscheint dann nicht, und der
+  Host löscht die Absicht.
+- **Liste nur schreiben, wenn sie sich geändert hat (71a):** Beide Hosts rufen
+  vor jedem Schreiben `host_core::event_write::guard_update` auf. Der
+  vergleicht mit dem zuletzt gelesenen Stand aus dem Cache und setzt
+  `keep_attendees`, wenn dieselben Leute eingeladen sind. EWS, Google und Graph
+  lassen die Liste beim Anbieter dann unberührt, mit der Zeile des Organisators.
+  CalDAV kann das noch nicht: Es baut den VEVENT neu und schreibt `ATTENDEE`
+  nur beim Benachrichtigen (TODO).
+- **Abgeleitete Termine (72a):** Wer aus einem bestehenden Termin einen neuen
+  anlegt (Carve-out, Folge-Serie, Kopie, Mitnahme, Lösen bei Exchange), gibt
+  dessen `organizer` und `organized_elsewhere` mit (`organizerOf` in
+  `@aperio/shared`, nie verschickt). `guard_create` nimmt den Organisator dort
+  ebenso heraus.
+- **Cache (67a):** `CACHE_GENERATION` 2 liest jedes externe Konto einmal neu
+  ein. Exchange liest seine Ordner dabei vollständig neu.
+- **Später (73a):** Name des Organisators in Suche, Verfügbarkeit und einer
+  Zeile „Organisiert von …“ im Editor (TODO).
+
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar unter demselben Gate wie der Benachrichtigen-Schalter
 (scheduling-fähiger Kalender + Teilnehmer vorhanden) — die Belegung aller

@@ -78,6 +78,11 @@ export interface CalendarEvent {
   updated_at: string;
   etag: string | null;
   organizer?: string | null;
+  /** Someone other than the connected account organizes this event, or the
+   *  provider cannot confirm that the account does (decision 70a). Read-only;
+   *  the editor then offers no "notify attendees". */
+  organized_elsewhere?: boolean;
+  /** Never the organizer's row (decision 67a). */
   attendee_responses?: AttendeeResponse[];
   /** The meeting is cancelled. Read-only. Cancelled events never fire
    *  reminders and are hidden when "show cancelled events" is off. */
@@ -98,6 +103,11 @@ export interface NewEvent {
   sound: SoundConfig | null;
   attendees: string[];
   send_invitations?: boolean;
+  /** For a create derived from an existing event: its organizer and whether
+   *  someone else organizes it (`organizerOf`, decision 72a). Never sent to a
+   *  provider. */
+  organizer?: string | null;
+  organized_elsewhere?: boolean;
 }
 
 export interface CreateCalendarRequest {

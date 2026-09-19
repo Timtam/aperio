@@ -172,6 +172,8 @@ pub async fn create_event(
     let now = Utc::now();
 
     Ok(Event {
+        keep_attendees: false,
+        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         id: uid,
@@ -1261,6 +1263,8 @@ END:VCALENDAR</c:calendar-data>
 
     fn sample_new_event() -> NewEvent {
         NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Standup".into(),
             description: None,
             location: None,
@@ -1378,6 +1382,8 @@ END:VCALENDAR</c:calendar-data>
 
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
             title: "Standup".into(),
@@ -1553,6 +1559,8 @@ END:VCALENDAR\r
     /// already (so it carries an ETag), with no reminders of its own.
     fn sample_existing_event(cal_url: &Url) -> Event {
         Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
             title: "Standup".into(),
@@ -1592,6 +1600,8 @@ END:VCALENDAR\r
             .await;
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
             title: "Standup".into(),
@@ -1715,6 +1725,8 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 
         // The truncated master, serialised the same way update_event would.
         let master = Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "series-1@aperio".into(),
             calendar_id: "https://example.com/cal/".into(),
             title: "Weekly sync".into(),

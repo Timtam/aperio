@@ -2174,6 +2174,47 @@ Siehe DESIGN §4.2.
   belegt; ein Server, der sich an RFC 4791 hält, verwirft sie. Live messen
   (iCloud, Nextcloud) und bei Bedarf auf das Zusammenführen umstellen, das
   #80 für Ausnahmen gebaut hat.
+  **Live-Test Runde 4** (65, 66b), gelaufen am 19.09.2026 auf dem Desktop mit
+  iCloud und Exchange. Das Handy war nicht dabei, Toni hat Aperio dort noch nie
+  benutzt (69).
+  - ↻ Der Build startete nicht: Die CSP des Produktionsbuilds verbot das
+    WebAssembly der Kernregeln. Behoben in PR #81.
+  - D3: Das Folge-Vorkommen einer ganztägigen iCloud-Serie stand am 26. statt
+    am 27.10. Das ist der Lesefehler aus 48a.
+  - ↻ D6, D7 und H2: Ändern eines Outlook-Termins scheiterte mit
+    `ErrorInvalidRecipients`. Aperio las den Organisator als Gast und wollte
+    ihn benachrichtigen. Behoben in PR #83.
+  - ↻ D8: Das gelöste Vorkommen öffnet Outlook als „Besprechung“. Vermutlich,
+    weil es den Organisator als Gast mitnahm. PR #83 nimmt ihn heraus. In der
+    nächsten Runde nachsehen.
+  - D9: Toni hat den Einzeltermin in Outlook gelöscht, und Aperio hat ihn
+    richtig entfernt. Das Löschen aus Aperio heraus ist noch ungeprüft.
+  - ↻ H1: „Anwenden auf“ stand da, aber nicht in der Tab-Reihenfolge. Behoben
+    in PR #82 (68): Der Titel nennt den Umfang, und ein schreibgeschütztes Feld
+    liegt in der Tab-Reihenfolge, auch für die ganze Serie.
+
+  ↻ **Der Organisator galt als Gast** (67a, 70a bis 72a), behoben in PR #83.
+  Die Regel steht einmal im Kern (`cal_core::attendee`, DESIGN §7.3):
+  - Beim Lesen nimmt jeder Adapter die Zeile des Organisators aus den Gästen.
+  - Benachrichtigen darf nur, wer den Termin organisiert. Das sagt ein
+    ausdrückliches Merkmal des Anbieters, sonst gilt der Termin als fremd
+    organisiert.
+  - Beide Hosts schreiben die Gästeliste nur, wenn sie sich gegenüber dem
+    Cache geändert hat (Exchange, Google, Microsoft 365).
+  - Abgeleitete Termine tragen den Organisator ihrer Quelle mit.
+  - `CACHE_GENERATION` 2: Der erste Start liest jedes externe Konto einmal neu
+    ein, Exchange vollständig.
+  Auf dem Handy wirkt das mit dem nächsten Build. Die `.so` muss frisch
+  erzeugt werden; neue FFI-Funktionen gibt es nicht, nur neue Felder im JSON.
+  🚩 **CalDAV: Ändern ohne Benachrichtigen verwirft die Gäste.** Das gab es
+  schon vorher. Der Adapter baut den VEVENT neu und schreibt `ORGANIZER` und
+  `ATTENDEE` nur beim Benachrichtigen. Ändert man bei iCloud nur den Titel,
+  sind die Gäste danach weg. Die gelesenen Zeilen zu übernehmen, ohne dass
+  der Server mailt, braucht eine Messung (`SCHEDULE-AGENT`, iCloud).
+  🚩 **Den Organisator zeigen** (73a), eigene Aufgabe: eine Zeile
+  „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
+  Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn
+  nicht mehr ab, weil er kein Gast mehr ist.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

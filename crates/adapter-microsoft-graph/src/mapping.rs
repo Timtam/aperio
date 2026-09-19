@@ -15,8 +15,8 @@
 //! refusing the write.
 
 use cal_core::{
-    AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
-    EventRecurrence, NewEvent, Reminder, ReminderKind,
+    AttendeeStatus, Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent,
+    Reminder, ReminderKind,
 };
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -149,6 +149,10 @@ pub struct EventEntry {
     /// The meeting organizer.
     #[serde(default)]
     pub organizer: Option<GraphRecipient>,
+    /// Whether the signed-in user organizes the event (decision 70a). Part of
+    /// the default property set.
+    #[serde(default, rename = "isOrganizer")]
+    pub is_organizer: Option<bool>,
 }
 
 /// An event body as Graph returns it: the content plus which of the two
@@ -573,42 +577,31 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     let created = entry.created_date_time.unwrap_or_else(Utc::now);
     let updated = entry.last_modified_date_time.unwrap_or(created);
 
-    // Attendees: the editable flat list ("Name <email>" / bare email)
-    // plus per-attendee RSVP state.
-    let mut attendees = Vec::new();
-    let mut attendee_responses = Vec::new();
-    for a in entry.attendees {
-        let Some(email) = a
-            .email_address
-            .as_ref()
-            .and_then(|e| e.address.clone())
-            .filter(|s| !s.trim().is_empty())
-        else {
-            continue;
-        };
-        let name = a
-            .email_address
-            .and_then(|e| e.name)
-            .filter(|n| !n.trim().is_empty());
-        attendees.push(format_attendee(name.as_deref(), &email));
-        attendee_responses.push(AttendeeResponse {
-            status: a
-                .status
-                .and_then(|s| s.response)
-                .as_deref()
-                .map(graph_status)
-                .unwrap_or_default(),
-            name,
-            email,
-        });
-    }
-    let organizer = entry
-        .organizer
-        .and_then(|o| o.email_address)
-        .and_then(|e| e.address)
-        .filter(|s| !s.trim().is_empty());
+    // Attendees: the editable flat list ("Name <email>" / bare email) plus
+    // per-attendee RSVP state, without the organizer (decision 67a), whose row
+    // answers "organizer". `isOrganizer` says whether the signed-in user
+    // organizes the event (decision 70a).
+    let people = cal_core::attendee::people_from_read(
+        entry
+            .organizer
+            .and_then(|o| o.email_address)
+            .and_then(|e| e.address),
+        entry.is_organizer,
+        entry.attendees.into_iter().filter_map(|a| {
+            let response = a.status.and_then(|s| s.response);
+            let email_address = a.email_address?;
+            Some(cal_core::attendee::ReadAttendee {
+                email: email_address.address?,
+                name: email_address.name,
+                status: response.as_deref().map(graph_status).unwrap_or_default(),
+                is_organizer: response.as_deref() == Some("organizer"),
+            })
+        }),
+    );
 
     Ok(Some(Event {
+        keep_attendees: false,
+        organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
         id: entry.id,
@@ -630,12 +623,12 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         color_hex: None,
         reminders,
         sound: None,
-        attendees,
+        attendees: people.attendees,
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
-        organizer,
-        attendee_responses,
+        organizer: people.organizer,
+        attendee_responses: people.attendee_responses,
         cancelled,
     }))
 }
@@ -649,15 +642,6 @@ fn graph_status(s: &str) -> AttendeeStatus {
         "declined" => AttendeeStatus::Declined,
         "tentativelyAccepted" => AttendeeStatus::Tentative,
         _ => AttendeeStatus::NeedsAction,
-    }
-}
-
-/// Render an attendee for the editable flat list — `"Name <email>"`
-/// when a distinct display name exists, else the bare email.
-fn format_attendee(name: Option<&str>, email: &str) -> String {
-    match name {
-        Some(n) if n.trim() != email => format!("{} <{}>", n.trim(), email),
-        _ => email.to_string(),
     }
 }
 
@@ -1003,7 +987,9 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, ev.start)?),
             None => None,
         },
-        attendees: attendees_to_write(&ev.attendees, ev.send_invitations),
+        // Not when the edit left the invitees alone (decision 71a): the list
+        // on the server keeps the organizer's row, which Aperio does not show.
+        attendees: attendees_to_write(&ev.attendees, ev.send_invitations && !ev.keep_attendees),
     })
 }
 
@@ -2040,14 +2026,72 @@ mod tests {
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
-        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
-        assert_eq!(ev.attendees[2], "nobody@example.com");
-        assert_eq!(ev.attendee_responses.len(), 3);
-        // organizer → implicit accept; tentativelyAccepted → Tentative;
-        // none → NeedsAction.
-        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
-        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Tentative);
-        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::NeedsAction);
+        // Never the organizer among the invitees (decision 67a).
+        assert_eq!(ev.attendees, ["Me <me@example.com>", "nobody@example.com"]);
+        assert_eq!(ev.attendee_responses.len(), 2);
+        // tentativelyAccepted → Tentative; none → NeedsAction.
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Tentative);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
+        // No isOrganizer: it cannot be confirmed the user organizes it.
+        assert!(ev.organized_elsewhere);
+    }
+
+    /// Graph marks the organizer's row with the response "organizer", and the
+    /// row goes by that mark even when its address is spelled otherwise than
+    /// the organizer's. `isOrganizer` says the user organizes the event.
+    #[test]
+    fn the_organizer_row_goes_by_its_response() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00.0000000", "timeZone": "UTC" },
+            "end":   { "dateTime": "2026-05-25T11:00:00.0000000", "timeZone": "UTC" },
+            "isAllDay": false,
+            "isOrganizer": true,
+            "organizer": { "emailAddress": { "name": "Toni", "address": "Toni@Example.com" } },
+            "attendees": [
+              { "type": "required", "status": { "response": "organizer" },
+                "emailAddress": { "name": "Toni", "address": "toni.alias@example.com" } },
+              { "type": "required", "status": { "response": "accepted" },
+                "emailAddress": { "address": "bob@example.com" } }
+            ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.attendees, ["bob@example.com"]);
+        assert!(!ev.organized_elsewhere);
+    }
+
+    /// An update that left the invitees as they were read writes no attendee
+    /// list, even when it notifies: the list on the server keeps the
+    /// organizer's row, which a written list would drop (decision 71a).
+    #[test]
+    fn an_unchanged_attendee_list_is_not_written() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00.0000000", "timeZone": "UTC" },
+            "end":   { "dateTime": "2026-05-25T11:00:00.0000000", "timeZone": "UTC" },
+            "isAllDay": false,
+            "isOrganizer": true,
+            "organizer": { "emailAddress": { "address": "toni@example.com" } },
+            "attendees": [
+              { "type": "required", "status": { "response": "accepted" },
+                "emailAddress": { "address": "bob@example.com" } }
+            ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        ev.send_invitations = true;
+
+        ev.keep_attendees = true;
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert!(json.get("attendees").is_none());
+
+        ev.keep_attendees = false;
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert_eq!(
+            json["attendees"][0]["emailAddress"]["address"],
+            "bob@example.com"
+        );
     }
 
     #[test]
@@ -2166,6 +2210,8 @@ mod tests {
         // A zoned recurring master writes its LOCAL wall-clock + IANA zone so
         // Graph expands it DST-correctly on its side.
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "OAGDU".into(),
             description: None,
             location: None,
@@ -2195,6 +2241,8 @@ mod tests {
     fn new_event_to_body_sends_no_zone_for_an_all_day_series() {
         let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "All-day".into(),
             description: None,
             location: None,
@@ -2278,6 +2326,8 @@ mod tests {
     #[test]
     fn new_event_to_body_carries_reminder_and_recurrence() {
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Yoga".into(),
             description: None,
             location: Some("Studio".into()),
@@ -2314,6 +2364,8 @@ mod tests {
     #[test]
     fn attendees_written_only_when_notifying() {
         let mut new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Review".into(),
             description: None,
             location: None,

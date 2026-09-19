@@ -53,6 +53,18 @@ The endpoint is discovered or user-supplied.
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by
   its `Start`, which moves when the exception is moved.
+- **The organizer is listed as an attendee.** Exchange puts the organizer
+  into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
+  made in Outlook it is the only row. The adapter drops that row by its flag
+  (`cal_core::attendee::people_from_read`), so it also goes when
+  `<t:Organizer>` names the organizer by an Exchange-internal (EX) address.
+  `MyResponseType` "Organizer" says the mailbox organizes the item; anything
+  else, or no answer, makes the event `organized_elsewhere`, and only the
+  organizer notifies. An update whose invitees did not change
+  (`keep_attendees`) sends no `calendar:RequiredAttendees`, so Exchange keeps
+  its own list, the organizer's row included. Without this an appointment
+  from Outlook failed to save with `ErrorInvalidRecipients`: Aperio asked to
+  notify, and the only recipient was the sender.
 
 ## Time zones
 

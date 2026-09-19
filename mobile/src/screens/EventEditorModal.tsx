@@ -20,6 +20,7 @@ import {
   allDayFormEndDate,
   applySignature,
   madeNoReminderChoice,
+  organizerOf,
   signatureIn,
   eventPrefillFrom,
   allDayWireEnd,
@@ -791,8 +792,13 @@ export default function EventEditorModal({
     // whose scheduling probe failed all report supports_scheduling=false) AND
     // there are attendees AND the toggle is on. Mirrors the desktop's
     // supports_scheduling gating.
+    // Only the organizer notifies anyone (decision 70a); the host clears the
+    // intent for someone else's meeting anyway. Mirrors the desktop.
     const sendInvitations =
-      (cal?.supports_scheduling ?? false) && attendees.length > 0 && notifyAttendees;
+      (cal?.supports_scheduling ?? false) &&
+      attendees.length > 0 &&
+      original?.organized_elsewhere !== true &&
+      notifyAttendees;
     // Reminders for the wire: while `keepRemindersAsDefault` holds, the rows on
     // screen came from the CALENDAR default and were never touched — sending
     // them would promote the default into a per-event VALARM that then lives on
@@ -939,6 +945,9 @@ export default function EventEditorModal({
           sound: null,
           attendees,
           send_invitations: sendInvitations,
+          // The occurrence's organizer, so it never becomes an invitee of the
+          // standalone copy (decision 72a).
+          ...organizerOf(original),
         });
         await savePrivate(created);
         if (!isLocalCal) {
@@ -1014,6 +1023,7 @@ export default function EventEditorModal({
                   sound: null,
                   attendees,
                   send_invitations: sendInvitations,
+                  ...organizerOf(original),
                 },
                 // Continuation of the master — keep its zone verbatim (incl.
                 // floating) so head and tail expand identically.
@@ -1584,6 +1594,7 @@ export default function EventEditorModal({
         onNotifyChange={setNotifyAttendees}
         showNotify={
           attendees.length > 0 &&
+          original?.organized_elsewhere !== true &&
           (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false)
         }
       />

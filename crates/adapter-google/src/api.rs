@@ -1577,6 +1577,8 @@ mod tests {
 
         let state = fixture_state(&server.url());
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Standup".into(),
             description: None,
             location: None,
@@ -1680,6 +1682,8 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         let new = NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: "Review".into(),
             description: None,
             location: None,
@@ -2084,6 +2088,8 @@ mod tests {
 
     fn moved_override() -> Event {
         Event {
+            keep_attendees: false,
+            organized_elsewhere: false,
             id: "master-1::rid::2026-06-01T18:00:00Z".into(),
             calendar_id: "primary".into(),
             title: "Moved again".into(),

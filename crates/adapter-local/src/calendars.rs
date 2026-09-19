@@ -557,6 +557,8 @@ fn persist_new_event(
         .map_err(map_sql_err)?;
 
     Ok(Event {
+        keep_attendees: false,
+        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         id: id.to_string(),
@@ -610,6 +612,8 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
+        keep_attendees: false,
+        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         id,
@@ -693,6 +697,8 @@ mod tests {
         a.create_event(
             &cal.id,
             NewEvent {
+                organized_elsewhere: false,
+                organizer: None,
                 title: "Standup".into(),
                 description: None,
                 location: None,
@@ -759,6 +765,8 @@ mod tests {
         let cal = a.create_calendar("Work", None, None, None).unwrap();
         let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let mk = |offset_h: i64| NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
             title: format!("E{offset_h}"),
             description: None,
             location: None,
@@ -800,6 +808,8 @@ mod tests {
             .create_event(
                 &cal.id,
                 NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
                     title: "OAGDU".into(),
                     description: None,
                     location: None,
@@ -846,6 +856,8 @@ mod tests {
         a.create_event(
             &cal.id,
             NewEvent {
+                organized_elsewhere: false,
+                organizer: None,
                 title: "Weekly".into(),
                 description: None,
                 location: None,
@@ -872,6 +884,8 @@ mod tests {
         a.create_event(
             &cal.id,
             NewEvent {
+                organized_elsewhere: false,
+                organizer: None,
                 title: "OneOff".into(),
                 description: None,
                 location: None,
@@ -914,6 +928,8 @@ mod tests {
             .create_event(
                 &cal.id,
                 NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
                     title: "Standup".into(),
                     description: None,
                     location: None,
@@ -959,6 +975,8 @@ mod tests {
             .create_event(
                 &cal.id,
                 NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
                     title: "Weekly".into(),
                     description: None,
                     location: None,
@@ -1006,6 +1024,8 @@ mod tests {
             .create_event(
                 &cal.id,
                 NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
                     title: "Once".into(),
                     description: None,
                     location: None,
