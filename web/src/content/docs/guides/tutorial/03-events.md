@@ -121,7 +121,10 @@ the earlier occurrences stay untouched, and this one plus every later one are
 changed (on edit, a new series takes over from here) or removed (on delete).
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
-occurrence, and a new date moves the start of the series.
+occurrence, and a new date moves the start of the series. The editor's title
+names your choice, such as **Edit this occurrence only**, and is read out when
+the editor opens. On the desktop the form repeats it as the read-only field
+**Apply to**, which `Tab` reaches like every other field.
 
 > **Single changed or deleted occurrences:** When a whole series moves to
 > another day or time, by dragging it or in the dialog, some single occurrences

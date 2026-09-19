@@ -44,8 +44,9 @@ export function editEventWithScope(
    *  the editor loads: the series, unless the row is edited in place. */
   const open = (
     scoped?: {
-      occurrence: string;
-      initialScope: 'occurrence' | 'this_and_future';
+      // None for the whole series, which opens the series itself.
+      occurrence?: string;
+      initialScope: 'occurrence' | 'series' | 'this_and_future';
     },
     eventId: string = seriesIdOf(ev),
   ) => {
@@ -97,8 +98,8 @@ export function editEventWithScope(
         // The whole series opens as the series — its own start, end, rule and
         // exceptions, like a search hit. Seeded from the occurrence, saving
         // moved the series start to that occurrence and the earlier ones
-        // disappeared.
-        run: () => open(),
+        // disappeared. The scope rides along so the editor can name it.
+        run: () => open({ initialScope: 'series' }),
       },
     ],
   });

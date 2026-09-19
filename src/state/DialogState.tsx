@@ -486,9 +486,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         // Only its own: a load for a prompt that was dismissed meanwhile must
         // not unblock the prompt that replaced it.
         if (seriesLoadingFor.current === prompt) seriesLoadingFor.current = null;
+        // The scope rides along, so the editor can name the choice.
         swap(
           series
-            ? { kind: 'event', event: series }
+            ? { kind: 'event', event: series, initialScope: 'series' }
             : { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 },
         );
       });

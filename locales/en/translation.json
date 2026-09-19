@@ -1458,6 +1458,11 @@
     "event": {
       "newTitle": "New event",
       "editTitle": "Edit event",
+      "editTitleScope": {
+        "occurrence": "Edit this occurrence only",
+        "thisAndFuture": "Edit this and all following",
+        "series": "Edit the whole series"
+      },
       "titleRequired": "Please enter a title.",
       "calendarRequired": "Please pick a calendar.",
       "dateInvalid": "The date is invalid.",
