@@ -22,7 +22,12 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * its rule and its exceptions unless the edit changed them.
  */
 
-const { invokeMock, onFile } = vi.hoisted(() => {
+const { invokeMock, onFile, announced, announce } = vi.hoisted(() => {
+  /** Everything the dialog hands the screen reader's live region, in order. */
+  const announced: string[] = [];
+  const announce = (message: string) => {
+    announced.push(message);
+  };
   /** What `get_event_by_id` answers: the series a row of a series belongs to. */
   const onFile: { series: unknown; updated: unknown } = { series: null, updated: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
@@ -39,7 +44,7 @@ const { invokeMock, onFile } = vi.hoisted(() => {
     }
     return Promise.resolve([]);
   });
-  return { invokeMock, onFile };
+  return { invokeMock, onFile, announced, announce };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -95,7 +100,7 @@ const REMINDERS = { getDefaultsFor: () => [] };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
 vi.mock('../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../state/dialogStateContext', () => ({ useDialogState: () => DIALOG_STATE }));
-vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => announce }));
 vi.mock('../state/useCalendarDefaultReminders', () => ({
   useCalendarDefaultReminders: () => REMINDERS,
 }));
@@ -121,6 +126,7 @@ afterEach(() => {
   invokeMock.mockClear();
   onFile.series = null;
   onFile.updated = null;
+  announced.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -521,6 +527,59 @@ describe('EventDialog → who may notify the attendees', () => {
       ).toBeNull();
     } finally {
       restore();
+    }
+  });
+
+  // The sentence is said once, as part of what the user just did: with
+  // "X added", so neither announcement cuts the other off, or after another
+  // calendar is chosen. On open it is simply there.
+  it('says the sentence with the first guest added, in the same announcement', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open({ ...SERIES, recurrence: null } as unknown as CalendarEvent);
+      expect(announced.some((m) => alwaysSentence.test(m))).toBe(false);
+      const input = document.querySelector<HTMLInputElement>('.attendee-picker__input')!;
+      fireEvent.change(input, { target: { value: 'bob@example.com' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await screen.findByText(alwaysSentence);
+      const said = announced.filter((m) => alwaysSentence.test(m));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toMatch(/^bob@example\.com (hinzugefügt|added)\. /i);
+      // A second guest changes nothing about who informs them.
+      fireEvent.change(input, { target: { value: 'carol@example.com' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await screen.findByText('carol@example.com');
+      expect(announced.filter((m) => alwaysSentence.test(m))).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it('says nothing on open, and the sentence when a calendar that mails is chosen', async () => {
+    deviceInBerlin();
+    const icloud = {
+      id: 'cal-icloud',
+      name: 'iCloud',
+      read_only: false,
+      account_id: 'acc-icloud',
+      supports_scheduling: true,
+      always_notifies_attendees: true,
+      notifier_name: 'iCloud',
+    } as unknown as Calendar;
+    CALENDARS.push(icloud);
+    STORE.selectedCalendarIds.add('cal-icloud');
+    try {
+      await open(meeting(false));
+      expect(announced.some((m) => alwaysSentence.test(m))).toBe(false);
+      fireEvent.change(screen.getByRole('combobox', { name: /kalender|calendar/i }), {
+        target: { value: 'cal-icloud' },
+      });
+      await screen.findByText(alwaysSentence);
+      expect(announced.filter((m) => alwaysSentence.test(m))).toHaveLength(1);
+    } finally {
+      CALENDARS.pop();
+      STORE.selectedCalendarIds.delete('cal-icloud');
     }
   });
 

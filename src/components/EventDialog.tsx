@@ -1546,32 +1546,36 @@ export function EventDialog({
 
   // "Notify attendees" or the sentence that says who informs them: the rule
   // both editors share (decisions 70a, 74a, 76a).
-  const noticeCalendar = calendars.find((c) => c.id === form.calendarId);
-  const notice = attendeeNotice({
-    calendar: noticeCalendar,
-    attendees: form.attendees,
-    original: event ?? null,
-  });
-  const noticeSentenceSpec = notifierSentence(noticeCalendar, 'change');
-  const noticeSentence = t(noticeSentenceSpec.key, noticeSentenceSpec.values);
-  // When the sentence appears while editing (the first guest added, another
-  // calendar chosen), say it once: nothing else tells a screen reader that
-  // the save will now mail the guests. Not on open, where it is simply there.
-  const noticeAtOpen = useRef<{ open: boolean; notice: typeof notice }>({
-    open: false,
-    notice,
-  });
-  useEffect(() => {
-    const seen = noticeAtOpen.current;
-    if (!isOpen) {
-      noticeAtOpen.current = { open: false, notice };
-      return;
+  const noticeFor = (calendarId: string, attendees: string[]) => {
+    const calendar = calendars.find((c) => c.id === calendarId);
+    const spec = notifierSentence(calendar, 'change');
+    return {
+      notice: attendeeNotice({ calendar, attendees, original: event ?? null }),
+      sentence: t(spec.key, spec.values),
+    };
+  };
+  const { notice, sentence: noticeSentence } = noticeFor(
+    form.calendarId,
+    form.attendees,
+  );
+  // When the sentence appears while editing, it is said once, as part of
+  // what the user just did: nothing else tells a screen reader that the save
+  // will now mail the guests. On open it is simply there. The first guest
+  // added says it with "X added" (`AttendeePicker`), another calendar chosen
+  // says it after the choice.
+  const noticeAfterAdding = (next: string[]): string | null => {
+    const after = noticeFor(form.calendarId, next);
+    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+  };
+  const announceNoticeForCalendar = (calendarId: string) => {
+    const after = noticeFor(calendarId, form.attendees);
+    if (
+      after.notice === 'always' &&
+      (notice !== 'always' || after.sentence !== noticeSentence)
+    ) {
+      announce(after.sentence);
     }
-    if (seen.open && seen.notice !== 'always' && notice === 'always') {
-      announce(noticeSentence);
-    }
-    noticeAtOpen.current = { open: true, notice };
-  }, [isOpen, notice, noticeSentence, announce]);
+  };
 
   const onDelete = useCallback(async () => {
     if (!event) return;
@@ -1700,6 +1704,7 @@ export function EventDialog({
               // The user has answered the question the note asked.
               setPrefillCalendarNote(null);
               update('calendarId', e.target.value);
+              announceNoticeForCalendar(e.target.value);
             }}
             required
           >
@@ -1849,6 +1854,7 @@ export function EventDialog({
             value={form.attendees}
             onChange={(next) => update('attendees', next)}
             labelledBy={attendeesLabelId}
+            addedNote={noticeAfterAdding}
           />
         </div>
 

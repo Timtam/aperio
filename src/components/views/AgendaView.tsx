@@ -32,7 +32,7 @@ import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { DayCheckInButton } from '../DayCheckInButton';
 import { duplicateEvent } from '../duplicateActions';
-import { ConfirmDialog } from '../ConfirmDialog';
+import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
   addEventExdate,
@@ -350,16 +350,10 @@ export function AgendaView() {
         )}
       </ul>
 
-      <ConfirmDialog
-        isOpen={confirmTarget !== null}
+      <DeleteEventConfirm
+        event={confirmTarget}
         onClose={() => setConfirmTarget(null)}
-        onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget, 'series');
-        }}
-        title={t('dialogs.confirm.deleteEventTitle')}
-        message={t('dialogs.confirm.deleteEventMessage', {
-          title: confirmTarget?.title ?? '',
-        })}
+        onDelete={(ev, send) => void performDelete(ev, 'series', send)}
       />
 
       <DeleteEventScopeDialog

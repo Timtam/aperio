@@ -313,9 +313,7 @@ impl CaldavAdapter {
                     "CalDAV PROPFIND enumeration failed; falling back to a windowed \
                      range read (bounded cache window, complete=false)"
                 );
-                let events = events::get_events(&self.http, cal_url, range, &self.credentials)
-                    .await
-                    .map_err(to_core_error)?;
+                let events = self.read_events(cal_url, range).await?;
                 let new_token = self.bootstrap_token(cal_url).await;
                 Ok(ChangeSet {
                     changes: events,
@@ -446,13 +444,14 @@ impl CaldavAdapter {
             .await
             .map_err(to_core_error)?;
         let fetched = entries.len();
+        let own = self.identity_for(&entries).await?;
         let mut out = Vec::new();
         for entry in entries {
             let Some(ical) = entry.calendar_data else {
                 continue;
             };
             let Ok(mut evs) =
-                mapping::parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))
+                mapping::parse_calendar_data_as(&ical, calendar_id, Some(&entry.href), &own)
             else {
                 continue;
             };
@@ -686,9 +685,7 @@ impl CaldavAdapter {
                 });
             }
         }
-        let events = events::get_events(&self.http, cal_url, range, &self.credentials)
-            .await
-            .map_err(to_core_error)?;
+        let events = self.read_events(cal_url, range).await?;
         Ok(ChangeSet {
             changes: events,
             deletions: Vec::new(),
@@ -794,23 +791,38 @@ impl CaldavAdapter {
         self.discover().await
     }
 
-    /// Record on each event whether this account organizes it (decision 70a),
-    /// by every href of its calendar-user-address-set (see [`OwnIdentity`]).
+    /// The account's addresses for reading `entries`: whether it organizes
+    /// each event, and which rows are its own, is read from the server's text
+    /// against every one of them (decision 70a; `mapping::parse_calendar_data_as`).
+    /// Needed only when an entry names an ORGANIZER at all, so a calendar
+    /// without meetings never asks.
     ///
-    /// The host keeps the flag with the event and a delta never re-reads an
+    /// The host keeps the result with the event and a delta never re-reads an
     /// unchanged one, so a guess would stay. When the addresses are unknown
     /// because discovery or the scheduling probe failed, the read fails
     /// instead, and the host keeps what it has and tries again. A server that
     /// answers without addresses is an answer: then no event with an
     /// organizer counts as the account's.
-    async fn mark_organized_by(&self, events: &mut [Event]) -> CoreResult<()> {
-        let own = if events.iter().any(|e| e.organizer.is_some()) {
-            self.own_identity().await?
+    async fn identity_for(&self, entries: &[xml::ResponseEntry]) -> CoreResult<OwnIdentity> {
+        let names_an_organizer = entries
+            .iter()
+            .filter_map(|e| e.calendar_data.as_deref())
+            .any(mapping::names_an_organizer);
+        if names_an_organizer {
+            self.own_identity().await
         } else {
-            OwnIdentity::default()
-        };
-        mapping::mark_organized_by(events, &own);
-        Ok(())
+            Ok(OwnIdentity::default())
+        }
+    }
+
+    /// Every event in `range` of the calendar at `cal_url`, read for this
+    /// account (see [`Self::identity_for`]).
+    async fn read_events(&self, cal_url: &Url, range: DateRange) -> CoreResult<Vec<Event>> {
+        let entries = events::report_events(&self.http, cal_url, range, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        let own = self.identity_for(&entries).await?;
+        events::events_from_entries(entries, cal_url.as_str(), &own).map_err(to_core_error)
     }
 
     /// The account's calendar-user addresses; see [`Self::discovery_with_scheduling`].
@@ -1018,11 +1030,7 @@ impl CalendarFeature for CaldavAdapter {
         // a join against the discovered home would be too lax.
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
-        let mut events = events::get_events(&self.http, &cal_url, range, &self.credentials)
-            .await
-            .map_err(to_core_error)?;
-        self.mark_organized_by(&mut events).await?;
-        Ok(events)
+        self.read_events(&cal_url, range).await
     }
 
     async fn get_events_delta(
@@ -1038,7 +1046,7 @@ impl CalendarFeature for CaldavAdapter {
         //   `ctag:<ctag>`  → the CTag gate (server lacks sync-collection),
         //   None / bare    → bootstrap (legacy CTag tokens land here too,
         //                     and upgrade to `sync:` if the server supports it).
-        let mut changes = match since_token {
+        let changes = match since_token {
             Some(t) => {
                 if let Some(sync_token) = t.strip_prefix("sync:") {
                     self.events_sync_incremental(&cal_url, range, sync_token)
@@ -1051,7 +1059,6 @@ impl CalendarFeature for CaldavAdapter {
             }
             None => self.events_bootstrap(&cal_url, range).await,
         }?;
-        self.mark_organized_by(&mut changes.changes).await?;
         Ok(changes)
     }
 
@@ -2083,6 +2090,89 @@ END:VCALENDAR</c:calendar-data>
             chrono::Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
             chrono::Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
         )
+    }
+
+    /// Both reads, the range query and the delta's multiget, know the
+    /// account's own meetings by every address the server lists, here by the
+    /// principal path alone: the ORGANIZER's EMAIL is an alias the server did
+    /// not list. (A read without any ORGANIZER does not ask for the
+    /// addresses at all: `get_events_delta_falls_back_to_ctag_gate` mocks no
+    /// discovery.)
+    #[tokio::test]
+    async fn a_read_knows_the_accounts_meetings_by_every_address() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(207)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <c:calendar-user-address-set>
+          <d:href>mailto:alice@me.com</d:href>
+          <d:href>/principals/users/alice/</d:href>
+        </c:calendar-user-address-set>
+        <c:schedule-outbox-URL><d:href>/calendars/alice/outbox/</d:href></c:schedule-outbox-URL>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#,
+            )
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(CTAG_RESPONSE)
+            .create_async()
+            .await;
+        let meeting = DELTA_REPORT_RESPONSE.replace(
+            "SUMMARY:Standup\n",
+            "SUMMARY:Standup\nORGANIZER;EMAIL=alias@elsewhere.example:/principals/users/alice/\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:bob@example.net\n",
+        );
+        server
+            .mock("REPORT", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(meeting)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        let cal_url = format!("{}/calendars/alice/work/", server.url());
+        let events = adapter.get_events(&cal_url, delta_range()).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].organized_elsewhere, "the range query");
+        assert_eq!(events[0].attendees, ["bob@example.net"]);
+        let delta = adapter
+            .get_events_delta(&cal_url, delta_range(), None)
+            .await
+            .unwrap();
+        assert_eq!(delta.changes.len(), 1);
+        assert!(!delta.changes[0].organized_elsewhere, "the multiget");
     }
 
     #[tokio::test]

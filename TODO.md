@@ -2248,8 +2248,11 @@ Siehe DESIGN §4.2.
     ohne Änderung schickt nichts.
   - Bei iCloud und Microsoft 365 zeigen Editor und Löschdialoge statt einer
     Wahl den Satz, wer die Teilnehmer informiert (76a, 80a, 82b), auf Desktop
-    und Handy. Die Löschdialoge fragen „organisiert das Konto?“ jetzt über
-    `organized_elsewhere` statt über einen Adressvergleich.
+    und Handy, auch nach der Entfernen-Taste in Woche, Tag, Monat und Agenda
+    (ein gemeinsamer `DeleteEventConfirm`). Die Löschdialoge fragen
+    „organisiert das Konto?“ jetzt über `organized_elsewhere` statt über einen
+    Adressvergleich. Der Satz beim ersten Gast kommt zusammen mit „X
+    hinzugefügt“ in einer Ansage.
   - `CACHE_GENERATION` 3.
   Wartet auf den Live-Test mit „Aperio R6 eigene“: Titel ändern, einen Gast
   hinzufügen und entfernen, den letzten entfernen, eine Serie ändern und ein
@@ -2257,7 +2260,10 @@ Siehe DESIGN §4.2.
   🚩 **Gestapelt auf #84, zusammen mit #83 zu mergen:** fremde iCloud-Einladungen
   schreibgeschützt (77a), der Löschdialog sagt dort „Der Organisator bekommt
   eine Absage“ (83b), eine lesbare Zusammenfassung der Wiederholung (84a), und
-  „nur diesen Termin“ einer iCloud-Serie als echte Ausnahme (79b).
+  „nur diesen Termin“ einer iCloud-Serie als echte Ausnahme (79b). Dazu
+  übersetzen beide Oberflächen die Ablehnung des Servers: Ein Fehler
+  `forbidden` beginnt mit `reply-only-invitation:` oder `server-refused:`,
+  und heute liest der Screenreader diesen englischen Text vor.
   🚩 **Offen nach #84:**
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine

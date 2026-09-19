@@ -84,15 +84,21 @@ when caching:
 > **Attendee scheduling is server-side, never client SMTP.** When the user
 > opts to notify, the adapter asks the *provider* to email attendees:
 > EWS flips `SendMeetingInvitations*` to `SendToAllAndSaveCopy`, Google
-> appends `?sendUpdates=all`, CalDAV/iCloud writes `ORGANIZER`+`ATTENDEE`
-> for RFC 6638 auto-scheduling (detected at discovery via
-> `schedule-outbox-URL`), and Graph sends automatically once attendees are
-> in the body. Each calendar carries a `supports_scheduling` flag — static
-> for EWS/Google/Graph, runtime-detected for CalDAV — that gates the UI
-> toggle. The transient `send_invitations` (on `NewEvent`/`Event`) and
-> `send_cancellations` (on `delete_event`) ride the call, never the stored
-> data. Note: on iCloud and Graph, *storing* attendees and *emailing* them
-> are inseparable — they're written only when notifying.
+> appends `?sendUpdates=all`, and Graph sends automatically once attendees
+> are in the body. On CalDAV the server schedules by itself (RFC 6638,
+> detected at discovery via `schedule-outbox-URL`): a new event gets
+> `ORGANIZER`+`ATTENDEE` only when the server schedules and the user
+> notifies. Every update reads the resource and carries `ORGANIZER`,
+> `ATTENDEE`, `SEQUENCE` and `STATUS` back verbatim, changing rows only for
+> a changed invitee list (`scheduling::plan_block`), because on such a
+> server a PUT without `ORGANIZER` cancels the meeting. Each calendar
+> carries a `supports_scheduling` flag — static for EWS/Google/Graph,
+> runtime-detected for CalDAV — that gates the UI toggle. The transient
+> `send_invitations` (on `NewEvent`/`Event`) and `send_cancellations` (on
+> `delete_event`) ride the call, never the stored data. Note: on Graph,
+> attendees are in the body only when notifying; on a scheduling CalDAV
+> server the organizer's copy *is* the invitation, so every saved change
+> reaches the attendees (see `always_notifies_attendees` below).
 
 > **The organizer is never an attendee.** Providers list the organizer among
 > the attendees, and an appointment made in Outlook lists nobody else. The

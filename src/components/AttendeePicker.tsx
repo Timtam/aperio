@@ -62,12 +62,18 @@ export interface AttendeePickerProps {
    *  EventDialog wraps the picker inside a labelled fieldset, so
    *  this is normally enough. */
   labelledBy?: string;
+  /** A sentence to say right after "X added" about what the new list
+   *  means, or null. The editor passes the notice that the provider now
+   *  mails the guests (decision 76a): said in the same announcement, so
+   *  neither cuts the other off. */
+  addedNote?: (next: string[]) => string | null;
 }
 
 export function AttendeePicker({
   value,
   onChange,
   labelledBy,
+  addedNote,
 }: AttendeePickerProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -147,15 +153,18 @@ export function AttendeePicker({
         announce(t('dialogs.event.attendees.alreadyOnList'));
         return;
       }
-      onChange([...value, trimmed]);
-      announce(t('dialogs.event.attendees.added', { name: trimmed }));
+      const next = [...value, trimmed];
+      onChange(next);
+      const added = t('dialogs.event.attendees.added', { name: trimmed });
+      const note = addedNote?.(next);
+      announce(note ? `${added} ${note}` : added);
       setQuery('');
       setDebouncedQuery('');
       setSuggestions([]);
       setOpen(false);
       setHighlightedIndex(-1);
     },
-    [value, onChange, announce, t],
+    [value, onChange, addedNote, announce, t],
   );
 
   const removeAt = useCallback(

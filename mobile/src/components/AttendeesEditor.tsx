@@ -53,6 +53,7 @@ export function AttendeesEditor({
   onNotifyChange,
   notice,
   noticeSentence,
+  addedNote,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
@@ -64,6 +65,11 @@ export function AttendeesEditor({
   notice: AttendeeNotice;
   /** The sentence shown for `'always'`. */
   noticeSentence: string;
+  /** A sentence to say right after "X added" about what the new list means,
+   *  or null: the editor's notice when the first guest makes the provider
+   *  mail them (decision 76a). One announcement, so neither cuts the other
+   *  off. */
+  addedNote?: (next: string[]) => string | null;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -96,13 +102,14 @@ export function AttendeesEditor({
       }
       setError(null);
       onAdd();
-      onChange([...value, trimmed]);
-      AccessibilityInfo.announceForAccessibility(
-        t('dialogs.event.attendees.added', { name: trimmed }),
-      );
+      const next = [...value, trimmed];
+      onChange(next);
+      const added = t('dialogs.event.attendees.added', { name: trimmed });
+      const note = addedNote?.(next);
+      AccessibilityInfo.announceForAccessibility(note ? `${added} ${note}` : added);
       return true;
     },
-    [value, onChange, onAdd, t],
+    [value, onChange, onAdd, addedNote, t],
   );
 
   const add = () => {

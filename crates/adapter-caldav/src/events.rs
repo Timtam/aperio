@@ -26,28 +26,30 @@ use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
 use crate::ical_raw::{component_lines, fold, insert_after_head, line_ending};
+use crate::identity::OwnIdentity;
 use crate::mapping::{
     decode_event_id, event_to_ical_preserving, format_utc_compact, new_event_to_ical,
-    override_recurrence_id, override_to_vevent, parse_calendar_data, parse_calendar_data_with_href,
-    same_calendar_user, strip_mailto_scheme, PriorAlarms,
+    override_recurrence_id, override_to_vevent, parse_calendar_data_as, same_calendar_user,
+    strip_mailto_scheme, PriorAlarms,
 };
 use crate::scheduling::{
     apply_to_block, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
 };
-use crate::xml::parse_multistatus;
+use crate::xml::{parse_multistatus, ResponseEntry};
 use cal_core::event_diff::changed_fields;
 use std::ops::Range;
 
-/// Read every event in `range` from the calendar collection at
-/// `calendar_url`. Returns one [`Event`] per VEVENT the server sent
-/// back, with the `calendar_id` field stamped to `calendar_url` so
-/// downstream code can address the source.
-pub async fn get_events(
+/// The `calendar-query` REPORT for every event in `range` of the calendar
+/// collection at `calendar_url`: one entry per resource, with its href, ETag
+/// and calendar-data. [`events_from_entries`] maps them; the adapter first
+/// looks whether any of them names an ORGANIZER, because only then does it
+/// need the account's own addresses.
+pub async fn report_events(
     client: &Client,
     calendar_url: &Url,
     range: DateRange,
     credentials: &Credentials,
-) -> CaldavResult<Vec<Event>> {
+) -> CaldavResult<Vec<ResponseEntry>> {
     let body = build_calendar_query(range.start, range.end);
     let method = Method::from_bytes(b"REPORT").expect("REPORT");
     let mut headers = auth_header(credentials)?;
@@ -79,17 +81,23 @@ pub async fn get_events(
         });
     }
     let text = response.text().await?;
-    let entries = parse_multistatus(&text)?;
+    parse_multistatus(&text)
+}
 
-    let calendar_id = calendar_url.as_str();
+/// The events of REPORT or multiget `entries`, for the account `own`, one
+/// per VEVENT, each with the `calendar_id` stamped to `calendar_id` and the
+/// server's ETag so the write layer can use If-Match.
+pub fn events_from_entries(
+    entries: Vec<ResponseEntry>,
+    calendar_id: &str,
+    own: &OwnIdentity,
+) -> CaldavResult<Vec<Event>> {
     let mut out = Vec::new();
     for entry in entries {
         let Some(ical) = entry.calendar_data else {
             continue;
         };
-        let mut events = parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))?;
-        // Stamp the ETag the server gave us so the write layer (6b.3)
-        // can use If-Match for safe updates.
+        let mut events = parse_calendar_data_as(&ical, calendar_id, Some(&entry.href), own)?;
         if let Some(etag) = entry.etag {
             for ev in &mut events {
                 ev.etag = Some(etag.clone());
@@ -317,7 +325,8 @@ async fn update_master(
     let (body, server_etag) = get_resource(client, &resource, credentials).await?;
     let refused =
         |why: &str| CaldavError::Protocol(format!("{}: {why}; nothing was saved", event.id));
-    let blocks = vevent_blocks(&body, cal_url.as_str())
+    let own = ctx.identity.clone().unwrap_or_default();
+    let blocks = vevent_blocks(&body, cal_url.as_str(), &own)
         .ok_or_else(|| refused("its resource cannot be read block by block"))?;
     let (_, uid) = decode_event_id(&event.id);
     let master = blocks
@@ -414,7 +423,8 @@ async fn update_override(
             slot.to_rfc3339(),
         ))
     };
-    let blocks = vevent_blocks(&body, cal_url.as_str())
+    let own = ctx.identity.clone().unwrap_or_default();
+    let blocks = vevent_blocks(&body, cal_url.as_str(), &own)
         .ok_or_else(|| refused("its resource cannot be read block by block"))?;
     let (_, uid) = decode_event_id(series_id);
     let block = blocks
@@ -531,8 +541,8 @@ struct VeventBlock {
 /// to, in document order. `None` when the two don't line up one to one (a
 /// VEVENT the mapper skips, an odd shape), so no caller can mistake one block
 /// for another.
-fn vevent_blocks(body: &str, calendar_id: &str) -> Option<Vec<VeventBlock>> {
-    let parsed = parse_calendar_data(body, calendar_id).ok()?;
+fn vevent_blocks(body: &str, calendar_id: &str, own: &OwnIdentity) -> Option<Vec<VeventBlock>> {
+    let parsed = parse_calendar_data_as(body, calendar_id, None, own).ok()?;
     let ranges = component_ranges(body, "VEVENT");
     if parsed.len() != ranges.len() {
         return None;
@@ -595,7 +605,8 @@ fn merge_with_overrides(
     keep: impl Fn(DateTime<Utc>) -> bool,
     transform: impl Fn(&str) -> String,
 ) -> Option<String> {
-    let blocks = vevent_blocks(body, calendar_id)?;
+    // Only the RECURRENCE-IDs matter here, not who organizes.
+    let blocks = vevent_blocks(body, calendar_id, &OwnIdentity::default())?;
     let kept: Vec<String> = blocks
         .iter()
         .filter_map(|b| match override_recurrence_id(&b.event.id) {
@@ -777,21 +788,10 @@ pub async fn delete_event(
         .headers(headers)
         .send_retrying()
         .await?;
-    let status = response.status();
-    if status == StatusCode::NOT_FOUND {
+    if response.status() == StatusCode::NOT_FOUND {
         return Ok(DeleteOutcome::NotFound);
     }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
-    }
+    check_write(response).await?;
     Ok(DeleteOutcome::Deleted)
 }
 
@@ -826,11 +826,12 @@ pub async fn add_event_exdate(
     // Match on the UID component — `event_id` may be the composite
     // `{href}|{uid}` while the freshly-parsed bodies carry bare UIDs.
     let (_, want_uid) = decode_event_id(event_id);
-    let blocks = vevent_blocks(&body, calendar_url.as_str()).ok_or_else(|| {
-        CaldavError::Protocol(format!(
+    let blocks =
+        vevent_blocks(&body, calendar_url.as_str(), &OwnIdentity::default()).ok_or_else(|| {
+            CaldavError::Protocol(format!(
             "event '{event_id}': its resource cannot be read block by block; nothing was changed"
         ))
-    })?;
+        })?;
     let in_slot = blocks.iter().find(|b| {
         override_recurrence_id(&b.event.id) == Some(occurrence)
             && cal_core::series_master_id(&b.event.id) == want_uid
@@ -845,8 +846,14 @@ pub async fn add_event_exdate(
                     "event '{event_id}' is not recurring"
                 )));
             };
+            let excluded = recurrence.exceptions.contains(&occurrence);
+            if excluded && in_slot.is_none() {
+                // Skipped already and nothing stands in the slot: nothing to
+                // write, so nothing is sent (no scheduling message either).
+                return Ok(());
+            }
             let master_text = &body[master.range.clone()];
-            let new_master = if recurrence.exceptions.contains(&occurrence) {
+            let new_master = if excluded {
                 master_text.to_string()
             } else {
                 let ending = line_ending(master_text);
@@ -913,7 +920,8 @@ async fn delete_resource(
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(());
     }
-    expect_write_success(&response)
+    check_write(response).await?;
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -1003,7 +1011,7 @@ pub async fn respond_to_event(
         .body(new_body)
         .send_retrying()
         .await?;
-    expect_write_success(&put)?;
+    check_write(put).await?;
     Ok(())
 }
 
@@ -1121,18 +1129,19 @@ fn extract_etag(response: &reqwest::Response) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// The outcome of a write, reading the body only when it failed. Returns the
-/// new ETag on success. A 403 is the server refusing this change, not the
-/// credentials, which it would have refused on the read before (RFC 6638
-/// names its preconditions in a `DAV:error` body, e.g. §3.2.2.1
-/// `allowed-attendee-scheduling-object-change`).
+/// The outcome of a write (PUT or DELETE), reading the body only when it
+/// failed. Returns the new ETag on success. A 403 is the server refusing this
+/// change, not the credentials, which fail with a 401 (RFC 6638 names its
+/// preconditions in a `DAV:error` body, e.g. §3.2.2.1
+/// `allowed-attendee-scheduling-object-change`). Any other failure keeps the
+/// start of the server's text.
 async fn check_write(response: reqwest::Response) -> CaldavResult<Option<String>> {
     let status = response.status();
     if status.is_success() {
         return Ok(extract_etag(&response));
     }
+    let body = response.text().await.unwrap_or_default();
     if status == StatusCode::FORBIDDEN {
-        let body = response.text().await.unwrap_or_default();
         let body: String = body.chars().take(4096).collect();
         return Err(CaldavError::Forbidden(
             match crate::xml::dav_error_condition(&body) {
@@ -1146,18 +1155,11 @@ async fn check_write(response: reqwest::Response) -> CaldavResult<Option<String>
     }
     Err(CaldavError::Http {
         status: status.as_u16(),
-        message: status.canonical_reason().unwrap_or("").to_string(),
-    })
-}
-
-fn expect_write_success(response: &reqwest::Response) -> CaldavResult<()> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(());
-    }
-    Err(CaldavError::Http {
-        status: status.as_u16(),
-        message: status.canonical_reason().unwrap_or("").to_string(),
+        message: if body.is_empty() {
+            status.canonical_reason().unwrap_or("").to_string()
+        } else {
+            body.chars().take(200).collect()
+        },
     })
 }
 
@@ -1271,8 +1273,11 @@ END:VCALENDAR</c:calendar-data>
             Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
         );
-        let events = get_events(&client(), &cal_url, range, &creds(&server.url()))
+        let events = report_events(&client(), &cal_url, range, &creds(&server.url()))
             .await
+            .and_then(|entries| {
+                events_from_entries(entries, cal_url.as_str(), &OwnIdentity::default())
+            })
             .unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].title, "Standup");
@@ -1543,6 +1548,53 @@ END:VCALENDAR\r
         assert_eq!(updated.etag.as_deref(), Some("\"server-etag\""));
     }
 
+    /// A reminder's sound and an app-start reminder live on this device only:
+    /// changing just those leaves the server's copy as it is, so nothing is
+    /// sent.
+    #[tokio::test]
+    async fn a_sound_only_edit_sends_nothing() {
+        let mut server = Server::new_async().await;
+        let get = serve_copy(
+            &mut server,
+            standup_body("Standup").replacen(
+                "END:VEVENT\r\n",
+                "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Standup\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\nEND:VEVENT\r\n",
+                1,
+            ),
+        )
+        .await;
+        let put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .expect(0)
+            .with_status(204)
+            .create_async()
+            .await;
+
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = sample_existing_event(&cal_url);
+        edit.reminders = vec![
+            cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 10 },
+                sound: Some(cal_core::SoundConfig {
+                    source: cal_core::SoundSource::Silent,
+                    volume: 40,
+                }),
+            },
+            cal_core::Reminder {
+                kind: cal_core::ReminderKind::AppStart,
+                sound: None,
+            },
+        ];
+        update_event(&client(), edit, &creds(&server.url()), &WriteCtx::default())
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+    }
+
     /// Without the server's copy a PUT would drop what it cannot see, a
     /// meeting's guests above all, so a failed read refuses the save.
     #[tokio::test]
@@ -1648,14 +1700,14 @@ END:VCALENDAR\r
 
     /// The iCloud meeting of live round 5 (E1), as the account read it.
     fn icloud_meeting(cal_url: &Url) -> Event {
-        let mut events = crate::mapping::parse_calendar_data_with_href(
+        crate::mapping::parse_calendar_data_as(
             crate::mapping::tests::ICLOUD_MEETING,
             cal_url.as_str(),
             Some("/calendars/alice/work/series.ics"),
+            &crate::mapping::tests::icloud_identity(),
         )
-        .unwrap();
-        crate::mapping::mark_organized_by(&mut events, &crate::mapping::tests::icloud_identity());
-        events.remove(0)
+        .unwrap()
+        .remove(0)
     }
 
     fn icloud_ctx() -> WriteCtx {
@@ -1762,6 +1814,11 @@ END:VCALENDAR\r
         assert!(body.contains(block_of(SERIES_BODY, "Moved far")), "{body}");
         assert!(body.contains(block_of(SERIES_BODY, "Retitled")), "{body}");
         assert!(body.contains("SUMMARY:Weekly\\, renamed"), "{body}");
+        assert_eq!(
+            body.matches("TZID:Europe/Berlin\r\n").count(),
+            1,
+            "the rebuilt master names its zone, which is not added twice: {body}"
+        );
     }
 
     /// Skipping an occurrence adds one EXDATE line to the master and drops
@@ -1798,6 +1855,33 @@ END:VCALENDAR\r
                 1
             )
         );
+    }
+
+    /// An occurrence the series skips already, with nothing standing in its
+    /// slot, needs no write: nothing is sent, so the server sends no
+    /// scheduling message either.
+    #[tokio::test]
+    async fn skipping_a_skipped_occurrence_sends_nothing() {
+        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+            "SEQUENCE:0\r\n",
+            "RRULE:FREQ=WEEKLY;COUNT=3\r\nEXDATE:20261116T150000Z\r\nSEQUENCE:0\r\n",
+            1,
+        );
+        let recurring: &'static str = Box::leak(recurring.into_boxed_str());
+        let mut server = Server::new_async().await;
+        let (_seen, get, put) = serve_series(&mut server, recurring, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|EBFB90D1-F3C9-4E8C-B18E-211595E15C22",
+            Utc.with_ymd_and_hms(2026, 11, 16, 15, 0, 0).unwrap(),
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
     }
 
     /// A 403 on a write is the server refusing that change, not the
@@ -1956,6 +2040,71 @@ END:VCALENDAR\r
         .await
         .unwrap();
         assert_eq!(outcome, DeleteOutcome::Deleted);
+    }
+
+    /// A 403 on a delete or on an answer's PUT is the server refusing that
+    /// write, like on any other PUT: it names its precondition.
+    #[tokio::test]
+    async fn a_403_on_a_delete_or_an_answer_names_the_refused_precondition() {
+        const REFUSAL: &str =
+            r#"<?xml version="1.0"?><D:error xmlns:D="DAV:"><D:need-privileges/></D:error>"#;
+        let mut server = Server::new_async().await;
+        let _delete = server
+            .mock(
+                "DELETE",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(403)
+            .with_body(REFUSAL)
+            .create_async()
+            .await;
+        let _get = serve_copy(
+            &mut server,
+            standup_body("Standup").replacen(
+                "END:VEVENT\r\n",
+                "ORGANIZER:mailto:boss@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r\nEND:VEVENT\r\n",
+                1,
+            ),
+        )
+        .await;
+        let _put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(403)
+            .with_body(REFUSAL)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let refused = |err: CaldavError| match err {
+            CaldavError::Forbidden(msg) => assert_eq!(msg, "server-refused: need-privileges"),
+            other => panic!("expected Forbidden, got {other:?}"),
+        };
+        refused(
+            delete_event(
+                &client(),
+                &cal_url,
+                "abc-123@aperio",
+                None,
+                &creds(&server.url()),
+            )
+            .await
+            .unwrap_err(),
+        );
+        refused(
+            respond_to_event(
+                &client(),
+                &cal_url,
+                "abc-123@aperio",
+                "me@example.com",
+                AttendeeStatus::Accepted,
+                true,
+                &creds(&server.url()),
+            )
+            .await
+            .unwrap_err(),
+        );
     }
 
     #[test]
@@ -2310,14 +2459,15 @@ RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR
         assert_eq!(
             sent.matches("TZID:Europe/Berlin\r\n").count(),
             1,
-            "the zone once, not twice: {sent}"
+            "the rest of the body as it was, the zone once: {sent}"
         );
     }
 
+    /// A master update rebuilds the master and puts the overrides back as
+    /// they were. The master here is in UTC and writes no zone of its own,
+    /// but a kept override names one: the server's zone goes back with it.
     #[tokio::test]
     async fn a_kept_override_keeps_the_zone_it_names() {
-        // A zone name `chrono-tz` does not know: the master goes back in UTC
-        // and writes no zone of its own, but the override still names it.
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
 BEGIN:VTIMEZONE\r\nTZID:W. Europe Standard Time\r\n\
 BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
@@ -2331,22 +2481,35 @@ SUMMARY:Later\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
         let (seen, _get, put) = serve_series(&mut server, body, "\"server-etag\"", 1).await;
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
-
-        add_event_exdate(
+        let mut master = crate::mapping::parse_calendar_data_with_href(
+            body,
+            cal_url.as_str(),
+            Some("/calendars/alice/work/series.ics"),
+        )
+        .unwrap()
+        .remove(0);
+        master.etag = None;
+        master.title = "Weekly sync, renamed".into();
+        update_event(
             &client(),
-            &cal_url,
-            "/calendars/alice/work/series.ics|series-1",
-            moved_slot(),
+            master,
             &creds(&server.url()),
+            &WriteCtx::default(),
         )
         .await
         .unwrap();
         put.assert_async().await;
 
         let sent = seen.lock().unwrap()[0].clone();
+        assert!(sent.contains("SUMMARY:Weekly sync\\, renamed"), "{sent}");
+        assert!(
+            sent.contains(block_of(body, "SUMMARY:Later")),
+            "the override byte for byte: {sent}"
+        );
         let zone = &body[body.find("BEGIN:VTIMEZONE").unwrap()
             ..body.find("END:VTIMEZONE\r\n").unwrap() + "END:VTIMEZONE\r\n".len()];
         assert!(sent.contains(zone), "the zone byte for byte: {sent}");
+        assert_eq!(sent.matches(zone).count(), 1, "the zone once: {sent}");
         assert!(
             sent.find(zone).unwrap() < sent.find("BEGIN:VEVENT").unwrap(),
             "before the components that name it: {sent}"
@@ -2443,8 +2606,11 @@ Buenos_Aires:20260615T090000\r\nSUMMARY:x\r\nEND:VEVENT\r\n";
             Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
         );
-        let err = get_events(&client(), &cal_url, range, &creds(&server.url()))
+        let err = report_events(&client(), &cal_url, range, &creds(&server.url()))
             .await
+            .and_then(|entries| {
+                events_from_entries(entries, cal_url.as_str(), &OwnIdentity::default())
+            })
             .unwrap_err();
         match err {
             CaldavError::Http { status, .. } => assert_eq!(status, 403),

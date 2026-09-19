@@ -1247,26 +1247,34 @@ export default function EventEditorModal({
 
   // "Notify attendees", or the sentence that says who informs them: the rule
   // the desktop shares (decisions 70a, 74a, 76a).
-  const noticeCalendar = calendars.find((c) => c.id === calId);
-  const notice = attendeeNotice({
-    calendar: noticeCalendar,
-    attendees,
-    original: original ?? null,
-  });
-  const noticeSpec = notifierSentence(noticeCalendar, 'change');
-  const noticeSentence = t(noticeSpec.key, noticeSpec.values);
-  // When the sentence appears while editing (the first guest added, another
-  // calendar chosen), say it once, as the desktop does: nothing else tells
-  // VoiceOver or TalkBack that saving will now mail the guests.
-  const lastNotice = useRef<typeof notice | null>(null);
-  useEffect(() => {
-    if (loading) return;
-    const before = lastNotice.current;
-    lastNotice.current = notice;
-    if (before != null && before !== 'always' && notice === 'always') {
-      AccessibilityInfo.announceForAccessibility(noticeSentence);
+  const noticeFor = (calendarId: string, people: string[]) => {
+    const calendar = calendars.find((c) => c.id === calendarId);
+    const spec = notifierSentence(calendar, 'change');
+    return {
+      notice: attendeeNotice({ calendar, attendees: people, original: original ?? null }),
+      sentence: t(spec.key, spec.values),
+    };
+  };
+  const { notice, sentence: noticeSentence } = noticeFor(calId, attendees);
+  // When the sentence appears while editing, it is said once, as part of what
+  // the user just did, as the desktop does: nothing else tells VoiceOver or
+  // TalkBack that saving will now mail the guests. On open it is simply there.
+  // The first guest added says it with "X added" (`AttendeesEditor`); another
+  // calendar chosen says it after VoiceOver has read the picker again.
+  const noticeAfterAdding = (next: string[]): string | null => {
+    const after = noticeFor(calId, next);
+    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+  };
+  const chooseCalendar = (next: string) => {
+    setCalId(next);
+    const after = noticeFor(next, attendees);
+    if (
+      after.notice === 'always' &&
+      (notice !== 'always' || after.sentence !== noticeSentence)
+    ) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(after.sentence, { queue: true });
     }
-  }, [loading, notice, noticeSentence]);
+  };
 
   if (loading) {
     return (
@@ -1349,7 +1357,7 @@ export default function EventEditorModal({
             currentId: calId,
             includeHidden: showHiddenCalendarTargets,
           }).map((c) => ({ value: c.id, label: c.name }))}
-          onChange={setCalId}
+          onChange={chooseCalendar}
         />
       )}
 
@@ -1622,6 +1630,7 @@ export default function EventEditorModal({
         onNotifyChange={setNotifyAttendees}
         notice={notice}
         noticeSentence={noticeSentence}
+        addedNote={noticeAfterAdding}
       />
 
       {/* Free/busy — attendee availability over the entered window. Shown only

@@ -1238,9 +1238,9 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   `attendees`, Graph ebenso, aber nur beim Benachrichtigen, weil Graph
   Teilnehmer nie still schreibt. „Teilnehmer benachrichtigen“ bleibt dabei
   stehen, damit die Entfernten eine Absage bekommen können
-  (`attendeeNotice` in `@aperio/shared`, auf beiden Oberflächen). Ob
-  Exchange die Absage ohne verbleibende Gäste annimmt, ist noch nicht
-  gemessen (Live-Runde 5).
+  (`attendeeNotice` in `@aperio/shared`, auf beiden Oberflächen). Exchange
+  nimmt die Absage an den letzten entfernten Gast an und verschickt sie
+  (gemessen in Live-Runde 5, D10).
 - **Abgeleitete Termine (72a):** Wer aus einem bestehenden Termin einen neuen
   anlegt (Carve-out, Folge-Serie, Kopie, Mitnahme, Lösen bei Exchange), gibt
   dessen `organizer` und `organized_elsewhere` mit (`organizerOf` in
@@ -1275,9 +1275,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   Besprechung lehnt Aperio eine geänderte Gästeliste ab. Das Speichern einer
   Serie legt jede Ausnahme Byte für Byte zurück; „nur diesen Termin löschen“
   fügt eine einzige `EXDATE`-Zeile ein. Ändert ein Speichern nichts, was der
-  Server speichert, schickt Aperio nichts, denn jeder PUT einer Besprechung
-  mailt den Gästen. Ein 403 beim Schreiben ist die Absage des Servers, keine
-  Anmeldefrage.
+  Server speichert (etwa nur den Klang einer Erinnerung), oder ist das
+  Vorkommen schon übersprungen, schickt Aperio nichts, denn jeder PUT einer
+  Besprechung mailt den Gästen. Ein 403 beim Schreiben, Löschen oder
+  Antworten ist die Absage des Servers, keine Anmeldefrage.
 - **Sagen, was passiert (76a, 80a, 82b):** Kalender auf einem solchen Server
   und bei Microsoft 365 tragen `always_notifies_attendees` (und
   `notifier_name`). Der Editor zeigt dann statt „Teilnehmer benachrichtigen“

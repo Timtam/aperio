@@ -77,7 +77,7 @@ import {
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import type { CalendarEvent, Task } from '../../api/types';
 import { BacklogRail } from '../BacklogRail';
-import { ConfirmDialog } from '../ConfirmDialog';
+import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
   addEventExdate,
@@ -2172,16 +2172,10 @@ export function WeekView() {
         </div>
       </div>
 
-      <ConfirmDialog
-        isOpen={confirmTarget !== null}
+      <DeleteEventConfirm
+        event={confirmTarget}
         onClose={() => setConfirmTarget(null)}
-        onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget, 'series');
-        }}
-        title={t('dialogs.confirm.deleteEventTitle')}
-        message={t('dialogs.confirm.deleteEventMessage', {
-          title: confirmTarget?.title ?? '',
-        })}
+        onDelete={(ev, send) => void performDelete(ev, 'series', send)}
       />
 
       <DeleteEventScopeDialog

@@ -389,7 +389,6 @@ pub fn attendee_line(entry: &str, ending: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::parse_calendar_data;
     use crate::mapping::tests::{icloud_identity, ICLOUD_MEETING};
 
     fn master_block() -> &'static str {
@@ -407,9 +406,9 @@ mod tests {
     }
 
     fn read() -> Event {
-        let mut events = parse_calendar_data(ICLOUD_MEETING, "cal").unwrap();
-        crate::mapping::mark_organized_by(&mut events, &icloud_identity());
-        events.remove(0)
+        crate::mapping::parse_calendar_data_as(ICLOUD_MEETING, "cal", None, &icloud_identity())
+            .unwrap()
+            .remove(0)
     }
 
     const CHAIR_ROW: &str = "ATTENDEE;CN=Toni Barth;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;EMAIL=toni@example\r\n .org;ROLE=CHAIR:/aB1/principal/\r\n";

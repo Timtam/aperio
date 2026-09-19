@@ -191,8 +191,8 @@ export function useChipContextMenu(): ChipContextMenuActions {
       // been grouped yet, and on an event that IS grouped it hid the fact that
       // this is also where the group is read, added to and taken apart.
       //
-      // A local read, unlike the who-am-I lookup below: one query against
-      // Aperio's own table, no provider, so the menu can wait for it.
+      // A local read: one query against Aperio's own table, no provider, so
+      // the menu can wait for it.
       let grouped = false;
       try {
         const found = await eventGroupsForEvents([

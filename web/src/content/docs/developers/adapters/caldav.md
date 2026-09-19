@@ -129,10 +129,11 @@ Apple's well-known endpoints.
   update puts every override of the resource back byte for byte; skipping
   an occurrence inserts one raw `EXDATE` line and leaves the rest of the
   resource untouched. A save that changes nothing the server stores (only a
-  colour kept on this device, say) is not sent, because every PUT of a
-  meeting mails its guests. A 403 on a write is reported as the server's
-  refusal (`Forbidden`, with the `DAV:error` precondition), not as a login
-  problem.
+  colour kept on this device or a reminder's sound, say) is not sent, nor is
+  skipping an occurrence the series skips already, because every PUT of a
+  meeting mails its guests. A 403 on a PUT or DELETE (a save, a delete, an
+  answer to an invitation) is reported as the server's refusal (`Forbidden`,
+  with the `DAV:error` precondition), not as a login problem.
 - **Such a server always notifies.** Calendars on a scheduling server carry
   `always_notifies_attendees` (and `notifier_name` "iCloud" on iCloud): the
   editors show "iCloud informs the attendees of every change" instead of the

@@ -7,12 +7,18 @@
 //! colour, a sound or a private reminder lives on this device, and saving one
 //! would otherwise mail every guest.
 //!
-//! The comparison is exact, with the one equivalence the editors produce: no
-//! description (or location) and an empty one are the same. Reminders compare
-//! as a set, invitees by address ([`crate::attendee::same_invitees`]).
+//! The comparison is exact apart from what the editors change on their own
+//! and what no provider stores:
+//!
+//! - title, description and location compare as the editors save them:
+//!   trimmed the JavaScript way, with an empty text the same as none;
+//! - reminders compare as a set of their kinds: the sound of a reminder and
+//!   an app-start reminder live on this device only;
+//! - invitees compare by address ([`crate::attendee::same_invitees`]).
 
 use crate::attendee::same_invitees;
-use crate::{Event, EventRecurrence, Reminder};
+use crate::signatures::js_trim;
+use crate::{Event, EventRecurrence, Reminder, ReminderKind};
 
 /// A field an edit can change and a provider stores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +40,7 @@ pub enum EventField {
 /// provider stores. Host-local parts (colour label, sound) are not fields.
 pub fn changed_fields(edit: &Event, before: &Event) -> Vec<EventField> {
     let mut changed = Vec::new();
-    if edit.title != before.title {
+    if !same_text(Some(&edit.title), Some(&before.title)) {
         changed.push(EventField::Title);
     }
     if !same_text(edit.description.as_deref(), before.description.as_deref()) {
@@ -68,7 +74,7 @@ pub fn changed_fields(edit: &Event, before: &Event) -> Vec<EventField> {
 }
 
 fn same_text(a: Option<&str>, b: Option<&str>) -> bool {
-    a.unwrap_or("") == b.unwrap_or("")
+    js_trim(a.unwrap_or("")) == js_trim(b.unwrap_or(""))
 }
 
 fn same_recurrence(a: Option<&EventRecurrence>, b: Option<&EventRecurrence>) -> bool {
@@ -87,12 +93,20 @@ fn same_recurrence(a: Option<&EventRecurrence>, b: Option<&EventRecurrence>) -> 
     }
 }
 
-/// The same reminders, in any order, each as often.
+/// The same stored reminders, in any order, each as often: compared by
+/// kind, without the app-start ones.
 fn same_reminders(a: &[Reminder], b: &[Reminder]) -> bool {
+    let stored = |list: &[Reminder]| -> Vec<ReminderKind> {
+        list.iter()
+            .map(|r| r.kind.clone())
+            .filter(|k| !matches!(k, ReminderKind::AppStart))
+            .collect()
+    };
+    let (a, b) = (stored(a), stored(b));
     if a.len() != b.len() {
         return false;
     }
-    let mut left: Vec<&Reminder> = b.iter().collect();
+    let mut left: Vec<&ReminderKind> = b.iter().collect();
     a.iter().all(|r| match left.iter().position(|l| *l == r) {
         Some(i) => {
             left.swap_remove(i);
@@ -156,10 +170,17 @@ mod tests {
     fn an_unchanged_copy_has_no_changed_field() {
         let before = event();
         let mut edit = before.clone();
-        // Host-local parts, spelling and order do not count.
+        // Host-local parts, spelling and order do not count, nor what the
+        // editors trim or no provider stores.
         edit.color_label = Some(crate::ColorLabelId("label".into()));
         edit.description = Some(String::new());
+        edit.title = " Sync\u{00A0}\n".into();
         edit.reminders.reverse();
+        edit.reminders[0].sound = Some(crate::SoundConfig::default());
+        edit.reminders.push(Reminder {
+            kind: ReminderKind::AppStart,
+            sound: None,
+        });
         edit.attendees = vec!["BOB@x".into()];
         edit.recurrence
             .as_mut()
@@ -174,21 +195,36 @@ mod tests {
         let before = event();
         let mut edit = before.clone();
         edit.title = "Sync 2".into();
+        edit.description = Some("Agenda".into());
         edit.location = Some("Room 3".into());
+        edit.start -= chrono::Duration::minutes(15);
         edit.end += chrono::Duration::minutes(15);
+        edit.all_day = true;
         edit.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY".into();
         edit.reminders.pop();
         edit.attendees.push("carol@x".into());
+        edit.color_hex = Some("#336699".into());
         assert_eq!(
             changed_fields(&edit, &before),
             [
                 EventField::Title,
+                EventField::Description,
                 EventField::Location,
+                EventField::Start,
                 EventField::End,
+                EventField::AllDay,
                 EventField::Recurrence,
                 EventField::Reminders,
                 EventField::Attendees,
+                EventField::ColorHex,
             ]
         );
+        // One more of the same kind is a change, the kind of one too.
+        let mut edit = before.clone();
+        edit.reminders.push(before.reminders[0].clone());
+        assert_eq!(changed_fields(&edit, &before), [EventField::Reminders]);
+        let mut edit = before.clone();
+        edit.recurrence = None;
+        assert_eq!(changed_fields(&edit, &before), [EventField::Recurrence]);
     }
 }

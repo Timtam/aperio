@@ -69,13 +69,26 @@ pub fn parse_calendar_data_with_href(
     calendar_id: &str,
     href: Option<&str>,
 ) -> CaldavResult<Vec<Event>> {
+    parse_calendar_data_as(body, calendar_id, href, &OwnIdentity::default())
+}
+
+/// [`parse_calendar_data_with_href`] for the account `own`: whether it
+/// organizes each event, and which of the event's rows are its own, is read
+/// from the server's own text (see `map_event`). An empty `own` knows no
+/// address: then an event with an ORGANIZER counts as someone else's.
+pub fn parse_calendar_data_as(
+    body: &str,
+    calendar_id: &str,
+    href: Option<&str>,
+    own: &OwnIdentity,
+) -> CaldavResult<Vec<Event>> {
     let parsed: ICalendar = body
         .parse()
         .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
     let mut out = Vec::new();
     for comp in parsed.components {
         if let icalendar::CalendarComponent::Event(ev) = comp {
-            match map_event(&ev, calendar_id, href) {
+            match map_event(&ev, calendar_id, href, own) {
                 Ok(event) => out.push(event),
                 Err(err) => {
                     tracing::warn!(?err, "skipping unmapped VEVENT");
@@ -105,7 +118,12 @@ pub fn decode_event_id(event_id: &str) -> (Option<&str>, &str) {
 // One marker for every adapter, kept in the core.
 use cal_core::OVERRIDE_ID_MARKER as RECURRENCE_ID_MARKER;
 
-fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> CaldavResult<Event> {
+fn map_event(
+    ev: &icalendar::Event,
+    calendar_id: &str,
+    href: Option<&str>,
+    own: &OwnIdentity,
+) -> CaldavResult<Event> {
     let uid = ev
         .get_uid()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without UID".to_string()))?;
@@ -182,13 +200,18 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     // user as ORGANIZER. A server may name a calendar user by a principal path
     // or a urn rather than a `mailto:`, with the address in an EMAIL parameter
     // (iCloud does, live measurement M1); see `calendar_user_address`.
-    // Whether the account organizes the event takes its own addresses, which
-    // the adapter knows from discovery (`mark_organized_by`); unknown until then.
+    // Whether the account organizes the event is read from the ORGANIZER
+    // line itself, its value or its EMAIL, against every address of the
+    // account (decision 70a): the same rule the write side uses
+    // (`scheduling::plan_block`). An empty `own` answers nothing.
     let organizer_prop = ev.properties().get("ORGANIZER");
     let organizer_value = organizer_prop.map(|p| p.value().trim().to_string());
     let organizer = organizer_prop
         .map(calendar_user_address)
         .filter(|s| !s.is_empty());
+    let organized_by_me = organizer_prop
+        .filter(|_| !own.is_empty())
+        .map(|p| own.names(p.value(), p.params().get("EMAIL").map(|e| e.value())));
     let rows = ev
         .multi_properties()
         .get("ATTENDEE")
@@ -202,11 +225,16 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
                 .get("PARTSTAT")
                 .map(|c| caldav_partstat(c.value()))
                 .unwrap_or_default(),
+            // The organizer's own row, and on the account's own meeting any
+            // row that names the account (iCloud's ROLE=CHAIR row): the host
+            // of a meeting is never its guest (67a).
             is_organizer: organizer_value
                 .as_deref()
-                .is_some_and(|org| same_calendar_user(org, p.value())),
+                .is_some_and(|org| same_calendar_user(org, p.value()))
+                || (organized_by_me == Some(true)
+                    && own.names(p.value(), p.params().get("EMAIL").map(|e| e.value()))),
         });
-    let people = cal_core::attendee::people_from_read(organizer, None, rows);
+    let people = cal_core::attendee::people_from_read(organizer, organized_by_me, rows);
 
     // RFC 5545 `STATUS:CANCELLED` — the event was cancelled. Aperio keeps it
     // visible (subject to the show-cancelled setting) but never schedules
@@ -245,21 +273,16 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     })
 }
 
-/// Record on each event whether the connected account organizes it (decision
-/// 70a). CalDAV has no flag for it: RFC 6638 names the account by every href
-/// of its `calendar-user-address-set`, so the account organizes an event whose
-/// ORGANIZER is any of them (see [`OwnIdentity::names`]). An empty identity
-/// means the server reported no address; then no event with an organizer
-/// counts as the account's.
-pub fn mark_organized_by(events: &mut [Event], own: &OwnIdentity) {
-    for ev in events {
-        let organized_by_me = match ev.organizer.as_deref() {
-            Some(organizer) if !own.is_empty() => Some(own.names(organizer, None)),
-            _ => None,
-        };
-        ev.organized_elsewhere =
-            cal_core::attendee::organized_elsewhere(ev.organizer.as_deref(), organized_by_me);
-    }
+/// Whether an iCalendar body has an ORGANIZER line at all: only then does a
+/// read need the account's own addresses. A property starts a line; a folded
+/// continuation starts with a space, so text inside a DESCRIPTION does not
+/// count.
+pub fn names_an_organizer(body: &str) -> bool {
+    body.split('\n').any(|line| {
+        line.get(..9)
+            .is_some_and(|name| name.eq_ignore_ascii_case("ORGANIZER"))
+            && line[9..].starts_with([';', ':'])
+    })
 }
 
 /// The address a calendar-user property (ORGANIZER, ATTENDEE) names, the way
@@ -1269,14 +1292,15 @@ ORGANIZER:mailto:me@example.com\r\nATTENDEE:mailto:bob@example.com\r\n\
 END:VEVENT\r\nBEGIN:VEVENT\r\nUID:own@aperio\r\n\
 DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\nEND:VEVENT\r\n\
 END:VCALENDAR\r\n";
-        let mut events = parse_calendar_data(body, "cal-1").unwrap();
         let own = |list: &[&str]| {
             OwnIdentity::from_hrefs(
                 &list.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
                 &url::Url::parse("https://dav.example.com/principals/me/").unwrap(),
             )
         };
-        mark_organized_by(&mut events, &own(&["mailto:ME@example.com"]));
+        let read =
+            |identity: &OwnIdentity| parse_calendar_data_as(body, "cal-1", None, identity).unwrap();
+        let events = read(&own(&["mailto:ME@example.com"]));
         assert!(
             !events[0].organized_elsewhere,
             "its ORGANIZER is the account"
@@ -1285,17 +1309,14 @@ END:VCALENDAR\r\n";
             !events[1].organized_elsewhere,
             "no organizer: the account's own"
         );
-        mark_organized_by(
-            &mut events,
-            &own(&["mailto:me@alias.example", "mailto:me@example.com"]),
-        );
+        let events = read(&own(&["mailto:me@alias.example", "mailto:me@example.com"]));
         assert!(
             !events[0].organized_elsewhere,
             "its ORGANIZER is the account's second address"
         );
-        mark_organized_by(&mut events, &own(&["mailto:someone@example.com"]));
+        let events = read(&own(&["mailto:someone@example.com"]));
         assert!(events[0].organized_elsewhere);
-        mark_organized_by(&mut events, &OwnIdentity::default());
+        let events = read(&OwnIdentity::default());
         assert!(
             events[0].organized_elsewhere,
             "none reported: not confirmed"
@@ -1348,19 +1369,55 @@ END:VCALENDAR\r\n";
 
     #[test]
     fn a_principal_spelled_organizer_is_the_accounts() {
-        let mut events = parse_calendar_data(ICLOUD_MEETING, "cal-1").unwrap();
+        let events =
+            parse_calendar_data_as(ICLOUD_MEETING, "cal-1", None, &icloud_identity()).unwrap();
         assert_eq!(events[0].organizer.as_deref(), Some("toni@example.org"));
         assert_eq!(events[0].attendees, ["Bob Guest <bob@example.net>"]);
         assert_eq!(events[0].attendee_responses.len(), 1);
-        mark_organized_by(&mut events, &icloud_identity());
         assert!(!events[0].organized_elsewhere);
         // Another account sees the same copy as someone else's meeting.
         let other = OwnIdentity::from_hrefs(
             &["/zZ9/principal/".into(), "mailto:bob@example.net".into()],
             &url::Url::parse("https://p42-caldav.icloud.com/9999/principal/").unwrap(),
         );
-        mark_organized_by(&mut events, &other);
+        let events = parse_calendar_data_as(ICLOUD_MEETING, "cal-1", None, &other).unwrap();
         assert!(events[0].organized_elsewhere);
+    }
+
+    /// The read decides by the ORGANIZER line itself, as the write does: its
+    /// principal path names the account even when its EMAIL is an alias the
+    /// server did not list. And on the account's own meeting a row naming
+    /// another of its addresses is not a guest either.
+    #[test]
+    fn the_read_knows_the_account_by_the_organizer_line_itself() {
+        let body = ICLOUD_MEETING
+            .replace(
+                "ORGANIZER;CN=Toni Barth;EMAIL=toni@example.org:/aB1/principal/",
+                "ORGANIZER;CN=Toni Barth;EMAIL=alias@me.example:/aB1/principal/",
+            )
+            .replace(
+                "SEQUENCE:0\r\n",
+                "ATTENDEE;CN=Toni;PARTSTAT=ACCEPTED:urn:uuid:1974\r\nSEQUENCE:0\r\n",
+            );
+        let events = parse_calendar_data_as(&body, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(
+            !events[0].organized_elsewhere,
+            "the principal path is the account's"
+        );
+        assert_eq!(events[0].attendees, ["Bob Guest <bob@example.net>"]);
+        // Without the account's addresses nothing is known about it.
+        let events = parse_calendar_data(&body, "cal-1").unwrap();
+        assert!(events[0].organized_elsewhere);
+    }
+
+    #[test]
+    fn only_a_line_that_starts_with_organizer_names_one() {
+        assert!(names_an_organizer(ICLOUD_MEETING));
+        assert!(names_an_organizer("BEGIN:VEVENT\norganizer:mailto:a@x\n"));
+        assert!(!names_an_organizer(
+            "BEGIN:VEVENT\r\nDESCRIPTION:ask the\r\n ORGANIZER:first\r\nSUMMARY:x\r\n"
+        ));
+        assert!(!names_an_organizer("BEGIN:VEVENT\r\nORGANIZERS:x\r\n"));
     }
 
     #[test]

@@ -39,8 +39,10 @@ pub enum CaldavError {
     /// The server, or the adapter on its behalf, refused a write the account
     /// may not make: a scheduling precondition (RFC 6638 §3.2.2.1, e.g.
     /// `allowed-attendee-scheduling-object-change`) or a change only the
-    /// organizer can make. Starts with a token the frontends translate
-    /// (`reply-only-invitation:`, `server-refused:`), followed by the detail.
+    /// organizer can make. Starts with a stable token
+    /// (`reply-only-invitation:`, `server-refused:`), followed by the detail,
+    /// so a frontend can tell the two refusals apart. The frontends do not
+    /// translate it yet and show the message as it is (TODO).
     /// A 403 on a read or during discovery stays [`CaldavError::Http`]:
     /// there it means the credentials.
     #[error("refused: {0}")]
