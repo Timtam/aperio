@@ -19,6 +19,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   SeriesNotLoadedError,
+  InvitationLockedError,
 } from './moveActions';
 
 /** An expanded recurring occurrence (what the views/dialog hand in). */
@@ -58,6 +59,54 @@ function fakeDataTransfer(): DataTransfer {
     },
   } as unknown as DataTransfer;
 }
+
+describe('a meeting somebody else organizes', () => {
+  const invitation = {
+    ...occurrence(),
+    calendar_id: 'cal-icloud',
+    organized_elsewhere: true,
+  } as unknown as CalendarEvent;
+  const icloud = { invitations_reply_only: true };
+
+  it('refuses a drag to another day before anything is written (77a)', async () => {
+    // Carving an occurrence out writes a NEW event and an EXDATE — no update
+    // the host or the adapter could refuse — so this is the only guard, and
+    // the organizer would otherwise get a decline for a drag.
+    await expect(
+      moveEventToDay(invitation, '2026-07-21', 'occurrence', icloud),
+    ).rejects.toBeInstanceOf(InvitationLockedError);
+    await expect(
+      moveEventToSlot(invitation, '2026-07-21', 600, 'series', icloud),
+    ).rejects.toBeInstanceOf(InvitationLockedError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it('lets your own meeting move, and one whose calendar takes edits', async () => {
+    // A one-off row, so the move writes instead of loading a series first.
+    const oneOff = {
+      id: 'p1',
+      calendar_id: 'cal-icloud',
+      title: 'Einzeln',
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T10:00:00.000Z',
+      recurrence: null,
+      organized_elsewhere: true,
+    } as unknown as CalendarEvent;
+    await expect(
+      moveEventToDay(
+        { ...oneOff, organized_elsewhere: false } as unknown as CalendarEvent,
+        '2026-07-21',
+        'series',
+        icloud,
+      ),
+    ).resolves.toBe(true);
+    invokeMock.mockClear();
+    // The same meeting on a provider that takes an invitee's edits.
+    await expect(
+      moveEventToDay(oneOff, '2026-07-21', 'series', { invitations_reply_only: false }),
+    ).resolves.toBe(true);
+  });
+});
 
 describe('moveActions drag payloads', () => {
   it('round-trips a task drag (incl. children + legacy id)', () => {

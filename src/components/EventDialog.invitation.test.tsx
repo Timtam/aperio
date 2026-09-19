@@ -161,7 +161,9 @@ describe('EventDialog → an invitation somebody else organizes', () => {
   });
 
   it('saves the row the provider has, with only its reminders changed', async () => {
-    onFile.loaded = { ...INVITATION, title: 'Aperio R6 fremde' };
+    // The provider's copy says something the form does not: only sending the
+    // loaded row can carry it.
+    onFile.loaded = { ...INVITATION, description: 'Vom Server, nicht aus dem Formular' };
     await open();
     fireEvent.click(
       screen.getByRole('button', { name: /erinnerung hinzufügen|add reminder/i }),
@@ -175,6 +177,7 @@ describe('EventDialog → an invitation somebody else organizes', () => {
     // The row as the provider has it: the form's values never reach the wire.
     expect(sent.id).toBe('ev-inv');
     expect(sent.title).toBe('Aperio R6 fremde');
+    expect(sent.description).toBe('Vom Server, nicht aus dem Formular');
     expect(sent.attendees).toEqual(INVITATION.attendees);
     expect(sent.send_invitations).toBe(false);
     expect(sent.reminders.length).toBeGreaterThan(0);
