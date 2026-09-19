@@ -25,11 +25,17 @@ use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
+use crate::ical_raw::{component_lines, fold, insert_after_head, line_ending};
 use crate::mapping::{
-    decode_event_id, event_to_ical_preserving, new_event_to_ical, override_recurrence_id,
-    override_to_vevent, parse_calendar_data, parse_calendar_data_with_href, PriorAlarms,
+    decode_event_id, event_to_ical_preserving, format_utc_compact, new_event_to_ical,
+    override_recurrence_id, override_to_vevent, parse_calendar_data, parse_calendar_data_with_href,
+    same_calendar_user, strip_mailto_scheme, PriorAlarms,
+};
+use crate::scheduling::{
+    apply_to_block, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
 };
 use crate::xml::parse_multistatus;
+use cal_core::event_diff::changed_fields;
 use std::ops::Range;
 
 /// Read every event in `range` from the calendar collection at
@@ -128,16 +134,22 @@ fn build_calendar_query(start: DateTime<Utc>, end: DateTime<Utc>) -> String {
 /// with a fresh UUID instead of silently overwriting an unrelated
 /// event. The returned [`Event`] carries the newly assigned UID
 /// and, where the server returned one, the freshly minted ETag.
+///
+/// A new event becomes a meeting only on a server that schedules, when the
+/// user notifies and someone other than the account is invited: then it
+/// names the account as its ORGANIZER and every invitee in a row, and the
+/// server sends the invitations. Otherwise it is a plain appointment. The
+/// event returned names the invitees that were written, and nobody else.
 pub async fn create_event(
     client: &Client,
     calendar_url: &Url,
     event: NewEvent,
     credentials: &Credentials,
-    organizer: Option<&str>,
+    ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
     let uid = format!("{}@aperio", Uuid::new_v4());
     let resource = resource_url(calendar_url, &uid)?;
-    let body = new_event_to_ical(&uid, &event, organizer);
+    let (body, written, organizer) = new_event_body(&uid, &event, ctx);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -166,8 +178,7 @@ pub async fn create_event(
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
         None
     } else {
-        expect_write_success(&response)?;
-        extract_etag(&response)
+        check_write(response).await?
     };
     let now = Utc::now();
 
@@ -192,152 +203,182 @@ pub async fn create_event(
         color_hex: event.color_hex,
         reminders: event.reminders,
         sound: event.sound,
-        attendees: event.attendees,
+        attendees: written,
         created_at: now,
         updated_at: now,
         etag,
-        // Write path: organizer/RSVP metadata is read-only, populated
-        // only when reading the event back from the server.
-        organizer: None,
+        organizer,
         attendee_responses: Vec::new(),
         // Freshly created by us — never a cancellation.
         cancelled: false,
     })
 }
 
-/// Update an existing event. Uses `If-Match: <etag>` when the
-/// caller's copy carries one so a 412 surfaces conflicts the user
-/// needs to resolve. Returns the updated event with the new ETag
-/// the server emitted in the response.
+/// A new event's body, the invitees it names, and its organizer as Aperio
+/// shows it when it is a meeting.
+fn new_event_body(
+    uid: &str,
+    event: &NewEvent,
+    ctx: &WriteCtx,
+) -> (String, Vec<String>, Option<String>) {
+    let vcal = new_event_to_ical(uid, event);
+    let own = ctx.identity.clone().unwrap_or_default();
+    let invitees = invitees_of(&event.attendees, &own);
+    match ctx.organizer_address.as_deref() {
+        Some(organizer) if ctx.schedules && event.send_invitations && !invitees.is_empty() => {
+            let ending = line_ending(&vcal);
+            let mut lines = fold(&format!("ORGANIZER:{organizer}"), ending);
+            for entry in &invitees {
+                lines.push_str(&attendee_line(entry, ending));
+            }
+            let shown = strip_mailto_scheme(organizer)
+                .unwrap_or(organizer)
+                .trim()
+                .to_string();
+            (splice_into_vevent(&vcal, &lines), invitees, Some(shown))
+        }
+        _ => (vcal, Vec::new(), None),
+    }
+}
+
+/// `vcal` with `lines` inserted at the head of its first VEVENT.
+fn splice_into_vevent(vcal: &str, lines: &str) -> String {
+    if lines.is_empty() {
+        return vcal.to_string();
+    }
+    let Some(range) = component_ranges(vcal, "VEVENT").into_iter().next() else {
+        return vcal.to_string();
+    };
+    format!(
+        "{}{}{}",
+        &vcal[..range.start],
+        insert_after_head(&vcal[range.clone()], lines),
+        &vcal[range.end..]
+    )
+}
+
+/// Update an existing event.
+///
+/// Every update reads the server's copy of the resource first and writes the
+/// whole resource back: the event rebuilt from core fields, with its alarms
+/// kept ([`PriorAlarms`]) and its meeting lines carried through as the
+/// server's own text ([`crate::scheduling`]), and every other component byte
+/// for byte. A read that fails refuses the save: without the copy, the PUT
+/// would drop what it cannot see, a meeting's guests above all. A save that
+/// would change nothing the server stores is not sent: on a scheduling
+/// server it would mail every guest.
+///
+/// If-Match carries the caller's ETag when there is one: the question is
+/// whether anything changed since the user last saw it.
 ///
 /// An override id (`{href}|{uid}::rid::{slot}`) writes that one occurrence
-/// and nothing else, see [`update_override`].
+/// and nothing else, see [`update_override`]. "This and all following"
+/// (`truncate_tail_overrides` on a timed series with an UNTIL) drops the
+/// overrides past the cutoff. An ALL-DAY series keeps them all: its DATE-only
+/// UNTIL and its local-midnight RECURRENCE-IDs cannot be compared exactly, so
+/// their cross-client cleanup stays a known gap rather than a guess.
 pub async fn update_event(
     client: &Client,
     event: Event,
     credentials: &Credentials,
-    organizer: Option<&str>,
+    ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
-    // First, and never falling through: the plain PUT below would write the
+    // First, and never falling through: the master path below would write the
     // occurrence over its whole series' resource.
     if let Some((series_id, slot)) =
         cal_core::split_override_id(&event.id).map_err(|e| CaldavError::Config(e.to_string()))?
     {
         let series_id = series_id.to_string();
-        return update_override(client, event, &series_id, slot, credentials, organizer).await;
+        return update_override(client, event, &series_id, slot, credentials, ctx).await;
     }
-    // "This and all following" truncation: the master's rule now ends earlier, so
-    // any RECURRENCE-ID override in the dropped tail must go too. The plain
-    // master-only PUT below leaves them (the server reattaches its other
-    // components), so a provider-modified occurrence past the cutoff would ghost.
-    // Take the GET-merge path only when the caller asked for it AND the rule
-    // carries an UNTIL to bound the tail; otherwise fall through unchanged.
-    //
-    // TIMED series only: both the UNTIL and an override's RECURRENCE-ID resolve to
-    // exact UTC instants, so the `rid <= until` cutoff is precise. An ALL-DAY
-    // series has a DATE-only UNTIL (end-of-day UTC) while an all-day RECURRENCE-ID
-    // anchors at local midnight — mixing those mis-classifies the cutoff-day
-    // override off UTC. Rather than drop/keep the wrong one, all-day truncations
-    // fall through to the plain PUT (their cross-client override cleanup is a rare
-    // gap, unchanged from before this feature).
-    if event.truncate_tail_overrides && !event.all_day {
-        if let Some(until) = event
+    let cutoff = if event.truncate_tail_overrides && !event.all_day {
+        event
             .recurrence
             .as_ref()
             .and_then(|r| rrule_until_instant(&r.rrule))
-        {
-            return update_event_dropping_tail_overrides(
-                client,
-                event,
-                until,
-                credentials,
-                organizer,
-            )
-            .await;
-        }
-    }
-    put_master_only(client, event, credentials, organizer).await
+    } else {
+        None
+    };
+    update_master(client, event, cutoff, credentials, ctx).await
 }
 
-/// Read the alarms already on the server's copy, so the PUT below doesn't
-/// destroy what it cannot rebuild (see [`PriorAlarms`]).
-///
-/// Best effort in every direction: an event with no reminders can inherit
-/// nothing, so it is not worth a request; a read that fails costs only the
-/// preservation and never the write. The cost is one GET on a save that
-/// carries reminders — a user-initiated action, one at a time.
-async fn read_prior_alarms(
-    client: &Client,
-    resource: &Url,
-    event: &Event,
-    credentials: &Credentials,
-) -> PriorAlarms {
-    if event.reminders.is_empty() {
-        return PriorAlarms::default();
-    }
-    let Ok(mut headers) = auth_header(credentials) else {
-        return PriorAlarms::default();
-    };
-    headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
-    let Ok(response) = client
-        .get(resource.clone())
-        .headers(headers)
-        .send_retrying()
-        .await
-    else {
-        return PriorAlarms::default();
-    };
-    if !response.status().is_success() {
-        return PriorAlarms::default();
-    }
-    match response.text().await {
-        Ok(body) => PriorAlarms::read(&body),
-        Err(_) => PriorAlarms::default(),
-    }
-}
-
-/// The plain update: serialise just the master and PUT it, letting the server
-/// keep the resource's other components (overrides) on the next round-trip.
-async fn put_master_only(
+/// Write a single event or a series master back into its resource; see
+/// [`update_event`]. `cutoff` drops the overrides after it.
+async fn update_master(
     client: &Client,
     event: Event,
+    cutoff: Option<DateTime<Utc>>,
     credentials: &Credentials,
-    organizer: Option<&str>,
+    ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url_for_event(&cal_url, &event.id)?;
-    let prior = read_prior_alarms(client, &resource, &event, credentials).await;
-    let body = event_to_ical_preserving(&event, organizer, prior);
-
-    let mut headers = auth_header(credentials)?;
-    headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/calendar; charset=utf-8"),
-    );
-    // If-Match still guards with the CALLER's ETag, not one from the read
-    // above: the read is only there to see what the alarms looked like, and
-    // conflict detection has to keep answering "did this change since the user
-    // last saw it", not "since a moment ago".
-    if let Some(etag) = &event.etag {
-        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
-        headers.insert(IF_MATCH, value);
+    let (body, server_etag) = get_resource(client, &resource, credentials).await?;
+    let refused =
+        |why: &str| CaldavError::Protocol(format!("{}: {why}; nothing was saved", event.id));
+    let blocks = vevent_blocks(&body, cal_url.as_str())
+        .ok_or_else(|| refused("its resource cannot be read block by block"))?;
+    let (_, uid) = decode_event_id(&event.id);
+    let master = blocks
+        .iter()
+        .find(|b| {
+            override_recurrence_id(&b.event.id).is_none() && decode_event_id(&b.event.id).1 == uid
+        })
+        .ok_or_else(|| refused("its resource holds no such event"))?;
+    if !one_organizer(&body, &blocks) {
+        return Err(refused("its components name different organizers"));
     }
-
-    let response = client
-        .put(resource.clone())
-        .headers(headers)
-        .body(body)
-        .send_retrying()
-        .await?;
-    expect_write_success(&response)?;
-    let new_etag = extract_etag(&response);
+    let plan = plan_block(&body[master.range.clone()], &event, ctx)?;
+    if cutoff.is_none()
+        && plan.change == PeopleChange::Keep
+        && changed_fields(&event, &master.event).is_empty()
+    {
+        return Ok(Event {
+            etag: server_etag.or(event.etag.clone()),
+            ..event
+        });
+    }
+    let master_vcal = splice_into_vevent(
+        &event_to_ical_preserving(&event, PriorAlarms::read(&body)),
+        &plan.lines,
+    );
+    let new_body = merge_with_overrides(
+        &body,
+        &master_vcal,
+        cal_url.as_str(),
+        |rid| cutoff.is_none_or(|until| rid <= until),
+        |block| apply_to_block(block, &plan.change),
+    )
+    .ok_or_else(|| refused("its resource cannot be read block by block"))?;
+    let if_match = event.etag.as_deref().or(server_etag.as_deref());
+    let new_etag = put_resource(client, &resource, new_body, if_match, credentials).await?;
 
     Ok(Event {
-        etag: new_etag.or(event.etag),
+        etag: new_etag.or(server_etag).or(event.etag.clone()),
         updated_at: Utc::now(),
         ..event
     })
+}
+
+/// Whether the components of a resource name one organizer at most. RFC 6638
+/// §3.2.4.2 wants every component of a scheduling object to name the same
+/// one; a resource that does not is not written.
+fn one_organizer(body: &str, blocks: &[VeventBlock]) -> bool {
+    let mut seen: Option<String> = None;
+    for block in blocks {
+        for line in component_lines(&body[block.range.clone()]) {
+            if line.name != "ORGANIZER" {
+                continue;
+            }
+            match &seen {
+                Some(first) if !same_calendar_user(first, &line.value) => return false,
+                Some(_) => {}
+                None => seen = Some(line.value.clone()),
+            }
+        }
+    }
+    true
 }
 
 /// Write one changed occurrence, `event`, into its series' resource.
@@ -346,7 +387,8 @@ async fn put_master_only(
 /// the series' resource, with the series' UID and a RECURRENCE-ID that names the
 /// slot. A PUT replaces the whole resource, so this reads the resource, swaps
 /// that one block for the rewritten occurrence, and puts everything else back
-/// byte for byte: the master, the other overrides, the time zones.
+/// byte for byte: the master, the other overrides, the time zones. The
+/// occurrence's own meeting lines are carried as for a master.
 ///
 /// Refused rather than widened. If the resource cannot be read block by block,
 /// or no override stands in the slot any more, nothing is written: the only
@@ -360,7 +402,7 @@ async fn update_override(
     series_id: &str,
     slot: DateTime<Utc>,
     credentials: &Credentials,
-    organizer: Option<&str>,
+    ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
@@ -382,45 +424,63 @@ async fn update_override(
                 && cal_core::series_master_id(&b.event.id) == uid
         })
         .ok_or_else(|| refused("it is no longer an exception in the series"))?;
-    let recurrence_id = recurrence_id_lines(&body[block.range.clone()])
+    let server_block = &body[block.range.clone()];
+    let plan = plan_block(server_block, &event, ctx)?;
+    if plan.change == PeopleChange::Keep && changed_fields(&event, &block.event).is_empty() {
+        return Ok(Event {
+            etag: server_etag.or(event.etag.clone()),
+            ..event
+        });
+    }
+    let recurrence_id = recurrence_id_lines(server_block)
         .ok_or_else(|| refused("its block carries no RECURRENCE-ID"))?;
     let rendered = override_to_vevent(
         &event,
         series_id,
         &recurrence_id,
-        organizer,
         PriorAlarms::read_occurrence(&body, slot),
     );
     let new_body = format!(
         "{}{}{}",
         &body[..block.range.start],
-        rendered,
+        insert_after_head(&rendered, &plan.lines),
         &body[block.range.end..]
     );
-
-    let mut headers = auth_header(credentials)?;
-    headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/calendar; charset=utf-8"),
-    );
-    if let Some(tag) = event.etag.as_ref().or(server_etag.as_ref()) {
-        let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
-        headers.insert(IF_MATCH, value);
-    }
-    let response = client
-        .put(resource)
-        .headers(headers)
-        .body(new_body)
-        .send_retrying()
-        .await?;
-    expect_write_success(&response)?;
-    let new_etag = extract_etag(&response);
+    let if_match = event.etag.as_deref().or(server_etag.as_deref());
+    let new_etag = put_resource(client, &resource, new_body, if_match, credentials).await?;
 
     Ok(Event {
         etag: new_etag.or(event.etag.clone()),
         updated_at: Utc::now(),
         ..event
     })
+}
+
+/// PUT `body` over `resource`, guarded by `if_match` when given. Returns the
+/// new ETag, when the server sent one.
+async fn put_resource(
+    client: &Client,
+    resource: &Url,
+    body: String,
+    if_match: Option<&str>,
+    credentials: &Credentials,
+) -> CaldavResult<Option<String>> {
+    let mut headers = auth_header(credentials)?;
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/calendar; charset=utf-8"),
+    );
+    if let Some(tag) = if_match {
+        let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
+        headers.insert(IF_MATCH, value);
+    }
+    let response = client
+        .put(resource.clone())
+        .headers(headers)
+        .body(body)
+        .send_retrying()
+        .await?;
+    check_write(response).await
 }
 
 /// GET a resource: its body and ETag. A 404 comes back as
@@ -514,110 +574,42 @@ fn recurrence_id_lines(block: &str) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
-/// "This and all following" write: GET the resource, replace the master with the
-/// truncated `event`, KEEP every RECURRENCE-ID override at/before `until` verbatim
-/// (so per-instance edits/VALARMs/X-props survive byte-for-byte), and DROP the
-/// overrides after `until` (the deleted tail). Falls back to the plain master-only
-/// PUT on any parse ambiguity, so it is never worse than today.
-async fn update_event_dropping_tail_overrides(
-    client: &Client,
-    event: Event,
-    until: DateTime<Utc>,
-    credentials: &Credentials,
-    organizer: Option<&str>,
-) -> CaldavResult<Event> {
-    let cal_url = Url::parse(&event.calendar_id)
-        .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
-    let resource = resource_url_for_event(&cal_url, &event.id)?;
-
-    // GET the current resource (raw body + ETag) to recover the override VEVENTs.
-    let mut get_headers = auth_header(credentials)?;
-    get_headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
-    let get = client
-        .get(resource.clone())
-        .headers(get_headers)
-        .send_retrying()
-        .await?;
-    if !get.status().is_success() {
-        // Can't read it back — fall through to the plain PUT (no worse than today).
-        return put_master_only(client, event, credentials, organizer).await;
-    }
-    let server_etag = extract_etag(&get);
-    let body = get.text().await?;
-
-    // Master via event_to_ical (new RRULE/UNTIL + VTIMEZONE); merge keeps the
-    // in-range override blocks verbatim and drops the tail. A parse mismatch →
-    // bail to the plain PUT (never worse than today). The body is already in
-    // hand, so the master's untouched alarms keep their identity for free —
-    // the overrides' alarms survive anyway, being spliced back verbatim.
-    let master_vcal = event_to_ical_preserving(&event, organizer, PriorAlarms::read(&body));
-    let new_body =
-        match merge_with_overrides(&body, &master_vcal, cal_url.as_str(), |rid| rid <= until) {
-            Some(b) => b,
-            None => return put_master_only(client, event, credentials, organizer).await,
-        };
-
-    let mut put_headers = auth_header(credentials)?;
-    put_headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/calendar; charset=utf-8"),
-    );
-    // If-Match against the FRESH server ETag (we just read the truth) so a
-    // concurrent edit surfaces as 412 rather than a silent clobber.
-    if let Some(tag) = &server_etag {
-        if let Ok(v) = HeaderValue::from_str(tag) {
-            put_headers.insert(IF_MATCH, v);
-        }
-    }
-    let put = client
-        .put(resource)
-        .headers(put_headers)
-        .body(new_body)
-        .send_retrying()
-        .await?;
-    expect_write_success(&put)?;
-    let new_etag = extract_etag(&put);
-
-    Ok(Event {
-        etag: new_etag.or(server_etag).or(event.etag.clone()),
-        updated_at: Utc::now(),
-        ..event
-    })
-}
-
 /// Rebuild a resource around a rewritten master: `master_vcal` (a VCALENDAR
 /// holding just the new master, from `event_to_ical`) with the RECURRENCE-ID
-/// overrides of `body` that `keep` accepts spliced back in, and the others
-/// dropped. A "this and all following" truncation keeps the overrides up to its
-/// cutoff; skipping one occurrence keeps all but the one in its slot.
+/// overrides of `body` that `keep` accepts spliced back in, each through
+/// `transform`, and the others dropped. A "this and all following" truncation
+/// keeps the overrides up to its cutoff; `transform` carries a change to the
+/// meeting's guests into every occurrence (see `scheduling::apply_to_block`).
 ///
 /// Overrides are identified from the MAPPED events (so a `TZID`/all-day
 /// RECURRENCE-ID is zone-resolved correctly) but their raw VEVENT text is kept
-/// byte-for-byte, so per-instance edits / VALARMs / X-props survive intact. A
-/// kept override may name a zone the new master does not, so every VTIMEZONE of
-/// `body` that `master_vcal` lacks comes along with them, byte-for-byte too.
-/// Returns `None` when the parsed events and raw blocks don't correspond 1:1 (an
-/// unmappable VEVENT, an odd shape) so the caller can fall back safely.
+/// byte-for-byte apart from what `transform` changes, so per-instance edits /
+/// VALARMs / X-props survive intact. A kept override may name a zone the new
+/// master does not, so every VTIMEZONE of `body` that `master_vcal` lacks comes
+/// along with them, byte-for-byte too. Returns `None` when the parsed events
+/// and raw blocks don't correspond 1:1 (an unmappable VEVENT, an odd shape).
 fn merge_with_overrides(
     body: &str,
     master_vcal: &str,
     calendar_id: &str,
     keep: impl Fn(DateTime<Utc>) -> bool,
+    transform: impl Fn(&str) -> String,
 ) -> Option<String> {
     let blocks = vevent_blocks(body, calendar_id)?;
-    let kept: Vec<&str> = blocks
+    let kept: Vec<String> = blocks
         .iter()
         .filter_map(|b| match override_recurrence_id(&b.event.id) {
             // Master VEVENT → replaced by the new master in `master_vcal`.
             None => None,
-            Some(rid) if keep(rid) => Some(&body[b.range.clone()]),
+            Some(rid) if keep(rid) => Some(transform(&body[b.range.clone()])),
             Some(_) => None,
         })
         .collect();
     if kept.is_empty() {
         return Some(master_vcal.to_string());
     }
-    let merged = splice_overrides_before_end(master_vcal, &kept);
+    let refs: Vec<&str> = kept.iter().map(String::as_str).collect();
+    let merged = splice_overrides_before_end(master_vcal, &refs);
     Some(with_missing_vtimezones(merged, body))
 }
 
@@ -803,19 +795,17 @@ pub async fn delete_event(
     Ok(DeleteOutcome::Deleted)
 }
 
-/// Skip one occurrence of a recurring series: append `occurrence` to the
-/// master's EXDATE list, and drop the override that stands in that slot if
-/// there is one. Mirrors the EXDATE handling that the local adapter has for
-/// "delete only this occurrence" of a recurring event. An override moved far
-/// from its slot is found all the same: it is recognised by its RECURRENCE-ID,
-/// the slot, not by where it now starts.
+/// Skip one occurrence of a recurring series: add `occurrence` to the
+/// master's EXDATEs, and drop the override that stands in that slot if there
+/// is one. An override moved far from its slot is found all the same: it is
+/// recognised by its RECURRENCE-ID, the slot, not by where it now starts.
 ///
-/// A PUT replaces the whole resource. The master is rebuilt from core fields
-/// with its new EXDATE, as for any master write: its alarms survive, properties
-/// Aperio does not model do not (see [`event_to_ical_preserving`]). Every other
-/// override goes back byte for byte, and so do the time zones they name. A body
-/// that cannot be read block by block gets the master alone, as every body did
-/// before overrides were kept.
+/// Nothing else of the resource changes. The EXDATE is inserted as one raw
+/// line into the master's own text, so its alarms, its meeting lines and
+/// everything Aperio does not model stay as the server wrote them. On the
+/// organizer's copy of a meeting an RFC 6638 server then cancels that one
+/// occurrence for its guests (§3.2.1.2); on an attendee's copy it declines
+/// it. A resource that cannot be read block by block is not written.
 ///
 /// A resource can hold overrides without their master: an invitation to one
 /// occurrence of somebody else's series arrives that way. Skipping such an
@@ -836,36 +826,43 @@ pub async fn add_event_exdate(
     // Match on the UID component — `event_id` may be the composite
     // `{href}|{uid}` while the freshly-parsed bodies carry bare UIDs.
     let (_, want_uid) = decode_event_id(event_id);
-    let mut events = parse_calendar_data(&body, calendar_url.as_str())?;
-    let new_body = match events
-        .iter_mut()
-        .find(|e| decode_event_id(&e.id).1 == want_uid)
-    {
+    let blocks = vevent_blocks(&body, calendar_url.as_str()).ok_or_else(|| {
+        CaldavError::Protocol(format!(
+            "event '{event_id}': its resource cannot be read block by block; nothing was changed"
+        ))
+    })?;
+    let in_slot = blocks.iter().find(|b| {
+        override_recurrence_id(&b.event.id) == Some(occurrence)
+            && cal_core::series_master_id(&b.event.id) == want_uid
+    });
+    let master = blocks.iter().find(|b| {
+        override_recurrence_id(&b.event.id).is_none() && decode_event_id(&b.event.id).1 == want_uid
+    });
+    let new_body = match master {
         Some(master) => {
-            let Some(recurrence) = master.recurrence.as_mut() else {
+            let Some(recurrence) = master.event.recurrence.as_ref() else {
                 return Err(CaldavError::Discovery(format!(
                     "event '{event_id}' is not recurring"
                 )));
             };
-            if !recurrence.exceptions.contains(&occurrence) {
-                recurrence.exceptions.push(occurrence);
+            let master_text = &body[master.range.clone()];
+            let new_master = if recurrence.exceptions.contains(&occurrence) {
+                master_text.to_string()
+            } else {
+                let ending = line_ending(master_text);
+                insert_after_head(
+                    master_text,
+                    &format!("EXDATE:{}{ending}", format_utc_compact(occurrence)),
+                )
+            };
+            let mut edits = vec![(master.range.clone(), new_master)];
+            if let Some(block) = in_slot {
+                edits.push((block.range.clone(), String::new()));
             }
-            // Re-serialising the master after an EXDATE skip — never a
-            // scheduling write, so no organizer. Skipping one occurrence changes
-            // nothing about the alarms, so they all come back exactly as the
-            // server had them: the body we just read is right here.
-            let master_vcal = event_to_ical_preserving(master, None, PriorAlarms::read(&body));
-            merge_with_overrides(&body, &master_vcal, calendar_url.as_str(), |rid| {
-                rid != occurrence
-            })
-            .unwrap_or(master_vcal)
+            replace_ranges(&body, edits)
         }
         None => {
-            let blocks = vevent_blocks(&body, calendar_url.as_str()).unwrap_or_default();
-            let Some(block) = blocks.iter().find(|b| {
-                override_recurrence_id(&b.event.id) == Some(occurrence)
-                    && cal_core::series_master_id(&b.event.id) == want_uid
-            }) else {
+            let Some(block) = in_slot else {
                 return Err(CaldavError::Discovery(format!(
                     "event '{event_id}' missing from its own resource"
                 )));
@@ -873,30 +870,25 @@ pub async fn add_event_exdate(
             if blocks.len() == 1 {
                 return delete_resource(client, &resource, etag.as_deref(), credentials).await;
             }
-            format!("{}{}", &body[..block.range.start], &body[block.range.end..])
+            replace_ranges(&body, vec![(block.range.clone(), String::new())])
         }
     };
-
-    // If-Match guards against a race with a concurrent edit; without an ETag
-    // we send the request anyway — the server will still accept it.
-    let mut put_headers = auth_header(credentials)?;
-    put_headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/calendar; charset=utf-8"),
-    );
-    if let Some(tag) = etag {
-        if let Ok(v) = HeaderValue::from_str(&tag) {
-            put_headers.insert(IF_MATCH, v);
-        }
-    }
-    let put = client
-        .put(resource)
-        .headers(put_headers)
-        .body(new_body)
-        .send_retrying()
-        .await?;
-    expect_write_success(&put)?;
+    put_resource(client, &resource, new_body, etag.as_deref(), credentials).await?;
     Ok(())
+}
+
+/// `body` with each range replaced by its text. The ranges must not overlap.
+fn replace_ranges(body: &str, mut edits: Vec<(Range<usize>, String)>) -> String {
+    edits.sort_by_key(|(range, _)| range.start);
+    let mut out = String::with_capacity(body.len());
+    let mut from = 0;
+    for (range, text) in edits {
+        out.push_str(&body[from..range.start]);
+        out.push_str(&text);
+        from = range.end;
+    }
+    out.push_str(&body[from..]);
+    out
 }
 
 /// DELETE a resource whose last occurrence was just skipped. A 404 means it is
@@ -1129,6 +1121,35 @@ fn extract_etag(response: &reqwest::Response) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// The outcome of a write, reading the body only when it failed. Returns the
+/// new ETag on success. A 403 is the server refusing this change, not the
+/// credentials, which it would have refused on the read before (RFC 6638
+/// names its preconditions in a `DAV:error` body, e.g. §3.2.2.1
+/// `allowed-attendee-scheduling-object-change`).
+async fn check_write(response: reqwest::Response) -> CaldavResult<Option<String>> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(extract_etag(&response));
+    }
+    if status == StatusCode::FORBIDDEN {
+        let body = response.text().await.unwrap_or_default();
+        let body: String = body.chars().take(4096).collect();
+        return Err(CaldavError::Forbidden(
+            match crate::xml::dav_error_condition(&body) {
+                Some(condition) if condition == "allowed-attendee-scheduling-object-change" => {
+                    format!("reply-only-invitation: {condition}")
+                }
+                Some(condition) => format!("server-refused: {condition}"),
+                None => "server-refused: HTTP 403".to_string(),
+            },
+        ));
+    }
+    Err(CaldavError::Http {
+        status: status.as_u16(),
+        message: status.canonical_reason().unwrap_or("").to_string(),
+    })
+}
+
 fn expect_write_success(response: &reqwest::Response) -> CaldavResult<()> {
     let status = response.status();
     if status.is_success() {
@@ -1301,7 +1322,7 @@ END:VCALENDAR</c:calendar-data>
             &cal_url,
             sample_new_event(),
             &creds(&server.url()),
-            None,
+            &WriteCtx::default(),
         )
         .await
         .unwrap();
@@ -1356,9 +1377,15 @@ END:VCALENDAR</c:calendar-data>
         });
 
         let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
-        let created = create_event(&client(), &cal_url, sample_new_event(), &creds(&base), None)
-            .await
-            .expect("412 after a retried send means the first PUT landed");
+        let created = create_event(
+            &client(),
+            &cal_url,
+            sample_new_event(),
+            &creds(&base),
+            &WriteCtx::default(),
+        )
+        .await
+        .expect("412 after a retried send means the first PUT landed");
 
         assert!(created.id.contains("@aperio"));
         assert!(created.etag.is_none(), "a 412 carries no ETag");
@@ -1367,9 +1394,31 @@ END:VCALENDAR</c:calendar-data>
         assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
     }
 
+    /// A plain event's copy on the server, with `summary` as its title.
+    fn standup_body(summary: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:abc-123@aperio\r\nDTSTAMP:20260520T060000Z\r\nSUMMARY:{summary}\r\nDTSTART:20260520T080000Z\r\nDTEND:20260520T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
+    async fn serve_copy(server: &mut Server, body: String) -> mockito::Mock {
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(200)
+            .with_header("content-type", "text/calendar")
+            .with_header("etag", "\"server-etag\"")
+            .with_body(body)
+            .create_async()
+            .await
+    }
+
     #[tokio::test]
     async fn update_event_sends_if_match_with_existing_etag() {
         let mut server = Server::new_async().await;
+        let get = serve_copy(&mut server, standup_body("Old standup")).await;
         let m = server
             .mock(
                 "PUT",
@@ -1382,56 +1431,29 @@ END:VCALENDAR</c:calendar-data>
             .await;
 
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
-        let existing = Event {
-            keep_attendees: false,
-            clear_attendees: false,
-            organized_elsewhere: false,
-            id: "abc-123@aperio".into(),
-            calendar_id: cal_url.to_string(),
-            title: "Standup".into(),
-            description: None,
-            location: None,
-            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
-            end: Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap(),
-            all_day: false,
-            recurrence: None,
-            color_label: None,
-            color_hex: None,
-            reminders: Vec::new(),
-            sound: None,
-            attendees: Vec::new(),
-            send_invitations: false,
-            truncate_tail_overrides: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            etag: Some("\"old-etag\"".into()),
-            organizer: None,
-            attendee_responses: Vec::new(),
-            cancelled: false,
-        };
-        let updated = update_event(&client(), existing, &creds(&server.url()), None)
-            .await
-            .unwrap();
+        let updated = update_event(
+            &client(),
+            sample_existing_event(&cal_url),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        get.assert_async().await;
         m.assert_async().await;
         assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
     }
 
     #[tokio::test]
     async fn update_reads_the_server_copy_and_puts_apples_mark_back() {
-        // The wiring, end to end: a plain update has no body in hand, so it
-        // reads the server's copy first and hands the alarms to the renderer.
-        // Without that read the PUT would spell Apple's own default alert as a
-        // hand-made alarm and the Calendar app would stop recognising it.
+        // Every update reads the server's copy first and hands its alarms to
+        // the renderer. Without that the PUT would spell Apple's own default
+        // alert as a hand-made alarm and the Calendar app would stop
+        // recognising it.
         let mut server = Server::new_async().await;
-        let get = server
-            .mock(
-                "GET",
-                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
-            )
-            .with_status(200)
-            .with_header("content-type", "text/calendar")
-            .with_body(
-                "BEGIN:VCALENDAR\r
+        let get = serve_copy(
+            &mut server,
+            "BEGIN:VCALENDAR\r
 VERSION:2.0\r
 BEGIN:VEVENT\r
 UID:abc-123@aperio\r
@@ -1449,10 +1471,10 @@ X-APPLE-DEFAULT-ALARM:TRUE\r
 END:VALARM\r
 END:VEVENT\r
 END:VCALENDAR\r
-",
-            )
-            .create_async()
-            .await;
+"
+            .to_string(),
+        )
+        .await;
         let put = server
             .mock(
                 "PUT",
@@ -1469,60 +1491,62 @@ END:VCALENDAR\r
 
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
+            title: "Standup, moved".into(),
             reminders: vec![cal_core::Reminder {
                 kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
                 sound: None,
             }],
             ..sample_existing_event(&cal_url)
         };
-        update_event(&client(), existing, &creds(&server.url()), None)
-            .await
-            .unwrap();
+        update_event(
+            &client(),
+            existing,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
         get.assert_async().await;
         put.assert_async().await;
     }
 
+    /// A save that changes nothing the server stores (a colour kept on this
+    /// device, a sound, a private reminder) is not sent: on a scheduling
+    /// server every PUT of a meeting mails its guests (decision 76a).
     #[tokio::test]
-    async fn update_without_reminders_does_not_read_first() {
-        // Nothing to inherit, so the extra round-trip would buy nothing.
-        // Asserted by a GET mock that must never be hit — without it this test
-        // passed whether the read happened or not.
+    async fn an_update_that_changes_nothing_sends_nothing() {
         let mut server = Server::new_async().await;
-        let get = server
-            .mock(
-                "GET",
-                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
-            )
-            .expect(0)
-            .with_status(200)
-            .create_async()
-            .await;
+        let get = serve_copy(&mut server, standup_body("Standup")).await;
         let put = server
             .mock(
                 "PUT",
                 mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
             )
+            .expect(0)
             .with_status(204)
-            .with_header("etag", "\"new-etag\"")
             .create_async()
             .await;
 
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
-        update_event(
+        let mut unchanged = sample_existing_event(&cal_url);
+        unchanged.color_label = Some(cal_core::ColorLabelId("label".into()));
+        let updated = update_event(
             &client(),
-            sample_existing_event(&cal_url),
+            unchanged,
             &creds(&server.url()),
-            None,
+            &WriteCtx::default(),
         )
         .await
         .unwrap();
-        put.assert_async().await;
         get.assert_async().await;
+        put.assert_async().await;
+        assert_eq!(updated.etag.as_deref(), Some("\"server-etag\""));
     }
 
+    /// Without the server's copy a PUT would drop what it cannot see, a
+    /// meeting's guests above all, so a failed read refuses the save.
     #[tokio::test]
-    async fn a_failed_read_costs_the_mark_and_not_the_save() {
-        // The preservation is a courtesy; the write is the job.
+    async fn a_failed_read_refuses_the_save() {
         let mut server = Server::new_async().await;
         let _get = server
             .mock(
@@ -1537,24 +1561,25 @@ END:VCALENDAR\r
                 "PUT",
                 mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
             )
+            .expect(0)
             .with_status(204)
-            .with_header("etag", "\"new-etag\"")
             .create_async()
             .await;
 
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
-        let existing = Event {
-            reminders: vec![cal_core::Reminder {
-                kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
-                sound: None,
-            }],
-            ..sample_existing_event(&cal_url)
-        };
-        let updated = update_event(&client(), existing, &creds(&server.url()), None)
-            .await
-            .unwrap();
+        let err = update_event(
+            &client(),
+            sample_existing_event(&cal_url),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, CaldavError::Http { status: 500, .. }),
+            "{err:?}"
+        );
         put.assert_async().await;
-        assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
     }
 
     /// The event as the caller holds it before an update: on the server
@@ -1592,6 +1617,7 @@ END:VCALENDAR\r
     #[tokio::test]
     async fn update_event_412_surfaces_as_conflict() {
         let mut server = Server::new_async().await;
+        let _get = serve_copy(&mut server, standup_body("Old standup")).await;
         let _m = server
             .mock(
                 "PUT",
@@ -1603,39 +1629,280 @@ END:VCALENDAR\r
             .await;
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
-            keep_attendees: false,
-            clear_attendees: false,
-            organized_elsewhere: false,
-            id: "abc-123@aperio".into(),
-            calendar_id: cal_url.to_string(),
-            title: "Standup".into(),
-            description: None,
-            location: None,
-            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
-            end: Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap(),
-            all_day: false,
-            recurrence: None,
-            color_label: None,
-            color_hex: None,
-            reminders: Vec::new(),
-            sound: None,
-            attendees: Vec::new(),
-            send_invitations: false,
-            truncate_tail_overrides: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),
-            organizer: None,
-            attendee_responses: Vec::new(),
-            cancelled: false,
+            ..sample_existing_event(&cal_url)
         };
-        let err = update_event(&client(), existing, &creds(&server.url()), None)
-            .await
-            .unwrap_err();
+        let err = update_event(
+            &client(),
+            existing,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
         match err {
             CaldavError::Http { status, .. } => assert_eq!(status, 412),
             other => panic!("expected 412, got {other:?}"),
         }
+    }
+
+    /// The iCloud meeting of live round 5 (E1), as the account read it.
+    fn icloud_meeting(cal_url: &Url) -> Event {
+        let mut events = crate::mapping::parse_calendar_data_with_href(
+            crate::mapping::tests::ICLOUD_MEETING,
+            cal_url.as_str(),
+            Some("/calendars/alice/work/series.ics"),
+        )
+        .unwrap();
+        crate::mapping::mark_organized_by(&mut events, &crate::mapping::tests::icloud_identity());
+        events.remove(0)
+    }
+
+    fn icloud_ctx() -> WriteCtx {
+        WriteCtx {
+            identity: Some(crate::mapping::tests::icloud_identity()),
+            schedules: true,
+            organizer_address: Some("mailto:toni@example.org".into()),
+        }
+    }
+
+    /// E1: renaming an iCloud meeting the account organizes, without
+    /// "Notify attendees", used to PUT it without ORGANIZER and ATTENDEE, and
+    /// iCloud cancelled it for the guest. Now every meeting line goes back as
+    /// the server wrote it, folding and parameter order included.
+    #[tokio::test]
+    async fn a_title_edit_of_an_organized_meeting_keeps_its_people_byte_for_byte() {
+        let mut server = Server::new_async().await;
+        let (seen, get, put) = serve_series(
+            &mut server,
+            crate::mapping::tests::ICLOUD_MEETING,
+            "\"server-etag\"",
+            1,
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = icloud_meeting(&cal_url);
+        edit.title = "Aperio R6 renamed".into();
+        edit.send_invitations = false;
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+        let body = seen.lock().unwrap()[0].clone();
+        for line in [
+            "ORGANIZER;CN=Toni Barth;EMAIL=toni@example.org:/aB1/principal/\r\n",
+            "ATTENDEE;CN=Toni Barth;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;EMAIL=toni@example\r\n .org;ROLE=CHAIR:/aB1/principal/\r\n",
+            "ATTENDEE;CN=Bob Guest;CUTYPE=INDIVIDUAL;EMAIL=bob@example.net;SCHEDULE-STATUS=\r\n 1.1:mailto:bob@example.net\r\n",
+            "SEQUENCE:0\r\n",
+            "SUMMARY:Aperio R6 renamed\r\n",
+        ] {
+            assert!(body.contains(line), "missing {line:?} in\n{body}");
+        }
+        assert_eq!(body.matches("ORGANIZER").count(), 1, "{body}");
+        assert_eq!(body.matches("ATTENDEE").count(), 2, "{body}");
+    }
+
+    /// Adding a guest keeps the other rows verbatim and writes one new row.
+    #[tokio::test]
+    async fn a_new_guest_joins_the_rows_the_server_wrote() {
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(
+            &mut server,
+            crate::mapping::tests::ICLOUD_MEETING,
+            "\"server-etag\"",
+            1,
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = icloud_meeting(&cal_url);
+        edit.attendees.push("carol@example.net".into());
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let body = seen.lock().unwrap()[0].clone();
+        assert_eq!(body.matches("ATTENDEE").count(), 3, "{body}");
+        assert!(
+            body.contains("RSVP=TRUE:mailto:carol@\r\n example.net\r\n"),
+            "{body}"
+        );
+        assert!(
+            body.contains("SCHEDULE-STATUS=\r\n 1.1:mailto:bob@example.net\r\n"),
+            "{body}"
+        );
+    }
+
+    /// A master update puts every override of its resource back, byte for
+    /// byte: nothing is left to a server "re-attaching" what the PUT omitted.
+    #[tokio::test]
+    async fn a_master_update_puts_every_override_back() {
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, SERIES_BODY, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut events = crate::mapping::parse_calendar_data_with_href(
+            SERIES_BODY,
+            cal_url.as_str(),
+            Some("/calendars/alice/work/series.ics"),
+        )
+        .unwrap();
+        let mut master = events.remove(0);
+        master.etag = None;
+        master.title = "Weekly, renamed".into();
+        update_event(
+            &client(),
+            master,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let body = seen.lock().unwrap()[0].clone();
+        assert!(body.contains(block_of(SERIES_BODY, "Moved far")), "{body}");
+        assert!(body.contains(block_of(SERIES_BODY, "Retitled")), "{body}");
+        assert!(body.contains("SUMMARY:Weekly\\, renamed"), "{body}");
+    }
+
+    /// Skipping an occurrence adds one EXDATE line to the master and drops
+    /// the override in that slot; every other byte stays: the meeting lines,
+    /// the alarm, Apple's own properties.
+    #[tokio::test]
+    async fn skipping_an_occurrence_splices_only_the_exdate() {
+        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+            "SEQUENCE:0\r\n",
+            "RRULE:FREQ=WEEKLY;COUNT=3\r\nSEQUENCE:0\r\n",
+            1,
+        );
+        let recurring: &'static str = Box::leak(recurring.into_boxed_str());
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, recurring, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let slot = Utc.with_ymd_and_hms(2026, 11, 16, 15, 0, 0).unwrap();
+        add_event_exdate(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|EBFB90D1-F3C9-4E8C-B18E-211595E15C22",
+            slot,
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let body = seen.lock().unwrap()[0].clone();
+        assert_eq!(
+            body,
+            recurring.replacen(
+                "BEGIN:VEVENT\r\n",
+                "BEGIN:VEVENT\r\nEXDATE:20261116T150000Z\r\n",
+                1
+            )
+        );
+    }
+
+    /// A 403 on a write is the server refusing that change, not the
+    /// credentials: it names its precondition.
+    #[tokio::test]
+    async fn a_403_on_a_write_names_the_refused_precondition() {
+        let mut server = Server::new_async().await;
+        let _get = serve_copy(&mut server, standup_body("Old standup")).await;
+        let _put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .with_status(403)
+            .with_body(
+                r#"<?xml version="1.0"?><D:error xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><C:allowed-attendee-scheduling-object-change/></D:error>"#,
+            )
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = update_event(
+            &client(),
+            sample_existing_event(&cal_url),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            CaldavError::Forbidden(msg) => assert_eq!(
+                msg,
+                "reply-only-invitation: allowed-attendee-scheduling-object-change"
+            ),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    /// A new event names its guests only as a meeting the server schedules:
+    /// when the user notifies. It echoes what it wrote, and nobody else.
+    #[tokio::test]
+    async fn a_new_meeting_names_its_guests_only_when_notifying() {
+        use std::sync::{Arc, Mutex};
+        let mut server = Server::new_async().await;
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        let _put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .expect(2)
+            .with_status(201)
+            .with_body_from_request(move |request| {
+                sink.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                Vec::new()
+            })
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut meeting = sample_new_event();
+        meeting.attendees = vec![
+            "Doe, Jane <jane@example.net>".into(),
+            "toni@example.org".into(),
+        ];
+        let silent = create_event(
+            &client(),
+            &cal_url,
+            meeting.clone(),
+            &creds(&server.url()),
+            &icloud_ctx(),
+        )
+        .await
+        .unwrap();
+        assert!(silent.attendees.is_empty(), "{:?}", silent.attendees);
+        meeting.send_invitations = true;
+        let invited = create_event(
+            &client(),
+            &cal_url,
+            meeting,
+            &creds(&server.url()),
+            &icloud_ctx(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(invited.attendees, ["Doe, Jane <jane@example.net>"]);
+        assert_eq!(invited.organizer.as_deref(), Some("toni@example.org"));
+        let bodies = seen.lock().unwrap().clone();
+        assert!(!bodies[0].contains("ATTENDEE"), "{}", bodies[0]);
+        assert!(
+            bodies[1].contains("ORGANIZER:mailto:toni@example.org\r\n"),
+            "{}",
+            bodies[1]
+        );
+        assert!(
+            bodies[1].contains("ATTENDEE;CN=\"Doe, Jane\";"),
+            "{}",
+            bodies[1]
+        );
+        assert_eq!(
+            bodies[1].matches("ATTENDEE").count(),
+            1,
+            "the account is no guest"
+        );
     }
 
     #[tokio::test]
@@ -1759,12 +2026,16 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             attendee_responses: Vec::new(),
             cancelled: false,
         };
-        let master_vcal = event_to_ical(&master, None);
+        let master_vcal = event_to_ical(&master);
         let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();
 
-        let merged = merge_with_overrides(body, &master_vcal, "https://example.com/cal/", |rid| {
-            rid <= until
-        })
+        let merged = merge_with_overrides(
+            body,
+            &master_vcal,
+            "https://example.com/cal/",
+            |rid| rid <= until,
+            str::to_string,
+        )
         .expect("body parses cleanly");
 
         // The in-range override is kept verbatim; the tail override is gone.
@@ -1817,8 +2088,13 @@ END:VCALENDAR\r\n";
 BEGIN:VEVENT\r\nDTSTART:20260803T090000Z\r\nSUMMARY:No UID\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let until = Utc.with_ymd_and_hms(2026, 8, 10, 0, 0, 0).unwrap();
         assert_eq!(
-            merge_with_overrides(body, "MASTER", "https://example.com/cal/", |rid| rid
-                <= until),
+            merge_with_overrides(
+                body,
+                "MASTER",
+                "https://example.com/cal/",
+                |rid| rid <= until,
+                str::to_string,
+            ),
             None,
         );
     }
@@ -1929,7 +2205,7 @@ END:VCALENDAR\r\n";
             &client(),
             moved_override(&cal_url),
             &creds(&server.url()),
-            None,
+            &WriteCtx::default(),
         )
         .await
         .unwrap();
@@ -1994,7 +2270,7 @@ RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR
             &client(),
             moved_override(&cal_url),
             &creds(&server.url()),
-            None,
+            &WriteCtx::default(),
         )
         .await
         .unwrap_err();

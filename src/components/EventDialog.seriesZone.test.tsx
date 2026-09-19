@@ -444,6 +444,86 @@ describe('EventDialog → who may notify the attendees', () => {
     }
   });
 
+  /** A calendar whose provider mails the attendees about every change and
+   *  about a deletion (iCloud; decisions 76a, 80a). */
+  function alwaysNotifying(): () => void {
+    const cal = CALENDARS[0] as {
+      supports_scheduling?: boolean;
+      always_notifies_attendees?: boolean;
+      notifier_name?: string;
+    };
+    cal.supports_scheduling = true;
+    cal.always_notifies_attendees = true;
+    cal.notifier_name = 'iCloud';
+    return () => {
+      delete cal.supports_scheduling;
+      delete cal.always_notifies_attendees;
+      delete cal.notifier_name;
+    };
+  }
+  const alwaysSentence = /iCloud informiert die Teilnehmer über jede Änderung|iCloud informs the attendees of every change/i;
+
+  it('says who informs the attendees instead of offering a choice iCloud would not keep', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(false));
+      expect(notifyToggle()).toBeNull();
+      const note = screen.getByText(alwaysSentence);
+      // Tab reaches it, and it is read by its text.
+      expect(note.getAttribute('tabindex')).toBe('0');
+      expect(note.getAttribute('aria-label')).toMatch(alwaysSentence);
+      fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+      );
+      const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+      expect((update?.[1] as { event: CalendarEvent }).event.send_invitations).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('deletes such a meeting after a confirmation that says so, without a silent choice', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(false));
+      fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));
+      await screen.findByText(/iCloud informiert die Teilnehmer über die Absage|iCloud informs the attendees of the cancellation/i);
+      expect(
+        screen.queryByRole('button', { name: /ohne benachrichtigung entfernen|remove without notifying/i }),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByRole('button', { name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i }),
+      );
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(true),
+      );
+      const del = invokeMock.mock.calls.filter((call) => call[0] === 'delete_event').pop();
+      expect((del?.[1] as { sendCancellations: boolean | null }).sendCancellations).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('asks about someone else\'s meeting not at all on delete (70a)', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(true));
+      fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(true),
+      );
+      expect(
+        screen.queryByRole('button', { name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i }),
+      ).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
   it('keeps the notify toggle when the last attendee is removed', async () => {
     // The one removed may still get a cancellation (decision 74a).
     deviceInBerlin();

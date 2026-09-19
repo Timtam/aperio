@@ -198,6 +198,8 @@ impl LocalAdapter {
             out.push(Calendar {
                 supports_scheduling: false,
                 supports_event_color: true,
+                always_notifies_attendees: false,
+                notifier_name: None,
                 color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
@@ -843,6 +845,8 @@ mod tests {
             color_label: None,
             supports_scheduling: false,
             supports_event_color: true,
+            always_notifies_attendees: false,
+            notifier_name: None,
             id: id.into(),
             name: name.into(),
             color: Some(container("#112233")),

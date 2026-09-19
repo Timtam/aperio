@@ -88,6 +88,8 @@ fn fixture_calendar(id: &str) -> Calendar {
         color_label: None,
         supports_scheduling: false,
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         id: id.into(),
         name: "From remote".into(),
         color: None,

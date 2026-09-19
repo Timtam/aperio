@@ -51,7 +51,13 @@ mod tests;
 /// 2: the organizer is never an invitee (decision 67a), and whether someone else
 ///    organizes an event is read (`organized_elsewhere`, decision 70a). An
 ///    Exchange account then re-drains its folders from scratch, once.
-pub const CACHE_GENERATION: u32 = 2;
+/// 3: CalDAV recognises the account by every href of its
+///    calendar-user-address-set and shows a principal-path calendar user by its
+///    EMAIL, so an iCloud meeting the account organizes no longer reads as
+///    someone else's (live round 5). Calendars carry
+///    `always_notifies_attendees` (decisions 76a, 82b); re-bootstrapping reads
+///    the calendar listings again too.
+pub const CACHE_GENERATION: u32 = 3;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";

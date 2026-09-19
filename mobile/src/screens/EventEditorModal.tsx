@@ -20,7 +20,9 @@ import {
   allDayFormEndDate,
   applySignature,
   madeNoReminderChoice,
-  offersNotifyAttendees,
+  attendeeNotice,
+  notifierSentence,
+  sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
   eventPrefillFrom,
@@ -792,15 +794,14 @@ export default function EventEditorModal({
     // scheduling (a local calendar, an iCal feed, or a CalDAV/iCloud account
     // whose scheduling probe failed all report supports_scheduling=false) AND
     // there is someone to tell AND the toggle is on. Mirrors the desktop.
-    // Only the organizer notifies anyone (decision 70a), and removed
-    // invitees may still be told (74a): `offersNotifyAttendees`, the rule the
-    // desktop shares. The host applies it again before it writes.
-    const sendInvitations =
-      offersNotifyAttendees({
-        supportsScheduling: cal?.supports_scheduling ?? false,
-        attendees,
-        original: original ?? null,
-      }) && notifyAttendees;
+    // Only the organizer notifies anyone (decision 70a), removed invitees may
+    // still be told (74a), and a provider that always notifies does so
+    // (76a): `attendeeNotice`, the rule the desktop shares. The host applies
+    // it again before it writes.
+    const sendInvitations = sendsInvitationsFor(
+      attendeeNotice({ calendar: cal, attendees, original: original ?? null }),
+      notifyAttendees,
+    );
     // Reminders for the wire: while `keepRemindersAsDefault` holds, the rows on
     // screen came from the CALENDAR default and were never touched — sending
     // them would promote the default into a per-event VALARM that then lives on
@@ -1225,8 +1226,9 @@ export default function EventEditorModal({
       isOccurrence && occurrence != null && original.recurrence != null
         ? { ...original, series_id: original.id, occurrence_start: occurrence }
         : original;
-    // The shared helper resolves organizer status and offers the cancel/silent
-    // choice when this is a meeting we organize on a scheduling-capable provider.
+    // The shared helper offers the cancel/silent choice for a meeting we
+    // organize on a scheduling-capable provider, or says who informs the
+    // attendees where the provider always does (decision 80a).
     const cal = calendars.find((c) => c.id === original.calendar_id);
     confirmDeleteEvent(
       target,
@@ -1239,9 +1241,32 @@ export default function EventEditorModal({
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       },
-      { supportsScheduling: cal?.supports_scheduling ?? false },
+      { calendar: cal },
     );
   }, [calendars, isOccurrence, navigation, occurrence, original, t]);
+
+  // "Notify attendees", or the sentence that says who informs them: the rule
+  // the desktop shares (decisions 70a, 74a, 76a).
+  const noticeCalendar = calendars.find((c) => c.id === calId);
+  const notice = attendeeNotice({
+    calendar: noticeCalendar,
+    attendees,
+    original: original ?? null,
+  });
+  const noticeSpec = notifierSentence(noticeCalendar, 'change');
+  const noticeSentence = t(noticeSpec.key, noticeSpec.values);
+  // When the sentence appears while editing (the first guest added, another
+  // calendar chosen), say it once, as the desktop does: nothing else tells
+  // VoiceOver or TalkBack that saving will now mail the guests.
+  const lastNotice = useRef<typeof notice | null>(null);
+  useEffect(() => {
+    if (loading) return;
+    const before = lastNotice.current;
+    lastNotice.current = notice;
+    if (before != null && before !== 'always' && notice === 'always') {
+      AccessibilityInfo.announceForAccessibility(noticeSentence);
+    }
+  }, [loading, notice, noticeSentence]);
 
   if (loading) {
     return (
@@ -1586,20 +1611,17 @@ export default function EventEditorModal({
         />
       )}
 
-      {/* Attendees — free-form people; the notify switch follows the rule the
-          desktop shares (`offersNotifyAttendees`): a calendar that can invite,
-          an event the account organizes, and someone to tell. */}
+      {/* Attendees — free-form people; the notify switch, or the sentence that
+          says who informs them, follows the rule the desktop shares
+          (`attendeeNotice`): a calendar that can invite, an event the account
+          organizes, and someone to tell. */}
       <AttendeesEditor
         value={attendees}
         onChange={setAttendees}
         notify={notifyAttendees}
         onNotifyChange={setNotifyAttendees}
-        showNotify={offersNotifyAttendees({
-          supportsScheduling:
-            calendars.find((c) => c.id === calId)?.supports_scheduling ?? false,
-          attendees,
-          original: original ?? null,
-        })}
+        notice={notice}
+        noticeSentence={noticeSentence}
       />
 
       {/* Free/busy — attendee availability over the entered window. Shown only

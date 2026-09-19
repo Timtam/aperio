@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { formatAttendee, primaryChannelValue } from '@aperio/shared';
+import type { AttendeeNotice } from '@aperio/shared';
 
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { parseAttendee } from '../api/calendar';
@@ -50,15 +51,19 @@ export function AttendeesEditor({
   onChange,
   notify,
   onNotifyChange,
-  showNotify,
+  notice,
+  noticeSentence,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
   notify: boolean;
   onNotifyChange: (next: boolean) => void;
-  /** Whether the "notify attendees" switch is meaningful (external calendar with
-   *  ≥1 attendee). Local calendars never send invitations. */
-  showNotify: boolean;
+  /** The shared rule (`attendeeNotice`): `'offer'` shows the "notify
+   *  attendees" switch, `'always'` the sentence that says who informs them
+   *  (decision 76a), `'none'` neither. */
+  notice: AttendeeNotice;
+  /** The sentence shown for `'always'`. */
+  noticeSentence: string;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -274,7 +279,13 @@ export function AttendeesEditor({
         </Text>
       )}
 
-      {showNotify && (
+      {notice === 'always' && (
+        <Text style={styles.switchLabel} accessible accessibilityRole="text">
+          {noticeSentence}
+        </Text>
+      )}
+
+      {notice === 'offer' && (
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: notify }}

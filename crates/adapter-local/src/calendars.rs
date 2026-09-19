@@ -69,6 +69,8 @@ impl LocalAdapter {
             // Local calendars store a per-event color natively (on the
             // event row), so the host routes recolors through update_event.
             supports_event_color: true,
+            always_notifies_attendees: false,
+            notifier_name: None,
         })
     }
 
@@ -188,6 +190,8 @@ impl LocalAdapter {
             default_sound: sound?,
             supports_scheduling: false,
             supports_event_color: true,
+            always_notifies_attendees: false,
+            notifier_name: None,
         }))
     }
 
@@ -279,6 +283,8 @@ impl CalendarFeature for LocalAdapter {
                 out.push(Calendar {
                     supports_scheduling: false,
                     supports_event_color: true,
+                    always_notifies_attendees: false,
+                    notifier_name: None,
                     id: id?,
                     name: name?,
                     color: color?,

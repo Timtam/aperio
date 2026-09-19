@@ -68,6 +68,8 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         supports_scheduling: false,
         // Synthetic, read-only birthday layer — no per-event color to store.
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         id: birthday_calendar_id(contact_list_id),
         // The list's own name, nothing else. What a frontend shows —
         // "Geburtstage – Familie" — it builds on its side from the row's

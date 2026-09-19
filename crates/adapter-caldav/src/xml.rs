@@ -125,6 +125,95 @@ pub fn extract_first_nested_href(
     Ok(found)
 }
 
+/// The local name of the first element inside a `DAV:error` body (RFC 4918
+/// §16), the precondition a server says a request broke, e.g.
+/// `allowed-attendee-scheduling-object-change`. `None` when the body is not
+/// such a document.
+pub fn dav_error_condition(body: &str) -> Option<String> {
+    let mut reader = Reader::from_str(body);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut inside_error = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if inside_error {
+                    return Some(
+                        String::from_utf8_lossy(e.name().local_name().as_ref()).into_owned(),
+                    );
+                }
+                if local_name_eq(e.name(), b"error") {
+                    inside_error = true;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+/// One `<href>` inside a property, with whether the server marked it
+/// `preferred="1"` (RFC 6638 does not define the attribute; Apple's servers
+/// write it on the address to use).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NestedHref {
+    pub href: String,
+    pub preferred: bool,
+}
+
+/// Every `<href>` nested in the property `prop_local_name`, in document
+/// order, e.g. all the addresses of `calendar-user-address-set`.
+pub fn extract_nested_hrefs(body: &str, prop_local_name: &[u8]) -> CaldavResult<Vec<NestedHref>> {
+    let mut reader = Reader::from_str(body);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut depth_inside_prop: u32 = 0;
+    let mut current: Option<NestedHref> = None;
+    let mut found = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                if local_name_eq(e.name(), prop_local_name) {
+                    depth_inside_prop = depth_inside_prop.saturating_add(1);
+                } else if depth_inside_prop > 0 && local_name_eq(e.name(), b"href") {
+                    let preferred = e.attributes().flatten().any(|a| {
+                        a.key.local_name().as_ref() == b"preferred" && a.value.as_ref() == b"1"
+                    });
+                    current = Some(NestedHref {
+                        href: String::new(),
+                        preferred,
+                    });
+                }
+            }
+            Ok(Event::End(e)) => {
+                if local_name_eq(e.name(), prop_local_name) {
+                    depth_inside_prop = depth_inside_prop.saturating_sub(1);
+                } else if local_name_eq(e.name(), b"href") {
+                    if let Some(href) = current.take().filter(|h| !h.href.is_empty()) {
+                        found.push(href);
+                    }
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if let Some(href) = current.as_mut() {
+                    let text = t
+                        .unescape()
+                        .map_err(|e| CaldavError::Protocol(e.to_string()))?;
+                    href.href.push_str(text.trim());
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => {
+                return Err(CaldavError::Protocol(format!("xml parse: {err}")));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(found)
+}
+
 /// One parsed `<response>` block. Captures the bits the calendar
 /// listing and event-range read both need without picking up the
 /// whole tree.

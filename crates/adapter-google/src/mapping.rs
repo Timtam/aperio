@@ -60,6 +60,8 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // Google's per-event colorId isn't mapped into Aperio's color model;
         // per-event colors stay host-local overrides.
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         color_label: None,
         id: entry.id,
         name: entry.summary,

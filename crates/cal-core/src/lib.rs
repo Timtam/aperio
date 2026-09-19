@@ -16,6 +16,7 @@ pub mod day_marker;
 pub mod day_start;
 pub mod error;
 pub mod event_anchor;
+pub mod event_diff;
 pub mod event_group;
 pub mod event_group_fold;
 pub mod event_local_reminders;

@@ -35,6 +35,16 @@ pub enum CaldavError {
 
     #[error("invalid configuration: {0}")]
     Config(String),
+
+    /// The server, or the adapter on its behalf, refused a write the account
+    /// may not make: a scheduling precondition (RFC 6638 §3.2.2.1, e.g.
+    /// `allowed-attendee-scheduling-object-change`) or a change only the
+    /// organizer can make. Starts with a token the frontends translate
+    /// (`reply-only-invitation:`, `server-refused:`), followed by the detail.
+    /// A 403 on a read or during discovery stays [`CaldavError::Http`]:
+    /// there it means the credentials.
+    #[error("refused: {0}")]
+    Forbidden(String),
 }
 
 impl From<reqwest::Error> for CaldavError {

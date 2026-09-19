@@ -124,6 +124,15 @@ when caching:
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
 
+> **Some providers always notify.** On an RFC 6638 CalDAV server (iCloud)
+> and on Microsoft Graph, a saved change to a meeting the account organizes
+> and its deletion reach the attendees whatever the request says. Those
+> calendars carry `always_notifies_attendees` (and a display-only
+> `notifier_name`), and the shared rules (`attendeeNotice`,
+> `cancellationNotice` in `@aperio/shared`) show a sentence that says who
+> informs the attendees instead of a notify checkbox or a "remove without
+> notifying" choice the provider would not keep (decisions 76a, 80a, 82b).
+
 > **Free/busy lookup** runs through `get_free_busy(emails, range)` and the
 > host `query_free_busy` command (the dialog's "Check availability"
 > button). Each provider answers in its own dialect: EWS `GetUserAvailability`

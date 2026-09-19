@@ -148,6 +148,8 @@ fn calendar(id: &str) -> Calendar {
         color_label: None,
         supports_scheduling: false,
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         id: id.into(),
         name: format!("Cal {id}"),
         color: None,
@@ -1394,25 +1396,29 @@ fn reconcile_cache_generation_resets_external_accounts_once() {
         0,
     );
 
-    // A device that applied generation 1 re-reads once more for generation 2:
-    // the organizer is never an invitee (decision 67a).
-    db.with_conn(|c| {
-        c.execute(
-            "UPDATE cache_sync_state SET window_start = '2026-01-01T00:00:00Z' WHERE account_id = 'ext'",
-            params![],
-        )
-    })
-    .unwrap();
-    prefs.set(super::CACHE_GENERATION_KEY, "1").unwrap();
-    assert_eq!(
-        super::reconcile_cache_generation(&store, &accounts, &prefs).unwrap(),
-        1,
-    );
-    assert!(window_of("ext").is_none());
-    assert_eq!(
-        prefs.get(super::CACHE_GENERATION_KEY).unwrap().as_deref(),
-        Some("2")
-    );
+    // A device that applied an older generation re-reads once more: 2 (the
+    // organizer is never an invitee, 67a) and 3 (CalDAV knows the account by
+    // every address it has, live round 5).
+    for older in ["1", "2"] {
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE cache_sync_state SET window_start = '2026-01-01T00:00:00Z' WHERE account_id = 'ext'",
+                params![],
+            )
+        })
+        .unwrap();
+        prefs.set(super::CACHE_GENERATION_KEY, older).unwrap();
+        assert_eq!(
+            super::reconcile_cache_generation(&store, &accounts, &prefs).unwrap(),
+            1,
+            "from generation {older}"
+        );
+        assert!(window_of("ext").is_none());
+        assert_eq!(
+            prefs.get(super::CACHE_GENERATION_KEY).unwrap().as_deref(),
+            Some("3")
+        );
+    }
 }
 
 /// The host's write guard, as both hosts call it before an update (decisions

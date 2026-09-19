@@ -29,7 +29,7 @@ use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::SendRetrying;
-use crate::xml::extract_first_nested_href;
+use crate::xml::{extract_first_nested_href, extract_nested_hrefs, NestedHref};
 
 const PROPFIND: &str = "PROPFIND";
 
@@ -101,11 +101,15 @@ pub struct Discovery {
     /// `calendar-user-address-set`), used as `ORGANIZER` when writing a
     /// scheduled event. `None` when the server advertised none.
     pub calendar_user_address: Option<String>,
-    /// Every `mailto:` in `calendar-user-address-set`, in the server's order;
-    /// the first is `calendar_user_address`. RFC 6638 makes each of them the
-    /// account's own, and iCloud lists every alias of the Apple ID, so an
-    /// event the account organizes may name any of them as `ORGANIZER`.
+    /// Every `mailto:` in `calendar-user-address-set`, the one the server
+    /// marks preferred first, then in the server's order; the first is
+    /// `calendar_user_address`.
     pub calendar_user_addresses: Vec<String>,
+    /// Every href of `calendar-user-address-set`: the `mailto:`s, principal
+    /// paths and `urn:`s. RFC 6638 makes each of them the account's own, and
+    /// a server writes whichever it likes into ORGANIZER; iCloud writes a
+    /// principal path (live measurement M1). See [`crate::identity`].
+    pub calendar_user_hrefs: Vec<String>,
     /// The scheduling probe failed for a reason that may pass: a network
     /// error or a server error. Then the addresses above are unknown, not
     /// absent, and the adapter asks again before it relies on them.
@@ -160,6 +164,7 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
         supports_scheduling: false,
         calendar_user_address: None,
         calendar_user_addresses: Vec::new(),
+        calendar_user_hrefs: Vec::new(),
         scheduling_probe_failed: false,
         schedule_outbox_url: None,
     };
@@ -174,6 +179,7 @@ impl Discovery {
         self.supports_scheduling = scheduling.supports_scheduling;
         self.calendar_user_address = scheduling.calendar_user_addresses.first().cloned();
         self.calendar_user_addresses = scheduling.calendar_user_addresses;
+        self.calendar_user_hrefs = scheduling.calendar_user_hrefs;
         self.schedule_outbox_url = scheduling.schedule_outbox_url;
         self.scheduling_probe_failed = scheduling.failed;
     }
@@ -185,8 +191,11 @@ pub struct Scheduling {
     /// The server auto-schedules (it has a `schedule-outbox-URL`) and names
     /// a `mailto:` to write as `ORGANIZER`.
     pub supports_scheduling: bool,
-    /// Every `mailto:` in `calendar-user-address-set`, in the server's order.
+    /// Every `mailto:` in `calendar-user-address-set`, the preferred one
+    /// first, each once.
     pub calendar_user_addresses: Vec<String>,
+    /// Every href of `calendar-user-address-set`, in the server's order.
+    pub calendar_user_hrefs: Vec<String>,
     pub schedule_outbox_url: Option<Url>,
     /// A network error or a server error (5xx) stopped the probe, so it says
     /// nothing about the server. A 4xx or an answer without the properties
@@ -230,38 +239,39 @@ pub async fn probe_scheduling(
         .ok()
         .flatten()
         .and_then(|href| principal_url.join(&href).ok());
-    let addresses = mailtos(&body);
+    let hrefs = extract_nested_hrefs(&body, b"calendar-user-address-set").unwrap_or_default();
+    let addresses = mailtos(&hrefs);
     // Need BOTH server auto-scheduling AND a usable organizer address —
     // without the latter we can't write a valid ORGANIZER.
     Scheduling {
         supports_scheduling: outbox_url.is_some() && !addresses.is_empty(),
         calendar_user_addresses: addresses,
+        calendar_user_hrefs: hrefs.into_iter().map(|h| h.href).collect(),
         schedule_outbox_url: outbox_url,
         failed: false,
     }
 }
 
-/// Every `mailto:` calendar-user-address in a scheduling PROPFIND body, in
-/// order, each once. `calendar-user-address-set` lists several addresses
-/// (principal paths and mailtos); `ORGANIZER`/`ATTENDEE` need the `mailto:`
-/// form. The probe asks for nothing else that holds a `mailto:`.
-fn mailtos(body: &str) -> Vec<String> {
+/// The `mailto:` hrefs among `hrefs` (the scheme in any case), the one marked
+/// preferred first, each address once. `ORGANIZER`/`ATTENDEE` need the
+/// `mailto:` form.
+fn mailtos(hrefs: &[NestedHref]) -> Vec<String> {
+    let mut ordered: Vec<&NestedHref> = hrefs.iter().filter(|h| h.preferred).collect();
+    ordered.extend(hrefs.iter().filter(|h| !h.preferred));
     let mut found: Vec<String> = Vec::new();
-    let mut rest = body;
-    while let Some(start) = rest.find("mailto:") {
-        let tail = &rest[start..];
-        let end = tail
-            .find(|c: char| c == '<' || c == '"' || c.is_whitespace())
-            .unwrap_or(tail.len());
-        let addr = tail[..end].trim();
-        if addr.len() > "mailto:".len()
+    for href in ordered {
+        let addr = href.href.trim();
+        let is_mailto = addr
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mailto:"));
+        if is_mailto
+            && addr.len() > "mailto:".len()
             && !found
                 .iter()
                 .any(|seen| cal_core::attendee::same_address(seen, addr))
         {
             found.push(addr.to_string());
         }
-        rest = &tail[end..];
     }
     found
 }
@@ -740,29 +750,50 @@ mod tests {
         assert!(matches!(err, CaldavError::Config(_)));
     }
 
-    #[test]
-    fn mailtos_picks_the_mailto_addresses() {
-        let body = r#"<c:calendar-user-address-set>
-            <d:href>/principals/users/alice/</d:href>
-            <d:href>mailto:alice@example.com</d:href>
-          </c:calendar-user-address-set>"#;
-        assert_eq!(mailtos(body), ["mailto:alice@example.com"]);
-        assert!(mailtos("<d:href>/no/mailto/here/</d:href>").is_empty());
+    fn address_set(inner: &str) -> Vec<NestedHref> {
+        let body = format!(
+            "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:response><d:propstat><d:prop><c:calendar-user-address-set>{inner}</c:calendar-user-address-set><c:schedule-outbox-URL><d:href>/outbox/</d:href></c:schedule-outbox-URL></d:prop></d:propstat></d:response></d:multistatus>"
+        );
+        extract_nested_hrefs(&body, b"calendar-user-address-set").unwrap()
     }
 
-    /// iCloud lists every alias of the Apple ID. Each is the account's own,
-    /// in the server's order, each once.
     #[test]
-    fn mailtos_keeps_every_alias_once() {
-        let body = r#"<c:calendar-user-address-set>
-            <d:href>mailto:alice@me.com</d:href>
-            <d:href>urn:uuid:1234</d:href>
-            <d:href preferred="1">mailto:alice@icloud.com</d:href>
-            <d:href>mailto:ALICE@me.com</d:href>
-          </c:calendar-user-address-set>"#;
+    fn mailtos_picks_the_mailto_addresses() {
+        let hrefs = address_set(
+            "<d:href>/principals/users/alice/</d:href><d:href>mailto:alice@example.com</d:href>",
+        );
+        assert_eq!(mailtos(&hrefs), ["mailto:alice@example.com"]);
+        assert!(mailtos(&address_set("<d:href>/no/mailto/here/</d:href>")).is_empty());
+    }
+
+    /// The shape measured live (M1): principal paths, a urn and the mail
+    /// address marked preferred. Every href is kept; the preferred mailto
+    /// comes first, whatever its case, and each address once. The outbox
+    /// href of the same body is not one of them.
+    #[test]
+    fn the_address_set_keeps_every_href() {
+        let hrefs = address_set(
+            "<d:href>/1974/principal</d:href>\
+             <d:href>mailto:alice@me.com</d:href>\
+             <d:href>/aB1/principal/</d:href>\
+             <d:href>urn:uuid:1974</d:href>\
+             <d:href preferred=\"1\">MAILTO:alice@icloud.com</d:href>\
+             <d:href>mailto:ALICE@me.com</d:href>",
+        );
         assert_eq!(
-            mailtos(body),
-            ["mailto:alice@me.com", "mailto:alice@icloud.com"]
+            hrefs.iter().map(|h| h.href.as_str()).collect::<Vec<_>>(),
+            [
+                "/1974/principal",
+                "mailto:alice@me.com",
+                "/aB1/principal/",
+                "urn:uuid:1974",
+                "MAILTO:alice@icloud.com",
+                "mailto:ALICE@me.com"
+            ]
+        );
+        assert_eq!(
+            mailtos(&hrefs),
+            ["MAILTO:alice@icloud.com", "mailto:alice@me.com"]
         );
     }
 
@@ -848,6 +879,12 @@ mod tests {
             Some("mailto:alice@example.com")
         );
         assert_eq!(d.calendar_user_addresses, ["mailto:alice@example.com"]);
+        // Every href is the account's, the principal path too (see
+        // `identity`): iCloud writes ORGANIZER as a principal path.
+        assert_eq!(
+            d.calendar_user_hrefs,
+            ["mailto:alice@example.com", "/principals/users/alice/"]
+        );
         // The outbox href is resolved to an absolute URL ready to POST to.
         let expected_outbox = format!("{}/calendars/alice/outbox/", server.url());
         assert_eq!(

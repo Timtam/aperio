@@ -27,6 +27,12 @@ pub mod error;
 pub mod events;
 pub mod freebusy;
 mod http;
+mod ical_raw;
+mod scheduling;
+
+use identity::OwnIdentity;
+use scheduling::WriteCtx;
+pub mod identity;
 pub mod mapping;
 pub mod sync;
 pub mod tasks;
@@ -789,7 +795,7 @@ impl CaldavAdapter {
     }
 
     /// Record on each event whether this account organizes it (decision 70a),
-    /// by every address in its calendar-user-address-set.
+    /// by every href of its calendar-user-address-set (see [`OwnIdentity`]).
     ///
     /// The host keeps the flag with the event and a delta never re-reads an
     /// unchanged one, so a guess would stay. When the addresses are unknown
@@ -799,20 +805,31 @@ impl CaldavAdapter {
     /// organizer counts as the account's.
     async fn mark_organized_by(&self, events: &mut [Event]) -> CoreResult<()> {
         let own = if events.iter().any(|e| e.organizer.is_some()) {
-            self.own_addresses().await?
+            self.own_identity().await?
         } else {
-            Vec::new()
+            OwnIdentity::default()
         };
         mapping::mark_organized_by(events, &own);
         Ok(())
     }
 
-    /// The account's calendar-user addresses. A scheduling probe that failed
-    /// for a reason that may pass is asked again, and its answer is kept.
-    async fn own_addresses(&self) -> CoreResult<Vec<String>> {
+    /// The account's calendar-user addresses; see [`Self::discovery_with_scheduling`].
+    async fn own_identity(&self) -> CoreResult<OwnIdentity> {
+        let discovery = self.discovery_with_scheduling().await?;
+        Ok(OwnIdentity::from_hrefs(
+            &discovery.calendar_user_hrefs,
+            &discovery.principal_url,
+        ))
+    }
+
+    /// Discovery, with a scheduling probe that failed for a reason that may
+    /// pass asked again; its answer is kept. Fails while it keeps failing.
+    /// When the answer changes whether the server schedules, the calendar
+    /// listing is read again, because each calendar carries that capability.
+    async fn discovery_with_scheduling(&self) -> CoreResult<discovery::Discovery> {
         let discovery = self.discover().await.map_err(to_core_error)?;
         if !discovery.scheduling_probe_failed {
-            return Ok(discovery.calendar_user_addresses);
+            return Ok(discovery);
         }
         let scheduling = discovery::probe_scheduling(
             &self.http_no_redirect,
@@ -826,26 +843,50 @@ impl CaldavAdapter {
             ));
         }
         let mut fresh = discovery;
+        let schedules_changed = fresh.supports_scheduling != scheduling.supports_scheduling;
         fresh.apply_scheduling(scheduling);
         *self.discovery.lock().expect("poison") = Some(fresh.clone());
-        Ok(fresh.calendar_user_addresses)
+        if schedules_changed {
+            *self.calendars_cache.lock().expect("poison") = None;
+        }
+        Ok(fresh)
     }
 
-    /// The user's `mailto:` organizer address for a write — but only when the
-    /// caller opted to notify AND the server actually auto-schedules (RFC
-    /// 6638). Otherwise `None`, so the mapper omits `ORGANIZER`/`ATTENDEE`
-    /// and the server schedules nothing. Discovery is cached, so this is free
-    /// after the first call; a discovery failure degrades to `None` (store
-    /// the event silently rather than failing the write).
-    async fn organizer_for_send(&self, sending: bool) -> Option<String> {
-        if !sending {
-            return None;
-        }
-        self.discover()
-            .await
-            .ok()
-            .filter(|d| d.supports_scheduling)
-            .and_then(|d| d.calendar_user_address)
+    /// What a write needs to know about the account on this server. The
+    /// account's addresses are left unknown when the scheduling probe keeps
+    /// failing; a write that needs them (one that touches a meeting) is then
+    /// refused by [`scheduling::plan_block`], and a plain one goes ahead.
+    async fn write_ctx(&self) -> CoreResult<WriteCtx> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let discovery = if discovery.scheduling_probe_failed {
+            match self.discovery_with_scheduling().await {
+                Ok(fresh) => fresh,
+                Err(_) => {
+                    return Ok(WriteCtx {
+                        identity: None,
+                        schedules: false,
+                        organizer_address: None,
+                    })
+                }
+            }
+        } else {
+            discovery
+        };
+        Ok(WriteCtx {
+            identity: Some(OwnIdentity::from_hrefs(
+                &discovery.calendar_user_hrefs,
+                &discovery.principal_url,
+            )),
+            schedules: discovery.supports_scheduling,
+            organizer_address: discovery.calendar_user_address.clone(),
+        })
+    }
+
+    /// Whether the account is on iCloud, the one server the editors name when
+    /// they say who informs the guests (decision 76a). The same URL check as
+    /// [`Self::supports_event_color`].
+    fn is_icloud(&self) -> bool {
+        self.credentials.config.server_url.contains("icloud.com")
     }
 
     /// Whether this account stores a per-event color natively (RFC 7986
@@ -857,7 +898,7 @@ impl CaldavAdapter {
     /// (rare, user-reportable). Drives both the calendar capability flag and
     /// the write-side gate that clears `color_hex` before an iCloud PUT.
     fn supports_event_color(&self) -> bool {
-        !self.credentials.config.server_url.contains("icloud.com")
+        !self.is_icloud()
     }
 
     /// Test-only: peek at the cached result without going to the wire.
@@ -885,6 +926,7 @@ fn to_core_error(err: CaldavError) -> CoreError {
         CaldavError::Protocol(msg) => CoreError::Protocol(msg),
         CaldavError::Discovery(msg) => CoreError::Protocol(format!("discovery: {msg}")),
         CaldavError::Config(msg) => CoreError::InvalidInput(msg),
+        CaldavError::Forbidden(msg) => CoreError::Forbidden(msg),
     }
 }
 
@@ -952,8 +994,15 @@ impl CalendarFeature for CaldavAdapter {
         // a color-capable (non-iCloud) account so the host routes recolors
         // through the provider; iCloud keeps the Stage 1 host-local override.
         let color_capable = self.supports_event_color();
+        // On an RFC 6638 server the organizer's copy is the invitation: the
+        // server mails the guests about every saved change and about a delete
+        // (decisions 76a, 80a).
+        let notifier =
+            (discovery.supports_scheduling && self.is_icloud()).then(|| "iCloud".to_string());
         for cal in &mut fresh {
             cal.supports_event_color = color_capable;
+            cal.always_notifies_attendees = discovery.supports_scheduling;
+            cal.notifier_name = notifier.clone();
         }
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
@@ -1015,24 +1064,18 @@ impl CalendarFeature for CaldavAdapter {
         if !self.supports_event_color() {
             event.color_hex = None;
         }
-        let organizer = self.organizer_for_send(event.send_invitations).await;
-        events::create_event(
-            &self.http,
-            &cal_url,
-            event,
-            &self.credentials,
-            organizer.as_deref(),
-        )
-        .await
-        .map_err(to_core_error)
+        let ctx = self.write_ctx().await?;
+        events::create_event(&self.http, &cal_url, event, &self.credentials, &ctx)
+            .await
+            .map_err(to_core_error)
     }
 
     async fn update_event(&self, mut event: Event) -> CoreResult<Event> {
         if !self.supports_event_color() {
             event.color_hex = None;
         }
-        let organizer = self.organizer_for_send(event.send_invitations).await;
-        events::update_event(&self.http, event, &self.credentials, organizer.as_deref())
+        let ctx = self.write_ctx().await?;
+        events::update_event(&self.http, event, &self.credentials, &ctx)
             .await
             .map_err(to_core_error)
     }
@@ -1764,7 +1807,7 @@ mod tests {
 
         let adapter = build_adapter(&server);
         assert!(adapter.discover().await.unwrap().scheduling_probe_failed);
-        let err = adapter.own_addresses().await.unwrap_err();
+        let err = adapter.own_identity().await.unwrap_err();
         assert!(matches!(err, CoreError::Network(_)), "{err:?}");
         failing.assert_async().await;
         failing.remove_async().await;
@@ -1793,13 +1836,13 @@ mod tests {
             .expect(1)
             .create_async()
             .await;
-        let own = adapter.own_addresses().await.unwrap();
-        assert_eq!(own, ["mailto:alice@me.com", "mailto:alice@icloud.com"]);
+        let own = adapter.own_identity().await.unwrap();
+        assert_eq!(own.mail_addresses(), ["alice@me.com", "alice@icloud.com"]);
         let kept = adapter.discover().await.unwrap();
         assert!(!kept.scheduling_probe_failed);
         assert!(kept.supports_scheduling);
         // Kept: asking again needs no request.
-        assert_eq!(adapter.own_addresses().await.unwrap(), own);
+        assert_eq!(adapter.own_identity().await.unwrap(), own);
     }
 
     #[test]

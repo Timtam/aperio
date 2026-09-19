@@ -1374,7 +1374,8 @@
       "notifyLegend": "Attendees",
       "notifyAttendees": "Notify attendees",
       "notifySilent": "Remove without notifying",
-      "notifyRevealed": "You organize this meeting — choose above whether to notify attendees.",
+      "notifyAlways": "The calendar server informs the attendees of the cancellation.",
+      "notifyAlwaysNamed": "{{service}} informs the attendees of the cancellation.",
       "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:"
     },
     "moveScope": {
@@ -1489,7 +1490,10 @@
         "cancelOccurrence": "Cancel this occurrence & notify attendees",
         "thisAndFutureMessage": "You organize \"{{title}}\". Cancel this and all following occurrences and notify the attendees, or just remove them from your calendar without telling them?",
         "cancelThisAndFuture": "Cancel this and all following & notify",
-        "removeSilently": "Remove without notifying"
+        "removeSilently": "Remove without notifying",
+        "alwaysMessage": "You organize \"{{title}}\". Deleting it cancels the meeting. {{sentence}}",
+        "alwaysOccurrenceMessage": "You organize \"{{title}}\". Deleting this occurrence cancels it. {{sentence}}",
+        "alwaysThisAndFutureMessage": "You organize \"{{title}}\". Deleting cancels this and all following occurrences. {{sentence}}"
       },
       "birthdayTitle": "Birthday",
       "birthdayAge": "Turns {{age}} years old",
@@ -1513,6 +1517,8 @@
         "description": "Description",
         "attendees": "Attendees",
         "notifyAttendees": "Notify attendees",
+        "notifyAlways": "The calendar server informs the attendees of every change.",
+        "notifyAlwaysNamed": "{{service}} informs the attendees of every change.",
         "colorLabel": "Color label"
       },
       "attendees": {

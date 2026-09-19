@@ -12,7 +12,9 @@ import { useTranslation } from 'react-i18next';
 import {
   applySignature,
   madeNoReminderChoice,
-  offersNotifyAttendees,
+  attendeeNotice,
+  notifierSentence,
+  sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
 } from '@aperio/shared';
@@ -1031,15 +1033,17 @@ export function EventDialog({
           }
         };
 
-        // Notify attendees: gated identically to the toggle's visibility
-        // (`offersNotifyAttendees`, decisions 70a and 74a).
+        // Notify attendees: the rule the checkbox and the sentence show
+        // (`attendeeNotice`, decisions 70a, 74a and 76a).
         const targetCal = calendars.find((c) => c.id === form.calendarId);
-        const sendInvitations =
-          offersNotifyAttendees({
-            supportsScheduling: !!targetCal?.supports_scheduling,
+        const sendInvitations = sendsInvitationsFor(
+          attendeeNotice({
+            calendar: targetCal,
             attendees: form.attendees,
             original: event ?? null,
-          }) && notifyAttendees;
+          }),
+          notifyAttendees,
+        );
         // When the target stores the color natively (local, or color-capable
         // CalDAV via RFC 7986 COLOR), apiCreate/UpdateEvent already carries it
         // on `color_label` — so the extra setEventColor call is only needed
@@ -1432,7 +1436,15 @@ export function EventDialog({
   // "remove silently"; everything else is a plain delete. The same choice is
   // offered for a whole meeting/series and for a single occurrence — `scope`
   // routes the dialog's confirm to the right removal.
-  const { offersChoice } = useCancellationChoice(event);
+  const {
+    offersChoice,
+    alwaysNotifies,
+    sentence: cancellationSentence,
+  } = useCancellationChoice(event);
+  // A meeting the account organizes gets the cancel dialog: with a choice
+  // where the provider can delete silently, as a plain confirmation that
+  // says who informs the attendees where it cannot (decision 80a).
+  const asksBeforeCancelling = offersChoice || alwaysNotifies;
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
   const [cancelChoiceScope, setCancelChoiceScope] = useState<
     'series' | 'occurrence' | 'this_and_future'
@@ -1532,6 +1544,35 @@ export function EventDialog({
     [event, announce, onClose, t],
   );
 
+  // "Notify attendees" or the sentence that says who informs them: the rule
+  // both editors share (decisions 70a, 74a, 76a).
+  const noticeCalendar = calendars.find((c) => c.id === form.calendarId);
+  const notice = attendeeNotice({
+    calendar: noticeCalendar,
+    attendees: form.attendees,
+    original: event ?? null,
+  });
+  const noticeSentenceSpec = notifierSentence(noticeCalendar, 'change');
+  const noticeSentence = t(noticeSentenceSpec.key, noticeSentenceSpec.values);
+  // When the sentence appears while editing (the first guest added, another
+  // calendar chosen), say it once: nothing else tells a screen reader that
+  // the save will now mail the guests. Not on open, where it is simply there.
+  const noticeAtOpen = useRef<{ open: boolean; notice: typeof notice }>({
+    open: false,
+    notice,
+  });
+  useEffect(() => {
+    const seen = noticeAtOpen.current;
+    if (!isOpen) {
+      noticeAtOpen.current = { open: false, notice };
+      return;
+    }
+    if (seen.open && seen.notice !== 'always' && notice === 'always') {
+      announce(noticeSentence);
+    }
+    noticeAtOpen.current = { open: true, notice };
+  }, [isOpen, notice, noticeSentence, announce]);
+
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
@@ -1539,7 +1580,7 @@ export function EventDialog({
     if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
       // Organizer with attendees → offer "cancel this occurrence + notify" vs
       // silent local skip; otherwise a plain EXDATE (no attendee notification).
-      if (offersChoice) {
+      if (asksBeforeCancelling) {
         setCancelChoiceScope('occurrence');
         setCancelChoiceOpen(true);
         return;
@@ -1549,7 +1590,7 @@ export function EventDialog({
     }
     // Removing this occurrence and all following ones (truncate the series).
     if (isOccurrence && editScope === 'this_and_future' && event.recurrence) {
-      if (offersChoice) {
+      if (asksBeforeCancelling) {
         setCancelChoiceScope('this_and_future');
         setCancelChoiceOpen(true);
         return;
@@ -1558,7 +1599,7 @@ export function EventDialog({
       return;
     }
     // Organizer removing a whole meeting/series with attendees → ask whether to notify.
-    if (offersChoice) {
+    if (asksBeforeCancelling) {
       setCancelChoiceScope('series');
       setCancelChoiceOpen(true);
       return;
@@ -1569,7 +1610,7 @@ export function EventDialog({
     submitting,
     isOccurrence,
     editScope,
-    offersChoice,
+    asksBeforeCancelling,
     performDelete,
     performOccurrenceDelete,
     performThisAndFutureDelete,
@@ -1811,13 +1852,7 @@ export function EventDialog({
           />
         </div>
 
-        {offersNotifyAttendees({
-          supportsScheduling: !!calendars.find(
-            (c) => c.id === form.calendarId,
-          )?.supports_scheduling,
-          attendees: form.attendees,
-          original: event ?? null,
-        }) && (
+        {notice === 'offer' && (
           <label className="form__field form__field--inline">
             <input
               type="checkbox"
@@ -1826,6 +1861,9 @@ export function EventDialog({
             />
             <span>{t('dialogs.event.fields.notifyAttendees')}</span>
           </label>
+        )}
+        {notice === 'always' && (
+          <FocusableNote className="form__hint">{noticeSentence}</FocusableNote>
         )}
 
         {calendars.find((c) => c.id === form.calendarId)
@@ -2064,14 +2102,28 @@ export function EventDialog({
         isOpen={cancelChoiceOpen}
         onClose={() => setCancelChoiceOpen(false)}
         title={t('dialogs.event.cancelChoice.title')}
-        message={t(
-          cancelChoiceScope === 'occurrence'
-            ? 'dialogs.event.cancelChoice.occurrenceMessage'
-            : cancelChoiceScope === 'this_and_future'
-              ? 'dialogs.event.cancelChoice.thisAndFutureMessage'
-              : 'dialogs.event.cancelChoice.message',
-          { title: event.title },
-        )}
+        message={
+          alwaysNotifies
+            ? t(
+                cancelChoiceScope === 'occurrence'
+                  ? 'dialogs.event.cancelChoice.alwaysOccurrenceMessage'
+                  : cancelChoiceScope === 'this_and_future'
+                    ? 'dialogs.event.cancelChoice.alwaysThisAndFutureMessage'
+                    : 'dialogs.event.cancelChoice.alwaysMessage',
+                {
+                  title: event.title,
+                  sentence: t(cancellationSentence.key, cancellationSentence.values),
+                },
+              )
+            : t(
+                cancelChoiceScope === 'occurrence'
+                  ? 'dialogs.event.cancelChoice.occurrenceMessage'
+                  : cancelChoiceScope === 'this_and_future'
+                    ? 'dialogs.event.cancelChoice.thisAndFutureMessage'
+                    : 'dialogs.event.cancelChoice.message',
+                { title: event.title },
+              )
+        }
         confirmLabel={t(
           cancelChoiceScope === 'occurrence'
             ? 'dialogs.event.cancelChoice.cancelOccurrence'
@@ -2088,7 +2140,7 @@ export function EventDialog({
             void performDelete(true);
           }
         }}
-        extraActions={[
+        extraActions={alwaysNotifies ? [] : [
           {
             label: t('dialogs.event.cancelChoice.removeSilently'),
             onClick: () => {

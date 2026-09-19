@@ -43,4 +43,21 @@ supports_scheduling: boolean,
  * (override). `#[serde(default)]` keeps older wire payloads + stores
  * (which never set it) deserialising as `false`.
  */
-supports_event_color: boolean, };
+supports_event_color: boolean, 
+/**
+ * True when the provider itself mails the invitees about every saved
+ * change to a meeting the account organizes, and about its deletion, so
+ * neither can be silent (decisions 76a, 80a). The editors then say so
+ * instead of offering "Notify attendees" or "Remove without notifying".
+ * CalDAV sets it on an RFC 6638 server (implicit scheduling: the
+ * organizer's copy is the invitation); Microsoft Graph on its calendars
+ * (decision 82b). `#[serde(default)]` keeps older payloads and stores
+ * deserialising as `false`.
+ */
+always_notifies_attendees: boolean, 
+/**
+ * The service the editors name when they say so ("iCloud informs the
+ * attendees …"), as the adapter knows it; `None` reads as "the calendar
+ * server". A display string only: no rule looks at it.
+ */
+notifier_name?: string, };

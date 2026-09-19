@@ -96,23 +96,50 @@ Apple's well-known endpoints.
   alpha is dropped to a plain hex.
 - **`getctag` fast-path.** When the collection's ctag is unchanged, the
   adapter can skip a full enumeration.
-- **The organizer's ATTENDEE is the one with ORGANIZER's address.** RFC 5545
-  has no per-row flag, so the read drops the `ATTENDEE` whose normalised
-  address (case and `mailto:` aside) equals `ORGANIZER`. The account organizes
-  an event whose `ORGANIZER` is any address in its `calendar-user-address-set`
-  (iCloud lists every alias of the Apple ID); any other `ORGANIZER` makes the
-  event `organized_elsewhere`, and so does any `ORGANIZER` on a server that
-  reports no address. An event without `ORGANIZER` is the account's own. When
-  the probe for the addresses fails on a network or server error, it is
-  repeated before the next read that needs it, and while it keeps failing that
-  read fails: the host keeps its cache instead of storing a guess that a
-  delta would never revisit. On a write the account's own address, which becomes
-  `ORGANIZER`, is never written as an `ATTENDEE`; with nobody else invited
-  there is no `ORGANIZER` either, just a plain appointment. Known gap: an
-  update rebuilds the VEVENT and writes `ATTENDEE` lines only when notifying,
-  so a plain edit of a meeting drops its attendees from the resource
-  (TODO). Neither `keep_attendees` nor `clear_attendees` can help here yet;
-  whether the server tells guests removed that way is not measured.
+- **The account is every href of its `calendar-user-address-set`.** A server
+  names a calendar user by whichever href it likes. iCloud writes a principal
+  path with the address in an `EMAIL` parameter, for ORGANIZER and for the
+  account's own `ROLE=CHAIR` row (live measurement M1):
+  `ORGANIZER;CN=…;EMAIL=toni@example.org:/aB1/principal/`. Discovery keeps
+  every href (`identity::OwnIdentity`), and the account organizes an event
+  whose ORGANIZER any of them names, each compared by its own rules (a
+  `mailto:` by address in any case, a path resolved against the principal
+  apart from one trailing slash, a `urn:` case-insensitively), or whose
+  `EMAIL` equals one of its addresses. Any other ORGANIZER, or any ORGANIZER
+  on a server that reports no address, makes the event `organized_elsewhere`;
+  an event without ORGANIZER is the account's own. The read shows a
+  non-mail calendar user by its `EMAIL`, and drops the row that names the
+  same user as ORGANIZER from the invitees. When the probe for the addresses
+  fails on a network or server error, it is repeated before the next read
+  that needs it, and while it keeps failing that read fails: the host keeps
+  its cache instead of storing a guess that a delta would never revisit.
+- **A write carries a meeting's lines; it never rebuilds them.** On an RFC
+  6638 server the organizer's copy is the invitation: the server mails the
+  attendees whenever it changes, and a PUT without ORGANIZER is a "remove"
+  that cancels the meeting for everyone (§3.2.3.1). Every update therefore
+  reads the resource first and fails if it cannot (`scheduling::plan_block`):
+  ORGANIZER, ATTENDEE, SEQUENCE and STATUS go back as the server wrote them,
+  folding and parameter order included. Only a change to the invitees
+  changes rows: the ones that stay verbatim, the removed ones dropped (the
+  server cancels for them), new ones generated
+  (`ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE`), and all of them
+  gone when the host confirmed every invitee removed (`clear_attendees`,
+  decision 74a). A guest change reaches the series' overrides too. On
+  someone else's meeting a change to the invitees is refused. A master
+  update puts every override of the resource back byte for byte; skipping
+  an occurrence inserts one raw `EXDATE` line and leaves the rest of the
+  resource untouched. A save that changes nothing the server stores (only a
+  colour kept on this device, say) is not sent, because every PUT of a
+  meeting mails its guests. A 403 on a write is reported as the server's
+  refusal (`Forbidden`, with the `DAV:error` precondition), not as a login
+  problem.
+- **Such a server always notifies.** Calendars on a scheduling server carry
+  `always_notifies_attendees` (and `notifier_name` "iCloud" on iCloud): the
+  editors show "iCloud informs the attendees of every change" instead of the
+  checkbox, and the delete dialogs say who informs them instead of offering
+  to remove silently (decisions 76a, 80a). A new event names its invitees,
+  with the account as ORGANIZER, only when the user notifies; otherwise it is
+  a plain appointment and the event returned names nobody.
 
 ## Testing
 

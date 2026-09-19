@@ -59,21 +59,25 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 
 > **Teilnehmer benachrichtigen:** Organisierst du einen Termin, ist jemand
 > anderes eingeladen und unterstützt der Kalender den serverseitigen Versand
-> (iCloud, Google, Exchange/Outlook), erscheint das Kontrollkästchen
-> **Teilnehmer benachrichtigen** (standardmäßig aktiv). Ist es gesetzt,
-> verschickt der Anbieter beim Speichern automatisch Einladungen bzw.
-> Aktualisierungen – Aperio selbst versendet keine E-Mails. Der Organisator
-> zählt nie als Teilnehmer: Ein Termin, den du in Outlook angelegt hast und bei
-> dem Outlook dich als einzigen Teilnehmer führt, hat in Aperio keine
-> Teilnehmer. Bei einer Besprechung, die jemand anderes organisiert, kann nur
-> diese Person Aktualisierungen verschicken; dort erscheint das
-> Kontrollkästchen nicht. Entfernst du den letzten Teilnehmer, bleibt das
-> Kontrollkästchen stehen, damit er eine Absage bekommen kann. Bei
-> Exchange/Outlook, Google und Microsoft 365
-> lässt Aperio die Teilnehmerliste beim Anbieter, wie sie ist, wenn du nur
-> Titel oder Zeit änderst. Bei iCloud geht das noch nicht: Speichern ohne
-> **Teilnehmer benachrichtigen** entfernt die Teilnehmer aus dem Termin, und
-> Speichern mit bittet alle erneut um eine Antwort.
+> (iCloud, Google, Exchange/Outlook, Microsoft 365), kann der Anbieter die
+> Teilnehmer benachrichtigen – Aperio selbst versendet keine E-Mails. Bei
+> Google und Exchange/Outlook erscheint das Kontrollkästchen **Teilnehmer
+> benachrichtigen** (standardmäßig aktiv); ist es gesetzt, verschickt der
+> Anbieter beim Speichern Einladungen bzw. Aktualisierungen. iCloud und
+> Microsoft 365 informieren die Teilnehmer von sich aus über jede Änderung und
+> können nicht still speichern. Statt des Kontrollkästchens sagt der Dialog
+> das, zum Beispiel „iCloud informiert die Teilnehmer über jede Änderung“.
+> Diesen Satz erreichst du mit Tab, und er wird angesagt, wenn er beim
+> Bearbeiten erscheint, etwa wenn du den ersten Teilnehmer hinzufügst.
+>
+> Der Organisator zählt nie als Teilnehmer: Ein Termin, den du in Outlook
+> angelegt hast und bei dem Outlook dich als einzigen Teilnehmer führt, hat in
+> Aperio keine Teilnehmer. Bei einer Besprechung, die jemand anderes
+> organisiert, kann nur diese Person Aktualisierungen verschicken; dort
+> erscheinen weder das Kontrollkästchen noch der Satz. Entfernst du den
+> letzten Teilnehmer, bleiben Kontrollkästchen oder Satz stehen, damit er
+> eine Absage bekommen kann. Änderst du nur Titel oder Zeit, lässt Aperio die
+> Teilnehmerliste beim Anbieter genau, wie sie ist, samt ihren Antworten.
 >
 > Löschst du eine **Besprechung, die du organisierst** (mit Teilnehmern, auf
 > einem Konto mit Server-Terminplanung), fragt Aperio in **einem** Dialog nach –
@@ -86,10 +90,11 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Datum beenden (**diesen und alle folgenden** behält die früheren Termine und
 > entfernt diesen sowie jeden späteren) oder alles absagen – die Auswahlgruppe
 > entscheidet jeweils, ob eine E-Mail rausgeht. Bei einem Einzeltermin bleibt
-> nur die Benachrichtigen-Auswahl. Bei einer Besprechung, zu der du nur
-> eingeladen bist, oder einem Termin ohne Teilnehmer wird ohne Rückfrage
-> gelöscht. (Auf iCloud/CalDAV entscheidet der Server über den Absageversand –
-> dort ist „ohne Benachrichtigung" nicht garantiert.)
+> nur die Benachrichtigen-Auswahl. Bei iCloud und Microsoft 365 verschickt das
+> Löschen die Absage immer. Dort gibt es keine Auswahlgruppe: Der Dialog sagt,
+> wer die Teilnehmer informiert, und jeder Umfang sagt ab. Bei einer
+> Besprechung, zu der du nur eingeladen bist, oder einem Termin ohne
+> Teilnehmer wird ohne Rückfrage gelöscht.
 
 > **Verfügbarkeit prüfen:** Hat ein Termin Teilnehmer und unterstützt der
 > Kalender die Server-Terminplanung, erscheint die Schaltfläche

@@ -50,6 +50,13 @@ flow and token refresh; the adapter sends a `Bearer` token.
   mails whenever `attendees` is in the body, so a silent removal cannot
   reach it.
 
+- **Graph always notifies.** Attendees in the body of a create or an update
+  are mailed, and deleting a meeting on the organizer's calendar sends its
+  cancellation (Microsoft's documentation; not measured live). Its calendars
+  therefore carry `always_notifies_attendees` with `notifier_name`
+  "Microsoft 365", and the editors say so instead of offering a silent save
+  or delete (decision 82b).
+
 ## Testing
 
 `mockito` with canned Graph JSON, including delta envelopes
