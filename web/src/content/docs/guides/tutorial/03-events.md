@@ -89,6 +89,31 @@ In the event dialog you can also set:
 > attendees, and every scope cancels. A meeting you were only invited to, or
 > an event with no attendees, is deleted without asking.
 
+> **An invitation somebody else organizes:** On iCloud — and on any calendar
+> server that schedules for you — the server takes only your own answer and
+> your own reminders for a meeting you were invited to. Everything else it
+> refuses, so Aperio shows such a meeting read-only: the title, the calendar,
+> the times, the place, the description and the guest list are all there to
+> read, each one a stop your screen reader reaches, but none of them can be
+> changed. The dialog says so in a line above the fields.
+>
+> What you can still do: answer (Accept, Tentative, Decline), set your own
+> reminders — attached ones the calendar keeps, or private ones only Aperio
+> rings — choose a sound, give it a colour, join a conference, check the
+> attendees' availability, and delete it. Answering no longer closes the
+> editor, so you can answer and set a reminder in one visit.
+>
+> Deleting it, or one occurrence of it, tells the organizer: the dialog says
+> "The organizer gets a decline" before it happens, and the button is called
+> **Delete and decline**. Ending somebody else's series early is not offered,
+> because the server would refuse it. Dragging such a meeting to another day
+> or time is refused too, and Aperio says so; moving it to another calendar
+> still works, and the copy has no attendees.
+>
+> The repeat rule is read out as a sentence — "every Monday, 5 times" — since
+> there are no controls to read. Aperio says plainly when a rule is one it
+> cannot put into words.
+
 > **Check availability:** When an event has attendees on a calendar with
 > server-side scheduling, a **Check availability** button appears, below
 > **Notify attendees** when that is shown, and also for a meeting someone

@@ -2257,13 +2257,41 @@ Siehe DESIGN §4.2.
   Wartet auf den Live-Test mit „Aperio R6 eigene“: Titel ändern, einen Gast
   hinzufügen und entfernen, den letzten entfernen, eine Serie ändern und ein
   Vorkommen löschen.
-  🚩 **Gestapelt auf #84, zusammen mit #83 zu mergen:** fremde iCloud-Einladungen
-  schreibgeschützt (77a), der Löschdialog sagt dort „Der Organisator bekommt
-  eine Absage“ (83b), eine lesbare Zusammenfassung der Wiederholung (84a), und
-  „nur diesen Termin“ einer iCloud-Serie als echte Ausnahme (79b). Dazu
-  übersetzen beide Oberflächen die Ablehnung des Servers: Ein Fehler
-  `forbidden` beginnt mit `reply-only-invitation:` oder `server-refused:`,
-  und heute liest der Screenreader diesen englischen Text vor.
+  ↻ **Fremde Einladungen sind schreibgeschützt** (77a, 83b, 84a), gestapelt
+  auf #84 und zusammen mit #83 zu mergen. Kalender auf einem Server mit
+  Terminplanung tragen `invitations_reply_only`; beide Editoren zeigen so
+  eine Besprechung schreibgeschützt (Antwort, eigene Erinnerungen, Klang,
+  Farbe, Beitreten, Verfügbarkeit, Löschen bleiben), CalDAV schreibt in so
+  einem Termin nur die VALARMs und lässt jede andere Zeile Byte für Byte
+  stehen, der Löschdialog sagt „Der Organisator bekommt eine Absage“, die
+  Wiederholung steht als Satz da (Kern-Regel mit Prüf-Datei, EN/DE), und
+  jede Ablehnung des Servers wird in beiden Oberflächen zu einem Satz.
+  `CACHE_GENERATION` 4. Offen bleibt „nur diesen Termin“ einer iCloud-Serie
+  als echte Ausnahme (79b, PR 3).
+  🚩 **Nach dem Live-Test zu klären (PR 2):**
+  - Nimmt iCloud es an, wenn ein Gast `X-APPLE-DEFAULT-ALARM` entfernt, und
+    setzt es den Standard-Hinweis danach wieder? Darauf ruht das Ersetzen der
+    Wecker.
+  - Schickt iCloud dem Organisator wirklich eine Absage, wenn ein Gast seine
+    Kopie oder ein einzelnes Vorkommen löscht? RFC 6638 führt `EXDATE` nicht
+    unter den erlaubten Änderungen eines Gastes; Apple macht es trotzdem
+    (86a: der Dialog sagt es schon jetzt).
+  - `EXDATE` einer Zeit-Serie wird weiter als UTC geschrieben, nicht mit
+    `TZID`; nur die Ganztagsform ist jetzt richtig.
+  - `respond_to_event` kennt nur die eine Adresse aus der Discovery, keine
+    Aliase, und gibt das neue ETag nicht zurück.
+  - Ein CalDAV-Server ohne Terminplanung bleibt wie in #84: Der Editor sperrt
+    nicht, und `plan_block` lehnt eine geänderte Gästeliste ab.
+  - Auf einem farbfähigen Server versteckt der Editor die Farbe einer fremden
+    Einladung, statt sie geräte-lokal zu halten.
+  - `WKST` zählt nur in der einen Form, in der es die Wochen verschiebt.
+  - Die Wiederholungs-Zusammenfassung erscheint auch im normalen Editor, wenn
+    die gespeicherte Regel nicht die ist, die der Picker zurückbauen würde
+    (87b, gebaut: `pickerMisreadsRule`). Die Bedienelemente selbst halten
+    solche Regeln weiter nicht; wer eines anfasst, speichert die Regel des
+    Pickers.
+  - iOS-Volltastatur erreicht die schreibgeschützten Zeilen des Handys nicht;
+    VoiceOver und TalkBack erreichen sie.
   🚩 **Eigener PR nach dem Stapel (89a):** Die erzeugten Kotlin-Bindings
   (`mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt`)
   nicht mehr einchecken. Die Android-CI erzeugt sie ohnehin vor jedem Bau neu,

@@ -134,6 +134,23 @@ Apple's well-known endpoints.
   meeting mails its guests. A 403 on a PUT or DELETE (a save, a delete, an
   answer to an invitation) is reported as the server's refusal (`Forbidden`,
   with the `DAV:error` precondition), not as a login problem.
+- **And it takes only the attendee's own changes.** Those calendars also
+  carry `invitations_reply_only`, so the editors show a meeting somebody else
+  organizes read-only apart from the reply and the account's own reminders
+  (decision 77a). The adapter writes such a copy by splicing: the server's own
+  VEVENT goes back byte for byte with its VALARMs replaced
+  (`write_attendee_copy`), so the zone, `SEQUENCE`, `STATUS`, the people,
+  Apple's own properties and every line the adapter does not model survive. An
+  alarm the read shows as a reminder is claimed by that reminder whatever its
+  ACTION or `RELATED` (`mapping::raw_alarm_reminder` — classifying it more
+  strictly would keep it *and* render a second one beside it); one Aperio
+  never showed is kept untouched; adding or removing alarms drops the
+  event-level `X-APPLE-DEFAULT-ALARM`. Any other changed field is refused
+  before the PUT (`cal_core::invitation::reply_only_change`), and a protected
+  difference against a copy the caller never saw is a **conflict**, not a
+  refusal: that is the organizer's change, not the user's. The PUT uses
+  If-Match against the freshly read ETag, because the body being written is
+  the body just read.
 - **Such a server always notifies.** Calendars on a scheduling server carry
   `always_notifies_attendees` (and `notifier_name` "iCloud" on iCloud): the
   editors show "iCloud informs the attendees of every change" instead of the

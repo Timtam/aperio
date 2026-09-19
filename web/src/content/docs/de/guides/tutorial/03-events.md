@@ -96,6 +96,34 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Besprechung, zu der du nur eingeladen bist, oder einem Termin ohne
 > Teilnehmer wird ohne Rückfrage gelöscht.
 
+> **Eine Einladung, die jemand anderes organisiert:** Bei iCloud – und auf
+> jedem Kalenderserver, der die Terminplanung übernimmt – nimmt der Server bei
+> einer Besprechung, zu der du eingeladen bist, nur deine eigene Antwort und
+> deine eigenen Erinnerungen an. Alles andere lehnt er ab, deshalb zeigt
+> Aperio so eine Besprechung schreibgeschützt: Titel, Kalender, Zeiten, Ort,
+> Beschreibung und die Gästeliste stehen alle da, jedes als eigener Halt für
+> den Screenreader, aber keines lässt sich ändern. Eine Zeile über den Feldern
+> sagt, warum.
+>
+> Was du weiter tun kannst: antworten (Zusagen, Vorläufig, Absagen), eigene
+> Erinnerungen setzen – angehängte, die der Kalender behält, oder eigene, die
+> nur Aperio meldet –, einen Klang wählen, eine Farbe vergeben, einer
+> Konferenz beitreten, die Verfügbarkeit der Teilnehmer prüfen und löschen.
+> Das Antworten schließt den Editor nicht mehr, du kannst also antworten und
+> danach eine Erinnerung setzen.
+>
+> Löschst du die Besprechung oder einen einzelnen Termin daraus, erfährt es
+> der Organisator: Der Dialog sagt vorher „Der Organisator bekommt eine
+> Absage“, und die Schaltfläche heißt **Löschen und absagen**. Die Serie eines
+> anderen früher zu beenden, wird nicht angeboten – der Server würde es
+> ablehnen. Auf einen anderen Tag oder eine andere Zeit ziehen geht ebenfalls
+> nicht, und Aperio sagt das; in einen anderen Kalender verschieben geht
+> weiter, und die Kopie hat keine Teilnehmer.
+>
+> Die Wiederholung steht als Satz da – „jeden Montag, 5 Mal“ –, weil es keine
+> Bedienelemente zu lesen gibt. Kann Aperio eine Regel nicht in Worte fassen,
+> sagt es das offen.
+
 > **Verfügbarkeit prüfen:** Hat ein Termin Teilnehmer und unterstützt der
 > Kalender die Server-Terminplanung, erscheint die Schaltfläche
 > **Verfügbarkeit prüfen**, unter **Teilnehmer benachrichtigen**, wenn es da

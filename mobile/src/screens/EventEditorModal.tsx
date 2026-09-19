@@ -31,6 +31,7 @@ import {
   eventWriteErrorMessage,
   invitationLocked,
   lastOccurrenceDayKey,
+  pickerMisreadsRule,
   recurrenceSummaryText,
   seriesDayKey,
   applyDateTimeChange,
@@ -767,9 +768,12 @@ export default function EventEditorModal({
   );
   // The repeat rule in words (84a), because there are no controls to read.
   const repeatSentence = (() => {
-    if (!locked || !original) return '';
+    if (!original) return '';
     const rule = original.recurrence?.rrule?.trim();
-    if (!rule) return t('dialogs.event.recurrence.none');
+    if (!rule) return locked ? t('dialogs.event.recurrence.none') : '';
+    // In the editable editor only where the controls would show another rule
+    // than the one stored (87b): otherwise they say it themselves.
+    if (!locked && !pickerMisreadsRule(rule)) return '';
     return recurrenceSummaryText(
       describeRecurrence({
         rrule: rule,
@@ -1699,12 +1703,20 @@ export default function EventEditorModal({
         />
       ) : (
         !(isOccurrence && editScope === 'occurrence') && (
+          <>
+          {repeatSentence !== '' && (
+            <ReadOnlyField
+              label={t('dialogs.event.recurrence.label')}
+              value={repeatSentence}
+            />
+          )}
           <RecurrenceSelector
             value={recurrence}
             onChange={setRecurrence}
             start={recurrenceStartDate(startDate)}
             capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
           />
+          </>
         )
       )}
 

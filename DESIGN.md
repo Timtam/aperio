@@ -583,6 +583,13 @@ Tabelle (`TaskI18nKeys`), die eine Oberfläche einmal liest — die Views fragen
 pro Kachel, und auf dem Telefon wäre jede Frage eine Überfahrt über die native
 Brücke für ein Wort, das sich zur Laufzeit nie ändert. Dazu zählt der Kern den
 Fortschritt der Unteraufgaben für alle Eltern einer Liste in einer Überfahrt.
+Ebenso die Wiederholung in Worten (84a): `cal_core::recurrence_summary`
+antwortet mit Schlüsseln und Werten — „jeden“ plus eine Wochentagsliste, ein
+Ende als Anzahl oder als Tag —, und `shared/recurrenceSummary.ts` setzt daraus
+den Satz in der Sprache des Lesers, mit den Wochentags- und Monatsnamen der
+Plattform. Eine Regel, die der Kern nicht in Worte fassen kann, sagt das
+(`Undescribed` mit dem Grund und der Häufigkeit); geraten wird nichts.
+
 Die Glyphen (○ ◐ ● ⊘, `!`/`★`) bleiben pro Oberfläche, genauso jede mit `t`
 gebaute Endung: das ist die Entscheidung vom 2026-09-09, ein E-Ink-Gerät will
 plausibel andere Zeichen. `shared/taskStatus.ts` hält beide Türen.
@@ -1289,6 +1296,38 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   (`attendeeNotice`, `cancellationNotice`, `notifierSentence`), auch das
   „Organisiert das Konto?“ der Löschdialoge: Es folgt jetzt
   `organized_elsewhere` statt eines eigenen Adressvergleichs.
+- **Fremde Einladungen sind schreibgeschützt (77a, 83b, 84a):** Auf einem
+  Server mit Terminplanung nimmt der Anbieter von einem Gast nur dessen
+  eigene Antwort und dessen eigene Wecker an (RFC 6638 §3.2.2.1); alles
+  andere lehnt er mit `allowed-attendee-scheduling-object-change` ab. Solche
+  Kalender tragen `invitations_reply_only` (CalDAV setzt es mit der
+  Terminplanung; Microsoft Graph nicht, denn Graph übernimmt die Änderung
+  eines Gastes). Beide Editoren zeigen so eine Besprechung schreibgeschützt:
+  jedes Feld bleibt ein Halt mit derselben Beschriftung wie sonst, nichts ist
+  `disabled` (das nähme den Wert aus der Leserreihenfolge), und die
+  Wiederholung steht als Satz da, weil es keine Bedienelemente zu lesen gibt.
+  Erlaubt bleiben Antworten, eigene Erinnerungen, Klang, Farbe (wo Aperio sie
+  hält), Beitreten, Verfügbarkeit prüfen und Löschen.
+  - Das Schreiben ersetzt im Text des Servers nur die VALARMs
+    (`adapter-caldav::write_attendee_copy`): Zone, `SEQUENCE`, `STATUS`, die
+    Personen, Apples eigene Eigenschaften und jede Zeile, die Aperio nicht
+    kennt, gehen Byte für Byte zurück. Ein Wecker, den der Nutzer behält,
+    behält seinen eigenen Text samt Apple-Marke; einen, den Aperio nie
+    angezeigt hat, löscht eine Aperio-Bearbeitung nie.
+  - Jedes andere geänderte Feld wird vor dem PUT abgelehnt
+    (`cal_core::invitation::reply_only_change`). Weicht es dagegen von einer
+    Fassung ab, die dieses Gerät nie gesehen hat, ist das die Änderung des
+    Organisators: ein Konflikt, keine Ablehnung — sonst bekäme der Nutzer
+    gesagt, er habe etwas getan, was er nicht getan hat.
+  - Löschen bleibt möglich, und der Dialog sagt vorher „Der Organisator
+    bekommt eine Absage“ (83b, noch nicht gemessen). „Diesen und alle
+    folgenden“ wird nicht angeboten: Das schriebe die Regel um, die nur der
+    Organisator ändern darf.
+  - Eine Ablehnung reist als Marke (`cal_core::WriteRefusal`:
+    `reply-only-invitation:`, `server-refused:`, `identity-unknown:`), und
+    beide Oberflächen sagen daraus einen Satz in der Sprache des Nutzers
+    (`shared/eventWriteError.ts`). `CACHE_GENERATION` 4, damit eine
+    gespeicherte Kalenderliste ohne das neue Merkmal neu gelesen wird.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen

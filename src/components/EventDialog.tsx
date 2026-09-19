@@ -56,6 +56,7 @@ import {
   eventWriteErrorMessage,
   invitationLocked,
   lastOccurrenceDayKey,
+  pickerMisreadsRule,
   planCarry,
   recurrenceSummaryText,
   seriesDayKey,
@@ -293,9 +294,12 @@ export function EventDialog({
   // The repeat rule in words (84a): there are no controls to read in a locked
   // invitation, and an expanded occurrence carries its series' rule.
   const repeatSentence = useMemo(() => {
-    if (!locked || !event) return '';
+    if (!event) return '';
     const rrule = event.recurrence?.rrule?.trim();
-    if (!rrule) return t('dialogs.event.recurrence.none');
+    if (!rrule) return locked ? t('dialogs.event.recurrence.none') : '';
+    // In the editable editor only where the controls would show another rule
+    // than the one stored: otherwise they say it themselves.
+    if (!locked && !pickerMisreadsRule(rrule)) return '';
     return recurrenceSummaryText(
       describeRecurrence({
         rrule,
@@ -2159,6 +2163,16 @@ export function EventDialog({
             value={repeatSentence}
           />
         ) : (
+          <>
+          {/* A rule the controls cannot hold is shown by them as a DIFFERENT
+              rule, and touching one would save that different rule. So the
+              stored rule is said in words above them (87b). */}
+          {repeatSentence !== '' && (
+            <ReadOnlyField
+              label={t('dialogs.event.recurrence.label')}
+              value={repeatSentence}
+            />
+          )}
           <RecurrenceSelector
             value={form.rrule}
             onChange={(rrule) => update('rrule', rrule)}
@@ -2168,6 +2182,7 @@ export function EventDialog({
                 ?.recurrence_capabilities
             }
           />
+          </>
         )}
 
         <RemindersEditor
