@@ -179,6 +179,12 @@ installSeriesShiftRules({
   seriesShiftJson: (inputJson) => CalFfi.seriesShift(inputJson),
 });
 
+// A repeat rule in words (84a): the locked invitation shows it, and so does
+// the editor when the picker cannot rebuild the stored rule.
+installRecurrenceSummaryRules({
+  recurrenceSummaryJson: (inputJson) => CalFfi.recurrenceSummary(inputJson),
+});
+
 // The clock a series repeats on: which stored zone names are a zone. Every
 // expansion of a series asks, and so do the reminder and widget passes, so it
 // is installed before anything can render or run in the background.

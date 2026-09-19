@@ -176,6 +176,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  writes, or why it cannot move. */
   seriesShift(inputJson: string): string;
 
+  /** A repeat rule in words: the keys and values a sentence is built from,
+   *  or why the rule has no sentence. */
+  recurrenceSummary(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

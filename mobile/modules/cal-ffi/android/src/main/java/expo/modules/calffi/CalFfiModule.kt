@@ -49,6 +49,7 @@ import uniffi.cal_ffi.stripSignature as uniffiStripSignature
 import uniffi.cal_ffi.applySignature as uniffiApplySignature
 import uniffi.cal_ffi.dayStart as uniffiDayStart
 import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
+import uniffi.cal_ffi.recurrenceSummary as uniffiRecurrenceSummary
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
@@ -484,6 +485,11 @@ class CalFfiModule : Module() {
     // Shifting a recurring series by whole days: one question, one answer.
     Function("seriesShift") { inputJson: String ->
       uniffiSeriesShift(inputJson)
+    }
+
+    // A repeat rule in words: keys and values the surface renders.
+    Function("recurrenceSummary") { inputJson: String ->
+      uniffiRecurrenceSummary(inputJson)
     }
 
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────

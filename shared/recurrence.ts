@@ -821,3 +821,44 @@ export function splitRRuleForEdit(
   );
   return { oldRule, newRule: newParts.join(';') };
 }
+
+/**
+ * The day the last occurrence of a bounded series falls on, `YYYY-MM-DD` on
+ * the series' own clock, or `null`.
+ *
+ * `UNTIL` is a BOUND, not an occurrence, and three providers write it three
+ * ways: Aperio and Exchange as the end of the day in UTC, Apple as the local
+ * end of day expressed in UTC, and a truncation as one second before the cut.
+ * Reading the digits would name a day the series does not meet, one day out
+ * for an invitation from west of Greenwich. So the day is asked of the same
+ * expander that decides which occurrences the user sees on screen (decision
+ * 85a), and the repeat sentence then agrees with the calendar.
+ *
+ * `null` for a rule without `UNTIL`, for a `COUNT` rule (whose sentence says
+ * how often instead), for a sub-daily rule (whose bound would iterate by the
+ * minute) and when nothing falls before the bound.
+ */
+export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
+  const body = event.recurrence?.rrule?.trim();
+  if (!body) return null;
+  const upper = body.toUpperCase();
+  if (!upper.includes('UNTIL=') || upper.includes('COUNT=')) return null;
+  if (/FREQ=(SECONDLY|MINUTELY|HOURLY)/.test(upper)) return null;
+  const tzid = zoneOrNull(event.recurrence?.tzid);
+  const dtstart = new Date(event.start);
+  if (Number.isNaN(dtstart.getTime())) return null;
+  try {
+    const rule = buildRule(body, tzid ? realToWall(dtstart, tzid) : dtstart);
+    const until = rule.options.until;
+    if (!until) return null;
+    const last = rule.before(until, true);
+    if (!last) return null;
+    // A zoned rule iterates in wall-clock space (`zonedOccurrences`), so its
+    // answer already reads as the day on the series' clock.
+    return tzid
+      ? last.toISOString().slice(0, 10)
+      : seriesDayKey(last.toISOString(), tzid);
+  } catch {
+    return null;
+  }
+}

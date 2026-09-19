@@ -868,6 +868,8 @@ external fun uniffi_cal_ffi_checksum_func_plan_status_cascade(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_priority_rank(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_recurrence_summary(
+): Short
 external fun uniffi_cal_ffi_checksum_func_self_assign_on_status_change(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_series_clock_zone(
@@ -1714,6 +1716,8 @@ external fun uniffi_cal_ffi_fn_func_plan_status_cascade(`inputJson`: RustBuffer.
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_priority_rank(`priority`: RustBuffer.ByValue,`scale`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_func_recurrence_summary(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_self_assign_on_status_change(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_series_clock_zone(`tzid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1946,6 +1950,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_priority_rank() != 622.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_recurrence_summary() != 63015.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_self_assign_on_status_change() != 56919.toShort()) {
@@ -10885,6 +10892,21 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_priority_rank(
     
         FfiConverterString.lower(`priority`),FfiConverterString.lower(`scale`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A repeat rule in words (decision 84a): the desktop asks the same rule
+         * through WebAssembly, and a locked invitation shows its answer as a field.
+         */
+    @Throws(StoreException::class) fun `recurrenceSummary`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_recurrence_summary(
+    
+        FfiConverterString.lower(`inputJson`),_status)
 }
     )
     }

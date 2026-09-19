@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   attendeeNotice,
+  declineSentence,
+  invitationLocked,
   cancellationNotice,
   notifierSentence,
   sendsInvitations,
@@ -82,6 +84,34 @@ describe('notifierSentence', () => {
     });
     expect(notifierSentence({}, 'cancellation')).toEqual({
       key: 'dialogs.deleteScope.notifyAlways',
+      values: {},
+    });
+  });
+});
+
+describe('invitationLocked', () => {
+  const invitation = { organized_elsewhere: true, attendees: ['me@example.com'] };
+
+  it('is only someone else\u2019s meeting on a provider that takes no edits (77a)', () => {
+    expect(invitationLocked({ invitations_reply_only: true }, invitation)).toBe(true);
+    // The account's own meeting is editable, whatever the provider does.
+    expect(
+      invitationLocked({ invitations_reply_only: true }, { ...invitation, organized_elsewhere: false }),
+    ).toBe(false);
+    // A provider that keeps an invitee's edits leaves the editor open.
+    expect(invitationLocked({ invitations_reply_only: false }, invitation)).toBe(false);
+    expect(invitationLocked({}, invitation)).toBe(false);
+    // Nothing known yet: not locked, and the adapter still refuses a write it
+    // may not make.
+    expect(invitationLocked(null, invitation)).toBe(false);
+    expect(invitationLocked({ invitations_reply_only: true }, null)).toBe(false);
+  });
+});
+
+describe('declineSentence', () => {
+  it('says the organizer gets a decline, shaped like the notifier sentence (83b)', () => {
+    expect(declineSentence()).toEqual({
+      key: 'dialogs.deleteScope.organizerGetsDecline',
       values: {},
     });
   });

@@ -2264,6 +2264,14 @@ Siehe DESIGN §4.2.
   übersetzen beide Oberflächen die Ablehnung des Servers: Ein Fehler
   `forbidden` beginnt mit `reply-only-invitation:` oder `server-refused:`,
   und heute liest der Screenreader diesen englischen Text vor.
+  🚩 **Eigener PR nach dem Stapel (89a):** Die erzeugten Kotlin-Bindings
+  (`mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt`)
+  nicht mehr einchecken. Die Android-CI erzeugt sie ohnehin vor jedem Bau neu,
+  und die Swift-Bindings liegen auch nicht im Repo. Umzustellen sind: Datei
+  loeschen und ignorieren, der lokale Android-Lauf erzeugt sie neben dem
+  frischen `.so`, und `mobile/scripts/check-ffi-bridges.mjs` erzeugt sie selbst,
+  statt die eingecheckte Fassung zu vergleichen. Anlass: Eine veraltete Datei
+  faellt sonst erst beim Checksum-Fehler auf dem Geraet auf.
   🚩 **Offen nach #84:**
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine

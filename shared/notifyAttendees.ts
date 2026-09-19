@@ -25,6 +25,7 @@ export type AttendeeNotice = 'none' | 'offer' | 'always';
 export interface NoticeCalendar {
   supports_scheduling?: boolean;
   always_notifies_attendees?: boolean;
+  invitations_reply_only?: boolean;
   notifier_name?: string | null;
 }
 
@@ -80,4 +81,30 @@ export function notifierSentence(
     what === 'change' ? 'dialogs.event.fields.notifyAlways' : 'dialogs.deleteScope.notifyAlways';
   const service = calendar?.notifier_name?.trim();
   return service ? { key: `${base}Named`, values: { service } } : { key: base, values: {} };
+}
+
+/**
+ * Whether an event is an invitation the provider keeps read-only: someone
+ * else organizes it, and the provider takes only this account's own reply and
+ * reminders (decision 77a, `cal_core::invitation::invitation_locked`).
+ *
+ * The editors then show it read-only apart from those, instead of offering
+ * edits the server would refuse. Both answers come from the adapter, so
+ * nothing is guessed from addresses here.
+ */
+export function invitationLocked(
+  calendar: NoticeCalendar | null | undefined,
+  event: NoticeEvent | null | undefined,
+): boolean {
+  return calendar?.invitations_reply_only === true && event?.organized_elsewhere === true;
+}
+
+/**
+ * The sentence a delete of such an invitation adds (decision 83b): removing
+ * the account's copy tells the organizer it is declined.
+ *
+ * Shaped like [`notifierSentence`], so every dialog appends it the same way.
+ */
+export function declineSentence(): { key: string; values: Record<string, string> } {
+  return { key: 'dialogs.deleteScope.organizerGetsDecline', values: {} };
 }

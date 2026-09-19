@@ -19,6 +19,7 @@ import {
   installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
+  installRecurrenceSummaryRules,
   installSeriesShiftRules,
   installSeriesClockRules,
   installZoneListRules,
@@ -67,6 +68,7 @@ import {
   isImportantPriority,
   normalPriority,
   priorityRank,
+  recurrenceSummaryJson,
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
@@ -197,6 +199,10 @@ initCoreRules()
     // The task settings: how the stored preferences read, and what a change stores.
     installTaskSettingsRules({ taskSettingsJson });
     installSeriesShiftRules({ seriesShiftJson });
+
+    // A repeat rule in words (84a): the locked invitation shows it, and
+    // so does the editor when the picker cannot rebuild the stored rule.
+    installRecurrenceSummaryRules({ recurrenceSummaryJson });
 
     // The clock a series repeats on: which stored zone names are a zone.
     installSeriesClockRules({

@@ -416,3 +416,10 @@ pub fn task_settings(input_json: &str) -> Result<String, JsValue> {
 pub fn series_shift(input_json: &str) -> Result<String, JsValue> {
     rules::series_shift(input_json).map_err(to_js)
 }
+
+/// A repeat rule in words: the keys and values a sentence is built from, or
+/// why the rule has no sentence (decision 84a).
+#[wasm_bindgen(js_name = recurrenceSummary)]
+pub fn recurrence_summary(input_json: &str) -> Result<String, JsValue> {
+    rules::recurrence_summary(input_json).map_err(to_js)
+}

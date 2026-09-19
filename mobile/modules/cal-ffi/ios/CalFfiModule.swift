@@ -386,6 +386,11 @@ public class CalFfiModule: Module {
       try seriesShift(inputJson: inputJson)
     }
 
+    // A repeat rule in words: keys and values the surface renders.
+    Function("recurrenceSummary") { (inputJson: String) -> String in
+      try recurrenceSummary(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this

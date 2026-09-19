@@ -57,6 +57,7 @@ import init, {
   dayStart as wasmDayStart,
   taskSettings as wasmTaskSettings,
   seriesShift as wasmSeriesShift,
+  recurrenceSummary as wasmRecurrenceSummary,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
   zoneLabels as wasmZoneLabels,
@@ -329,6 +330,12 @@ export function taskSettingsJson(inputJson: string): string {
 export function seriesShiftJson(inputJson: string): string {
   assertReady();
   return wasmSeriesShift(inputJson);
+}
+
+/** See `cal_core::recurrence_summary::recurrence_summary_json`. */
+export function recurrenceSummaryJson(inputJson: string): string {
+  assertReady();
+  return wasmRecurrenceSummary(inputJson);
 }
 
 /** See `cal_core::series_clock_zone`: the stored name, or `''` for UTC. */
