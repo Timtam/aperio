@@ -2519,6 +2519,7 @@ mod server_zone_tests {
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "S:IID|CK".into(),
             calendar_id: "FA|FCK".into(),

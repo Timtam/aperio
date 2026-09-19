@@ -1207,17 +1207,36 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   wird nichts entfernt.
 - **Benachrichtigen darf nur, wer organisiert (70a):** Der Adapter sagt, ob das
   Konto den Termin organisiert (EWS `MyResponseType`, Graph `isOrganizer`,
-  Google `organizer.self`, CalDAV `ORGANIZER` gleich der eigenen
-  calendar-user-address). Sonst, oder wenn es sich nicht bestätigen lässt, ist
-  der Termin `organized_elsewhere`. Der Schalter erscheint dann nicht, und der
-  Host löscht die Absicht.
+  Google `organizer.self`, CalDAV `ORGANIZER` gleich einer der Adressen aus
+  `calendar-user-address-set`). Die Antwort des Anbieters zählt zuerst, auch
+  wenn er keine Adresse des Organisators nennt. Ohne Antwort ist ein Termin
+  mit Organisator `organized_elsewhere`, einer ohne Organisator gehört dem
+  Konto (ein einfacher Termin). Bei `organized_elsewhere` erscheint der
+  Schalter nicht, und der Host löscht die Absicht. Auch der
+  Videokonferenz-Anbieter lädt dann niemanden ein
+  (`host_core::meetings::meeting_guests`). Kann CalDAV die eigenen Adressen
+  nicht lesen, weil die Abfrage an einem Netz- oder Serverfehler scheitert,
+  scheitert das Lesen der Termine. Der Host behält dann seinen Stand, statt
+  eine Vermutung zu speichern, die ein Delta nie wieder anfasst.
 - **Liste nur schreiben, wenn sie sich geändert hat (71a):** Beide Hosts rufen
   vor jedem Schreiben `host_core::event_write::guard_update` auf. Der
-  vergleicht mit dem zuletzt gelesenen Stand aus dem Cache und setzt
+  vergleicht mit dem zuletzt gelesenen Stand aus dem Cache (bei Exchange auch
+  dann, wenn ein neuer ChangeKey die Id inzwischen geändert hat) und setzt
   `keep_attendees`, wenn dieselben Leute eingeladen sind. EWS, Google und Graph
   lassen die Liste beim Anbieter dann unberührt, mit der Zeile des Organisators.
   CalDAV kann das noch nicht: Es baut den VEVENT neu und schreibt `ATTENDEE`
   nur beim Benachrichtigen (TODO).
+- **Den letzten Gast entfernen (74a):** Eine leere Liste allein löscht beim
+  Anbieter nichts, damit ein Termin, der ohne seine Gäste gelesen wurde,
+  niemanden ausladen kann. Zeigt der Cache aber Gäste und sind nach der
+  Änderung keine mehr da, setzt `guard_update` `clear_attendees`. EWS löscht
+  dann `RequiredAttendees` und `OptionalAttendees`, Google schickt ein leeres
+  `attendees`, Graph ebenso, aber nur beim Benachrichtigen, weil Graph
+  Teilnehmer nie still schreibt. „Teilnehmer benachrichtigen“ bleibt dabei
+  stehen, damit die Entfernten eine Absage bekommen können
+  (`offersNotifyAttendees` in `@aperio/shared`, auf beiden Oberflächen). Ob
+  Exchange die Absage ohne verbleibende Gäste annimmt, ist noch nicht
+  gemessen (Live-Runde 5).
 - **Abgeleitete Termine (72a):** Wer aus einem bestehenden Termin einen neuen
   anlegt (Carve-out, Folge-Serie, Kopie, Mitnahme, Lösen bei Exchange), gibt
   dessen `organizer` und `organized_elsewhere` mit (`organizerOf` in
@@ -1229,8 +1248,10 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   Zeile „Organisiert von …“ im Editor (TODO).
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
-prüfen" — sichtbar unter demselben Gate wie der Benachrichtigen-Schalter
-(scheduling-fähiger Kalender + Teilnehmer vorhanden) — die Belegung aller
+prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen
+Teilnehmern, auch bei einer Besprechung, die jemand anderes organisiert; der
+Benachrichtigen-Schalter verlangt zusätzlich, dass das Konto organisiert
+(70a) — die Belegung aller
 Teilnehmer im aktuell eingegebenen Zeitfenster. Pro Teilnehmer wird frei/belegt
 angezeigt plus eine Zusammenfassung; das Ergebnis wird über die Live-Region
 angekündigt. Best-Effort: Ein Anbieter, der nicht antworten darf (fehlende

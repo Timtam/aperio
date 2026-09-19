@@ -670,7 +670,10 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
         None => ev.id.clone(),
     };
     let ev_enc = urlencoding(&target);
-    let su = send_updates_param(ev.send_invitations && !ev.attendees.is_empty());
+    // Removed invitees count too: with every one removed (`clear_attendees`)
+    // they may still get a cancellation (decision 74a).
+    let su =
+        send_updates_param(ev.send_invitations && (!ev.attendees.is_empty() || ev.clear_attendees));
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
@@ -2089,6 +2092,7 @@ mod tests {
     fn moved_override() -> Event {
         Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "master-1::rid::2026-06-01T18:00:00Z".into(),
             calendar_id: "primary".into(),

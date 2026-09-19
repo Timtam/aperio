@@ -212,6 +212,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
 
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -240,13 +241,18 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
 
 /// Record on each event whether the connected account organizes it (decision
 /// 70a). CalDAV has no flag for it: RFC 6638 names the account by its
-/// calendar-user address, so the account organizes an event whose ORGANIZER is
-/// that address. `own_address` is `None` when discovery did not report one;
-/// then no event with an organizer counts as the account's.
-pub fn mark_organized_by(events: &mut [Event], own_address: Option<&str>) {
+/// calendar-user addresses, so the account organizes an event whose ORGANIZER
+/// is any address in its `calendar-user-address-set`. `own_addresses` is empty
+/// when the server reported none; then no event with an organizer counts as
+/// the account's.
+pub fn mark_organized_by(events: &mut [Event], own_addresses: &[String]) {
     for ev in events {
-        let organized_by_me = match (ev.organizer.as_deref(), own_address) {
-            (Some(organizer), Some(own)) => Some(cal_core::attendee::same_address(organizer, own)),
+        let organized_by_me = match ev.organizer.as_deref() {
+            Some(organizer) if !own_addresses.is_empty() => Some(
+                own_addresses
+                    .iter()
+                    .any(|own| cal_core::attendee::same_address(organizer, own)),
+            ),
             _ => None,
         };
         ev.organized_elsewhere =
@@ -1267,8 +1273,9 @@ END:VEVENT\r\nEND:VCALENDAR\r\n";
         assert_eq!(events[0].attendees, ["bob@example.com"]);
     }
 
-    /// Whether the account organizes an event takes its own address (RFC 6638
-    /// calendar-user address): it organizes the event whose ORGANIZER that is.
+    /// Whether the account organizes an event takes its own addresses (RFC
+    /// 6638 calendar-user-address-set): it organizes the event whose ORGANIZER
+    /// is any of them, not only the first.
     #[test]
     fn the_account_organizes_what_its_address_organizes() {
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mtg-3@aperio\r\n\
@@ -1278,7 +1285,8 @@ END:VEVENT\r\nBEGIN:VEVENT\r\nUID:own@aperio\r\n\
 DTSTART:20260520T080000Z\r\nDTEND:20260520T090000Z\r\nEND:VEVENT\r\n\
 END:VCALENDAR\r\n";
         let mut events = parse_calendar_data(body, "cal-1").unwrap();
-        mark_organized_by(&mut events, Some("mailto:ME@example.com"));
+        let own = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        mark_organized_by(&mut events, &own(&["mailto:ME@example.com"]));
         assert!(
             !events[0].organized_elsewhere,
             "its ORGANIZER is the account"
@@ -1287,10 +1295,21 @@ END:VCALENDAR\r\n";
             !events[1].organized_elsewhere,
             "no organizer: the account's own"
         );
-        mark_organized_by(&mut events, Some("mailto:someone@example.com"));
+        mark_organized_by(
+            &mut events,
+            &own(&["mailto:me@alias.example", "mailto:me@example.com"]),
+        );
+        assert!(
+            !events[0].organized_elsewhere,
+            "its ORGANIZER is the account's second address"
+        );
+        mark_organized_by(&mut events, &own(&["mailto:someone@example.com"]));
         assert!(events[0].organized_elsewhere);
-        mark_organized_by(&mut events, None);
-        assert!(events[0].organized_elsewhere, "unknown: not confirmed");
+        mark_organized_by(&mut events, &[]);
+        assert!(
+            events[0].organized_elsewhere,
+            "none reported: not confirmed"
+        );
         assert!(!events[1].organized_elsewhere);
     }
 

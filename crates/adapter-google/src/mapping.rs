@@ -439,6 +439,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
 
     Ok(Some(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -510,11 +511,13 @@ pub struct EventWriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Vec<String>>,
     pub reminders: EventRemindersWrite,
-    /// Attendees are always written (Google stores them); whether Google
-    /// EMAILS them is governed by the `sendUpdates` query param on the
-    /// request, not the body.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub attendees: Vec<EventAttendeeWrite>,
+    /// Attendees are written whenever there are any (Google stores them);
+    /// whether Google EMAILS them is governed by the `sendUpdates` query
+    /// param on the request, not the body. `None` leaves the array out, so
+    /// Google keeps its own; `Some` of an empty list clears it, which only a
+    /// host-confirmed removal of every invitee asks for (decision 74a).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attendees: Option<Vec<EventAttendeeWrite>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -582,7 +585,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
             .as_ref()
             .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
         reminders: reminders_to_write(&new.reminders),
-        attendees: attendees_to_write(&new.attendees),
+        attendees: Some(attendees_to_write(&new.attendees)).filter(|list| !list.is_empty()),
     }
 }
 
@@ -609,11 +612,14 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
         reminders: reminders_to_write(&ev.reminders),
         // Left out of the PATCH when the edit did not change the invitees
         // (decision 71a): a PATCH replaces the whole array, and Google's copy
-        // holds the organizer's row, which Aperio does not show.
+        // holds the organizer's row, which Aperio does not show. An empty
+        // array only when the host says every invitee was removed (74a).
         attendees: if ev.keep_attendees {
-            Vec::new()
+            None
+        } else if ev.clear_attendees {
+            Some(Vec::new())
         } else {
-            attendees_to_write(&ev.attendees)
+            Some(attendees_to_write(&ev.attendees)).filter(|list| !list.is_empty())
         },
     }
 }
@@ -868,6 +874,25 @@ mod tests {
         assert!(!body.contains("attendees"), "{body}");
     }
 
+    /// Removing every invitee sends an empty array, which clears Google's,
+    /// but only when the host says so (decision 74a): an empty list alone
+    /// leaves the array out.
+    #[test]
+    fn removing_the_last_invitee_sends_an_empty_array() {
+        let raw = r#"{
+            "id": "ev-own",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert!(body.get("attendees").is_none(), "{body}");
+        ev.clear_attendees = true;
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert_eq!(body["attendees"], serde_json::json!([]));
+    }
+
     #[test]
     fn map_event_all_day() {
         let raw = r#"{
@@ -991,6 +1016,7 @@ mod tests {
         // DST-correctly on its side (parity with the read path).
         let ev = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-z".into(),
             calendar_id: "primary".into(),
@@ -1031,6 +1057,7 @@ mod tests {
         let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
         let ev = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-all-day".into(),
             calendar_id: "primary".into(),
@@ -1231,6 +1258,7 @@ mod tests {
     fn event_to_body_serialises_recurrence_with_exdates() {
         let ev = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-1".into(),
             calendar_id: "primary".into(),

@@ -173,6 +173,7 @@ pub async fn create_event(
 
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -1383,6 +1384,7 @@ END:VCALENDAR</c:calendar-data>
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
@@ -1560,6 +1562,7 @@ END:VCALENDAR\r
     fn sample_existing_event(cal_url: &Url) -> Event {
         Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
@@ -1601,6 +1604,7 @@ END:VCALENDAR\r
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
@@ -1726,6 +1730,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         // The truncated master, serialised the same way update_event would.
         let master = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "series-1@aperio".into(),
             calendar_id: "https://example.com/cal/".into(),

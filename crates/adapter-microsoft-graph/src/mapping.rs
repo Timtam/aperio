@@ -601,6 +601,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
 
     Ok(Some(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -873,9 +874,11 @@ pub struct EventWriteBody {
     /// Microsoft Graph QUIRK: putting attendees in the body makes Graph
     /// EMAIL them on create/update — there is no per-request suppress. So we
     /// write this ONLY when the user opted to notify; declining means Graph
-    /// stores no attendee list (documented limitation).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub attendees: Vec<GraphAttendeeWrite>,
+    /// stores no attendee list (documented limitation). `None` leaves Graph's
+    /// list alone; `Some` of an empty list clears it, which only a notified,
+    /// host-confirmed removal of every invitee asks for (decision 74a).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attendees: Option<Vec<GraphAttendeeWrite>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -957,7 +960,8 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, new.start)?),
             None => None,
         },
-        attendees: attendees_to_write(&new.attendees, new.send_invitations),
+        attendees: Some(attendees_to_write(&new.attendees, new.send_invitations))
+            .filter(|list| !list.is_empty()),
     };
     Ok(body)
 }
@@ -989,7 +993,13 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
         },
         // Not when the edit left the invitees alone (decision 71a): the list
         // on the server keeps the organizer's row, which Aperio does not show.
-        attendees: attendees_to_write(&ev.attendees, ev.send_invitations && !ev.keep_attendees),
+        attendees: if !ev.send_invitations || ev.keep_attendees {
+            None
+        } else if ev.clear_attendees {
+            Some(Vec::new())
+        } else {
+            Some(attendees_to_write(&ev.attendees, true)).filter(|list| !list.is_empty())
+        },
     })
 }
 
@@ -2092,6 +2102,19 @@ mod tests {
             json["attendees"][0]["emailAddress"]["address"],
             "bob@example.com"
         );
+
+        // Every invitee removed, and the removed told (decision 74a): an
+        // empty list clears Graph's. Not without notifying, which Graph
+        // cannot do silently.
+        ev.attendees.clear();
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert!(json.get("attendees").is_none(), "{json}");
+        ev.clear_attendees = true;
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert_eq!(json["attendees"], serde_json::json!([]));
+        ev.send_invitations = false;
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert!(json.get("attendees").is_none(), "{json}");
     }
 
     #[test]

@@ -2204,6 +2204,23 @@ Siehe DESIGN §4.2.
   - Abgeleitete Termine tragen den Organisator ihrer Quelle mit.
   - `CACHE_GENERATION` 2: Der erste Start liest jedes externe Konto einmal neu
     ein, Exchange vollständig.
+  Die Prüfung von #83 fand sechs Lücken, alle im selben PR behoben:
+  - iCloud erkannte nur die erste Adresse des Kontos als eigene. Jetzt zählt
+    jede Adresse aus `calendar-user-address-set`.
+  - Scheiterte die Adressabfrage an einem Netz- oder Serverfehler, blieben
+    eigene iCloud-Besprechungen dauerhaft „fremd“. Jetzt wird die Abfrage
+    wiederholt, und solange sie scheitert, scheitert das Lesen.
+  - Sagte der Anbieter „nicht der Organisator“, nannte aber keine Adresse,
+    galt der Termin als eigener. Jetzt zählt die Antwort des Anbieters zuerst.
+  - Nach einem neuen Exchange-ChangeKey fand der Cache-Vergleich den Termin
+    nicht mehr und schrieb die Liste doch. Jetzt findet er ihn.
+  - Webex konnte die Gäste einer fremden Besprechung anschreiben. Jetzt lädt
+    es dort niemanden ein.
+  - Den letzten Gast zu entfernen kam beim Anbieter nicht an. Jetzt wird die
+    Liste geleert, und „Teilnehmer benachrichtigen“ bleibt für die Absage
+    stehen (74a).
+  🚩 **Ungemessen:** ob Exchange die Absage an den letzten entfernten Gast
+  annimmt. Live-Runde 5 prüft das.
   Auf dem Handy wirkt das mit dem nächsten Build. Die `.so` muss frisch
   erzeugt werden; neue FFI-Funktionen gibt es nicht, nur neue Felder im JSON.
   🚩 **CalDAV: Ändern ohne Benachrichtigen verwirft die Gäste.** Das gab es

@@ -61,8 +61,13 @@ In the event dialog you can also set:
 > attendee: an appointment you made in Outlook, which Outlook lists with you
 > as its only attendee, has no attendees in Aperio. For a meeting someone
 > else organizes, only they can send updates, so the checkbox does not appear
-> there. And when you only change the title or the time, Aperio leaves the
-> attendee list at the provider as it is.
+> there. If you remove the last attendee, the checkbox stays, so the person
+> you removed can get a cancellation. On Exchange/Outlook, Google and
+> Microsoft 365, when you only change
+> the title or the time, Aperio leaves the attendee list at the provider as it
+> is. iCloud cannot do that yet: saving without **Notify attendees** removes
+> the attendees from the event, and saving with it asks everyone to reply
+> again.
 >
 > When you delete a **meeting you organize** (with attendees, on an account
 > with server-side scheduling), Aperio asks in **one** dialog what should happen
@@ -79,8 +84,10 @@ In the event dialog you can also set:
 > whether a cancellation goes out, so "without notifying" isn't guaranteed
 > there.)
 
-> **Check availability:** Below that toggle sits a **Check availability**
-> button. It looks up, for the currently entered time window, which
+> **Check availability:** When an event has attendees on a calendar with
+> server-side scheduling, a **Check availability** button appears, below
+> **Notify attendees** when that is shown, and also for a meeting someone
+> else organizes. It looks up, for the currently entered time window, which
 > attendees are **free** or **busy**, and shows the result per attendee
 > with a summary (announced via the live region). If a provider can't
 > answer (missing permission), that attendee reads as "free/unknown".

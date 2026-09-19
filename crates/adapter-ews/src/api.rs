@@ -692,7 +692,9 @@ pub async fn update_event(
     let decoded = decode_event_id(&event.id);
     let target = resolve_write_target(client, &decoded).await?;
     let (set_xml, delete_xml) = event_to_update_field_xml_on(event, server_zones, target.kind)?;
-    let notify = event.send_invitations && !event.attendees.is_empty();
+    // Removed invitees count too: with every one removed (`clear_attendees`)
+    // they may still get a cancellation (decision 74a).
+    let notify = event.send_invitations && (!event.attendees.is_empty() || event.clear_attendees);
     let envelope = update_calendar_item(
         &target.item_id,
         target.change_key.as_deref(),
@@ -1193,6 +1195,7 @@ fn build_event_from_new(
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -1705,6 +1708,7 @@ mod tests {
             .await;
         let starting = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "S:ITEM-ID|CK-V1".into(),
             calendar_id: "FOLDER-ID|FCK".into(),
@@ -1912,6 +1916,7 @@ mod tests {
 
         let starting = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             // Occurrence-prefixed id — update_event should resolve
             // master via GetItem before issuing the UpdateItem.
@@ -2008,6 +2013,7 @@ mod tests {
             crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
         let edit = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: override_id.clone(),
             calendar_id: "FOLDER-ID|FCK".into(),
@@ -2145,6 +2151,7 @@ mod tests {
         let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
         Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
             calendar_id: "FOLDER-ID|FCK".into(),

@@ -125,6 +125,15 @@ pub struct Event {
     /// on the server. NOT persisted and meaningless on a read.
     #[serde(default, skip_serializing_if = "is_false")]
     pub keep_attendees: bool,
+    /// Transient write-only signal: the edit removed every invitee the event
+    /// had when it was last read, so the adapter writes the provider's list
+    /// empty. An empty [`attendees`](Self::attendees) alone never clears a
+    /// list, so an edit of an event read without its invitees cannot
+    /// uninvite anyone by accident. The host sets it
+    /// (`attendee::guard_update`); the removed guests may still be notified
+    /// (decision 74a). NOT persisted and meaningless on a read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_attendees: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
@@ -139,12 +148,14 @@ pub struct Event {
     /// / stores that don't surface it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organizer: Option<String>,
-    /// Someone other than the connected account organizes this event, or the
-    /// provider cannot confirm that the account does (decision 70a). Only the
-    /// organizer sends invitations and updates, so the editors offer no
-    /// "notify attendees" and the host clears any send intent. Read-only, set
-    /// by the adapter through `attendee::people_from_read`; `false` for an
-    /// event with no organizer, which is the account's own.
+    /// Someone other than the connected account organizes this event, or an
+    /// organizer is named and the provider does not say it is the account
+    /// (decision 70a). Only the organizer sends invitations and updates, so
+    /// the editors offer no "notify attendees" and the host clears any send
+    /// intent. Read-only, set by the adapter through
+    /// `attendee::people_from_read` (the rule is
+    /// `attendee::organized_elsewhere`); `false` for an event with no
+    /// organizer that the provider does not call someone else's.
     #[serde(default, skip_serializing_if = "is_false")]
     pub organized_elsewhere: bool,
     /// Per-attendee RSVP state, populated on read where the provider

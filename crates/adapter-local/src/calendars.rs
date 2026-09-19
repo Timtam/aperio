@@ -558,6 +558,7 @@ fn persist_new_event(
 
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -613,6 +614,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
 
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,

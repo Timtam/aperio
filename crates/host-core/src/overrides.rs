@@ -886,6 +886,7 @@ mod tests {
     ) -> cal_core::Event {
         cal_core::Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),
             calendar_id: "icloud:cal".into(),
@@ -934,6 +935,7 @@ mod tests {
 
         let mk = |id: &str| cal_core::Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),
             calendar_id: "icloud:cal".into(),
@@ -1220,6 +1222,7 @@ mod tests {
 
         let mut events = vec![cal_core::Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "dav:evt".into(),
             calendar_id: "dav:cal".into(),

@@ -1795,12 +1795,13 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     // without the organizer (decision 67a). Exchange lists the organizer as a
     // row whose ResponseType is "Organizer" — for an appointment made in
     // Outlook, as the only row — and says through MyResponseType whether the
-    // connected mailbox organizes the item (decision 70a).
+    // connected mailbox organizes the item (decision 70a). "Unknown" says
+    // nothing, so it counts as no answer.
     let organized_by_me = item
         .my_response_type
         .as_deref()
         .map(str::trim)
-        .filter(|r| !r.is_empty())
+        .filter(|r| !r.is_empty() && *r != "Unknown")
         .map(|r| r == "Organizer");
     let people = cal_core::attendee::people_from_read(
         item.organizer,
@@ -1822,6 +1823,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
 
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -2151,13 +2153,14 @@ pub fn event_to_update_field_xml_on(
     // "Die Löschaktion wird für diese Eigenschaft nicht unterstützt"
     // failure when editing a recurring series.)
 
-    // Attendees: SET when present (stored as a meeting). We do NOT emit a
-    // DeleteItemField for an empty list — clearing all attendees doesn't
-    // propagate (acceptable, and avoids an accidental mass-uninvite on edits
-    // that never touched the attendee list). Whether attendees are EMAILED is
-    // governed by the envelope's SendMeetingInvitationsOrCancellations.
+    // Attendees: SET when present (stored as a meeting). An empty list alone
+    // emits no DeleteItemField, so an edit that never touched the attendee
+    // list cannot mass-uninvite. Whether attendees are EMAILED is governed by
+    // the envelope's SendMeetingInvitationsOrCancellations.
     // Not at all when the edit left the invitees alone (decision 71a): the list
     // on the server keeps what Aperio does not show, the organizer's own row.
+    // Cleared, both collections the read merges, only when the host says the
+    // edit removed every invitee it had read (decision 74a).
     let attendees_xml = if event.keep_attendees {
         String::new()
     } else {
@@ -2167,6 +2170,9 @@ pub fn event_to_update_field_xml_on(
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:RequiredAttendees\"/>\n              <t:CalendarItem>\n{attendees_xml}              </t:CalendarItem>\n            </t:SetItemField>\n"
         ));
+    } else if event.clear_attendees && !event.keep_attendees {
+        del.push_str(delete_item_field_xml("calendar:RequiredAttendees").as_str());
+        del.push_str(delete_item_field_xml("calendar:OptionalAttendees").as_str());
     }
     if let Some(rec) = &event.recurrence {
         let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
@@ -4075,6 +4081,7 @@ mod tests {
     fn zoned_master(tzid: Option<&str>) -> Event {
         Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
@@ -4909,6 +4916,7 @@ mod tests {
     fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
         let ev = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
@@ -5177,6 +5185,7 @@ mod tests {
     fn event_to_update_field_xml_deletes_empty_optional_fields() {
         let ev = Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
             calendar_id: "FID|FK".into(),
@@ -6664,6 +6673,30 @@ mod tests {
         assert!(!set.contains("calendar:RequiredAttendees"), "{set}");
     }
 
+    /// Removing every invitee clears both collections the read merges, but
+    /// only when the host says so (decision 74a): an empty list alone
+    /// deletes nothing.
+    #[test]
+    fn removing_the_last_invitee_deletes_the_list() {
+        let mut item = ParsedItem {
+            start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+            end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+            ..ParsedItem::default()
+        };
+        item.item_id = "MTG-5".into();
+        let mut ev = to_event(item, "cal-1").unwrap();
+        assert!(ev.attendees.is_empty());
+        let (set, del) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("Attendees"), "{set}");
+        assert!(!del.contains("Attendees"), "{del}");
+
+        ev.clear_attendees = true;
+        let (set, del) = event_to_update_field_xml(&ev).unwrap();
+        assert!(!set.contains("Attendees"), "{set}");
+        assert!(del.contains("calendar:RequiredAttendees"), "{del}");
+        assert!(del.contains("calendar:OptionalAttendees"), "{del}");
+    }
+
     /// The organizer's row is found by its flag, whatever address Exchange
     /// names the organizer by: an Exchange-internal (EX) address does not
     /// match the row's SMTP address.
@@ -6693,6 +6726,33 @@ mod tests {
         let ev = to_event(item, "cal-1").unwrap();
         assert_eq!(ev.attendees, ["bob@example.com"]);
         assert!(ev.organized_elsewhere, "no MyResponseType: not confirmed");
+    }
+
+    /// MyResponseType is the mailbox's own answer and counts even when the
+    /// item names no organizer address. "Unknown" answers nothing.
+    #[test]
+    fn my_response_type_decides_without_an_organizer_address() {
+        let item_answering = |answer: &str| {
+            let mut item = ParsedItem {
+                start: Some("2026-10-06T07:00:00Z".parse().unwrap()),
+                end: Some("2026-10-06T07:30:00Z".parse().unwrap()),
+                my_response_type: Some(answer.into()),
+                ..ParsedItem::default()
+            };
+            item.item_id = "MTG-4".into();
+            item.attendees = vec![EwsAttendee {
+                email: "bob@example.com".into(),
+                name: None,
+                response_type: Some("Accept".into()),
+            }];
+            to_event(item, "cal-1").unwrap()
+        };
+        assert!(item_answering("Accept").organized_elsewhere);
+        assert!(!item_answering("Organizer").organized_elsewhere);
+        assert!(
+            !item_answering("Unknown").organized_elsewhere,
+            "no answer and no organizer: the mailbox's own"
+        );
     }
 
     #[test]

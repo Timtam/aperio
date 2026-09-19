@@ -443,4 +443,27 @@ describe('EventDialog → who may notify the attendees', () => {
       delete cal.supports_scheduling;
     }
   });
+
+  it('keeps the notify toggle when the last attendee is removed', async () => {
+    // The one removed may still get a cancellation (decision 74a).
+    deviceInBerlin();
+    const cal = CALENDARS[0] as { supports_scheduling?: boolean };
+    cal.supports_scheduling = true;
+    try {
+      await open(meeting(false));
+      fireEvent.click(screen.getByRole('button', { name: /bob@example\.com.*(entfernen|remove)/i }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: /bob@example\.com/i })).toBeNull());
+      expect(notifyToggle()).not.toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+      );
+      const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+      const sent = (update?.[1] as { event: CalendarEvent }).event;
+      expect(sent.attendees).toEqual([]);
+      expect(sent.send_invitations).toBe(true);
+    } finally {
+      delete cal.supports_scheduling;
+    }
+  });
 });

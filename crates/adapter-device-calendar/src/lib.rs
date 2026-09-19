@@ -205,6 +205,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
     };
     Ok(Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         id: d.id,
         calendar_id: d.calendar_id,

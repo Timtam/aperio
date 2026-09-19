@@ -99,14 +99,20 @@ Apple's well-known endpoints.
 - **The organizer's ATTENDEE is the one with ORGANIZER's address.** RFC 5545
   has no per-row flag, so the read drops the `ATTENDEE` whose normalised
   address (case and `mailto:` aside) equals `ORGANIZER`. The account organizes
-  an event whose `ORGANIZER` is its own calendar-user address from discovery;
-  otherwise, or while that address is unknown, the event is
-  `organized_elsewhere`. On a write the account's own address, which becomes
+  an event whose `ORGANIZER` is any address in its `calendar-user-address-set`
+  (iCloud lists every alias of the Apple ID); any other `ORGANIZER` makes the
+  event `organized_elsewhere`, and so does any `ORGANIZER` on a server that
+  reports no address. An event without `ORGANIZER` is the account's own. When
+  the probe for the addresses fails on a network or server error, it is
+  repeated before the next read that needs it, and while it keeps failing that
+  read fails: the host keeps its cache instead of storing a guess that a
+  delta would never revisit. On a write the account's own address, which becomes
   `ORGANIZER`, is never written as an `ATTENDEE`; with nobody else invited
   there is no `ORGANIZER` either, just a plain appointment. Known gap: an
   update rebuilds the VEVENT and writes `ATTENDEE` lines only when notifying,
   so a plain edit of a meeting drops its attendees from the resource
-  (TODO). `keep_attendees` cannot help here yet.
+  (TODO). Neither `keep_attendees` nor `clear_attendees` can help here yet;
+  whether the server tells guests removed that way is not measured.
 
 ## Testing
 

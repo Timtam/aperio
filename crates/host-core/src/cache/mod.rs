@@ -975,6 +975,13 @@ impl CacheStore {
     }
 
     /// The cached row of one event, by its id, if the cache holds it.
+    ///
+    /// An EWS id carries the item's ChangeKey (`S:item|ck`, an override the
+    /// master's), and Exchange changes that key with every change on the
+    /// server; the cache follows (see [`Self::apply_events_delta`]). An editor
+    /// opened before such a change still holds the old id. So when the exact
+    /// id is missing, the one row of the same native item and the same
+    /// occurrence slot counts: the same id without its ChangeKey.
     pub fn read_event(&self, account: &str, calendar: &str, id: &str) -> DbResult<Option<Event>> {
         let events: Vec<Event> = self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(
@@ -984,7 +991,18 @@ impl CacheStore {
             let rows = stmt.query_map(params![account, calendar, id], |r| r.get::<_, String>(0))?;
             rows_to_structs(rows, "cache_events")
         })?;
-        Ok(events.into_iter().next())
+        if let Some(event) = events.into_iter().next() {
+            return Ok(Some(event));
+        }
+        let wanted = without_change_key(id);
+        let mut same = self
+            .read_events_by_native(account, calendar, &[native_id(id).to_string()])?
+            .into_iter()
+            .filter(|ev| without_change_key(&ev.id) == wanted);
+        Ok(match (same.next(), same.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        })
     }
 
     pub fn remove_event(&self, account: &str, calendar: &str, id: &str) -> DbResult<()> {
@@ -1720,6 +1738,19 @@ fn native_id(id: &str) -> &str {
         Some((native, _)) => native,
         None => stripped,
     }
+}
+
+/// An id without the part [`native_id`] drops after `|` (the EWS ChangeKey,
+/// the CalDAV UID), keeping its kind prefix and an override's
+/// `::rid::<slot>`: one event of one native resource, whatever version of
+/// the resource the id was minted from.
+fn without_change_key(id: &str) -> String {
+    let (head, slot) = match id.find(cal_core::OVERRIDE_ID_MARKER) {
+        Some(at) => id.split_at(at),
+        None => (id, ""),
+    };
+    let head = head.split_once('|').map_or(head, |(before, _)| before);
+    format!("{head}{slot}")
 }
 
 /// Whether a container has a recorded freshness stamp. `false` right

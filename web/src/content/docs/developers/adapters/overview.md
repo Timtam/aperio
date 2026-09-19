@@ -105,17 +105,22 @@ when caching:
 >   An unknown organizer drops nothing.
 > - **Only the organizer notifies.** The adapter says whether the connected
 >   account organizes the event (EWS `MyResponseType`, Graph `isOrganizer`,
->   Google `organizer.self`, CalDAV `ORGANIZER` equal to the account's
->   calendar-user address). An event whose organizer is someone else, or
->   whose organizer cannot be confirmed as the account, is
->   `organized_elsewhere`; the editors then offer no "notify attendees".
+>   Google `organizer.self`, CalDAV `ORGANIZER` equal to any of the account's
+>   calendar-user addresses). The provider's answer counts first, even without
+>   an organizer address. Without an answer, an event with an organizer is
+>   `organized_elsewhere` and one without is the account's own
+>   (`cal_core::attendee::organized_elsewhere`). For an event organized
+>   elsewhere the editors offer no "notify attendees", and a meeting provider
+>   attached to it invites nobody (`host_core::meetings::meeting_guests`).
 > - **On write**, both hosts run `host_core::event_write` before any store
 >   sees the event: `guard_update` drops the organizer, clears
 >   `send_invitations` unless the account organizes the event and someone
->   else is invited, and sets `keep_attendees` when the edit left the
->   invitees as the cache last read them. EWS, Google and Graph then leave the
->   provider's attendee list alone, so a title or time change never rewrites
->   it. `guard_create` does the same for a create; a create derived from an
+>   else is invited (or was, until this edit removed them), and sets
+>   `keep_attendees` when the edit left the invitees as the cache last read
+>   them. EWS, Google and Graph then leave the provider's attendee list alone,
+>   so a title or time change never rewrites it. An empty list alone never
+>   clears the provider's; `clear_attendees`, set when the edit removed every
+>   invitee the cache had read, does. `guard_create` does the same for a create; a create derived from an
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
 

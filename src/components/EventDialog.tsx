@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import {
   applySignature,
   madeNoReminderChoice,
+  offersNotifyAttendees,
   organizerOf,
   signatureIn,
 } from '@aperio/shared';
@@ -597,9 +598,6 @@ export function EventDialog({
   // Expanded from a master OR a provider-sent override — both are one
   // occurrence of a series, and both have to offer the scope choice.
   const isOccurrence = isEdit && !!event && isSeriesOccurrence(event);
-  // Only the organizer notifies anyone (decision 70a): someone else's meeting
-  // offers no "notify attendees", and the host clears the intent anyway.
-  const organizedElsewhere = event?.organized_elsewhere === true;
   const [editScope, setEditScope] = useState<EditScope>(
     initialScope ?? 'occurrence',
   );
@@ -1033,15 +1031,15 @@ export function EventDialog({
           }
         };
 
-        // Notify attendees: gated identically to the toggle's visibility —
-        // only when the target calendar can schedule server-side AND there
-        // are attendees to notify.
+        // Notify attendees: gated identically to the toggle's visibility
+        // (`offersNotifyAttendees`, decisions 70a and 74a).
         const targetCal = calendars.find((c) => c.id === form.calendarId);
         const sendInvitations =
-          !!targetCal?.supports_scheduling &&
-          form.attendees.length > 0 &&
-          !organizedElsewhere &&
-          notifyAttendees;
+          offersNotifyAttendees({
+            supportsScheduling: !!targetCal?.supports_scheduling,
+            attendees: form.attendees,
+            original: event ?? null,
+          }) && notifyAttendees;
         // When the target stores the color natively (local, or color-capable
         // CalDAV via RFC 7986 COLOR), apiCreate/UpdateEvent already carries it
         // on `color_label` — so the extra setEventColor call is only needed
@@ -1423,7 +1421,6 @@ export function EventDialog({
       dialogCalendarId,
       calendars,
       notifyAttendees,
-      organizedElsewhere,
       announce,
       offerToCarry,
       onClose,
@@ -1814,21 +1811,27 @@ export function EventDialog({
           />
         </div>
 
+        {offersNotifyAttendees({
+          supportsScheduling: !!calendars.find(
+            (c) => c.id === form.calendarId,
+          )?.supports_scheduling,
+          attendees: form.attendees,
+          original: event ?? null,
+        }) && (
+          <label className="form__field form__field--inline">
+            <input
+              type="checkbox"
+              checked={notifyAttendees}
+              onChange={(e) => setNotifyAttendees(e.target.checked)}
+            />
+            <span>{t('dialogs.event.fields.notifyAttendees')}</span>
+          </label>
+        )}
+
         {calendars.find((c) => c.id === form.calendarId)
           ?.supports_scheduling &&
           form.attendees.length > 0 && (
             <>
-              {!organizedElsewhere && (
-                <label className="form__field form__field--inline">
-                  <input
-                    type="checkbox"
-                    checked={notifyAttendees}
-                    onChange={(e) => setNotifyAttendees(e.target.checked)}
-                  />
-                  <span>{t('dialogs.event.fields.notifyAttendees')}</span>
-                </label>
-              )}
-
               <div className="form__field availability">
                 <button
                   type="button"

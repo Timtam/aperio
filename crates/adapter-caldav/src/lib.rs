@@ -789,16 +789,46 @@ impl CaldavAdapter {
     }
 
     /// Record on each event whether this account organizes it (decision 70a),
-    /// by its calendar-user address from discovery. Discovery is cached; a
-    /// failure leaves the address unknown, so no event with an organizer
-    /// counts as the account's and none offers to notify.
-    async fn mark_organized_by(&self, events: &mut [Event]) {
-        let own = self
-            .discover()
-            .await
-            .ok()
-            .and_then(|d| d.calendar_user_address);
-        mapping::mark_organized_by(events, own.as_deref());
+    /// by every address in its calendar-user-address-set.
+    ///
+    /// The host keeps the flag with the event and a delta never re-reads an
+    /// unchanged one, so a guess would stay. When the addresses are unknown
+    /// because discovery or the scheduling probe failed, the read fails
+    /// instead, and the host keeps what it has and tries again. A server that
+    /// answers without addresses is an answer: then no event with an
+    /// organizer counts as the account's.
+    async fn mark_organized_by(&self, events: &mut [Event]) -> CoreResult<()> {
+        let own = if events.iter().any(|e| e.organizer.is_some()) {
+            self.own_addresses().await?
+        } else {
+            Vec::new()
+        };
+        mapping::mark_organized_by(events, &own);
+        Ok(())
+    }
+
+    /// The account's calendar-user addresses. A scheduling probe that failed
+    /// for a reason that may pass is asked again, and its answer is kept.
+    async fn own_addresses(&self) -> CoreResult<Vec<String>> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        if !discovery.scheduling_probe_failed {
+            return Ok(discovery.calendar_user_addresses);
+        }
+        let scheduling = discovery::probe_scheduling(
+            &self.http_no_redirect,
+            &discovery.principal_url,
+            &self.credentials,
+        )
+        .await;
+        if scheduling.failed {
+            return Err(CoreError::Network(
+                "the account's calendar-user addresses could not be read".into(),
+            ));
+        }
+        let mut fresh = discovery;
+        fresh.apply_scheduling(scheduling);
+        *self.discovery.lock().expect("poison") = Some(fresh.clone());
+        Ok(fresh.calendar_user_addresses)
     }
 
     /// The user's `mailto:` organizer address for a write — but only when the
@@ -942,7 +972,7 @@ impl CalendarFeature for CaldavAdapter {
         let mut events = events::get_events(&self.http, &cal_url, range, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        self.mark_organized_by(&mut events).await;
+        self.mark_organized_by(&mut events).await?;
         Ok(events)
     }
 
@@ -972,7 +1002,7 @@ impl CalendarFeature for CaldavAdapter {
             }
             None => self.events_bootstrap(&cal_url, range).await,
         }?;
-        self.mark_organized_by(&mut changes.changes).await;
+        self.mark_organized_by(&mut changes.changes).await?;
         Ok(changes)
     }
 
@@ -1697,6 +1727,79 @@ mod tests {
         let second = adapter.discover().await.unwrap();
         assert_eq!(first.calendar_home_url, second.calendar_home_url);
         assert!(adapter.cached_calendar_home().is_some());
+    }
+
+    /// A scheduling probe that failed on a server error leaves the account's
+    /// addresses unknown. Asking for them repeats the probe; while it keeps
+    /// failing the read fails (the host keeps its cache rather than storing
+    /// a guess), and once it answers, every address it names is kept.
+    #[tokio::test]
+    async fn a_failed_scheduling_probe_is_asked_again() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        let failing = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(503)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        assert!(adapter.discover().await.unwrap().scheduling_probe_failed);
+        let err = adapter.own_addresses().await.unwrap_err();
+        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        failing.assert_async().await;
+        failing.remove_async().await;
+
+        let answer = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <c:calendar-user-address-set>
+          <d:href>mailto:alice@me.com</d:href>
+          <d:href>mailto:alice@icloud.com</d:href>
+        </c:calendar-user-address-set>
+        <c:schedule-outbox-URL><d:href>/calendars/alice/outbox/</d:href></c:schedule-outbox-URL>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(207)
+            .with_body(answer)
+            .expect(1)
+            .create_async()
+            .await;
+        let own = adapter.own_addresses().await.unwrap();
+        assert_eq!(own, ["mailto:alice@me.com", "mailto:alice@icloud.com"]);
+        let kept = adapter.discover().await.unwrap();
+        assert!(!kept.scheduling_probe_failed);
+        assert!(kept.supports_scheduling);
+        // Kept: asking again needs no request.
+        assert_eq!(adapter.own_addresses().await.unwrap(), own);
     }
 
     #[test]

@@ -48,6 +48,7 @@ fn wide() -> DateRange {
 fn event(id: &str, start_h: u32, end_h: u32) -> Event {
     Event {
         keep_attendees: false,
+        clear_attendees: false,
         organized_elsewhere: false,
         id: id.into(),
         calendar_id: CAL.into(),
@@ -1472,6 +1473,56 @@ fn read_event_finds_one_cached_row_by_id() {
     assert_eq!(read.attendees, ["bob@example.com"]);
     assert!(store.read_event(ACC, "c2", "ev-1").unwrap().is_none());
     assert!(store.read_event(ACC, "c1", "ev-3").unwrap().is_none());
+}
+
+/// Exchange changes the ChangeKey in an id with every change on the server,
+/// and the cache follows. An editor opened before that still holds the old
+/// id; the row of the same item and the same occurrence slot is found anyway,
+/// so the write guard compares with it (decision 71a).
+#[test]
+fn read_event_finds_a_row_whose_change_key_moved_on() {
+    let store = setup();
+    let mut master = event("S:item-1|ck-v1", 8, 9);
+    master.attendees = vec!["bob@example.com".into()];
+    let mut moved = event("S:item-1|ck-v1::rid::1780000000", 10, 11);
+    moved.attendees = vec!["carol@example.com".into()];
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[master, moved])
+        .unwrap();
+    let mut master = event("S:item-1|ck-v2", 8, 9);
+    master.attendees = vec!["bob@example.com".into()];
+    let mut moved = event("S:item-1|ck-v2::rid::1780000000", 10, 11);
+    moved.attendees = vec!["carol@example.com".into()];
+    store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: vec![master, moved],
+                deletions: Vec::new(),
+                new_token: Some("c2".into()),
+            },
+        )
+        .unwrap();
+
+    let read = store
+        .read_event(ACC, CAL, "S:item-1|ck-v1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(read.id, "S:item-1|ck-v2");
+    let read = store
+        .read_event(ACC, CAL, "S:item-1|ck-v1::rid::1780000000")
+        .unwrap()
+        .unwrap();
+    assert_eq!(read.id, "S:item-1|ck-v2::rid::1780000000");
+    assert!(store
+        .read_event(ACC, CAL, "S:item-1|ck-v1::rid::1790000000")
+        .unwrap()
+        .is_none());
+    assert!(store
+        .read_event(ACC, CAL, "S:item-2|ck-v1")
+        .unwrap()
+        .is_none());
 }
 
 // ── Change detection (no-op refreshes stay UI-silent) ────────────────

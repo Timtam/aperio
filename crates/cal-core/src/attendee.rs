@@ -73,8 +73,9 @@ pub struct EventPeople {
     pub attendees: Vec<String>,
     /// The invitees' responses, in the same order: never the organizer's.
     pub attendee_responses: Vec<AttendeeResponse>,
-    /// Someone other than the connected account organizes the event, or it
-    /// cannot be confirmed that the account does.
+    /// Someone other than the connected account organizes the event, or an
+    /// organizer is named and the provider does not say it is the account
+    /// (see [`organized_elsewhere`]).
     pub organized_elsewhere: bool,
 }
 
@@ -88,9 +89,7 @@ pub struct EventPeople {
 ///
 /// `organized_by_me` is the provider's own statement that the connected
 /// account organizes the event: `Some(true)` or `Some(false)` when it says,
-/// `None` when it cannot. An event with an organizer counts as organized
-/// elsewhere unless the provider says the account organizes it; an event with
-/// no organizer is the account's own.
+/// `None` when it cannot. See [`organized_elsewhere`] for how it counts.
 pub fn people_from_read(
     organizer: Option<String>,
     organized_by_me: Option<bool>,
@@ -132,12 +131,17 @@ pub fn people_from_read(
 
 /// Whether someone other than the connected account organizes an event.
 ///
-/// An event with an organizer counts as organized elsewhere unless the
-/// provider says the account organizes it (`organized_by_me == Some(true)`):
-/// only the organizer may notify anyone, so an unconfirmed claim notifies
-/// nobody. An event with no organizer is the account's own.
+/// The provider's answer counts first: `Some(true)` is the account's own,
+/// `Some(false)` is someone else's, even when the provider names no organizer
+/// address. Without an answer, an event with an organizer counts as organized
+/// elsewhere, because only the organizer may notify anyone and an unconfirmed
+/// claim notifies nobody; an event with no organizer is the account's own (a
+/// plain appointment).
 pub fn organized_elsewhere(organizer: Option<&str>, organized_by_me: Option<bool>) -> bool {
-    organizer.is_some_and(|o| !o.trim().is_empty()) && organized_by_me != Some(true)
+    match organized_by_me {
+        Some(mine) => !mine,
+        None => organizer.is_some_and(|o| !o.trim().is_empty()),
+    }
 }
 
 /// Whether two addresses name the same mailbox, as the rules above compare
@@ -181,10 +185,14 @@ pub fn same_invitees(a: &[String], b: &[String]) -> bool {
 ///
 /// - The organizer leaves the attendee list, and the responses.
 /// - The send intent survives only for an event the account organizes, with
-///   someone else invited.
+///   someone else invited, or with invitees just removed, who may be told
+///   (decision 74a).
 /// - When `read` shows the same invitees, [`Event::keep_attendees`] tells the
 ///   adapter to leave the provider's list as it is (decision 71a), so a title
 ///   or time change never rewrites who is invited.
+/// - When the edit removed every invitee `read` shows,
+///   [`Event::clear_attendees`] tells the adapter to write the list empty,
+///   which it never does for an empty list alone.
 pub fn guard_update(event: &mut Event, read: Option<&Event>) {
     let organizer = event.organizer.clone();
     event.attendees = without_organizer(&event.attendees, organizer.as_deref());
@@ -193,11 +201,14 @@ pub fn guard_update(event: &mut Event, read: Option<&Event>) {
             .attendee_responses
             .retain(|r| normalize_address(&r.email) != organizer);
     }
-    event.send_invitations &= !event.organized_elsewhere && !event.attendees.is_empty();
-    event.keep_attendees = read.is_some_and(|read| {
-        let before = without_organizer(&read.attendees, read.organizer.as_deref());
-        same_invitees(&before, &event.attendees)
-    });
+    let before = read.map(|read| without_organizer(&read.attendees, read.organizer.as_deref()));
+    event.keep_attendees = before
+        .as_deref()
+        .is_some_and(|before| same_invitees(before, &event.attendees));
+    event.clear_attendees =
+        event.attendees.is_empty() && before.as_deref().is_some_and(|before| !before.is_empty());
+    event.send_invitations &=
+        !event.organized_elsewhere && (!event.attendees.is_empty() || event.clear_attendees);
 }
 
 /// The write rule for a create, run by the host before the adapter sees it.
@@ -316,6 +327,7 @@ mod tests {
                 send_invitations: true,
                 truncate_tail_overrides: false,
                 keep_attendees: false,
+                clear_attendees: false,
                 created_at: at,
                 updated_at: at,
                 etag: None,
@@ -425,6 +437,16 @@ mod tests {
             assert!(organized_elsewhere(Some("boss@x"), None));
             assert!(!organized_elsewhere(None, None));
             assert!(!organized_elsewhere(Some("  "), None));
+            // The provider's answer counts even without an organizer address.
+            assert!(organized_elsewhere(None, Some(false)));
+            assert!(!organized_elsewhere(None, Some(true)));
+            let unnamed = people_from_read(
+                None,
+                Some(false),
+                [row("a@x", true), row("b@x", true), row("c@x", false)],
+            );
+            assert_eq!(unnamed.organizer, None);
+            assert!(unnamed.organized_elsewhere);
         }
 
         #[test]
@@ -461,6 +483,36 @@ mod tests {
             let mut unknown = event(Some("toni@x"), &["bob@x"]);
             guard_update(&mut unknown, None);
             assert!(!unknown.keep_attendees, "nothing to compare with: write");
+        }
+
+        /// Decision 74a: removing the last invitee clears the provider's
+        /// list, and the one removed may still be told. Only a read that
+        /// showed invitees says so; an empty list alone clears nothing.
+        #[test]
+        fn removing_the_last_invitee_clears_the_list() {
+            let read = event(Some("toni@x"), &["Toni <toni@x>", "bob@x"]);
+            let mut removed = event(Some("toni@x"), &[]);
+            guard_update(&mut removed, Some(&read));
+            assert!(removed.clear_attendees);
+            assert!(!removed.keep_attendees);
+            assert!(removed.send_invitations, "bob may get a cancellation");
+
+            let mut elsewhere = event(Some("boss@x"), &[]);
+            elsewhere.organized_elsewhere = true;
+            guard_update(&mut elsewhere, Some(&event(Some("boss@x"), &["bob@x"])));
+            assert!(elsewhere.clear_attendees);
+            assert!(!elsewhere.send_invitations, "only the organizer notifies");
+
+            let mut alone = event(Some("toni@x"), &[]);
+            guard_update(&mut alone, Some(&event(Some("toni@x"), &["Toni <toni@x>"])));
+            assert!(!alone.clear_attendees, "the organizer was never a guest");
+            assert!(alone.keep_attendees);
+            assert!(!alone.send_invitations);
+
+            let mut unknown = event(Some("toni@x"), &[]);
+            guard_update(&mut unknown, None);
+            assert!(!unknown.clear_attendees, "nothing read: nothing cleared");
+            assert!(!unknown.send_invitations);
         }
 
         #[test]

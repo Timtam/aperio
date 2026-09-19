@@ -40,10 +40,15 @@ flow and token refresh; the adapter sends a `Bearer` token.
   editors never offer subtasks on a Graph list.
 - **The organizer answers "organizer".** Graph lists the organizer among the
   attendees with `status.response` "organizer"; the adapter drops that row by
-  its response. `isOrganizer` says the signed-in user organizes the event;
-  otherwise it is `organized_elsewhere` and only the organizer notifies. An
+  its response. `isOrganizer` says whether the signed-in user organizes the
+  event, and that answer counts even without an organizer address; when it
+  says no, or when it is missing and an organizer is named, the event is
+  `organized_elsewhere` and only the organizer notifies. An
   update whose invitees did not change (`keep_attendees`) sends no
-  `attendees`, so Graph keeps its own list.
+  `attendees`, so Graph keeps its own list. One that removed every invitee
+  (`clear_attendees`) sends an empty list, but only when notifying: Graph
+  mails whenever `attendees` is in the body, so a silent removal cannot
+  reach it.
 
 ## Testing
 

@@ -67,6 +67,22 @@ pub fn attendee_addresses(attendees: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Whom a meeting provider may invite to a meeting attached to `event`: its
+/// invitees as addresses ([`attendee_addresses`]), never the organizer, whom
+/// a cached row may still list (decision 67a). Nobody at all for an event
+/// someone else organizes: only the organizer tells the guests anything
+/// (decision 70a), and the provider mails whomever it holds, on attach and
+/// again on removal. Both hosts ask this, so neither can drift.
+pub fn meeting_guests(event: &cal_core::Event) -> Vec<String> {
+    if event.organized_elsewhere {
+        return Vec::new();
+    }
+    attendee_addresses(&cal_core::attendee::without_organizer(
+        &event.attendees,
+        event.organizer.as_deref(),
+    ))
+}
+
 /// Whether the videoconference provider should email the people invited to a
 /// NEW meeting. Takes the bare addresses from [`attendee_addresses`].
 ///
@@ -438,6 +454,7 @@ mod tests {
     fn meeting_event(id: &str, title: &str, start: DateTime<Utc>) -> cal_core::Event {
         cal_core::Event {
             keep_attendees: false,
+            clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),
             calendar_id: "webex:cal".into(),
@@ -656,6 +673,25 @@ mod tests {
                 "carol@example.test".to_string(),
             ]
         );
+    }
+
+    /// The provider invites the invitees, never the organizer (67a), and
+    /// nobody for a meeting someone else organizes (70a).
+    #[test]
+    fn a_meeting_invites_only_the_organizers_own_guests() {
+        let mut event = meeting_event("ev-1", "Sync", Utc::now());
+        event.organizer = Some("toni@example.test".into());
+        event.attendees = vec![
+            "Toni <TONI@example.test>".into(),
+            "Bob <bob@example.test>".into(),
+        ];
+        assert_eq!(meeting_guests(&event), ["bob@example.test"]);
+
+        event.organizer = Some("boss@example.test".into());
+        event.organized_elsewhere = true;
+        let guests = meeting_guests(&event);
+        assert!(guests.is_empty(), "{guests:?}");
+        assert!(!should_provider_notify(&guests, false));
     }
 
     #[test]

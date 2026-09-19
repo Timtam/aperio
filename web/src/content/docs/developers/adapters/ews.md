@@ -58,11 +58,16 @@ The endpoint is discovered or user-supplied.
   made in Outlook it is the only row. The adapter drops that row by its flag
   (`cal_core::attendee::people_from_read`), so it also goes when
   `<t:Organizer>` names the organizer by an Exchange-internal (EX) address.
-  `MyResponseType` "Organizer" says the mailbox organizes the item; anything
-  else, or no answer, makes the event `organized_elsewhere`, and only the
-  organizer notifies. An update whose invitees did not change
+  `MyResponseType` "Organizer" says the mailbox organizes the item; any other
+  answer makes the event `organized_elsewhere`, even without an organizer
+  address, and only the organizer notifies. "Unknown", or no
+  `MyResponseType`, is no answer: then an item with an organizer is
+  `organized_elsewhere` and one without is the mailbox's own. An update whose invitees did not change
   (`keep_attendees`) sends no `calendar:RequiredAttendees`, so Exchange keeps
-  its own list, the organizer's row included. Without this an appointment
+  its own list, the organizer's row included. One that removed every invitee
+  (`clear_attendees`) deletes `RequiredAttendees` and `OptionalAttendees`,
+  and with notifying on, Exchange is asked to send the removed a
+  cancellation (not yet measured live). Without this an appointment
   from Outlook failed to save with `ErrorInvalidRecipients`: Aperio asked to
   notify, and the only recipient was the sender.
 

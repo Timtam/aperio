@@ -27,8 +27,8 @@ use std::sync::Arc;
 use adapter_local::LocalAdapter;
 use cal_core::Event;
 use host_core::meetings::{
-    attendee_addresses, should_provider_announce_removal, should_provider_notify, EventMeeting,
-    MeetingsRepo,
+    attendee_addresses, meeting_guests, should_provider_announce_removal, should_provider_notify,
+    EventMeeting, MeetingsRepo,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -133,11 +133,9 @@ pub async fn attach_meeting(
     // Addresses, not the display strings the event carries: a provider
     // validates this field as an email and refuses the meeting otherwise.
     let can_invite = calendar_can_invite(&registry, &cache, &request.calendar_id);
-    // Never the organizer, whom a cached row may still list (decision 67a).
-    let guests = attendee_addresses(&cal_core::attendee::without_organizer(
-        &event.attendees,
-        event.organizer.as_deref(),
-    ));
+    // Never the organizer, and nobody for someone else's meeting
+    // (decisions 67a, 70a).
+    let guests = meeting_guests(&event);
     let notify = should_provider_notify(&guests, can_invite);
     let meeting = vc
         .create_meeting(NewMeeting {
