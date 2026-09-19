@@ -655,6 +655,22 @@ export function isSeriesOccurrence<E extends RecurringEventLike>(
 }
 
 /**
+ * Whether a row is a provider override: a real row the provider sent for one
+ * modified occurrence (its id names the series and the slot it replaces), not
+ * an occurrence we expanded from a master.
+ *
+ * Editing "just this one" on such a row updates the row itself, by its own id.
+ * There is nothing to carve out of the series — it already skips that slot —
+ * and carving would delete the provider's exception and leave a detached copy.
+ * Desktop and phone both ask this, so the two editors decide the same way.
+ */
+export function isProviderOverride<E extends RecurringEventLike>(
+  event: E,
+): boolean {
+  return !isExpandedOccurrence(event) && overrideRecurrenceIso(event) != null;
+}
+
+/**
  * Occurrence-start ISO for an expanded occurrence, else `null` for a master.
  * Drives "delete only this occurrence" (append onto the master's EXDATE).
  */

@@ -88,6 +88,8 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import {
+  isProviderOverride,
+  occurrenceIsoOf,
   planCarry,
   seriesIdOf,
   worthCarrying,
@@ -364,7 +366,9 @@ export default function EventEditorModal({
   const [notifyAttendees, setNotifyAttendees] = useState(true);
   // Per-event sound OVERRIDE (§14.4 item level) — a host-local `sound.item.{id}`
   // pref, NOT the inline Event.sound (which the reminder resolver ignores). Keyed
-  // by the loaded master id (so it's per-series). Edit-only: a new event has no
+  // by the loaded row's id, the id its reminders fire under: the master's (so
+  // it's per-series), or a provider override's own when one was opened in place.
+  // Edit-only: a new event has no
   // id yet, so it inherits the container/global default until re-edited (matches
   // the desktop, which hides this picker on create).
   const itemSound = useSoundPref(original ? `sound.item.${original.id}` : null);
@@ -613,8 +617,9 @@ export default function EventEditorModal({
   /**
    * The master as the EDITED OCCURRENCE looked, for the carry's "what changed".
    *
-   * `original` is the series master — `editEventWithScope` navigates with
-   * `seriesIdOf(ev)` and the editor loads that — so its start is the series'
+   * `original` is the series master here — for any occurrence that is not a
+   * provider override, `editEventWithScope` navigates with `seriesIdOf(ev)` and
+   * the editor loads that — so its start is the series'
    * DTSTART, weeks or months before the occurrence on screen. Handed to the
    * carry as the "before", every occurrence edit therefore looked like a move
    * of both start and end, and the copies had those instants written onto them
@@ -826,6 +831,65 @@ export default function EventEditorModal({
     setError(null);
     setSaving(true);
     try {
+      if (
+        editing &&
+        original != null &&
+        editScope === 'occurrence' &&
+        isProviderOverride(original)
+      ) {
+        // Already an override — the user is editing an occurrence they (or the
+        // provider) changed before. The row loaded here IS the exception, and
+        // the series already skips its slot, so update it in place by its own
+        // id. Mirrors the desktop EventDialog.
+        const overrideRow: CalendarEvent = {
+          ...original,
+          title: trimmedTitle,
+          calendar_id: calId,
+          start,
+          end,
+          all_day: allDay,
+          location: location.trim() || null,
+          description: description.trim() || null,
+          // Stays null: an override is one instance and owns no rule.
+          recurrence: null,
+          color_label: colorToSend,
+          reminders: remindersForWire,
+          attendees,
+          send_invitations: sendInvitations,
+        };
+        // What comes back is normally the override itself. Exchange may instead
+        // detach it as a single of its own, when it will not move an exception
+        // past a neighbouring occurrence, so the colour and the carry follow
+        // the row that came back. The private reminders stay on the series,
+        // where an override's belong: keyed by the single, the save would
+        // empty the series' own row. Mirrors the desktop EventDialog.
+        const updated = await updateEvent(overrideRow, original.calendar_id);
+        await savePrivate(overrideRow);
+        if (!isLocalCal) {
+          await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
+          if (updated.id !== overrideRow.id) {
+            // The override's id names nothing any more.
+            await setEventColor(overrideRow.id, calId, null).catch(() => undefined);
+          }
+        }
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+        );
+        // The other copies have a series each, so carrying this means carving
+        // the same occurrence out of them — not updating a row.
+        if (
+          await offerToCarry(
+            original,
+            updated,
+            'occurrence',
+            occurrenceIsoOf(original),
+          )
+        ) {
+          return;
+        }
+        navigation.goBack();
+        return;
+      }
       if (
         editing &&
         original != null &&
@@ -1113,8 +1177,11 @@ export default function EventEditorModal({
 
   // Delete with recurrence scope — the same shared confirm the list rows pop
   // (occurrence-vs-series for a recurring event, plain delete otherwise). The
-  // loaded `original` is the series MASTER (getEventById), which carries no
-  // occurrence context, so when the editor was opened FROM an occurrence row
+  // loaded `original` is the series MASTER (getEventById), unless a provider
+  // override was opened in place: that row has no rule and names its own
+  // occurrence, so the confirm offers this occurrence or the series for it as
+  // it stands. The master carries no occurrence context, so when the
+  // editor was opened FROM an occurrence row
   // re-attach the route's instant — gated on the freshly-loaded recurrence like
   // the edit-scope UI above (a stale occurrence param degrades to a plain
   // whole-event delete). On success announce + close, matching the row surfaces.
@@ -1390,7 +1457,12 @@ export default function EventEditorModal({
           editor confirms it read-only — one clear choice beats a control a
           screen-reader user could miss. The segmented control stays as a fallback
           for any path that opens an occurrence without the prompt. */}
-      {isOccurrence && original?.recurrence != null && initialScope != null && (
+      {isOccurrence &&
+        original != null &&
+        // A provider override opened in place has no rule of its own; the
+        // scope the user chose still applies, as on the desktop.
+        (original.recurrence != null || isProviderOverride(original)) &&
+        initialScope != null && (
         <Text style={styles.muted}>
           {t('dialogs.event.scope.label')}:{' '}
           {t(

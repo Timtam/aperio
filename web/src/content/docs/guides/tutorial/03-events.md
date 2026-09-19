@@ -135,10 +135,9 @@ occurrence, and a new date moves the start of the series.
 
 > **Changing an occurrence that was already changed:** An occurrence changed
 > on its own in the calendar's own app (iCloud, Google, Exchange) stays part of
-> its series when you change only this occurrence again in the event dialog on
-> the desktop. The mobile app still makes it an appointment of its own. An
-> occurrence you changed on its own in Aperio already is an appointment of its
-> own. Exchange is the exception: there such an occurrence may not move onto or
+> its series when you change only this occurrence again in the event dialog,
+> on the desktop and in the mobile app. An occurrence you changed on its own in
+> Aperio already is an appointment of its own. Exchange is the exception: there such an occurrence may not move onto or
 > past another occurrence of the same series. Aperio then makes it an
 > appointment of its own at the new time, as it does with any other occurrence
 > you move on its own.

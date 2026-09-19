@@ -2124,11 +2124,19 @@ Siehe DESIGN §4.2.
 
   Die Prüfung des Ausnahme-Fixes hat zwei ältere Fehler gefunden. Toni hat sie
   direkt danach eingereiht, noch vor 48a (61a):
-  🚩 **A: Das Handy ändert eine Exchange-Ausnahme nicht direkt.** Für „nur
-  dieses Vorkommen“ öffnet es den Serienkopf. Dann löscht es die Ausnahme und
-  legt einen neuen Einzeltermin an, oder das Speichern scheitert. Der Desktop
-  ändert die Ausnahme direkt (`EventDialog.tsx`). Das Handy braucht denselben
-  Weg (`eventEditScope.ts`, `EventEditorModal.tsx`).
+  ↻ **A: Das Handy ändert eine Exchange-Ausnahme nicht direkt**, behoben in
+  PR #78. Für „nur dieses Vorkommen“ öffnete es den Serienkopf. Dann löschte es
+  die Ausnahme und legte einen neuen Einzeltermin an, oder das Speichern
+  scheiterte. Jetzt öffnet es die Ausnahme selbst und ändert sie direkt, wie der
+  Desktop (`isProviderOverride` in `shared/recurrence.ts`). Zu- und Absagen gehen
+  wie auf dem Desktop an die Serie. Bei CalDAV und Google braucht das PR #80.
+  Wirkt mit dem nächsten Handy-Build.
+  🚩 **Klang eines geänderten Vorkommens: Desktop und Handy uneins.** Die
+  Erinnerungen einer Ausnahme suchen ihren Klang unter der Id der Ausnahme
+  (`host-core/src/reminders.rs`). Das Handy speichert ihn dort, der Desktop
+  unter der Serie (`EventDialog.tsx`, `seriesIdOf`). Ein am Desktop gewählter
+  Klang erreicht die Ausnahme also nicht. Eine Regel festlegen, am besten im
+  Kern (`sound.rs`: erst die Ausnahme, dann die Serie).
   🚩 **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat.** Auf dem
   Desktop legt Verschieben oder Ziehen einer geänderten Ausnahme einen neuen
   Einzeltermin an und nimmt den Platz aus der Serie heraus. Die Ausnahme selbst

@@ -3,6 +3,7 @@ import {
   expandEvent,
   expandAll,
   isExpandedOccurrence,
+  isProviderOverride,
   isSeriesOccurrence,
   localTimeZone,
   occurrenceIsoOf,
@@ -877,10 +878,18 @@ describe('an override is an occurrence of its series', () => {
     expect(occurrenceIsoOf(override)).toBe('2026-05-26T09:00:00.000Z');
   });
 
+  /** Editing "just this one" on it updates the override itself, by its own
+   *  id. Desktop and phone both ask this; the phone used to open the series
+   *  instead and replace the provider's exception with a detached copy. */
+  it('is a provider override', () => {
+    expect(isProviderOverride(override)).toBe(true);
+  });
+
   /** A plain event is untouched by any of it. */
   it('leaves a standalone event alone', () => {
     const plain = mkEvent();
     expect(isSeriesOccurrence(plain)).toBe(false);
+    expect(isProviderOverride(plain)).toBe(false);
     expect(seriesIdOf(plain)).toBe('evt-1');
     expect(occurrenceIsoOf(plain)).toBeNull();
   });
@@ -891,6 +900,22 @@ describe('an override is an occurrence of its series', () => {
       recurrence: { rrule: 'FREQ=DAILY;COUNT=3', exceptions: [], tzid: null },
     });
     expect(isSeriesOccurrence(master)).toBe(false);
+    expect(isProviderOverride(master)).toBe(false);
     expect(seriesIdOf(master)).toBe('evt-1');
+  });
+
+  /** An occurrence we expanded from a master is an occurrence, but not an
+   *  override: "just this one" carves it out of the series. */
+  it('does not take an expanded occurrence for an override', () => {
+    const master = mkEvent({
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3', exceptions: [], tzid: null },
+    });
+    const [first] = expandEvent(master, {
+      start: new Date('2026-05-18T00:00:00.000Z'),
+      end: new Date('2026-05-25T00:00:00.000Z'),
+    });
+    expect(first).toBeDefined();
+    expect(isSeriesOccurrence(first)).toBe(true);
+    expect(isProviderOverride(first)).toBe(false);
   });
 });
