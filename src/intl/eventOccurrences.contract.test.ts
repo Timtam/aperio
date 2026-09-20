@@ -21,6 +21,10 @@ interface Occurrence {
 interface Row {
   name: string;
   note: string;
+  /** The clock THIS row is read on, when it is not the table's own
+   *  `measuredWith.machineZone`: an all-day row only means what it says on one
+   *  clock, and one row may need another one to say what it says. */
+  deviceZone?: string;
   wasTypeScript?: boolean;
   surfacesDiffer?: boolean;
   input: { events: Ev[]; range: { start: string; end: string } };
@@ -76,21 +80,24 @@ describe('eventOccurrences contract (views)', () => {
   // device" is answered; every zone the rows name is still read from the data.
   const machineZone = (table as { measuredWith?: { machineZone?: string } }).measuredWith
     ?.machineZone;
+  // The zone the CURRENT row is read on. A row may name its own
+  // (`deviceZone`) — the table was measured east of Greenwich, and a rule
+  // about days has a second half west of it.
+  let deviceZone = machineZone as string;
   // The restore, not the spy: naming a spy's type here would name the type
   // of what it wraps, and `resolvedOptions` answers a shape of its own.
   let restoreZone: (() => void) | null = null;
   beforeAll(() => {
     expect(machineZone, 'the table names the zone it was measured on').toBeTruthy();
     const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const machine = real.call(new Intl.DateTimeFormat()).timeZone;
     const spy = vi
       .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
       .mockImplementation(function (this: Intl.DateTimeFormat) {
         const options = real.call(this);
         // Only a formatter built WITHOUT a zone asks "where am I"; one built
         // for a named zone keeps its own answer.
-        return options.timeZone === real.call(new Intl.DateTimeFormat()).timeZone
-          ? { ...options, timeZone: machineZone as string }
-          : options;
+        return options.timeZone === machine ? { ...options, timeZone: deviceZone } : options;
       });
     restoreZone = () => spy.mockRestore();
   });
@@ -110,6 +117,8 @@ describe('eventOccurrences contract (views)', () => {
       'an-all-day-series-without-zone-into-winter',
       'an-all-day-series-into-summer-keeps-its-monday',
       'an-all-day-exception-cancels-the-day-it-names',
+      'an-all-day-exception-west-of-greenwich',
+      'an-all-day-series-on-an-american-clock',
       'an-all-day-series-a-provider-gave-a-zone',
       'a-zoned-weekly-series-keeps-its-wall-clock-into-winter',
       'a-wall-clock-in-the-spring-gap',
@@ -140,7 +149,12 @@ describe('eventOccurrences contract (views)', () => {
 
   for (const row of table.cases) {
     it(row.name, () => {
-      expect(instants(answer(row)), row.note).toEqual(instants(row.expect));
+      deviceZone = row.deviceZone ?? (machineZone as string);
+      try {
+        expect(instants(answer(row)), row.note).toEqual(instants(row.expect));
+      } finally {
+        deviceZone = machineZone as string;
+      }
     });
   }
 });

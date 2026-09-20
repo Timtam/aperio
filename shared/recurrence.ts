@@ -1,7 +1,7 @@
 import { RRule, rrulestr } from 'rrule';
 
 import { compareMachineStrings } from './ordering';
-import { expansionClock, seriesClockZone } from './seriesClock';
+import { expansionClock, seriesClockZone, type SeriesExpansionClock } from './seriesClock';
 
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
 // minimal `RecurringEventLike` so it needs neither side's full `CalendarEvent`
@@ -73,8 +73,9 @@ export function expandEvent<E extends RecurringEventLike>(
   // core reads no clock. An all-day series therefore steps on the days its
   // reader sees — read on UTC, as it was until now, a named weekday landed a
   // day late east of Greenwich.
-  const byDay = readsCalendarDays(event);
-  const tzid = expansionZoneFor(event);
+  const clock = expansionClock(event.all_day === true, event.recurrence.tzid);
+  const byDay = clock === 'device-days';
+  const tzid = zoneOfClock(clock, event.recurrence.tzid);
 
   let occurrences: Date[];
   try {
@@ -92,19 +93,20 @@ export function expandEvent<E extends RecurringEventLike>(
     return [];
   }
 
-  // An exception cancels an occurrence. For a series of DAYS it names a day,
-  // and the instant it was stored as is only one spelling of that day: one
-  // written before 48a, or by a provider that anchors elsewhere, is off by the
-  // zone's offset and would otherwise stop meeting the day it cancels — the
-  // cancelled day would come back (decision 95).
-  const occurrenceKey = (d: Date): string =>
-    byDay ? dayOnClock(d, tzid) : String(d.getTime());
-  const exceptions = new Set(
-    event.recurrence.exceptions.map((iso) => occurrenceKey(new Date(iso))),
-  );
+  // An exception cancels an occurrence. A timed series names an instant, and
+  // an instant is compared exactly. A series of DAYS names a day, and the
+  // instant it was stored as is only one spelling of it: one written before
+  // 48a, or by a provider that anchors a date elsewhere, sits hours off the
+  // local midnight the occurrence has (decision 95).
+  const exceptions = event.recurrence.exceptions
+    .map((iso) => new Date(iso).getTime())
+    .filter((at) => !Number.isNaN(at));
+  const cancelled = byDay
+    ? (d: Date) => exceptions.some((at) => namesTheSameDay(at, d.getTime()))
+    : namesExactly(exceptions);
 
   return occurrences
-    .filter((d) => !exceptions.has(occurrenceKey(d)))
+    .filter((d) => !cancelled(d))
     .map<ExpandedOccurrence<E>>((occStart) => {
       const occEnd = new Date(occStart.getTime() + duration);
       return {
@@ -134,35 +136,66 @@ function readsCalendarDays(event: {
 }
 
 /**
- * The zone this series' rule is read on, or `null` for UTC: the core chooses
- * WHICH clock, and this fills in the one name the core may not know — the
- * device's own zone, for a series of days. A device that reports UTC (or a
- * name tzdata does not know) reads days on UTC, which is the same reading.
+ * The zone a rule read on `clock` is expanded in, or `null` for UTC.
+ *
+ * The core chooses WHICH clock; this fills in the one name the core may not
+ * know — the device's own zone, for a series of days. A device that reports
+ * UTC, or a name tzdata or `Intl` does not know, reads days on UTC, which is
+ * the same reading. Takes the clock rather than asking for it again: every
+ * expansion of every series on screen passes through here.
  */
-function expansionZoneFor(event: {
-  all_day?: boolean;
-  recurrence?: { tzid?: string | null } | null;
-}): string | null {
-  switch (expansionClock(event.all_day === true, event.recurrence?.tzid)) {
+function zoneOfClock(
+  clock: SeriesExpansionClock,
+  tzid: string | null | undefined,
+): string | null {
+  switch (clock) {
     case 'device-days':
-      return expansionZone(localTimeZone());
+      return usableZone(localTimeZone());
     case 'zone':
-      return expansionZone(event.recurrence?.tzid);
+      return usableZone(zoneOrNull(tzid));
     default:
       return null;
   }
 }
 
-/** {@link expansionZoneFor} for a series named by its two facts. */
-function clockZone(allDay: boolean, tzid: string | null | undefined): string | null {
-  return expansionZoneFor({ all_day: allDay, recurrence: { tzid } });
+/** The zone this series' rule is read on, or `null` for UTC. */
+function expansionZoneFor(event: {
+  all_day?: boolean;
+  recurrence?: { tzid?: string | null } | null;
+}): string | null {
+  const tzid = event.recurrence?.tzid;
+  return zoneOfClock(expansionClock(event.all_day === true, tzid), tzid);
 }
 
-/** The `YYYY-MM-DD` day `instant` falls on, read on `zone`'s clock (`null`
- *  being UTC). Read through `Intl` with the zone named, never through the
- *  process's own clock, so an answer does not change with the machine. */
-function dayOnClock(instant: Date, zone: string | null): string {
-  return (zone ? realToWall(instant, zone) : instant).toISOString().slice(0, 10);
+/** {@link expansionZoneFor} for a series named by its two facts. */
+function clockZone(allDay: boolean, tzid: string | null | undefined): string | null {
+  return zoneOfClock(expansionClock(allDay, tzid), tzid);
+}
+
+/**
+ * Half a day. Two instants this close name the same DAY of a series of days,
+ * and two that far apart never can: an all-day occurrence is local midnight,
+ * and the instant another writer stored for that same day — midnight UTC,
+ * noon, the local midnight of a zone an hour or two away, or the UTC-stepped
+ * instant a build before 48a wrote — sits within hours of it, while the
+ * neighbouring occurrence is a whole day away.
+ *
+ * Compared as DAYS instead, the reading is not symmetric: midnight UTC falls
+ * on the day before in every zone west of Greenwich, so an exception would
+ * cancel a day the user never deleted — and hiding a day is worse than showing
+ * one that should be gone (`expandAll` keeps what it cannot place).
+ */
+const SAME_DAY_MS = 12 * 60 * 60 * 1000;
+
+/** Whether `stored` and `occurrence` name the same day of a series of days. */
+function namesTheSameDay(stored: number, occurrence: number): boolean {
+  return Math.abs(stored - occurrence) < SAME_DAY_MS;
+}
+
+/** The timed reading: an instant is an instant, compared exactly. */
+function namesExactly(instants: readonly number[]): (d: Date) => boolean {
+  const set = new Set(instants);
+  return (d) => set.has(d.getTime());
 }
 
 function buildRule(rruleBody: string, dtstart: Date): RRule {
@@ -325,10 +358,10 @@ function shiftUntilToWall(rruleBody: string, tzid: string): string {
   );
 }
 
-/** The zone a series is expanded in, or `null` for UTC — including a zone `Intl`
- *  cannot resolve, which {@link zonedOccurrences} also expands in UTC. */
-function expansionZone(tzid: string | null | undefined): string | null {
-  const zone = zoneOrNull(tzid);
+/** A zone the core accepted, if THIS device's `Intl` can also use it; `null`
+ *  otherwise, which expands in UTC rather than dropping the series. The
+ *  formatter it probes with is the memoised one every occurrence then uses. */
+function usableZone(zone: string | null): string | null {
   if (!zone) return null;
   try {
     zoneFormatter(zone);
@@ -431,12 +464,19 @@ export function localTimeZone(): string | null {
   // Only the runtime's read is guarded. The rule below throws when its door is
   // not installed, and swallowing that would quietly stop every stamp.
   try {
-    tz = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // The formatter is memoised, its ANSWER is not: building one costs real
+    // time and every all-day series on screen asks (48a), while a device that
+    // moves must still be able to say so.
+    deviceFormatter ??= new Intl.DateTimeFormat();
+    tz = deviceFormatter.resolvedOptions().timeZone;
   } catch {
     return null;
   }
   return seriesClockZone(tz);
 }
+
+/** The formatter {@link localTimeZone} reads the device's zone from. */
+let deviceFormatter: Intl.DateTimeFormat | null = null;
 
 /**
  * Stamp the host's local zone onto a freshly-created TIMED recurring rule so it
@@ -655,30 +695,22 @@ export function expandAll<E extends RecurringEventLike>(
   events: E[],
   range: { start: Date; end: Date },
 ): E[] {
-  // The clock a series of days is read on — one device, one zone, so it is
-  // read once for every series in this batch.
-  const deviceDays = expansionZone(localTimeZone());
-  // Per series, the occurrences an override supersedes — each under BOTH
-  // spellings of its slot: the instant, and the day it falls on here. A series
-  // of days is matched by its day (48a, decision 95), because the instant an
-  // override's slot was minted at is only one spelling of that day and a
-  // provider (or a build before 48a) may have written another; a timed series
-  // is matched by the instant, as it always was.
-  let overridden: Map<string, Set<string>> | null = null;
+  // Per series, the instants of the occurrences an override supersedes. A
+  // timed series matches its slot exactly, as it always did; a series of DAYS
+  // matches the occurrence the slot NAMES (within half a day, 48a and decision
+  // 95), because the instant a slot was minted at is only one spelling of that
+  // day and a provider — or a build before 48a — may have written another.
+  let overridden: Map<string, number[]> | null = null;
   for (const ev of events) {
     const iso = overrideRecurrenceIso(ev);
     const seriesId = overrideSeriesId(ev);
     if (iso == null || seriesId == null) continue;
-    const at = new Date(iso);
-    if (Number.isNaN(at.getTime())) continue;
+    const at = new Date(iso).getTime();
+    if (Number.isNaN(at)) continue;
     (overridden ??= new Map());
-    let set = overridden.get(seriesId);
-    if (!set) {
-      set = new Set();
-      overridden.set(seriesId, set);
-    }
-    set.add(String(at.getTime()));
-    set.add(dayOnClock(at, deviceDays));
+    const slots = overridden.get(seriesId);
+    if (slots) slots.push(at);
+    else overridden.set(seriesId, [at]);
   }
 
   const out = events.flatMap((ev) => {
@@ -692,15 +724,17 @@ export function expandAll<E extends RecurringEventLike>(
     if (ev.cancelled && overrideRecurrenceIso(ev) != null) return [];
     const occs = expandEvent(ev, range);
     const replaced = ev.recurrence?.rrule ? overridden?.get(ev.id) : undefined;
-    if (!replaced || replaced.size === 0) return occs;
+    if (!replaced || replaced.length === 0) return occs;
     // Drop the master occurrences an override stands in for (matched on the
     // original occurrence instant). Keep anything we can't place — never hide.
     const byDay = readsCalendarDays(ev);
     return occs.filter((o) => {
       const iso = occurrenceIsoOf(o);
       if (iso == null) return true;
-      const at = new Date(iso);
-      return !replaced.has(byDay ? dayOnClock(at, deviceDays) : String(at.getTime()));
+      const at = new Date(iso).getTime();
+      return !replaced.some((slot) =>
+        byDay ? namesTheSameDay(slot, at) : slot === at,
+      );
     });
   });
   // `start` is an ISO instant — a machine string, not text.

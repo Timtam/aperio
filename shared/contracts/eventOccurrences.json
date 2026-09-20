@@ -31,7 +31,7 @@
     "surfacesDiffer": "marks a row that records `reminders`",
     "wasTypeScript": "a row pinning a JavaScript artifact the port may decide against; it must then change the row on purpose, with a note",
     "instants": "compare as instants, never as text: expandAll writes milliseconds (.000Z)",
-    "measuredWith": "the rrule.js version and the zone of the machine the views’ answer was measured on (the expander does not read it)"
+    "measuredWith": "the rrule.js version, and the zone a row is read on unless the row names its own `deviceZone`. Since 48a the expander DOES read the device's zone for an all-day series, so both readers answer this zone themselves rather than taking the machine's"
   },
   "measuredWith": {
     "rruleJs": "2.8.1",
@@ -2657,6 +2657,79 @@
         {
           "event": 0,
           "start": "2026-06-21T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-exception-west-of-greenwich",
+      "note": "The same rule for a series anchored west of Greenwich, where midnight UTC falls on the day BEFORE: a daily all-day series at New York's local midnight (04:00 UTC), with 2026-06-15 cancelled as midnight UTC. The exception cancels the occurrence it NAMES — the one it is nearest to — and that reading is the same on every clock, which is the point: read as a day on the device's own clock instead, this exception cancels 14 June in New York, a day nobody deleted, while the deleted one comes back.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-06-14T04:00:00Z",
+            "end": "2026-06-15T04:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=4",
+              "exceptions": ["2026-06-15T00:00:00Z"]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-06-13T00:00:00Z",
+          "end": "2026-06-20T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-06-14T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-16T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-17T04:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-on-an-american-clock",
+      "deviceZone": "America/New_York",
+      "note": "An all-day Monday series read on a device in New York, across the change to winter time on 1 November 2026 — a week after Europe's. Every occurrence is its own Monday's local midnight there: 04:00 UTC in summer time, 05:00 UTC after. Read on the table's own clock (Berlin, which changed on 25 October) the later Mondays would answer 04:00 UTC, so this row is what keeps the device's zone an INPUT rather than decoration.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-10-26T04:00:00Z",
+            "end": "2026-10-27T04:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;COUNT=3",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-25T00:00:00Z",
+          "end": "2026-11-10T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-26T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T05:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-09T05:00:00.000Z"
         }
       ]
     },

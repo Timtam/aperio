@@ -22,7 +22,7 @@ use cal_core::{
     TaskRecurrence,
 };
 use chrono::{
-    DateTime, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
+    DateTime, Duration as ChronoDuration, Local, NaiveDateTime, NaiveTime, TimeZone, Utc,
 };
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
@@ -1078,6 +1078,21 @@ fn occurrence_triggers(
     out
 }
 
+/// The clock this device is on, NAMED: its IANA zone, read through the core's
+/// own name rule (`canonical_zone`) so the device's zone is judged exactly as a
+/// stored one is. A device whose zone cannot be named falls back to chrono's
+/// `Local`, which is the same clock read another way — the rule engine judges a
+/// rule's parts slightly differently on the two, so the named one is preferred
+/// and is what the tests pin.
+fn device_clock() -> RruleTz {
+    iana_time_zone::get_timezone()
+        .ok()
+        .and_then(|name| cal_core::canonical_zone(&name).map(str::to_string))
+        .and_then(|canonical| canonical.parse::<chrono_tz::Tz>().ok())
+        .map(RruleTz::Tz)
+        .unwrap_or(RruleTz::Local(Local))
+}
+
 /// Expand an RRULE into the occurrence list within `[start_bound,
 /// end_bound]`. EXDATEs from the master are honoured. Robustness
 /// notes:
@@ -1097,21 +1112,6 @@ fn occurrence_triggers(
 ///     the DST offset the moment the series crosses a transition — an hour,
 ///     and near midnight a whole day. `cal_core::EventRecurrence::tzid`
 ///     documents exactly that, and this function used to ignore it.
-/// The clock this device is on, NAMED: its IANA zone, read through the core's
-/// own name rule (`canonical_zone`) so the device's zone is judged exactly as a
-/// stored one is. A device whose zone cannot be named falls back to chrono's
-/// `Local`, which is the same clock read another way — the rule engine judges a
-/// rule's parts slightly differently on the two, so the named one is preferred
-/// and is what the tests pin.
-fn device_clock() -> RruleTz {
-    iana_time_zone::get_timezone()
-        .ok()
-        .and_then(|name| cal_core::canonical_zone(&name).map(str::to_string))
-        .and_then(|canonical| canonical.parse::<chrono_tz::Tz>().ok())
-        .map(RruleTz::Tz)
-        .unwrap_or(RruleTz::Local(Local))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn expand_occurrences(
     dt_start_utc: DateTime<Utc>,
@@ -1197,6 +1197,23 @@ fn expand_occurrences(
     )
 }
 
+/// Half a day: two instants this close name the same DAY of a series of days.
+///
+/// An all-day occurrence is local midnight, and the instant another writer
+/// stored for that same day — midnight UTC, noon, the local midnight of a zone
+/// an hour or two away, or the UTC-stepped instant a build before 48a wrote —
+/// sits within hours of it, while the neighbouring occurrence is a whole day
+/// away. Compared as DAYS instead, the reading is not symmetric: midnight UTC
+/// falls on the day before in every zone west of Greenwich, and an exception
+/// would then cancel a day nobody deleted. The views read it the same way
+/// (`namesTheSameDay` in `shared/recurrence.ts`).
+const SAME_DAY_MS: i64 = 12 * 60 * 60 * 1000;
+
+/// Whether `stored` and `occurrence` name the same day of a series of days.
+fn names_the_same_day(stored: i64, occurrence: i64) -> bool {
+    (stored - occurrence).abs() < SAME_DAY_MS
+}
+
 /// The occurrences of `unvalidated` on `zone`'s clock, inside the bounds.
 ///
 /// `by_day` says how an exception is matched. A timed series' exception names
@@ -1204,8 +1221,8 @@ fn expand_occurrences(
 /// instant it was stored as is one spelling of that day, and a build before
 /// 48a — or a provider that anchors a date elsewhere — wrote another, so
 /// comparing instants would let a cancelled day come back (decision 95). Its
-/// exceptions are therefore kept out of the rule and filtered afterwards, by
-/// the local day each one falls on.
+/// exceptions are therefore kept out of the rule and filtered afterwards,
+/// against the occurrence each one NAMES ([`names_the_same_day`]).
 #[allow(clippy::too_many_arguments)]
 fn expand_on(
     dt_start_utc: DateTime<Utc>,
@@ -1251,11 +1268,8 @@ fn expand_on(
             "RRULE expansion hit the scheduler safety limit",
         );
     }
-    let cancelled_days: Vec<NaiveDate> = if by_day {
-        exceptions
-            .iter()
-            .map(|ex| ex.with_timezone(&zone).date_naive())
-            .collect()
+    let cancelled: Vec<i64> = if by_day {
+        exceptions.iter().map(|ex| ex.timestamp_millis()).collect()
     } else {
         Vec::new()
     };
@@ -1263,7 +1277,12 @@ fn expand_on(
         .dates
         .into_iter()
         .map(|dt| dt.with_timezone(&Utc))
-        .filter(|occ| !by_day || !cancelled_days.contains(&occ.with_timezone(&zone).date_naive()))
+        .filter(|occ| {
+            !by_day
+                || !cancelled
+                    .iter()
+                    .any(|at| names_the_same_day(*at, occ.timestamp_millis()))
+        })
         .collect()
 }
 
@@ -3629,15 +3648,21 @@ mod tests {
             serde_json::from_str(TABLE).expect("the table parses")
         }
 
-        /// The clock the table was measured on, as its own `measuredWith` names
-        /// it. A name the crate cannot resolve fails the test rather than
-        /// falling back to this machine's zone, which would make an all-day row
-        /// mean something different on every runner.
-        fn machine_zone() -> RruleTz {
-            let name = table()["measuredWith"]["machineZone"]
+        /// The clock a row is read on: its own `deviceZone` when it names one,
+        /// else the `measuredWith.machineZone` the whole table was measured on.
+        /// A name the crate cannot resolve fails the test rather than falling
+        /// back to this machine's zone, which would make an all-day row mean
+        /// something different on every runner.
+        fn device_zone(case: &Value) -> RruleTz {
+            let name = case["deviceZone"]
                 .as_str()
-                .expect("the table names the machine's zone")
-                .to_string();
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    table()["measuredWith"]["machineZone"]
+                        .as_str()
+                        .expect("the table names the machine's zone")
+                        .to_string()
+                });
             RruleTz::Tz(
                 name.parse::<chrono_tz::Tz>()
                     .unwrap_or_else(|_| panic!("chrono-tz knows {name}")),
@@ -3654,7 +3679,7 @@ mod tests {
         /// Every event on its own, as `event_triggers` expands it: a cancelled event
         /// is skipped before anything expands, and an override is just another event.
         /// Sorted by instant, then input index — the order the table records.
-        fn reminder_answer(input: &Value) -> Vec<(DateTime<Utc>, usize)> {
+        fn reminder_answer(input: &Value, device: RruleTz) -> Vec<(DateTime<Utc>, usize)> {
             let lo = instant(&input["range"]["start"]);
             let hi = instant(&input["range"]["end"]);
             let mut rows = Vec::new();
@@ -3682,11 +3707,11 @@ mod tests {
                             &exceptions,
                             rec.get("tzid").and_then(Value::as_str),
                             ev["all_day"].as_bool() == Some(true),
-                            // The device the table was measured on. An all-day
-                            // row only means what it says on one clock, and the
+                            // The device this row is read on. An all-day row
+                            // only means what it says on one clock, and the
                             // table names it — read from the machine instead,
                             // these rows would pass in Berlin and fail on CI.
-                            machine_zone(),
+                            device,
                             lo,
                             hi,
                         )
@@ -3749,7 +3774,12 @@ mod tests {
             let t = table();
             for case in t["cases"].as_array().expect("cases") {
                 let want = recorded(case.get("reminders").unwrap_or(&case["expect"]));
-                assert_eq!(reminder_answer(&case["input"]), want, "{}", case["name"]);
+                assert_eq!(
+                    reminder_answer(&case["input"], device_zone(case)),
+                    want,
+                    "{}",
+                    case["name"],
+                );
             }
         }
     }
