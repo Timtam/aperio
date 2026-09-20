@@ -14,6 +14,7 @@ export * from './syncConflictGroups';
 export * from './taskRecurrence';
 export * from './expandTaskOccurrences';
 export * from './recurrence';
+export * from './occurrenceWrite';
 export * from './rrule';
 export * from './reminderNotification';
 export * from './dateKey';

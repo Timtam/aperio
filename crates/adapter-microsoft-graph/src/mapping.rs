@@ -63,6 +63,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // Graph mails the guests by itself, but it takes an invitee's edits
         // and keeps them local, so an invitation is not read-only here (77a).
         invitations_reply_only: false,
+        stores_occurrence_exceptions: false,
         notifier_name: Some("Microsoft 365".into()),
         color_label: None,
         id: entry.id,

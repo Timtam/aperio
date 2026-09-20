@@ -172,6 +172,22 @@ Apple's well-known endpoints.
   `SCHEDULE-AGENT` on ANOTHER attendee's row is not read — the server still
   mails the rest.
 
+- **One occurrence can be kept inside its series.** A save or a drag of a
+  single occurrence writes a `RECURRENCE-ID` exception into the series' own
+  resource (decision 79b) instead of skipping the slot and creating a
+  standalone event beside it. The calendar declares that it can hold one
+  (`Calendar::stores_occurrence_exceptions`), and `update_event` mints the
+  block when nothing stands in the slot yet (`mint_override`). The
+  `RECURRENCE-ID` takes the form of the MASTER's own `DTSTART` — `VALUE=DATE`,
+  `TZID=<its own spelling>`, a UTC value or a floating one (RFC 5545 §3.8.4.4)
+  — because that is the form a client matches against its expansion, and the
+  zone name must resolve against a `VTIMEZONE` already in this resource. The
+  minted value is read back the way the reader reads it and must answer the
+  same slot; where it cannot (a local time that happens twice, a zone this
+  build cannot resolve), and where the master is not recurring, has no
+  `DTSTART`, already skips the slot, or is somebody else's invitation, the
+  write is REFUSED rather than turned into something else.
+
 ## Testing
 
 `mockito` serves canned `PROPFIND`/`REPORT`/multiget XML. Tests assert the

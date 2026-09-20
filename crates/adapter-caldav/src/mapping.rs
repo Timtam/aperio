@@ -34,6 +34,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Property};
 
 use crate::error::{CaldavError, CaldavResult};
+use crate::ical_raw::{component_lines, fold};
 use crate::identity::OwnIdentity;
 
 /// The one VALARM property Aperio insists on authoring: it is the event's own
@@ -1196,6 +1197,109 @@ pub(crate) fn reminder_to_alarm(
         }
         ReminderKind::AppStart => None,
     }
+}
+
+/// The form a master's `DTSTART` takes. A `RECURRENCE-ID` MUST use the same
+/// value type (RFC 5545 §3.8.4.4), because that is how every client matches
+/// the exception to an occurrence of the rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotForm {
+    /// `;VALUE=DATE:` — an all-day series. Its days are the reader's calendar
+    /// days (48a), and a DATE names one of them on every device.
+    Date,
+    /// `;TZID=<name>:` — the name as the master spells it, which is the only
+    /// one guaranteed to resolve against a VTIMEZONE in this same resource.
+    Zoned(String),
+    /// A bare value ending in `Z`.
+    Utc,
+    /// A bare value with no zone at all: read as UTC by `datetime_to_utc`, and
+    /// expanded in UTC by the views, so it round-trips exactly.
+    Floating,
+}
+
+/// Why a slot cannot be named in the master's own form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotRefusal {
+    /// The master has no `DTSTART` at all.
+    NoStart,
+    /// Its zone is one this build cannot resolve, so the value would name an
+    /// instant nobody can compute back.
+    UnknownZone(String),
+    /// The local time the slot falls on happens twice (the autumn overlap) or
+    /// not at all (the spring gap), so the value would not read back as this
+    /// slot — and the exception would drift to another occurrence, or to none.
+    AmbiguousLocalTime,
+}
+
+/// The `DTSTART` form of the master VEVENT in `master_block`.
+pub(crate) fn dtstart_form(master_block: &str) -> Option<SlotForm> {
+    let line = component_lines(master_block)
+        .into_iter()
+        .find(|l| l.name == "DTSTART")?;
+    if line
+        .param("VALUE")
+        .is_some_and(|v| v.eq_ignore_ascii_case("DATE"))
+    {
+        return Some(SlotForm::Date);
+    }
+    if let Some(tzid) = line.param("TZID") {
+        return Some(SlotForm::Zoned(tzid.to_string()));
+    }
+    Some(if line.value.trim_end().ends_with('Z') {
+        SlotForm::Utc
+    } else {
+        SlotForm::Floating
+    })
+}
+
+/// The `RECURRENCE-ID` property line naming `slot`, in the form the master's
+/// own `DTSTART` uses, folded with `ending`.
+///
+/// The master's line is the only honest source. The edit being written carries
+/// `recurrence: null` by then, so its zone is gone; a server may spell a zone
+/// in a way Aperio would not re-emit; and a `TZID` must resolve against a
+/// VTIMEZONE already in THIS resource, which copying the name guarantees and
+/// inventing one does not. Only `TZID` and `VALUE` are carried over: any other
+/// parameter the master's `DTSTART` happens to have belongs to a DTSTART, and
+/// copying it onto a RECURRENCE-ID would invent a property. `RANGE` is never
+/// written — "this and all following" is the split path, not an exception.
+///
+/// The minted value is read back the way the reader reads it and must answer
+/// `slot` again; where it cannot, this refuses rather than writing an
+/// exception that names a different occurrence on the next read.
+pub(crate) fn mint_recurrence_id(
+    master_block: &str,
+    slot: DateTime<Utc>,
+    ending: &str,
+) -> Result<String, SlotRefusal> {
+    let line = match dtstart_form(master_block).ok_or(SlotRefusal::NoStart)? {
+        SlotForm::Date => {
+            // The same day `exdate_line` writes: an all-day instant is local
+            // midnight, so the UTC date is the day before west of the clock.
+            let day = slot.with_timezone(&Local).date_naive();
+            if naive_date_to_utc(day) != slot {
+                return Err(SlotRefusal::AmbiguousLocalTime);
+            }
+            format!("RECURRENCE-ID;VALUE=DATE:{}", day.format("%Y%m%d"))
+        }
+        SlotForm::Zoned(tzid) => {
+            let tz: chrono_tz::Tz = tzid
+                .parse()
+                .map_err(|_| SlotRefusal::UnknownZone(tzid.clone()))?;
+            let naive = slot.with_timezone(&tz).naive_local();
+            if resolve_with_tzid(naive, &tzid) != Some(slot) {
+                return Err(SlotRefusal::AmbiguousLocalTime);
+            }
+            format!(
+                "RECURRENCE-ID;TZID={}:{}",
+                tzid,
+                naive.format("%Y%m%dT%H%M%S")
+            )
+        }
+        SlotForm::Utc => format!("RECURRENCE-ID:{}", format_utc_compact(slot)),
+        SlotForm::Floating => format!("RECURRENCE-ID:{}", slot.naive_utc().format("%Y%m%dT%H%M%S")),
+    };
+    Ok(fold(&line, ending))
 }
 
 pub(crate) fn format_utc_compact(dt: DateTime<Utc>) -> String {

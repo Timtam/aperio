@@ -378,6 +378,29 @@ describe('moveEventToDay (planner drag-and-drop)', () => {
     });
   });
 
+  /**
+   * Decision 79b: where the provider can keep a changed occurrence inside its
+   * series, a drag writes that occurrence — not a copy beside a hole. The
+   * calendar says whether it can; a calendar that says nothing keeps the
+   * carve-out above, which is what every calendar did before.
+   */
+  it('occurrence scope writes the occurrence itself where the calendar holds one', async () => {
+    const occ = occurrence();
+    const target = localKey(occ.start, 3);
+    const moved = await moveEventToDay(occ, target, 'occurrence', {
+      stores_occurrence_exceptions: true,
+    });
+    expect(moved).toBe(true);
+    const calls = invokeMock.mock.calls;
+    // One write, and no hole in the series.
+    expect(calls.map(([cmd]) => cmd)).toEqual(['update_event']);
+    const [, args] = calls[0];
+    // The id ADDRESSES the occurrence: the series, and the slot it stands in.
+    expect(args.event.id).toBe('e1::rid::2026-06-15T09:00:00Z');
+    expect(args.event.recurrence).toBeNull();
+    expect(localKey(args.event.start)).toBe(target);
+  });
+
   it("a detached occurrence names its series' organizer, so the host keeps it out", async () => {
     // Decision 72a: the standalone copy is a create, and the provider may still
     // list the organizer among the invitees the copy takes along.

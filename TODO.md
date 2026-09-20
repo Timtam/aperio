@@ -2329,6 +2329,29 @@ Siehe DESIGN §4.2.
   frischen `.so`, und `mobile/scripts/check-ffi-bridges.mjs` erzeugt sie selbst,
   statt die eingecheckte Fassung zu vergleichen. Anlass: Eine veraltete Datei
   faellt sonst erst beim Checksum-Fehler auf dem Geraet auf.
+  🚩 **Offen nach 79b** („nur dieser Termin" bleibt in seiner Serie):
+  - **Exchange kann es, darf aber noch nicht.** `UpdateItem` gegen eine
+    `OccurrenceItemId` macht aus jedem Vorkommen eine Ausnahme, aber
+    `resolve_override_target` sucht eine `::rid::`-Kennung NUR unter den
+    `ModifiedOccurrences` — ein noch nie geändertes Vorkommen gilt dort als
+    „keine Ausnahme mehr" und wird abgelehnt. Deshalb meldet der EWS-Adapter
+    `stores_occurrence_exceptions: false`, und Exchange löst weiter heraus. Die
+    Index-Maschinerie steht nebenan in `delete_series_occurrence` (Kandidat aus
+    der Regel, dann pro Index am Server geprüft, 6 Stunden Toleranz); sie muss
+    für den Schreibweg eine `OccurrenceItemId` statt einer `ItemId` erzeugen.
+    Eigener PR — und dort fällt auch 94 an: der stille Rückfall
+    `detach_exception` darf nur bei einer ECHTEN Server-Ausnahme bleiben.
+  - Microsoft 365 hat für eine Ausnahme gar keine Kennung im Adapter
+    (`::rid::` kommt dort nicht vor) und meldet die Fähigkeit deshalb nicht.
+  - Lokale Serien lösen weiter heraus (91): der lokale Speicher hat keine
+    Ausnahme-Zeile.
+  - Der Kalenderwechsel eines einzelnen Vorkommens bleibt ein Herauslösen, auch
+    wo der Anbieter eine Ausnahme hielte — die Serie zieht ja nicht mit.
+  - Die Mitnahme in eine Gruppe (`groupCarry`) legt weiterhin für jede Kopie
+    einen eigenständigen Termin an; eine Ausnahme im Takt einer ANDEREN Serie
+    wäre geraten, nicht gelesen.
+  - Ungemessen: ob iCloud eine von Aperio geschriebene `RECURRENCE-ID`
+    annimmt, und was die Gäste dabei bekommen. Gehört in Live-Runde 7.
   🚩 **Offen nach #84:**
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine

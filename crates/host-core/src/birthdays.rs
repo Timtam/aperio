@@ -70,6 +70,7 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         supports_event_color: false,
         always_notifies_attendees: false,
         invitations_reply_only: false,
+        stores_occurrence_exceptions: false,
         notifier_name: None,
         id: birthday_calendar_id(contact_list_id),
         // The list's own name, nothing else. What a frontend shows —

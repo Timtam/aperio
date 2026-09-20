@@ -159,6 +159,16 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         supports_event_color: false,
         always_notifies_attendees: false,
         invitations_reply_only: false,
+        // FALSE for now, and not because Exchange cannot: `UpdateItem` against
+        // an `OccurrenceItemId` makes an exception of any occurrence. But
+        // `resolve_override_target` looks a `::rid::` id up among the
+        // `ModifiedOccurrences` ONLY, so an occurrence nobody has changed yet
+        // is "no longer an exception in the series" and the write is refused.
+        // Declaring the capability before that path exists would promise a
+        // write this adapter cannot address (79b; the index machinery is next
+        // door in `delete_series_occurrence`, verified per index against the
+        // server, and TODO says so).
+        stores_occurrence_exceptions: false,
         notifier_name: None,
         color_label: None,
         id: folder.folder_id,

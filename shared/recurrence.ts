@@ -669,6 +669,25 @@ export function overrideRecurrenceIso<E extends RecurringEventLike>(
 }
 
 /**
+ * The id that ADDRESSES one occurrence of `seriesId` as an exception — the
+ * `{series}::rid::{slot}` shape every adapter that can hold one understands
+ * (`cal_core::split_override_id`, decision 79b).
+ *
+ * This is a REQUEST: the surfaces mint it to say which occurrence they mean,
+ * and the adapter answers with the id of its own making, in its own spelling.
+ * The slot is written to the second, as the adapters write it, because an id
+ * is read by people too — the instant itself is what is compared, never the
+ * text.
+ */
+export function overrideIdFor(seriesId: string, occurrenceIso: string): string {
+  const at = new Date(occurrenceIso);
+  const slot = Number.isNaN(at.getTime())
+    ? occurrenceIso
+    : at.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return `${seriesId}${RECURRENCE_ID_MARKER}${slot}`;
+}
+
+/**
  * The series (master) id a RECURRENCE-ID override belongs to, or `null` for a
  * master / plain event.
  */

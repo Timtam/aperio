@@ -369,6 +369,7 @@ impl CalendarFeature for IcalAdapter {
             supports_event_color: false,
             always_notifies_attendees: false,
             invitations_reply_only: false,
+            stores_occurrence_exceptions: false,
             notifier_name: None,
         }])
     }

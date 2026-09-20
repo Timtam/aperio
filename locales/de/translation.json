@@ -1632,6 +1632,7 @@
         "replyOnly": "Nur der Organisator kann diese Besprechung ändern. Es wurde nichts geändert.",
         "serverRefused": "Der Kalenderserver hat diese Änderung abgelehnt ({{detail}}). Es wurde nichts geändert.",
         "identityUnknown": "Aperio konnte die eigenen Adressen dieses Kontos auf dem Kalenderserver nicht lesen und kann dort deshalb keine Besprechung ändern. Es wurde nichts geändert.",
+        "occurrenceNotWritable": "Dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern. Es wurde nichts geändert.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen."
       },
