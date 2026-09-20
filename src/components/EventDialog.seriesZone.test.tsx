@@ -22,7 +22,12 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * its rule and its exceptions unless the edit changed them.
  */
 
-const { invokeMock, onFile } = vi.hoisted(() => {
+const { invokeMock, onFile, announced, announce } = vi.hoisted(() => {
+  /** Everything the dialog hands the screen reader's live region, in order. */
+  const announced: string[] = [];
+  const announce = (message: string) => {
+    announced.push(message);
+  };
   /** What `get_event_by_id` answers: the series a row of a series belongs to. */
   const onFile: { series: unknown; updated: unknown } = { series: null, updated: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
@@ -39,7 +44,7 @@ const { invokeMock, onFile } = vi.hoisted(() => {
     }
     return Promise.resolve([]);
   });
-  return { invokeMock, onFile };
+  return { invokeMock, onFile, announced, announce };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -95,7 +100,7 @@ const REMINDERS = { getDefaultsFor: () => [] };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
 vi.mock('../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../state/dialogStateContext', () => ({ useDialogState: () => DIALOG_STATE }));
-vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => announce }));
 vi.mock('../state/useCalendarDefaultReminders', () => ({
   useCalendarDefaultReminders: () => REMINDERS,
 }));
@@ -121,6 +126,7 @@ afterEach(() => {
   invokeMock.mockClear();
   onFile.series = null;
   onFile.updated = null;
+  announced.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -441,6 +447,139 @@ describe('EventDialog → who may notify the attendees', () => {
       expect((update?.[1] as { event: CalendarEvent }).event.send_invitations).toBe(false);
     } finally {
       delete cal.supports_scheduling;
+    }
+  });
+
+  /** A calendar whose provider mails the attendees about every change and
+   *  about a deletion (iCloud; decisions 76a, 80a). */
+  function alwaysNotifying(): () => void {
+    const cal = CALENDARS[0] as {
+      supports_scheduling?: boolean;
+      always_notifies_attendees?: boolean;
+      notifier_name?: string;
+    };
+    cal.supports_scheduling = true;
+    cal.always_notifies_attendees = true;
+    cal.notifier_name = 'iCloud';
+    return () => {
+      delete cal.supports_scheduling;
+      delete cal.always_notifies_attendees;
+      delete cal.notifier_name;
+    };
+  }
+  const alwaysSentence = /iCloud informiert die Teilnehmer über jede Änderung|iCloud informs the attendees of every change/i;
+
+  it('says who informs the attendees instead of offering a choice iCloud would not keep', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(false));
+      expect(notifyToggle()).toBeNull();
+      const note = screen.getByText(alwaysSentence);
+      // Tab reaches it, and it is read by its text.
+      expect(note.getAttribute('tabindex')).toBe('0');
+      expect(note.getAttribute('aria-label')).toMatch(alwaysSentence);
+      fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+      );
+      const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+      expect((update?.[1] as { event: CalendarEvent }).event.send_invitations).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('deletes such a meeting after a confirmation that says so, without a silent choice', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(false));
+      fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));
+      await screen.findByText(/iCloud informiert die Teilnehmer über die Absage|iCloud informs the attendees of the cancellation/i);
+      expect(
+        screen.queryByRole('button', { name: /ohne benachrichtigung entfernen|remove without notifying/i }),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByRole('button', { name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i }),
+      );
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(true),
+      );
+      const del = invokeMock.mock.calls.filter((call) => call[0] === 'delete_event').pop();
+      expect((del?.[1] as { sendCancellations: boolean | null }).sendCancellations).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('asks about someone else\'s meeting not at all on delete (70a)', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open(meeting(true));
+      fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(true),
+      );
+      expect(
+        screen.queryByRole('button', { name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i }),
+      ).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  // The sentence is said once, as part of what the user just did: with
+  // "X added", so neither announcement cuts the other off, or after another
+  // calendar is chosen. On open it is simply there.
+  it('says the sentence with the first guest added, in the same announcement', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open({ ...SERIES, recurrence: null } as unknown as CalendarEvent);
+      expect(announced.some((m) => alwaysSentence.test(m))).toBe(false);
+      const input = document.querySelector<HTMLInputElement>('.attendee-picker__input')!;
+      fireEvent.change(input, { target: { value: 'bob@example.com' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await screen.findByText(alwaysSentence);
+      const said = announced.filter((m) => alwaysSentence.test(m));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toMatch(/^bob@example\.com (hinzugefügt|added)\. /i);
+      // A second guest changes nothing about who informs them.
+      fireEvent.change(input, { target: { value: 'carol@example.com' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await screen.findByText('carol@example.com');
+      expect(announced.filter((m) => alwaysSentence.test(m))).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it('says nothing on open, and the sentence when a calendar that mails is chosen', async () => {
+    deviceInBerlin();
+    const icloud = {
+      id: 'cal-icloud',
+      name: 'iCloud',
+      read_only: false,
+      account_id: 'acc-icloud',
+      supports_scheduling: true,
+      always_notifies_attendees: true,
+      notifier_name: 'iCloud',
+    } as unknown as Calendar;
+    CALENDARS.push(icloud);
+    STORE.selectedCalendarIds.add('cal-icloud');
+    try {
+      await open(meeting(false));
+      expect(announced.some((m) => alwaysSentence.test(m))).toBe(false);
+      fireEvent.change(screen.getByRole('combobox', { name: /kalender|calendar/i }), {
+        target: { value: 'cal-icloud' },
+      });
+      await screen.findByText(alwaysSentence);
+      expect(announced.filter((m) => alwaysSentence.test(m))).toHaveLength(1);
+    } finally {
+      CALENDARS.pop();
+      STORE.selectedCalendarIds.delete('cal-icloud');
     }
   });
 

@@ -2219,15 +2219,66 @@ Siehe DESIGN §4.2.
   - Den letzten Gast zu entfernen kam beim Anbieter nicht an. Jetzt wird die
     Liste geleert, und „Teilnehmer benachrichtigen“ bleibt für die Absage
     stehen (74a).
-  🚩 **Ungemessen:** ob Exchange die Absage an den letzten entfernten Gast
-  annimmt. Live-Runde 5 prüft das.
+  Gemessen in Live-Runde 5 (D10): Exchange nimmt die Absage an den letzten
+  entfernten Gast an und verschickt sie.
   Auf dem Handy wirkt das mit dem nächsten Build. Die `.so` muss frisch
   erzeugt werden; neue FFI-Funktionen gibt es nicht, nur neue Felder im JSON.
-  🚩 **CalDAV: Ändern ohne Benachrichtigen verwirft die Gäste.** Das gab es
-  schon vorher. Der Adapter baut den VEVENT neu und schreibt `ORGANIZER` und
-  `ATTENDEE` nur beim Benachrichtigen. Ändert man bei iCloud nur den Titel,
-  sind die Gäste danach weg. Die gelesenen Zeilen zu übernehmen, ohne dass
-  der Server mailt, braucht eine Messung (`SCHEDULE-AGENT`, iCloud).
+  **Live-Test Runde 5**, gelaufen am 19.09.2026 auf dem Desktop (Build
+  dd4c4440):
+  - D7 bis D10 und H1b wie erwartet. D10: Exchange schickt dem letzten
+    entfernten Gast die Absage.
+  - D6 und H2: Speichern klappt, aber Aperio zeigt einzeln geänderte
+    Exchange-Termine mit dem Titel der Serie, und jedes Speichern schreibt
+    Titel, Ort, Text und Erinnerung der Serie zurück. Toni hat das live
+    bestätigt. Das ist 58a, als Nächstes nach dem iCloud-Fix (78a).
+  - E1: Toni speicherte versehentlich das iCloud-Original einer eigenen
+    Besprechung; der Gast verschwand, und iCloud sagte ihm ab. E2 fiel damit
+    aus.
+  ↻ **Ein iCloud-Termin verliert seine Gäste** (E1), behoben in PR #84.
+  Aperio baute den VEVENT neu und schrieb `ORGANIZER` und `ATTENDEE` nur beim
+  Benachrichtigen; ohne `ORGANIZER` sagt ein RFC-6638-Server die Besprechung
+  allen ab. Zudem erkannte Aperio Toni nicht als Organisator, weil iCloud ihn
+  per Principal-Pfad nennt (Messung M1), also fehlte der Schalter. Jetzt:
+  - Aperio erkennt das Konto an allen Einträgen seiner
+    `calendar-user-address-set` und am `EMAIL` einer Zeile.
+  - Jedes Speichern liest zuerst die Kopie des Servers und trägt die Zeilen
+    der Besprechung wörtlich weiter; nur eine geänderte Gästeliste ändert
+    Zeilen. Eine Serie behält ihre Ausnahmen Byte für Byte, „nur diesen
+    Termin löschen“ fügt eine einzige `EXDATE`-Zeile ein, und ein Speichern
+    ohne Änderung schickt nichts.
+  - Bei iCloud und Microsoft 365 zeigen Editor und Löschdialoge statt einer
+    Wahl den Satz, wer die Teilnehmer informiert (76a, 80a, 82b), auf Desktop
+    und Handy, auch nach der Entfernen-Taste in Woche, Tag, Monat und Agenda
+    (ein gemeinsamer `DeleteEventConfirm`). Die Löschdialoge fragen
+    „organisiert das Konto?“ jetzt über `organized_elsewhere` statt über einen
+    Adressvergleich. Der Satz beim ersten Gast kommt zusammen mit „X
+    hinzugefügt“ in einer Ansage.
+  - `CACHE_GENERATION` 3.
+  Wartet auf den Live-Test mit „Aperio R6 eigene“: Titel ändern, einen Gast
+  hinzufügen und entfernen, den letzten entfernen, eine Serie ändern und ein
+  Vorkommen löschen.
+  🚩 **Gestapelt auf #84, zusammen mit #83 zu mergen:** fremde iCloud-Einladungen
+  schreibgeschützt (77a), der Löschdialog sagt dort „Der Organisator bekommt
+  eine Absage“ (83b), eine lesbare Zusammenfassung der Wiederholung (84a), und
+  „nur diesen Termin“ einer iCloud-Serie als echte Ausnahme (79b). Dazu
+  übersetzen beide Oberflächen die Ablehnung des Servers: Ein Fehler
+  `forbidden` beginnt mit `reply-only-invitation:` oder `server-refused:`,
+  und heute liest der Screenreader diesen englischen Text vor.
+  🚩 **Offen nach #84:**
+  - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
+    Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine
+    Gäste (81b). Richtiges Verschieben (WebDAV MOVE) erst nach einer Messung.
+  - `SEQUENCE` geht wörtlich zurück; ob iCloud ihn selbst hochzählt, ist nicht
+    gemessen. Ebenso `SCHEDULE-AGENT=CLIENT` (ein stilles Speichern bleibt
+    unmöglich, solange Aperio kein iTIP verschickt).
+  - Ein CalDAV-Server ohne Terminplanung speichert neue Gäste nicht als Daten.
+  - Die `EXDATE` einer ganztägigen Serie wird als UTC-Zeitpunkt geschrieben,
+    nicht als Datum.
+  - Der VTODO-Neubau in `tasks.rs` verwirft `ORGANIZER` und `ATTENDEE` ebenso.
+  - Microsoft 365: dass Graph bei jeder Änderung und beim Löschen mailt, steht
+    in Microsofts Doku; gemessen ist es nicht.
+  - Eigenschaften, die Aperio nicht kennt (etwa `X-APPLE-TRAVEL-ADVISORY-…`),
+    gehen beim Neubau eines Termins verloren; das gehört zu 58a.
   🚩 **Den Organisator zeigen** (73a), eigene Aufgabe: eine Zeile
   „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn

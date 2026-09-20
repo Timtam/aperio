@@ -56,6 +56,11 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // No RFC 7986 per-event COLOR round-trip on Graph; per-event colors
         // stay host-local overrides.
         supports_event_color: false,
+        // Graph mails the attendees of a meeting the account organizes about
+        // every change and about its deletion; no request can stay silent
+        // (decision 82b; per Microsoft's documentation, not measured live).
+        always_notifies_attendees: true,
+        notifier_name: Some("Microsoft 365".into()),
         color_label: None,
         id: entry.id,
         name: entry.name,

@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/announcerContext';
 import type { CalendarEvent } from '../api/types';
 import { useCancellationChoice } from '../state/useCancellationChoice';
 import { Modal } from './Modal';
@@ -14,10 +13,13 @@ import { Modal } from './Modal';
  * scheduling-capable provider, via `useCancellationChoice`), a **Notify
  * attendees / Remove without notifying** radio group sits above the scope
  * buttons (default: notify) — so the notify choice is made once, transparently,
- * and each scope button applies it. Attendee copies / non-meetings / local
- * events show the scope buttons alone (silent). Cancel takes initial focus for
- * those; for the organizer form the radio group is focused first (non-
- * destructive) so the choice is surfaced before the scope buttons.
+ * and each scope button applies it. A provider that cancels for the attendees
+ * whatever it is asked (iCloud, Microsoft 365) gets no choice: the message
+ * says who informs them (decision 80a), and every scope notifies. Attendee
+ * copies / non-meetings / local events show the scope buttons alone (silent).
+ * Cancel takes initial focus for those; for the organizer form the radio group
+ * is focused first (non-destructive) so the choice is surfaced before the
+ * scope buttons.
  */
 export interface DeleteEventScopeDialogProps {
   isOpen: boolean;
@@ -45,14 +47,13 @@ export function DeleteEventScopeDialog({
   onSeries,
 }: DeleteEventScopeDialogProps) {
   const { t } = useTranslation();
-  const announce = useAnnouncer();
-  const { offersChoice } = useCancellationChoice(event);
+  const { offersChoice, alwaysNotifies, sentence } = useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const notifyRef = useRef<HTMLInputElement>(null);
   const messageId = useId();
   // Live mirror of offersChoice so the open-focus effect can read the value AT
-  // OPEN without depending on it (which would re-run and STEAL focus onto the
-  // notify radio if the async organizer check resolves mid-life).
+  // OPEN without depending on it (which would re-run and move focus if the
+  // event changed while the dialog is open).
   const offersChoiceRef = useRef(offersChoice);
   offersChoiceRef.current = offersChoice;
 
@@ -62,10 +63,9 @@ export function DeleteEventScopeDialog({
     if (isOpen) setNotify(true);
   }, [isOpen]);
 
-  // Focus ONCE per open — the radio when the organizer choice is already known
-  // at open (non-destructive), else Cancel; never a scope (delete) button. Keyed
-  // on isOpen only (reads the ref), so a late organizer-check resolve grows the
-  // dialog but never yanks focus onto a control the user hasn't heard of.
+  // Focus ONCE per open — the radio when there is a choice (non-destructive),
+  // else Cancel; never a scope (delete) button. Keyed on isOpen only (reads
+  // the ref), so a change while open never yanks focus.
   useEffect(() => {
     if (!isOpen) return;
     queueMicrotask(() => {
@@ -74,26 +74,8 @@ export function DeleteEventScopeDialog({
     });
   }, [isOpen]);
 
-  // The organizer check resolves async, so the notify section appears a beat
-  // after open. Announce that reveal (a false→true transition while open) so the
-  // grown dialog isn't a silent surprise; focus deliberately stays put (see
-  // above), and the user can Tab to the newly announced radios. `prev` starts at
-  // the current value, so a section already present on the first render (were
-  // the check ever synchronous) would not announce.
-  const prevOffersChoiceRef = useRef(offersChoice);
-  useEffect(() => {
-    if (!isOpen) {
-      prevOffersChoiceRef.current = offersChoice;
-      return;
-    }
-    if (offersChoice && !prevOffersChoiceRef.current) {
-      announce(t('dialogs.deleteScope.notifyRevealed'));
-    }
-    prevOffersChoiceRef.current = offersChoice;
-  }, [isOpen, offersChoice, announce, t]);
-
   const run = (fn: (send: boolean) => void) => {
-    fn(offersChoice ? notify : false);
+    fn(offersChoice ? notify : alwaysNotifies);
     onClose();
   };
 
@@ -117,6 +99,7 @@ export function DeleteEventScopeDialog({
             : 'dialogs.deleteScope.message',
           { title },
         )}
+        {alwaysNotifies && ` ${t(sentence.key, sentence.values)}`}
       </p>
       {offersChoice && (
         <fieldset className="form__field">

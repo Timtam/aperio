@@ -22,6 +22,7 @@ const row = (over: Record<string, unknown>) => ({
   default_sound: null,
   supports_scheduling: false,
   supports_event_color: false,
+  always_notifies_attendees: false,
   account_id: 'local',
   recurrence_capabilities: DEFAULT_RECURRENCE_CAPABILITIES,
   ...over,

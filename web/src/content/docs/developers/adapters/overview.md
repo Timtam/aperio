@@ -84,15 +84,21 @@ when caching:
 > **Attendee scheduling is server-side, never client SMTP.** When the user
 > opts to notify, the adapter asks the *provider* to email attendees:
 > EWS flips `SendMeetingInvitations*` to `SendToAllAndSaveCopy`, Google
-> appends `?sendUpdates=all`, CalDAV/iCloud writes `ORGANIZER`+`ATTENDEE`
-> for RFC 6638 auto-scheduling (detected at discovery via
-> `schedule-outbox-URL`), and Graph sends automatically once attendees are
-> in the body. Each calendar carries a `supports_scheduling` flag — static
-> for EWS/Google/Graph, runtime-detected for CalDAV — that gates the UI
-> toggle. The transient `send_invitations` (on `NewEvent`/`Event`) and
-> `send_cancellations` (on `delete_event`) ride the call, never the stored
-> data. Note: on iCloud and Graph, *storing* attendees and *emailing* them
-> are inseparable — they're written only when notifying.
+> appends `?sendUpdates=all`, and Graph sends automatically once attendees
+> are in the body. On CalDAV the server schedules by itself (RFC 6638,
+> detected at discovery via `schedule-outbox-URL`): a new event gets
+> `ORGANIZER`+`ATTENDEE` only when the server schedules and the user
+> notifies. Every update reads the resource and carries `ORGANIZER`,
+> `ATTENDEE`, `SEQUENCE` and `STATUS` back verbatim, changing rows only for
+> a changed invitee list (`scheduling::plan_block`), because on such a
+> server a PUT without `ORGANIZER` cancels the meeting. Each calendar
+> carries a `supports_scheduling` flag — static for EWS/Google/Graph,
+> runtime-detected for CalDAV — that gates the UI toggle. The transient
+> `send_invitations` (on `NewEvent`/`Event`) and `send_cancellations` (on
+> `delete_event`) ride the call, never the stored data. Note: on Graph,
+> attendees are in the body only when notifying; on a scheduling CalDAV
+> server the organizer's copy *is* the invitation, so every saved change
+> reaches the attendees (see `always_notifies_attendees` below).
 
 > **The organizer is never an attendee.** Providers list the organizer among
 > the attendees, and an appointment made in Outlook lists nobody else. The
@@ -123,6 +129,15 @@ when caching:
 >   invitee the cache had read, does. `guard_create` does the same for a create; a create derived from an
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
+
+> **Some providers always notify.** On an RFC 6638 CalDAV server (iCloud)
+> and on Microsoft Graph, a saved change to a meeting the account organizes
+> and its deletion reach the attendees whatever the request says. Those
+> calendars carry `always_notifies_attendees` (and a display-only
+> `notifier_name`), and the shared rules (`attendeeNotice`,
+> `cancellationNotice` in `@aperio/shared`) show a sentence that says who
+> informs the attendees instead of a notify checkbox or a "remove without
+> notifying" choice the provider would not keep (decisions 76a, 80a, 82b).
 
 > **Free/busy lookup** runs through `get_free_busy(emails, range)` and the
 > host `query_free_busy` command (the dialog's "Check availability"

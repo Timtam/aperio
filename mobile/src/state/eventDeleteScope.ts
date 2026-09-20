@@ -1,17 +1,16 @@
 import { Alert } from 'react-native';
 
-import { occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
+import {
+  cancellationNotice,
+  notifierSentence,
+  occurrenceIsoOf,
+  seriesIdOf,
+  type NoticeCalendar,
+} from '@aperio/shared';
 
 import { showEventScopeDialog } from './eventScopeDialog';
 import { addEventExdate, CalendarEvent, deleteEvent } from '../api/calendar';
-import { resolveCalendarUserEmail } from './currentUserEmail';
 import { deleteThisAndFuture } from './deleteSeriesFromOccurrence';
-
-/** Lower-case, `mailto:`-stripped form for comparing addresses. */
-function normalizeEmail(value: string | null | undefined): string {
-  if (!value) return '';
-  return value.trim().replace(/^mailto:/i, '').toLowerCase();
-}
 
 // Shared event-delete confirmation with recurrence scope — the mobile analogue
 // of the desktop EventDialog's delete-scope choice. A concrete occurrence of a
@@ -26,21 +25,22 @@ type Tr = (key: string, vars?: Record<string, unknown>) => string;
 /** Pop the delete-confirm for `ev`; on a successful mutation calls
  *  `onSuccess(announceMessage)`, on failure `onError(message)`.
  *
- *  When `supportsScheduling` is true (the event's calendar is on a
- *  scheduling-capable provider) AND the event has attendees, this resolves
- *  whether the connected account ORGANIZES the meeting (via
- *  `calendarCurrentUserEmail`); if so, a whole-event/series delete becomes a
+ *  `opts.calendar` is the event's calendar row. The shared rule
+ *  (`cancellationNotice`, the desktop's too) decides what the delete asks:
+ *  for a meeting the account ORGANIZES, with attendees, on a
+ *  scheduling-capable provider, a whole-event/series delete becomes a
  *  three-way choice — cancel + notify attendees / remove without notifying /
- *  keep. An attendee's copy, a non-meeting event, or a non-scheduling provider
- *  gets a plain delete (no cancellation). A single occurrence is always a local
- *  EXDATE that never notifies. Every calendar surface routes here so the logic
- *  lives in one place. */
+ *  keep — where the provider can delete silently, and a confirmation that
+ *  says who informs the attendees where it always does (decision 80a). An
+ *  attendee's copy, a non-meeting event, or a non-scheduling provider gets a
+ *  plain delete (no cancellation). Every calendar surface routes here so the
+ *  logic lives in one place. */
 export function confirmDeleteEvent(
   ev: CalendarEvent,
   t: Tr,
   onSuccess: (message: string) => void,
   onError: (message: string) => void,
-  opts: { supportsScheduling?: boolean } = {},
+  opts: { calendar?: NoticeCalendar | null } = {},
 ): void {
   const series = seriesIdOf(ev);
   // Non-null only for an expanded occurrence of a recurring series.
@@ -173,6 +173,50 @@ export function confirmDeleteEvent(
       ],
     );
 
+  // The provider cancels for the attendees whatever it is asked (iCloud,
+  // Microsoft 365): no notify/silent choice it would not keep, the sentence
+  // that says so instead, and every scope notifies (decision 80a).
+  const alwaysOccurrenceDialog = (sentence: string) =>
+    showEventScopeDialog({
+      title: t('dialogs.deleteScope.title'),
+      message: `${t('dialogs.deleteScope.message', { title: ev.title })} ${sentence}`,
+      cancelLabel: t('dialogs.deleteScope.cancel'),
+      options: [
+        {
+          key: 'occurrence',
+          label: t('dialogs.deleteScope.occurrence'),
+          destructive: true,
+          run: () => removeOccurrence(true),
+        },
+        {
+          key: 'thisAndFuture',
+          label: t('dialogs.deleteScope.thisAndFuture'),
+          destructive: true,
+          run: () => removeThisAndFuture(true),
+        },
+        {
+          key: 'series',
+          label: t('dialogs.deleteScope.series'),
+          destructive: true,
+          run: () => deleteWith(true),
+        },
+      ],
+    });
+
+  const alwaysAlert = (sentence: string) =>
+    Alert.alert(
+      t('dialogs.event.cancelChoice.title'),
+      t('dialogs.event.cancelChoice.alwaysMessage', { title: ev.title, sentence }),
+      [
+        { text: t('mobile.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.event.cancelChoice.cancelMeeting'),
+          style: 'destructive',
+          onPress: () => deleteWith(true),
+        },
+      ],
+    );
+
   const plainAlert = () =>
     Alert.alert(
       t('dialogs.confirm.deleteEventTitle'),
@@ -187,35 +231,24 @@ export function confirmDeleteEvent(
       ],
     );
 
-  // Only a meeting we ORGANIZE on a scheduling provider offers the
-  // notify/silent choice (for the whole series OR a single occurrence).
-  // Resolve "who am I" lazily at delete time (a cheap host read).
-  const organizerGated = ev.attendees.length > 0 && opts.supportsScheduling;
-
-  if (occurrence != null) {
-    if (organizerGated) {
-      void resolveCalendarUserEmail(ev.calendar_id)
-        .then((me) => {
-          const isOrganizer =
-            !!me && normalizeEmail(ev.organizer) === normalizeEmail(me);
-          occurrenceAlert(isOrganizer);
-        })
-        .catch(() => occurrenceAlert(false));
+  // Only a meeting we ORGANIZE on a scheduling provider asks about its
+  // attendees; the adapter's reading (`organized_elsewhere`) says whether we
+  // do (decision 70a).
+  const notice = cancellationNotice(opts.calendar, ev);
+  if (notice === 'always') {
+    const sentenceSpec = notifierSentence(opts.calendar, 'cancellation');
+    const sentence = t(sentenceSpec.key, sentenceSpec.values);
+    if (occurrence != null) {
+      alwaysOccurrenceDialog(sentence);
       return;
     }
-    occurrenceAlert(false);
+    alwaysAlert(sentence);
     return;
   }
-  if (organizerGated) {
-    void resolveCalendarUserEmail(ev.calendar_id)
-      .then((me) => {
-        const isOrganizer =
-          !!me && normalizeEmail(ev.organizer) === normalizeEmail(me);
-        if (isOrganizer) choiceAlert();
-        else plainAlert();
-      })
-      .catch(() => plainAlert());
+  if (occurrence != null) {
+    occurrenceAlert(notice === 'offer');
     return;
   }
-  plainAlert();
+  if (notice === 'offer') choiceAlert();
+  else plainAlert();
 }

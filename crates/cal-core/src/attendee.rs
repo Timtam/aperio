@@ -180,6 +180,45 @@ pub fn same_invitees(a: &[String], b: &[String]) -> bool {
     set(a) == set(b)
 }
 
+/// What an update does with the invitee list the provider holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteeWrite {
+    /// Leave the provider's list exactly as it is (decision 71a).
+    Keep,
+    /// Write the edit's list: the invitees in it stay or are added, the
+    /// others are removed.
+    Replace,
+    /// Remove every invitee (decision 74a).
+    Clear,
+}
+
+/// Decide [`InviteeWrite`] for an update against the list the provider holds
+/// right now. `now` is the edit's list, `current` the provider's; neither
+/// holds the organizer. `event` carries the host's flags
+/// ([`Event::keep_attendees`], [`Event::clear_attendees`]).
+///
+/// The same invitees, or the host's keep flag, keep the list. An edit with
+/// nobody left clears it only when the host confirmed the removal
+/// ([`guard_update`] saw invitees in the cached read): an empty list alone
+/// uninvites nobody, so an event read without its invitees cannot empty the
+/// provider's list by accident.
+pub fn invitee_write(event: &Event, now: &[String], current: &[String]) -> InviteeWrite {
+    if event.keep_attendees || same_invitees(now, current) {
+        return InviteeWrite::Keep;
+    }
+    let nobody_now = now
+        .iter()
+        .all(|entry| normalize_address(&parse(entry).1).is_empty());
+    if nobody_now {
+        return if event.clear_attendees {
+            InviteeWrite::Clear
+        } else {
+            InviteeWrite::Keep
+        };
+    }
+    InviteeWrite::Replace
+}
+
 /// The write rule for an update, run by the host before the adapter sees the
 /// event. `read` is the event as it was last read, when the host has it.
 ///
@@ -513,6 +552,47 @@ mod tests {
             guard_update(&mut unknown, None);
             assert!(!unknown.clear_attendees, "nothing read: nothing cleared");
             assert!(!unknown.send_invitations);
+        }
+
+        /// The adapter's rule against the provider's list as it is right now:
+        /// the same people keep it, a change replaces it, and nobody left
+        /// clears it only when the host confirmed the removal (74a).
+        #[test]
+        fn invitee_write_against_the_providers_list() {
+            let current = ["Bob <bob@x>".to_string(), "carol@x".to_string()];
+            let mut edit = event(Some("toni@x"), &["CAROL@x", "bob@x"]);
+            assert_eq!(
+                invitee_write(&edit, &edit.attendees.clone(), &current),
+                InviteeWrite::Keep
+            );
+
+            edit.attendees = vec!["bob@x".into()];
+            assert_eq!(
+                invitee_write(&edit, &edit.attendees.clone(), &current),
+                InviteeWrite::Replace
+            );
+
+            edit.keep_attendees = true;
+            assert_eq!(
+                invitee_write(&edit, &edit.attendees.clone(), &current),
+                InviteeWrite::Keep
+            );
+            edit.keep_attendees = false;
+
+            edit.attendees = vec![];
+            assert_eq!(
+                invitee_write(&edit, &[], &current),
+                InviteeWrite::Keep,
+                "an empty list alone uninvites nobody"
+            );
+            edit.clear_attendees = true;
+            assert_eq!(invitee_write(&edit, &[], &current), InviteeWrite::Clear);
+
+            let first = event(Some("toni@x"), &["dave@x"]);
+            assert_eq!(
+                invitee_write(&first, &first.attendees.clone(), &[]),
+                InviteeWrite::Replace
+            );
         }
 
         #[test]

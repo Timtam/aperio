@@ -4,11 +4,14 @@ import { calendarCurrentUserEmail } from '../api/calendar';
  * Cache for "who am I on this calendar?" — the connected account's email.
  *
  * `calendarCurrentUserEmail` is a LIVE provider call (via the host FFI), not a
- * local read, so we cache the answer per calendar. EventRsvp warms it whenever
- * a meeting is opened; the delete flow (`confirmDeleteEvent`) reuses it so
- * repeated deletes don't each hit the network. The mobile twin of the desktop
- * `currentUserEmail` cache. Identity is immutable for an account's lifetime, so
- * no invalidation — the cache dies with the JS context.
+ * local read, so we cache the answer per calendar. EventRsvp is its only user:
+ * it finds the account's own attendee row to answer an invitation. Whether the
+ * account organizes an event is not decided here but by the adapter on read
+ * (`organized_elsewhere`, decision 70a), which the delete flow
+ * (`confirmDeleteEvent`) reads through the shared `cancellationNotice`. The
+ * mobile twin of the desktop `currentUserEmail` cache. Identity is immutable
+ * for an account's lifetime, so no invalidation — the cache dies with the JS
+ * context.
  */
 const cache = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();

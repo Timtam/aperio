@@ -1167,11 +1167,7 @@ export function CalendarDayList({
           setError(message);
           announce(t('mobile.error', { message }));
         },
-        {
-          supportsScheduling:
-            calendars.find((c) => c.id === ev.calendar_id)
-              ?.supports_scheduling ?? false,
-        },
+        { calendar: calendars.find((c) => c.id === ev.calendar_id) },
       ),
     [announce, calendars, load, t],
   );

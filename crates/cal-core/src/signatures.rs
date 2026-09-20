@@ -72,7 +72,7 @@ pub(crate) fn is_js_whitespace(c: char) -> bool {
     )
 }
 
-fn js_trim(s: &str) -> &str {
+pub(crate) fn js_trim(s: &str) -> &str {
     s.trim_matches(is_js_whitespace)
 }
 

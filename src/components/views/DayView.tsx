@@ -67,7 +67,7 @@ import {
 } from '../../intl/taskStatus';
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { duplicateEvent } from '../duplicateActions';
-import { ConfirmDialog } from '../ConfirmDialog';
+import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { getDayLog } from '../../api/client';
 import { useDayMarkers } from '../../state/useDayMarkers';
 import { useDayMarkersChanged } from '../../state/dayMarkersChanged';
@@ -1636,16 +1636,10 @@ export function DayView() {
         />
       )}
 
-      <ConfirmDialog
-        isOpen={confirmTarget !== null}
+      <DeleteEventConfirm
+        event={confirmTarget}
         onClose={() => setConfirmTarget(null)}
-        onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget, 'series');
-        }}
-        title={t('dialogs.confirm.deleteEventTitle')}
-        message={t('dialogs.confirm.deleteEventMessage', {
-          title: confirmTarget?.title ?? '',
-        })}
+        onDelete={(ev, send) => void performDelete(ev, 'series', send)}
       />
 
       {/* Dropping a recurring event on a new time asks the same §7.5 question

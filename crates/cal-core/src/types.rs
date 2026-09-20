@@ -63,6 +63,22 @@ pub struct Calendar {
     /// (which never set it) deserialising as `false`.
     #[serde(default)]
     pub supports_event_color: bool,
+    /// True when the provider itself mails the invitees about every saved
+    /// change to a meeting the account organizes, and about its deletion, so
+    /// neither can be silent (decisions 76a, 80a). The editors then say so
+    /// instead of offering "Notify attendees" or "Remove without notifying".
+    /// CalDAV sets it on an RFC 6638 server (implicit scheduling: the
+    /// organizer's copy is the invitation); Microsoft Graph on its calendars
+    /// (decision 82b). `#[serde(default)]` keeps older payloads and stores
+    /// deserialising as `false`.
+    #[serde(default)]
+    pub always_notifies_attendees: bool,
+    /// The service the editors name when they say so ("iCloud informs the
+    /// attendees …"), as the adapter knows it; `None` reads as "the calendar
+    /// server". A display string only: no rule looks at it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub notifier_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

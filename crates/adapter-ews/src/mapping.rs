@@ -157,6 +157,8 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         // No RFC 7986 per-event COLOR round-trip on EWS; per-event colors
         // stay host-local overrides.
         supports_event_color: false,
+        always_notifies_attendees: false,
+        notifier_name: None,
         color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {

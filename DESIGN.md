@@ -1207,8 +1207,10 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   wird nichts entfernt.
 - **Benachrichtigen darf nur, wer organisiert (70a):** Der Adapter sagt, ob das
   Konto den Termin organisiert (EWS `MyResponseType`, Graph `isOrganizer`,
-  Google `organizer.self`, CalDAV `ORGANIZER` gleich einer der Adressen aus
-  `calendar-user-address-set`). Die Antwort des Anbieters zählt zuerst, auch
+  Google `organizer.self`, CalDAV `ORGANIZER` gleich einem der Einträge aus
+  `calendar-user-address-set`, auch einem Principal-Pfad oder einer `urn:`,
+  oder dessen `EMAIL` gleich einer der Adressen; iCloud schreibt den
+  Organisator als Principal-Pfad mit `EMAIL`, Messung M1). Die Antwort des Anbieters zählt zuerst, auch
   wenn er keine Adresse des Organisators nennt. Ohne Antwort ist ein Termin
   mit Organisator `organized_elsewhere`, einer ohne Organisator gehört dem
   Konto (ein einfacher Termin). Bei `organized_elsewhere` erscheint der
@@ -1224,8 +1226,10 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   dann, wenn ein neuer ChangeKey die Id inzwischen geändert hat) und setzt
   `keep_attendees`, wenn dieselben Leute eingeladen sind. EWS, Google und Graph
   lassen die Liste beim Anbieter dann unberührt, mit der Zeile des Organisators.
-  CalDAV kann das noch nicht: Es baut den VEVENT neu und schreibt `ATTENDEE`
-  nur beim Benachrichtigen (TODO).
+  CalDAV liest vor jedem Schreiben die Kopie des Servers und trägt
+  `ORGANIZER`, `ATTENDEE`, `SEQUENCE` und `STATUS` wörtlich weiter; nur eine
+  geänderte Gästeliste ändert Zeilen (siehe unten, „Ein iCloud-Termin behält
+  seine Leute“).
 - **Den letzten Gast entfernen (74a):** Eine leere Liste allein löscht beim
   Anbieter nichts, damit ein Termin, der ohne seine Gäste gelesen wurde,
   niemanden ausladen kann. Zeigt der Cache aber Gäste und sind nach der
@@ -1234,18 +1238,57 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   `attendees`, Graph ebenso, aber nur beim Benachrichtigen, weil Graph
   Teilnehmer nie still schreibt. „Teilnehmer benachrichtigen“ bleibt dabei
   stehen, damit die Entfernten eine Absage bekommen können
-  (`offersNotifyAttendees` in `@aperio/shared`, auf beiden Oberflächen). Ob
-  Exchange die Absage ohne verbleibende Gäste annimmt, ist noch nicht
-  gemessen (Live-Runde 5).
+  (`attendeeNotice` in `@aperio/shared`, auf beiden Oberflächen). Exchange
+  nimmt die Absage an den letzten entfernten Gast an und verschickt sie
+  (gemessen in Live-Runde 5, D10).
 - **Abgeleitete Termine (72a):** Wer aus einem bestehenden Termin einen neuen
   anlegt (Carve-out, Folge-Serie, Kopie, Mitnahme, Lösen bei Exchange), gibt
   dessen `organizer` und `organized_elsewhere` mit (`organizerOf` in
   `@aperio/shared`, nie verschickt). `guard_create` nimmt den Organisator dort
   ebenso heraus.
 - **Cache (67a):** `CACHE_GENERATION` 2 liest jedes externe Konto einmal neu
-  ein. Exchange liest seine Ordner dabei vollständig neu.
+  ein. Exchange liest seine Ordner dabei vollständig neu. Generation 3 liest
+  noch einmal neu, weil CalDAV das Konto jetzt an allen Adressen erkennt.
 - **Später (73a):** Name des Organisators in Suche, Verfügbarkeit und einer
   Zeile „Organisiert von …“ im Editor (TODO).
+
+**Ein iCloud-Termin behält seine Leute (Live-Runde 5, E1).** Auf einem
+RFC-6638-Server ist die Kopie des Organisators die Einladung selbst: Jede
+Änderung daran mailt der Server den Gästen, und ein PUT ohne `ORGANIZER` gilt
+als „Besprechung entfernt“ und sagt allen ab (§3.2.3.1). Aperio baute den
+VEVENT bei jedem Speichern neu und schrieb `ORGANIZER` und `ATTENDEE` nur beim
+Benachrichtigen. In Runde 5 hielt es Toni zudem für fremd (iCloud nennt ihn
+per Principal-Pfad), der Schalter fehlte, und das Umbenennen einer eigenen
+Besprechung sagte sie dem Gast ab. Jetzt:
+
+- **Erkennen:** Das Konto sind alle Einträge seiner
+  `calendar-user-address-set` (`identity::OwnIdentity`), je nach ihrer Form
+  genau verglichen, dazu das `EMAIL` einer Zeile. Das Lesen zeigt einen
+  Principal-Pfad über sein `EMAIL` und nimmt die eigene CHAIR-Zeile aus den
+  Gästen.
+- **Schreiben:** Jede Änderung liest zuerst die Kopie des Servers und scheitert,
+  wenn das nicht geht. `ORGANIZER`, `ATTENDEE`, `SEQUENCE` und `STATUS` gehen
+  wörtlich zurück, samt Faltung und Parameter-Reihenfolge
+  (`scheduling::plan_block`). Nur eine geänderte Gästeliste ändert Zeilen:
+  bleibende wörtlich, entfernte weg, neue erzeugt, alle weg bei bestätigtem
+  Leeren (74a), und das auch in den Ausnahmen der Serie. Bei einer fremden
+  Besprechung lehnt Aperio eine geänderte Gästeliste ab. Das Speichern einer
+  Serie legt jede Ausnahme Byte für Byte zurück; „nur diesen Termin löschen“
+  fügt eine einzige `EXDATE`-Zeile ein. Ändert ein Speichern nichts, was der
+  Server speichert (etwa nur den Klang einer Erinnerung), oder ist das
+  Vorkommen schon übersprungen, schickt Aperio nichts, denn jeder PUT einer
+  Besprechung mailt den Gästen. Ein 403 beim Schreiben, Löschen oder
+  Antworten ist die Absage des Servers, keine Anmeldefrage.
+- **Sagen, was passiert (76a, 80a, 82b):** Kalender auf einem solchen Server
+  und bei Microsoft 365 tragen `always_notifies_attendees` (und
+  `notifier_name`). Der Editor zeigt dann statt „Teilnehmer benachrichtigen“
+  den Satz „iCloud informiert die Teilnehmer über jede Änderung“, als
+  Tab-Halt und beim Erscheinen angesagt; die Löschdialoge sagen, wer die
+  Teilnehmer über die Absage informiert, statt „Ohne Benachrichtigung
+  entfernen“ anzubieten. Die Regeln stehen einmal in `@aperio/shared`
+  (`attendeeNotice`, `cancellationNotice`, `notifierSentence`), auch das
+  „Organisiert das Konto?“ der Löschdialoge: Es folgt jetzt
+  `organized_elsewhere` statt eines eigenen Adressvergleichs.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen
