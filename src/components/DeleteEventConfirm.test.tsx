@@ -139,6 +139,24 @@ describe('DeleteEventConfirm', () => {
     ).toBeNull();
   });
 
+  it('says nothing about telling anyone on a calendar that never tells (98)', () => {
+    // The marker is about a SERVER that would otherwise send. On a calendar
+    // that schedules nothing, nobody was ever going to be told, and saying so
+    // would be noise — the shared rule answers `'none'` there, and the dialog
+    // follows the rule rather than the raw flag.
+    const onDelete = open({
+      ...meeting('cal-plain'),
+      scheduling_silenced: true,
+    } as CalendarEvent);
+    expect(
+      screen.queryByText(
+        /Die Teilnehmer erfahren von der Absage nichts|attendees are not told about the cancellation/i,
+      ),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete|bestätigen|confirm)$/i }));
+    expect(onDelete).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
   it('says who informs the attendees where the provider always does, and cancels', () => {
     const onDelete = open(meeting('cal-icloud'));
     const sentence = /iCloud informiert die Teilnehmer über die Absage|iCloud informs the attendees of the cancellation/i;

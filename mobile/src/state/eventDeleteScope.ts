@@ -136,7 +136,7 @@ export function confirmDeleteEvent(
       : showEventScopeDialog({
           title: t('dialogs.confirm.deleteEventTitle'),
           message: `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
-            invitationLocked(opts.calendar, ev) || ev.scheduling_silenced === true
+            invitationLocked(opts.calendar, ev) || saysNobodyIsTold()
               ? ` ${deleteSentence()}`
               : ''
           }`,
@@ -187,10 +187,13 @@ export function confirmDeleteEvent(
       ],
     );
 
-  // The provider cancels for the attendees whatever it is asked (iCloud,
-  // Microsoft 365): no notify/silent choice it would not keep, the sentence
-  // that says so instead, and every scope notifies (decision 80a).
-  const alwaysOccurrenceDialog = (sentence: string) =>
+  // The PROVIDER decides, so no notify/silent choice it would not keep: the
+  // sentence says what it will do, and every scope carries the same `send`.
+  // `send` is true where it cancels for the attendees whatever it is asked
+  // (iCloud, Microsoft 365, decision 80a) and false where the event keeps it
+  // out of its scheduling altogether (98) — asking it to send would ask for
+  // what nobody does.
+  const providerDecidesOccurrenceDialog = (sentence: string, send: boolean) =>
     showEventScopeDialog({
       title: t('dialogs.deleteScope.title'),
       message: `${t('dialogs.deleteScope.message', { title: ev.title })} ${sentence}`,
@@ -200,19 +203,19 @@ export function confirmDeleteEvent(
           key: 'occurrence',
           label: t('dialogs.deleteScope.occurrence'),
           destructive: true,
-          run: () => removeOccurrence(true),
+          run: () => removeOccurrence(send),
         },
         {
           key: 'thisAndFuture',
           label: t('dialogs.deleteScope.thisAndFuture'),
           destructive: true,
-          run: () => removeThisAndFuture(true),
+          run: () => removeThisAndFuture(send),
         },
         {
           key: 'series',
           label: t('dialogs.deleteScope.series'),
           destructive: true,
-          run: () => deleteWith(true),
+          run: () => deleteWith(send),
         },
       ],
     });
@@ -237,12 +240,16 @@ export function confirmDeleteEvent(
    * server informs the attendees (76a/80a). One chooser, so the four delete
    * paths on this surface cannot drift apart.
    */
+  /** The shared rule's answer, not the raw flag: one reading of "nobody is
+   *  told", the same one the desktop's `useCancellationChoice` gates on. */
+  const saysNobodyIsTold = (): boolean =>
+    cancellationNotice(opts.calendar, ev) === 'silent';
+
   const deleteSentence = (): string => {
     if (invitationLocked(opts.calendar, ev)) return t(declineSentence(ev).key);
-    const spec =
-      ev.scheduling_silenced === true
-        ? silentSentence(opts.calendar, 'cancellation')
-        : notifierSentence(opts.calendar, 'cancellation');
+    const spec = saysNobodyIsTold()
+      ? silentSentence(opts.calendar, 'cancellation')
+      : notifierSentence(opts.calendar, 'cancellation');
     return t(spec.key, spec.values);
   };
 
@@ -251,11 +258,10 @@ export function confirmDeleteEvent(
     // organizer it is declined (83b), so the dialog says so and the button
     // names it.
     const declines = invitationLocked(opts.calendar, ev);
-    const silent = ev.scheduling_silenced === true;
     Alert.alert(
       t('dialogs.confirm.deleteEventTitle'),
       `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
-        declines || silent ? ` ${deleteSentence()}` : ''
+        declines || saysNobodyIsTold() ? ` ${deleteSentence()}` : ''
       }`,
       [
         { text: t('mobile.cancel'), style: 'cancel' },
@@ -272,15 +278,24 @@ export function confirmDeleteEvent(
   // attendees; the adapter's reading (`organized_elsewhere`) says whether we
   // do (decision 70a).
   const notice = cancellationNotice(opts.calendar, ev);
-  // `'silent'` is `'always'`'s twin: the same one-button shape, because the
-  // provider decides either way — only the sentence differs (decision 98).
-  if (notice === 'always' || notice === 'silent') {
+  if (notice === 'always') {
     const sentence = deleteSentence();
     if (occurrence != null) {
-      alwaysOccurrenceDialog(sentence);
+      providerDecidesOccurrenceDialog(sentence, true);
       return;
     }
     alwaysAlert(sentence);
+    return;
+  }
+  // Nobody is told (98). Nothing is CANCELLED for anyone, so it is a delete:
+  // the plain wording, the plain button, `send = false` — and the sentence, so
+  // the silence is said rather than left to be noticed.
+  if (notice === 'silent') {
+    if (occurrence != null) {
+      providerDecidesOccurrenceDialog(deleteSentence(), false);
+      return;
+    }
+    plainAlert();
     return;
   }
   if (occurrence != null) {

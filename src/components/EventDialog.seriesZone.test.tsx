@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { Calendar, CalendarEvent } from '../api/types';
 
@@ -532,6 +532,50 @@ describe('EventDialog → who may notify the attendees', () => {
       );
       const del = invokeMock.mock.calls.filter((call) => call[0] === 'delete_event').pop();
       expect((del?.[1] as { sendCancellations: boolean | null }).sendCancellations).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  /**
+   * Decision 98: nobody is told, so nothing is CANCELLED for anyone — but the
+   * delete still asks, and says so. Before this, a silenced meeting fell
+   * through every branch and was deleted on one click, with no dialog and
+   * without the sentence ever being read.
+   */
+  it('asks before deleting a silenced meeting, and sends nothing (98)', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open({ ...meeting(false), scheduling_silenced: true } as CalendarEvent);
+      fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));
+      // The dialog is there, and it says what will not happen.
+      const sentence = await screen.findByText(
+        /Die Teilnehmer erfahren von der Absage nichts|attendees are not told about the cancellation/i,
+      );
+      // The editor has a Delete button of its own; this is the dialog's.
+      const dialog = within(sentence.closest('[role="dialog"]') as HTMLElement);
+      // Not a cancellation: no "cancel & notify", no "remove without notifying".
+      expect(
+        dialog.queryByRole('button', {
+          name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i,
+        }),
+      ).toBeNull();
+      expect(
+        dialog.queryByRole('button', {
+          name: /ohne benachrichtigung entfernen|remove without notifying/i,
+        }),
+      ).toBeNull();
+      // Nothing was deleted by opening the dialog.
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(false);
+      fireEvent.click(
+        dialog.getByRole('button', { name: /^(löschen|delete|bestätigen|confirm)$/i }),
+      );
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'delete_event')).toBe(true),
+      );
+      const del = invokeMock.mock.calls.filter((call) => call[0] === 'delete_event').pop();
+      expect((del?.[1] as { sendCancellations: boolean | null }).sendCancellations).toBe(false);
     } finally {
       restore();
     }

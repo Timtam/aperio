@@ -43,16 +43,20 @@ export function useCancellationChoice(event: CalendarEvent | null): {
   // `cancellationNotice` says nothing about it — but removing the account's
   // copy is an answer to the organizer (decision 83b).
   const declines = invitationLocked(calendar, event);
-  // The event's own resource can forbid the server to send (`scheduling_silenced`,
-  // RFC 6638 SCHEDULE-AGENT). Then nobody hears of the deletion, and both
-  // sentences say that instead of promising a message (decision 98).
-  const silent = event?.scheduling_silenced === true;
+  // ONE reading of "nobody is told", used for the flag the dialogs gate on and
+  // for the sentence they show. Two spellings of it — the notice here and the
+  // raw `scheduling_silenced` elsewhere — is how the surfaces came to disagree
+  // about when the sentence appears (decision 98).
+  const silent = notice === 'silent';
   return {
     notice,
     offersChoice: notice === 'offer',
     alwaysNotifies: notice === 'always',
-    silent: notice === 'silent',
+    silent,
     declines,
+    // Someone else's meeting is answered to its ORGANIZER, and whether that
+    // answer leaves the server is the event's own business (`declineSentence`);
+    // the account's own meeting speaks about its attendees.
     sentence: declines
       ? declineSentence(event)
       : silent
