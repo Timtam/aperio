@@ -177,6 +177,9 @@ serde_json = "1"
 # Datum & Zeit
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+# The device's own zone by name, so a rule that repeats on the device's days
+# can be expanded on a NAMED clock (see host-core's `device_clock`).
+iana-time-zone = "0.1"
 ts-rs = { version = "12", features = ["chrono-impl"] }
 
 # Textordnung

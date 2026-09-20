@@ -17,7 +17,13 @@ export interface SeriesClockRules {
   seriesClockZone(tzid: string): string;
   /** tzdata's spelling of the zone a name resolves to; `''` for an unknown name. */
   canonicalZone(name: string): string;
+  /** Which clock the series' rule is read on: `device-days`, `zone` or `utc`.
+   *  The empty string stands for "no zone stored". */
+  expansionClock(allDay: boolean, tzid: string): string;
 }
+
+/** The clock a series' rule is read on — the core's answer (decision 48a). */
+export type SeriesExpansionClock = 'device-days' | 'zone' | 'utc';
 
 let installedRules: SeriesClockRules | null = null;
 
@@ -56,4 +62,25 @@ export function seriesClockZone(tzid: string | null | undefined): string | null 
 export function canonicalZone(name: string): string | null {
   const canonical = rules().canonicalZone(name);
   return canonical === '' ? null : canonical;
+}
+
+/**
+ * Which clock a series' rule is read on: an all-day series repeats on the
+ * CALENDAR DAYS of the device, whatever zone it carries (decision 48a), a
+ * series with a zone on that zone's wall clock, everything else on UTC.
+ *
+ * Which zone the device is in is not the core's business — it reads no clock —
+ * so the caller supplies it (`localTimeZone()` in `recurrence.ts`).
+ */
+export function expansionClock(
+  allDay: boolean,
+  tzid: string | null | undefined,
+): SeriesExpansionClock {
+  const answer = rules().expansionClock(allDay, tzid ?? '');
+  if (answer !== 'device-days' && answer !== 'zone' && answer !== 'utc') {
+    // A door that answers something else is a door out of step with the core,
+    // and guessing here would hide it.
+    throw new Error(`the core named an unknown expansion clock: ${answer}`);
+  }
+  return answer;
 }

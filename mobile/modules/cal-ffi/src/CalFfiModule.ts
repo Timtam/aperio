@@ -75,6 +75,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  does not know. Synchronous. See `cal_core::canonical_zone`. */
   canonicalZone(name: string): string;
 
+  /** Which clock a series' rule is read on: `device-days` for an all-day
+   *  series, `zone` for the zone it stores, `utc` otherwise. `''` for the tzid
+   *  means none. Synchronous. See `cal_core::expansion_clock`. */
+  expansionClock(allDay: boolean, tzid: string): string;
+
   /** The world zone list's names by position, as JSON. Synchronous. See
    *  `cal_core::zone_list`. */
   zoneLabels(): string;

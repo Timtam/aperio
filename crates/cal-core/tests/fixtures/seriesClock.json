@@ -1,5 +1,5 @@
 {
-  "what": "Which zone name a series repeats on: every stored name and the answer cal_core::series_clock_zone gives, and every tzdata name and the zone cal_core::canonical_zone resolves it to.",
+  "what": "Which zone name a series repeats on: every stored name and the answer cal_core::series_clock_zone gives, every tzdata name and the zone cal_core::canonical_zone resolves it to, and which clock a series is read on at all (cal_core::expansion_clock), an all-day series included.",
   "why": "The views, the reminders and the stamp on a new series each decided on their own which names are a zone. The views took every name but `UTC`; the reminders trimmed the name and knew it only in its exact case; a series Exchange stored as `Etc/UTC` took the zoned path in the views. One rule in the core answers all three, and a frontend that is not JavaScript.",
   "decidedBy": "DESIGN-series-time-zone.md, section \"UTC und Anbieter\", and the decisions of 2026-09-14: a name counts only if tzdata knows it (ASCII case ignored, nothing trimmed) and it is not one of the eighteen names tzdata gives UTC. Everything else repeats on UTC, in the views and in the reminders alike. The answers are chosen, not measured: the rule replaces three different ones.",
   "writtenBy": [
@@ -17,6 +17,7 @@
   "shape": {
     "seriesClockZone": "[{tzid, zone, note}]: tzid as stored (null for none); zone is the stored spelling unchanged when the series repeats on it, null when it repeats on UTC",
     "canonicalZone": "[{name, canonical, note}]: canonical is tzdata's spelling of the zone the name resolves to, null when tzdata does not know the name",
+    "expansionClock": "[{allDay, tzid, clock, note}]: which clock the rule is read on — `device-days` for an all-day series (the reader's own days), `zone` for the stored zone's wall clock, `utc` otherwise. cal_core::expansion_clock; the device's zone itself is the caller's, because the core reads no clock.",
     "doors": "the WebAssembly and phone doors write null as the empty string, in both directions; an empty name already means UTC, and no zone is named ''"
   },
   "seriesClockZone": [
@@ -114,5 +115,16 @@
     { "name": "Mars/Olympus", "canonical": null, "note": "An invented name." },
     { "name": "IST", "canonical": null, "note": "An abbreviation." },
     { "name": "Etc/Unıversal", "canonical": null, "note": "Only ASCII letters fold." }
+  ],
+  "expansionClock": [
+    { "allDay": false, "tzid": null, "clock": "utc", "note": "A series with no zone repeats on UTC." },
+    { "allDay": false, "tzid": "Europe/Berlin", "clock": "zone", "note": "A series with a zone repeats on its wall clock, so 09:00 stays 09:00." },
+    { "allDay": false, "tzid": "europe/berlin", "clock": "zone", "note": "The name counts with ASCII case folded, as everywhere else here." },
+    { "allDay": false, "tzid": "Etc/UTC", "clock": "utc", "note": "A UTC name is no zone." },
+    { "allDay": false, "tzid": "+05:30", "clock": "utc", "note": "An offset is no zone." },
+    { "allDay": true, "tzid": null, "clock": "device-days", "note": "An all-day series repeats on the days the device shows (48a)." },
+    { "allDay": true, "tzid": "Europe/Berlin", "clock": "device-days", "note": "A zone a provider added does not move it: an all-day series has none of its own (46a)." },
+    { "allDay": true, "tzid": "Etc/UTC", "clock": "device-days", "note": "Nor does a UTC name make it repeat on UTC, which is what put a named weekday a day late east of Greenwich." },
+    { "allDay": true, "tzid": "Pacific/Kiritimati", "clock": "device-days", "note": "Fourteen hours ahead changes nothing: the days are the reader's." }
   ]
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   expandEvent,
   expandAll,
@@ -576,14 +576,16 @@ describe('which stored zones a series repeats on (cal_core::series_clock)', () =
     // what separates the old rule from this one: no zone read at all.
     const zoneReads = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
     for (const tzid of ['GMT', '+05:30']) {
-      expect(seriesDayKey(at, tzid)).toBe(seriesDayKey(at, null));
-      expect(moveSeriesInstant(at, tzid, 1)).toBe(moveSeriesInstant(at, null, 1));
-      expect(movedSeriesUntil(rule, tzid, at, '2026-10-19T01:30:00.000Z')).toBe(
-        movedSeriesUntil(rule, null, at, '2026-10-19T01:30:00.000Z'),
+      expect(seriesDayKey(at, tzid, false)).toBe(seriesDayKey(at, null, false));
+      expect(moveSeriesInstant(at, tzid, false, 1)).toBe(
+        moveSeriesInstant(at, null, false, 1),
+      );
+      expect(movedSeriesUntil(rule, tzid, false, at, '2026-10-19T01:30:00.000Z')).toBe(
+        movedSeriesUntil(rule, null, false, at, '2026-10-19T01:30:00.000Z'),
       );
     }
     expect(zoneReads).not.toHaveBeenCalled();
-    expect(seriesDayKey(at, '+05:30')).toBe('2026-10-18');
+    expect(seriesDayKey(at, '+05:30', false)).toBe('2026-10-18');
   });
 
   it('moves exceptions on UTC for a series stored under a UTC name or an unknown one', () => {
@@ -917,5 +919,51 @@ describe('an override is an occurrence of its series', () => {
     expect(first).toBeDefined();
     expect(isSeriesOccurrence(first)).toBe(true);
     expect(isProviderOverride(first)).toBe(false);
+  });
+});
+
+/**
+ * Decision 48a: an all-day series repeats on the days of the DEVICE, so the
+ * day its rule is read against is a day on that clock — not the UTC day, which
+ * east of Greenwich is the day before.
+ *
+ * The device's zone is an input here, so the test answers it instead of
+ * leaving it to the machine: these expectations would otherwise hold in Berlin
+ * and fail on CI, which runs in UTC.
+ */
+describe('the day an all-day series is read on', () => {
+  const DEVICE = 'Europe/Berlin';
+  // The restore, not the spy: naming a spy's type here would name the type
+  // of what it wraps, and `resolvedOptions` answers a shape of its own.
+  let restoreZone: (() => void) | null = null;
+  beforeEach(() => {
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const machine = real.call(new Intl.DateTimeFormat()).timeZone;
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockImplementation(function (this: Intl.DateTimeFormat) {
+        const options = real.call(this);
+        // Only a formatter built without a zone asks "where am I".
+        return options.timeZone === machine ? { ...options, timeZone: DEVICE } : options;
+      });
+    restoreZone = () => spy.mockRestore();
+  });
+  afterEach(() => {
+    restoreZone?.();
+  });
+
+  it('names the local day, where UTC names the one before', () => {
+    // Monday 2026-10-19 in Berlin begins at 22:00 UTC on the Sunday.
+    const at = '2026-10-18T22:00:00.000Z';
+    expect(seriesDayKey(at, null, true)).toBe('2026-10-19');
+    // The same instant in a series WITH a time of day is read on UTC, as it
+    // always was: it names an instant, not a day.
+    expect(seriesDayKey(at, null, false)).toBe('2026-10-18');
+  });
+
+  it('keeps naming the local day after a clock change', () => {
+    // Monday 2026-10-26, after the change to winter time: local midnight is
+    // 23:00 UTC on the Sunday now.
+    expect(seriesDayKey('2026-10-25T23:00:00.000Z', null, true)).toBe('2026-10-26');
   });
 });

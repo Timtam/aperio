@@ -1107,13 +1107,14 @@ async fn instance_in_slot(
 /// The day an all-day slot names.
 ///
 /// Aperio anchors an all-day date at local midnight, but a slot does not always
-/// sit there. The views expand an all-day series in plain UTC from its first
-/// date, so across a clock change its slots lie an hour or two off local
-/// midnight. A date whose midnight a clock change skips resolves to that date's
-/// UTC midnight (`EventDateTime::resolve`), which west of UTC reads as the
-/// evening before. Both stay within hours of the local midnight they stand for,
-/// so the day is the one whose midnight lies nearest: twelve hours on, then the
-/// local date.
+/// sit there. Since 48a an all-day series repeats on the device's calendar
+/// days, so its slots ARE local midnight; a slot written by a build before
+/// that, or by another client, can still lie an hour or two off it across a
+/// clock change. A date whose midnight a clock change skips resolves to that
+/// date's UTC midnight (`EventDateTime::resolve`), which west of UTC reads as
+/// the evening before. All of them stay within hours of the local midnight they
+/// stand for, so the day is the one whose midnight lies nearest: twelve hours
+/// on, then the local date.
 fn all_day_slot(slot: DateTime<Utc>) -> chrono::NaiveDate {
     (slot + Duration::hours(12))
         .with_timezone(&chrono::Local)

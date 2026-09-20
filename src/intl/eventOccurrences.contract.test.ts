@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { expandAll } from './recurrence';
 
@@ -8,6 +8,7 @@ interface Ev {
   id: string;
   start: string;
   end: string;
+  all_day?: boolean;
   recurrence: { rrule: string; exceptions: string[]; tzid?: string | null } | null;
   cancelled?: boolean;
 }
@@ -67,6 +68,36 @@ const instants = (rows: Occurrence[]) =>
     .sort((a, b) => a.at - b.at || a.event - b.event);
 
 describe('eventOccurrences contract (views)', () => {
+  // An ALL-DAY series repeats on the device's calendar days (48a), so the
+  // device's zone is an input to these rows — and the table names the one they
+  // were measured on. It is answered here, rather than left to the machine, so
+  // the rows mean the same on CI (which runs in UTC and would never cross a
+  // clock change) as on a developer's laptop. Only the question "where is this
+  // device" is answered; every zone the rows name is still read from the data.
+  const machineZone = (table as { measuredWith?: { machineZone?: string } }).measuredWith
+    ?.machineZone;
+  // The restore, not the spy: naming a spy's type here would name the type
+  // of what it wraps, and `resolvedOptions` answers a shape of its own.
+  let restoreZone: (() => void) | null = null;
+  beforeAll(() => {
+    expect(machineZone, 'the table names the zone it was measured on').toBeTruthy();
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockImplementation(function (this: Intl.DateTimeFormat) {
+        const options = real.call(this);
+        // Only a formatter built WITHOUT a zone asks "where am I"; one built
+        // for a named zone keeps its own answer.
+        return options.timeZone === real.call(new Intl.DateTimeFormat()).timeZone
+          ? { ...options, timeZone: machineZone as string }
+          : options;
+      });
+    restoreZone = () => spy.mockRestore();
+  });
+  afterAll(() => {
+    restoreZone?.();
+  });
+
   // Anti-silence: named rows, not a count.
   it('still carries the rows the rules turn on', () => {
     const names = new Set(table.cases.map((r) => r.name));
@@ -76,6 +107,10 @@ describe('eventOccurrences contract (views)', () => {
       'a-date-only-until-without-a-zone',
       'a-date-only-until-on-a-zoned-series',
       'an-all-day-series-west-of-utc-until-its-local-day',
+      'an-all-day-series-without-zone-into-winter',
+      'an-all-day-series-into-summer-keeps-its-monday',
+      'an-all-day-exception-cancels-the-day-it-names',
+      'an-all-day-series-a-provider-gave-a-zone',
       'a-zoned-weekly-series-keeps-its-wall-clock-into-winter',
       'a-wall-clock-in-the-spring-gap',
       'a-wall-clock-in-the-autumn-overlap',

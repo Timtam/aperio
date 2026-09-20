@@ -21,7 +21,9 @@ use cal_core::{
     NewEvent, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task,
     TaskRecurrence,
 };
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{
+    DateTime, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
+};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -1028,6 +1030,11 @@ fn occurrence_triggers(
             &rec.rrule,
             &rec.exceptions,
             rec.tzid.as_deref(),
+            // An all-day item repeats on the DEVICE's calendar days, and the
+            // views read it the same way (48a): a reminder that fired on
+            // another day than the one on screen would be a second reading.
+            all_day_anchor.is_some(),
+            device_clock(),
             window_start,
             window_end,
         ),
@@ -1090,11 +1097,33 @@ fn occurrence_triggers(
 ///     the DST offset the moment the series crosses a transition — an hour,
 ///     and near midnight a whole day. `cal_core::EventRecurrence::tzid`
 ///     documents exactly that, and this function used to ignore it.
+/// The clock this device is on, NAMED: its IANA zone, read through the core's
+/// own name rule (`canonical_zone`) so the device's zone is judged exactly as a
+/// stored one is. A device whose zone cannot be named falls back to chrono's
+/// `Local`, which is the same clock read another way — the rule engine judges a
+/// rule's parts slightly differently on the two, so the named one is preferred
+/// and is what the tests pin.
+fn device_clock() -> RruleTz {
+    iana_time_zone::get_timezone()
+        .ok()
+        .and_then(|name| cal_core::canonical_zone(&name).map(str::to_string))
+        .and_then(|canonical| canonical.parse::<chrono_tz::Tz>().ok())
+        .map(RruleTz::Tz)
+        .unwrap_or(RruleTz::Local(Local))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn expand_occurrences(
     dt_start_utc: DateTime<Utc>,
     rrule_body: &str,
     exceptions: &[DateTime<Utc>],
     tzid: Option<&str>,
+    all_day: bool,
+    // The clock THIS device is on, which a series of days repeats on (48a).
+    // A parameter, not `Local` read in here, so an answer that depends on it
+    // can be tested on any machine — `all_day_fire_instant` takes its zone the
+    // same way, for the same reason.
+    device: RruleTz,
     start_bound: DateTime<Utc>,
     end_bound: DateTime<Utc>,
 ) -> Vec<DateTime<Utc>> {
@@ -1113,6 +1142,26 @@ fn expand_occurrences(
         }
     };
 
+    // WHICH clock the rule repeats on is the core's rule (`expansion_clock`),
+    // the same answer the views get. An ALL-DAY series repeats on the device's
+    // calendar days (48a): it carries no zone of its own, and read on UTC a
+    // named weekday lands a day late east of Greenwich — on the day the views
+    // no longer show it.
+    if matches!(
+        cal_core::expansion_clock(all_day, tzid),
+        cal_core::ExpansionClock::DeviceDays
+    ) {
+        return expand_on(
+            dt_start_utc,
+            unvalidated,
+            exceptions,
+            device,
+            true,
+            start_bound,
+            end_bound,
+            body,
+        );
+    }
     // The zone the rule repeats in, by the core's rule — the answer the views
     // get (`cal_core::series_clock`): a name tzdata knows, in any ASCII case and
     // untrimmed, that is not a UTC name. Anything else repeats in UTC rather
@@ -1136,10 +1185,41 @@ fn expand_occurrences(
             RruleTz::UTC
         }
     };
+    expand_on(
+        dt_start_utc,
+        unvalidated,
+        exceptions,
+        zone,
+        false,
+        start_bound,
+        end_bound,
+        body,
+    )
+}
+
+/// The occurrences of `unvalidated` on `zone`'s clock, inside the bounds.
+///
+/// `by_day` says how an exception is matched. A timed series' exception names
+/// an INSTANT, and rrule compares it as one. A series of days names a DAY: the
+/// instant it was stored as is one spelling of that day, and a build before
+/// 48a — or a provider that anchors a date elsewhere — wrote another, so
+/// comparing instants would let a cancelled day come back (decision 95). Its
+/// exceptions are therefore kept out of the rule and filtered afterwards, by
+/// the local day each one falls on.
+#[allow(clippy::too_many_arguments)]
+fn expand_on(
+    dt_start_utc: DateTime<Utc>,
+    unvalidated: RRule<rrule::Unvalidated>,
+    exceptions: &[DateTime<Utc>],
+    zone: RruleTz,
+    by_day: bool,
+    start_bound: DateTime<Utc>,
+    end_bound: DateTime<Utc>,
+    body: &str,
+) -> Vec<DateTime<Utc>> {
     // DTSTART carries the zone: rrule repeats at ITS wall clock, so a weekly
     // 09:00 series stays 09:00 across the DST boundary instead of sliding to
-    // 08:00 or 10:00. The bounds and EXDATEs stay instants — they are compared,
-    // not repeated, and an instant means the same moment in any zone.
+    // 08:00 or 10:00.
     let dt_start = dt_start_utc.with_timezone(&zone);
     let validated = match unvalidated.validate(dt_start) {
         Ok(v) => v,
@@ -1154,8 +1234,10 @@ fn expand_occurrences(
     };
 
     let mut set = RRuleSet::new(dt_start).rrule(validated);
-    for ex in exceptions {
-        set = set.exdate(ex.with_timezone(&RruleTz::UTC));
+    if !by_day {
+        for ex in exceptions {
+            set = set.exdate(ex.with_timezone(&RruleTz::UTC));
+        }
     }
     set = set
         .after(start_bound.with_timezone(&RruleTz::UTC))
@@ -1169,10 +1251,19 @@ fn expand_occurrences(
             "RRULE expansion hit the scheduler safety limit",
         );
     }
+    let cancelled_days: Vec<NaiveDate> = if by_day {
+        exceptions
+            .iter()
+            .map(|ex| ex.with_timezone(&zone).date_naive())
+            .collect()
+    } else {
+        Vec::new()
+    };
     result
         .dates
         .into_iter()
         .map(|dt| dt.with_timezone(&Utc))
+        .filter(|occ| !by_day || !cancelled_days.contains(&occ.with_timezone(&zone).date_naive()))
         .collect()
 }
 
@@ -2457,6 +2548,8 @@ mod tests {
             "FREQ=WEEKLY;COUNT=30",
             &[],
             Some("Europe/Berlin"),
+            false,
+            RruleTz::Local(Local),
             winter,
             Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
         );
@@ -2480,6 +2573,8 @@ mod tests {
             "FREQ=WEEKLY;COUNT=30",
             &[],
             None,
+            false,
+            RruleTz::Local(Local),
             start,
             Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
         );
@@ -2500,11 +2595,89 @@ mod tests {
             "FREQ=WEEKLY;COUNT=4",
             &[],
             Some("Mars/Olympus_Mons"),
+            false,
+            RruleTz::Local(Local),
             start,
             Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap(),
         );
         assert_eq!(occurrences.len(), 4);
         assert!(occurrences.iter().all(|o| o.hour() == 8));
+    }
+
+    /// Decision 48a: an ALL-DAY series repeats on the days of the device, not
+    /// on UTC. Read on UTC, its occurrences keep the stored instant's clock
+    /// time, so after a clock change each one sits an hour into the day before
+    /// — the reminder then rings on a day the calendar does not show it.
+    #[test]
+    fn an_all_day_series_stays_on_its_weekday_across_a_clock_change() {
+        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        // Monday 2026-10-19 in Berlin begins at 22:00 UTC the day before
+        // (summer time); the change to winter time is on the 25th.
+        let start = Utc.with_ymd_and_hms(2026, 10, 18, 22, 0, 0).unwrap();
+        let occurrences = expand_occurrences(
+            start,
+            "FREQ=WEEKLY;COUNT=3",
+            &[],
+            None,
+            true,
+            berlin,
+            start,
+            Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
+        );
+        let days: Vec<NaiveDate> = occurrences
+            .iter()
+            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .collect();
+        assert_eq!(
+            days,
+            vec![
+                NaiveDate::from_ymd_opt(2026, 10, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 10, 26).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+            ],
+            "every occurrence is a Monday on the device's calendar",
+        );
+        // And each one begins at that day's own midnight, not an hour into it.
+        assert!(
+            occurrences
+                .iter()
+                .all(|o| o.with_timezone(&chrono_tz::Europe::Berlin).time()
+                    == NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+            "{occurrences:?}",
+        );
+    }
+
+    /// An all-day exception names a DAY (decision 95). The instant it was
+    /// stored as is one spelling of that day: a provider that anchors a date at
+    /// midnight UTC writes another than the local midnight the occurrence has,
+    /// and compared as instants the cancelled day would come back.
+    #[test]
+    fn an_all_day_exception_cancels_the_day_whatever_instant_it_names() {
+        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let start = Utc.with_ymd_and_hms(2026, 6, 7, 22, 0, 0).unwrap();
+        let occurrences = expand_occurrences(
+            start,
+            "FREQ=WEEKLY;COUNT=3",
+            // Midnight UTC of the second Monday, not its local midnight.
+            &[Utc.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap()],
+            None,
+            true,
+            berlin,
+            start,
+            Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
+        );
+        let days: Vec<NaiveDate> = occurrences
+            .iter()
+            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .collect();
+        assert_eq!(
+            days,
+            vec![
+                NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 6, 22).unwrap(),
+            ],
+            "the cancelled day stays cancelled",
+        );
     }
 
     fn user(id: &str) -> TaskUser {
@@ -3395,6 +3568,8 @@ mod tests {
         /// The rows where the reminders answer differently, by name: a count would
         /// break on exactly the change it has to survive.
         const DIFFERING: &[&str] = &[
+            "an-all-day-series-west-of-utc-until-its-local-day",
+            "a-date-only-until-on-an-all-day-series-east-of-utc",
             "a-start-with-milliseconds",
             "a-trailing-semicolon",
             "a-date-only-until-without-a-zone",
@@ -3404,8 +3579,6 @@ mod tests {
             "an-until-without-z-on-a-zoned-series",
             "an-until-without-z-before-the-wall-clock-time",
             "an-until-before-the-start",
-            "an-all-day-series-west-of-utc-until-its-local-day",
-            "a-date-only-until-on-an-all-day-series-east-of-utc",
             "an-exception-a-millisecond-off-keeps-the-occurrence",
             "a-daily-series-across-a-change-at-midnight",
             "a-moved-occurrence-stands-in-for-its-slot",
@@ -3456,6 +3629,21 @@ mod tests {
             serde_json::from_str(TABLE).expect("the table parses")
         }
 
+        /// The clock the table was measured on, as its own `measuredWith` names
+        /// it. A name the crate cannot resolve fails the test rather than
+        /// falling back to this machine's zone, which would make an all-day row
+        /// mean something different on every runner.
+        fn machine_zone() -> RruleTz {
+            let name = table()["measuredWith"]["machineZone"]
+                .as_str()
+                .expect("the table names the machine's zone")
+                .to_string();
+            RruleTz::Tz(
+                name.parse::<chrono_tz::Tz>()
+                    .unwrap_or_else(|_| panic!("chrono-tz knows {name}")),
+            )
+        }
+
         fn instant(v: &Value) -> DateTime<Utc> {
             v.as_str()
                 .expect("an instant")
@@ -3493,6 +3681,12 @@ mod tests {
                             rec["rrule"].as_str().expect("a rule"),
                             &exceptions,
                             rec.get("tzid").and_then(Value::as_str),
+                            ev["all_day"].as_bool() == Some(true),
+                            // The device the table was measured on. An all-day
+                            // row only means what it says on one clock, and the
+                            // table names it — read from the machine instead,
+                            // these rows would pass in Berlin and fail on CI.
+                            machine_zone(),
                             lo,
                             hi,
                         )

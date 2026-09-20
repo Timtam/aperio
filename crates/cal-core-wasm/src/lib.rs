@@ -227,6 +227,15 @@ pub fn canonical_zone(name: &str) -> String {
     rules::canonical_zone(name)
 }
 
+/// Which clock a series is read on: `device-days` for an all-day series,
+/// `zone` for the wall clock of the zone it stores, `utc` otherwise. `""` for
+/// the tzid means the series stores none. The zone of the device itself stays
+/// with the caller — the core reads no clock.
+#[wasm_bindgen(js_name = expansionClock)]
+pub fn expansion_clock(all_day: bool, tzid: &str) -> String {
+    rules::expansion_clock(all_day, tzid)
+}
+
 /// The world zone list's names: every listed zone's id, city, area and region,
 /// by position. See `cal_core::zone_list`. The offsets are not here: they need
 /// chrono-tz, which this module leaves out, and the desktop asks its host.

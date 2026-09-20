@@ -191,6 +191,7 @@ installRecurrenceSummaryRules({
 // is installed before anything can render or run in the background.
 installSeriesClockRules({
   seriesClockZone: (tzid) => CalFfi.seriesClockZone(tzid),
+  expansionClock: (allDay, tzid) => CalFfi.expansionClock(allDay, tzid),
   canonicalZone: (name) => CalFfi.canonicalZone(name),
 });
 

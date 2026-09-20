@@ -569,7 +569,10 @@ async function moveSeries(
     throw new SeriesNotLoadedError(seriesId);
   }
   const { tzid } = recurrence;
-  const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid)) / DAY_MS;
+  // An all-day series counts its days on the device's calendar (48a); a timed
+  // one on the clock it stores.
+  const allDay = master.all_day === true;
+  const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid, allDay)) / DAY_MS;
   const days = Math.round(dayOf(dropped) - dayOf(event.start));
 
   let start: string;
@@ -588,10 +591,11 @@ async function moveSeries(
     start = moveSeriesInstant(
       master.start,
       tzid,
+      allDay,
       days,
       minute === null ? undefined : dropped,
     );
-    timeChanges = start !== moveSeriesInstant(master.start, tzid, days);
+    timeChanges = start !== moveSeriesInstant(master.start, tzid, allDay, days);
     end = new Date(
       Date.parse(start) + Date.parse(master.end) - Date.parse(master.start),
     ).toISOString();
@@ -600,10 +604,10 @@ async function moveSeries(
 
   const answer = shiftSeriesRule(
     recurrence.rrule,
-    seriesDayKey(master.start, tzid),
+    seriesDayKey(master.start, tzid, allDay),
     days,
     timeChanges,
-    movedSeriesUntil(recurrence.rrule, tzid, master.start, start),
+    movedSeriesUntil(recurrence.rrule, tzid, allDay, master.start, start),
   );
   if (answer.outcome === 'refused') {
     throw new SeriesShiftRefusedError(answer.reason);
@@ -622,8 +626,9 @@ async function moveSeries(
         moveSeriesInstant(
           iso,
           tzid,
+          allDay,
           days,
-          timeChanges || master.all_day ? start : undefined,
+          timeChanges || allDay ? start : undefined,
         ),
       ),
     },

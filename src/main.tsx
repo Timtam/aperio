@@ -72,6 +72,7 @@ import {
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
+  expansionClockThroughCore,
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
@@ -208,6 +209,7 @@ initCoreRules()
     installSeriesClockRules({
       seriesClockZone: seriesClockZoneThroughCore,
       canonicalZone: canonicalZoneThroughCore,
+      expansionClock: expansionClockThroughCore,
     });
 
     // The world zone list: its names and search from the core in WebAssembly,

@@ -57,6 +57,7 @@ import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
 import uniffi.cal_ffi.normalizeJoinUrl as uniffiNormalizeJoinUrl
 import uniffi.cal_ffi.seriesClockZone as uniffiSeriesClockZone
 import uniffi.cal_ffi.canonicalZone as uniffiCanonicalZone
+import uniffi.cal_ffi.expansionClock as uniffiExpansionClock
 import uniffi.cal_ffi.zoneLabels as uniffiZoneLabels
 import uniffi.cal_ffi.zoneSearch as uniffiZoneSearch
 import uniffi.cal_ffi.zoneChoice as uniffiZoneChoice
@@ -369,6 +370,12 @@ class CalFfiModule : Module() {
 
     Function("canonicalZone") { name: String ->
       uniffiCanonicalZone(name)
+    }
+
+    // Which clock a series' rule is read on: an all-day series repeats on the
+    // device's calendar days (48a). Synchronous, for the same reason.
+    Function("expansionClock") { allDay: Boolean, tzid: String ->
+      uniffiExpansionClock(allDay, tzid)
     }
 
     // The world zone list: its names, the search, where a stored or device

@@ -134,7 +134,8 @@ pub use recurrence_summary::{
 };
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use series_clock::{
-    canonical_zone, listed_zones, series_clock_zone, written_series_zone, NameKind, TZDATA_VERSION,
+    canonical_zone, expansion_clock, listed_zones, series_clock_zone, written_series_zone,
+    ExpansionClock, NameKind, TZDATA_VERSION,
 };
 pub use series_shift::{
     series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,

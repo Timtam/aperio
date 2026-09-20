@@ -126,13 +126,16 @@ keinen, dort ist die Wahl Tonis Sache.
   gehen Beginn und Ende auf Mitternacht in dieser Zone. Die Zone selbst bleibt
   unberührt. Das passt zu 18a und dazu, dass Unberührtes wörtlich bleibt. Die
   dritte Runde bestätigt es vor dem Bau.
-- **48a — ganztägige Serien wiederholen sich an Kalendertagen.** Aperio
-  wiederholt ganztägige Serien heute in UTC. Östlich von UTC landet ein
+- **48a — ganztägige Serien wiederholen sich an Kalendertagen.** *(gebaut)*
+  Aperio wiederholte ganztägige Serien in UTC. Östlich von UTC landete ein
   genannter Wochentag deshalb einen Tag zu spät, bei jedem Anbieter außer
-  Microsoft 365 und dem Gerätekalender. Eine Kern-Regel behebt das: Eine
-  ganztägige Serie wiederholt sich an den Kalendertagen des Geräts, egal welche
-  Zone sie trägt. Ansichten, Erinnerungen, Widget und Badge fragen dieselbe
-  Regel. Das wird ein eigener PR.
+  Microsoft 365 und dem Gerätekalender. Jetzt sagt der Kern, welche Uhr eine
+  Serie liest (`cal_core::expansion_clock`): eine ganztägige die Kalendertage
+  des Geräts, egal welche Zone sie trägt; eine zonierte ihre Zone; alles andere
+  UTC. WELCHE Zone das Gerät hat, gibt der Aufrufer dazu — der Kern liest keine
+  Uhr (`event_anchor`). Ansichten, Erinnerungen, Widget und Badge fragen
+  dieselbe Regel, und die Ausnahmen einer ganztägigen Serie vergleichen den Tag
+  statt den Zeitpunkt, damit ein gestrichener Tag gestrichen bleibt (95).
 - **49a — eine gezielte dritte Runde.** Siehe Stufe 4, „Gemessen“.
 - **51a bis 53a — wie die dritte Runde läuft.** Toni legt die ganztägigen
   Serien und Termine selbst in Outlook im Web an (51a) und macht die Ausnahme

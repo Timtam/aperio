@@ -46,6 +46,7 @@ regex.workspace = true
 sha2.workspace = true
 # RRULE expansion for the reminder trigger enumeration (host_core::reminders).
 chrono-tz.workspace = true
+iana-time-zone.workspace = true
 rrule.workspace = true
 # The event_log cluster: onboarding reads the pending dir via tokio::fs; the
 # desktop sync-round hooks are #[async_trait]. tokio cross-compiles to mobile

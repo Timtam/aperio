@@ -2083,7 +2083,29 @@ Siehe DESIGN §4.2.
   fragen sie. Exchange fragt für eine ganztägige Serie auch keine Serverzonen
   mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
   vorher ohne Zone.
-  🚩 **Ganztägige Serien an Kalendertagen wiederholen** (48a), eigener PR.
+  ✅ **Ganztägige Serien wiederholen sich an Kalendertagen** (48a, erledigt
+  2026-09-20). Welche Uhr eine Serie liest, sagt jetzt der Kern
+  (`cal_core::expansion_clock`, Tabelle `seriesClock.json`): eine ganztägige
+  Serie liest die Kalendertage des GERÄTS, egal welche Zone sie trägt, eine
+  zonierte ihre Zone, alles andere UTC. WELCHE Zone das Gerät hat, reicht der
+  Aufrufer herein — der Kern liest keine Uhr. Ansichten und Erinnerungen
+  fragen dieselbe Regel (`expandEvent`, `expand_occurrences`), und ihre
+  gemeinsame Tabelle `eventOccurrences.json` nennt die Uhr, auf der sie
+  gemessen wurde, damit eine ganztägige Zeile auf jedem Rechner dasselbe
+  bedeutet. Ausnahmen einer ganztägigen Serie vergleichen den TAG, nicht den
+  Zeitpunkt (95), damit ein gestrichener Tag gestrichen bleibt, auch wenn ein
+  Anbieter ihn anders schreibt.
+  Offen geblieben:
+  - Eine Ausnahme, die ein Aperio-Bau VOR 48a in einer Serie über eine
+    Zeitumstellung geschrieben hat, nennt einen Zeitpunkt, der lokal auf den
+    Vortag fällt. Weder Zeitpunkt- noch Tagesvergleich trifft ihn: der
+    gestrichene Tag kommt einmal zurück, und ein erneutes Löschen schreibt ihn
+    richtig. Eine Wanderung wurde bewusst nicht gebaut (95).
+  - `plan_repairs` vergleicht ganztägige Zeilen weiter über den UTC-Tag
+    (`starts_the_same`, der Kern darf die Gerätezone nicht lesen). In einer
+    Zone, deren lokale Mitternacht über die Umstellung den UTC-Tag wechselt
+    (etwa London), kann ein Anker deshalb den Nachbartag nennen. Betrifft nur
+    das Reparieren verwaister Farb-, Erinnerungs- und Gruppenzeilen.
   **Live-Test Runde 3** (49a), gelaufen am 18.09.2026:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
