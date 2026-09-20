@@ -8,6 +8,7 @@ import { differenceInCalendarDays } from 'date-fns';
 import {
   moveSeriesInstant,
   movedSeriesUntil,
+  organizerOf,
   seriesDayKey,
   shiftSeriesRule,
   type ShiftRefusal,
@@ -330,6 +331,7 @@ export async function moveOrCopyEvent(
     reminders: source.reminders,
     sound: source.sound,
     attendees: source.attendees,
+    ...organizerOf(source),
   });
 
   if (mode === 'move' && asOccurrence) {
@@ -459,6 +461,7 @@ export async function moveEventToSlot(
       reminders: event.reminders,
       sound: event.sound,
       attendees: event.attendees,
+      ...organizerOf(event),
     });
     const occIso = occurrenceIsoOf(event);
     if (occIso) {

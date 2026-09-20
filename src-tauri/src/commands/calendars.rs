@@ -523,6 +523,9 @@ pub async fn create_event(
         .unwrap_or_else(|| LOCAL_ID.to_string());
     let is_local = account == LOCAL_ID;
     let mut new_event = request.event;
+    // The organizer is never an invitee, and only an event the account
+    // organizes may notify (decisions 67a, 72a).
+    host_core::event_write::guard_create(&mut new_event);
     // A calendar whose default reminders are set to "attach" writes them into
     // a brand-new appointment the editor left without any — the caller says
     // whether the reminders were a choice or merely unset.
@@ -584,6 +587,18 @@ pub async fn update_event(
     let target_account = registry
         .account_for_calendar(&event.calendar_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
+    // Before anything reaches a store: the organizer is never an invitee, only
+    // an event the account organizes may notify, and a list the edit did not
+    // change stays as the provider has it (decisions 67a, 70a, 71a). Compared
+    // with the event as read, in the calendar it was read from.
+    let mut event = event;
+    let read_calendar = previous_calendar_id
+        .clone()
+        .unwrap_or_else(|| event.calendar_id.clone());
+    let read_account = registry
+        .account_for_calendar(&read_calendar)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    host_core::event_write::guard_update(&cache, &read_account, &read_calendar, &mut event);
 
     // Cross-calendar move detection. When the frontend captured the
     // event's *original* calendar_id on dialog open and passes it
@@ -658,6 +673,10 @@ pub async fn update_event(
         // sees a duplicate they can resolve manually rather than
         // an empty calendar where their event used to live.
         let mut new_payload = NewEvent {
+            // The moved event's organizer, so the create guard keeps it out of
+            // the invitees at the target too (decision 72a).
+            organized_elsewhere: event.organized_elsewhere,
+            organizer: event.organizer.clone(),
             // A cross-calendar move re-creates the event at the target; the
             // organizer-notify intent isn't carried through this path (a
             // dedicated "notify on move" decision is future work, DESIGN §7.5).
@@ -677,6 +696,7 @@ pub async fn update_event(
             sound: event.sound.clone(),
             attendees: event.attendees.clone(),
         };
+        host_core::event_write::guard_create(&mut new_payload);
         // Preserve the color when moving INTO a color-capable provider:
         // resolve the label to a hex so the target stores it natively (the
         // incoming event carries `color_label`, not `color_hex`).
@@ -1175,6 +1195,8 @@ mod tests {
             .create_event(
                 &cal.id,
                 NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
                     title: "Standup".into(),
                     description: None,
                     location: None,

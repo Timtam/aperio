@@ -1,3 +1,5 @@
+import { organizerOf } from '@aperio/shared';
+
 import {
   createEvent as apiCreateEvent,
   createTask as apiCreateTask,
@@ -22,6 +24,7 @@ export async function duplicateEvent(event: CalendarEvent): Promise<void> {
     reminders: event.reminders,
     sound: event.sound,
     attendees: event.attendees,
+    ...organizerOf(event),
   });
 }
 

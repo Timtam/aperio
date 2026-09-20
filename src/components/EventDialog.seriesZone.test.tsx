@@ -33,6 +33,10 @@ const { invokeMock, onFile } = vi.hoisted(() => {
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
     }
+    // A string command: the RSVP block asks whose calendar this is.
+    if (command === 'calendar_current_user_email' || command === 'get_user_pref') {
+      return Promise.resolve(null);
+    }
     return Promise.resolve([]);
   });
   return { invokeMock, onFile };
@@ -384,5 +388,82 @@ describe('EventDialog → the scope chosen up front', () => {
     await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
     expect(screen.getByRole('dialog', { name: /^(termin bearbeiten|edit event)$/i })).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: /^(anwenden auf|apply to)$/i })).toBeNull();
+  });
+});
+
+describe('EventDialog → who may notify the attendees', () => {
+  // Only the organizer notifies anyone (decision 70a).
+  const meeting = (organizedElsewhere: boolean) =>
+    ({
+      ...SERIES,
+      recurrence: null,
+      attendees: ['bob@example.com'],
+      organizer: 'boss@example.com',
+      organized_elsewhere: organizedElsewhere,
+    }) as unknown as CalendarEvent;
+  const notifyToggle = () =>
+    screen.queryByRole('checkbox', { name: /teilnehmer benachrichtigen|notify attendees/i });
+
+  async function open(event: CalendarEvent) {
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={event} />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
+  }
+
+  it('offers the notify toggle for a meeting the account organizes', async () => {
+    deviceInBerlin();
+    const cal = CALENDARS[0] as { supports_scheduling?: boolean };
+    cal.supports_scheduling = true;
+    try {
+      await open(meeting(false));
+      expect(notifyToggle()).not.toBeNull();
+    } finally {
+      delete cal.supports_scheduling;
+    }
+  });
+
+  it('offers no notify toggle for a meeting someone else organizes', async () => {
+    deviceInBerlin();
+    const cal = CALENDARS[0] as { supports_scheduling?: boolean };
+    cal.supports_scheduling = true;
+    try {
+      await open(meeting(true));
+      expect(notifyToggle()).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+      );
+      const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+      expect((update?.[1] as { event: CalendarEvent }).event.send_invitations).toBe(false);
+    } finally {
+      delete cal.supports_scheduling;
+    }
+  });
+
+  it('keeps the notify toggle when the last attendee is removed', async () => {
+    // The one removed may still get a cancellation (decision 74a).
+    deviceInBerlin();
+    const cal = CALENDARS[0] as { supports_scheduling?: boolean };
+    cal.supports_scheduling = true;
+    try {
+      await open(meeting(false));
+      fireEvent.click(screen.getByRole('button', { name: /bob@example\.com.*(entfernen|remove)/i }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: /bob@example\.com/i })).toBeNull());
+      expect(notifyToggle()).not.toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+      );
+      const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+      const sent = (update?.[1] as { event: CalendarEvent }).event;
+      expect(sent.attendees).toEqual([]);
+      expect(sent.send_invitations).toBe(true);
+    } finally {
+      delete cal.supports_scheduling;
+    }
   });
 });

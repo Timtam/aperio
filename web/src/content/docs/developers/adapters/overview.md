@@ -94,6 +94,36 @@ when caching:
 > data. Note: on iCloud and Graph, *storing* attendees and *emailing* them
 > are inseparable — they're written only when notifying.
 
+> **The organizer is never an attendee.** Providers list the organizer among
+> the attendees, and an appointment made in Outlook lists nobody else. The
+> rule lives in `cal_core::attendee`:
+> - **On read**, each adapter hands its rows to `people_from_read`, which
+>   drops the organizer's row from `attendees` and `attendee_responses`. The
+>   row is found by the provider's own flag (EWS `ResponseType` "Organizer",
+>   Graph response "organizer", Google `attendees[].organizer`), or, where
+>   there is none (CalDAV), by the normalised address equal to the organizer.
+>   An unknown organizer drops nothing.
+> - **Only the organizer notifies.** The adapter says whether the connected
+>   account organizes the event (EWS `MyResponseType`, Graph `isOrganizer`,
+>   Google `organizer.self`, CalDAV `ORGANIZER` equal to any of the account's
+>   calendar-user addresses). The provider's answer counts first, even without
+>   an organizer address. Without an answer, an event with an organizer is
+>   `organized_elsewhere` and one without is the account's own
+>   (`cal_core::attendee::organized_elsewhere`). For an event organized
+>   elsewhere the editors offer no "notify attendees", and a meeting provider
+>   attached to it invites nobody (`host_core::meetings::meeting_guests`).
+> - **On write**, both hosts run `host_core::event_write` before any store
+>   sees the event: `guard_update` drops the organizer, clears
+>   `send_invitations` unless the account organizes the event and someone
+>   else is invited (or was, until this edit removed them), and sets
+>   `keep_attendees` when the edit left the invitees as the cache last read
+>   them. EWS, Google and Graph then leave the provider's attendee list alone,
+>   so a title or time change never rewrites it. An empty list alone never
+>   clears the provider's; `clear_attendees`, set when the edit removed every
+>   invitee the cache had read, does. `guard_create` does the same for a create; a create derived from an
+>   existing event carries that event's `organizer` and
+>   `organized_elsewhere` (never sent) so it applies there too.
+
 > **Free/busy lookup** runs through `get_free_busy(emails, range)` and the
 > host `query_free_busy` command (the dialog's "Check availability"
 > button). Each provider answers in its own dialect: EWS `GetUserAvailability`

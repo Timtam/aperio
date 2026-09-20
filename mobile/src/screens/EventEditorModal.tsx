@@ -20,6 +20,8 @@ import {
   allDayFormEndDate,
   applySignature,
   madeNoReminderChoice,
+  offersNotifyAttendees,
+  organizerOf,
   signatureIn,
   eventPrefillFrom,
   allDayWireEnd,
@@ -789,10 +791,16 @@ export default function EventEditorModal({
     // Invitations only go out when the target calendar advertises RFC-6638
     // scheduling (a local calendar, an iCal feed, or a CalDAV/iCloud account
     // whose scheduling probe failed all report supports_scheduling=false) AND
-    // there are attendees AND the toggle is on. Mirrors the desktop's
-    // supports_scheduling gating.
+    // there is someone to tell AND the toggle is on. Mirrors the desktop.
+    // Only the organizer notifies anyone (decision 70a), and removed
+    // invitees may still be told (74a): `offersNotifyAttendees`, the rule the
+    // desktop shares. The host applies it again before it writes.
     const sendInvitations =
-      (cal?.supports_scheduling ?? false) && attendees.length > 0 && notifyAttendees;
+      offersNotifyAttendees({
+        supportsScheduling: cal?.supports_scheduling ?? false,
+        attendees,
+        original: original ?? null,
+      }) && notifyAttendees;
     // Reminders for the wire: while `keepRemindersAsDefault` holds, the rows on
     // screen came from the CALENDAR default and were never touched — sending
     // them would promote the default into a per-event VALARM that then lives on
@@ -939,6 +947,9 @@ export default function EventEditorModal({
           sound: null,
           attendees,
           send_invitations: sendInvitations,
+          // The occurrence's organizer, so it never becomes an invitee of the
+          // standalone copy (decision 72a).
+          ...organizerOf(original),
         });
         await savePrivate(created);
         if (!isLocalCal) {
@@ -1014,6 +1025,7 @@ export default function EventEditorModal({
                   sound: null,
                   attendees,
                   send_invitations: sendInvitations,
+                  ...organizerOf(original),
                 },
                 // Continuation of the master — keep its zone verbatim (incl.
                 // floating) so head and tail expand identically.
@@ -1574,18 +1586,20 @@ export default function EventEditorModal({
         />
       )}
 
-      {/* Attendees — free-form people; the notify switch shows only when the
-          target calendar can actually invite (advertises RFC-6638 scheduling)
-          and there are attendees, matching the desktop's gating. */}
+      {/* Attendees — free-form people; the notify switch follows the rule the
+          desktop shares (`offersNotifyAttendees`): a calendar that can invite,
+          an event the account organizes, and someone to tell. */}
       <AttendeesEditor
         value={attendees}
         onChange={setAttendees}
         notify={notifyAttendees}
         onNotifyChange={setNotifyAttendees}
-        showNotify={
-          attendees.length > 0 &&
-          (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false)
-        }
+        showNotify={offersNotifyAttendees({
+          supportsScheduling:
+            calendars.find((c) => c.id === calId)?.supports_scheduling ?? false,
+          attendees,
+          original: original ?? null,
+        })}
       />
 
       {/* Free/busy — attendee availability over the entered window. Shown only

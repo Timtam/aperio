@@ -9,7 +9,13 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { applySignature, madeNoReminderChoice, signatureIn } from '@aperio/shared';
+import {
+  applySignature,
+  madeNoReminderChoice,
+  offersNotifyAttendees,
+  organizerOf,
+  signatureIn,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { timeInputStep } from '../state/timeStep';
@@ -1025,14 +1031,15 @@ export function EventDialog({
           }
         };
 
-        // Notify attendees: gated identically to the toggle's visibility —
-        // only when the target calendar can schedule server-side AND there
-        // are attendees to notify.
+        // Notify attendees: gated identically to the toggle's visibility
+        // (`offersNotifyAttendees`, decisions 70a and 74a).
         const targetCal = calendars.find((c) => c.id === form.calendarId);
         const sendInvitations =
-          !!targetCal?.supports_scheduling &&
-          form.attendees.length > 0 &&
-          notifyAttendees;
+          offersNotifyAttendees({
+            supportsScheduling: !!targetCal?.supports_scheduling,
+            attendees: form.attendees,
+            original: event ?? null,
+          }) && notifyAttendees;
         // When the target stores the color natively (local, or color-capable
         // CalDAV via RFC 7986 COLOR), apiCreate/UpdateEvent already carries it
         // on `color_label` — so the extra setEventColor call is only needed
@@ -1141,6 +1148,7 @@ export function EventDialog({
                 sound: null,
                 attendees: form.attendees,
                 send_invitations: sendInvitations,
+                ...organizerOf(event ?? {}),
               });
               await savePrivate(created);
               if (!storesColorNatively) {
@@ -1222,6 +1230,7 @@ export function EventDialog({
                         sound: null,
                         attendees: form.attendees,
                         send_invitations: sendInvitations,
+                        ...organizerOf(master),
                       },
                       // Continuation of the master — keep its zone verbatim
                       // (incl. floating) so head and tail expand identically.
@@ -1802,19 +1811,27 @@ export function EventDialog({
           />
         </div>
 
+        {offersNotifyAttendees({
+          supportsScheduling: !!calendars.find(
+            (c) => c.id === form.calendarId,
+          )?.supports_scheduling,
+          attendees: form.attendees,
+          original: event ?? null,
+        }) && (
+          <label className="form__field form__field--inline">
+            <input
+              type="checkbox"
+              checked={notifyAttendees}
+              onChange={(e) => setNotifyAttendees(e.target.checked)}
+            />
+            <span>{t('dialogs.event.fields.notifyAttendees')}</span>
+          </label>
+        )}
+
         {calendars.find((c) => c.id === form.calendarId)
           ?.supports_scheduling &&
           form.attendees.length > 0 && (
             <>
-              <label className="form__field form__field--inline">
-                <input
-                  type="checkbox"
-                  checked={notifyAttendees}
-                  onChange={(e) => setNotifyAttendees(e.target.checked)}
-                />
-                <span>{t('dialogs.event.fields.notifyAttendees')}</span>
-              </label>
-
               <div className="form__field availability">
                 <button
                   type="button"

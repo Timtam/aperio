@@ -170,6 +170,9 @@ pub fn events_for_contacts(
             }
             let age = birthday_age(year, &bday);
             out.push(Event {
+                keep_attendees: false,
+                clear_attendees: false,
+                organized_elsewhere: false,
                 send_invitations: false,
                 truncate_tail_overrides: false,
                 id: format!("{BIRTHDAY_EVENT_PREFIX}{}:{}", contact.id, year),

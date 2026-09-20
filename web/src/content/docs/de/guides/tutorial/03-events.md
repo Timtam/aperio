@@ -57,11 +57,23 @@ Im Termin-Dialog kannst du außerdem festlegen:
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
 
-> **Teilnehmer benachrichtigen:** Hat ein Termin Teilnehmer und unterstützt
-> der Kalender den serverseitigen Versand (iCloud, Google, Exchange/Outlook),
-> erscheint das Kontrollkästchen **Teilnehmer benachrichtigen** (standardmäßig
-> aktiv). Ist es gesetzt, verschickt der Anbieter beim Speichern automatisch
-> Einladungen bzw. Aktualisierungen – Aperio selbst versendet keine E-Mails.
+> **Teilnehmer benachrichtigen:** Organisierst du einen Termin, ist jemand
+> anderes eingeladen und unterstützt der Kalender den serverseitigen Versand
+> (iCloud, Google, Exchange/Outlook), erscheint das Kontrollkästchen
+> **Teilnehmer benachrichtigen** (standardmäßig aktiv). Ist es gesetzt,
+> verschickt der Anbieter beim Speichern automatisch Einladungen bzw.
+> Aktualisierungen – Aperio selbst versendet keine E-Mails. Der Organisator
+> zählt nie als Teilnehmer: Ein Termin, den du in Outlook angelegt hast und bei
+> dem Outlook dich als einzigen Teilnehmer führt, hat in Aperio keine
+> Teilnehmer. Bei einer Besprechung, die jemand anderes organisiert, kann nur
+> diese Person Aktualisierungen verschicken; dort erscheint das
+> Kontrollkästchen nicht. Entfernst du den letzten Teilnehmer, bleibt das
+> Kontrollkästchen stehen, damit er eine Absage bekommen kann. Bei
+> Exchange/Outlook, Google und Microsoft 365
+> lässt Aperio die Teilnehmerliste beim Anbieter, wie sie ist, wenn du nur
+> Titel oder Zeit änderst. Bei iCloud geht das noch nicht: Speichern ohne
+> **Teilnehmer benachrichtigen** entfernt die Teilnehmer aus dem Termin, und
+> Speichern mit bittet alle erneut um eine Antwort.
 >
 > Löschst du eine **Besprechung, die du organisierst** (mit Teilnehmern, auf
 > einem Konto mit Server-Terminplanung), fragt Aperio in **einem** Dialog nach –
@@ -79,8 +91,11 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > gelöscht. (Auf iCloud/CalDAV entscheidet der Server über den Absageversand –
 > dort ist „ohne Benachrichtigung" nicht garantiert.)
 
-> **Verfügbarkeit prüfen:** Unter demselben Schalter erscheint die
-> Schaltfläche **Verfügbarkeit prüfen**. Sie fragt für das aktuell
+> **Verfügbarkeit prüfen:** Hat ein Termin Teilnehmer und unterstützt der
+> Kalender die Server-Terminplanung, erscheint die Schaltfläche
+> **Verfügbarkeit prüfen**, unter **Teilnehmer benachrichtigen**, wenn es da
+> ist, und auch bei einer Besprechung, die jemand anderes organisiert. Sie
+> fragt für das aktuell
 > eingestellte Zeitfenster ab, welche Teilnehmer **frei** oder **belegt**
 > sind, und zeigt das Ergebnis pro Teilnehmer mit einer Zusammenfassung an
 > (die Live-Region kündigt es an). Antwortet ein Anbieter nicht (fehlende
@@ -91,7 +106,8 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Dialog **Deine Antwort** mit den Schaltflächen **Zusagen**, **Vorläufig**
 > und **Absagen** – die aktuelle Antwort ist hervorgehoben. Deine Antwort
 > geht automatisch an den Organisator. Bist du selbst der Organisator,
-> siehst du stattdessen den Antwortstatus aller Teilnehmer.
+> siehst du stattdessen den Antwortstatus aller Teilnehmer; der Organisator
+> ist nicht darunter.
 
 ## Termine bearbeiten, verschieben, löschen
 
