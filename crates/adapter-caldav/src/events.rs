@@ -2208,6 +2208,33 @@ END:VCALENDAR\r
         );
     }
 
+    /// The alarms are spliced into the copy just read, but the reminders
+    /// written are the ones the CALLER saw. So the PUT is guarded by the
+    /// caller's version, not by the one the splice came from: a reminders-only
+    /// edit passes the verdict whatever the version, and with the fresh ETag a
+    /// save from a second device would quietly drop the alarm the first set.
+    #[tokio::test]
+    async fn an_invitation_reminder_edit_is_guarded_by_the_callers_version() {
+        use crate::mapping::tests::ICLOUD_INVITATION;
+        let mut server = Server::new_async().await;
+        // The resource moved on since this copy was read: the GET answers
+        // "server-etag", and only "caller-etag" is accepted on the PUT.
+        let (_seen, get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"caller-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.etag = Some("\"caller-etag\"".into());
+        edit.reminders.push(cal_core::Reminder {
+            kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+            sound: None,
+        });
+        update_event(&client(), edit, &creds(&server.url()), &icloud_ctx())
+            .await
+            .unwrap();
+        get.assert_async().await;
+        put.assert_async().await;
+    }
+
     /// An alarm the read shows as a reminder is claimed by that reminder,
     /// whatever its ACTION or the end it is triggered from. Classifying it
     /// more strictly would keep it AND render a second one beside it, and the
