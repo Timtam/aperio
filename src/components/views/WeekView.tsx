@@ -26,6 +26,7 @@ import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
 import {
   EVENT_DND_TYPE,
+  InvitationLockedError,
   moveEventToSlot,
   readEventDrag,
   readTaskDrag,
@@ -86,6 +87,7 @@ import {
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
+  invitationLocked,
   collapseEventGroups,
   groupBadge,
   dropMinuteInWindow,
@@ -322,11 +324,19 @@ export function WeekView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
+  // The chip menu hands a locked invitation's delete to this view's own
+  // flow, which asks first (83b). The view defines it further down, so the
+  // menu gets a stable wrapper.
+  const requestDeleteRef = useRef<(event: CalendarEvent) => void>(() => {});
+  const requestDeleteFromMenu = useCallback(
+    (event: CalendarEvent) => requestDeleteRef.current(event),
+    [],
+  );
   const {
     openForEvent: openEventMenu,
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
-  } = useChipContextMenu();
+  } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
   const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
 
@@ -925,7 +935,13 @@ export function WeekView() {
       minute: number | null = null,
     ) => {
       try {
-        const moved = await moveEventToSlot(ev, dayKey, minute, scope);
+        const moved = await moveEventToSlot(
+          ev,
+          dayKey,
+          minute,
+          scope,
+          calendarById.get(ev.calendar_id),
+        );
         if (!moved) return; // nothing changed — nothing to announce
         announce(
           minute === null || ev.all_day
@@ -941,6 +957,12 @@ export function WeekView() {
         );
         invalidateData();
       } catch (err) {
+        if (err instanceof InvitationLockedError) {
+          // 77a: only the organizer moves their meeting. Said, not silently
+          // swallowed, and nothing was written.
+          announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+          return;
+        }
         if (err instanceof SeriesShiftRefusedError) {
           if (isSeriesOccurrence(ev)) {
             // Ask again, offering only this occurrence.
@@ -967,17 +989,28 @@ export function WeekView() {
         }
       }
     },
-    [announce, t, fmt, invalidateData, clockAt],
+    [announce, t, fmt, invalidateData, clockAt, calendarById],
+  );
+  /** Someone else's meeting does not move: said before a scope question
+   *  nothing could answer (77a). */
+  const refuseLockedDrag = useCallback(
+    (ev: CalendarEvent): boolean => {
+      if (!invitationLocked(calendarById.get(ev.calendar_id), ev)) return false;
+      announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+      return true;
+    },
+    [calendarById, announce, t],
   );
   const handleEventDayDrop = useCallback(
     (ev: CalendarEvent, dayKey: string, minute: number | null = null) => {
+      if (refuseLockedDrag(ev)) return;
       if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
         setPendingEventDrop({ event: ev, dayKey, minute });
         return;
       }
       void performEventDrop(ev, dayKey, 'series', minute);
     },
-    [performEventDrop],
+    [refuseLockedDrag, performEventDrop],
   );
 
   // Map a drop's horizontal position to the day column under the cursor by
@@ -1071,6 +1104,8 @@ export function WeekView() {
       setConfirmTarget(ev);
     }
   }, []);
+  // The menu's hand-off points at this view's flow.
+  requestDeleteRef.current = requestDelete;
 
   // Deferred indicator — see DayView for the rationale.
   const showLoading = useDeferredLoading(loading);

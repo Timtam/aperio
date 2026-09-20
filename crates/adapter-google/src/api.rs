@@ -2116,6 +2116,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 

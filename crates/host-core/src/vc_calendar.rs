@@ -123,6 +123,7 @@ impl VcCalendar {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         })
     }
 }
@@ -157,6 +158,7 @@ impl CalendarFeature for VcCalendar {
             supports_scheduling: false,
             supports_event_color: false,
             always_notifies_attendees: false,
+            invitations_reply_only: false,
             notifier_name: None,
         }])
     }
@@ -301,6 +303,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 

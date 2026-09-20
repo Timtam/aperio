@@ -199,6 +199,7 @@ impl LocalAdapter {
                 supports_scheduling: false,
                 supports_event_color: true,
                 always_notifies_attendees: false,
+                invitations_reply_only: false,
                 notifier_name: None,
                 color_label: color_label?.map(ColorLabelId),
                 id: id?,
@@ -805,6 +806,7 @@ mod tests {
             organizer: None,
             attendee_responses: vec![],
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
@@ -846,6 +848,7 @@ mod tests {
             supports_scheduling: false,
             supports_event_color: true,
             always_notifies_attendees: false,
+            invitations_reply_only: false,
             notifier_name: None,
             id: id.into(),
             name: name.into(),

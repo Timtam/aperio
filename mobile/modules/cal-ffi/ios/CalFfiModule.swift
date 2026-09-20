@@ -115,6 +115,36 @@ public class CalFfiModule: Module {
     override var reason: String { syncDetail }
   }
 
+  /// A refused event write, with the desktop's own code and the adapter's
+  /// message — which starts with the token the surfaces translate
+  /// (`cal_core::WriteRefusal`). Without it an unmapped Swift error reaches
+  /// JS as its description and the shared translator matches nothing.
+  final class EventCodedError: Exception {
+    let writeCode: String
+    let writeDetail: String
+    init(code: String, detail: String) {
+      self.writeCode = code
+      self.writeDetail = detail
+      super.init()
+    }
+    override var code: String { writeCode }
+    override var reason: String { writeDetail }
+  }
+
+  /// Re-throw a refused event write with its code intact. Everything else
+  /// falls through untouched.
+  private func eventCoded<T>(_ block: () throws -> T) throws -> T {
+    do {
+      return try block()
+    } catch let StoreError.Forbidden(detail) {
+      throw EventCodedError(code: "forbidden", detail: detail)
+    } catch let StoreError.Conflict(detail) {
+      throw EventCodedError(code: "conflict", detail: detail)
+    } catch let StoreError.Network(detail) {
+      throw EventCodedError(code: "network", detail: detail)
+    }
+  }
+
   /// Re-throw the ONE refusal a grouping request can meet with a code.
   ///
   /// `Conflict` is generic across the store, but at THIS call site it can only
@@ -386,6 +416,11 @@ public class CalFfiModule: Module {
       try seriesShift(inputJson: inputJson)
     }
 
+    // A repeat rule in words: keys and values the surface renders.
+    Function("recurrenceSummary") { (inputJson: String) -> String in
+      try recurrenceSummary(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this
@@ -528,19 +563,28 @@ public class CalFfiModule: Module {
     }.runOnQueue(slowQueue)
 
     AsyncFunction("createEventJson") { (requestJson: String) -> String in
-      try self.host.createEventJson(requestJson: requestJson)
+      try self.eventCoded { try self.host.createEventJson(requestJson: requestJson) }
     }
 
     AsyncFunction("updateEventJson") { (eventJson: String, previousCalendarId: String?) -> String in
-      try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
+      try self.eventCoded {
+        try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
+      }
     }
 
     AsyncFunction("deleteEvent") { (id: String, calendarId: String?, sendCancellations: Bool?) in
-      try self.host.deleteEvent(id: id, calendarId: calendarId, sendCancellations: sendCancellations)
+      try self.eventCoded {
+        try self.host.deleteEvent(
+          id: id, calendarId: calendarId, sendCancellations: sendCancellations)
+      }
     }
 
     AsyncFunction("addEventExdateJson") { (id: String, occurrence: String, calendarId: String?, sendCancellations: Bool) in
-      try self.host.addEventExdateJson(id: id, occurrence: occurrence, calendarId: calendarId, sendCancellations: sendCancellations)
+      try self.eventCoded {
+        try self.host.addEventExdateJson(
+          id: id, occurrence: occurrence, calendarId: calendarId,
+          sendCancellations: sendCancellations)
+      }
     }
 
     // ─── Sync ───
@@ -901,8 +945,10 @@ public class CalFfiModule: Module {
 
     AsyncFunction("respondToEvent") {
       (calendarId: String, eventId: String, status: String, sendResponse: Bool) in
-      try self.host.respondToEvent(
-        calendarId: calendarId, eventId: eventId, status: status, sendResponse: sendResponse)
+      try self.eventCoded {
+        try self.host.respondToEvent(
+          calendarId: calendarId, eventId: eventId, status: status, sendResponse: sendResponse)
+      }
     }
 
     AsyncFunction("taskListMembersJson") { (listId: String) -> String in

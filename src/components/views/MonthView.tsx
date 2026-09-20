@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useState,
-} from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
@@ -28,6 +21,7 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import {
+  invitationLocked,
   collapseEventGroups,
   groupBadge,
   eventInstanceKey,
@@ -88,6 +82,7 @@ import {
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
   EVENT_DND_TYPE,
+  InvitationLockedError,
   moveEventToDay,
   readEventDrag,
   readTaskDrag,
@@ -132,11 +127,19 @@ export function MonthView() {
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
+  // The chip menu hands a locked invitation's delete to this view's own
+  // flow, which asks first (83b). The view defines it further down, so the
+  // menu gets a stable wrapper.
+  const requestDeleteRef = useRef<(event: CalendarEvent) => void>(() => {});
+  const requestDeleteFromMenu = useCallback(
+    (event: CalendarEvent) => requestDeleteRef.current(event),
+    [],
+  );
   const {
     openForEvent: openEventMenu,
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
-  } = useChipContextMenu();
+  } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
 
   const cells = useMemo(
     () => buildMonthGrid(anchor, weekStartsOn),
@@ -456,6 +459,16 @@ export function MonthView() {
     [announce, t, invalidateData],
   );
 
+  /** Someone else's meeting does not move: said before a scope question
+   *  nothing could answer (77a). */
+  const refuseLockedDrag = useCallback(
+    (ev: CalendarEvent): boolean => {
+      if (!invitationLocked(calendarById.get(ev.calendar_id), ev)) return false;
+      announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+      return true;
+    },
+    [calendarById, announce, t],
+  );
   const requestDelete = useCallback((ev: CalendarEvent) => {
     // Only an expanded occurrence has a single instance to delete; a bare
     // recurring master row (unexpandable RRULE) has none, so it takes the plain
@@ -467,6 +480,8 @@ export function MonthView() {
       setConfirmTarget(ev);
     }
   }, []);
+  // The menu's hand-off points at this view's flow.
+  requestDeleteRef.current = requestDelete;
 
   // Event chip dropped on a day cell → move it there (time + duration
   // stay). Recurring events first ask for the §7.5 scope ("only this
@@ -480,7 +495,12 @@ export function MonthView() {
   const performEventDrop = useCallback(
     async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
       try {
-        const moved = await moveEventToDay(ev, dayKey, scope);
+        const moved = await moveEventToDay(
+          ev,
+          dayKey,
+          scope,
+          calendarById.get(ev.calendar_id),
+        );
         if (!moved) return; // same-day drop — nothing to announce
         announce(
           t('views.eventMovedToDay', {
@@ -490,6 +510,12 @@ export function MonthView() {
         );
         invalidateData();
       } catch (err) {
+        if (err instanceof InvitationLockedError) {
+          // 77a: only the organizer moves their meeting. Said, not silently
+          // swallowed, and nothing was written.
+          announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+          return;
+        }
         if (err instanceof SeriesShiftRefusedError) {
           if (isSeriesOccurrence(ev)) {
             // Ask again, offering only this occurrence.
@@ -514,7 +540,7 @@ export function MonthView() {
         );
       }
     },
-    [announce, t, fmt, invalidateData],
+    [announce, t, fmt, invalidateData, calendarById],
   );
 
   // Drag-and-drop: a task dropped on a day cell is scheduled on that day
@@ -529,6 +555,7 @@ export function MonthView() {
       if (!payload) {
         const dropped = readEventDrag(e.dataTransfer);
         if (!dropped) return;
+        if (refuseLockedDrag(dropped)) return;
         if (isSeriesOccurrence(dropped) || dropped.recurrence?.rrule) {
           setPendingEventDrop({ event: dropped, dayKey });
           return;
@@ -552,7 +579,7 @@ export function MonthView() {
         );
       }
     },
-    [invalidateData, announce, t, fmt, performEventDrop],
+    [invalidateData, announce, t, fmt, performEventDrop, refuseLockedDrag],
   );
 
   // Deferred indicator — see DayView for the rationale.

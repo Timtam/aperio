@@ -535,6 +535,16 @@ pub fn series_shift(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// A repeat rule in words (decision 84a): the desktop asks the same rule
+/// through WebAssembly, and a locked invitation shows its answer as a field.
+#[uniffi::export]
+pub fn recurrence_summary(input_json: String) -> Result<String, StoreError> {
+    cal_core::recurrence_summary_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "recurrence summary question".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {
@@ -711,6 +721,41 @@ mod tests {
         match series_shift("not json".to_string()) {
             Err(StoreError::InvalidField { field, .. }) => {
                 assert_eq!(field, "series shift question")
+            }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's repeat-summary table, through the phone's own
+    /// door. A free function crosses UniFFI unwatched by the bridge check, so
+    /// the rows are what proves it is wired to the rule at all.
+    #[test]
+    fn recurrence_summary_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/recurrenceSummary.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(rows.len() >= 40, "the contract covers the shapes");
+        for row in rows {
+            let name = row["name"].as_str().expect("a name");
+            let mut question = serde_json::json!({
+                "rrule": row["rrule"],
+                "start": row["start"],
+            });
+            if let Some(last_day) = row["last_day"].as_str() {
+                question["last_day"] = serde_json::Value::String(last_day.to_string());
+            }
+            let answered = recurrence_summary(question.to_string()).expect("a readable question");
+            let answered: serde_json::Value =
+                serde_json::from_str(&answered).expect("the answer parses");
+            assert_eq!(answered, row["expected"], "{name}");
+        }
+    }
+
+    #[test]
+    fn recurrence_summary_door_names_a_question_it_cannot_read() {
+        match recurrence_summary("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "recurrence summary question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
         }

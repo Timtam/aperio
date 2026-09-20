@@ -750,6 +750,7 @@ mod tests {
                 supports_scheduling: false,
                 supports_event_color: false,
                 always_notifies_attendees: false,
+                invitations_reply_only: false,
                 notifier_name: None,
                 id: "ical:42".into(),
                 name: "schulferien-sachsen-anhalt".into(),
@@ -762,6 +763,7 @@ mod tests {
                 supports_scheduling: false,
                 supports_event_color: true,
                 always_notifies_attendees: false,
+                invitations_reply_only: false,
                 notifier_name: None,
                 id: "local-1".into(),
                 name: "Persönlich".into(),
@@ -804,6 +806,7 @@ mod tests {
                 supports_scheduling: false,
                 supports_event_color: false,
                 always_notifies_attendees: false,
+                invitations_reply_only: false,
                 notifier_name: None,
                 id: "google:work".into(),
                 name: "Work".into(),
@@ -816,6 +819,7 @@ mod tests {
                 supports_scheduling: false,
                 supports_event_color: false,
                 always_notifies_attendees: false,
+                invitations_reply_only: false,
                 notifier_name: None,
                 id: "google:other".into(),
                 name: "Other".into(),
@@ -918,6 +922,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
@@ -967,6 +972,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         // Apply stamps the binding onto the matching external event only.
         let mut events = vec![mk("icloud:evt-1"), mk("icloud:evt-2")];
@@ -1255,6 +1261,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }];
         apply_color_to_events(&repo, &mut events);
         // The native label survives — the stale override did NOT shadow it.

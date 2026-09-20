@@ -130,6 +130,15 @@ when caching:
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
 
+> **And some take only an attendee's own changes.** On a scheduling CalDAV
+> server (iCloud), a meeting somebody else organizes accepts the attendee's
+> reply and the attendee's own alarms and refuses everything else (RFC 6638
+> §3.2.2.1). Those calendars carry `invitations_reply_only`, and the editors
+> show such a meeting read-only apart from those, with a delete that tells the
+> organizer (decisions 77a, 83b; `invitationLocked`, `declineSentence` in
+> `@aperio/shared`). Microsoft Graph leaves the flag false: it mails the
+> guests by itself, but it takes an invitee's edits.
+
 > **Some providers always notify.** On an RFC 6638 CalDAV server (iCloud)
 > and on Microsoft Graph, a saved change to a meeting the account organizes
 > and its deletion reach the attendees whatever the request says. Those

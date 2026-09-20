@@ -1336,7 +1336,8 @@
       "scopeFuture": "This applies to this occurrence and all following ones. Each copy series is split at the same point.",
       "regroupFailed_one": "The copy was updated, but the new entries could not be tied together as one appointment again.",
       "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again.",
-      "truncatedNotRestored": "The series in {{calendar}} was cut short and could not be put back — it now ends at this occurrence."
+      "truncatedNotRestored": "The series in {{calendar}} was cut short and could not be put back — it now ends at this occurrence.",
+      "skippedInvitation": "The copy in {{calendar}} was not changed — someone else organizes it."
     },
     "eventGroup": {
       "title": "Same appointment",
@@ -1376,7 +1377,10 @@
       "notifySilent": "Remove without notifying",
       "notifyAlways": "The calendar server informs the attendees of the cancellation.",
       "notifyAlwaysNamed": "{{service}} informs the attendees of the cancellation.",
-      "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:"
+      "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:",
+      "organizerGetsDecline": "The organizer gets a decline.",
+      "organizerNotTold": "The organizer is not told.",
+      "attendeesNotTold": "The attendees are not told about the cancellation."
     },
     "moveScope": {
       "title": "Move recurring event",
@@ -1519,6 +1523,8 @@
         "notifyAttendees": "Notify attendees",
         "notifyAlways": "The calendar server informs the attendees of every change.",
         "notifyAlwaysNamed": "{{service}} informs the attendees of every change.",
+        "notifySilent": "This meeting is not sent through the calendar server — attendees are not told about changes.",
+        "notifySilentNamed": "This meeting is not sent through {{service}} — attendees are not told about changes.",
         "colorLabel": "Color label"
       },
       "attendees": {
@@ -1607,14 +1613,29 @@
           "1": "first",
           "2": "second",
           "3": "third",
-          "4": "fourth"
+          "4": "fourth",
+          "5": "fifth"
         },
         "unsupportedHint": "Not supported by this calendar's account.",
         "relativeUnsupportedHint": "This account can only repeat on a fixed day of the month.",
-        "editsSeries": "Changes apply to the entire series."
+        "editsSeries": "Changes apply to the entire series.",
+        "storedLabel": "Stored repeat"
       },
       "prefillCalendarReadOnly": "The earlier appointment is in \"{{calendar}}\", which cannot take new appointments. The calendar below stays as it is.",
-      "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is."
+      "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is.",
+      "invitation": {
+        "hint": "Someone else organizes this meeting, so only the organizer can change its details. What you set for yourself stays yours.",
+        "allDayValue": "{{date}}, all day",
+        "moveRefused": "\"{{title}}\" is organized by someone else, so only the organizer can move it to another day or time. Nothing was moved."
+      },
+      "writeError": {
+        "replyOnly": "Only the organizer can change this meeting. Nothing was changed.",
+        "serverRefused": "The calendar server refused this change ({{detail}}). Nothing was changed.",
+        "identityUnknown": "Aperio could not read this account's own addresses on the calendar server, so it cannot change a meeting there. Nothing was changed.",
+        "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
+        "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version."
+      },
+      "deleteAndDecline": "Delete and decline"
     },
     "task": {
       "newTitle": "New task",
@@ -1846,7 +1867,8 @@
       "moved": "\"{{title}}\" moved.",
       "copied": "\"{{title}}\" copied.",
       "subtasksIncluded_one": "The subtask will be moved or copied along with the parent.",
-      "subtasksIncluded_other": "The {{count}} subtasks will be moved or copied along with the parent."
+      "subtasksIncluded_other": "The {{count}} subtasks will be moved or copied along with the parent.",
+      "invitationMoveNotice": "Moving it deletes your copy: the organizer gets a decline, and the moved copy has no attendees."
     },
     "accounts": {
       "title": "Manage accounts",
@@ -2077,7 +2099,8 @@
         "indian": "Indian Ocean",
         "pacific": "Pacific"
       }
-    }
+    },
+    "readOnlyField": "{{label}}: {{value}}"
   },
   "sidebar": {
     "label": "Sidebar",
@@ -2374,5 +2397,83 @@
     "count_other": "{{count}} earlier entries, reachable with the arrow keys.",
     "applied": "Filled in from \"{{title}}\". The day stays as it was.",
     "acceptHint": "Fills in everything but the day"
+  },
+  "recurrenceSummary": {
+    "sentence": {
+      "every": "{{every}}",
+      "everyOn": "{{every}} {{on}}",
+      "everyEnd": "{{every}}, {{end}}",
+      "everyOnEnd": "{{every}} {{on}}, {{end}}"
+    },
+    "every": {
+      "second": "every second",
+      "minute": "every minute",
+      "hour": "every hour",
+      "day": "every day",
+      "month": "every month",
+      "year": "every year"
+    },
+    "interval": {
+      "second": "every {{count}} seconds",
+      "minute": "every {{count}} minutes",
+      "hour": "every {{count}} hours",
+      "day": "every {{count}} days",
+      "week": "every {{count}} weeks",
+      "month": "every {{count}} months",
+      "year": "every {{count}} years"
+    },
+    "weekly": {
+      "onDays": "every {{weekdays}}",
+      "workdays": "every weekday, Monday to Friday"
+    },
+    "on": {
+      "weekdays": "on {{weekdays}}",
+      "monthDay_one": "on day {{days}}",
+      "monthDay_other": "on days {{days}}",
+      "lastDay": "on the last day",
+      "nthWeekday": "on the {{ordinal}} {{weekday}}",
+      "nthOfSet": "on the {{ordinal}} {{set}}",
+      "dateInYear": "on {{month}} {{day}}",
+      "nthWeekdayInMonth": "on the {{ordinal}} {{weekday}} of {{month}}",
+      "nthOfSetInMonth": "on the {{ordinal}} {{set}} of {{month}}"
+    },
+    "set": {
+      "weekday": "weekday",
+      "weekendDay": "weekend day"
+    },
+    "ordinal": {
+      "1": "first",
+      "2": "second",
+      "3": "third",
+      "4": "fourth",
+      "5": "fifth",
+      "last": "last"
+    },
+    "day": {
+      "number": "{{day}}"
+    },
+    "end": {
+      "count_one": "once",
+      "count_other": "{{count}} times",
+      "lastOn": "last on {{date}}",
+      "bounded": "with an end date"
+    },
+    "list": {
+      "separator": ", ",
+      "and": "{{rest}} and {{last}}"
+    },
+    "undescribed": {
+      "known": "Repeats {{unit}} by a rule Aperio cannot put into words.",
+      "unknown": "Repeats by a rule Aperio cannot put into words."
+    },
+    "unitAdverb": {
+      "second": "every second",
+      "minute": "every minute",
+      "hour": "hourly",
+      "day": "daily",
+      "week": "weekly",
+      "month": "monthly",
+      "year": "yearly"
+    }
   }
 }

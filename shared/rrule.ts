@@ -287,3 +287,43 @@ export function buildRRule(p: ParsedRule): string | null {
   }
   return out.join(';');
 }
+
+/**
+ * The rule the repeat controls would rebuild from what they show, or `null`
+ * when they show nothing.
+ *
+ * The pickers parse a stored rule into their own options and write those
+ * options back. For a rule they cannot hold — a lowercase one, `HOURLY`, the
+ * last day of the month, a `BYSETPOS` composite — what they show is a
+ * DIFFERENT rule than the one stored, and touching any control saves that
+ * different rule. A surface can compare this with the stored rule and say
+ * what really recurs (decision 87b).
+ */
+export function rebuiltByPicker(rrule: string | null): string | null {
+  return buildRRule(parseRRule(rrule));
+}
+
+/** Whether the repeat controls show something other than the stored rule. */
+export function pickerMisreadsRule(rrule: string | null | undefined): boolean {
+  const stored = rrule?.trim();
+  if (!stored) return false;
+  const body = stored.replace(/^RRULE:/i, '');
+  const rebuilt = rebuiltByPicker(body);
+  if (rebuilt === null) return true;
+  // Compared as sets of parts, with the defaults RFC 5545 §3.3.10 gives a
+  // rule that leaves them out: Apple, Exchange and Google spell `INTERVAL=1`
+  // and `WKST=MO` out, the pickers write nothing, and both rules recur on the
+  // same days. Counting that as a misreading would put a read-only line above
+  // the controls of every ordinary weekly appointment.
+  const parts = (rule: string) =>
+    rule
+      .split(';')
+      .map((part) => part.trim().toUpperCase())
+      .filter((part) => part !== '' && part !== 'INTERVAL=1' && part !== 'WKST=MO')
+      // The pickers keep an UNTIL by its day, so a bound that differs only in
+      // its time of day is the same bound to them.
+      .map((part) => (part.startsWith('UNTIL=') ? `UNTIL=${part.slice(6, 14)}` : part))
+      .sort()
+      .join(';');
+  return parts(body) !== parts(rebuilt);
+}

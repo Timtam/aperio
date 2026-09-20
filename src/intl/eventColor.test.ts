@@ -18,6 +18,7 @@ function calendar(id: string, hex: string | null): Calendar {
     supports_scheduling: false,
     supports_event_color: false,
     always_notifies_attendees: false,
+  invitations_reply_only: false,
   };
 }
 

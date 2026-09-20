@@ -14,12 +14,15 @@ import {
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
+  silentSentence,
+  type AttendeeNotice,
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { useDateFormat } from '../intl/dateFormat';
 import { timeInputStep } from '../state/timeStep';
 import { useSignatures } from '../state/useSignatures';
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -31,7 +34,6 @@ import {
   deleteEventById,
   eventGroupsForEvents,
   getEventById,
-  isCommandError,
   queryFreeBusy,
   setEventColor,
   setEventLocalReminders,
@@ -50,8 +52,15 @@ import {
   seriesTimesFromOccurrenceEdit,
 } from '../intl/recurrence';
 import {
+  describeRecurrence,
   eventPrefillFrom,
+  eventWriteErrorMessage,
+  invitationLocked,
+  lastOccurrenceDayKey,
+  pickerMisreadsRule,
   planCarry,
+  recurrenceSummaryText,
+  seriesDayKey,
   worthCarrying,
   type CarryableFields,
   type CarryScope,
@@ -65,6 +74,7 @@ import { useCancellationChoice } from '../state/useCancellationChoice';
 import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
+import { DeleteEventConfirm } from './DeleteEventConfirm';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { ConferenceSection } from './ConferenceSection';
 import { MeetingControls } from './MeetingControls';
@@ -231,6 +241,23 @@ const SCOPE_TITLE_KEY = {
 } as const satisfies Record<EditScope, string>;
 
 /** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
+/**
+ * One field of a locked invitation (77a): the form's own label, and the value
+ * as text a screen reader reaches with Tab.
+ *
+ * A read-only input, never `disabled` — a disabled control is skipped by the
+ * reading cursor, and the value is exactly what the user opened the dialog to
+ * hear.
+ */
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="form__field">
+      <span className="form__label">{label}</span>
+      <input type="text" readOnly value={value} />
+    </label>
+  );
+}
+
 export function EventDialog({
   isOpen,
   onClose,
@@ -243,13 +270,46 @@ export function EventDialog({
   prefillFrom,
   targetPinned,
 }: EventDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { openEventGroupCarry } = useDialogState();
+  const { openEventGroupCarry, invalidateData } = useDialogState();
   const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
   const { showHiddenCalendarTargets, timeStepMinutes } = useViewState();
 
   const isEdit = event !== null;
+  // 77a: someone else's meeting, on a provider that takes only this account's
+  // own reply and reminders. Read from the calendar the row came FROM, never
+  // the one the form points at: a locked invitation has no calendar picker.
+  const readCalendar = calendars.find((c) => c.id === event?.calendar_id);
+  const locked = isEdit && invitationLocked(readCalendar, event);
+  // A day of a locked invitation, written out. The editable form shows a
+  // date control; there is none here, so the value says the date in words.
+  const readOnlyDay = (dayKey: string): string => {
+    const date = new Date(`${dayKey}T00:00:00`);
+    const text = Number.isNaN(date.getTime()) ? dayKey : fmt.format(date, 'PPP');
+    return form.allDay
+      ? t('dialogs.event.invitation.allDayValue', { date: text })
+      : text;
+  };
+  // The repeat rule in words (84a): there are no controls to read in a locked
+  // invitation, and an expanded occurrence carries its series' rule.
+  const repeatSentence = useMemo(() => {
+    if (!event) return '';
+    const rrule = event.recurrence?.rrule?.trim();
+    if (!rrule) return locked ? t('dialogs.event.recurrence.none') : '';
+    // In the editable editor only where the controls would show another rule
+    // than the one stored: otherwise they say it themselves.
+    if (!locked && !pickerMisreadsRule(rrule)) return '';
+    return recurrenceSummaryText(
+      describeRecurrence({
+        rrule,
+        start: seriesDayKey(event.start, event.recurrence?.tzid),
+        last_day: lastOccurrenceDayKey(event),
+      }),
+      { t, language: i18n.language },
+    );
+  }, [locked, event, t, i18n.language]);
   // Stable id for the attendees-picker label — used as the
   // combobox's `aria-labelledby` so the input announces "Teilnehmer,
   // Combobox" with the right name on every screen reader.
@@ -891,7 +951,7 @@ export function EventDialog({
       );
     } catch (err) {
       setAvailabilityError(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        eventWriteErrorMessage(err, t),
       );
     } finally {
       setCheckingAvailability(false);
@@ -1032,6 +1092,37 @@ export function EventDialog({
             }).catch(() => undefined);
           }
         };
+
+        // 77a: a locked invitation writes its own reminders and nothing else.
+        // The row goes back as the provider has it — the occurrence's own
+        // override by its id, otherwise the series — so no form value can
+        // reach the wire, and the adapter decides against the server's fresh
+        // copy whether anything is sent at all.
+        if (locked && event) {
+          const loaded = isProviderOverride(event)
+            ? event
+            : await getEventById(seriesIdOf(event), event.calendar_id);
+          if (!loaded) {
+            throw new Error(
+              t('dialogs.event.seriesLoadFailed', { title: event.title }),
+            );
+          }
+          const payload: CalendarEvent = {
+            ...loaded,
+            reminders: keepRemindersAsDefault ? [] : attachedRows(form.reminders),
+            send_invitations: false,
+          };
+          await apiUpdateEvent(payload, event.calendar_id);
+          await savePrivate(loaded);
+          await setEventColor(
+            seriesIdOf(loaded),
+            loaded.calendar_id,
+            form.colorLabel,
+          );
+          announce(t('dialogs.event.updated', { title: loaded.title }));
+          onClose();
+          return;
+        }
 
         // Notify attendees: the rule the checkbox and the sentence show
         // (`attendeeNotice`, decisions 70a, 74a and 76a).
@@ -1396,13 +1487,9 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          // Only the message: String() would put an English "Error: " in
-          // front of a translated sentence.
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        // In words, including a provider's refusal, which reaches here with a
+        // token in its message.
+        setError(eventWriteErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -1412,6 +1499,7 @@ export function EventDialog({
       submitting,
       isEdit,
       event,
+      locked,
       isOccurrence,
       editScope,
       keepRemindersAsDefault,
@@ -1439,13 +1527,17 @@ export function EventDialog({
   const {
     offersChoice,
     alwaysNotifies,
+    silent: cancellationIsSilent,
     sentence: cancellationSentence,
   } = useCancellationChoice(event);
   // A meeting the account organizes gets the cancel dialog: with a choice
-  // where the provider can delete silently, as a plain confirmation that
-  // says who informs the attendees where it cannot (decision 80a).
-  const asksBeforeCancelling = offersChoice || alwaysNotifies;
+  // where the provider can delete silently, as a plain confirmation that says
+  // who informs the attendees where it cannot (decision 80a) — and as a plain
+  // confirmation that says NOBODY is told where the event keeps the server out
+  // of its scheduling (98). Deleting a meeting stays a question in all three.
+  const asksBeforeCancelling = offersChoice || alwaysNotifies || cancellationIsSilent;
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
   const [cancelChoiceScope, setCancelChoiceScope] = useState<
     'series' | 'occurrence' | 'this_and_future'
   >('series');
@@ -1468,13 +1560,9 @@ export function EventDialog({
         );
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          // Only the message: String() would put an English "Error: " in
-          // front of a translated sentence.
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        // In words, including a provider's refusal, which reaches here with a
+        // token in its message.
+        setError(eventWriteErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -1507,7 +1595,7 @@ export function EventDialog({
         onClose();
       } catch (err) {
         setError(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+          eventWriteErrorMessage(err, t),
         );
       } finally {
         setSubmitting(false);
@@ -1535,7 +1623,7 @@ export function EventDialog({
         onClose();
       } catch (err) {
         setError(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+          eventWriteErrorMessage(err, t),
         );
       } finally {
         setSubmitting(false);
@@ -1548,12 +1636,18 @@ export function EventDialog({
   // both editors share (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, attendees: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const spec = notifierSentence(calendar, 'change');
-    return {
-      notice: attendeeNotice({ calendar, attendees, original: event ?? null }),
-      sentence: t(spec.key, spec.values),
-    };
+    const notice = attendeeNotice({ calendar, attendees, original: event ?? null });
+    // Two sentences, one place they can appear: who informs the attendees, or
+    // that nobody will (`scheduling_silenced`, decision 98).
+    const spec =
+      notice === 'silent'
+        ? silentSentence(calendar, 'change')
+        : notifierSentence(calendar, 'change');
+    return { notice, sentence: t(spec.key, spec.values) };
   };
+  /** A notice that shows a sentence rather than a switch. */
+  const saysASentence = (notice: AttendeeNotice) =>
+    notice === 'always' || notice === 'silent';
   const { notice, sentence: noticeSentence } = noticeFor(
     form.calendarId,
     form.attendees,
@@ -1565,13 +1659,13 @@ export function EventDialog({
   // says it after the choice.
   const noticeAfterAdding = (next: string[]): string | null => {
     const after = noticeFor(form.calendarId, next);
-    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+    return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const announceNoticeForCalendar = (calendarId: string) => {
     const after = noticeFor(calendarId, form.attendees);
     if (
-      after.notice === 'always' &&
-      (notice !== 'always' || after.sentence !== noticeSentence)
+      saysASentence(after.notice) &&
+      (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       announce(after.sentence);
     }
@@ -1580,6 +1674,12 @@ export function EventDialog({
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
+    // 77a/83b: removing the account's copy of someone else's meeting tells
+    // the organizer it is declined, so it asks first and says so.
+    if (locked) {
+      setDeclineOpen(true);
+      return;
+    }
     // Removing a single occurrence of a recurring event.
     if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
       // Organizer with attendees → offer "cancel this occurrence + notify" vs
@@ -1612,6 +1712,7 @@ export function EventDialog({
   }, [
     event,
     submitting,
+    locked,
     isOccurrence,
     editScope,
     asksBeforeCancelling,
@@ -1682,18 +1783,41 @@ export function EventDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={onSubmit} className="form">
-        {isEdit && event && (
-          <EventRsvp event={event} onResponded={onClose} />
+        {/* Why the fields below cannot be changed, before the first of them,
+            and the first stop in the dialog. */}
+        {locked && (
+          <FocusableNote className="form__hint form__hint--invitation">
+            {t('dialogs.event.invitation.hint')}
+          </FocusableNote>
         )}
-        <TitleSuggestBox
-          label={t('dialogs.event.fields.title')}
-          value={form.title}
-          onChange={(v) => update('title', v)}
-          options={titleOptions}
-          onAccept={acceptTitleSuggestion}
-          required
-        />
+        {isEdit && event && (
+          <EventRsvp
+            event={event}
+            // Answering leaves a locked invitation open: the reminders are
+            // the only thing left to save here, and closing would throw them
+            // away. The views still refresh.
+            onResponded={locked ? invalidateData : onClose}
+          />
+        )}
+        {locked ? (
+          <ReadOnlyField label={t('dialogs.event.fields.title')} value={form.title} />
+        ) : (
+          <TitleSuggestBox
+            label={t('dialogs.event.fields.title')}
+            value={form.title}
+            onChange={(v) => update('title', v)}
+            options={titleOptions}
+            onAccept={acceptTitleSuggestion}
+            required
+          />
+        )}
 
+        {locked ? (
+          <ReadOnlyField
+            label={t('dialogs.event.fields.calendar')}
+            value={readCalendar?.name ?? ''}
+          />
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.calendar')}
@@ -1731,16 +1855,47 @@ export function EventDialog({
             <span className="form__hint">{prefillCalendarNote}</span>
           )}
         </label>
+        )}
 
-        <label className="form__field form__field--inline">
-          <input
-            type="checkbox"
-            checked={form.allDay}
-            onChange={(e) => update('allDay', e.target.checked)}
-          />
-          <span>{t('dialogs.event.fields.allDay')}</span>
-        </label>
+        {!locked && (
+          <label className="form__field form__field--inline">
+            <input
+              type="checkbox"
+              checked={form.allDay}
+              onChange={(e) => update('allDay', e.target.checked)}
+            />
+            <span>{t('dialogs.event.fields.allDay')}</span>
+          </label>
+        )}
 
+        {locked ? (
+          <>
+            {/* The same labels as the editable form, so the dialog reads the
+                same way whoever organizes the meeting. An all-day invitation
+                has no times, exactly as the editable form has none. */}
+            <ReadOnlyField
+              label={t('dialogs.event.fields.startDate')}
+              value={readOnlyDay(form.startDate)}
+            />
+            {!form.allDay && (
+              <ReadOnlyField
+                label={t('dialogs.event.fields.startTime')}
+                value={form.startTime}
+              />
+            )}
+            <ReadOnlyField
+              label={t('dialogs.event.fields.endDate')}
+              value={readOnlyDay(form.endDate)}
+            />
+            {!form.allDay && (
+              <ReadOnlyField
+                label={t('dialogs.event.fields.endTime')}
+                value={form.endTime}
+              />
+            )}
+          </>
+        ) : (
+          <>
         <div className="form__row">
           <label className="form__field">
             <span className="form__label">
@@ -1796,7 +1951,17 @@ export function EventDialog({
             </label>
           )}
         </div>
+          </>
+        )}
 
+        {locked ? (
+          form.location.trim() !== '' && (
+            <ReadOnlyField
+              label={t('dialogs.event.fields.location')}
+              value={form.location}
+            />
+          )
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.location')}
@@ -1808,7 +1973,18 @@ export function EventDialog({
             autoComplete="off"
           />
         </label>
+        )}
 
+        {locked ? (
+          form.description.trim() !== '' && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.event.fields.description')}
+              </span>
+              <textarea readOnly value={form.description} rows={4} />
+            </label>
+          )
+        ) : (
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.description')}
@@ -1826,6 +2002,7 @@ export function EventDialog({
             onChange={(next) => update('description', next)}
           />
         </label>
+        )}
         <DescriptionLinks text={form.description} />
         {/* Any conference in this event, whoever created it — an Outlook or
             eM Client invitation as readily as one Aperio made. Detection is
@@ -1838,14 +2015,31 @@ export function EventDialog({
         {/* Creating one, as opposed to joining one. Only for a meeting Aperio
             owns — an event carrying someone else's link gets Join above and no
             Remove here, because it is not ours to delete. */}
-        <MeetingControls
-          event={event ?? null}
-          onEventChanged={(saved) => {
-            update('location', saved.location ?? '');
-            update('description', saved.description ?? '');
-          }}
-        />
+        {/* Making one, as opposed to joining one: not on a meeting the
+            account does not organize. */}
+        {!locked && (
+          <MeetingControls
+            event={event ?? null}
+            onEventChanged={(saved) => {
+              update('location', saved.location ?? '');
+              update('description', saved.description ?? '');
+            }}
+          />
+        )}
 
+        {locked ? (
+          form.attendees.map((attendee, index) => (
+            <ReadOnlyField
+              key={`${attendee}-${index}`}
+              label={
+                index === 0
+                  ? t('dialogs.event.fields.attendees')
+                  : t('dialogs.event.attendees.chipsLabel')
+              }
+              value={attendee}
+            />
+          ))
+        ) : (
         <div className="form__field">
           <span className="form__label" id={attendeesLabelId}>
             {t('dialogs.event.fields.attendees')}
@@ -1857,6 +2051,7 @@ export function EventDialog({
             addedNote={noticeAfterAdding}
           />
         </div>
+        )}
 
         {notice === 'offer' && (
           <label className="form__field form__field--inline">
@@ -1868,7 +2063,7 @@ export function EventDialog({
             <span>{t('dialogs.event.fields.notifyAttendees')}</span>
           </label>
         )}
-        {notice === 'always' && (
+        {saysASentence(notice) && (
           <FocusableNote className="form__hint">{noticeSentence}</FocusableNote>
         )}
 
@@ -1947,27 +2142,52 @@ export function EventDialog({
             </>
           )}
 
-        <label className="form__field">
-          <span className="form__label">
-            {t('dialogs.event.fields.colorLabel')}
-          </span>
-          <ColorLabelSelect
-            value={form.colorLabel}
-            onChange={(next) => update('colorLabel', next)}
-            labels={colorLabels}
-            noneLabel={t('dialogs.event.noColorLabel')}
-          />
-        </label>
+        {/* A colour is Aperio's own — except where the provider stores it,
+            and there an attendee may not write one. */}
+        {(!locked || readCalendar?.supports_event_color !== true) && (
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.event.fields.colorLabel')}
+            </span>
+            <ColorLabelSelect
+              value={form.colorLabel}
+              onChange={(next) => update('colorLabel', next)}
+              labels={colorLabels}
+              noneLabel={t('dialogs.event.noColorLabel')}
+            />
+          </label>
+        )}
 
-        <RecurrenceSelector
-          value={form.rrule}
-          onChange={(rrule) => update('rrule', rrule)}
-          start={recurrenceStartDate(form.startDate)}
-          capabilities={
-            calendars.find((c) => c.id === form.calendarId)
-              ?.recurrence_capabilities
-          }
-        />
+        {locked ? (
+          <ReadOnlyField
+            label={t('dialogs.event.recurrence.label')}
+            value={repeatSentence}
+          />
+        ) : (
+          <>
+          {/* A rule the controls cannot hold is shown by them as a DIFFERENT
+              rule, and touching one would save that different rule. So the
+              stored rule is said in words above them (87b). */}
+          {repeatSentence !== '' && (
+            // Its own label: the controls below carry `recurrence.label`, and
+            // two adjacent stops with the same name saying different things
+            // is worse than no summary at all.
+            <ReadOnlyField
+              label={t('dialogs.event.recurrence.storedLabel')}
+              value={repeatSentence}
+            />
+          )}
+          <RecurrenceSelector
+            value={form.rrule}
+            onChange={(rrule) => update('rrule', rrule)}
+            start={recurrenceStartDate(form.startDate)}
+            capabilities={
+              calendars.find((c) => c.id === form.calendarId)
+                ?.recurrence_capabilities
+            }
+          />
+          </>
+        )}
 
         <RemindersEditor
           value={form.reminders}
@@ -2104,12 +2324,38 @@ export function EventDialog({
       </form>
     </Modal>
     {event && (
+      <DeleteEventConfirm
+        event={declineOpen ? event : null}
+        onClose={() => setDeclineOpen(false)}
+        onDelete={(_ev, send) => {
+          // The dialogs close one after the other: a modal restores focus to
+          // what opened it, and unmounting both in one commit drops focus to
+          // the page.
+          setDeclineOpen(false);
+          void (isOccurrence && editScope === 'occurrence' && event.recurrence
+            ? performOccurrenceDelete(send)
+            : performDelete(send));
+        }}
+      />
+    )}
+    {event && (
       <ConfirmDialog
         isOpen={cancelChoiceOpen}
         onClose={() => setCancelChoiceOpen(false)}
-        title={t('dialogs.event.cancelChoice.title')}
+        title={t(
+          // Nothing is cancelled for anyone when nobody is told: it is a
+          // delete, and it says so.
+          cancellationIsSilent
+            ? 'dialogs.confirm.deleteEventTitle'
+            : 'dialogs.event.cancelChoice.title',
+        )}
         message={
-          alwaysNotifies
+          cancellationIsSilent
+            ? `${t('dialogs.confirm.deleteEventMessage', { title: event.title })} ${t(
+                cancellationSentence.key,
+                cancellationSentence.values,
+              )}`
+            : alwaysNotifies
             ? t(
                 cancelChoiceScope === 'occurrence'
                   ? 'dialogs.event.cancelChoice.alwaysOccurrenceMessage'
@@ -2130,23 +2376,29 @@ export function EventDialog({
                 { title: event.title },
               )
         }
-        confirmLabel={t(
-          cancelChoiceScope === 'occurrence'
-            ? 'dialogs.event.cancelChoice.cancelOccurrence'
-            : cancelChoiceScope === 'this_and_future'
-              ? 'dialogs.event.cancelChoice.cancelThisAndFuture'
-              : 'dialogs.event.cancelChoice.cancelMeeting',
-        )}
+        confirmLabel={
+          cancellationIsSilent
+            ? undefined
+            : t(
+                cancelChoiceScope === 'occurrence'
+                  ? 'dialogs.event.cancelChoice.cancelOccurrence'
+                  : cancelChoiceScope === 'this_and_future'
+                    ? 'dialogs.event.cancelChoice.cancelThisAndFuture'
+                    : 'dialogs.event.cancelChoice.cancelMeeting',
+              )
+        }
         onConfirm={() => {
+          // Asking the provider to send would ask for what it will not do.
+          const send = !cancellationIsSilent;
           if (cancelChoiceScope === 'occurrence') {
-            void performOccurrenceDelete(true);
+            void performOccurrenceDelete(send);
           } else if (cancelChoiceScope === 'this_and_future') {
-            void performThisAndFutureDelete(true);
+            void performThisAndFutureDelete(send);
           } else {
-            void performDelete(true);
+            void performDelete(send);
           }
         }}
-        extraActions={alwaysNotifies ? [] : [
+        extraActions={alwaysNotifies || cancellationIsSilent ? [] : [
           {
             label: t('dialogs.event.cancelChoice.removeSilently'),
             onClick: () => {

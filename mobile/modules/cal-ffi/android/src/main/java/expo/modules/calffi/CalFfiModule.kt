@@ -49,6 +49,7 @@ import uniffi.cal_ffi.stripSignature as uniffiStripSignature
 import uniffi.cal_ffi.applySignature as uniffiApplySignature
 import uniffi.cal_ffi.dayStart as uniffiDayStart
 import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
+import uniffi.cal_ffi.recurrenceSummary as uniffiRecurrenceSummary
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
@@ -194,6 +195,30 @@ class CalFfiModule : Module() {
    * frontend has to say that sentence — "take one of them out first" — and it
    * cannot, if all that arrives is an exception's `toString()`.
    */
+  /**
+   * Re-throw a refused event write with its code and its own message.
+   *
+   * An adapter says WHY it refused with a token the surfaces translate
+   * (`cal_core::WriteRefusal`: "reply-only-invitation: title"), and the
+   * desktop's Tauri layer hands that text over with a code. Without this the
+   * phone got Kotlin's `toString()` — "detail=reply-only-invitation: title" —
+   * under Expo's generic `ERR_UNEXPECTED`, so the shared translator matched
+   * nothing and a blind user heard the English token read out.
+   *
+   * The codes are the desktop's (`forbidden`, `conflict`, `network`), so one
+   * translator serves both surfaces.
+   */
+  private inline fun <T> eventCoded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Forbidden) {
+      throw CodedException("forbidden", e.detail, e)
+    } catch (e: StoreException.Conflict) {
+      throw CodedException("conflict", e.detail, e)
+    } catch (e: StoreException.Network) {
+      throw CodedException("network", e.detail, e)
+    }
+
   private inline fun <T> groupCoded(block: () -> T): T =
     try {
       block()
@@ -486,6 +511,11 @@ class CalFfiModule : Module() {
       uniffiSeriesShift(inputJson)
     }
 
+    // A repeat rule in words: keys and values the surface renders.
+    Function("recurrenceSummary") { inputJson: String ->
+      uniffiRecurrenceSummary(inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so
@@ -638,19 +668,19 @@ class CalFfiModule : Module() {
     }.runOnQueue(slowScope)
 
     AsyncFunction("createEventJson") { requestJson: String ->
-      host.createEventJson(requestJson)
+      eventCoded { host.createEventJson(requestJson) }
     }
 
     AsyncFunction("updateEventJson") { eventJson: String, previousCalendarId: String? ->
-      host.updateEventJson(eventJson, previousCalendarId)
+      eventCoded { host.updateEventJson(eventJson, previousCalendarId) }
     }
 
     AsyncFunction("deleteEvent") { id: String, calendarId: String?, sendCancellations: Boolean? ->
-      host.deleteEvent(id, calendarId, sendCancellations)
+      eventCoded { host.deleteEvent(id, calendarId, sendCancellations) }
     }
 
     AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String?, sendCancellations: Boolean ->
-      host.addEventExdateJson(id, occurrence, calendarId, sendCancellations)
+      eventCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
     }
 
     syncFunctions()
@@ -814,7 +844,7 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
-      host.respondToEvent(calendarId, eventId, status, sendResponse)
+      eventCoded { host.respondToEvent(calendarId, eventId, status, sendResponse) }
     }
 
     AsyncFunction("taskListMembersJson") { listId: String ->

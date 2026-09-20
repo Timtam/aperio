@@ -2257,28 +2257,83 @@ Siehe DESIGN §4.2.
   Wartet auf den Live-Test mit „Aperio R6 eigene“: Titel ändern, einen Gast
   hinzufügen und entfernen, den letzten entfernen, eine Serie ändern und ein
   Vorkommen löschen.
-  🚩 **Gestapelt auf #84, zusammen mit #83 zu mergen:** fremde iCloud-Einladungen
-  schreibgeschützt (77a), der Löschdialog sagt dort „Der Organisator bekommt
-  eine Absage“ (83b), eine lesbare Zusammenfassung der Wiederholung (84a), und
-  „nur diesen Termin“ einer iCloud-Serie als echte Ausnahme (79b). Dazu
-  übersetzen beide Oberflächen die Ablehnung des Servers: Ein Fehler
-  `forbidden` beginnt mit `reply-only-invitation:` oder `server-refused:`,
-  und heute liest der Screenreader diesen englischen Text vor.
+  ↻ **Fremde Einladungen sind schreibgeschützt** (77a, 83b, 84a), gestapelt
+  auf #84 und zusammen mit #83 zu mergen. Kalender auf einem Server mit
+  Terminplanung tragen `invitations_reply_only`; beide Editoren zeigen so
+  eine Besprechung schreibgeschützt (Antwort, eigene Erinnerungen, Klang,
+  Farbe, Beitreten, Verfügbarkeit, Löschen bleiben), CalDAV schreibt in so
+  einem Termin nur die VALARMs und lässt jede andere Zeile Byte für Byte
+  stehen, der Löschdialog sagt „Der Organisator bekommt eine Absage“, die
+  Wiederholung steht als Satz da (Kern-Regel mit Prüf-Datei, EN/DE), und
+  jede Ablehnung des Servers wird in beiden Oberflächen zu einem Satz.
+  `CACHE_GENERATION` 4. Offen bleibt „nur diesen Termin“ einer iCloud-Serie
+  als echte Ausnahme (79b, PR 3).
+  🚩 **Nach dem Live-Test zu klären (PR 2):**
+  - Nimmt iCloud es an, wenn ein Gast `X-APPLE-DEFAULT-ALARM` entfernt, und
+    setzt es den Standard-Hinweis danach wieder? Darauf ruht das Ersetzen der
+    Wecker.
+  - Schickt iCloud dem Organisator wirklich eine Absage, wenn ein Gast seine
+    Kopie oder ein einzelnes Vorkommen löscht? RFC 6638 führt `EXDATE` nicht
+    unter den erlaubten Änderungen eines Gastes; Apple macht es trotzdem
+    (86a: der Dialog sagt es schon jetzt).
+  - `EXDATE` einer Zeit-Serie wird weiter als UTC geschrieben, nicht mit
+    `TZID`; nur die Ganztagsform ist jetzt richtig.
+  - `respond_to_event` kennt nur die eine Adresse aus der Discovery, keine
+    Aliase, und gibt das neue ETag nicht zurück. Deshalb braucht ein Speichern
+    direkt nach dem Antworten einen frischen Stand: sonst meldet der Adapter
+    einen Konflikt, weil die Antwort das ETag schon weitergedreht hat.
+  - Ein CalDAV-Server ohne Terminplanung bleibt wie in #84: Der Editor sperrt
+    nicht, und `plan_block` lehnt eine geänderte Gästeliste ab.
+  - Auf einem farbfähigen Server versteckt der Editor die Farbe einer fremden
+    Einladung, statt sie geräte-lokal zu halten.
+  - `WKST` zählt nur in der einen Form, in der es die Wochen verschiebt.
+  - Eine Serie mit Zone wird in Wanduhr-Zeit ausgeklappt, ihr `UNTIL` bleibt
+    aber ein echter Zeitpunkt (`shared/recurrence.ts`, `zonedOccurrences`).
+    Ein Abendtermin am Tag der Grenze fällt dadurch um den Zonen-Versatz
+    heraus — im Kalender und im Satz „letzter Termin am …“ gleichermaßen.
+    Gefunden bei der Prüfung von #85; der Satz sagt, was die Ansicht zeigt.
+  - Die Wiederholungs-Zusammenfassung erscheint auch im normalen Editor, wenn
+    die gespeicherte Regel nicht die ist, die der Picker zurückbauen würde
+    (87b, gebaut: `pickerMisreadsRule`). Die Bedienelemente selbst halten
+    solche Regeln weiter nicht; wer eines anfasst, speichert die Regel des
+    Pickers.
+  - iOS-Volltastatur erreicht die schreibgeschützten Zeilen des Handys nicht;
+    VoiceOver und TalkBack erreichen sie.
+  🚩 **Eigener PR nach dem Stapel (89a):** Die erzeugten Kotlin-Bindings
+  (`mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt`)
+  nicht mehr einchecken. Die Android-CI erzeugt sie ohnehin vor jedem Bau neu,
+  und die Swift-Bindings liegen auch nicht im Repo. Umzustellen sind: Datei
+  loeschen und ignorieren, der lokale Android-Lauf erzeugt sie neben dem
+  frischen `.so`, und `mobile/scripts/check-ffi-bridges.mjs` erzeugt sie selbst,
+  statt die eingecheckte Fassung zu vergleichen. Anlass: Eine veraltete Datei
+  faellt sonst erst beim Checksum-Fehler auf dem Geraet auf.
   🚩 **Offen nach #84:**
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine
     Gäste (81b). Richtiges Verschieben (WebDAV MOVE) erst nach einer Messung.
-  - `SEQUENCE` geht wörtlich zurück; ob iCloud ihn selbst hochzählt, ist nicht
-    gemessen. Ebenso `SCHEDULE-AGENT=CLIENT` (ein stilles Speichern bleibt
-    unmöglich, solange Aperio kein iTIP verschickt).
+  - ✅ `SEQUENCE` geht wörtlich zurück — **iCloud zählt ihn selbst hoch**
+    (Live-Runde 6: 0 vor dem Speichern, 1 danach). Aperio rührt ihn nicht an.
+  - ✅ `SCHEDULE-AGENT` ist **gemessen** (Live-Runde 6) und wird gelesen: Eine
+    per `.ics` importierte Einladung trägt `SCHEDULE-AGENT=CLIENT` am
+    `ORGANIZER` und `NONE` an der eigenen Zeile, und iCloud verschickt dann
+    weder die Antwort noch die Absage. Der Termin trägt das als
+    `scheduling_silenced` (Cache-Generation 5), und die Sätze sagen dann, dass
+    niemand erfährt (98). Ein stilles Speichern bleibt trotzdem unmöglich,
+    solange Aperio kein iTIP selbst verschickt.
   - Ein CalDAV-Server ohne Terminplanung speichert neue Gäste nicht als Daten.
-  - Die `EXDATE` einer ganztägigen Serie wird als UTC-Zeitpunkt geschrieben,
-    nicht als Datum.
   - Der VTODO-Neubau in `tasks.rs` verwirft `ORGANIZER` und `ATTENDEE` ebenso.
   - Microsoft 365: dass Graph bei jeder Änderung und beim Löschen mailt, steht
     in Microsofts Doku; gemessen ist es nicht.
-  - Eigenschaften, die Aperio nicht kennt (etwa `X-APPLE-TRAVEL-ADVISORY-…`),
-    gehen beim Neubau eines Termins verloren; das gehört zu 58a.
+  - `SCHEDULE-AGENT` an der Zeile EINES Gastes (statt am Organisator oder an
+    der eigenen) wird nicht gelesen: dann mailt der Server den anderen Gästen
+    weiterhin, und der Satz gilt für sie. Ungemessen, bisher nie gesehen.
+  - Eigenschaften, die Aperio nicht kennt, gehen beim Neubau eines Termins
+    verloren; das gehört zu 58a. Live-Runde 6 nennt sie beim Namen: Ein
+    Speichern der eigenen iCloud-Besprechung ersetzte
+    `DTSTART;TZID=Europe/Berlin:20261109T160000` durch
+    `DTSTART:20261109T150000Z` (derselbe Zeitpunkt, aber die `VTIMEZONE` ist
+    weg — das ist 18a) und verwarf `TRANSP`, `X-APPLE-CREATOR-IDENTITY` und
+    `X-APPLE-CREATOR-TEAM-IDENTITY`.
   🚩 **Den Organisator zeigen** (73a), eigene Aufgabe: eine Zeile
   „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn

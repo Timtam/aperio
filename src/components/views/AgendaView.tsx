@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { CalendarEvent } from '../../api/types';
@@ -66,7 +66,17 @@ export function AgendaView() {
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events: allEvents, calendarById, loading } = useEvents(range);
-  const { openForEvent: openEventMenu } = useChipContextMenu();
+  // The chip menu hands a locked invitation's delete to this view's own
+  // flow, which asks first (83b). The view defines it further down, so the
+  // menu gets a stable wrapper.
+  const requestDeleteRef = useRef<(event: CalendarEvent) => void>(() => {});
+  const requestDeleteFromMenu = useCallback(
+    (event: CalendarEvent) => requestDeleteRef.current(event),
+    [],
+  );
+  const { openForEvent: openEventMenu } = useChipContextMenu({
+    requestDelete: requestDeleteFromMenu,
+  });
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -208,6 +218,8 @@ export function AgendaView() {
       setConfirmTarget(ev);
     }
   }, []);
+  // The menu's hand-off points at this view's flow.
+  requestDeleteRef.current = requestDelete;
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

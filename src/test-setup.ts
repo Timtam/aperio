@@ -55,6 +55,7 @@ import {
   installTaskSettingsRules,
   installTaskPriorityRules,
   installTextCollation,
+  installRecurrenceSummaryRules,
   installSeriesShiftRules,
   installSeriesClockRules,
   installZoneListRules,
@@ -99,6 +100,7 @@ import {
   markCoreRulesReady,
   normalPriority,
   priorityRank,
+  recurrenceSummaryJson,
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
@@ -171,6 +173,7 @@ installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson 
 installDayStartRules({ dayStartJson });
 installTaskSettingsRules({ taskSettingsJson });
 installSeriesShiftRules({ seriesShiftJson });
+installRecurrenceSummaryRules({ recurrenceSummaryJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,

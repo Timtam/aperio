@@ -1,0 +1,944 @@
+{
+  "note": "Decision 84a: a repeat rule in words. Each row is one rule as a provider writes it. `expected` is what cal_core::recurrence_summary answers, checked by the core and by the desktop through the WASM door; `en` and `de` are the sentence shared/recurrenceSummary.ts renders from it against the real locale files. The phone runs the same door and the same renderer.",
+  "rows": [
+    {
+      "name": "none_for_empty_rule",
+      "rrule": "",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "none"
+      },
+      "en": "",
+      "de": ""
+    },
+    {
+      "name": "daily",
+      "rrule": "FREQ=DAILY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.every.day"
+        }
+      },
+      "en": "every day",
+      "de": "jeden Tag"
+    },
+    {
+      "name": "every_3_days",
+      "rrule": "FREQ=DAILY;INTERVAL=3",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.interval.day",
+          "count": 3
+        }
+      },
+      "en": "every 3 days",
+      "de": "alle 3 Tage"
+    },
+    {
+      "name": "weekly_from_start",
+      "rrule": "FREQ=WEEKLY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday"
+          ]
+        }
+      },
+      "en": "every Monday",
+      "de": "jeden Montag"
+    },
+    {
+      "name": "weekly_monday_5_times",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;COUNT=5",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyEnd",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday"
+          ]
+        },
+        "end": {
+          "key": "recurrenceSummary.end.count",
+          "count": 5
+        }
+      },
+      "en": "every Monday, 5 times",
+      "de": "jeden Montag, 5 Mal"
+    },
+    {
+      "name": "weekly_once",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;COUNT=1",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyEnd",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday"
+          ]
+        },
+        "end": {
+          "key": "recurrenceSummary.end.count",
+          "count": 1
+        }
+      },
+      "en": "every Monday, once",
+      "de": "jeden Montag, einmal"
+    },
+    {
+      "name": "weekly_days_are_sorted_monday_first",
+      "rrule": "FREQ=WEEKLY;BYDAY=WE,MO",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday",
+            "wednesday"
+          ]
+        }
+      },
+      "en": "every Monday and Wednesday",
+      "de": "jeden Montag und Mittwoch"
+    },
+    {
+      "name": "weekly_three_days",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday",
+            "wednesday",
+            "friday"
+          ]
+        }
+      },
+      "en": "every Monday, Wednesday and Friday",
+      "de": "jeden Montag, Mittwoch und Freitag"
+    },
+    {
+      "name": "workdays",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.workdays"
+        }
+      },
+      "en": "every weekday, Monday to Friday",
+      "de": "jeden Werktag, Montag bis Freitag"
+    },
+    {
+      "name": "daily_workweek_byday",
+      "rrule": "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.workdays"
+        }
+      },
+      "en": "every weekday, Monday to Friday",
+      "de": "jeden Werktag, Montag bis Freitag"
+    },
+    {
+      "name": "every_2_weeks_on_tue_thu",
+      "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH",
+      "start": "2026-06-16",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.interval.week",
+          "count": 2
+        },
+        "on": {
+          "key": "recurrenceSummary.on.weekdays",
+          "weekdays": [
+            "tuesday",
+            "thursday"
+          ]
+        }
+      },
+      "en": "every 2 weeks on Tuesday and Thursday",
+      "de": "alle 2 Wochen am Dienstag und Donnerstag"
+    },
+    {
+      "name": "apple_interval_1_wkst_su",
+      "rrule": "FREQ=WEEKLY;BYDAY=SU,MO;WKST=SU",
+      "start": "2026-06-14",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday",
+            "sunday"
+          ]
+        }
+      },
+      "en": "every Monday and Sunday",
+      "de": "jeden Montag und Sonntag"
+    },
+    {
+      "name": "monthly_from_start",
+      "rrule": "FREQ=MONTHLY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.monthDay",
+          "count": 1,
+          "month_days": [
+            15
+          ]
+        }
+      },
+      "en": "every month on day 15",
+      "de": "jeden Monat am 15."
+    },
+    {
+      "name": "monthly_days_list",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=15,1",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.monthDay",
+          "count": 2,
+          "month_days": [
+            1,
+            15
+          ]
+        }
+      },
+      "en": "every month on days 1 and 15",
+      "de": "jeden Monat am 1. und 15."
+    },
+    {
+      "name": "monthly_last_day",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+      "start": "2026-06-30",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.lastDay"
+        }
+      },
+      "en": "every month on the last day",
+      "de": "jeden Monat am letzten Tag"
+    },
+    {
+      "name": "monthly_second_tuesday",
+      "rrule": "FREQ=MONTHLY;BYDAY=2TU",
+      "start": "2026-06-09",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthWeekday",
+          "weekday": "tuesday",
+          "ordinal": 2
+        }
+      },
+      "en": "every month on the second Tuesday",
+      "de": "jeden Monat am zweiten Dienstag"
+    },
+    {
+      "name": "monthly_last_friday",
+      "rrule": "FREQ=MONTHLY;BYDAY=-1FR",
+      "start": "2026-06-26",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthWeekday",
+          "weekday": "friday",
+          "ordinal": -1
+        }
+      },
+      "en": "every month on the last Friday",
+      "de": "jeden Monat am letzten Freitag"
+    },
+    {
+      "name": "monthly_fifth_friday",
+      "rrule": "FREQ=MONTHLY;BYDAY=5FR",
+      "start": "2026-05-29",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthWeekday",
+          "weekday": "friday",
+          "ordinal": 5
+        }
+      },
+      "en": "every month on the fifth Friday",
+      "de": "jeden Monat am fünften Freitag"
+    },
+    {
+      "name": "ews_last_weekday_bysetpos",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+      "start": "2026-06-30",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthOfSet",
+          "ordinal": -1,
+          "set": "weekday"
+        }
+      },
+      "en": "every month on the last weekday",
+      "de": "jeden Monat am letzten Werktag"
+    },
+    {
+      "name": "ews_first_weekend_day",
+      "rrule": "FREQ=MONTHLY;BYDAY=SA,SU;BYSETPOS=1",
+      "start": "2026-06-06",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthOfSet",
+          "ordinal": 1,
+          "set": "weekend_day"
+        }
+      },
+      "en": "every month on the first weekend day",
+      "de": "jeden Monat am ersten Wochenendtag"
+    },
+    {
+      "name": "ews_all_seven_bysetpos_is_a_month_day",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYSETPOS=3",
+      "start": "2026-06-03",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.monthDay",
+          "count": 1,
+          "month_days": [
+            3
+          ]
+        }
+      },
+      "en": "every month on day 3",
+      "de": "jeden Monat am 3."
+    },
+    {
+      "name": "every_2_months_on_day_1",
+      "rrule": "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1",
+      "start": "2026-06-01",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.interval.month",
+          "count": 2
+        },
+        "on": {
+          "key": "recurrenceSummary.on.monthDay",
+          "count": 1,
+          "month_days": [
+            1
+          ]
+        }
+      },
+      "en": "every 2 months on day 1",
+      "de": "alle 2 Monate am 1."
+    },
+    {
+      "name": "yearly_from_start",
+      "rrule": "FREQ=YEARLY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.year"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.dateInYear",
+          "month_days": [
+            15
+          ],
+          "month": 6
+        }
+      },
+      "en": "every year on June 15",
+      "de": "jedes Jahr am 15. Juni"
+    },
+    {
+      "name": "yearly_march_17",
+      "rrule": "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=17",
+      "start": "2026-03-17",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.year"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.dateInYear",
+          "month_days": [
+            17
+          ],
+          "month": 3
+        }
+      },
+      "en": "every year on March 17",
+      "de": "jedes Jahr am 17. März"
+    },
+    {
+      "name": "yearly_second_tuesday_of_march",
+      "rrule": "FREQ=YEARLY;BYMONTH=3;BYDAY=2TU",
+      "start": "2026-03-10",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.year"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthWeekdayInMonth",
+          "weekday": "tuesday",
+          "ordinal": 2,
+          "month": 3
+        }
+      },
+      "en": "every year on the second Tuesday of March",
+      "de": "jedes Jahr am zweiten Dienstag im März"
+    },
+    {
+      "name": "hourly_every_6_five_times",
+      "rrule": "FREQ=HOURLY;INTERVAL=6;COUNT=5",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyEnd",
+        "every": {
+          "key": "recurrenceSummary.interval.hour",
+          "count": 6
+        },
+        "end": {
+          "key": "recurrenceSummary.end.count",
+          "count": 5
+        }
+      },
+      "en": "every 6 hours, 5 times",
+      "de": "alle 6 Stunden, 5 Mal"
+    },
+    {
+      "name": "minutely",
+      "rrule": "FREQ=MINUTELY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.every.minute"
+        }
+      },
+      "en": "every minute",
+      "de": "jede Minute"
+    },
+    {
+      "name": "secondly",
+      "rrule": "FREQ=SECONDLY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.every.second"
+        }
+      },
+      "en": "every second",
+      "de": "jede Sekunde"
+    },
+    {
+      "name": "until_last_on",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=1,15;UNTIL=20270331T235959Z",
+      "start": "2026-06-01",
+      "last_day": "2027-03-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOnEnd",
+        "every": {
+          "key": "recurrenceSummary.every.month"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.monthDay",
+          "count": 2,
+          "month_days": [
+            1,
+            15
+          ]
+        },
+        "end": {
+          "key": "recurrenceSummary.end.lastOn",
+          "date": "2027-03-15"
+        }
+      },
+      "en": "every month on days 1 and 15, last on March 15, 2027",
+      "de": "jeden Monat am 1. und 15., letzter Termin am 15. März 2027"
+    },
+    {
+      "name": "until_without_last_day",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;UNTIL=20270331T235959Z",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyEnd",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday"
+          ]
+        },
+        "end": {
+          "key": "recurrenceSummary.end.bounded"
+        }
+      },
+      "en": "every Monday, with an end date",
+      "de": "jeden Montag, mit Enddatum"
+    },
+    {
+      "name": "lowercase_rule_with_prefix",
+      "rrule": "rrule:freq=weekly;byday=tu",
+      "start": "2026-06-16",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "tuesday"
+          ]
+        }
+      },
+      "en": "every Tuesday",
+      "de": "jeden Dienstag"
+    },
+    {
+      "name": "trailing_semicolon",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.weekly.onDays",
+          "weekdays": [
+            "monday"
+          ]
+        }
+      },
+      "en": "every Monday",
+      "de": "jeden Montag"
+    },
+    {
+      "name": "duplicate_part",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;byday=TU",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unreadable"
+      },
+      "en": "Repeats by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "no_freq",
+      "rrule": "BYDAY=MO",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unreadable"
+      },
+      "en": "Repeats by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "interval_zero",
+      "rrule": "FREQ=WEEKLY;INTERVAL=0",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unreadable",
+        "unit": "week"
+      },
+      "en": "Repeats weekly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich wöchentlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "bogus_part",
+      "rrule": "FREQ=WEEKLY;X-APPLE-THING=1",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "week"
+      },
+      "en": "Repeats weekly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich wöchentlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "byweekno",
+      "rrule": "FREQ=YEARLY;BYWEEKNO=3",
+      "start": "2026-01-12",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "year"
+      },
+      "en": "Repeats yearly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich jährlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "byyearday",
+      "rrule": "FREQ=YEARLY;BYYEARDAY=100",
+      "start": "2026-04-10",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "year"
+      },
+      "en": "Repeats yearly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich jährlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "byhour",
+      "rrule": "FREQ=DAILY;BYHOUR=9,17",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "day"
+      },
+      "en": "Repeats daily by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich täglich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "count_zero",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;COUNT=0",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "no_occurrences",
+        "unit": "week"
+      },
+      "en": "Repeats weekly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich wöchentlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "count_and_until",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO;COUNT=3;UNTIL=20270331T235959Z",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "count_and_until",
+        "unit": "week"
+      },
+      "en": "Repeats weekly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich wöchentlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "daily_interval_with_byday",
+      "rrule": "FREQ=DAILY;INTERVAL=2;BYDAY=MO",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "day"
+      },
+      "en": "Repeats daily by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich täglich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "monthly_limited_months",
+      "rrule": "FREQ=MONTHLY;BYMONTH=3;BYMONTHDAY=1",
+      "start": "2026-03-01",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "limited_months",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "monthly_plain_byday",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO",
+      "start": "2026-06-01",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "mixed_month_days",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=20,-2",
+      "start": "2026-06-20",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "mixed_month_days",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "several_ordinals",
+      "rrule": "FREQ=MONTHLY;BYDAY=1MO,3MO",
+      "start": "2026-06-01",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "several_positions",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "third_last_weekday",
+      "rrule": "FREQ=MONTHLY;BYDAY=-3FR",
+      "start": "2026-06-12",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "ordinal",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "yearly_ordinal_without_month",
+      "rrule": "FREQ=YEARLY;BYDAY=2TU",
+      "start": "2026-01-13",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "year"
+      },
+      "en": "Repeats yearly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich jährlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "two_weekly_days_with_sunday_week_start",
+      "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=SU",
+      "start": "2026-06-14",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "week_start",
+        "unit": "week"
+      },
+      "en": "Repeats weekly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich wöchentlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "set_position_over_an_unnamed_set",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO,WE;BYSETPOS=2",
+      "start": "2026-06-03",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "set_position",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "hourly",
+      "rrule": "FREQ=HOURLY",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.every.hour"
+        }
+      },
+      "en": "every hour",
+      "de": "jede Stunde"
+    },
+    {
+      "name": "every_30_seconds",
+      "rrule": "FREQ=SECONDLY;INTERVAL=30",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.interval.second",
+          "count": 30
+        }
+      },
+      "en": "every 30 seconds",
+      "de": "alle 30 Sekunden"
+    },
+    {
+      "name": "every_15_minutes",
+      "rrule": "FREQ=MINUTELY;INTERVAL=15",
+      "start": "2026-06-15",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.every",
+        "every": {
+          "key": "recurrenceSummary.interval.minute",
+          "count": 15
+        }
+      },
+      "en": "every 15 minutes",
+      "de": "alle 15 Minuten"
+    },
+    {
+      "name": "every_2_years_on_christmas_eve",
+      "rrule": "FREQ=YEARLY;INTERVAL=2;BYMONTH=12;BYMONTHDAY=24",
+      "start": "2026-12-24",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.interval.year",
+          "count": 2
+        },
+        "on": {
+          "key": "recurrenceSummary.on.dateInYear",
+          "month_days": [
+            24
+          ],
+          "month": 12
+        }
+      },
+      "en": "every 2 years on December 24",
+      "de": "alle 2 Jahre am 24. Dezember"
+    },
+    {
+      "name": "yearly_last_workday_of_december",
+      "rrule": "FREQ=YEARLY;BYMONTH=12;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+      "start": "2026-12-31",
+      "expected": {
+        "outcome": "described",
+        "key": "recurrenceSummary.sentence.everyOn",
+        "every": {
+          "key": "recurrenceSummary.every.year"
+        },
+        "on": {
+          "key": "recurrenceSummary.on.nthOfSetInMonth",
+          "ordinal": -1,
+          "month": 12,
+          "set": "weekday"
+        }
+      },
+      "en": "every year on the last weekday of December",
+      "de": "jedes Jahr am letzten Werktag im Dezember"
+    },
+    {
+      "name": "friday_the_thirteenth",
+      "rrule": "FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13",
+      "start": "2026-11-13",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "last_monday_written_as_a_day_range",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=25,26,27,28,29,30,31",
+      "start": "2026-11-30",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "month"
+      },
+      "en": "Repeats monthly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich monatlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "yearly_month_day_without_a_month",
+      "rrule": "FREQ=YEARLY;BYMONTHDAY=17",
+      "start": "2026-06-17",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "year"
+      },
+      "en": "Repeats yearly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich jährlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    },
+    {
+      "name": "yearly_set_position_over_every_day",
+      "rrule": "FREQ=YEARLY;BYMONTH=3;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYSETPOS=-1",
+      "start": "2026-03-31",
+      "expected": {
+        "outcome": "undescribed",
+        "reason": "unknown_part",
+        "unit": "year"
+      },
+      "en": "Repeats yearly by a rule Aperio cannot put into words.",
+      "de": "Wiederholt sich jährlich nach einer Regel, die Aperio nicht in Worte fassen kann."
+    }
+  ]
+}

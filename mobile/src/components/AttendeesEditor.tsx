@@ -54,6 +54,7 @@ export function AttendeesEditor({
   notice,
   noticeSentence,
   addedNote,
+  readOnly = false,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
@@ -70,6 +71,10 @@ export function AttendeesEditor({
    *  mail them (decision 76a). One announcement, so neither cuts the other
    *  off. */
   addedNote?: (next: string[]) => string | null;
+  /** A meeting somebody else organizes: the guests are shown, not edited
+   *  (decision 77a). The list stays readable; nothing that would write it
+   *  is rendered. */
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -134,6 +139,7 @@ export function AttendeesEditor({
   // appeared without it interrupting their typing.
   const lastAnnounced = useRef<number>(-1);
   useEffect(() => {
+    if (readOnly) return;
     const trimmed = input.trim();
     if (trimmed.length < 1) {
       setSuggestions([]);
@@ -172,7 +178,7 @@ export function AttendeesEditor({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [input, value, t]);
+  }, [input, value, t, readOnly]);
 
   const remove = (i: number) => {
     const removed = value[i];
@@ -206,19 +212,24 @@ export function AttendeesEditor({
               >
                 {attendee}
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('dialogs.event.attendees.removeLabel', { name: attendee })}
-                onPress={() => remove(i)}
-                style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.removeButtonText}>{t('mobile.delete')}</Text>
-              </Pressable>
+              {!readOnly && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('dialogs.event.attendees.removeLabel', {
+                    name: attendee,
+                  })}
+                  onPress={() => remove(i)}
+                  style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.removeButtonText}>{t('mobile.delete')}</Text>
+                </Pressable>
+              )}
             </View>
           ))}
         </View>
       )}
 
+      {!readOnly && (
       <View style={styles.addRow}>
         <TextInput
           style={styles.input}
@@ -242,8 +253,9 @@ export function AttendeesEditor({
           <Text style={styles.addButtonText}>{t('mobile.add')}</Text>
         </Pressable>
       </View>
+      )}
 
-      {suggestions.length > 0 && (
+      {!readOnly && suggestions.length > 0 && (
         <View
           accessibilityRole="list"
           accessibilityLabel={t('dialogs.event.attendees.popupLabel')}
@@ -286,7 +298,7 @@ export function AttendeesEditor({
         </Text>
       )}
 
-      {notice === 'always' && (
+      {(notice === 'always' || notice === 'silent') && (
         <Text style={styles.switchLabel} accessible accessibilityRole="text">
           {noticeSentence}
         </Text>

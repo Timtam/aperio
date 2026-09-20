@@ -158,6 +158,7 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         // stay host-local overrides.
         supports_event_color: false,
         always_notifies_attendees: false,
+        invitations_reply_only: false,
         notifier_name: None,
         color_label: None,
         id: folder.folder_id,
@@ -1850,6 +1851,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         organizer: people.organizer,
         attendee_responses: people.attendee_responses,
         cancelled,
+        scheduling_silenced: false,
     })
 }
 
@@ -4111,6 +4113,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
@@ -4946,6 +4949,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let (set, _del) = event_to_update_field_xml(&ev).unwrap();
         assert!(
@@ -5211,6 +5215,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));

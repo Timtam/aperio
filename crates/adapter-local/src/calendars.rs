@@ -70,6 +70,7 @@ impl LocalAdapter {
             // event row), so the host routes recolors through update_event.
             supports_event_color: true,
             always_notifies_attendees: false,
+            invitations_reply_only: false,
             notifier_name: None,
         })
     }
@@ -191,6 +192,7 @@ impl LocalAdapter {
             supports_scheduling: false,
             supports_event_color: true,
             always_notifies_attendees: false,
+            invitations_reply_only: false,
             notifier_name: None,
         }))
     }
@@ -284,6 +286,7 @@ impl CalendarFeature for LocalAdapter {
                     supports_scheduling: false,
                     supports_event_color: true,
                     always_notifies_attendees: false,
+                    invitations_reply_only: false,
                     notifier_name: None,
                     id: id?,
                     name: name?,
@@ -590,6 +593,7 @@ fn persist_new_event(
         organizer: None,
         attendee_responses: Vec::new(),
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 
@@ -649,6 +653,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         organizer: None,
         attendee_responses: Vec::new(),
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 

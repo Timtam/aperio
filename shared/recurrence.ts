@@ -821,3 +821,50 @@ export function splitRRuleForEdit(
   );
   return { oldRule, newRule: newParts.join(';') };
 }
+
+/**
+ * The day the last occurrence of a bounded series falls on, `YYYY-MM-DD` on
+ * the series' own clock, or `null`.
+ *
+ * `UNTIL` is a BOUND, not an occurrence, and three providers write it three
+ * ways: Aperio and Exchange as the end of the day in UTC, Apple as the local
+ * end of day expressed in UTC, and a truncation as one second before the cut.
+ * Reading the digits would name a day the series does not meet, one day out
+ * for an invitation from west of Greenwich. So the day is asked of the same
+ * expander that decides which occurrences the user sees on screen (decision
+ * 85a), and the repeat sentence then agrees with the calendar.
+ *
+ * `null` for a rule without `UNTIL`, for a `COUNT` rule (whose sentence says
+ * how often instead), for a sub-daily rule (whose bound would iterate by the
+ * minute) and when nothing falls before the bound.
+ */
+export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
+  const body = event.recurrence?.rrule?.trim();
+  if (!body) return null;
+  const upper = body.toUpperCase();
+  if (!upper.includes('UNTIL=') || upper.includes('COUNT=')) return null;
+  if (/FREQ=(SECONDLY|MINUTELY|HOURLY)/.test(upper)) return null;
+  const tzid = zoneOrNull(event.recurrence?.tzid);
+  const dtstart = new Date(event.start);
+  if (Number.isNaN(dtstart.getTime())) return null;
+  try {
+    // Built exactly as `zonedOccurrences` builds it — a zoned rule is
+    // iterated in WALL-CLOCK space — so this answers with the occurrence the
+    // views show. rrule.js applies the rule's own `UNTIL` while it iterates,
+    // and a zoned rule's `UNTIL` is a real instant read in that wall-clock
+    // space: an evening occurrence on the bound's own day can fall outside it
+    // by the zone's offset. That is the expander's reading, in the calendar
+    // and here alike, and this sentence is about what the calendar shows.
+    const rule = buildRule(body, tzid ? realToWall(dtstart, tzid) : dtstart);
+    const until = rule.options.until;
+    if (!until) return null;
+    const last = rule.before(until, true);
+    if (!last) return null;
+    // Both readings land on the same digits: a zoned rule answers in wall
+    // clock, which already IS the series' clock, and a rule without a zone
+    // answers in UTC, which is the clock `expandEvent` reads it on.
+    return last.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}

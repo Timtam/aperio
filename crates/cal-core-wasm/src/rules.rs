@@ -339,6 +339,11 @@ pub fn series_shift(input_json: &str) -> Result<String, WireError> {
     cal_core::series_shift_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::recurrenceSummary`].
+pub fn recurrence_summary(input_json: &str) -> Result<String, WireError> {
+    cal_core::recurrence_summary_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

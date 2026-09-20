@@ -260,6 +260,22 @@ pub fn guard_create(event: &mut NewEvent) {
     event.send_invitations &= !event.organized_elsewhere && !event.attendees.is_empty();
 }
 
+/// The invitees a copy in ANOTHER calendar gets: none, when the event it was
+/// copied from is somebody else's meeting (decision 81b).
+///
+/// Moving such a meeting is a create and a delete. The guests belong to the
+/// organizer's copy — the new one would look like a meeting this account
+/// invited them to, and nobody would ever be told of it. A copy that stays
+/// where it is (an occurrence carved out, a duplicate, a carried copy) keeps
+/// the list the editor showed: it is the same meeting in the same place, and
+/// dropping its people would lose what the user can see.
+pub fn invitees_of_moved_copy(event: &mut NewEvent) {
+    if event.organized_elsewhere {
+        event.attendees.clear();
+        event.send_invitations = false;
+    }
+}
+
 /// Split an attendee entry into an optional display name and an email.
 ///
 /// Recognises `"Display Name <email@host>"` (the inner address is taken
@@ -374,6 +390,7 @@ mod tests {
                 organized_elsewhere: false,
                 attendee_responses: Vec::new(),
                 cancelled: false,
+                scheduling_silenced: false,
             }
         }
 
@@ -623,11 +640,30 @@ mod tests {
             new.send_invitations = true;
             new.organized_elsewhere = true;
             guard_create(&mut new);
-            assert_eq!(new.attendees, ["bob@x"]);
+            assert_eq!(
+                new.attendees,
+                ["bob@x"],
+                "a copy that stays where it is keeps the list the editor showed"
+            );
             assert!(
                 !new.send_invitations,
                 "a copy of someone else's meeting notifies nobody"
             );
+
+            // Only a copy in ANOTHER calendar loses them: there it would look
+            // like a meeting this account invited them to (81b).
+            invitees_of_moved_copy(&mut new);
+            assert!(new.attendees.is_empty());
+
+            // The account's own meeting keeps its guests when it is copied or
+            // moved: they were invited by this account.
+            new.attendees = vec!["bob@x".into()];
+            new.send_invitations = true;
+            new.organized_elsewhere = false;
+            new.organizer = None;
+            guard_create(&mut new);
+            assert_eq!(new.attendees, ["bob@x"]);
+            assert!(new.send_invitations);
         }
     }
 }

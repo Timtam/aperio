@@ -6,11 +6,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { differenceInCalendarDays } from 'date-fns';
 
 import {
+  invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
   organizerOf,
   seriesDayKey,
   shiftSeriesRule,
+  type NoticeCalendar,
   type ShiftRefusal,
 } from '@aperio/shared';
 
@@ -365,8 +367,9 @@ export async function moveEventToDay(
   event: CalendarEvent,
   targetDayKey: string,
   scope: MoveCopyScope = 'series',
+  sourceCalendar?: NoticeCalendar | null,
 ): Promise<boolean> {
-  return moveEventToSlot(event, targetDayKey, null, scope);
+  return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar);
 }
 
 /**
@@ -391,7 +394,15 @@ export async function moveEventToSlot(
   targetDayKey: string,
   minuteOfDay: number | null,
   scope: MoveCopyScope = 'series',
+  sourceCalendar?: NoticeCalendar | null,
 ): Promise<boolean> {
+  // 77a: only the organizer moves their meeting. This is the only place that
+  // can say so for a dragged OCCURRENCE — carving one out writes a new event
+  // and an EXDATE, so neither the host nor the adapter ever sees an update to
+  // refuse, and the organizer would get a decline for a drag.
+  if (invitationLocked(sourceCalendar, event)) {
+    throw new InvitationLockedError(event.title);
+  }
   const [y, m, d] = targetDayKey.split('-').map(Number);
   if (!y || !m || !d) return false;
   const delta = differenceInCalendarDays(
@@ -483,6 +494,18 @@ export async function moveEventToSlot(
 }
 
 export type { ShiftRefusal };
+
+/** Moving someone else's meeting to another day or time was refused (77a):
+ *  only the organizer may. The surface says so, naming the meeting. */
+export class InvitationLockedError extends Error {
+  readonly title: string;
+
+  constructor(title: string) {
+    super(`"${title}" is organized by someone else; nothing was moved`);
+    this.name = 'InvitationLockedError';
+    this.title = title;
+  }
+}
 
 /** Moving a whole series was refused: its rule cannot move by whole days. The
  *  surface says why and offers to move only the occurrence. */

@@ -5,6 +5,7 @@ import {
   carryOnto,
   firstOccurrenceFrom,
   futureCarryRow,
+  invitationLocked,
   occurrenceCarryRow,
   organizerOf,
   planCarry,
@@ -187,6 +188,9 @@ export function EventGroupCarryDialog({
     setBusy(true);
     setError(null);
     const failed: CarryTarget[] = [];
+    // Copies somebody else organizes: among the ones that did not change, and
+    // the report says why (77a).
+    const lockedOut: CarryTarget[] = [];
     // The rows created so far, to be joined into a group of their own — the
     // earlier passes' included, so a retry ties the whole set together.
     const created: NewGroupMember[] = [...createdRows];
@@ -199,6 +203,19 @@ export function EventGroupCarryDialog({
         if (current == null) {
           // The copy is gone from under us. Reported, not silently counted.
           failed.push(target);
+          continue;
+        }
+        // A copy on a calendar that takes only its attendee's own changes is
+        // not written: the provider would refuse it, and half a carry is the
+        // state this dialog exists to prevent.
+        if (
+          invitationLocked(
+            calendars.find((c) => c.id === target.calendar_id),
+            current,
+          )
+        ) {
+          failed.push(target);
+          lockedOut.push(target);
           continue;
         }
         if (scope === 'occurrence' && occurrence) {
@@ -423,8 +440,19 @@ export function EventGroupCarryDialog({
       const names = failed.map((target) => calendarName(target.calendar_id));
       setOutcome({ kind: 'partly', done, failed });
       setPending(failed);
+      // One announcement, not two: the live region keeps only the last of
+      // two in the same frame.
+      const why = lockedOut
+        .map((target) =>
+          t('dialogs.eventGroupCarry.skippedInvitation', {
+            calendar: calendarName(target.calendar_id),
+          }),
+        )
+        .join(' ');
       announce(
-        t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') }),
+        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${
+          why === '' ? '' : ` ${why}`
+        }`,
       );
       // Stays open. A half-carried group is exactly the state this feature
       // exists to prevent, so the user has to see it and can retry the rest.

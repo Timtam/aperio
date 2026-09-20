@@ -3,8 +3,24 @@ import { act, render, screen } from '@testing-library/react';
 
 import type { CalendarEvent } from '../api/types';
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+const { invokeMock, store } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  // Which calendar a row came from decides whether its editor is read-only
+  // (77a), so the provider reads the calendar store.
+  store: {
+    calendars: [
+      { id: 'cal-1', name: 'Arbeit' },
+      {
+        id: 'cal-icloud',
+        name: 'iCloud',
+        supports_scheduling: true,
+        invitations_reply_only: true,
+      },
+    ],
+  },
+}));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+vi.mock('./calendarStoreContext', () => ({ useCalendarStore: () => store }));
 
 import { DialogStateProvider } from './DialogState';
 import { useDialogState } from './dialogStateContext';
@@ -25,6 +41,17 @@ const series = {
   title: 'Tabletten nehmen',
   start: '2026-07-01T08:30:00Z',
   recurrence: { rrule: 'FREQ=DAILY', exceptions: [] },
+} as unknown as CalendarEvent;
+
+/** An occurrence of a series somebody else organizes, on a provider that
+ *  takes only this account's own changes. */
+const invitationOccurrence = {
+  ...occurrence,
+  id: 'evt-3@2026-07-20T08:30:00Z',
+  series_id: 'evt-3',
+  calendar_id: 'cal-icloud',
+  organized_elsewhere: true,
+  title: 'Aperio R6 fremde',
 } as unknown as CalendarEvent;
 
 // A plain, non-recurring row (no series_id) opens the editor directly.
@@ -52,6 +79,12 @@ function Probe() {
       </button>
       <button type="button" onClick={() => d.openEventDialog(single)}>
         open-single
+      </button>
+      <button
+        type="button"
+        onClick={() => d.openEventDialog(invitationOccurrence)}
+      >
+        open-invitation
       </button>
       <button type="button" onClick={() => d.chooseEventEditScope('occurrence')}>
         choose-occ
@@ -224,5 +257,26 @@ describe('DialogState recurring-edit scope prompt', () => {
     expect(screen.getByTestId('kind').textContent).toBe('event');
     // No prompt ⇒ no forced scope; the editor falls back to its own default.
     expect(screen.getByTestId('scope').textContent).toBe('none');
+  });
+});
+
+describe('DialogState and an invitation somebody else organizes', () => {
+  it('opens the series it will save, with an explicit scope and no prompt (77a)', async () => {
+    // The series as `get_event_by_id` answers: the editor shows ITS date and
+    // rule, so the read-only fields describe the meeting the buttons act on.
+    const invitationSeries = {
+      ...invitationOccurrence,
+      id: 'evt-3',
+      series_id: undefined,
+    } as unknown as CalendarEvent;
+    invokeMock.mockResolvedValueOnce(invitationSeries);
+    renderProbe();
+    await click('open-invitation');
+    // No scope prompt: there is nothing to scope in a read-only editor. And
+    // the scope IS set, so the editor shows it and its Delete acts on it
+    // instead of skipping one occurrence without asking.
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    expect(screen.getByTestId('scope').textContent).toBe('series');
+    expect(screen.getByTestId('event').textContent).toBe('evt-3');
   });
 });

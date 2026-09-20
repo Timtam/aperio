@@ -25,7 +25,9 @@
 //!   only when the server schedules and the user notifies, as before.
 
 use cal_core::attendee::{invitee_write, normalize_address, parse, InviteeWrite};
+use cal_core::event_diff::EventField;
 use cal_core::Event;
+use cal_core::WriteRefusal;
 
 use crate::error::{CaldavError, CaldavResult};
 use crate::ical_raw::{
@@ -44,6 +46,11 @@ pub struct WriteCtx {
     pub schedules: bool,
     /// The `mailto:` a new meeting names as its ORGANIZER.
     pub organizer_address: Option<String>,
+    /// The server stores an event's colour (RFC 7986 `COLOR`). iCloud does
+    /// not, and the adapter clears the field on write there, so on an
+    /// invitation a colour it sent must not read as a change the account made
+    /// (77a).
+    pub writes_color: bool,
 }
 
 /// What a write does to a meeting's people, to be applied to the other
@@ -81,6 +88,33 @@ pub struct BlockPlan {
     pub attendee_copy: bool,
 }
 
+/// Whether `server_block` names an ORGANIZER that is not the account: the
+/// account's copy of someone else's meeting.
+///
+/// On a scheduling server such a copy takes only this account's own reply and
+/// alarms (RFC 6638 §3.2.2.1, decision 77a), so the write goes down a path of
+/// its own — before anything decides about invitees, because on an attendee's
+/// copy the invitees are the organizer's to change and a difference there is
+/// the organizer's doing.
+pub fn attendee_copy(server_block: &str, ctx: &WriteCtx) -> CaldavResult<bool> {
+    let lines = component_lines(server_block);
+    let Some(organizer) = lines.iter().find(|l| l.name == "ORGANIZER") else {
+        return Ok(false);
+    };
+    let identity = ctx.identity.as_ref().ok_or_else(identity_unknown)?;
+    Ok(!identity.names(&organizer.value, organizer.param("EMAIL")))
+}
+
+/// Without the account's own addresses nothing can be decided about a
+/// meeting, and a guess would cancel it for its guests.
+fn identity_unknown() -> CaldavError {
+    CaldavError::Network(
+        WriteRefusal::IdentityUnknown.message(
+            "the account's own addresses on this server could not be read; nothing was saved",
+        ),
+    )
+}
+
 /// Plan the meeting lines of `server_block`, the server's current copy of the
 /// VEVENT that `edit` rewrites.
 pub fn plan_block(server_block: &str, edit: &Event, ctx: &WriteCtx) -> CaldavResult<BlockPlan> {
@@ -105,12 +139,7 @@ pub fn plan_block(server_block: &str, edit: &Event, ctx: &WriteCtx) -> CaldavRes
         return Ok(plan_plain(server_block, &rows, edit, ctx, ending, carried));
     };
 
-    let identity = ctx.identity.as_ref().ok_or_else(|| {
-        CaldavError::Network(
-            "the account's own addresses on this server could not be read; nothing was saved"
-                .into(),
-        )
-    })?;
+    let identity = ctx.identity.as_ref().ok_or_else(identity_unknown)?;
     let own_meeting = identity.names(&organizer.value, organizer.param("EMAIL"));
     // The organizer's row and the account's own row are not invitees (67a).
     let is_host = |row: &ContentLine| {
@@ -130,8 +159,11 @@ pub fn plan_block(server_block: &str, edit: &Event, ctx: &WriteCtx) -> CaldavRes
 
     if !own_meeting {
         if decision != InviteeWrite::Keep {
+            // Only reachable on a server that does not schedule: where it
+            // does, `attendee_copy` sends the write down the attendee path
+            // before any invitee decision (77a).
             return Err(CaldavError::Forbidden(
-                "reply-only-invitation: only the organizer can change who is invited".into(),
+                WriteRefusal::ReplyOnlyInvitation.message(EventField::Attendees.token()),
             ));
         }
         let mut text = verbatim(&[organizer]);
@@ -402,6 +434,7 @@ mod tests {
             identity: Some(icloud_identity()),
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
+            writes_color: false,
         }
     }
 

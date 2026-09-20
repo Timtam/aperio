@@ -143,6 +143,22 @@ pub(crate) fn line_ending(block: &str) -> &'static str {
     }
 }
 
+/// One content line's text as it reads, with its folding undone: the
+/// continuation lines joined and their leading space dropped (RFC 5545 §3.1).
+/// The inverse of [`fold`].
+pub(crate) fn unfold(raw: &str) -> String {
+    let mut out = String::new();
+    for (index, physical) in raw.split_inclusive('\n').enumerate() {
+        let content = physical.trim_end_matches(['\r', '\n']);
+        if index == 0 {
+            out.push_str(content);
+        } else {
+            out.push_str(content.get(1..).unwrap_or(""));
+        }
+    }
+    out
+}
+
 /// `line` (without an ending) as physical lines of at most 75 octets each,
 /// every one ending in `ending`; a continuation starts with a space. Never
 /// splits a UTF-8 character (RFC 5545 §3.1).
@@ -200,6 +216,25 @@ pub(crate) fn insert_after_head(block: &str, lines: &str) -> String {
     format!("{}{}{}", &block[..at], lines, &block[at..])
 }
 
+/// `block` with `text` inserted right before its own closing `END:` line, so
+/// a new sub-component (a VALARM) lands after the properties and inside the
+/// component (RFC 5545 §3.6.1). The block's last physical line is its end.
+pub(crate) fn insert_before_end(block: &str, text: &str) -> String {
+    if text.is_empty() {
+        return block.to_string();
+    }
+    let mut at = block.len();
+    let mut offset = 0;
+    for line in block.split_inclusive('\n') {
+        let marker = line.trim_end_matches(['\r', '\n']);
+        if marker.len() > 4 && marker[..4].eq_ignore_ascii_case("END:") {
+            at = offset;
+        }
+        offset += line.len();
+    }
+    format!("{}{}{}", &block[..at], text, &block[at..])
+}
+
 /// `block` without the text in `drop`.
 pub(crate) fn without_ranges(block: &str, drop: &[Range<usize>]) -> String {
     let mut sorted: Vec<&Range<usize>> = drop.iter().collect();
@@ -255,6 +290,14 @@ END:VEVENT\r\n";
     }
 
     #[test]
+    fn unfolding_is_folding_undone() {
+        let line = "ATTENDEE;CN=A very long display name indeed;\
+PARTSTAT=NEEDS-ACTION:mailto:someone@example.com";
+        assert_eq!(unfold(&fold(line, "\r\n")), line);
+        assert_eq!(unfold("ATTENDEE:mailto:a@x\r\n"), "ATTENDEE:mailto:a@x");
+    }
+
+    #[test]
     fn fold_keeps_75_octets_and_whole_characters() {
         let line = format!("ATTENDEE;CN={}:mailto:a@x", "ä".repeat(60));
         let folded = fold(&line, "\r\n");
@@ -286,6 +329,17 @@ END:VEVENT\r\n";
             insert_after_head(over, "SEQUENCE:1\r\n"),
             "BEGIN:VEVENT\r\nRECURRENCE-ID;TZID=Europe/Berlin:2026\r\n 1109T160000\r\nSEQUENCE:1\r\nSUMMARY:x\r\nEND:VEVENT\r\n"
         );
+    }
+
+    #[test]
+    fn a_sub_component_goes_before_the_blocks_own_end() {
+        let block = "BEGIN:VEVENT\r\nUID:x\r\nBEGIN:VALARM\r\nEND:VALARM\r\nEND:VEVENT\r\n";
+        assert_eq!(
+            insert_before_end(block, "BEGIN:VALARM\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n"),
+            "BEGIN:VEVENT\r\nUID:x\r\nBEGIN:VALARM\r\nEND:VALARM\r\n\
+BEGIN:VALARM\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\n"
+        );
+        assert_eq!(insert_before_end(block, ""), block);
     }
 
     #[test]

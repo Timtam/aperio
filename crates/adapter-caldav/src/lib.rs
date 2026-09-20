@@ -878,6 +878,7 @@ impl CaldavAdapter {
                         identity: None,
                         schedules: false,
                         organizer_address: None,
+                        writes_color: self.supports_event_color(),
                     })
                 }
             }
@@ -891,6 +892,7 @@ impl CaldavAdapter {
             )),
             schedules: discovery.supports_scheduling,
             organizer_address: discovery.calendar_user_address.clone(),
+            writes_color: self.supports_event_color(),
         })
     }
 
@@ -1014,6 +1016,11 @@ impl CalendarFeature for CaldavAdapter {
         for cal in &mut fresh {
             cal.supports_event_color = color_capable;
             cal.always_notifies_attendees = discovery.supports_scheduling;
+            // And the other way round: on someone else's meeting such a server
+            // takes only this account's own reply and alarms (§3.2.2.1), so
+            // the editors show it read-only (77a). Same source as the write
+            // path's `ctx.schedules`, so editor and adapter cannot disagree.
+            cal.invitations_reply_only = discovery.supports_scheduling;
             cal.notifier_name = notifier.clone();
         }
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
@@ -1949,6 +1956,69 @@ mod tests {
         assert_eq!(first.len(), second.len());
         assert_eq!(first[0].name, "Work");
         m.assert_async().await;
+    }
+
+    /// A calendar on a scheduling server says both things about a meeting's
+    /// people: the server mails them about every change the account makes as
+    /// organizer (76a), and it takes only this account's own changes on a
+    /// meeting somebody else organizes (77a). A server without scheduling
+    /// says neither.
+    #[tokio::test]
+    async fn a_scheduling_server_says_an_invitation_is_read_only() {
+        let scheduling = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <c:calendar-user-address-set>
+          <d:href>mailto:alice@me.com</d:href>
+        </c:calendar-user-address-set>
+        <c:schedule-outbox-URL><d:href>/calendars/alice/outbox/</d:href></c:schedule-outbox-URL>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        for (scheduler, expected) in [(Some(scheduling), true), (None, false)] {
+            let mut server = Server::new_async().await;
+            server
+                .mock("GET", "/.well-known/caldav")
+                .with_status(404)
+                .create_async()
+                .await;
+            server
+                .mock("PROPFIND", "/")
+                .with_status(207)
+                .with_body(PRINCIPAL_RESPONSE)
+                .create_async()
+                .await;
+            server
+                .mock("PROPFIND", "/principals/users/alice/")
+                .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+                .with_status(207)
+                .with_body(HOME_SET_RESPONSE)
+                .create_async()
+                .await;
+            server
+                .mock("PROPFIND", "/principals/users/alice/")
+                .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+                .with_status(207)
+                .with_body(scheduler.unwrap_or(HOME_SET_RESPONSE))
+                .create_async()
+                .await;
+            server
+                .mock("PROPFIND", "/calendars/alice/")
+                .with_status(207)
+                .with_body(HOME_LISTING_RESPONSE)
+                .create_async()
+                .await;
+
+            let calendars = build_adapter(&server).list_calendars().await.unwrap();
+            assert_eq!(calendars.len(), 1);
+            assert_eq!(calendars[0].invitations_reply_only, expected);
+            assert_eq!(calendars[0].always_notifies_attendees, expected);
+        }
     }
 
     /// Moving a changed occurrence to another calendar deletes it from the

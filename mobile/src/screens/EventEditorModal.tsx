@@ -22,11 +22,20 @@ import {
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
+  silentSentence,
+  type AttendeeNotice,
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
   eventPrefillFrom,
   allDayWireEnd,
+  describeRecurrence,
+  eventWriteErrorMessage,
+  invitationLocked,
+  lastOccurrenceDayKey,
+  pickerMisreadsRule,
+  recurrenceSummaryText,
+  seriesDayKey,
   applyDateTimeChange,
   dateInput,
   defaultNewEventTimes,
@@ -56,6 +65,7 @@ import { MeetingControls } from '../components/MeetingControls';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { QuickTimeButton } from '../components/QuickTimeButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
+import { ReadOnlyField } from '../components/ReadOnlyField';
 import { SignatureButton } from '../components/SignatureButton';
 import {
   signatureForCalendar,
@@ -127,10 +137,6 @@ function isoToLocalParts(iso: string): { date: string; time: string } {
   return { date: dateInput(d), time: timeInput(d) };
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 /** The rows that ride ON the event — a real alarm the provider stores and
  *  every other client of the calendar sees. The placement flag is Aperio's own
  *  bookkeeping and never goes on the wire. */
@@ -158,7 +164,7 @@ export default function EventEditorModal({
   route,
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
@@ -612,7 +618,7 @@ export default function EventEditorModal({
           if (initialTitle) setTitle(initialTitle);
         }
       } catch (err) {
-        const message = errorMessage(err);
+        const message = eventWriteErrorMessage(err, t);
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {
@@ -755,6 +761,39 @@ export default function EventEditorModal({
   );
 
 
+  // 77a: someone else's meeting, on a provider that takes only this account's
+  // own reply and reminders. From the calendar the row came FROM — a locked
+  // invitation has no calendar picker to change.
+  const locked = invitationLocked(
+    calendars.find((c) => c.id === original?.calendar_id),
+    original ?? null,
+  );
+  // The repeat rule in words (84a), because there are no controls to read.
+  const repeatSentence = (() => {
+    if (!original) return '';
+    const rule = original.recurrence?.rrule?.trim();
+    if (!rule) return locked ? t('dialogs.event.recurrence.none') : '';
+    // In the editable editor only where the controls would show another rule
+    // than the one stored (87b): otherwise they say it themselves.
+    if (!locked && !pickerMisreadsRule(rule)) return '';
+    return recurrenceSummaryText(
+      describeRecurrence({
+        rrule: rule,
+        start: seriesDayKey(original.start, original.recurrence?.tzid),
+        last_day: lastOccurrenceDayKey(original),
+      }),
+      { t, language: i18n.language },
+    );
+  })();
+  // A day of a locked invitation, written out, as the desktop writes it.
+  const readOnlyDay = (dayKey: string): string => {
+    const date = new Date(`${dayKey}T00:00:00`);
+    const text = Number.isNaN(date.getTime())
+      ? dayKey
+      : new Intl.DateTimeFormat(i18n.language, { dateStyle: 'long' }).format(date);
+    return allDay ? t('dialogs.event.invitation.allDayValue', { date: text }) : text;
+  };
+
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
@@ -862,6 +901,27 @@ export default function EventEditorModal({
     setError(null);
     setSaving(true);
     try {
+      // 77a: a locked invitation writes its own reminders and nothing else.
+      // The row goes back as the provider has it, so no form value — and no
+      // re-stamped rule or re-trimmed text — can reach the wire, and the
+      // adapter decides against the server's copy whether anything is sent.
+      if (locked && original != null) {
+        await updateEvent(
+          {
+            ...original,
+            reminders: keepRemindersAsDefault ? [] : attachedRows(reminders),
+            send_invitations: false,
+          },
+          original.calendar_id,
+        );
+        await savePrivate(original);
+        await setEventColor(seriesIdOf(original), original.calendar_id, colorLabel);
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.event.updated', { title: original.title }),
+        );
+        navigation.goBack();
+        return;
+      }
       if (
         editing &&
         original != null &&
@@ -1176,7 +1236,7 @@ export default function EventEditorModal({
       }
       navigation.goBack();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = eventWriteErrorMessage(err, t);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {
@@ -1186,6 +1246,7 @@ export default function EventEditorModal({
     allDay,
     attendees,
     calId,
+    locked,
     calendars,
     colorLabel,
     description,
@@ -1249,12 +1310,17 @@ export default function EventEditorModal({
   // the desktop shares (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, people: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const spec = notifierSentence(calendar, 'change');
-    return {
-      notice: attendeeNotice({ calendar, attendees: people, original: original ?? null }),
-      sentence: t(spec.key, spec.values),
-    };
+    const notice = attendeeNotice({ calendar, attendees: people, original: original ?? null });
+    // Two sentences, one place they can appear: who informs the attendees, or
+    // that nobody will (`scheduling_silenced`, decision 98).
+    const spec =
+      notice === 'silent'
+        ? silentSentence(calendar, 'change')
+        : notifierSentence(calendar, 'change');
+    return { notice, sentence: t(spec.key, spec.values) };
   };
+  /** A notice that shows a sentence rather than a switch. */
+  const saysASentence = (value: AttendeeNotice) => value === 'always' || value === 'silent';
   const { notice, sentence: noticeSentence } = noticeFor(calId, attendees);
   // When the sentence appears while editing, it is said once, as part of what
   // the user just did, as the desktop does: nothing else tells VoiceOver or
@@ -1263,14 +1329,14 @@ export default function EventEditorModal({
   // calendar chosen says it after VoiceOver has read the picker again.
   const noticeAfterAdding = (next: string[]): string | null => {
     const after = noticeFor(calId, next);
-    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+    return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const chooseCalendar = (next: string) => {
     setCalId(next);
     const after = noticeFor(next, attendees);
     if (
-      after.notice === 'always' &&
-      (notice !== 'always' || after.sentence !== noticeSentence)
+      saysASentence(after.notice) &&
+      (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       AccessibilityInfo.announceForAccessibilityWithOptions(after.sentence, { queue: true });
     }
@@ -1326,22 +1392,39 @@ export default function EventEditorModal({
         </Text>
       )}
 
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.event.fields.title')}</Text>
-        <TitleField
-          style={styles.input}
-          value={title}
-          onChangeText={setTitle}
-          accessibilityLabel={t('dialogs.event.fields.title')}
-        />
-        <TitleSuggestions
-          options={titleOptions}
-          onAccept={acceptTitleSuggestion}
-          editable={!saving}
-        />
-      </View>
+      {/* Why the fields below cannot be changed, before the first of them. */}
+      {locked && (
+        <Text style={styles.invitationHint} accessibilityRole="text">
+          {t('dialogs.event.invitation.hint')}
+        </Text>
+      )}
 
-      {calendars.length > 0 && (
+      {locked ? (
+        <ReadOnlyField label={t('dialogs.event.fields.title')} value={title} />
+      ) : (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('dialogs.event.fields.title')}</Text>
+          <TitleField
+            style={styles.input}
+            value={title}
+            onChangeText={setTitle}
+            accessibilityLabel={t('dialogs.event.fields.title')}
+          />
+          <TitleSuggestions
+            options={titleOptions}
+            onAccept={acceptTitleSuggestion}
+            editable={!saving}
+          />
+        </View>
+      )}
+
+      {locked ? (
+        <ReadOnlyField
+          label={t('dialogs.event.fields.calendar')}
+          value={calendars.find((c) => c.id === calId)?.name ?? ''}
+        />
+      ) : (
+      calendars.length > 0 && (
         <SelectFieldButton<string>
           label={t('dialogs.event.fields.calendar')}
           value={calId}
@@ -1359,8 +1442,33 @@ export default function EventEditorModal({
           }).map((c) => ({ value: c.id, label: c.name }))}
           onChange={chooseCalendar}
         />
+      )
       )}
 
+      {locked ? (
+        <>
+          {/* The same labels as the editable editor, and an all-day
+              invitation has no times, exactly as there. */}
+          <ReadOnlyField
+            label={t('dialogs.event.fields.startDate')}
+            value={readOnlyDay(startDate)}
+          />
+          {!allDay && (
+            <ReadOnlyField
+              label={t('dialogs.event.fields.startTime')}
+              value={startTime}
+            />
+          )}
+          <ReadOnlyField
+            label={t('dialogs.event.fields.endDate')}
+            value={readOnlyDay(endDate)}
+          />
+          {!allDay && (
+            <ReadOnlyField label={t('dialogs.event.fields.endTime')} value={endTime} />
+          )}
+        </>
+      ) : (
+        <>
       {/* One switch node for SR (the Pressable carries role + checked + label and
           handles the tap); the inner Switch is the real visual toggle for
           sighted users, hidden from SR and non-interactive so the row stays a
@@ -1460,35 +1568,55 @@ export default function EventEditorModal({
           <QuickTimeButton value={endTime} onPick={(next) => setDateTime('endTime', next)} />
         </View>
       )}
+        </>
+      )}
 
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.event.fields.location')}</Text>
-        <TextInput
-          style={styles.input}
-          value={location}
-          onChangeText={setLocation}
-          accessibilityLabel={t('dialogs.event.fields.location')}
-        />
-      </View>
+      {locked ? (
+        location.trim() !== '' && (
+          <ReadOnlyField label={t('dialogs.event.fields.location')} value={location} />
+        )
+      ) : (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('dialogs.event.fields.location')}</Text>
+          <TextInput
+            style={styles.input}
+            value={location}
+            onChangeText={setLocation}
+            accessibilityLabel={t('dialogs.event.fields.location')}
+          />
+        </View>
+      )}
 
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.event.fields.description')}</Text>
-        <TextInput
-          style={[styles.input, styles.multiline]}
-          value={description}
-          onChangeText={setDescription}
-          accessibilityLabel={t('dialogs.event.fields.description')}
-          multiline
-        />
-        {/* Beside the field, not inside it: a signature is an addition at the
-            end, and the text above stays the user's. */}
-        <SignatureButton
-          boundTo={calendarId}
-          description={description}
-          onChange={setDescription}
-        />
-        <DescriptionLinks text={description} />
-      </View>
+      {locked ? (
+        <>
+          {description.trim() !== '' && (
+            <ReadOnlyField
+              label={t('dialogs.event.fields.description')}
+              value={description}
+            />
+          )}
+          <DescriptionLinks text={description} />
+        </>
+      ) : (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('dialogs.event.fields.description')}</Text>
+          <TextInput
+            style={[styles.input, styles.multiline]}
+            value={description}
+            onChangeText={setDescription}
+            accessibilityLabel={t('dialogs.event.fields.description')}
+            multiline
+          />
+          {/* Beside the field, not inside it: a signature is an addition at the
+              end, and the text above stays the user's. */}
+          <SignatureButton
+            boundTo={calendarId}
+            description={description}
+            onChange={setDescription}
+          />
+          <DescriptionLinks text={description} />
+        </View>
+      )}
 
       {/* Any conference in this event, whoever created it — an Outlook or eM
           Client invitation as readily as one Aperio made. Detection is shared
@@ -1498,24 +1626,30 @@ export default function EventEditorModal({
       {/* Creating one, as opposed to joining one. Only for a meeting Aperio
           owns — an event carrying someone else's link gets Join above and no
           Remove here. */}
-      <MeetingControls
-        event={original}
-        onEventChanged={(saved) => {
-          setLocation(saved.location ?? '');
-          setDescription(saved.description ?? '');
-        }}
-      />
+      {!locked && (
+        <MeetingControls
+          event={original}
+          onEventChanged={(saved) => {
+            setLocation(saved.location ?? '');
+            setDescription(saved.description ?? '');
+          }}
+        />
+      )}
 
       {/* Colour — every calendar: a local or colour-capable external calendar
           stores it on the event (color_label); a non-capable external event
           keeps it as a host-local override (setEventColor on save). Real
-          swatches for sighted users + the label name for SR. */}
+          swatches for sighted users + the label name for SR. Not where the
+          provider stores it and an attendee may not write one (77a). */}
+      {(!locked ||
+        calendars.find((c) => c.id === calId)?.supports_event_color !== true) && (
       <ColorLabelSelect
         value={colorLabel}
         labels={colorLabels}
         onChange={setColorLabel}
         disabled={saving}
       />
+      )}
 
       {/* Edit scope — only when a single occurrence of a recurring series was
           opened. "This occurrence only" excludes it + saves a standalone; "Whole
@@ -1571,13 +1705,29 @@ export default function EventEditorModal({
       {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
           mode / end). Hidden when editing a single occurrence (the standalone
           it becomes is non-recurring); shown for new events + whole-series edits. */}
-      {!(isOccurrence && editScope === 'occurrence') && (
-        <RecurrenceSelector
-          value={recurrence}
-          onChange={setRecurrence}
-          start={recurrenceStartDate(startDate)}
-          capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
+      {locked ? (
+        <ReadOnlyField
+          label={t('dialogs.event.recurrence.label')}
+          value={repeatSentence}
         />
+      ) : (
+        !(isOccurrence && editScope === 'occurrence') && (
+          <>
+          {repeatSentence !== '' && (
+            // Its own label: the controls below carry `recurrence.label`.
+            <ReadOnlyField
+              label={t('dialogs.event.recurrence.storedLabel')}
+              value={repeatSentence}
+            />
+          )}
+          <RecurrenceSelector
+            value={recurrence}
+            onChange={setRecurrence}
+            start={recurrenceStartDate(startDate)}
+            capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
+          />
+          </>
+        )
       )}
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
@@ -1624,6 +1774,7 @@ export default function EventEditorModal({
           (`attendeeNotice`): a calendar that can invite, an event the account
           organizes, and someone to tell. */}
       <AttendeesEditor
+        readOnly={locked}
         value={attendees}
         onChange={setAttendees}
         notify={notifyAttendees}
@@ -1652,7 +1803,14 @@ export default function EventEditorModal({
           otherwise. A successful response closes the editor so the list refetches
           the new status. */}
       {editing && original != null && (
-        <EventRsvp event={original} onResponded={() => navigation.goBack()} />
+        <EventRsvp
+          event={original}
+          // Answering leaves a locked invitation open: the reminders are the
+          // only thing left to save there, and leaving would throw them away.
+          onResponded={() => {
+            if (!locked) navigation.goBack();
+          }}
+        />
       )}
 
       <Pressable
@@ -1751,5 +1909,16 @@ const makeStyles = (c: ThemeColors) =>
     birthdayName: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
     hint: { fontSize: 15, color: c.textSecondary },
     pressed: { opacity: 0.7 },
+    // The reason a meeting somebody else organizes cannot be changed: a
+    // paragraph above the fields it explains, not a field of its own.
+    invitationHint: {
+      fontSize: 15,
+      color: c.textPrimary,
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceSubtle,
+    },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
   });

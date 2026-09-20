@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { isSeriesOccurrence, seriesIdOf } from '@aperio/shared';
+import { invitationLocked, isSeriesOccurrence, seriesIdOf } from '@aperio/shared';
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 
 import { getEventById, type NewGroupMember } from '../api/client';
@@ -20,6 +20,8 @@ import type {
 } from '../api/types';
 import { focusActiveView } from '../a11y/focusView';
 import { DialogStateContext } from './dialogStateContext';
+import { useCalendarStore } from './calendarStoreContext';
+import { isProviderOverride } from '../intl/recurrence';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /** Which slice of a recurring series an edit applies to. */
@@ -383,6 +385,9 @@ export interface DialogStateValue {
  * component's own mount-time focus handling takes over.
  */
 export function DialogStateProvider({ children }: { children: ReactNode }) {
+  // Which calendar a row came from decides whether its editor is read-only
+  // (77a). The provider sits inside the calendar store, so it can ask.
+  const { calendars } = useCalendarStore();
   const [stack, setStack] = useState<DialogMode[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
   const invalidateData = useCallback(
@@ -428,6 +433,34 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       // hand off to the editor locked to that scope. Everything else — creating,
       // or editing a non-recurring / master row — opens the editor directly.
       if (event && isSeriesOccurrence(event)) {
+        // Someone else's meeting is read-only apart from the answer and the
+        // reminders (77a): there is nothing to scope, so the editor opens on
+        // the row the view passed in, with the scope it will act on. Without
+        // an explicit scope the editor would show no scope field, and its
+        // Delete would skip one occurrence without asking — a decline to the
+        // organizer from one keypress.
+        const readCalendar = calendars.find((c) => c.id === event.calendar_id);
+        if (invitationLocked(readCalendar, event)) {
+          // A provider override IS the occurrence and is saved by its own id.
+          if (isProviderOverride(event)) {
+            push({ kind: 'event', event, initialScope: 'occurrence' });
+            return;
+          }
+          // Otherwise the editor acts on the series, so it opens the series —
+          // its own start, its own rule — the way the phone does. Showing the
+          // occurrence's date under "Ganze Serie" would name a different
+          // meeting than the one the buttons act on.
+          void getEventById(seriesIdOf(event), event.calendar_id)
+            .catch(() => null)
+            .then((series) => {
+              push({
+                kind: 'event',
+                event: series ?? event,
+                initialScope: 'series',
+              });
+            });
+          return;
+        }
         push({ kind: 'eventEditScope', event });
         return;
       }
@@ -448,7 +481,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       if (options?.replace) replaceTop(next);
       else push(next);
     },
-    [push, replaceTop],
+    [push, replaceTop, calendars],
   );
   // The prompt frame `chooseEventEditScope` answers, read before its update.
   const stackRef = useRef(stack);
