@@ -640,6 +640,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         organizer: people.organizer,
         attendee_responses: people.attendee_responses,
         cancelled,
+        scheduling_silenced: false,
     }))
 }
 

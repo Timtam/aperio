@@ -16,7 +16,10 @@ import { ConfirmDialog } from './ConfirmDialog';
  *   notifying";
  * - a provider that cancels it for the attendees whatever the request says
  *   (iCloud, Microsoft 365): the sentence that says who informs them, and one
- *   button that cancels.
+ *   button that cancels;
+ * - an event whose own resource keeps the server out of its scheduling
+ *   (`scheduling_silenced`, RFC 6638): a plain delete, plus the sentence that
+ *   nobody will hear of it (decision 98).
  *
  * `onDelete` gets whether to send the cancellations.
  */
@@ -30,7 +33,8 @@ export function DeleteEventConfirm({
   onDelete: (event: CalendarEvent, sendCancellations: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { offersChoice, alwaysNotifies, declines, sentence } = useCancellationChoice(event);
+  const { offersChoice, alwaysNotifies, silent, declines, sentence } =
+    useCancellationChoice(event);
   const title = event?.title ?? '';
   const asks = offersChoice || alwaysNotifies;
   return (
@@ -50,9 +54,10 @@ export function DeleteEventConfirm({
           : offersChoice
             ? t('dialogs.event.cancelChoice.message', { title })
             : // Deleting the account's copy of someone else's meeting is an
-              // answer to the organizer, so the dialog says so (83b).
+              // answer to the organizer, so the dialog says so (83b) — and
+              // where the server may not send, that nobody hears of it (98).
               `${t('dialogs.confirm.deleteEventMessage', { title })}${
-                declines ? ` ${t(sentence.key, sentence.values)}` : ''
+                declines || silent ? ` ${t(sentence.key, sentence.values)}` : ''
               }`
       }
       confirmLabel={

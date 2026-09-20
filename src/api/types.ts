@@ -76,6 +76,12 @@ export interface CalendarEvent {
    *  it. Never the organizer's row (decision 67a). Read-only; absent/empty
    *  otherwise. */
   attendee_responses?: AttendeeResponse[];
+  /** The event's resource says the SERVER must not send its scheduling
+   *  messages (RFC 6638 `SCHEDULE-AGENT=CLIENT` or `NONE`). Read-only. The
+   *  calendar's `always_notifies_attendees` is a fact about the calendar;
+   *  this is the one fact about the event that can contradict it, so a dialog
+   *  promises a message only where one is sent (live round 6). */
+  scheduling_silenced?: boolean;
   /** The meeting is cancelled (RFC 5545 STATUS:CANCELLED / EWS IsCancelled /
    *  Graph isCancelled). Read-only. Cancelled events never fire reminders and
    *  are hidden when the user turns off "show cancelled events". Absent/false

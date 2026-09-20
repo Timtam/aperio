@@ -1222,6 +1222,7 @@ fn build_event_from_new(
         attendee_responses: Vec::new(),
         // Freshly created/updated by us — never a cancellation.
         cancelled: false,
+        scheduling_silenced: false,
     }
 }
 
@@ -1732,6 +1733,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -1942,6 +1944,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -2037,6 +2040,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let updated = update_event(&client_for(&server), &edit, None)
             .await
@@ -2175,6 +2179,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 

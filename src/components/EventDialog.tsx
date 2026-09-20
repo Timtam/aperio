@@ -14,6 +14,8 @@ import {
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
+  silentSentence,
+  type AttendeeNotice,
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
@@ -1539,12 +1541,15 @@ export function EventDialog({
   const {
     offersChoice,
     alwaysNotifies,
+    silent: cancellationIsSilent,
     sentence: cancellationSentence,
   } = useCancellationChoice(event);
   // A meeting the account organizes gets the cancel dialog: with a choice
-  // where the provider can delete silently, as a plain confirmation that
-  // says who informs the attendees where it cannot (decision 80a).
-  const asksBeforeCancelling = offersChoice || alwaysNotifies;
+  // where the provider can delete silently, as a plain confirmation that says
+  // who informs the attendees where it cannot (decision 80a) — and as a plain
+  // confirmation that says NOBODY is told where the event keeps the server out
+  // of its scheduling (98). Deleting a meeting stays a question in all three.
+  const asksBeforeCancelling = offersChoice || alwaysNotifies || cancellationIsSilent;
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
   const [declineOpen, setDeclineOpen] = useState(false);
   const [cancelChoiceScope, setCancelChoiceScope] = useState<
@@ -1645,12 +1650,18 @@ export function EventDialog({
   // both editors share (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, attendees: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const spec = notifierSentence(calendar, 'change');
-    return {
-      notice: attendeeNotice({ calendar, attendees, original: event ?? null }),
-      sentence: t(spec.key, spec.values),
-    };
+    const notice = attendeeNotice({ calendar, attendees, original: event ?? null });
+    // Two sentences, one place they can appear: who informs the attendees, or
+    // that nobody will (`scheduling_silenced`, decision 98).
+    const spec =
+      notice === 'silent'
+        ? silentSentence(calendar, 'change')
+        : notifierSentence(calendar, 'change');
+    return { notice, sentence: t(spec.key, spec.values) };
   };
+  /** A notice that shows a sentence rather than a switch. */
+  const saysASentence = (notice: AttendeeNotice) =>
+    notice === 'always' || notice === 'silent';
   const { notice, sentence: noticeSentence } = noticeFor(
     form.calendarId,
     form.attendees,
@@ -1662,13 +1673,13 @@ export function EventDialog({
   // says it after the choice.
   const noticeAfterAdding = (next: string[]): string | null => {
     const after = noticeFor(form.calendarId, next);
-    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+    return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const announceNoticeForCalendar = (calendarId: string) => {
     const after = noticeFor(calendarId, form.attendees);
     if (
-      after.notice === 'always' &&
-      (notice !== 'always' || after.sentence !== noticeSentence)
+      saysASentence(after.notice) &&
+      (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       announce(after.sentence);
     }
@@ -2066,7 +2077,7 @@ export function EventDialog({
             <span>{t('dialogs.event.fields.notifyAttendees')}</span>
           </label>
         )}
-        {notice === 'always' && (
+        {saysASentence(notice) && (
           <FocusableNote className="form__hint">{noticeSentence}</FocusableNote>
         )}
 
@@ -2345,9 +2356,20 @@ export function EventDialog({
       <ConfirmDialog
         isOpen={cancelChoiceOpen}
         onClose={() => setCancelChoiceOpen(false)}
-        title={t('dialogs.event.cancelChoice.title')}
+        title={t(
+          // Nothing is cancelled for anyone when nobody is told: it is a
+          // delete, and it says so.
+          cancellationIsSilent
+            ? 'dialogs.confirm.deleteEventTitle'
+            : 'dialogs.event.cancelChoice.title',
+        )}
         message={
-          alwaysNotifies
+          cancellationIsSilent
+            ? `${t('dialogs.confirm.deleteEventMessage', { title: event.title })} ${t(
+                cancellationSentence.key,
+                cancellationSentence.values,
+              )}`
+            : alwaysNotifies
             ? t(
                 cancelChoiceScope === 'occurrence'
                   ? 'dialogs.event.cancelChoice.alwaysOccurrenceMessage'
@@ -2368,23 +2390,29 @@ export function EventDialog({
                 { title: event.title },
               )
         }
-        confirmLabel={t(
-          cancelChoiceScope === 'occurrence'
-            ? 'dialogs.event.cancelChoice.cancelOccurrence'
-            : cancelChoiceScope === 'this_and_future'
-              ? 'dialogs.event.cancelChoice.cancelThisAndFuture'
-              : 'dialogs.event.cancelChoice.cancelMeeting',
-        )}
+        confirmLabel={
+          cancellationIsSilent
+            ? undefined
+            : t(
+                cancelChoiceScope === 'occurrence'
+                  ? 'dialogs.event.cancelChoice.cancelOccurrence'
+                  : cancelChoiceScope === 'this_and_future'
+                    ? 'dialogs.event.cancelChoice.cancelThisAndFuture'
+                    : 'dialogs.event.cancelChoice.cancelMeeting',
+              )
+        }
         onConfirm={() => {
+          // Asking the provider to send would ask for what it will not do.
+          const send = !cancellationIsSilent;
           if (cancelChoiceScope === 'occurrence') {
-            void performOccurrenceDelete(true);
+            void performOccurrenceDelete(send);
           } else if (cancelChoiceScope === 'this_and_future') {
-            void performThisAndFutureDelete(true);
+            void performThisAndFutureDelete(send);
           } else {
-            void performDelete(true);
+            void performDelete(send);
           }
         }}
-        extraActions={alwaysNotifies ? [] : [
+        extraActions={alwaysNotifies || cancellationIsSilent ? [] : [
           {
             label: t('dialogs.event.cancelChoice.removeSilently'),
             onClick: () => {

@@ -1378,7 +1378,9 @@
       "notifyAlways": "The calendar server informs the attendees of the cancellation.",
       "notifyAlwaysNamed": "{{service}} informs the attendees of the cancellation.",
       "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:",
-      "organizerGetsDecline": "The organizer gets a decline."
+      "organizerGetsDecline": "The organizer gets a decline.",
+      "organizerNotTold": "The organizer is not told.",
+      "attendeesNotTold": "The attendees are not told about the cancellation."
     },
     "moveScope": {
       "title": "Move recurring event",
@@ -1521,6 +1523,8 @@
         "notifyAttendees": "Notify attendees",
         "notifyAlways": "The calendar server informs the attendees of every change.",
         "notifyAlwaysNamed": "{{service}} informs the attendees of every change.",
+        "notifySilent": "This meeting is not sent through the calendar server — attendees are not told about changes.",
+        "notifySilentNamed": "This meeting is not sent through {{service}} — attendees are not told about changes.",
         "colorLabel": "Color label"
       },
       "attendees": {

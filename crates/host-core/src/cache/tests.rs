@@ -72,6 +72,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         organizer: None,
         attendee_responses: Vec::new(),
         cancelled: false,
+        scheduling_silenced: false,
     }
 }
 

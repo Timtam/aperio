@@ -27,6 +27,17 @@ const CALENDARS: Calendar[] = [
     always_notifies_attendees: true,
     notifier_name: 'iCloud',
   } as unknown as Calendar,
+  {
+    // The same server, with the invitation rule the editors read (77a): a
+    // meeting someone else organizes takes only this account's own reply.
+    id: 'cal-icloud-invite',
+    name: 'iCloud',
+    read_only: false,
+    supports_scheduling: true,
+    always_notifies_attendees: true,
+    invitations_reply_only: true,
+    notifier_name: 'iCloud',
+  } as unknown as Calendar,
 ];
 const STORE = { calendars: CALENDARS };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
@@ -82,6 +93,68 @@ describe('DeleteEventConfirm', () => {
     expect(onDelete).toHaveBeenLastCalledWith(expect.anything(), false);
     fireEvent.click(screen.getByRole('button', { name: cancelButton }));
     expect(onDelete).toHaveBeenLastCalledWith(expect.anything(), true);
+  });
+
+  /**
+   * Decision 98, from live round 6: an event whose own resource keeps the
+   * server out of its scheduling (RFC 6638 `SCHEDULE-AGENT`) is cancelled for
+   * nobody. The calendar still says "iCloud informs them" — the event says
+   * otherwise, and the dialog says what is true.
+   */
+  it('says nobody is told where the event keeps the server out (98)', () => {
+    const onDelete = open({
+      ...meeting('cal-icloud'),
+      scheduling_silenced: true,
+    } as CalendarEvent);
+    expect(
+      screen.getByText(
+        /Die Teilnehmer erfahren von der Absage nichts|attendees are not told about the cancellation/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/iCloud informiert|iCloud informs/i)).toBeNull();
+    // Nothing is sent, so nothing is offered or claimed: a plain delete.
+    expect(screen.queryByRole('button', { name: cancelButton })).toBeNull();
+    expect(screen.queryByRole('button', { name: silentButton })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete|bestätigen|confirm)$/i }));
+    expect(onDelete).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it('says the organizer gets a decline for an invitation (83b)', () => {
+    open(meeting('cal-icloud-invite', true));
+    expect(
+      screen.getByText(/Der Organisator bekommt eine Absage|organizer gets a decline/i),
+    ).toBeInTheDocument();
+  });
+
+  it('says the organizer hears nothing when the event keeps the server out (98)', () => {
+    open({
+      ...meeting('cal-icloud-invite', true),
+      scheduling_silenced: true,
+    } as CalendarEvent);
+    expect(
+      screen.getByText(/Der Organisator erfährt davon nichts|organizer is not told/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Der Organisator bekommt eine Absage|organizer gets a decline/i),
+    ).toBeNull();
+  });
+
+  it('says nothing about telling anyone on a calendar that never tells (98)', () => {
+    // The marker is about a SERVER that would otherwise send. On a calendar
+    // that schedules nothing, nobody was ever going to be told, and saying so
+    // would be noise — the shared rule answers `'none'` there, and the dialog
+    // follows the rule rather than the raw flag.
+    const onDelete = open({
+      ...meeting('cal-plain'),
+      scheduling_silenced: true,
+    } as CalendarEvent);
+    expect(
+      screen.queryByText(
+        /Die Teilnehmer erfahren von der Absage nichts|attendees are not told about the cancellation/i,
+      ),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete|bestätigen|confirm)$/i }));
+    expect(onDelete).toHaveBeenCalledWith(expect.anything(), false);
   });
 
   it('says who informs the attendees where the provider always does, and cancels', () => {

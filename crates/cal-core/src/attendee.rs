@@ -390,6 +390,7 @@ mod tests {
                 organized_elsewhere: false,
                 attendee_responses: Vec::new(),
                 cancelled: false,
+                scheduling_silenced: false,
             }
         }
 

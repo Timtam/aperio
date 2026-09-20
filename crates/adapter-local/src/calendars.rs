@@ -596,6 +596,7 @@ fn persist_new_event(
         organizer: None,
         attendee_responses: Vec::new(),
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 
@@ -655,6 +656,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         organizer: None,
         attendee_responses: Vec::new(),
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 

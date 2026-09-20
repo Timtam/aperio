@@ -926,6 +926,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
@@ -975,6 +976,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         // Apply stamps the binding onto the matching external event only.
         let mut events = vec![mk("icloud:evt-1"), mk("icloud:evt-2")];
@@ -1263,6 +1265,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }];
         apply_color_to_events(&repo, &mut events);
         // The native label survives — the stale override did NOT shadow it.

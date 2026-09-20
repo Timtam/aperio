@@ -1375,7 +1375,9 @@
       "notifyAlways": "Der Kalenderserver informiert die Teilnehmer über die Absage.",
       "notifyAlwaysNamed": "{{service}} informiert die Teilnehmer über die Absage.",
       "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:",
-      "organizerGetsDecline": "Der Organisator bekommt eine Absage."
+      "organizerGetsDecline": "Der Organisator bekommt eine Absage.",
+      "organizerNotTold": "Der Organisator erfährt davon nichts.",
+      "attendeesNotTold": "Die Teilnehmer erfahren von der Absage nichts."
     },
     "moveScope": {
       "title": "Serientermin verschieben",
@@ -1521,6 +1523,8 @@
         "notifyAttendees": "Teilnehmer benachrichtigen",
         "notifyAlways": "Der Kalenderserver informiert die Teilnehmer über jede Änderung.",
         "notifyAlwaysNamed": "{{service}} informiert die Teilnehmer über jede Änderung.",
+        "notifySilent": "Dieser Termin wird nicht über den Kalenderserver verschickt — die Teilnehmer erfahren von Änderungen nichts.",
+        "notifySilentNamed": "Dieser Termin wird nicht über {{service}} verschickt — die Teilnehmer erfahren von Änderungen nichts.",
         "colorLabel": "Farb-Label"
       },
       "attendees": {

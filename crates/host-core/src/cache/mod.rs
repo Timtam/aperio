@@ -62,15 +62,16 @@ mod tests;
 ///    (decision 77a). A listing stored under generation 3 has no such flag,
 ///    and the test devices already applied 3, so this needs its own
 ///    generation rather than a note on that one.
+/// 5: events carry `scheduling_silenced` — the resource's own
+///    `SCHEDULE-AGENT` (RFC 6638 §7.1), so a dialog promises a message only
+///    where the server sends one (live round 6). A row cached under
+///    generation 4 has no such field and would read as "the server sends",
+///    which for the measured invitation is exactly the wrong answer.
 /// 6: calendars carry `stores_occurrence_exceptions`, so "only this
 ///    occurrence" writes a real exception where the provider can hold one
 ///    instead of carving the occurrence out of its series (decision 79b). A
 ///    listing stored under an earlier generation has no such flag and would
 ///    keep carving out until the next re-bootstrap.
-///
-///    (5 is taken by `Event::scheduling_silenced` on the branch this one is
-///    stacked on; both touch this line, and the merge keeps 6 with both
-///    notes.)
 pub const CACHE_GENERATION: u32 = 6;
 
 /// `user_prefs` key holding the cache generation last applied on this device.

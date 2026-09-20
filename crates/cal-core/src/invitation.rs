@@ -99,6 +99,7 @@ mod tests {
             organizer: Some("boss@example.com".into()),
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
