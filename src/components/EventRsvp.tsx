@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { eventWriteErrorMessage } from '@aperio/shared';
 import { useAnnouncer } from '../a11y/announcerContext';
-import { isCommandError, respondToEvent } from '../api/client';
+import { respondToEvent } from '../api/client';
 import type { AttendeeStatus, CalendarEvent } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
 import { resolveCalendarUserEmail } from '../state/currentUserEmail';
@@ -119,9 +120,7 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
       );
       onResponded();
     } catch (err) {
-      setError(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      setError(eventWriteErrorMessage(err, t));
     } finally {
       setPending(null);
     }

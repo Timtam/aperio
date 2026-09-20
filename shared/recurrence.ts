@@ -848,13 +848,19 @@ export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
   const dtstart = new Date(event.start);
   if (Number.isNaN(dtstart.getTime())) return null;
   try {
+    // A zoned rule is iterated in WALL-CLOCK space (`zonedOccurrences`): its
+    // dtstart is the wall clock, and so is every instant it answers with. The
+    // rule's own UNTIL is a real instant, so it has to be moved into that
+    // space before it can be compared with them — otherwise the bound is off
+    // by the zone's offset and the day named can be the occurrence before.
     const rule = buildRule(body, tzid ? realToWall(dtstart, tzid) : dtstart);
     const until = rule.options.until;
     if (!until) return null;
-    const last = rule.before(until, true);
+    const bound = tzid ? realToWall(until, tzid) : until;
+    const last = rule.before(bound, true);
     if (!last) return null;
-    // A zoned rule iterates in wall-clock space (`zonedOccurrences`), so its
-    // answer already reads as the day on the series' clock.
+    // In wall-clock space the answer already reads as the day on the series'
+    // clock; without a zone it is a real instant and is read as one.
     return tzid
       ? last.toISOString().slice(0, 10)
       : seriesDayKey(last.toISOString(), tzid);

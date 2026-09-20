@@ -2,7 +2,7 @@ import { eventWriteErrorMessage } from '@aperio/shared';
 import { seriesIdOf } from '@aperio/shared';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   AttendeeStatus,
@@ -131,7 +131,12 @@ export function EventRsvp({
       // only, so VoiceOver heard nothing at all.
       const message = eventWriteErrorMessage(err, t);
       setError(message);
-      AccessibilityInfo.announceForAccessibility(message);
+      // Android reads the line below as a live region; iOS has none, so it is
+      // announced only there — saying it twice on TalkBack is worse than
+      // saying it once.
+      if (Platform.OS === 'ios') {
+        AccessibilityInfo.announceForAccessibility(message);
+      }
     } finally {
       setPending(null);
     }

@@ -1614,12 +1614,12 @@
         },
         "unsupportedHint": "Vom Konto dieses Kalenders nicht unterstützt.",
         "relativeUnsupportedHint": "Dieses Konto kann nur an einem festen Tag im Monat wiederholen.",
-        "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
+        "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus.",
+        "storedLabel": "Gespeicherte Wiederholung"
       },
       "prefillCalendarReadOnly": "Der frühere Termin liegt in „{{calendar}}\", und dorthin lassen sich keine neuen Termine schreiben. Der Kalender unten bleibt, wie er ist.",
       "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist.",
       "invitation": {
-        "title": "Einladung",
         "hint": "Diese Besprechung organisiert jemand anderes, deshalb kann nur der Organisator ihre Angaben ändern. Was du für dich selbst festlegst, bleibt deins.",
         "allDayValue": "{{date}}, ganztägig",
         "moveRefused": "„{{title}}“ organisiert jemand anderes, deshalb kann nur der Organisator ihn auf einen anderen Tag oder eine andere Zeit verschieben. Es wurde nichts verschoben."
@@ -2430,7 +2430,8 @@
       "nthWeekday": "am {{ordinal}} {{weekday}}",
       "nthOfSet": "am {{ordinal}} {{set}}",
       "dateInYear": "am {{day}} {{month}}",
-      "nthWeekdayInMonth": "am {{ordinal}} {{weekday}} im {{month}}"
+      "nthWeekdayInMonth": "am {{ordinal}} {{weekday}} im {{month}}",
+      "nthOfSetInMonth": "am {{ordinal}} {{set}} im {{month}}"
     },
     "set": {
       "weekday": "Werktag",

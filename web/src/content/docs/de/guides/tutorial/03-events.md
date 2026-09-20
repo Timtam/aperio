@@ -112,9 +112,10 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Das Antworten schließt den Editor nicht mehr, du kannst also antworten und
 > danach eine Erinnerung setzen.
 >
-> Löschst du die Besprechung oder einen einzelnen Termin daraus, erfährt es
-> der Organisator: Der Dialog sagt vorher „Der Organisator bekommt eine
-> Absage“, und die Schaltfläche heißt **Löschen und absagen**. Die Serie eines
+> Löschst du die Besprechung, erfährt es der Organisator: Der Dialog sagt
+> vorher „Der Organisator bekommt eine Absage“, und die Schaltfläche heißt
+> **Löschen und absagen**. Beim Überspringen eines einzelnen Termins steht
+> derselbe Satz über den gewohnten Umfang-Schaltflächen. Die Serie eines
 > anderen früher zu beenden, wird nicht angeboten – der Server würde es
 > ablehnen. Auf einen anderen Tag oder eine andere Zeit ziehen geht ebenfalls
 > nicht, und Aperio sagt das; in einen anderen Kalender verschieben geht

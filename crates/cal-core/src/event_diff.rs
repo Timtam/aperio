@@ -211,8 +211,11 @@ mod tests {
 
     #[test]
     fn every_field_has_a_stable_token() {
-        // The refusal message carries the token, and a surface looks its
-        // sentence up by it: a renamed token is a sentence nobody finds.
+        // The refusal message carries the token
+        // (`reply-only-invitation: title`), which is what a reader of a log,
+        // a bug report or a server trace sees; the surfaces say the sentence
+        // for the REFUSAL, not for the field. Renaming one silently would
+        // change what every such message says.
         let all = [
             EventField::Title,
             EventField::Description,

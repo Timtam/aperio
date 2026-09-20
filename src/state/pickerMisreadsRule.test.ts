@@ -25,6 +25,10 @@ describe('pickerMisreadsRule', () => {
       'FREQ=WEEKLY;BYDAY=MO;COUNT=5',
       // The last day of the month round-trips; the controls hold it.
       'FREQ=MONTHLY;BYMONTHDAY=-1',
+      // The defaults a provider spells out and the pickers leave implicit.
+      'FREQ=WEEKLY;INTERVAL=1;BYDAY=TU',
+      'FREQ=WEEKLY;WKST=MO;BYDAY=TU',
+      'FREQ=DAILY;INTERVAL=1',
       'RRULE:FREQ=DAILY',
     ]) {
       expect(pickerMisreadsRule(rule)).toBe(false);

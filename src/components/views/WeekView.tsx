@@ -87,6 +87,7 @@ import {
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
+  invitationLocked,
   collapseEventGroups,
   groupBadge,
   dropMinuteInWindow,
@@ -990,15 +991,26 @@ export function WeekView() {
     },
     [announce, t, fmt, invalidateData, clockAt, calendarById],
   );
+  /** Someone else's meeting does not move: said before a scope question
+   *  nothing could answer (77a). */
+  const refuseLockedDrag = useCallback(
+    (ev: CalendarEvent): boolean => {
+      if (!invitationLocked(calendarById.get(ev.calendar_id), ev)) return false;
+      announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+      return true;
+    },
+    [calendarById, announce, t],
+  );
   const handleEventDayDrop = useCallback(
     (ev: CalendarEvent, dayKey: string, minute: number | null = null) => {
+      if (refuseLockedDrag(ev)) return;
       if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
         setPendingEventDrop({ event: ev, dayKey, minute });
         return;
       }
       void performEventDrop(ev, dayKey, 'series', minute);
     },
-    [performEventDrop],
+    [refuseLockedDrag, performEventDrop],
   );
 
   // Map a drop's horizontal position to the day column under the cursor by

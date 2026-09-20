@@ -2279,7 +2279,9 @@ Siehe DESIGN §4.2.
   - `EXDATE` einer Zeit-Serie wird weiter als UTC geschrieben, nicht mit
     `TZID`; nur die Ganztagsform ist jetzt richtig.
   - `respond_to_event` kennt nur die eine Adresse aus der Discovery, keine
-    Aliase, und gibt das neue ETag nicht zurück.
+    Aliase, und gibt das neue ETag nicht zurück. Deshalb braucht ein Speichern
+    direkt nach dem Antworten einen frischen Stand: sonst meldet der Adapter
+    einen Konflikt, weil die Antwort das ETag schon weitergedreht hat.
   - Ein CalDAV-Server ohne Terminplanung bleibt wie in #84: Der Editor sperrt
     nicht, und `plan_block` lehnt eine geänderte Gästeliste ab.
   - Auf einem farbfähigen Server versteckt der Editor die Farbe einer fremden

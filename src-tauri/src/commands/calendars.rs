@@ -697,6 +697,9 @@ pub async fn update_event(
             attendees: event.attendees.clone(),
         };
         host_core::event_write::guard_create(&mut new_payload);
+        // A copy in another calendar of somebody else's meeting invites
+        // nobody (81b).
+        cal_core::attendee::invitees_of_moved_copy(&mut new_payload);
         // Preserve the color when moving INTO a color-capable provider:
         // resolve the label to a hex so the target stores it natively (the
         // incoming event carries `color_label`, not `color_hex`).

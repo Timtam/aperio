@@ -103,9 +103,10 @@ In the event dialog you can also set:
 > attendees' availability, and delete it. Answering no longer closes the
 > editor, so you can answer and set a reminder in one visit.
 >
-> Deleting it, or one occurrence of it, tells the organizer: the dialog says
-> "The organizer gets a decline" before it happens, and the button is called
-> **Delete and decline**. Ending somebody else's series early is not offered,
+> Deleting it tells the organizer: the dialog says "The organizer gets a
+> decline" before it happens, and the button is called **Delete and decline**.
+> Skipping a single occurrence says the same sentence, above the usual scope
+> buttons. Ending somebody else's series early is not offered,
 > because the server would refuse it. Dragging such a meeting to another day
 > or time is refused too, and Aperio says so; moving it to another calendar
 > still works, and the copy has no attendees.

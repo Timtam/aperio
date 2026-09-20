@@ -32,7 +32,6 @@ import {
   deleteEventById,
   eventGroupsForEvents,
   getEventById,
-  isCommandError,
   queryFreeBusy,
   setEventColor,
   setEventLocalReminders,
@@ -1486,13 +1485,9 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          // Only the message: String() would put an English "Error: " in
-          // front of a translated sentence.
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        // In words, including a provider's refusal, which reaches here with a
+        // token in its message.
+        setError(eventWriteErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -1560,13 +1555,9 @@ export function EventDialog({
         );
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          // Only the message: String() would put an English "Error: " in
-          // front of a translated sentence.
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        // In words, including a provider's refusal, which reaches here with a
+        // token in its message.
+        setError(eventWriteErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -2026,18 +2017,17 @@ export function EventDialog({
         )}
 
         {locked ? (
-          form.attendees.length > 0 && (
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.event.fields.attendees')}
-              </span>
-              <textarea
-                readOnly
-                value={form.attendees.join('\n')}
-                rows={Math.min(6, form.attendees.length)}
-              />
-            </label>
-          )
+          form.attendees.map((attendee, index) => (
+            <ReadOnlyField
+              key={`${attendee}-${index}`}
+              label={
+                index === 0
+                  ? t('dialogs.event.fields.attendees')
+                  : t('dialogs.event.attendees.chipsLabel')
+              }
+              value={attendee}
+            />
+          ))
         ) : (
         <div className="form__field">
           <span className="form__label" id={attendeesLabelId}>
@@ -2168,8 +2158,11 @@ export function EventDialog({
               rule, and touching one would save that different rule. So the
               stored rule is said in words above them (87b). */}
           {repeatSentence !== '' && (
+            // Its own label: the controls below carry `recurrence.label`, and
+            // two adjacent stops with the same name saying different things
+            // is worse than no summary at all.
             <ReadOnlyField
-              label={t('dialogs.event.recurrence.label')}
+              label={t('dialogs.event.recurrence.storedLabel')}
               value={repeatSentence}
             />
           )}

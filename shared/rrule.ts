@@ -310,13 +310,19 @@ export function pickerMisreadsRule(rrule: string | null | undefined): boolean {
   const body = stored.replace(/^RRULE:/i, '');
   const rebuilt = rebuiltByPicker(body);
   if (rebuilt === null) return true;
-  // Compared as sets of parts: the order the pickers write them in is their
-  // own, and a rule that says the same thing is not a misreading.
+  // Compared as sets of parts, with the defaults RFC 5545 §3.3.10 gives a
+  // rule that leaves them out: Apple, Exchange and Google spell `INTERVAL=1`
+  // and `WKST=MO` out, the pickers write nothing, and both rules recur on the
+  // same days. Counting that as a misreading would put a read-only line above
+  // the controls of every ordinary weekly appointment.
   const parts = (rule: string) =>
     rule
       .split(';')
       .map((part) => part.trim().toUpperCase())
-      .filter((part) => part !== '')
+      .filter((part) => part !== '' && part !== 'INTERVAL=1' && part !== 'WKST=MO')
+      // The pickers keep an UNTIL by its day, so a bound that differs only in
+      // its time of day is the same bound to them.
+      .map((part) => (part.startsWith('UNTIL=') ? `UNTIL=${part.slice(6, 14)}` : part))
       .sort()
       .join(';');
   return parts(body) !== parts(rebuilt);

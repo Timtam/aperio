@@ -261,15 +261,22 @@ describe('DialogState recurring-edit scope prompt', () => {
 });
 
 describe('DialogState and an invitation somebody else organizes', () => {
-  it('opens the editor with an explicit scope and asks nothing (77a)', () => {
+  it('opens the series it will save, with an explicit scope and no prompt (77a)', async () => {
+    // The series as `get_event_by_id` answers: the editor shows ITS date and
+    // rule, so the read-only fields describe the meeting the buttons act on.
+    const invitationSeries = {
+      ...invitationOccurrence,
+      id: 'evt-3',
+      series_id: undefined,
+    } as unknown as CalendarEvent;
+    invokeMock.mockResolvedValueOnce(invitationSeries);
     renderProbe();
-    act(() => {
-      screen.getByText('open-invitation').click();
-    });
+    await click('open-invitation');
     // No scope prompt: there is nothing to scope in a read-only editor. And
     // the scope IS set, so the editor shows it and its Delete acts on it
     // instead of skipping one occurrence without asking.
     expect(screen.getByTestId('kind').textContent).toBe('event');
     expect(screen.getByTestId('scope').textContent).toBe('series');
+    expect(screen.getByTestId('event').textContent).toBe('evt-3');
   });
 });

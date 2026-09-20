@@ -1614,12 +1614,12 @@
         },
         "unsupportedHint": "Not supported by this calendar's account.",
         "relativeUnsupportedHint": "This account can only repeat on a fixed day of the month.",
-        "editsSeries": "Changes apply to the entire series."
+        "editsSeries": "Changes apply to the entire series.",
+        "storedLabel": "Stored repeat"
       },
       "prefillCalendarReadOnly": "The earlier appointment is in \"{{calendar}}\", which cannot take new appointments. The calendar below stays as it is.",
       "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is.",
       "invitation": {
-        "title": "Invitation",
         "hint": "Someone else organizes this meeting, so only the organizer can change its details. What you set for yourself stays yours.",
         "allDayValue": "{{date}}, all day",
         "moveRefused": "\"{{title}}\" is organized by someone else, so only the organizer can move it to another day or time. Nothing was moved."
@@ -2430,7 +2430,8 @@
       "nthWeekday": "on the {{ordinal}} {{weekday}}",
       "nthOfSet": "on the {{ordinal}} {{set}}",
       "dateInYear": "on {{month}} {{day}}",
-      "nthWeekdayInMonth": "on the {{ordinal}} {{weekday}} of {{month}}"
+      "nthWeekdayInMonth": "on the {{ordinal}} {{weekday}} of {{month}}",
+      "nthOfSetInMonth": "on the {{ordinal}} {{set}} of {{month}}"
     },
     "set": {
       "weekday": "weekday",

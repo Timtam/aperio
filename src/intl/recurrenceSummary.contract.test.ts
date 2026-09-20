@@ -72,6 +72,33 @@ describe('a repeat rule in words', () => {
         if (key !== undefined) keys.add(key);
       }
     }
+    // The renderer's own keys too: the core names a weekday, an ordinal or a
+    // set, and these are the words that come out of that. A missing one would
+    // read as the key itself.
+    for (const key of [
+      'recurrenceSummary.set.weekday',
+      'recurrenceSummary.set.weekendDay',
+      'recurrenceSummary.ordinal.1',
+      'recurrenceSummary.ordinal.2',
+      'recurrenceSummary.ordinal.3',
+      'recurrenceSummary.ordinal.4',
+      'recurrenceSummary.ordinal.5',
+      'recurrenceSummary.ordinal.last',
+      'recurrenceSummary.day.number',
+      'recurrenceSummary.list.separator',
+      'recurrenceSummary.list.and',
+      'recurrenceSummary.undescribed.known',
+      'recurrenceSummary.undescribed.unknown',
+      'recurrenceSummary.unitAdverb.second',
+      'recurrenceSummary.unitAdverb.minute',
+      'recurrenceSummary.unitAdverb.hour',
+      'recurrenceSummary.unitAdverb.day',
+      'recurrenceSummary.unitAdverb.week',
+      'recurrenceSummary.unitAdverb.month',
+      'recurrenceSummary.unitAdverb.year',
+    ]) {
+      keys.add(key);
+    }
     expect(keys.size).toBeGreaterThan(20);
     for (const language of ['en', 'de'] as const) {
       const t = i18n.getFixedT(language);

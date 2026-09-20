@@ -88,6 +88,7 @@ import type {
   TaskList,
 } from '../../api/types';
 import {
+  invitationLocked,
   dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
@@ -830,6 +831,7 @@ export function DayView() {
   };
 
   const handleEventTimeDrop = (ev: CalendarEvent, minute: number) => {
+    if (refuseLockedDrag(ev)) return;
     if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
       setPendingEventDrop({ event: ev, minute, dayKey });
       return;
@@ -977,6 +979,16 @@ export function DayView() {
     [announce, t, invalidateData],
   );
 
+  /** Someone else's meeting does not move: said before a scope question
+   *  nothing could answer (77a). */
+  const refuseLockedDrag = useCallback(
+    (ev: CalendarEvent): boolean => {
+      if (!invitationLocked(calendarById.get(ev.calendar_id), ev)) return false;
+      announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+      return true;
+    },
+    [calendarById, announce, t],
+  );
   const requestDelete = useCallback((ev: CalendarEvent) => {
     // Only an EXPANDED occurrence has a specific instance to delete, so only it
     // gets the occurrence-vs-series choice. A recurring MASTER row (e.g. an

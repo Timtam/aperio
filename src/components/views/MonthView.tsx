@@ -21,6 +21,7 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import {
+  invitationLocked,
   collapseEventGroups,
   groupBadge,
   eventInstanceKey,
@@ -458,6 +459,16 @@ export function MonthView() {
     [announce, t, invalidateData],
   );
 
+  /** Someone else's meeting does not move: said before a scope question
+   *  nothing could answer (77a). */
+  const refuseLockedDrag = useCallback(
+    (ev: CalendarEvent): boolean => {
+      if (!invitationLocked(calendarById.get(ev.calendar_id), ev)) return false;
+      announce(t('dialogs.event.invitation.moveRefused', { title: ev.title }));
+      return true;
+    },
+    [calendarById, announce, t],
+  );
   const requestDelete = useCallback((ev: CalendarEvent) => {
     // Only an expanded occurrence has a single instance to delete; a bare
     // recurring master row (unexpandable RRULE) has none, so it takes the plain
@@ -544,6 +555,7 @@ export function MonthView() {
       if (!payload) {
         const dropped = readEventDrag(e.dataTransfer);
         if (!dropped) return;
+        if (refuseLockedDrag(dropped)) return;
         if (isSeriesOccurrence(dropped) || dropped.recurrence?.rrule) {
           setPendingEventDrop({ event: dropped, dayKey });
           return;
@@ -567,7 +579,7 @@ export function MonthView() {
         );
       }
     },
-    [invalidateData, announce, t, fmt, performEventDrop],
+    [invalidateData, announce, t, fmt, performEventDrop, refuseLockedDrag],
   );
 
   // Deferred indicator — see DayView for the rationale.

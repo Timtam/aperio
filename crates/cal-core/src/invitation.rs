@@ -8,23 +8,20 @@
 //! offering edits the server would throw away. Deleting stays possible: the
 //! server then tells the organizer (83b).
 //!
-//! The same rule decides in three places, so they cannot disagree: the
-//! editors lock their fields by [`invitation_locked`], the adapter refuses a
-//! protected change by [`reply_only_verdict`] against the server's fresh copy,
-//! and `shared/invitationLocked.ts` is the surfaces' twin of the first.
+//! What the core owns here is the WRITE rule: which field an attendee may
+//! change, and what a difference against an unseen copy means
+//! ([`reply_only_change`], [`reply_only_verdict`]). The adapter asks it
+//! against the server's fresh copy, before any PUT.
+//!
+//! Whether to show an editor read-only at all is two booleans the adapter
+//! already answers — the calendar's `invitations_reply_only` and the event's
+//! `organized_elsewhere` — and the surfaces read them through
+//! `invitationLocked` in `shared/notifyAttendees.ts`, beside the notice rules
+//! they belong with. A Rust twin of `a && b` would be a second place to keep
+//! in step for nothing.
 
 use crate::event_diff::{changed_fields, EventField};
 use crate::Event;
-
-/// Whether an event is such an invitation: the calendar's provider takes only
-/// the attendee's changes, and the account does not organize this meeting.
-///
-/// Both answers come from the adapter — `Calendar::invitations_reply_only` at
-/// discovery, `Event::organized_elsewhere` from the event's own ORGANIZER line
-/// (decision 70a) — so nothing is guessed from addresses here.
-pub const fn invitation_locked(calendar_reply_only: bool, organized_elsewhere: bool) -> bool {
-    calendar_reply_only && organized_elsewhere
-}
 
 /// The first field of `edit` that an attendee may not change, compared against
 /// `before`, in [`EventField`] order. `None` when the edit changes nothing but
@@ -103,13 +100,6 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
         }
-    }
-
-    #[test]
-    fn only_someone_elses_meeting_on_such_a_provider_is_locked() {
-        assert!(invitation_locked(true, true));
-        assert!(!invitation_locked(true, false));
-        assert!(!invitation_locked(false, true));
     }
 
     #[test]

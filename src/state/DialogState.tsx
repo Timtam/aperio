@@ -441,11 +441,24 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         // organizer from one keypress.
         const readCalendar = calendars.find((c) => c.id === event.calendar_id);
         if (invitationLocked(readCalendar, event)) {
-          push({
-            kind: 'event',
-            event,
-            initialScope: isProviderOverride(event) ? 'occurrence' : 'series',
-          });
+          // A provider override IS the occurrence and is saved by its own id.
+          if (isProviderOverride(event)) {
+            push({ kind: 'event', event, initialScope: 'occurrence' });
+            return;
+          }
+          // Otherwise the editor acts on the series, so it opens the series —
+          // its own start, its own rule — the way the phone does. Showing the
+          // occurrence's date under "Ganze Serie" would name a different
+          // meeting than the one the buttons act on.
+          void getEventById(seriesIdOf(event), event.calendar_id)
+            .catch(() => null)
+            .then((series) => {
+              push({
+                kind: 'event',
+                event: series ?? event,
+                initialScope: 'series',
+              });
+            });
           return;
         }
         push({ kind: 'eventEditScope', event });

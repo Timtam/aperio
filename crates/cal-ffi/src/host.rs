@@ -3404,6 +3404,9 @@ impl Host {
                 attendees: event.attendees.clone(),
             };
             host_core::event_write::guard_create(&mut new_payload);
+            // A copy in another calendar of somebody else's meeting invites
+            // nobody (81b).
+            cal_core::attendee::invitees_of_moved_copy(&mut new_payload);
             let target_calendar_id = event.calendar_id.clone();
             let source_event_id = event.id.clone();
             let created = self.runtime.block_on(async {

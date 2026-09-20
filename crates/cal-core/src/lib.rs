@@ -118,7 +118,7 @@ pub use group_suggestion::{
     find_group_suggestions, find_group_suggestions_json, is_meeting_calendar, suggest_group_mate,
     suggest_group_mate_json, GroupSuggestion, SuggestibleEvent, MEETINGS_CALENDAR_SUFFIX,
 };
-pub use invitation::{invitation_locked, reply_only_change, reply_only_verdict, ReplyOnlyVerdict};
+pub use invitation::{reply_only_change, reply_only_verdict, ReplyOnlyVerdict};
 pub use meeting_events::{
     join_url_of, meeting_join_url, without_duplicate_meetings, without_duplicate_meetings_json,
     MeetingFilterEvent,

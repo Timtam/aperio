@@ -221,8 +221,13 @@ pub enum RecurrenceSummary {
     },
 }
 
-/// Every key this module can emit. The locale test reads it, so a key without
-/// a sentence in either language is a failing test and not a silent gap.
+/// Every key this module can emit.
+///
+/// The core's own contract test proves every key here appears in a row of the
+/// fixture; the surfaces then prove every row's keys have a sentence in both
+/// languages (`src/intl/recurrenceSummary.contract.test.ts`), against the
+/// real locale files. So a key emitted but never worded fails on one side or
+/// the other, and the core reads none of the app's translations.
 pub const SUMMARY_KEYS: &[&str] = &[
     "recurrenceSummary.sentence.every",
     "recurrenceSummary.sentence.everyOn",
@@ -248,6 +253,7 @@ pub const SUMMARY_KEYS: &[&str] = &[
     "recurrenceSummary.on.lastDay",
     "recurrenceSummary.on.nthWeekday",
     "recurrenceSummary.on.nthOfSet",
+    "recurrenceSummary.on.nthOfSetInMonth",
     "recurrenceSummary.on.dateInYear",
     "recurrenceSummary.on.nthWeekdayInMonth",
     "recurrenceSummary.end.count",
@@ -422,6 +428,14 @@ fn on_phrase(
     if sub_daily && (by_day.is_some() || by_month_day.is_some() || by_set_pos.is_some()) {
         return Err(undescribed(UnknownPart, unit));
     }
+    // Two day parts in one rule narrow each other: RFC 5545 §3.3.10's own
+    // "every Friday the 13th" is `BYDAY=FR;BYMONTHDAY=13`, and a rule that
+    // said "every month on day 13" would name a date the series does not
+    // keep. Wording one and dropping the other is the guess this module
+    // exists not to make.
+    if by_month_day.is_some() && (by_day.is_some() || by_set_pos.is_some()) {
+        return Err(undescribed(UnknownPart, unit));
+    }
 
     match freq {
         Freq::Secondly | Freq::Minutely | Freq::Hourly => Ok(OnPart::None),
@@ -493,12 +507,20 @@ fn on_phrase(
             };
             let ordinal_day = match (by_day, by_set_pos) {
                 (Some(days), Some(set_pos)) => {
-                    let mut phrase = set_position_phrase(days, set_pos, unit)?;
                     // A set position in a year without a month would count
                     // within the whole year, which is not what it says here.
                     if by_month.is_none() {
                         return Err(undescribed(UnknownPart, unit));
                     }
+                    let mut phrase = set_position_phrase(days, set_pos, unit)?;
+                    // Only "the nth workday" carries its month in a sentence.
+                    // Over all seven days the position is a day of the month,
+                    // and "the last day of March" or "day 3" would read as a
+                    // day of the year.
+                    if !phrase.key.ends_with("on.nthOfSet") {
+                        return Err(undescribed(UnknownPart, unit));
+                    }
+                    phrase.key = format!("{KEY_PREFIX}on.nthOfSetInMonth");
                     phrase.month = Some(month);
                     return Ok(OnPart::Beside(phrase));
                 }
@@ -515,14 +537,16 @@ fn on_phrase(
                 (None, None) => None,
             };
             if let Some(mut phrase) = ordinal_day {
-                if phrase.key.ends_with("on.lastDay") {
-                    return Err(undescribed(UnknownPart, unit));
-                }
                 phrase.key = format!("{KEY_PREFIX}on.nthWeekdayInMonth");
                 phrase.month = Some(month);
                 return Ok(OnPart::Beside(phrase));
             }
             let day = match by_month_day {
+                // Readers disagree about a day of the month in a yearly rule
+                // that names no month: one reads it as the start's month, the
+                // other as every month. The plain rule takes both halves from
+                // the start, and that one is not in doubt.
+                Some(_) if by_month.is_none() => return Err(undescribed(UnknownPart, unit)),
                 Some(value) => single_month_day(value, unit)?,
                 None => start_date(question, unit)?.day() as u8,
             };
@@ -910,12 +934,28 @@ mod tests {
             (Some(2), Some(Weekday::Tuesday), Some(3))
         );
 
+        // A position over the workdays of a named month says which month.
+        let summary = ask("FREQ=YEARLY;BYMONTH=12;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1");
+        let (_, _, on, _) = described(&summary);
+        let on = on.unwrap();
+        assert_eq!(on.key, "recurrenceSummary.on.nthOfSetInMonth");
+        assert_eq!((on.ordinal, on.month), (Some(-1), Some(12)));
+
         // Without a month, a position counts within the whole year: no
-        // sentence rather than a wrong one.
-        assert_eq!(
-            reason(&ask("FREQ=YEARLY;BYDAY=2TU")).0,
-            UndescribedReason::UnknownPart
-        );
+        // sentence rather than a wrong one. The same for a position over all
+        // seven days, which would read as a day of the year, and for a day of
+        // the month that names no month.
+        for rrule in [
+            "FREQ=YEARLY;BYDAY=2TU",
+            "FREQ=YEARLY;BYMONTH=3;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYSETPOS=-1",
+            "FREQ=YEARLY;BYMONTHDAY=17",
+        ] {
+            assert_eq!(
+                reason(&ask(rrule)).0,
+                UndescribedReason::UnknownPart,
+                "{rrule}"
+            );
+        }
         // Several months is a rule that runs in some months only.
         assert_eq!(
             reason(&ask("FREQ=YEARLY;BYMONTH=3,9;BYMONTHDAY=17")).0,
@@ -991,6 +1031,18 @@ mod tests {
             ),
             (
                 "FREQ=MONTHLY;BYDAY=MO",
+                UndescribedReason::UnknownPart,
+                RepeatUnit::Month,
+            ),
+            // Two day parts narrow each other: RFC 5545's own "every Friday
+            // the 13th", and the BYSETPOS-free spelling of "the last Monday".
+            (
+                "FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13",
+                UndescribedReason::UnknownPart,
+                RepeatUnit::Month,
+            ),
+            (
+                "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=25,26,27,28,29,30,31",
                 UndescribedReason::UnknownPart,
                 RepeatUnit::Month,
             ),

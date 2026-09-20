@@ -1619,13 +1619,15 @@ export default function EventEditorModal({
       {/* Creating one, as opposed to joining one. Only for a meeting Aperio
           owns — an event carrying someone else's link gets Join above and no
           Remove here. */}
-      <MeetingControls
-        event={original}
-        onEventChanged={(saved) => {
-          setLocation(saved.location ?? '');
-          setDescription(saved.description ?? '');
-        }}
-      />
+      {!locked && (
+        <MeetingControls
+          event={original}
+          onEventChanged={(saved) => {
+            setLocation(saved.location ?? '');
+            setDescription(saved.description ?? '');
+          }}
+        />
+      )}
 
       {/* Colour — every calendar: a local or colour-capable external calendar
           stores it on the event (color_label); a non-capable external event
@@ -1705,8 +1707,9 @@ export default function EventEditorModal({
         !(isOccurrence && editScope === 'occurrence') && (
           <>
           {repeatSentence !== '' && (
+            // Its own label: the controls below carry `recurrence.label`.
             <ReadOnlyField
-              label={t('dialogs.event.recurrence.label')}
+              label={t('dialogs.event.recurrence.storedLabel')}
               value={repeatSentence}
             />
           )}

@@ -149,8 +149,11 @@ Apple's well-known endpoints.
   before the PUT (`cal_core::invitation::reply_only_change`), and a protected
   difference against a copy the caller never saw is a **conflict**, not a
   refusal: that is the organizer's change, not the user's. The PUT uses
-  If-Match against the freshly read ETag, because the body being written is
-  the body just read.
+  If-Match against the CALLER's ETag, as every other write here does: the
+  alarms are spliced into the copy just read, but the reminders written are
+  the ones the caller saw, and a reminders-only edit passes the verdict
+  whatever the version — so the ETag is what keeps it from overwriting an
+  alarm another device set in the meantime.
 - **Such a server always notifies.** Calendars on a scheduling server carry
   `always_notifies_attendees` (and `notifier_name` "iCloud" on iCloud): the
   editors show "iCloud informs the attendees of every change" instead of the

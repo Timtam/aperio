@@ -13,7 +13,7 @@
 //! ID/etag tracking concern (completed_at vs start_utc).
 
 use cal_core::{rrule_until_instant, AttendeeStatus, DateRange, Event, EventRecurrence, NewEvent};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use reqwest::{
     header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     Client, Method, StatusCode,
@@ -449,10 +449,13 @@ async fn write_attendee_copy(
             ..edit
         });
     };
-    // If-Match is the ETag just read, on purpose: the body being written IS
-    // the body just read, with the alarms swapped. That is what lets an
-    // answer and a reminder be saved one after the other without reopening.
-    let if_match = server_etag.as_deref().or(edit.etag.as_deref());
+    // If-Match is the CALLER's version, as on every other write: the alarms
+    // are spliced into the copy just read, but the reminders being written
+    // are the ones the caller saw, so writing them over a copy somebody else
+    // changed would drop that change. `reply_only_verdict` lets a reminders-
+    // only edit through whatever the version, because reminders are the
+    // attendee's own — which is exactly why the ETag has to guard them here.
+    let if_match = edit.etag.as_deref().or(server_etag.as_deref());
     let new_body = replace_ranges(body, vec![(block, new_block)]);
     let new_etag = put_resource(client, resource, new_body, if_match, credentials).await?;
     Ok(Event {
@@ -1088,7 +1091,17 @@ fn exdate_line(master: &str, occurrence: DateTime<Utc>) -> String {
                 .is_some_and(|value| value.eq_ignore_ascii_case("DATE"))
     });
     if all_day {
-        format!("EXDATE;VALUE=DATE:{}", occurrence.format("%Y%m%d"))
+        // An all-day instant is local midnight (`reference_allday_local_midnight`),
+        // so its day is the local one: in Berlin the 16th is stored as the
+        // 15th at 23:00 UTC, and `EXDATE;VALUE=DATE:20261115` would exclude
+        // nothing at all — the bug this line exists to fix.
+        format!(
+            "EXDATE;VALUE=DATE:{}",
+            occurrence
+                .with_timezone(&Local)
+                .date_naive()
+                .format("%Y%m%d")
+        )
     } else {
         format!("EXDATE:{}", format_utc_compact(occurrence))
     }
@@ -1380,7 +1393,7 @@ mod tests {
     // Only the tests still call the preservation-free renderer directly.
     use crate::config::{AuthKind, CaldavAccountConfig};
     use crate::mapping::event_to_ical;
-    use chrono::TimeZone;
+    use chrono::{Local, TimeZone};
     use mockito::Server;
 
     #[test]
@@ -2437,7 +2450,13 @@ END:VCALENDAR\r
             &client(),
             &cal_url,
             "/calendars/alice/work/series.ics|9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1",
-            Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).unwrap(),
+            // Built the way an all-day occurrence is: local midnight as an
+            // instant. East of Greenwich that is the day BEFORE in UTC, which
+            // is what made the old line exclude nothing.
+            Local
+                .with_ymd_and_hms(2026, 11, 16, 0, 0, 0)
+                .unwrap()
+                .with_timezone(&Utc),
             &creds(&server.url()),
         )
         .await
