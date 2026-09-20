@@ -9,9 +9,11 @@ import {
   invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
+  occurrenceWrite,
   organizerOf,
   seriesDayKey,
   shiftSeriesRule,
+  type ExceptionCalendar,
   type NoticeCalendar,
   type ShiftRefusal,
 } from '@aperio/shared';
@@ -25,7 +27,6 @@ import {
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
 import {
-  isProviderOverride,
   isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
@@ -367,7 +368,7 @@ export async function moveEventToDay(
   event: CalendarEvent,
   targetDayKey: string,
   scope: MoveCopyScope = 'series',
-  sourceCalendar?: NoticeCalendar | null,
+  sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
 ): Promise<boolean> {
   return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar);
 }
@@ -394,7 +395,7 @@ export async function moveEventToSlot(
   targetDayKey: string,
   minuteOfDay: number | null,
   scope: MoveCopyScope = 'series',
-  sourceCalendar?: NoticeCalendar | null,
+  sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
 ): Promise<boolean> {
   // 77a: only the organizer moves their meeting. This is the only place that
   // can say so for a dragged OCCURRENCE — carving one out writes a new event
@@ -435,21 +436,32 @@ export async function moveEventToSlot(
       ? shift(event.end)
       : new Date(new Date(newStart).getTime() + durationMs).toISOString();
 
-  if (scope === 'occurrence' && isProviderOverride(event)) {
-    // An override IS the occurrence, and the series already skips its slot.
-    // Carving it out created a copy next to it, and on Exchange an exception
-    // moved far from its slot then stayed behind as a duplicate.
+  // What a drag of ONE occurrence does to its series: write the occurrence
+  // itself where the provider can hold an exception, carve it out where it
+  // cannot (decision 79b, the rule the editors share).
+  const write = occurrenceWrite({
+    row: event,
+    calendar: sourceCalendar,
+    scope: scope === 'occurrence' ? 'occurrence' : 'series',
+  });
+  if (write.kind === 'in-place') {
+    // The occurrence stays IN its series. Carving it out created a copy next
+    // to it, and on Exchange an exception moved far from its slot then stayed
+    // behind as a duplicate.
     const landed = await apiUpdateEvent({
       ...event,
+      // Its own id where the provider already holds the exception, the minted
+      // one where this drag is what creates it.
+      id: write.id,
       start: newStart,
       end: newEnd,
-      // Stays null: an override is one instance and owns no rule.
+      // Stays null: an exception is one instance and owns no rule.
       recurrence: null,
     });
     // Exchange will not move an exception past a neighbouring occurrence and
     // detaches it as a single with an id of its own. A colour Aperio keeps on
     // the device, keyed by the override's id, follows it there.
-    if (landed?.id && landed.id !== event.id && event.color_label) {
+    if (landed?.id && landed.id !== write.id && event.color_label) {
       await setEventColor(landed.id, landed.calendar_id, event.color_label);
       await setEventColor(event.id, event.calendar_id, null).catch(
         () => undefined,
@@ -458,7 +470,7 @@ export async function moveEventToSlot(
     return true;
   }
 
-  if (scope === 'occurrence' && isSeriesOccurrence(event)) {
+  if (write.kind === 'carve-out') {
     await apiCreateEvent({
       calendar_id: event.calendar_id,
       title: event.title,
@@ -474,10 +486,7 @@ export async function moveEventToSlot(
       attendees: event.attendees,
       ...organizerOf(event),
     });
-    const occIso = occurrenceIsoOf(event);
-    if (occIso) {
-      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
-    }
+    await addEventExdate(write.seriesId, write.occurrence, event.calendar_id);
     return true;
   }
 

@@ -71,6 +71,7 @@ impl LocalAdapter {
             supports_event_color: true,
             always_notifies_attendees: false,
             invitations_reply_only: false,
+            stores_occurrence_exceptions: false,
             notifier_name: None,
         })
     }
@@ -193,6 +194,7 @@ impl LocalAdapter {
             supports_event_color: true,
             always_notifies_attendees: false,
             invitations_reply_only: false,
+            stores_occurrence_exceptions: false,
             notifier_name: None,
         }))
     }
@@ -287,6 +289,7 @@ impl CalendarFeature for LocalAdapter {
                     supports_event_color: true,
                     always_notifies_attendees: false,
                     invitations_reply_only: false,
+                    stores_occurrence_exceptions: false,
                     notifier_name: None,
                     id: id?,
                     name: name?,

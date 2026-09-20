@@ -1296,6 +1296,26 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   (`attendeeNotice`, `cancellationNotice`, `notifierSentence`), auch das
   „Organisiert das Konto?“ der Löschdialoge: Es folgt jetzt
   `organized_elsewhere` statt eines eigenen Adressvergleichs.
+- **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
+  Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
+  auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was
+  es zu einem Vorkommen macht — die Serie kennt es nicht mehr, eine spätere
+  Änderung der Serie lässt es stehen, und bei einem Anbieter, der seinen Gästen
+  mailt, ist das Herauslösen eine Absage plus eine neue Einladung. Kann der
+  Anbieter das geänderte Vorkommen IN der Serie halten, schreiben die
+  Oberflächen jetzt genau das: eine echte Ausnahme (`RECURRENCE-ID` bei CalDAV,
+  eine Instanz bei Google). Ob er es kann, sagt der Kalender selbst
+  (`stores_occurrence_exceptions`); wo er es nicht kann, bleibt es beim
+  Herauslösen, und niemand rät. Die Entscheidung trifft EINE Regel in
+  `@aperio/shared` (`occurrenceWrite`), die beide Editoren und das Ziehen
+  fragen — ein Umfang, der die Serie meint, kommt dort nie an, und ein Zug in
+  einen ANDEREN Kalender ist immer ein Herauslösen, weil eine Ausnahme nur in
+  der Ressource ihrer eigenen Serie existiert. Die `RECURRENCE-ID` selbst
+  schreibt CalDAV in der Form, die der `DTSTART` des Masters hat (RFC 5545
+  §3.8.4.4), mit dessen eigener Zonen-Schreibweise — die einzige, die gegen
+  eine `VTIMEZONE` in derselben Ressource auflöst — und liest sie zur Probe
+  zurück, bevor sie geschrieben wird. Lehnt der Anbieter ab, sagt Aperio es
+  (92) und löst nicht heimlich heraus.
 - **Fremde Einladungen sind schreibgeschützt (77a, 83b, 84a):** Auf einem
   Server mit Terminplanung nimmt der Anbieter von einem Gast nur dessen
   eigene Antwort und dessen eigene Wecker an (RFC 6638 §3.2.2.1); alles

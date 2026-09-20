@@ -31,9 +31,9 @@ use crate::ical_raw::{
 };
 use crate::identity::OwnIdentity;
 use crate::mapping::{
-    decode_event_id, event_to_ical_preserving, format_utc_compact, new_event_to_ical,
-    override_recurrence_id, override_to_vevent, parse_calendar_data_as, same_calendar_user,
-    strip_mailto_scheme, PriorAlarms,
+    decode_event_id, event_to_ical_preserving, format_utc_compact, mint_recurrence_id,
+    new_event_to_ical, override_recurrence_id, override_to_vevent, parse_calendar_data_as,
+    same_calendar_user, strip_mailto_scheme, PriorAlarms, SlotRefusal,
 };
 use crate::scheduling::{
     apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
@@ -604,13 +604,30 @@ async fn update_override(
     let blocks = vevent_blocks(&body, cal_url.as_str(), &own)
         .ok_or_else(|| refused("its resource cannot be read block by block"))?;
     let (_, uid) = decode_event_id(series_id);
-    let block = blocks
-        .iter()
-        .find(|b| {
-            override_recurrence_id(&b.event.id) == Some(slot)
-                && cal_core::series_master_id(&b.event.id) == uid
-        })
-        .ok_or_else(|| refused("it is no longer an exception in the series"))?;
+    let block = blocks.iter().find(|b| {
+        override_recurrence_id(&b.event.id) == Some(slot)
+            && cal_core::series_master_id(&b.event.id) == uid
+    });
+    let Some(block) = block else {
+        // Nothing stands in the slot yet, so this save is the first change to
+        // that one occurrence: write the exception the series does not have
+        // (decision 79b). Until now every such save carved the occurrence out
+        // of its series instead.
+        return mint_override(
+            client,
+            &resource,
+            &body,
+            &blocks,
+            event,
+            uid,
+            series_id,
+            slot,
+            server_etag,
+            credentials,
+            ctx,
+        )
+        .await;
+    };
     let server_block = &body[block.range.clone()];
     if ctx.schedules && attendee_copy(server_block, ctx)? {
         return write_attendee_copy(
@@ -653,6 +670,99 @@ async fn update_override(
     Ok(Event {
         etag: new_etag.or(event.etag.clone()),
         updated_at: Utc::now(),
+        ..event
+    })
+}
+
+/// Add an exception for `slot` to the series' own resource: the write behind
+/// "only this occurrence" where the provider can hold one (decision 79b).
+///
+/// A sibling of [`update_override`], not a branch inside it: that one swaps a
+/// block the server already has, this one adds a block the resource has never
+/// carried. They share the GET and the PUT and nothing else.
+///
+/// Refuses rather than writing something else. Every refusal here means the
+/// same thing to the user — this occurrence could not be saved on its own, and
+/// nothing was changed — so the reason travels as a machine token for the log
+/// (decision 92: the carve-out is never done behind the user's back).
+#[allow(clippy::too_many_arguments)]
+async fn mint_override(
+    client: &Client,
+    resource: &Url,
+    body: &str,
+    blocks: &[VeventBlock],
+    event: Event,
+    uid: &str,
+    series_id: &str,
+    slot: DateTime<Utc>,
+    server_etag: Option<String>,
+    credentials: &Credentials,
+    ctx: &WriteCtx,
+) -> CaldavResult<Event> {
+    let refused =
+        |why: &str| CaldavError::Forbidden(WriteRefusal::OccurrenceNotWritable.message(why));
+    let master = blocks
+        .iter()
+        .find(|b| {
+            override_recurrence_id(&b.event.id).is_none()
+                && cal_core::series_master_id(&b.event.id) == uid
+        })
+        .ok_or_else(|| refused("no-master"))?;
+    let master_block = &body[master.range.clone()];
+    // An exception belongs to a RULE. Without one there is no occurrence to
+    // stand in for, and the resource would grow a second event under one UID.
+    if master.event.recurrence.is_none() {
+        return Err(refused("not-recurring"));
+    }
+    // The occurrence was skipped; an exception would bring back a day the user
+    // deleted. `add_event_exdate` is the other direction and stays that way.
+    if master
+        .event
+        .recurrence
+        .as_ref()
+        .is_some_and(|r| r.exceptions.contains(&slot))
+    {
+        return Err(refused("already-skipped"));
+    }
+    // Someone else's meeting: RFC 6638 takes only this account's own reply and
+    // alarms (decision 77a), and an exception is neither.
+    if ctx.schedules && attendee_copy(master_block, ctx)? {
+        return Err(CaldavError::Forbidden(
+            WriteRefusal::ReplyOnlyInvitation.message("occurrence"),
+        ));
+    }
+    let plan = plan_block(master_block, &event, ctx)?;
+    // Inviting people to ONE occurrence of a series that has none would give
+    // the new block an ORGANIZER the master lacks, and a resource whose blocks
+    // name different organizers is one `one_organizer` refuses to write again.
+    if matches!(plan.change, PeopleChange::Invite { .. }) {
+        return Err(refused("would-invite"));
+    }
+    let ending = line_ending(master_block);
+    let recurrence_id = mint_recurrence_id(master_block, slot, ending).map_err(|why| {
+        refused(match why {
+            SlotRefusal::NoStart => "master-without-start",
+            SlotRefusal::UnknownZone(_) => "unknown-zone",
+            SlotRefusal::AmbiguousLocalTime => "ambiguous-local-time",
+        })
+    })?;
+    // A new block carries no alarms of its own yet: the reminders the edit
+    // holds are rendered fresh, and the master's VALARMs stay the master's.
+    let rendered = override_to_vevent(&event, series_id, &recurrence_id, PriorAlarms::default());
+    let new_body = insert_before_end(body, &insert_after_head(&rendered, &plan.lines));
+    let if_match = event.etag.as_deref().or(server_etag.as_deref());
+    let new_etag = put_resource(client, resource, new_body, if_match, credentials).await?;
+    Ok(Event {
+        // The id the next read will mint for this block, so the row the
+        // surfaces hold after the save is the row they would load.
+        id: format!(
+            "{series_id}{}{}",
+            cal_core::OVERRIDE_ID_MARKER,
+            slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ),
+        etag: new_etag.or(server_etag).or(event.etag.clone()),
+        updated_at: Utc::now(),
+        recurrence: None,
         ..event
     })
 }
@@ -3078,26 +3188,122 @@ END:VCALENDAR\r\n";
     }
 
     #[tokio::test]
-    async fn an_override_update_is_refused_when_the_slot_holds_no_override() {
-        // Someone deleted the exception since the row was read. The only write
-        // left would be one over the whole series, so there is none.
+    async fn a_slot_without_an_exception_gets_one() {
+        // Decision 79b: the first change to one occurrence WRITES the
+        // exception the series does not have yet. Until now this refused, and
+        // the surfaces carved the occurrence out into an event of its own.
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
 BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
 RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
-        let (_seen, _get, put) = serve_series(&mut server, body, "\"res-etag\"", 0).await;
+        let (seen, _get, put) = serve_series(&mut server, body, "\"res-etag\"", 1).await;
         let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
 
-        let err = update_event(
+        let saved = update_event(
             &client(),
             moved_override(&cal_url),
             &creds(&server.url()),
             &WriteCtx::default(),
         )
         .await
-        .unwrap_err();
-        assert!(err.to_string().contains("refusing"), "{err}");
+        .unwrap();
         put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+
+        // The master's own DTSTART is a bare UTC value, so the exception says
+        // the slot the same way (RFC 5545 §3.8.4.4).
+        assert!(
+            sent.contains("RECURRENCE-ID:20260615T070000Z"),
+            "the minted exception names the slot: {sent}"
+        );
+        assert_eq!(sent.matches("BEGIN:VEVENT").count(), 2, "{sent}");
+        // The master is untouched, rule and all.
+        assert!(sent.contains("RRULE:FREQ=WEEKLY;BYDAY=MO"), "{sent}");
+        assert!(sent.contains("SUMMARY:Weekly sync"), "{sent}");
+        // The new block carries the edit, and no rule of its own.
+        assert!(sent.contains("SUMMARY:Moved again"), "{sent}");
+        assert_eq!(sent.matches("RRULE:").count(), 1, "{sent}");
+        // The row that comes back is the row the next read would give.
+        assert_eq!(
+            saved.id,
+            "/calendars/alice/work/series.ics|series-1::rid::2026-06-15T07:00:00Z"
+        );
+        assert!(saved.recurrence.is_none(), "an exception has no rule");
+    }
+
+    #[tokio::test]
+    async fn a_minted_exception_says_the_slot_the_way_its_master_does() {
+        // A zoned master: the exception copies the zone NAME from the master's
+        // own DTSTART, because that is the one a VTIMEZONE in this resource
+        // resolves. 29 June 09:00 Berlin is 07:00 UTC in summer time.
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, SERIES_BODY, "\"res-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let edit = Event {
+            id: "/calendars/alice/work/series.ics|series-1::rid::2026-06-29T07:00:00Z".into(),
+            title: "Just this Monday".into(),
+            start: Utc.with_ymd_and_hms(2026, 6, 29, 12, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 6, 29, 12, 30, 0).unwrap(),
+            etag: Some("\"res-etag\"".into()),
+            ..sample_existing_event(&cal_url)
+        };
+
+        update_event(&client(), edit, &creds(&server.url()), &WriteCtx::default())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(
+            sent.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260629T090000"),
+            "the master's own zone, its own spelling: {sent}"
+        );
+        // The two exceptions the resource already had are still there.
+        assert_eq!(sent.matches("BEGIN:VEVENT").count(), 4, "{sent}");
+        assert!(sent.contains("X-CUSTOM-PROP:kept byte for byte"), "{sent}");
+    }
+
+    #[tokio::test]
+    async fn an_exception_is_refused_where_it_would_name_nothing() {
+        let cases: [(&str, &str); 2] = [
+            (
+                // Not a series at all: an exception would be a second event
+                // under one UID.
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+SUMMARY:Not a series\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                "not-recurring",
+            ),
+            (
+                // The occurrence was deleted; an exception would bring back a
+                // day the user removed.
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEXDATE:20260615T070000Z\r\nSUMMARY:Weekly sync\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n",
+                "already-skipped",
+            ),
+        ];
+        for (body, why) in cases {
+            let mut server = Server::new_async().await;
+            let (_seen, _get, put) = serve_series(&mut server, body, "\"res-etag\"", 0).await;
+            let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+            let err = update_event(
+                &client(),
+                moved_override(&cal_url),
+                &creds(&server.url()),
+                &WriteCtx::default(),
+            )
+            .await
+            .unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains("occurrence-not-writable") && message.contains(why),
+                "{why}: {message}"
+            );
+            // Refused means refused: nothing was written, and the surfaces are
+            // told rather than quietly given a carve-out (decision 92).
+            put.assert_async().await;
+        }
     }
 
     #[tokio::test]

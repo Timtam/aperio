@@ -34,6 +34,13 @@ pub enum WriteRefusal {
     /// The account's own addresses on this server could not be read, so
     /// nothing can be decided about a meeting and nothing was written.
     IdentityUnknown,
+    /// One occurrence could not be kept inside its series as an exception, so
+    /// nothing was written (decision 79b). The detail is a machine token for
+    /// the log — `no-master`, `not-recurring`, `already-skipped`,
+    /// `ambiguous-local-time`, … — because to the user every one of them means
+    /// the same thing: this occurrence could not be saved on its own. Carving
+    /// it out instead is never done behind their back (decision 92).
+    OccurrenceNotWritable,
 }
 
 impl WriteRefusal {
@@ -43,6 +50,7 @@ impl WriteRefusal {
             Self::ReplyOnlyInvitation => "reply-only-invitation",
             Self::ServerRefused => "server-refused",
             Self::IdentityUnknown => "identity-unknown",
+            Self::OccurrenceNotWritable => "occurrence-not-writable",
         }
     }
 

@@ -102,6 +102,7 @@ import { setEventColor } from '../api/containerColor';
 import {
   isProviderOverride,
   occurrenceIsoOf,
+  occurrenceWrite,
   planCarry,
   seriesIdOf,
   worthCarrying,
@@ -920,18 +921,26 @@ export default function EventEditorModal({
         navigation.goBack();
         return;
       }
-      if (
-        editing &&
-        original != null &&
-        editScope === 'occurrence' &&
-        isProviderOverride(original)
-      ) {
-        // Already an override — the user is editing an occurrence they (or the
-        // provider) changed before. The row loaded here IS the exception, and
-        // the series already skips its slot, so update it in place by its own
-        // id. Mirrors the desktop EventDialog.
+      // What "only this occurrence" does to the series it belongs to: write
+      // the occurrence itself where the provider can hold an exception, carve
+      // it out where it cannot (decision 79b, the rule the desktop shares).
+      // The slot travels beside the row here: this editor opens the SERIES
+      // MASTER, so the row alone says nothing about which occurrence is meant.
+      const occurrenceWriteKind =
+        editing && original != null
+          ? occurrenceWrite({
+              row: original,
+              occurrence,
+              calendar: calendars.find((c) => c.id === original.calendar_id),
+              scope: editScope,
+            })
+          : ({ kind: 'series' } as const);
+      if (editing && original != null && occurrenceWriteKind.kind === 'in-place') {
+        // The occurrence stays IN its series: the exception the provider
+        // already holds, or the one this save creates.
         const overrideRow: CalendarEvent = {
           ...original,
+          id: occurrenceWriteKind.id,
           title: trimmedTitle,
           calendar_id: calId,
           start,
@@ -979,19 +988,15 @@ export default function EventEditorModal({
         navigation.goBack();
         return;
       }
-      if (
-        editing &&
-        original != null &&
-        isOccurrence &&
-        occurrence != null &&
-        editScope === 'occurrence' &&
-        original.recurrence != null
-      ) {
-        // "This occurrence only": exclude the original occurrence from the
-        // series (add its instant to the master EXDATE), then create a STANDALONE
-        // event (no recurrence) carrying the edits. Mirrors the desktop
-        // EventDialog single-instance override.
-        await addEventExdate(original.id, occurrence, original.calendar_id);
+      if (editing && original != null && occurrenceWriteKind.kind === 'carve-out') {
+        // The provider cannot keep a changed occurrence inside its series, so
+        // the occurrence leaves it: the series skips the slot (EXDATE) and a
+        // STANDALONE event carries the edits. Mirrors the desktop EventDialog.
+        await addEventExdate(
+          occurrenceWriteKind.seriesId,
+          occurrenceWriteKind.occurrence,
+          original.calendar_id,
+        );
         const created = await createEvent({
           calendar_id: calId,
           title: trimmedTitle,
@@ -1021,10 +1026,10 @@ export default function EventEditorModal({
         // the same occurrence out of them — not updating a row.
         if (
           await offerToCarry(
-            occurrenceBefore(original, occurrence),
+            occurrenceBefore(original, occurrenceWriteKind.occurrence),
             created,
             'occurrence',
-            occurrence,
+            occurrenceWriteKind.occurrence,
           )
         ) {
           return;

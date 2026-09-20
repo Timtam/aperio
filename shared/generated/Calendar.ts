@@ -71,6 +71,27 @@ always_notifies_attendees: boolean,
  */
 invitations_reply_only: boolean, 
 /**
+ * The provider can keep ONE changed occurrence inside its series — an
+ * exception the adapter addresses by `{series}::rid::{slot}`
+ * ([`crate::split_override_id`]) — so "only this occurrence" writes that
+ * exception and the series stays one appointment. Where it is false the
+ * occurrence is CARVED OUT instead: the series skips the slot and a
+ * standalone event takes its place, which is what every calendar did
+ * before this flag (decision 79b).
+ *
+ * CalDAV sets it (RFC 5545 §3.8.4.4 `RECURRENCE-ID` in the series' own
+ * resource, with and without RFC 6638 scheduling), as do Exchange
+ * (`ModifiedOccurrences`) and Google (`events/{master}/instances`).
+ * Microsoft Graph could hold one but Aperio has no id for it, the local
+ * store has no exception row at all (decision 91), and an iCal feed, a
+ * device calendar and a synthesised calendar have nothing to write to.
+ * `#[serde(default)]` keeps older payloads and stored listings
+ * deserialising as `false`, which is the carve-out — the direction of
+ * failure is yesterday's behaviour, never a write the adapter cannot
+ * address.
+ */
+stores_occurrence_exceptions: boolean, 
+/**
  * The service the editors name when they say so ("iCloud informs the
  * attendees …"), as the adapter knows it; `None` reads as "the calendar
  * server". A display string only: no rule looks at it.

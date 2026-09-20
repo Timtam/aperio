@@ -14,6 +14,8 @@ export {
   isSeriesOccurrence,
   seriesIdOf,
   occurrenceIsoOf,
+  occurrenceWrite,
+  overrideIdFor,
   truncateRRuleBefore,
   splitRRuleForEdit,
   planSeriesSplit,

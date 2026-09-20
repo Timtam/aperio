@@ -62,6 +62,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         supports_event_color: false,
         always_notifies_attendees: false,
         invitations_reply_only: false,
+        stores_occurrence_exceptions: true,
         notifier_name: None,
         color_label: None,
         id: entry.id,

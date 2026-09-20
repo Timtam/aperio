@@ -148,6 +148,7 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         supports_event_color: false,
         always_notifies_attendees: false,
         invitations_reply_only: false,
+        stores_occurrence_exceptions: true,
         notifier_name: None,
         color_label: None,
         id,

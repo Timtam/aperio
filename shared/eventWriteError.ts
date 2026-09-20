@@ -16,6 +16,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'reply-only-invitation': 'dialogs.event.writeError.replyOnly',
   'server-refused': 'dialogs.event.writeError.serverRefused',
   'identity-unknown': 'dialogs.event.writeError.identityUnknown',
+  'occurrence-not-writable': 'dialogs.event.writeError.occurrenceNotWritable',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];

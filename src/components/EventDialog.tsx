@@ -42,6 +42,7 @@ import {
   isProviderOverride,
   isSeriesOccurrence,
   occurrenceIsoOf,
+  occurrenceWrite,
   planSeriesSplit,
   seriesIdOf,
   writeSeriesSplit,
@@ -1158,9 +1159,22 @@ export function EventDialog({
           // override to its master. "Just this one" would have rewritten the
           // whole series, which is the one outcome this dialog exists to
           // prevent.
-          if (editScope === 'occurrence' && isProviderOverride(event)) {
+          // What "only this occurrence" does to the series it belongs to:
+          // write the occurrence itself where the provider can hold an
+          // exception, carve it out where it cannot (decision 79b, the rule
+          // both editors and both drag paths share).
+          const occurrenceWriteKind = occurrenceWrite({
+            row: event,
+            calendar: calendars.find((c) => c.id === event.calendar_id),
+            scope: editScope,
+          });
+          if (occurrenceWriteKind.kind === 'in-place') {
             const overrideRow: CalendarEvent = {
               ...event,
+              // The id ADDRESSES the occurrence: its own when the provider
+              // already holds the exception, the minted one when this save is
+              // what creates it.
+              id: occurrenceWriteKind.id,
               title: trimmedTitle,
               calendar_id: form.calendarId,
               start,
@@ -1220,12 +1234,12 @@ export function EventDialog({
             return;
           }
 
-          if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
-            // Single-instance override: add the original date to the
-            // series EXDATE list, then create a standalone event with
-            // the user's modified fields.
-            const occIso = occurrenceIsoOf(event);
-            if (occIso) {
+          if (occurrenceWriteKind.kind === 'carve-out') {
+            // The provider cannot keep a changed occurrence inside its series,
+            // so the occurrence leaves it: the series skips the slot and a
+            // standalone event takes its place.
+            const occIso = occurrenceWriteKind.occurrence;
+            {
               await addEventExdate(seriesId, occIso, event.calendar_id);
               const created = await apiCreateEvent({
                 calendar_id: form.calendarId,
