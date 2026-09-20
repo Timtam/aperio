@@ -186,6 +186,44 @@ describe('EventDialog → an invitation somebody else organizes', () => {
     expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(false);
   });
 
+  it('names the stored rule beside the controls that would rewrite it (87b)', async () => {
+    // An editable event whose rule the repeat controls cannot hold: they show
+    // "the last Monday" for "the last workday", and touching one would save
+    // that. So the stored rule is said in words — under its OWN label, or two
+    // adjacent stops would both be called "Wiederholung".
+    const editable = {
+      ...INVITATION,
+      id: 'ev-own',
+      organized_elsewhere: false,
+      organizer: 'me@example.com',
+      attendee_responses: [],
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+        exceptions: [],
+        tzid: null,
+      },
+    } as unknown as CalendarEvent;
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={editable} initialScope="series" />
+      </StrictMode>,
+    );
+    const stored = await screen.findByLabelText(
+      /gespeicherte wiederholung|stored repeat/i,
+      undefined,
+      { timeout: 8000 },
+    );
+    expect((stored as HTMLInputElement).readOnly).toBe(true);
+    expect((stored as HTMLInputElement).value).toMatch(
+      /am letzten Werktag|on the last weekday/i,
+    );
+    // The controls are still there: this is an event the account may edit.
+    expect(
+      screen.queryByText(/organisiert jemand anderes|organizes this meeting/i),
+    ).toBeNull();
+  });
+
   it('asks before deleting, and says the organizer gets a decline', async () => {
     await open();
     fireEvent.click(screen.getByRole('button', { name: /^(löschen|delete)$/i }));

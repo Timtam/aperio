@@ -27,10 +27,9 @@ describe('lastOccurrenceDayKey', () => {
     ).toBe('2027-03-29');
   });
 
-  it('reads a zoned rule on the clock the series recurs in', () => {
-    // Apple writes the local end of day as UTC: 21:59:59Z is 23:59:59 in
-    // Berlin on the same day, so the Monday bound belongs to that Monday and
-    // not to the week before.
+  it('names the day on the clock the series recurs in', () => {
+    // A morning series in Berlin: the day is read on the series' clock, not
+    // on UTC, so a bound written as the local end of day names that Monday.
     expect(
       lastOccurrenceDayKey(
         event(
@@ -40,6 +39,24 @@ describe('lastOccurrenceDayKey', () => {
         ),
       ),
     ).toBe('2027-03-29');
+  });
+
+  it('answers with the occurrence the calendar shows, offset and all', () => {
+    // The sentence is about what the user sees. A zoned rule is expanded in
+    // wall-clock space while its UNTIL stays a real instant, so an EVENING
+    // series ends one occurrence earlier than the bound's own day suggests —
+    // in the calendar and in this sentence alike. The offset itself is the
+    // expander's, and it is noted in TODO; a sentence that disagreed with the
+    // grid would be the worse of the two.
+    expect(
+      lastOccurrenceDayKey(
+        event(
+          'FREQ=WEEKLY;BYDAY=MO;UNTIL=20270329T215959Z',
+          '2026-06-15T20:00:00.000Z',
+          'Europe/Berlin',
+        ),
+      ),
+    ).toBe('2027-03-22');
   });
 
   it('says nothing where a day would be a guess', () => {

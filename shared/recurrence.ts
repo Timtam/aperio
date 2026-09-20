@@ -848,22 +848,22 @@ export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
   const dtstart = new Date(event.start);
   if (Number.isNaN(dtstart.getTime())) return null;
   try {
-    // A zoned rule is iterated in WALL-CLOCK space (`zonedOccurrences`): its
-    // dtstart is the wall clock, and so is every instant it answers with. The
-    // rule's own UNTIL is a real instant, so it has to be moved into that
-    // space before it can be compared with them — otherwise the bound is off
-    // by the zone's offset and the day named can be the occurrence before.
+    // Built exactly as `zonedOccurrences` builds it — a zoned rule is
+    // iterated in WALL-CLOCK space — so this answers with the occurrence the
+    // views show. rrule.js applies the rule's own `UNTIL` while it iterates,
+    // and a zoned rule's `UNTIL` is a real instant read in that wall-clock
+    // space: an evening occurrence on the bound's own day can fall outside it
+    // by the zone's offset. That is the expander's reading, in the calendar
+    // and here alike, and this sentence is about what the calendar shows.
     const rule = buildRule(body, tzid ? realToWall(dtstart, tzid) : dtstart);
     const until = rule.options.until;
     if (!until) return null;
-    const bound = tzid ? realToWall(until, tzid) : until;
-    const last = rule.before(bound, true);
+    const last = rule.before(until, true);
     if (!last) return null;
-    // In wall-clock space the answer already reads as the day on the series'
-    // clock; without a zone it is a real instant and is read as one.
-    return tzid
-      ? last.toISOString().slice(0, 10)
-      : seriesDayKey(last.toISOString(), tzid);
+    // Both readings land on the same digits: a zoned rule answers in wall
+    // clock, which already IS the series' clock, and a rule without a zone
+    // answers in UTC, which is the clock `expandEvent` reads it on.
+    return last.toISOString().slice(0, 10);
   } catch {
     return null;
   }

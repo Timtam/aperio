@@ -2287,6 +2287,11 @@ Siehe DESIGN §4.2.
   - Auf einem farbfähigen Server versteckt der Editor die Farbe einer fremden
     Einladung, statt sie geräte-lokal zu halten.
   - `WKST` zählt nur in der einen Form, in der es die Wochen verschiebt.
+  - Eine Serie mit Zone wird in Wanduhr-Zeit ausgeklappt, ihr `UNTIL` bleibt
+    aber ein echter Zeitpunkt (`shared/recurrence.ts`, `zonedOccurrences`).
+    Ein Abendtermin am Tag der Grenze fällt dadurch um den Zonen-Versatz
+    heraus — im Kalender und im Satz „letzter Termin am …“ gleichermaßen.
+    Gefunden bei der Prüfung von #85; der Satz sagt, was die Ansicht zeigt.
   - Die Wiederholungs-Zusammenfassung erscheint auch im normalen Editor, wenn
     die gespeicherte Regel nicht die ist, die der Picker zurückbauen würde
     (87b, gebaut: `pickerMisreadsRule`). Die Bedienelemente selbst halten
