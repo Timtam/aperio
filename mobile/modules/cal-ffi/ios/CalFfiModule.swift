@@ -278,6 +278,12 @@ public class CalFfiModule: Module {
       canonicalZone(name: name)
     }
 
+    // Which clock a series' rule is read on: an all-day series repeats on the
+    // device's calendar days (48a). Synchronous, for the same reason.
+    Function("expansionClock") { (allDay: Bool, tzid: String) -> String in
+      expansionClock(allDay: allDay, tzid: tzid)
+    }
+
     // The world zone list: its names, the search, where a stored or device
     // zone stands, and the offsets.
     Function("zoneLabels") { () -> String in

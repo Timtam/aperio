@@ -192,6 +192,14 @@ pub fn canonical_zone(name: &str) -> String {
     cal_core::canonical_zone(name).unwrap_or("").to_string()
 }
 
+/// See [`crate::expansionClock`]. Infallible; `""` for the tzid means none.
+pub fn expansion_clock(all_day: bool, tzid: &str) -> String {
+    let tzid = if tzid.is_empty() { None } else { Some(tzid) };
+    cal_core::expansion_clock(all_day, tzid)
+        .as_token()
+        .to_string()
+}
+
 /// See [`crate::zoneLabels`].
 pub fn zone_labels() -> Result<String, WireError> {
     cal_core::zone_labels_json().map_err(|e| WireError::BadJson(e.to_string()))

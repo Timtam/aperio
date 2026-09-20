@@ -106,9 +106,15 @@ Some of the rules that cross today:
   wrote (digit runs by value: "Kapitel 2" before "Kapitel 10");
 - **the series clock**, `cal_core::series_clock`:
   - `seriesClockZone` answers which stored zone names a series repeats on;
-  - `canonicalZone` resolves a tzdata name to its zone.
+  - `canonicalZone` resolves a tzdata name to its zone;
+  - `expansionClock` answers which clock a series is read on at all —
+    `device-days` for an all-day series (it repeats on the days its reader
+    sees, whatever zone it carries), `zone` for the zone it stores, `utc`
+    otherwise. WHICH zone the device is in stays with the caller: the core
+    reads no clock, so the views hand it `Intl`'s answer and host-core hands it
+    the device's IANA name.
 
-  Both are plain strings, with `''` for none, because every expansion of a
+  All three are plain strings, with `''` for none, because every expansion of a
   series asks. The names are generated from chrono-tz by `cargo xtask tz-list`.
   The Exchange adapter's Windows zone ids are generated on top of them, from a
   pinned CLDR file, by `cargo xtask windows-zones`.

@@ -129,6 +129,52 @@ pub fn written_series_zone(tzid: Option<&str>, all_day: bool) -> Option<&str> {
     }
 }
 
+/// The clock a series' rule is read on — the answer [`expansion_clock`] gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpansionClock {
+    /// UTC: a series with no zone of its own repeats on it.
+    Utc,
+    /// The wall clock of the zone the series stores, so a time of day survives
+    /// a clock change.
+    Zone,
+    /// The calendar days of the DEVICE: an all-day series repeats on the days
+    /// its reader sees.
+    DeviceDays,
+}
+
+/// Which clock `all_day` and `tzid` make a series repeat on (decision 48a).
+///
+/// An all-day series names days, not instants, so it repeats on the device's
+/// calendar days whatever zone it carries — it carries none of its own (46a),
+/// and one a provider added would move the series to that zone's midnights.
+/// Read on UTC instead, as Aperio read it until now, a named weekday lands a
+/// day late east of Greenwich, and a day of the month can land in the wrong
+/// month.
+///
+/// Only the CHOICE is made here. The device's zone is the caller's to know:
+/// the core never reads a clock ([`crate::event_anchor`]), so the host hands
+/// its own zone to the expander (host-core's reminders, the views' `Intl`).
+pub fn expansion_clock(all_day: bool, tzid: Option<&str>) -> ExpansionClock {
+    if all_day {
+        ExpansionClock::DeviceDays
+    } else if series_clock_zone(tzid).is_some() {
+        ExpansionClock::Zone
+    } else {
+        ExpansionClock::Utc
+    }
+}
+
+impl ExpansionClock {
+    /// The name the doors carry: `device-days`, `zone` or `utc`.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            ExpansionClock::Utc => "utc",
+            ExpansionClock::Zone => "zone",
+            ExpansionClock::DeviceDays => "device-days",
+        }
+    }
+}
+
 /// The zones outside `Etc/` with a region part, in tzdata's spelling and in
 /// the order the names sort with ASCII case folded — the zones a series' zone
 /// is chosen from. The region part keeps out the POSIX-style names such as
@@ -358,6 +404,33 @@ mod contract {
                 canonical_zone(name),
                 row["canonical"].as_str(),
                 "{name:?}: {}",
+                row["note"].as_str().unwrap_or(""),
+            );
+        }
+    }
+
+    #[test]
+    fn every_expansion_clock_row_holds() {
+        let rows = section("expansionClock");
+        // Anti-silence: an all-day series answers the same however it is
+        // spelled, and a timed one still asks the zone rule.
+        assert!(
+            rows.iter()
+                .any(|r| r["allDay"] == true && r["tzid"].as_str() == Some("Europe/Berlin")),
+            "the contract lost the all-day row that carries a zone",
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["allDay"] == false && r["clock"].as_str() == Some("zone")),
+            "the contract lost the timed row that repeats on its zone",
+        );
+        for row in &rows {
+            let all_day = row["allDay"].as_bool().expect("every row says all-day");
+            let tzid = row["tzid"].as_str();
+            assert_eq!(
+                expansion_clock(all_day, tzid).as_token(),
+                row["clock"].as_str().expect("every row names a clock"),
+                "all_day={all_day} {tzid:?}: {}",
                 row["note"].as_str().unwrap_or(""),
             );
         }

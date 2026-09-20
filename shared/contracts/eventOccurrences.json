@@ -25,13 +25,13 @@
     "providers that expand for us": "Graph’s calendarView and the device calendars deliver occurrences; nothing is expanded for them"
   },
   "shape": {
-    "input": "{events: [{id, start, end, recurrence: {rrule, exceptions, tzid?} | null, cancelled?}], range: {start, end}}; instants in RFC 3339, UTC",
+    "input": "{events: [{id, start, end, all_day?, recurrence: {rrule, exceptions, tzid?} | null, cancelled?}], range: {start, end}}; instants in RFC 3339, UTC. `all_day` reads as false when absent; an all-day series repeats on the DEVICE's calendar days (48a) and cancels by the day an exception falls on, so its rows only mean what they say when the reader is in `measuredWith.machineZone`",
     "expect": "[{event: index into events, start}], sorted by instant and then by input index",
     "reminders": "present only where the reminder path answered differently: the same shape and order, each event expanded on its own (a cancelled event skipped, overrides not applied)",
     "surfacesDiffer": "marks a row that records `reminders`",
     "wasTypeScript": "a row pinning a JavaScript artifact the port may decide against; it must then change the row on purpose, with a note",
     "instants": "compare as instants, never as text: expandAll writes milliseconds (.000Z)",
-    "measuredWith": "the rrule.js version and the zone of the machine the views’ answer was measured on (the expander does not read it)"
+    "measuredWith": "the rrule.js version, and the zone a row is read on unless the row names its own `deviceZone`. Since 48a the expander DOES read the device's zone for an all-day series, so both readers answer this zone themselves rather than taking the machine's"
   },
   "measuredWith": {
     "rruleJs": "2.8.1",
@@ -1578,13 +1578,14 @@
     },
     {
       "name": "an-all-day-series-west-of-utc-until-its-local-day",
-      "note": "All-day in New York: local midnight is 04:00 UTC. truncateRRuleBefore writes the local day as a date-only UNTIL for an all-day split, so May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 20:00 on May 5 in New York, and lose May 6. The rrule crate does not accept the date-only UNTIL, so the reminders keep only the master.",
+      "note": "All-day in New York, read on a device in Berlin: the stored instant is 04:00 UTC. truncateRRuleBefore writes the local day as a date-only UNTIL for an all-day split, so May 6 is meant to be the last day. The views read the date as 00:00 UTC and lose May 6. The rrule crate does not accept a date-only UNTIL on a named clock, so the reminders keep only the master — as before 48a, which changed WHICH clock the series is read on, not what the crate accepts.",
       "wasTypeScript": true,
       "surfacesDiffer": true,
       "input": {
         "events": [
           {
             "id": "s",
+            "all_day": true,
             "start": "2026-05-04T04:00:00Z",
             "end": "2026-05-05T04:00:00Z",
             "recurrence": {
@@ -1617,12 +1618,13 @@
     },
     {
       "name": "a-date-only-until-on-an-all-day-series-east-of-utc",
-      "note": "All-day in Berlin from May 4 (local midnight is 22:00 UTC the day before), with the date-only UNTIL an all-day split writes: May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 02:00 on May 6 in Berlin, and keep May 6 as the last day. The rrule crate does not accept the date-only UNTIL, so the reminders keep only the master.",
+      "note": "All-day in Berlin from May 4 (local midnight is 22:00 UTC the day before), with the date-only UNTIL an all-day split writes: May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 02:00 on May 6 in Berlin, and keep May 6 as the last day. The rrule crate does not accept a date-only UNTIL, so the reminders keep only the master.",
       "surfacesDiffer": true,
       "input": {
         "events": [
           {
             "id": "s",
+            "all_day": true,
             "start": "2026-05-03T22:00:00Z",
             "end": "2026-05-04T22:00:00Z",
             "recurrence": {
@@ -1665,6 +1667,7 @@
         "events": [
           {
             "id": "s",
+            "all_day": true,
             "start": "2026-05-03T22:00:00Z",
             "end": "2026-05-04T22:00:00Z",
             "recurrence": {
@@ -2555,11 +2558,12 @@
     },
     {
       "name": "an-all-day-series-without-zone-into-winter",
-      "note": "All-day weekly from Monday 2026-10-19 in Berlin, stored as local midnight (22:00 UTC the day before). All-day series carry no zone and step in UTC, so after the change each occurrence sits at 23:00 on the Sunday, local time.",
+      "note": "All-day weekly from Monday 2026-10-19 in Berlin, stored as local midnight (22:00 UTC the day before), across the change to winter time on 2026-10-25. An all-day series repeats on the DEVICE's calendar days (48a), so every occurrence is the local midnight of its own Monday: 22:00 UTC before the change, 23:00 UTC after it. Read in UTC, as Aperio read it until now, every later occurrence sat at 23:00 on the SUNDAY — the day before the one the rule names.",
       "input": {
         "events": [
           {
             "id": "s",
+            "all_day": true,
             "start": "2026-10-18T22:00:00Z",
             "end": "2026-10-19T22:00:00Z",
             "recurrence": {
@@ -2580,11 +2584,185 @@
         },
         {
           "event": 0,
-          "start": "2026-10-25T22:00:00.000Z"
+          "start": "2026-10-25T23:00:00.000Z"
         },
         {
           "event": 0,
-          "start": "2026-11-01T22:00:00.000Z"
+          "start": "2026-11-01T23:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-into-summer-keeps-its-monday",
+      "note": "The same series across the change to summer time on 2027-03-28: Monday 2027-03-22 is local midnight at 23:00 UTC the day before, Monday 2027-03-29 at 22:00 UTC. Both are Mondays on the device's calendar, which is what an all-day series repeats on (48a).",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2027-03-21T23:00:00Z",
+            "end": "2027-03-22T23:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2027-03-20T00:00:00Z",
+          "end": "2027-04-06T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2027-03-21T23:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-03-28T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2027-04-04T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-exception-cancels-the-day-it-names",
+      "note": "An all-day Monday series in Berlin, each occurrence at local midnight (22:00 UTC the day before), with 2026-06-15 cancelled — written as midnight UTC, the way a provider that anchors a date elsewhere writes it. A series of days cancels the DAY the exception falls on (48a, decision 95); compared as an instant it would cancel nothing and the deleted day would come back.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-06-07T22:00:00Z",
+            "end": "2026-06-08T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": ["2026-06-15T00:00:00Z"]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-06-07T00:00:00Z",
+          "end": "2026-06-23T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-06-07T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-21T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-exception-west-of-greenwich",
+      "note": "The same rule for a series anchored west of Greenwich, where midnight UTC falls on the day BEFORE: a daily all-day series at New York's local midnight (04:00 UTC), with 2026-06-15 cancelled as midnight UTC. The exception cancels the occurrence it NAMES — the one it is nearest to — and that reading is the same on every clock, which is the point: read as a day on the device's own clock instead, this exception cancels 14 June in New York, a day nobody deleted, while the deleted one comes back.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-06-14T04:00:00Z",
+            "end": "2026-06-15T04:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;COUNT=4",
+              "exceptions": ["2026-06-15T00:00:00Z"]
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-06-13T00:00:00Z",
+          "end": "2026-06-20T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-06-14T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-16T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-17T04:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-on-an-american-clock",
+      "deviceZone": "America/New_York",
+      "note": "An all-day Monday series read on a device in New York, across the change to winter time on 1 November 2026 — a week after Europe's. Every occurrence is its own Monday's local midnight there: 04:00 UTC in summer time, 05:00 UTC after. Read on the table's own clock (Berlin, which changed on 25 October) the later Mondays would answer 04:00 UTC, so this row is what keeps the device's zone an INPUT rather than decoration.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-10-26T04:00:00Z",
+            "end": "2026-10-27T04:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY;COUNT=3",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-10-25T00:00:00Z",
+          "end": "2026-11-10T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-10-26T04:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-02T05:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-11-09T05:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "an-all-day-series-a-provider-gave-a-zone",
+      "note": "An all-day series is read on the device's days whatever zone it carries: the same Berlin Mondays, with a zone fourteen hours ahead written onto the series. A zone does harm on the wire (46a) and changes nothing here.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-06-07T22:00:00Z",
+            "end": "2026-06-08T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=WEEKLY",
+              "exceptions": [],
+              "tzid": "Pacific/Kiritimati"
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-06-07T00:00:00Z",
+          "end": "2026-06-16T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-06-07T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-06-14T22:00:00.000Z"
         }
       ]
     },

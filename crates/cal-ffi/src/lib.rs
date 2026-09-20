@@ -263,6 +263,22 @@ pub fn canonical_zone(name: String) -> String {
     cal_core::canonical_zone(&name).unwrap_or("").to_string()
 }
 
+/// Which clock a series is read on: "device-days" for an all-day series, "zone"
+/// for the wall clock of the zone it stores, "utc" otherwise. "" for the tzid
+/// means none. The device's own zone stays with the caller, because the core
+/// reads no clock. See cal_core::expansion_clock.
+#[uniffi::export]
+pub fn expansion_clock(all_day: bool, tzid: String) -> String {
+    let tzid = if tzid.is_empty() {
+        None
+    } else {
+        Some(tzid.as_str())
+    };
+    cal_core::expansion_clock(all_day, tzid)
+        .as_token()
+        .to_string()
+}
+
 /// The world zone list's names by position, as JSON. See cal_core::zone_list.
 #[uniffi::export]
 pub fn zone_labels() -> Result<String, StoreError> {
@@ -802,6 +818,26 @@ mod tests {
                 .to_string();
             let want = row["canonical"].as_str().unwrap_or("");
             assert_eq!(canonical_zone(name.clone()), want, "{name:?}");
+        }
+
+        let clocks = doc["expansionClock"]
+            .as_array()
+            .expect("expansionClock rows");
+        assert!(
+            clocks
+                .iter()
+                .any(|r| r["allDay"] == true && r["clock"].as_str() == Some("device-days")),
+            "the contract lost the all-day row",
+        );
+        for row in clocks {
+            let all_day = row["allDay"].as_bool().expect("every row says all-day");
+            let tzid = row["tzid"].as_str().unwrap_or("").to_string();
+            let want = row["clock"].as_str().expect("every row names a clock");
+            assert_eq!(
+                expansion_clock(all_day, tzid.clone()),
+                want,
+                "all_day={all_day} {tzid:?}",
+            );
         }
     }
 

@@ -60,6 +60,7 @@ import init, {
   recurrenceSummary as wasmRecurrenceSummary,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
+  expansionClock as wasmExpansionClock,
   zoneLabels as wasmZoneLabels,
   zoneSearch as wasmZoneSearch,
   zoneChoice as wasmZoneChoice,
@@ -348,6 +349,12 @@ export function seriesClockZoneThroughCore(tzid: string): string {
 export function canonicalZoneThroughCore(name: string): string {
   assertReady();
   return wasmCanonicalZone(name);
+}
+
+/** See `cal_core::expansion_clock`: `device-days`, `zone` or `utc`. */
+export function expansionClockThroughCore(allDay: boolean, tzid: string): string {
+  assertReady();
+  return wasmExpansionClock(allDay, tzid);
 }
 
 /** See `cal_core::zone_labels_json`. */

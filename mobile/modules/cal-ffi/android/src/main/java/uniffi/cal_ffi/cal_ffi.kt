@@ -838,6 +838,8 @@ external fun uniffi_cal_ffi_checksum_func_detect_conference(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_expand_task_occurrences(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_expansion_clock(
+): Short
 external fun uniffi_cal_ffi_checksum_func_find_group_suggestions(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_find_meeting_link_pairs(
@@ -1686,6 +1688,8 @@ external fun uniffi_cal_ffi_fn_func_detect_conference(`sourcesJson`: RustBuffer.
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_expand_task_occurrences(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_expansion_clock(`allDay`: Byte,`tzid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_group_suggestions(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_find_meeting_link_pairs(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1905,6 +1909,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_expand_task_occurrences() != 30514.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_expansion_clock() != 64961.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_find_group_suggestions() != 11457.toShort()) {
@@ -10655,6 +10662,22 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     UniffiLib.uniffi_cal_ffi_fn_func_expand_task_occurrences(
     
         FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Which clock a series is read on: "device-days" for an all-day series, "zone"
+         * for the wall clock of the zone it stores, "utc" otherwise. "" for the tzid
+         * means none. The device's own zone stays with the caller, because the core
+         * reads no clock. See cal_core::expansion_clock.
+         */ fun `expansionClock`(`allDay`: kotlin.Boolean, `tzid`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_expansion_clock(
+    
+        FfiConverterBoolean.lower(`allDay`),FfiConverterString.lower(`tzid`),_status)
 }
     )
     }

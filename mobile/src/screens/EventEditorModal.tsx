@@ -779,7 +779,7 @@ export default function EventEditorModal({
     return recurrenceSummaryText(
       describeRecurrence({
         rrule: rule,
-        start: seriesDayKey(original.start, original.recurrence?.tzid),
+        start: seriesDayKey(original.start, original.recurrence?.tzid, original.all_day),
         last_day: lastOccurrenceDayKey(original),
       }),
       { t, language: i18n.language },

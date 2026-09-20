@@ -104,6 +104,7 @@ import {
   seriesShiftJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
+  expansionClockThroughCore,
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
@@ -177,6 +178,7 @@ installRecurrenceSummaryRules({ recurrenceSummaryJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,
+  expansionClock: expansionClockThroughCore,
 });
 installZoneListRules({
   zoneLabelsJson,

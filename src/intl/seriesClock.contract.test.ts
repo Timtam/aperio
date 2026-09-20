@@ -76,6 +76,7 @@ describe('the shell around the door', () => {
     shell.installSeriesClockRules({
       seriesClockZone: (tzid) => (tzid === '' ? '' : 'Europe/Berlin'),
       canonicalZone: () => '',
+      expansionClock: () => 'zone',
     });
     expect(shell.seriesClockZone('europe/berlin')).toBe('europe/berlin');
     expect(shell.seriesClockZone(null)).toBeNull();

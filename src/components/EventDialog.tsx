@@ -304,7 +304,7 @@ export function EventDialog({
     return recurrenceSummaryText(
       describeRecurrence({
         rrule,
-        start: seriesDayKey(event.start, event.recurrence?.tzid),
+        start: seriesDayKey(event.start, event.recurrence?.tzid, event.all_day),
         last_day: lastOccurrenceDayKey(event),
       }),
       { t, language: i18n.language },
