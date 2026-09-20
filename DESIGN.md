@@ -1296,6 +1296,18 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   (`attendeeNotice`, `cancellationNotice`, `notifierSentence`), auch das
   „Organisiert das Konto?“ der Löschdialoge: Es folgt jetzt
   `organized_elsewhere` statt eines eigenen Adressvergleichs.
+- **Ein Termin kann dem widersprechen (98).** `always_notifies_attendees` ist
+  eine Eigenschaft des KALENDERS; ein einzelner Termin kann dem Server
+  trotzdem verbieten, für ihn zu verschicken (`SCHEDULE-AGENT=CLIENT` oder
+  `NONE`, RFC 6638 §7.1, am `ORGANIZER` oder an der eigenen Gastzeile). In
+  Live-Runde 6 trug eine per `.ics` importierte Einladung genau das, und
+  iCloud verschickte weder die Antwort noch die Absage. Der Adapter liest es
+  und der Termin trägt es als `scheduling_silenced`; die Sätze sagen dann, was
+  wirklich geschieht — „Dieser Termin wird nicht über iCloud verschickt — die
+  Teilnehmer erfahren von Änderungen nichts“, „Die Teilnehmer erfahren von der
+  Absage nichts“, und bei einer fremden Einladung „Der Organisator erfährt
+  davon nichts“ statt „bekommt eine Absage“. Ein Schalter wird dort nie
+  angeboten: Er würde um etwas bitten, das niemand tut.
 - **Fremde Einladungen sind schreibgeschützt (77a, 83b, 84a):** Auf einem
   Server mit Terminplanung nimmt der Anbieter von einem Gast nur dessen
   eigene Antwort und dessen eigene Wecker an (RFC 6638 §3.2.2.1); alles

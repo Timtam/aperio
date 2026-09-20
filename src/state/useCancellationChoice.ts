@@ -3,6 +3,7 @@ import {
   declineSentence,
   invitationLocked,
   notifierSentence,
+  silentSentence,
   type AttendeeNotice,
 } from '@aperio/shared';
 
@@ -29,6 +30,9 @@ export function useCancellationChoice(event: CalendarEvent | null): {
   notice: AttendeeNotice;
   offersChoice: boolean;
   alwaysNotifies: boolean;
+  /** Nobody is told at all: the event's own resource keeps the server out of
+   *  its scheduling (RFC 6638 `SCHEDULE-AGENT`). The dialog still SAYS so. */
+  silent: boolean;
   declines: boolean;
   sentence: { key: string; values: Record<string, string> };
 } {
@@ -39,11 +43,20 @@ export function useCancellationChoice(event: CalendarEvent | null): {
   // `cancellationNotice` says nothing about it — but removing the account's
   // copy is an answer to the organizer (decision 83b).
   const declines = invitationLocked(calendar, event);
+  // The event's own resource can forbid the server to send (`scheduling_silenced`,
+  // RFC 6638 SCHEDULE-AGENT). Then nobody hears of the deletion, and both
+  // sentences say that instead of promising a message (decision 98).
+  const silent = event?.scheduling_silenced === true;
   return {
     notice,
     offersChoice: notice === 'offer',
     alwaysNotifies: notice === 'always',
+    silent: notice === 'silent',
     declines,
-    sentence: declines ? declineSentence() : notifierSentence(calendar, 'cancellation'),
+    sentence: declines
+      ? declineSentence(event)
+      : silent
+        ? silentSentence(calendar, 'cancellation')
+        : notifierSentence(calendar, 'cancellation'),
   };
 }

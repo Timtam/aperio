@@ -2547,6 +2547,7 @@ mod server_zone_tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         adapter.update_event(series).await.expect("update");
         assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);

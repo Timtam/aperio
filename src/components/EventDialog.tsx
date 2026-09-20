@@ -14,6 +14,8 @@ import {
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
+  silentSentence,
+  type AttendeeNotice,
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
@@ -1631,12 +1633,18 @@ export function EventDialog({
   // both editors share (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, attendees: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const spec = notifierSentence(calendar, 'change');
-    return {
-      notice: attendeeNotice({ calendar, attendees, original: event ?? null }),
-      sentence: t(spec.key, spec.values),
-    };
+    const notice = attendeeNotice({ calendar, attendees, original: event ?? null });
+    // Two sentences, one place they can appear: who informs the attendees, or
+    // that nobody will (`scheduling_silenced`, decision 98).
+    const spec =
+      notice === 'silent'
+        ? silentSentence(calendar, 'change')
+        : notifierSentence(calendar, 'change');
+    return { notice, sentence: t(spec.key, spec.values) };
   };
+  /** A notice that shows a sentence rather than a switch. */
+  const saysASentence = (notice: AttendeeNotice) =>
+    notice === 'always' || notice === 'silent';
   const { notice, sentence: noticeSentence } = noticeFor(
     form.calendarId,
     form.attendees,
@@ -1648,13 +1656,13 @@ export function EventDialog({
   // says it after the choice.
   const noticeAfterAdding = (next: string[]): string | null => {
     const after = noticeFor(form.calendarId, next);
-    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+    return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const announceNoticeForCalendar = (calendarId: string) => {
     const after = noticeFor(calendarId, form.attendees);
     if (
-      after.notice === 'always' &&
-      (notice !== 'always' || after.sentence !== noticeSentence)
+      saysASentence(after.notice) &&
+      (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       announce(after.sentence);
     }
@@ -2052,7 +2060,7 @@ export function EventDialog({
             <span>{t('dialogs.event.fields.notifyAttendees')}</span>
           </label>
         )}
-        {notice === 'always' && (
+        {saysASentence(notice) && (
           <FocusableNote className="form__hint">{noticeSentence}</FocusableNote>
         )}
 

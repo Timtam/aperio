@@ -6,6 +6,7 @@ import {
   eventWriteErrorMessage,
   invitationLocked,
   notifierSentence,
+  silentSentence,
   occurrenceIsoOf,
   seriesIdOf,
   type NoticeCalendar,
@@ -135,7 +136,9 @@ export function confirmDeleteEvent(
       : showEventScopeDialog({
           title: t('dialogs.confirm.deleteEventTitle'),
           message: `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
-            invitationLocked(opts.calendar, ev) ? ` ${t(declineSentence().key)}` : ''
+            invitationLocked(opts.calendar, ev) || ev.scheduling_silenced === true
+              ? ` ${deleteSentence()}`
+              : ''
           }`,
           cancelLabel: t('mobile.cancel'),
           options: [
@@ -228,16 +231,31 @@ export function confirmDeleteEvent(
       ],
     );
 
+  /**
+   * What the delete says about who is told: the organizer gets a decline
+   * (83b), nobody hears of it at all (`scheduling_silenced`, 98), or the
+   * server informs the attendees (76a/80a). One chooser, so the four delete
+   * paths on this surface cannot drift apart.
+   */
+  const deleteSentence = (): string => {
+    if (invitationLocked(opts.calendar, ev)) return t(declineSentence(ev).key);
+    const spec =
+      ev.scheduling_silenced === true
+        ? silentSentence(opts.calendar, 'cancellation')
+        : notifierSentence(opts.calendar, 'cancellation');
+    return t(spec.key, spec.values);
+  };
+
   const plainAlert = () => {
     // Removing the account's copy of someone else's meeting tells the
     // organizer it is declined (83b), so the dialog says so and the button
     // names it.
     const declines = invitationLocked(opts.calendar, ev);
-    const sentence = declines ? t(declineSentence().key) : '';
+    const silent = ev.scheduling_silenced === true;
     Alert.alert(
       t('dialogs.confirm.deleteEventTitle'),
       `${t('dialogs.confirm.deleteEventMessage', { title: ev.title })}${
-        declines ? ` ${sentence}` : ''
+        declines || silent ? ` ${deleteSentence()}` : ''
       }`,
       [
         { text: t('mobile.cancel'), style: 'cancel' },
@@ -254,9 +272,10 @@ export function confirmDeleteEvent(
   // attendees; the adapter's reading (`organized_elsewhere`) says whether we
   // do (decision 70a).
   const notice = cancellationNotice(opts.calendar, ev);
-  if (notice === 'always') {
-    const sentenceSpec = notifierSentence(opts.calendar, 'cancellation');
-    const sentence = t(sentenceSpec.key, sentenceSpec.values);
+  // `'silent'` is `'always'`'s twin: the same one-button shape, because the
+  // provider decides either way — only the sentence differs (decision 98).
+  if (notice === 'always' || notice === 'silent') {
+    const sentence = deleteSentence();
     if (occurrence != null) {
       alwaysOccurrenceDialog(sentence);
       return;

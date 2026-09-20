@@ -206,6 +206,25 @@ pub struct Event {
     /// the wire / out of stores when `false`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub cancelled: bool,
+    /// The resource itself says the SERVER must not send this event's
+    /// scheduling messages (RFC 6638 §7.1 `SCHEDULE-AGENT=CLIENT` or `NONE`,
+    /// on the `ORGANIZER` line or on the account's own `ATTENDEE` row).
+    ///
+    /// `false` is the normal case and the RFC's default (`SERVER`): the
+    /// calendar server mails the invitation, the update and the reply. An
+    /// event that says otherwise is one some client took responsibility for —
+    /// an invitation imported from a `.ics` file carries it, and then nothing
+    /// leaves the server at all. Measured in live round 6: with
+    /// `SCHEDULE-AGENT=CLIENT` on the organizer and `NONE` on the account's
+    /// own row, iCloud sent neither the reply to an answer nor the
+    /// cancellation on a delete.
+    ///
+    /// The surfaces read it so they promise a message only where one is sent:
+    /// `always_notifies_attendees` is a fact about the CALENDAR, and this is
+    /// the one fact about the EVENT that can contradict it. Read-only,
+    /// provider-populated; `false` on providers that have no such marker.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub scheduling_silenced: bool,
 }
 
 /// An attendee's RSVP status — RFC 5545 `PARTSTAT`, normalised across

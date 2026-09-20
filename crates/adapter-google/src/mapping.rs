@@ -470,6 +470,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         // surfaced as a suppressing override (a cancelled WHOLE event returned
         // `None` above).
         cancelled,
+        scheduling_silenced: false,
     }))
 }
 
@@ -1047,6 +1048,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             cancelled: false,
+            scheduling_silenced: false,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
@@ -1088,6 +1090,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             cancelled: false,
+            scheduling_silenced: false,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         for side in ["start", "end"] {
@@ -1289,6 +1292,7 @@ mod tests {
             organizer: None,
             attendee_responses: vec![],
             cancelled: false,
+            scheduling_silenced: false,
         };
         let body = event_to_body(&ev);
         let json = serde_json::to_value(&body).unwrap();

@@ -123,6 +123,7 @@ impl VcCalendar {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         })
     }
 }
@@ -302,6 +303,7 @@ mod tests {
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 

@@ -22,6 +22,8 @@ import {
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
+  silentSentence,
+  type AttendeeNotice,
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
@@ -1308,12 +1310,17 @@ export default function EventEditorModal({
   // the desktop shares (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, people: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const spec = notifierSentence(calendar, 'change');
-    return {
-      notice: attendeeNotice({ calendar, attendees: people, original: original ?? null }),
-      sentence: t(spec.key, spec.values),
-    };
+    const notice = attendeeNotice({ calendar, attendees: people, original: original ?? null });
+    // Two sentences, one place they can appear: who informs the attendees, or
+    // that nobody will (`scheduling_silenced`, decision 98).
+    const spec =
+      notice === 'silent'
+        ? silentSentence(calendar, 'change')
+        : notifierSentence(calendar, 'change');
+    return { notice, sentence: t(spec.key, spec.values) };
   };
+  /** A notice that shows a sentence rather than a switch. */
+  const saysASentence = (value: AttendeeNotice) => value === 'always' || value === 'silent';
   const { notice, sentence: noticeSentence } = noticeFor(calId, attendees);
   // When the sentence appears while editing, it is said once, as part of what
   // the user just did, as the desktop does: nothing else tells VoiceOver or
@@ -1322,14 +1329,14 @@ export default function EventEditorModal({
   // calendar chosen says it after VoiceOver has read the picker again.
   const noticeAfterAdding = (next: string[]): string | null => {
     const after = noticeFor(calId, next);
-    return notice !== 'always' && after.notice === 'always' ? after.sentence : null;
+    return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const chooseCalendar = (next: string) => {
     setCalId(next);
     const after = noticeFor(next, attendees);
     if (
-      after.notice === 'always' &&
-      (notice !== 'always' || after.sentence !== noticeSentence)
+      saysASentence(after.notice) &&
+      (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       AccessibilityInfo.announceForAccessibilityWithOptions(after.sentence, { queue: true });
     }

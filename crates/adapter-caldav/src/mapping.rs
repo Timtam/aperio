@@ -236,6 +236,27 @@ fn map_event(
         });
     let people = cal_core::attendee::people_from_read(organizer, organized_by_me, rows);
 
+    // RFC 6638 §7.1 `SCHEDULE-AGENT`: who sends this event's scheduling
+    // messages. `SERVER` is the default and the normal case; `CLIENT` or
+    // `NONE` mean the server stays silent, and then nobody is told about a
+    // change, an answer or a cancellation. Read from the ORGANIZER line and
+    // from the account's own ATTENDEE row, and silent if EITHER says so: the
+    // surfaces promise a message only when nothing in the resource
+    // contradicts it. Measured in live round 6 — an invitation imported from
+    // a `.ics` file carries `CLIENT` on its organizer and `NONE` on the
+    // account's row, and iCloud sent neither a reply nor a cancellation.
+    let scheduling_silenced = organizer_prop.is_some_and(schedule_agent_is_silent)
+        || ev
+            .multi_properties()
+            .get("ATTENDEE")
+            .into_iter()
+            .flatten()
+            .any(|p| {
+                !own.is_empty()
+                    && own.names(p.value(), p.params().get("EMAIL").map(|e| e.value()))
+                    && schedule_agent_is_silent(p)
+            });
+
     // RFC 5545 `STATUS:CANCELLED` — the event was cancelled. Aperio keeps it
     // visible (subject to the show-cancelled setting) but never schedules
     // reminders for it. Any other STATUS (TENTATIVE/CONFIRMED) reads as active.
@@ -270,6 +291,19 @@ fn map_event(
         organizer: people.organizer,
         attendee_responses: people.attendee_responses,
         cancelled,
+        scheduling_silenced,
+    })
+}
+
+/// Whether a `SCHEDULE-AGENT` on this property tells the server to stay
+/// silent: `CLIENT` (some client sends the scheduling messages) or `NONE`
+/// (nobody does). An absent parameter, and the explicit `SERVER`, mean the
+/// server sends — the RFC's default and what every invitation that arrived
+/// through the server itself carries.
+fn schedule_agent_is_silent(prop: &Property) -> bool {
+    prop.params().get("SCHEDULE-AGENT").is_some_and(|agent| {
+        let value = agent.value().trim();
+        value.eq_ignore_ascii_case("CLIENT") || value.eq_ignore_ascii_case("NONE")
     })
 }
 
@@ -1548,6 +1582,64 @@ END:VCALENDAR\r\n";
         // Without the account's addresses nothing is known about it.
         let events = parse_calendar_data(&body, "cal-1").unwrap();
         assert!(events[0].organized_elsewhere);
+    }
+
+    /// RFC 6638 §7.1: `SCHEDULE-AGENT` says who sends the scheduling
+    /// messages. Measured in live round 6 — an invitation imported from a
+    /// `.ics` file carries `CLIENT` on its organizer and `NONE` on the
+    /// account's own row, and iCloud then sent neither the reply to an answer
+    /// nor the cancellation on a delete. The surfaces promise a message only
+    /// when nothing in the resource says the server stays out.
+    #[test]
+    fn a_schedule_agent_says_the_server_stays_out() {
+        // Nothing said: the RFC's default, and every invitation that arrived
+        // through the server itself.
+        let events =
+            parse_calendar_data_as(ICLOUD_INVITATION, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(!events[0].scheduling_silenced, "a plain invitation");
+
+        // On the ORGANIZER line, as the imported copy carries it.
+        let imported = ICLOUD_INVITATION.replace(
+            "EMAIL=boss@example.net:mailto:boss@example.net",
+            "EMAIL=boss@example.net;SCHEDULE-AGENT=CLIENT:mailto:boss@example.net",
+        );
+        let events = parse_calendar_data_as(&imported, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(
+            events[0].scheduling_silenced,
+            "SCHEDULE-AGENT=CLIENT on the organizer",
+        );
+
+        // On the ACCOUNT's own attendee row, which is what silences its reply.
+        // The anchor sits on the FOLDED half of that row, so this also shows
+        // the parameter being read after the line is joined again.
+        let own_row = ICLOUD_INVITATION.replace(
+            "ROLE=REQ-PARTICIPANT:/aB1/principal/",
+            "ROLE=REQ-PARTICIPANT;SCHEDULE-AGENT=NONE:/aB1/principal/",
+        );
+        assert_ne!(
+            own_row, ICLOUD_INVITATION,
+            "the account's row was rewritten"
+        );
+        let events = parse_calendar_data_as(&own_row, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(
+            events[0].scheduling_silenced,
+            "SCHEDULE-AGENT=NONE on the account's row",
+        );
+        // Another account's row says nothing about this account's messages.
+        let stranger = OwnIdentity::from_hrefs(
+            &["mailto:someone@example.com".into()],
+            &url::Url::parse("https://p42-caldav.icloud.com/9999/principal/").unwrap(),
+        );
+        let events = parse_calendar_data_as(&own_row, "cal-1", None, &stranger).unwrap();
+        assert!(!events[0].scheduling_silenced, "another attendee's row");
+
+        // The explicit default reads as the default, in any case.
+        let server = ICLOUD_INVITATION.replace(
+            "EMAIL=boss@example.net:mailto:boss@example.net",
+            "EMAIL=boss@example.net;SCHEDULE-AGENT=server:mailto:boss@example.net",
+        );
+        let events = parse_calendar_data_as(&server, "cal-1", None, &icloud_identity()).unwrap();
+        assert!(!events[0].scheduling_silenced, "SCHEDULE-AGENT=SERVER");
     }
 
     #[test]

@@ -806,6 +806,7 @@ mod tests {
             organizer: None,
             attendee_responses: vec![],
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 

@@ -161,6 +161,16 @@ Apple's well-known endpoints.
   to remove silently (decisions 76a, 80a). A new event names its invitees,
   with the account as ORGANIZER, only when the user notifies; otherwise it is
   a plain appointment and the event returned names nobody.
+- **Unless the event says otherwise.** `SCHEDULE-AGENT` (RFC 6638 §7.1) on the
+  `ORGANIZER` line, or on the account's own `ATTENDEE` row, can tell the
+  server to stay out of this event's scheduling: `CLIENT` means some client
+  sends the messages, `NONE` that nobody does. The read carries that as
+  `Event.scheduling_silenced`, and the surfaces then say nobody is told
+  instead of naming a sender (decision 98). It is not a guess: an invitation
+  imported from a `.ics` file carries both markers, and iCloud sent neither
+  the reply to an answer nor the cancellation on a delete (live round 6).
+  `SCHEDULE-AGENT` on ANOTHER attendee's row is not read — the server still
+  mails the rest.
 
 ## Testing
 

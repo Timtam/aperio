@@ -225,6 +225,7 @@ pub async fn create_event(
         attendee_responses: Vec::new(),
         // Freshly created by us — never a cancellation.
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 
@@ -1887,6 +1888,7 @@ END:VCALENDAR\r
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         }
     }
 
@@ -2847,6 +2849,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             organizer: None,
             attendee_responses: Vec::new(),
             cancelled: false,
+            scheduling_silenced: false,
         };
         let master_vcal = event_to_ical(&master);
         let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();

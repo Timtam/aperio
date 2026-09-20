@@ -2311,17 +2311,29 @@ Siehe DESIGN §4.2.
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine
     Gäste (81b). Richtiges Verschieben (WebDAV MOVE) erst nach einer Messung.
-  - `SEQUENCE` geht wörtlich zurück; ob iCloud ihn selbst hochzählt, ist nicht
-    gemessen. Ebenso `SCHEDULE-AGENT=CLIENT` (ein stilles Speichern bleibt
-    unmöglich, solange Aperio kein iTIP verschickt).
+  - ✅ `SEQUENCE` geht wörtlich zurück — **iCloud zählt ihn selbst hoch**
+    (Live-Runde 6: 0 vor dem Speichern, 1 danach). Aperio rührt ihn nicht an.
+  - ✅ `SCHEDULE-AGENT` ist **gemessen** (Live-Runde 6) und wird gelesen: Eine
+    per `.ics` importierte Einladung trägt `SCHEDULE-AGENT=CLIENT` am
+    `ORGANIZER` und `NONE` an der eigenen Zeile, und iCloud verschickt dann
+    weder die Antwort noch die Absage. Der Termin trägt das als
+    `scheduling_silenced` (Cache-Generation 5), und die Sätze sagen dann, dass
+    niemand erfährt (98). Ein stilles Speichern bleibt trotzdem unmöglich,
+    solange Aperio kein iTIP selbst verschickt.
   - Ein CalDAV-Server ohne Terminplanung speichert neue Gäste nicht als Daten.
-  - Die `EXDATE` einer ganztägigen Serie wird als UTC-Zeitpunkt geschrieben,
-    nicht als Datum.
   - Der VTODO-Neubau in `tasks.rs` verwirft `ORGANIZER` und `ATTENDEE` ebenso.
   - Microsoft 365: dass Graph bei jeder Änderung und beim Löschen mailt, steht
     in Microsofts Doku; gemessen ist es nicht.
-  - Eigenschaften, die Aperio nicht kennt (etwa `X-APPLE-TRAVEL-ADVISORY-…`),
-    gehen beim Neubau eines Termins verloren; das gehört zu 58a.
+  - `SCHEDULE-AGENT` an der Zeile EINES Gastes (statt am Organisator oder an
+    der eigenen) wird nicht gelesen: dann mailt der Server den anderen Gästen
+    weiterhin, und der Satz gilt für sie. Ungemessen, bisher nie gesehen.
+  - Eigenschaften, die Aperio nicht kennt, gehen beim Neubau eines Termins
+    verloren; das gehört zu 58a. Live-Runde 6 nennt sie beim Namen: Ein
+    Speichern der eigenen iCloud-Besprechung ersetzte
+    `DTSTART;TZID=Europe/Berlin:20261109T160000` durch
+    `DTSTART:20261109T150000Z` (derselbe Zeitpunkt, aber die `VTIMEZONE` ist
+    weg — das ist 18a) und verwarf `TRANSP`, `X-APPLE-CREATOR-IDENTITY` und
+    `X-APPLE-CREATOR-TEAM-IDENTITY`.
   🚩 **Den Organisator zeigen** (73a), eigene Aufgabe: eine Zeile
   „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn

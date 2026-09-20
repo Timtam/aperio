@@ -298,7 +298,7 @@ export function AttendeesEditor({
         </Text>
       )}
 
-      {notice === 'always' && (
+      {(notice === 'always' || notice === 'silent') && (
         <Text style={styles.switchLabel} accessible accessibilityRole="text">
           {noticeSentence}
         </Text>

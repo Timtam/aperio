@@ -12,6 +12,12 @@
  *   about a deletion (`always_notifies_attendees`: iCloud and other RFC 6638
  *   servers, Microsoft 365). No choice is offered that the provider would not
  *   keep; a sentence says who informs them ([`notifierSentence`]).
+ * - `'silent'`: the EVENT says the server must not send its scheduling
+ *   messages (`scheduling_silenced`, RFC 6638 `SCHEDULE-AGENT`), so nobody is
+ *   told whatever the calendar can do. Measured in live round 6: an
+ *   invitation imported from a `.ics` file carries that marker, and iCloud
+ *   sent neither a reply nor a cancellation. A sentence says so, because a
+ *   missing sentence would read as "nothing worth mentioning".
  *
  * The host applies the same rules again before it writes
  * (`cal_core::attendee::guard_update`), so these decide what a dialog shows,
@@ -19,7 +25,7 @@
  *
  * Typed structurally, so the desktop and the mobile shapes both fit.
  */
-export type AttendeeNotice = 'none' | 'offer' | 'always';
+export type AttendeeNotice = 'none' | 'offer' | 'always' | 'silent';
 
 /** The calendar capabilities these rules read (`host_core::wire::CalendarRow`). */
 export interface NoticeCalendar {
@@ -33,6 +39,9 @@ export interface NoticeCalendar {
 export interface NoticeEvent {
   attendees?: readonly string[] | null;
   organized_elsewhere?: boolean;
+  /** The event's own resource forbids the server to send (RFC 6638
+   *  `SCHEDULE-AGENT`); the calendar's own capability then does not apply. */
+  scheduling_silenced?: boolean;
 }
 
 /** The notice an editor shows for the attendees it holds now. `original`
@@ -47,6 +56,10 @@ export function attendeeNotice(input: {
   if (!calendar?.supports_scheduling || original?.organized_elsewhere === true) return 'none';
   const someoneToTell = attendees.length > 0 || (original?.attendees?.length ?? 0) > 0;
   if (!someoneToTell) return 'none';
+  // The event overrules the calendar, never the other way round: a server
+  // told to stay out of this event's scheduling sends nothing, so neither
+  // "the server informs them" nor a switch that asks it to would be true.
+  if (original?.scheduling_silenced === true) return 'silent';
   return calendar.always_notifies_attendees === true ? 'always' : 'offer';
 }
 
@@ -84,6 +97,27 @@ export function notifierSentence(
 }
 
 /**
+ * The sentence for an event the server may not send for (`'silent'`): nobody
+ * is told. The change sentence names the service where the adapter knows it,
+ * because "not through iCloud" says which door stayed shut; the cancellation
+ * sentence names nobody, because there is nothing to name.
+ */
+export function silentSentence(
+  calendar: NoticeCalendar | null | undefined,
+  what: 'change' | 'cancellation',
+): { key: string; values: Record<string, string> } {
+  if (what === 'cancellation') {
+    // NOT `deleteScope.notifySilent` — that key is the BUTTON that removes
+    // without notifying, on a provider that offers the choice.
+    return { key: 'dialogs.deleteScope.attendeesNotTold', values: {} };
+  }
+  const service = calendar?.notifier_name?.trim();
+  return service
+    ? { key: 'dialogs.event.fields.notifySilentNamed', values: { service } }
+    : { key: 'dialogs.event.fields.notifySilent', values: {} };
+}
+
+/**
  * Whether an event is an invitation the provider keeps read-only: someone
  * else organizes it, and the provider takes only this account's own reply and
  * reminders (decision 77a, `cal_core::invitation::invitation_locked`).
@@ -105,6 +139,14 @@ export function invitationLocked(
  *
  * Shaped like [`notifierSentence`], so every dialog appends it the same way.
  */
-export function declineSentence(): { key: string; values: Record<string, string> } {
-  return { key: 'dialogs.deleteScope.organizerGetsDecline', values: {} };
+export function declineSentence(event?: NoticeEvent | null): {
+  key: string;
+  values: Record<string, string>;
+} {
+  // The same measurement, from the other side: with `SCHEDULE-AGENT` telling
+  // the server to stay out, deleting the copy declines nothing — the
+  // organizer hears nothing at all (live round 6, decision 98).
+  return event?.scheduling_silenced === true
+    ? { key: 'dialogs.deleteScope.organizerNotTold', values: {} }
+    : { key: 'dialogs.deleteScope.organizerGetsDecline', values: {} };
 }

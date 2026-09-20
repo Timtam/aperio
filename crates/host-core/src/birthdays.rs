@@ -207,6 +207,7 @@ pub fn events_for_contacts(
                 organizer: None,
                 attendee_responses: Vec::new(),
                 cancelled: false,
+                scheduling_silenced: false,
             });
         }
     }

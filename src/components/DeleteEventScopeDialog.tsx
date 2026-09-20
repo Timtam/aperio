@@ -47,7 +47,8 @@ export function DeleteEventScopeDialog({
   onSeries,
 }: DeleteEventScopeDialogProps) {
   const { t } = useTranslation();
-  const { offersChoice, alwaysNotifies, declines, sentence } = useCancellationChoice(event);
+  const { offersChoice, alwaysNotifies, silent, declines, sentence } =
+    useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const notifyRef = useRef<HTMLInputElement>(null);
   const messageId = useId();
@@ -99,7 +100,7 @@ export function DeleteEventScopeDialog({
             : 'dialogs.deleteScope.message',
           { title },
         )}
-        {(alwaysNotifies || declines) && ` ${t(sentence.key, sentence.values)}`}
+        {(alwaysNotifies || declines || silent) && ` ${t(sentence.key, sentence.values)}`}
       </p>
       {offersChoice && (
         <fieldset className="form__field">

@@ -490,6 +490,30 @@ describe('EventDialog → who may notify the attendees', () => {
     }
   });
 
+  /**
+   * Decision 98, from live round 6: the calendar says iCloud informs the
+   * attendees; this event's own resource says the server may not send for it
+   * (RFC 6638 `SCHEDULE-AGENT`). The event wins, and the editor says nobody
+   * will hear of the change instead of promising a mail.
+   */
+  it('says nobody is told where the event keeps the server out (98)', async () => {
+    deviceInBerlin();
+    const restore = alwaysNotifying();
+    try {
+      await open({ ...meeting(false), scheduling_silenced: true } as CalendarEvent);
+      // Still no switch: asking to notify would ask for what will not happen.
+      expect(notifyToggle()).toBeNull();
+      expect(screen.queryByText(alwaysSentence)).toBeNull();
+      const silent = /nicht über iCloud verschickt|not sent through iCloud/i;
+      const note = screen.getByText(silent);
+      // The same tab stop as the sentence it replaces, read by its own text.
+      expect(note.getAttribute('tabindex')).toBe('0');
+      expect(note.getAttribute('aria-label')).toMatch(silent);
+    } finally {
+      restore();
+    }
+  });
+
   it('deletes such a meeting after a confirmation that says so, without a silent choice', async () => {
     deviceInBerlin();
     const restore = alwaysNotifying();

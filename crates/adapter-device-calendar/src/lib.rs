@@ -235,6 +235,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         // and device-calendar events are OS-notified (Aperio never schedules
         // their reminders), so cancellation is moot here for now.
         cancelled: false,
+        scheduling_silenced: false,
     })
 }
 
