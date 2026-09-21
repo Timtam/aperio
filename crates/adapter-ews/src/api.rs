@@ -749,22 +749,34 @@ pub async fn update_event(
     // rather than every field the row happens to carry (decision 58a). Read
     // here, after the target is resolved: an exception's own ItemId is only
     // known once `resolve_write_target` has found it.
+    //
+    // An exception is never written without its own copy: every field written
+    // blind there is exactly the round-5 defect. What the user is told depends
+    // on what went wrong (decision 92: say it). A failed request keeps its own
+    // error — a dropped connection, an expired sign-in, a busy or vanished
+    // item are not facts about the occurrence, and a retry or a new sign-in
+    // may well work. Only an answer that arrives WITHOUT the occurrence's copy
+    // is the refusal.
     let before = match read_before(client, &target, &event.calendar_id).await {
-        Ok(found) => found,
-        Err(err) if target.kind == EventIdKind::Exception => {
-            // Decision 92: say it. Writing every field onto an occurrence whose
-            // own copy we could not read is exactly the round-5 defect — the
-            // series' subject and a deleted location, over somebody's changed
-            // occurrence.
+        Ok(None) if target.kind == EventIdKind::Exception => {
             tracing::warn!(
                 target: "adapter_ews::write",
-                ?err,
                 event_id = %event.id,
-                "the occurrence's own copy could not be read; refusing to write",
+                "the server answered without the occurrence's own copy; refusing to write",
             );
             return Err(EwsError::Protocol(
                 cal_core::WriteRefusal::OccurrenceNotWritable.message("own-copy-unreadable"),
             ));
+        }
+        Ok(found) => found,
+        Err(err) if target.kind == EventIdKind::Exception => {
+            tracing::warn!(
+                target: "adapter_ews::write",
+                ?err,
+                event_id = %event.id,
+                "the occurrence's own copy could not be read; nothing is written",
+            );
+            return Err(err);
         }
         Err(err) => {
             // A single or a series head: the row is the user's own, and
@@ -808,8 +820,8 @@ pub async fn update_event(
     // against THAT copy, so that copy is what it belongs on, and a server that
     // checks the ChangeKey (this envelope asks for `AlwaysOverwrite`, so ours
     // does not) is given the version the delta was computed from rather than
-    // whatever the host cached last. What keeps another device's change is not
-    // this key but the set: a field this edit did not touch is not in it.
+    // whatever the host cached last. It is not a lock, and it does not keep
+    // another device's change: see `event_to_update_field_xml_on`.
     let change_key = before
         .as_ref()
         .and_then(|b| b.etag.clone())
@@ -2964,13 +2976,14 @@ mod tests {
         );
     }
 
-    /// An exception is the one kind where a full write is the measured defect
-    /// (live round 5): without its own copy, every field written is the
-    /// SERIES'. So a read that fails there refuses the write instead.
-    #[tokio::test]
-    async fn an_exception_whose_own_copy_cannot_be_read_is_refused() {
+    /// Serves the series that names `EXC-ID` as the exception of the Tuesday
+    /// 08:00Z slot, answers the read of `EXC-ID` itself with `own_copy`, and
+    /// records every request.
+    async fn read_exception_with(
+        server: &mut Server,
+        own_copy: String,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
         use std::sync::{Arc, Mutex};
-        let mut server = Server::new_async().await;
         let series = r#"<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
@@ -2991,7 +3004,6 @@ mod tests {
   </m:ResponseMessages></m:GetItemResponse></s:Body>
 </s:Envelope>"#
             .to_string();
-        let fault = read_fault("ErrorItemNotFound");
         let requests = Arc::new(Mutex::new(Vec::<String>::new()));
         let seen = Arc::clone(&requests);
         server
@@ -3000,7 +3012,7 @@ mod tests {
             .with_body_from_request(move |request| {
                 let body = request.utf8_lossy_body().unwrap().into_owned();
                 let answer = if body.contains(r#"Id="EXC-ID""#) {
-                    fault.clone()
+                    own_copy.clone()
                 } else {
                     series.clone()
                 };
@@ -3009,6 +3021,28 @@ mod tests {
             })
             .create_async()
             .await;
+        requests
+    }
+
+    /// An exception is the one kind where a full write is the measured defect
+    /// (live round 5): without its own copy, every field written is the
+    /// SERIES'. When the server answers without that copy, the write is
+    /// refused, and the surfaces say so in their own sentence.
+    #[tokio::test]
+    async fn an_exception_whose_own_copy_cannot_be_read_is_refused() {
+        let mut server = Server::new_async().await;
+        let answered_without_it = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items/>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = read_exception_with(&mut server, answered_without_it.to_string()).await;
 
         let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
             .await
@@ -3020,10 +3054,38 @@ mod tests {
         );
         assert!(err.to_string().contains("own-copy-unreadable"), "{err}");
         let requests = requests.lock().unwrap();
-        assert_eq!(requests.len(), 2, "the series, the unreadable copy");
+        assert_eq!(requests.len(), 2, "the series, the copy that was not there");
         assert!(
             !requests.iter().any(|body| body.contains("UpdateItem")),
             "and nothing was written",
+        );
+    }
+
+    /// A request that FAILS is not a fact about the occurrence. Nothing is
+    /// written, but the error keeps its own kind — here a busy server, which a
+    /// second attempt may well get past — instead of telling the user this
+    /// occurrence cannot be changed on its own.
+    #[tokio::test]
+    async fn a_failed_read_of_an_exception_keeps_its_own_error() {
+        let mut server = Server::new_async().await;
+        let requests = read_exception_with(&mut server, read_fault("ErrorServerBusy")).await;
+
+        let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap_err();
+
+        match &err {
+            EwsError::Soap { code, .. } => assert_eq!(code, "ErrorServerBusy"),
+            other => panic!("expected the server's own fault, got {other:?}"),
+        }
+        assert!(
+            !err.to_string().contains("occurrence-not-writable"),
+            "{err}"
+        );
+        let requests = requests.lock().unwrap();
+        assert!(
+            !requests.iter().any(|body| body.contains("UpdateItem")),
+            "nothing was written",
         );
     }
 

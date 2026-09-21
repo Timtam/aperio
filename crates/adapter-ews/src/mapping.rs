@@ -2148,12 +2148,16 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// kind of item the update is written to, as `resolve_write_target` found it.
 ///
 /// `before` is the PROVIDER's current copy, read at write time
-/// (`api::read_before`). With it, only the fields the edit actually changed are
-/// written (decision 58a): an update used to set every field it had, so a save
-/// that moved an occurrence by an hour also wrote back whatever title, location
-/// and reminder the row happened to carry — and before this branch's first
-/// commit, an occurrence's row carried the SERIES'. It also stops a save from
-/// overwriting a field another device changed between opening and saving.
+/// (`api::read_before`). With it, only the fields whose value differs from that
+/// copy are written (decision 58a): an update used to set every field it had,
+/// so a save that moved an occurrence by an hour also wrote back its title, its
+/// body and its reminder, and a save that changed nothing still went out.
+///
+/// This is a TWO-way comparison, edit against server. It cannot tell a field
+/// the user changed from one the host holds stale: if another device renamed
+/// the event after this one read it, the old title differs from the server's
+/// and is written back, exactly as before. Telling those apart needs the copy
+/// the editor opened, which the host does not send.
 ///
 /// Without it every field is written, exactly as before. The emitted set is
 /// always a SUBSET of what `before = None` emits — never a superset — so a
@@ -2282,12 +2286,26 @@ pub fn event_to_update_field_xml_on(
         del.push_str(delete_item_field_xml("calendar:RequiredAttendees").as_str());
         del.push_str(delete_item_field_xml("calendar:OptionalAttendees").as_str());
     }
+    // The rule Exchange stores is the BUILT one, and that depends on the start
+    // as well: the range's StartDate is `event.start`'s date, and a rule
+    // without BYDAY, BYMONTHDAY or BYMONTH takes those from the start too. The
+    // rrule text carries none of it, so a series dragged to another day
+    // compares equal on the text alone and would keep its old StartDate on the
+    // server. So the rule is asked twice: as text, which also catches a rule
+    // that no longer builds, and as what would go on the wire.
+    let built_rule = |ev: &Event| {
+        ev.recurrence
+            .as_ref()
+            .map(|rec| rrule_to_ews_recurrence(&rec.rrule, ev.start).ok())
+    };
+    let rule_changed = touches(EventField::Recurrence)
+        || before.is_some_and(|b| built_rule(event) != built_rule(b));
     // Two locks on the rule, on purpose. The diff is one: an exception has no
     // rule on either side, so nothing is emitted. The `target` check below is
     // the other, and it is the one that still holds when there is no `before`.
     // Together they also stop an ordinary single's save from carrying a
     // pointless `DeleteItemField calendar:Recurrence` every time.
-    if touches(EventField::Recurrence) {
+    if rule_changed {
         if let Some(rec) = &event.recurrence {
             let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
             // Wrap the recurrence element in a SetItemField against
@@ -2311,8 +2329,7 @@ pub fn event_to_update_field_xml_on(
     // unmeasured claim above that a server-side edit can drop the zone. A
     // time-only gate would drop it on a rule-only change — weekly to daily
     // without moving the series.
-    let zone_may_change =
-        touches(EventField::Recurrence) || touches(EventField::AllDay) || slot_changed;
+    let zone_may_change = rule_changed || touches(EventField::AllDay) || slot_changed;
     if let Some(windows) =
         series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
             .filter(|_| zone_may_change)
@@ -5540,11 +5557,34 @@ mod tests {
         assert_eq!(field_uris(&del), ["calendar:Recurrence"], "{del}");
     }
 
-    /// **The subset invariant.** Whatever the pair and whatever the target, an
-    /// update built WITH a before names a subset of the fields the same update
-    /// names WITHOUT one. A suppressed field is therefore always one whose
-    /// value the server already has: the diff can write less, never anything
-    /// else.
+    /// Every `SetItemField` and `DeleteItemField` block a built update holds,
+    /// whole: the field AND the value it writes.
+    fn update_blocks(xml: &str) -> Vec<String> {
+        let mut blocks = Vec::new();
+        for (open, close) in [
+            ("<t:SetItemField>", "</t:SetItemField>"),
+            ("<t:DeleteItemField>", "</t:DeleteItemField>"),
+        ] {
+            let mut rest = xml;
+            while let Some(at) = rest.find(open) {
+                let tail = &rest[at..];
+                let end = tail.find(close).expect("a closed block") + close.len();
+                blocks.push(tail[..end].to_string());
+                rest = &tail[end..];
+            }
+        }
+        blocks
+    }
+
+    /// **The subset invariant.** Whatever the pair and whatever the target,
+    /// every block an update holds WITH a before — field and value — is one the
+    /// same update holds WITHOUT one. The comparison can make an update
+    /// smaller; it can never add a field, and never write a field with another
+    /// value.
+    ///
+    /// It cannot see a gate that is missing or wired to the wrong field: that
+    /// only writes MORE, or less, of the same blocks.
+    /// `each_field_is_written_exactly_when_it_changed` watches the gates.
     #[test]
     fn no_update_writes_a_field_it_would_not_write_without_a_before() {
         let base = Event {
@@ -5575,6 +5615,14 @@ mod tests {
                 Event {
                     start: base.start + chrono::Duration::hours(1),
                     end: base.end + chrono::Duration::hours(1),
+                    ..base.clone()
+                },
+            ),
+            (
+                "a day later",
+                Event {
+                    start: base.start + chrono::Duration::days(1),
+                    end: base.end + chrono::Duration::days(1),
                     ..base.clone()
                 },
             ),
@@ -5642,6 +5690,15 @@ mod tests {
                     ..base.clone()
                 },
             ),
+            (
+                "weekly in Berlin, a day later",
+                Event {
+                    start: base.start + chrono::Duration::days(1),
+                    end: base.end + chrono::Duration::days(1),
+                    recurrence: weekly(Some("Europe/Berlin"), "FREQ=WEEKLY"),
+                    ..base.clone()
+                },
+            ),
         ];
         let server = ServerTimeZones::new(["w. europe standard time"]);
         for (before_name, before) in &variants {
@@ -5651,28 +5708,196 @@ mod tests {
                     EventIdKind::Exception,
                     EventIdKind::RecurringMaster,
                 ] {
-                    let named = |(set, del): (String, String)| -> Vec<String> {
-                        field_uris(&set)
+                    let blocks = |(set, del): (String, String)| -> Vec<String> {
+                        update_blocks(&set)
                             .into_iter()
-                            .chain(field_uris(&del))
+                            .chain(update_blocks(&del))
                             .collect()
                     };
-                    let with = named(
+                    let with = blocks(
                         event_to_update_field_xml_on(edit, Some(before), Some(&server), kind)
                             .unwrap(),
                     );
-                    let without = named(
+                    let without = blocks(
                         event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
                     );
-                    for field in with {
+                    for block in with {
                         assert!(
-                            without.contains(&field),
-                            "{kind:?}, {before_name} -> {edit_name}: {field} is written with a \
-                             before but not without one",
+                            without.contains(&block),
+                            "{kind:?}, {before_name} -> {edit_name}: written with a before but \
+                             not without one, or with another value:\n{block}",
                         );
                     }
                 }
             }
+        }
+    }
+
+    /// Each gated field, both ways: changed against the before, it is written;
+    /// equal to it, it is not. A gate that is dropped, inverted or wired to
+    /// the wrong field fails here, by the name of the case.
+    #[test]
+    fn each_field_is_written_exactly_when_it_changed() {
+        let before = Event {
+            description: Some("Bring the notes".into()),
+            location: Some("Room 2".into()),
+            reminders: quarter_hour(),
+            ..zoned_master(Some("Europe/Berlin"))
+        };
+        let slot: &[&str] = &["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"];
+        let zone: &[&str] = &["calendar:StartTimeZone", "calendar:EndTimeZone"];
+        let cases: Vec<(&str, Event, Vec<&str>)> = vec![
+            ("nothing", before.clone(), vec![]),
+            (
+                "title",
+                Event {
+                    title: "Weekly sync".into(),
+                    ..before.clone()
+                },
+                vec!["item:Subject"],
+            ),
+            (
+                "description",
+                Event {
+                    description: Some("Bring the minutes".into()),
+                    ..before.clone()
+                },
+                vec!["item:Body"],
+            ),
+            (
+                "location",
+                Event {
+                    location: Some("Room 3".into()),
+                    ..before.clone()
+                },
+                vec!["calendar:Location"],
+            ),
+            (
+                "no location",
+                Event {
+                    location: None,
+                    ..before.clone()
+                },
+                vec!["calendar:Location"],
+            ),
+            (
+                "reminder",
+                Event {
+                    reminders: vec![Reminder {
+                        kind: ReminderKind::Relative { minutes_before: 30 },
+                        sound: None,
+                    }],
+                    ..before.clone()
+                },
+                vec!["item:ReminderIsSet", "item:ReminderMinutesBeforeStart"],
+            ),
+            (
+                "no reminder",
+                Event {
+                    reminders: Vec::new(),
+                    ..before.clone()
+                },
+                vec!["item:ReminderIsSet"],
+            ),
+            (
+                // Same day, same weekday: the rule as built is the same, so it
+                // stays; the zone rides with the slot.
+                "an hour later",
+                Event {
+                    start: before.start + chrono::Duration::hours(1),
+                    end: before.end + chrono::Duration::hours(1),
+                    ..before.clone()
+                },
+                [slot, zone].concat(),
+            ),
+            (
+                "daily",
+                Event {
+                    recurrence: Some(EventRecurrence {
+                        rrule: "FREQ=DAILY".into(),
+                        exceptions: Vec::new(),
+                        tzid: Some("Europe/Berlin".into()),
+                    }),
+                    ..before.clone()
+                },
+                [&["calendar:Recurrence"][..], zone].concat(),
+            ),
+            (
+                "no rule",
+                Event {
+                    recurrence: None,
+                    ..before.clone()
+                },
+                vec!["calendar:Recurrence"],
+            ),
+        ];
+        for (name, edit, expected) in cases {
+            let (set, del) = event_to_update_field_xml_on(
+                &edit,
+                Some(&before),
+                None,
+                EventIdKind::RecurringMaster,
+            )
+            .unwrap();
+            let written: Vec<String> = field_uris(&set)
+                .into_iter()
+                .chain(field_uris(&del))
+                .collect();
+            assert_eq!(written, expected, "{name}:\nset: {set}\ndel: {del}");
+        }
+    }
+
+    /// A series dragged to another day keeps its rule's TEXT, but not the rule
+    /// Exchange stores: the range's StartDate is the start's date, and a weekly
+    /// rule without BYDAY repeats on the start's weekday. Both go out again, or
+    /// the server keeps the old first day (review of #89).
+    #[test]
+    fn a_series_moved_to_another_day_rewrites_its_rule() {
+        let weekly = zoned_master(Some("Europe/Berlin"));
+        let ten_days = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=DAILY;COUNT=10".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            ..zoned_master(Some("Europe/Berlin"))
+        };
+        for (before, days, first_day, also) in [
+            (
+                weekly,
+                1,
+                "2026-05-21",
+                "<t:DaysOfWeek>Thursday</t:DaysOfWeek>",
+            ),
+            (
+                ten_days,
+                7,
+                "2026-05-27",
+                "<t:NumberOfOccurrences>10</t:NumberOfOccurrences>",
+            ),
+        ] {
+            let edit = Event {
+                start: before.start + chrono::Duration::days(days),
+                end: before.end + chrono::Duration::days(days),
+                ..before.clone()
+            };
+            let (set, _) = event_to_update_field_xml_on(
+                &edit,
+                Some(&before),
+                None,
+                EventIdKind::RecurringMaster,
+            )
+            .unwrap();
+            let rrule = &before.recurrence.as_ref().unwrap().rrule;
+            assert!(
+                field_uris(&set).contains(&"calendar:Recurrence".to_string()),
+                "{rrule}: {set}"
+            );
+            assert!(
+                set.contains(&format!("<t:StartDate>{first_day}</t:StartDate>")),
+                "{rrule}: {set}"
+            );
+            assert!(set.contains(also), "{rrule}: {set}");
         }
     }
 
