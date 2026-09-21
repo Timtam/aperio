@@ -2158,11 +2158,14 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// field the user changed from one this device holds stale. The third side is
 /// the copy the editor opened (decision 106): the host marks the fields the
 /// edit left as that copy has them ([`Event::keep_fields`]), and those are not
-/// written, with or without `before` — the provider's value, whatever it is
-/// now, stays. A kept rule that must go along with a moved start is the
-/// server's rule, rebuilt on that start.
+/// written — the provider's value, whatever it is now, stays — with one
+/// exception: a kept rule that must go along with a start this update writes.
+/// With `before`, that is the server's rule and zone, rebuilt on that start.
+/// Without it the server's rule is unknown, and this device's goes along, as
+/// in #89's blind write: another device's COUNT, UNTIL or zone can then go.
 ///
-/// Without `before`, every field not kept is written. With it, what is emitted
+/// Without `before`, every field not kept is written, and so is a kept rule
+/// whose slot is written. With `before`, what is emitted
 /// is a SUBSET of what the same event emits without — never a superset, and
 /// never another value — except that a kept rule and its zone are the server's
 /// own. So a field the COMPARISON suppresses is one whose value the server
@@ -5832,6 +5835,32 @@ mod tests {
                                         || zone.is_some_and(|zone| block.contains(zone)),
                                     "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: a \
                                      kept rule or zone that is not the server's:\n{block}",
+                                );
+                                // Its VALUE may be the server's; whether it is
+                                // written at all is still the no-before
+                                // write's call — except the server's zone,
+                                // which rides along with a written slot where
+                                // the edit's own rule carries none.
+                                let uri_of = |b: &str| {
+                                    b.split(r#"FieldURI=""#)
+                                        .nth(1)
+                                        .and_then(|rest| rest.split('"').next())
+                                        .map(str::to_owned)
+                                };
+                                let uri = uri_of(&block);
+                                let servers_zone_only =
+                                    uri.as_deref().is_some_and(|u| u.ends_with("TimeZone"))
+                                        && series_windows_zone(
+                                            edit.all_day,
+                                            edit.recurrence.as_ref(),
+                                            Some(&server),
+                                        )
+                                        .is_none();
+                                assert!(
+                                    servers_zone_only || without.iter().any(|b| uri_of(b) == uri),
+                                    "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: a \
+                                     kept rule or zone written with a before but not without \
+                                     one:\n{block}",
                                 );
                                 continue;
                             }

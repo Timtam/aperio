@@ -790,7 +790,7 @@ pub async fn update_event(
                 target: "adapter_ews::write",
                 ?err,
                 event_id = %event.id,
-                "the current copy could not be read; writing every field not kept",
+                "the current copy could not be read; writing every field not kept, and a kept rule with a moved slot",
             );
             None
         }

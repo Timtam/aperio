@@ -1580,8 +1580,9 @@ async fn a_write_keeps_nothing_until_the_calendar_is_read_again() {
 
 /// The race the review of #90 found: a refresh that BEGAN before a write and
 /// commits after it — after the save's invalidation, even — must not count.
-/// The proof is the generation the refresh began at, compared when asked, so
-/// the order the two reach the database in does not matter.
+/// The proof is the mark the refresh began at, compared when asked, so the
+/// order the two reach the database in does not matter — here even for a
+/// write that got past the generation check.
 #[tokio::test]
 async fn a_refresh_that_began_before_a_write_proves_nothing() {
     let store = setup();
@@ -1589,7 +1590,7 @@ async fn a_refresh_that_began_before_a_write_proves_nothing() {
     refresh_with(&store, vec![read.clone()]).await;
 
     // The refresh begins and reads the provider...
-    let began = store.refresh_generation(ACC, SyncScope::Events, CAL);
+    let began = store.event_proof_mark(ACC, CAL);
     // ...a save runs to its end and invalidates...
     let mut save = read.clone();
     save.title = "Saved".into();
@@ -1611,6 +1612,63 @@ async fn a_refresh_that_began_before_a_write_proves_nothing() {
         &mut revert,
     ));
     assert!(revert.keep_fields.is_empty(), "{:?}", revert.keep_fields);
+}
+
+/// A refresh that fetched before an invalidation cannot write at all: it is
+/// asked again under the writer lock, so it can never land after a newer
+/// refresh that already holds the save.
+#[test]
+fn a_refresh_from_before_an_invalidation_cannot_write() {
+    let store = setup();
+    let old = event("ev-1", 9, 10);
+    let began = store.refresh_generation(ACC, SyncScope::Events, CAL);
+    store.invalidate(ACC, SyncScope::Events, CAL).unwrap();
+    let written = store
+        .replace_calendar_events_if_current(ACC, CAL, wide(), std::slice::from_ref(&old), began)
+        .unwrap();
+    assert_eq!(written, None);
+    let delta = Delta {
+        changes: vec![old],
+        deletions: Vec::new(),
+        new_token: Some("t".into()),
+    };
+    let written = store
+        .apply_events_delta_if_current(ACC, CAL, &delta, began)
+        .unwrap();
+    assert_eq!(written, None);
+    assert!(store.read_events(ACC, CAL, wide()).unwrap().is_empty());
+}
+
+/// A save that fails does not throw away a refresh running beside it: nothing
+/// would start another one, and the view would stay stale. The refresh still
+/// proves nothing about that save.
+#[tokio::test]
+async fn a_failed_write_leaves_a_refresh_running_beside_it_alone() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+
+    let began = store.refresh_generation(ACC, SyncScope::Events, CAL);
+    let mark = store.event_proof_mark(ACC, CAL);
+    let mut failed = read.clone();
+    failed.title = "Never saved".into();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut failed,
+    ));
+
+    let newer = Event {
+        title: "From the server".into(),
+        ..read.clone()
+    };
+    let written = store
+        .replace_calendar_events_if_current(ACC, CAL, wide(), std::slice::from_ref(&newer), began)
+        .unwrap();
+    assert_eq!(written, Some(true), "the refresh still writes");
+    store.mark_events_refreshed(ACC, CAL, mark);
+    assert!(!store.events_proven(ACC, CAL), "but proves nothing");
 }
 
 /// While a write is in flight, a refresh that began after it started may still

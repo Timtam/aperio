@@ -103,7 +103,6 @@ import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import {
   isProviderOverride,
-  occurrenceIsoOf,
   occurrenceWrite,
   planCarry,
   seriesIdOf,
@@ -981,13 +980,21 @@ export default function EventEditorModal({
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
         );
         // The other copies have a series each, so carrying this means carving
-        // the same occurrence out of them — not updating a row.
+        // the same occurrence out of them — not updating a row. The "before"
+        // is the OCCURRENCE, and the slot the one `occurrenceWrite` resolved:
+        // this editor opens the series master for an occurrence the provider
+        // does not hold yet, and with the master's start as "before" every
+        // occurrence edit looked like a move of the whole series — accepting
+        // the carry moved every copy's series (review of #90). As the
+        // carve-out branch below.
         if (
           await offerToCarry(
-            original,
+            isProviderOverride(original)
+              ? original
+              : occurrenceBefore(original, occurrenceWriteKind.occurrence),
             updated,
             'occurrence',
-            occurrenceIsoOf(original),
+            occurrenceWriteKind.occurrence,
             overrideRow,
           )
         ) {

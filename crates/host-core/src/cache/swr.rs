@@ -274,6 +274,8 @@ pub async fn refresh_events(
     // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
     // write if a local mutation invalidates this calendar mid-fetch.
     let gen = cache.refresh_generation(account, SyncScope::Events, calendar);
+    // Decision 106: what this refresh can prove, taken before it reads.
+    let proof_mark = cache.event_proof_mark(account, calendar);
     match ext
         .get_events_delta(calendar, fetch_range, effective_token)
         .await
@@ -338,13 +340,24 @@ pub async fn refresh_events(
                     changes.extend(kept);
                 }
                 let carried_unfetched = changes.len() > fetched;
-                let replaced = cache.replace_calendar_events(account, calendar, window, &changes);
+                // Asked again under the writer lock: a save may have
+                // invalidated the calendar while this waited for it.
+                let changed = match cache
+                    .replace_calendar_events_if_current(account, calendar, window, &changes, gen)
+                {
+                    Ok(Some(changed)) => changed,
+                    Ok(None) => return Ok(false),
+                    // Rows, window and freshness rolled back. So does the
+                    // token, by not being written: a token ahead of its rows
+                    // would let the next delta skip what this one failed to
+                    // write — and prove rows that were never written.
+                    Err(_) => return Ok(true),
+                };
                 // Decision 106: every row now is what this fetch read — unless
                 // some were carried over unread.
-                if replaced.is_ok() && !carried_unfetched {
-                    cache.mark_events_refreshed(account, calendar, gen);
+                if !carried_unfetched {
+                    cache.mark_events_refreshed(account, calendar, proof_mark);
                 }
-                let changed = replaced.unwrap_or(true);
                 let _ = cache.set_token(
                     account,
                     SyncScope::Events,
@@ -353,7 +366,8 @@ pub async fn refresh_events(
                 );
                 Ok(changed)
             } else {
-                let applied = cache.apply_events_delta(
+                // The token is written in the same transaction as the rows.
+                match cache.apply_events_delta_if_current(
                     account,
                     calendar,
                     &Delta {
@@ -361,13 +375,18 @@ pub async fn refresh_events(
                         deletions: cs.deletions,
                         new_token: cs.new_token,
                     },
-                );
-                // Decision 106: a delta is every change since the token,
-                // this app's own writes among them.
-                if applied.is_ok() {
-                    cache.mark_events_refreshed(account, calendar, gen);
+                    gen,
+                ) {
+                    Ok(Some(changed)) => {
+                        // Decision 106: a delta is every change since a token
+                        // that is only ever stored with the rows it covers,
+                        // this app's own writes among them.
+                        cache.mark_events_refreshed(account, calendar, proof_mark);
+                        Ok(changed)
+                    }
+                    Ok(None) => Ok(false),
+                    Err(_) => Ok(true),
                 }
-                Ok(applied.unwrap_or(true))
             }
         }
         Err(cal_core::Error::Unsupported(_)) => {

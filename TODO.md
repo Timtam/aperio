@@ -2234,11 +2234,18 @@ Siehe DESIGN §4.2.
     Regel und der Server hat einen anderen Start, geht der Zeitraum mit. Eine
     behaltene Regel ist dabei die des SERVERS, auf den neuen Start gebaut,
     mit ihrer Zone — so überlebt das „endet nach 5 Terminen" oder die neue
-    Zone eines anderen Geräts. Eine Serie, die ein anderes Gerät zum
+    Zone eines anderen Geräts. Nur wenn Aperio die aktuelle Fassung nicht
+    lesen konnte, geht die eigene mit, wie in Teil 2. Eine Serie, die ein anderes Gerät zum
     Einzeltermin gemacht hat, wird nicht wieder zur Serie.
   - Beim Mitnehmen in eine Termingruppe bietet Aperio an, was der Bearbeiter
     gespeichert hat, nicht was eine neu angelegte Ausnahme vom Server
-    übernommen hat (Desktop und Handy).
+    übernommen hat (Desktop und Handy). Und am Handy bietet „nur dieser
+    Termin" nicht mehr an, die ganzen Serien der anderen Kopien zu verschieben:
+    Es verglich mit dem Serienkopf statt mit dem Vorkommen (älterer Fehler,
+    gefunden in der zweiten Review-Runde von #90).
+  - Eine Aktualisierung schreibt nur noch, wenn seit ihrem Beginn nichts
+    invalidiert wurde, gefragt unter der Schreibsperre der Datenbank; und ihre
+    Sync-Marke nur zusammen mit den Zeilen, zu denen sie gehört.
   - Das Feld wird tolerant gelesen: Ein unbekannter Eintrag fällt weg, und das
     Feld wird geschrieben. Ein Plugin scheitert nie daran.
   Offen geblieben:

@@ -1354,7 +1354,8 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   Zweifel schreibt Aperio lieber einen veralteten Wert als gar keinen
   gewollten. Eine behaltene Wiederholungsregel ist die des Anbieters: Muss sie
   mit einem verschobenen Start neu geschrieben werden, dann seine, auf den
-  neuen Start gebaut.
+  neuen Start gebaut — sofern Aperio seine aktuelle Fassung lesen konnte;
+  sonst geht die eigene mit.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was
