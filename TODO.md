@@ -2149,8 +2149,33 @@ Siehe DESIGN §4.2.
     Antwort gilt einem anderen Platz), erbt die Zeile weiter den Serieninhalt
     und es steht im Log (102). Sichtbar machen erst, wenn Live-Runde 7 zeigt,
     dass der Fall eintritt.
-  - Das SCHREIBEN setzt weiterhin alle Felder; dass es die richtigen sind, ist
-    die halbe Miete. „Nur geänderte Felder schreiben" ist Teil 2.
+  ✅ **Ein Speichern schreibt, was der Bearbeiter geändert hat** (58a, Teil 2,
+  erledigt 2026-09-21). Ein `UpdateItem` setzte jedes Feld, das die Zeile
+  gerade trug — eine um eine halbe Stunde verschobene Ausnahme schrieb auch
+  Betreff, Text und Erinnerung zurück und löschte den Ort, den sie nie hatte.
+  Jetzt liest der Adapter vor dem Schreiben die Fassung des SERVERS
+  (`api::read_before`, nach Id, nie nach Version) und schreibt nur die Felder,
+  die sich gegen sie unterscheiden (`cal_core::event_diff::changed_fields`).
+  Damit überschreibt ein Speichern nicht mehr, was ein anderes Gerät zwischen
+  Öffnen und Speichern geändert hat, und ein Speichern, das gar nichts ändert,
+  schickt überhaupt kein `UpdateItem` mehr.
+  Absichtlich anders als „so wenig wie möglich":
+  - Der Zeitraum ist EINE Tatsache: Start, Ende und Ganztag gehen zusammen
+    raus, sobald eines davon sich ändert. Exchange prüft einen Start gegen das
+    gespeicherte Ende, und der Ganztags-Rand schreibt beide Grenzen neu.
+  - Die Gastliste entscheiden weiter die Gast-Regeln (71a, 74a), nicht der
+    Vergleich: nur der Aufrufer weiß, ob der Bearbeiter die Liste angefasst
+    hat.
+  - Die Zone fährt an der REGEL mit, nicht an der Uhrzeit: von wöchentlich auf
+    täglich, ohne die Serie zu verschieben, trägt sie trotzdem mit (41a).
+  - Ist die eigene Fassung einer AUSNAHME nicht lesbar, wird gar nicht
+    geschrieben (`occurrence-not-writable`) — alle Felder zu schreiben wäre
+    genau der gemessene Fehler. Bei einem Einzeltermin oder einer Serie wird
+    wie früher alles geschrieben und das Log sagt warum (102).
+  - Was gebaut wurde entscheidet, ob überhaupt geschickt wird, nicht der
+    Vergleich: ein `UpdateItem` mit leerem `<t:Updates>` ist ein Fehler.
+  Kosten: eine zusätzliche Abfrage pro Speichern (bei einer Ausnahme die
+  zweite, nach der Serie). Offen: auf dem Handy nicht getestet.
 
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;
@@ -2272,6 +2297,9 @@ Siehe DESIGN §4.2.
     Speichern auch die eigenen Werte zurück. Teil 2 („nur geänderte Felder
     schreiben") nimmt dem Schreibweg zusätzlich die Fälle, in denen ein
     anderes Gerät zwischen Öffnen und Speichern etwas geändert hat.
+    ✅ Auch das ist gebaut (58a Teil 2): ein Speichern schreibt nur noch die
+    Felder, die der Bearbeiter geändert hat, gemessen an der Fassung, die der
+    Server in diesem Augenblick hat.
   - E1: Toni speicherte versehentlich das iCloud-Original einer eigenen
     Besprechung; der Gast verschwand, und iCloud sagte ihm ab. E2 fiel damit
     aus.

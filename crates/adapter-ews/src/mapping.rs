@@ -38,6 +38,7 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 
+use cal_core::event_diff::EventField;
 use cal_core::{
     AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot, Reminder,
     ReminderKind,
@@ -2139,21 +2140,44 @@ fn required_attendees_xml(attendees: &[String]) -> String {
 /// For a single item or a series head; an exception takes
 /// [`event_to_update_field_xml_on`] with [`EventIdKind::Exception`].
 pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
-    event_to_update_field_xml_on(event, None, EventIdKind::Single)
+    event_to_update_field_xml_on(event, None, None, EventIdKind::Single)
 }
 
 /// [`event_to_update_field_xml`] for a server whose known Windows zone ids are
 /// `server_zones` (decision 41a); `None` when they are unknown. `target` is the
 /// kind of item the update is written to, as `resolve_write_target` found it.
+///
+/// `before` is the PROVIDER's current copy, read at write time
+/// (`api::read_before`). With it, only the fields the edit actually changed are
+/// written (decision 58a): an update used to set every field it had, so a save
+/// that moved an occurrence by an hour also wrote back whatever title, location
+/// and reminder the row happened to carry — and before this branch's first
+/// commit, an occurrence's row carried the SERIES'. It also stops a save from
+/// overwriting a field another device changed between opening and saving.
+///
+/// Without it every field is written, exactly as before. The emitted set is
+/// always a SUBSET of what `before = None` emits — never a superset — so a
+/// suppressed field can only ever be one whose value the server already has.
 pub fn event_to_update_field_xml_on(
     event: &Event,
+    before: Option<&Event>,
     server_zones: Option<&ServerTimeZones>,
     target: EventIdKind,
 ) -> EwsResult<(String, String)> {
     let mut set = String::new();
     let mut del = String::new();
 
-    push_set_string(&mut set, "item:Subject", "Subject", &event.title);
+    // `None` means "no copy to compare with": then everything is written.
+    let changed = before.map(|b| cal_core::event_diff::changed_fields(event, b));
+    let touches = |field: EventField| {
+        changed
+            .as_ref()
+            .is_none_or(|fields| fields.contains(&field))
+    };
+
+    if touches(EventField::Title) {
+        push_set_string(&mut set, "item:Subject", "Subject", &event.title);
+    }
     // Body is SET when present, but NEVER deleted. `SyncFolderItems`
     // doesn't return `<t:Body>`, so the description is loaded lazily
     // via the GetItem enrichment fan-out — and the grid drag-move
@@ -2164,50 +2188,68 @@ pub fn event_to_update_field_xml_on(
     // when we actually have a body to write; a deliberate "clear the
     // description" therefore doesn't propagate to EWS (acceptable —
     // far better than silent data loss).
-    if let Some(desc) = event.description.as_deref().filter(|s| !s.is_empty()) {
-        push_set_body(&mut set, desc);
-    }
-    match event.location.as_deref().filter(|s| !s.is_empty()) {
-        Some(loc) => {
-            push_set_string(&mut set, "calendar:Location", "Location", loc);
-        }
-        None => {
-            del.push_str(delete_item_field_xml("calendar:Location").as_str());
+    if touches(EventField::Description) {
+        if let Some(desc) = event.description.as_deref().filter(|s| !s.is_empty()) {
+            push_set_body(&mut set, desc);
         }
     }
-    // Same all-day boundary pinning as the create path.
-    let (wire_start, wire_end) = if event.all_day {
-        (
-            ews_all_day_boundary(event.start),
-            ews_all_day_boundary(event.end),
-        )
-    } else {
-        (event.start, event.end)
-    };
-    push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
-    push_set_datetime(&mut set, "calendar:End", "End", wire_end);
-    push_set_bool(
-        &mut set,
-        "calendar:IsAllDayEvent",
-        "IsAllDayEvent",
-        event.all_day,
-    );
-
-    let reminder_minutes = first_relative_reminder_minutes(&event.reminders);
-    push_set_bool(
-        &mut set,
-        "item:ReminderIsSet",
-        "ReminderIsSet",
-        reminder_minutes.is_some(),
-    );
-    if let Some(minutes) = reminder_minutes {
-        // ReminderMinutesBeforeStart is an integer field, not a string.
-        push_set_raw(
+    // The location is the second half of the round-5 defect: an unchanged one
+    // was written back on every save, and an absent one was DELETED on every
+    // save — including the save of an occurrence that never had one of its own.
+    if touches(EventField::Location) {
+        match event.location.as_deref().filter(|s| !s.is_empty()) {
+            Some(loc) => {
+                push_set_string(&mut set, "calendar:Location", "Location", loc);
+            }
+            None => {
+                del.push_str(delete_item_field_xml("calendar:Location").as_str());
+            }
+        }
+    }
+    // The slot is ONE fact, written as one group: `ews_all_day_boundary`
+    // rewrites both boundaries from `all_day`, and Exchange validates a Start
+    // against the End it has stored. Writing one of the three without the
+    // others is how a whole update faults, or how a stored instant is silently
+    // re-read. Predictable beats minimal.
+    let slot_changed =
+        touches(EventField::Start) || touches(EventField::End) || touches(EventField::AllDay);
+    if slot_changed {
+        // Same all-day boundary pinning as the create path.
+        let (wire_start, wire_end) = if event.all_day {
+            (
+                ews_all_day_boundary(event.start),
+                ews_all_day_boundary(event.end),
+            )
+        } else {
+            (event.start, event.end)
+        };
+        push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
+        push_set_datetime(&mut set, "calendar:End", "End", wire_end);
+        push_set_bool(
             &mut set,
-            "item:ReminderMinutesBeforeStart",
-            "ReminderMinutesBeforeStart",
-            &minutes.to_string(),
+            "calendar:IsAllDayEvent",
+            "IsAllDayEvent",
+            event.all_day,
         );
+    }
+
+    if touches(EventField::Reminders) {
+        let reminder_minutes = first_relative_reminder_minutes(&event.reminders);
+        push_set_bool(
+            &mut set,
+            "item:ReminderIsSet",
+            "ReminderIsSet",
+            reminder_minutes.is_some(),
+        );
+        if let Some(minutes) = reminder_minutes {
+            // ReminderMinutesBeforeStart is an integer field, not a string.
+            push_set_raw(
+                &mut set,
+                "item:ReminderMinutesBeforeStart",
+                "ReminderMinutesBeforeStart",
+                &minutes.to_string(),
+            );
+        }
     }
     // NB: when there's no reminder we DON'T `DeleteItemField`
     // ReminderMinutesBeforeStart. EWS refuses that delete with
@@ -2240,24 +2282,40 @@ pub fn event_to_update_field_xml_on(
         del.push_str(delete_item_field_xml("calendar:RequiredAttendees").as_str());
         del.push_str(delete_item_field_xml("calendar:OptionalAttendees").as_str());
     }
-    if let Some(rec) = &event.recurrence {
-        let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
-        // Wrap the recurrence element in a SetItemField against
-        // calendar:Recurrence. EWS expects the body's inner shape to
-        // start with `<t:CalendarItem>` containing the recurrence.
-        set.push_str(&format!(
-            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:Recurrence\"/>\n              <t:CalendarItem>\n                {rec_xml}\n              </t:CalendarItem>\n            </t:SetItemField>\n",
-        ));
-    } else if target != EventIdKind::Exception {
-        // An exception has no rule of its own to clear. Exchange refuses to
-        // delete one there (`ErrorInvalidPropertyDelete`, live test round 3),
-        // and the whole update fails with it.
-        del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
+    // Two locks on the rule, on purpose. The diff is one: an exception has no
+    // rule on either side, so nothing is emitted. The `target` check below is
+    // the other, and it is the one that still holds when there is no `before`.
+    // Together they also stop an ordinary single's save from carrying a
+    // pointless `DeleteItemField calendar:Recurrence` every time.
+    if touches(EventField::Recurrence) {
+        if let Some(rec) = &event.recurrence {
+            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
+            // Wrap the recurrence element in a SetItemField against
+            // calendar:Recurrence. EWS expects the body's inner shape to
+            // start with `<t:CalendarItem>` containing the recurrence.
+            set.push_str(&format!(
+                "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:Recurrence\"/>\n              <t:CalendarItem>\n                {rec_xml}\n              </t:CalendarItem>\n            </t:SetItemField>\n",
+            ));
+        } else if target != EventIdKind::Exception {
+            // An exception has no rule of its own to clear. Exchange refuses to
+            // delete one there (`ErrorInvalidPropertyDelete`, live test round 3),
+            // and the whole update fails with it.
+            del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
+        }
     }
     // Keep the zone on a zoned recurring master so a server-side edit doesn't
     // drop it and re-expand the series in UTC, by the same rule as a create.
+    //
+    // `series_windows_zone` is a pure function of (all_day, recurrence), so
+    // those two are the exact gate; the slot rides along as insurance for the
+    // unmeasured claim above that a server-side edit can drop the zone. A
+    // time-only gate would drop it on a rule-only change — weekly to daily
+    // without moving the series.
+    let zone_may_change =
+        touches(EventField::Recurrence) || touches(EventField::AllDay) || slot_changed;
     if let Some(windows) =
         series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
+            .filter(|_| zone_may_change)
     {
         let win = escape_xml(windows);
         set.push_str(&format!(
@@ -4367,6 +4425,7 @@ mod tests {
             let xml = new_event_to_calendar_item_xml_on(&create, zones).unwrap();
             let (set, _) = event_to_update_field_xml_on(
                 &zoned_master(Some(tzid)),
+                None,
                 zones,
                 EventIdKind::RecurringMaster,
             )
@@ -5383,6 +5442,326 @@ mod tests {
         assert!(del.contains("FieldURI=\"calendar:Recurrence\""));
     }
 
+    /// A saved single, as an editor hands it back.
+    fn saved_single(title: &str) -> Event {
+        Event {
+            id: "S:IID|CK".into(),
+            title: title.into(),
+            recurrence: None,
+            ..zoned_master(None)
+        }
+    }
+
+    /// A 15-minute reminder.
+    fn quarter_hour() -> Vec<Reminder> {
+        vec![Reminder {
+            kind: ReminderKind::Relative { minutes_before: 15 },
+            sound: None,
+        }]
+    }
+
+    /// Every `FieldURI="…"` a built update names, in order.
+    fn field_uris(xml: &str) -> Vec<String> {
+        xml.split(r#"FieldURI=""#)
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next().map(str::to_string))
+            .collect()
+    }
+
+    /// **The D6/H2 proof** (decision 58a, live round 5). Moving an occurrence
+    /// by half an hour writes the slot and nothing else: not the title, and
+    /// not the location — which, on an occurrence that has none of its own,
+    /// used to go out as a DELETE on every single save.
+    #[test]
+    fn an_update_that_changed_only_the_time_leaves_the_location_alone() {
+        let before = Event {
+            location: Some("Room 2".into()),
+            ..saved_single("Standup")
+        };
+        let edit = Event {
+            start: before.start + chrono::Duration::minutes(30),
+            end: before.end + chrono::Duration::minutes(30),
+            ..before.clone()
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::Exception)
+                .unwrap();
+        assert_eq!(
+            field_uris(&set),
+            ["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"],
+            "the slot, and only the slot: {set}",
+        );
+        assert!(del.is_empty(), "and nothing is deleted: {del}");
+    }
+
+    /// Clearing a location still clears it: "not changed" and "emptied" are
+    /// different facts.
+    #[test]
+    fn an_update_that_cleared_the_location_deletes_it() {
+        let before = Event {
+            location: Some("Room 2".into()),
+            ..saved_single("Standup")
+        };
+        let edit = Event {
+            location: None,
+            ..before.clone()
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::Single).unwrap();
+        assert!(set.is_empty(), "nothing is set: {set}");
+        assert_eq!(field_uris(&del), ["calendar:Location"], "{del}");
+    }
+
+    /// Without a copy to compare with, every field goes out exactly as it
+    /// always did. This is what an unreadable `before` falls back to on a
+    /// single or a series head (decision 102).
+    #[test]
+    fn an_update_without_a_before_writes_every_field_as_it_always_did() {
+        let edit = Event {
+            location: Some("Room 2".into()),
+            reminders: quarter_hour(),
+            ..saved_single("Standup")
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&edit, None, None, EventIdKind::Single).unwrap();
+        assert_eq!(
+            field_uris(&set),
+            [
+                "item:Subject",
+                "calendar:Location",
+                "calendar:Start",
+                "calendar:End",
+                "calendar:IsAllDayEvent",
+                "item:ReminderIsSet",
+                "item:ReminderMinutesBeforeStart",
+            ],
+            "{set}",
+        );
+        assert_eq!(field_uris(&del), ["calendar:Recurrence"], "{del}");
+    }
+
+    /// **The subset invariant.** Whatever the pair and whatever the target, an
+    /// update built WITH a before names a subset of the fields the same update
+    /// names WITHOUT one. A suppressed field is therefore always one whose
+    /// value the server already has: the diff can write less, never anything
+    /// else.
+    #[test]
+    fn no_update_writes_a_field_it_would_not_write_without_a_before() {
+        let base = Event {
+            location: Some("Room 2".into()),
+            description: Some("Bring the notes".into()),
+            attendees: vec!["alice@example.com".into()],
+            reminders: quarter_hour(),
+            ..saved_single("Standup")
+        };
+        let weekly = |tzid: Option<&str>, rrule: &str| {
+            Some(EventRecurrence {
+                rrule: rrule.into(),
+                exceptions: Vec::new(),
+                tzid: tzid.map(str::to_string),
+            })
+        };
+        let variants: Vec<(&str, Event)> = vec![
+            ("unchanged", base.clone()),
+            (
+                "retitled",
+                Event {
+                    title: "Standup, later".into(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "moved",
+                Event {
+                    start: base.start + chrono::Duration::hours(1),
+                    end: base.end + chrono::Duration::hours(1),
+                    ..base.clone()
+                },
+            ),
+            (
+                "all day",
+                Event {
+                    all_day: true,
+                    ..base.clone()
+                },
+            ),
+            (
+                "no location",
+                Event {
+                    location: None,
+                    ..base.clone()
+                },
+            ),
+            (
+                "no description",
+                Event {
+                    description: None,
+                    ..base.clone()
+                },
+            ),
+            (
+                "no reminder",
+                Event {
+                    reminders: Vec::new(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "no invitee",
+                Event {
+                    attendees: Vec::new(),
+                    clear_attendees: true,
+                    ..base.clone()
+                },
+            ),
+            (
+                "invitees kept",
+                Event {
+                    keep_attendees: true,
+                    ..base.clone()
+                },
+            ),
+            (
+                "weekly in Berlin",
+                Event {
+                    recurrence: weekly(Some("Europe/Berlin"), "FREQ=WEEKLY"),
+                    ..base.clone()
+                },
+            ),
+            (
+                "daily in Berlin",
+                Event {
+                    recurrence: weekly(Some("Europe/Berlin"), "FREQ=DAILY"),
+                    ..base.clone()
+                },
+            ),
+            (
+                "weekly, no zone",
+                Event {
+                    recurrence: weekly(None, "FREQ=WEEKLY"),
+                    ..base.clone()
+                },
+            ),
+        ];
+        let server = ServerTimeZones::new(["w. europe standard time"]);
+        for (before_name, before) in &variants {
+            for (edit_name, edit) in &variants {
+                for kind in [
+                    EventIdKind::Single,
+                    EventIdKind::Exception,
+                    EventIdKind::RecurringMaster,
+                ] {
+                    let named = |(set, del): (String, String)| -> Vec<String> {
+                        field_uris(&set)
+                            .into_iter()
+                            .chain(field_uris(&del))
+                            .collect()
+                    };
+                    let with = named(
+                        event_to_update_field_xml_on(edit, Some(before), Some(&server), kind)
+                            .unwrap(),
+                    );
+                    let without = named(
+                        event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
+                    );
+                    for field in with {
+                        assert!(
+                            without.contains(&field),
+                            "{kind:?}, {before_name} -> {edit_name}: {field} is written with a \
+                             before but not without one",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A rule that did not change is neither written nor deleted — and a
+    /// title-only save on a zoned series carries no zone pair either.
+    #[test]
+    fn an_unchanged_recurrence_is_neither_set_nor_deleted() {
+        let before = zoned_master(Some("Europe/Berlin"));
+        let edit = Event {
+            title: "Weekly sync".into(),
+            ..before.clone()
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::RecurringMaster)
+                .unwrap();
+        assert_eq!(field_uris(&set), ["item:Subject"], "{set}");
+        assert!(del.is_empty(), "{del}");
+    }
+
+    /// The zone rides with the RULE, not with the clock: weekly to daily
+    /// without moving the series still carries the zone the series repeats in
+    /// (decision 41a), because a rule written without one re-expands in UTC.
+    #[test]
+    fn a_rule_change_carries_the_zone_even_when_the_time_stands_still() {
+        let before = zoned_master(Some("Europe/Berlin"));
+        let edit = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=DAILY".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            ..before.clone()
+        };
+        let (set, _) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::RecurringMaster)
+                .unwrap();
+        assert_eq!(
+            field_uris(&set),
+            [
+                "calendar:Recurrence",
+                "calendar:StartTimeZone",
+                "calendar:EndTimeZone",
+            ],
+            "{set}",
+        );
+    }
+
+    /// The slot is one fact: turning an event into an all-day one writes both
+    /// boundaries with it, because `ews_all_day_boundary` rewrites them from
+    /// the flag and Exchange validates a Start against the End it has stored.
+    #[test]
+    fn the_slot_is_written_as_one() {
+        let before = saved_single("Trip");
+        let edit = Event {
+            all_day: true,
+            ..before.clone()
+        };
+        let (set, _) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::Single).unwrap();
+        assert_eq!(
+            field_uris(&set),
+            ["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"],
+            "{set}",
+        );
+    }
+
+    /// The invitee rules keep their authority: what goes out is decided by
+    /// `keep_attendees` and `clear_attendees` (decisions 71a, 74a), never by
+    /// the field diff. The host knows whether the edit touched the list; the
+    /// diff only knows that this device's copy of it looks the same.
+    #[test]
+    fn attendees_are_not_suppressed_by_the_field_diff() {
+        let before = Event {
+            attendees: vec!["alice@example.com".into()],
+            ..saved_single("Review")
+        };
+        let edit = Event {
+            title: "Review, moved room".into(),
+            ..before.clone()
+        };
+        let (set, _) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::Single).unwrap();
+        assert_eq!(
+            field_uris(&set),
+            ["item:Subject", "calendar:RequiredAttendees"],
+            "{set}",
+        );
+    }
+
     /// Live test round 3: Exchange refuses `DeleteItemField calendar:Recurrence`
     /// on an exception (`ErrorInvalidPropertyDelete`) and fails the whole
     /// update. An override edit carries no rule, so the delete must stay out
@@ -5394,11 +5773,26 @@ mod tests {
             ..zoned_master(None)
         };
         let (_, del) =
-            event_to_update_field_xml_on(&override_edit, None, EventIdKind::Exception).unwrap();
+            event_to_update_field_xml_on(&override_edit, None, None, EventIdKind::Exception)
+                .unwrap();
         assert!(!del.contains("calendar:Recurrence"), "{del}");
+        // Without a copy to compare with, an absent location is still cleared.
         assert!(del.contains(r#"FieldURI="calendar:Location""#), "{del}");
+        // With one, it is not touched at all: it never differed (58a). This
+        // half is the round-5 defect; the rule half above is round 3's.
+        let (set, del) = event_to_update_field_xml_on(
+            &override_edit,
+            Some(&override_edit),
+            None,
+            EventIdKind::Exception,
+        )
+        .unwrap();
+        assert!(
+            !set.contains("calendar:Location") && !del.contains("calendar:Location"),
+            "set: {set}\ndel: {del}",
+        );
         for kind in [EventIdKind::Single, EventIdKind::RecurringMaster] {
-            let (_, del) = event_to_update_field_xml_on(&override_edit, None, kind).unwrap();
+            let (_, del) = event_to_update_field_xml_on(&override_edit, None, None, kind).unwrap();
             assert!(
                 del.contains(r#"FieldURI="calendar:Recurrence""#),
                 "{kind:?}: {del}"

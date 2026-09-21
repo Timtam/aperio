@@ -745,13 +745,78 @@ pub async fn update_event(
 ) -> EwsResult<Event> {
     let decoded = decode_event_id(&event.id);
     let target = resolve_write_target(client, &decoded).await?;
-    let (set_xml, delete_xml) = event_to_update_field_xml_on(event, server_zones, target.kind)?;
+    // The provider's own copy, so the update writes what the edit CHANGED
+    // rather than every field the row happens to carry (decision 58a). Read
+    // here, after the target is resolved: an exception's own ItemId is only
+    // known once `resolve_write_target` has found it.
+    let before = match read_before(client, &target, &event.calendar_id).await {
+        Ok(found) => found,
+        Err(err) if target.kind == EventIdKind::Exception => {
+            // Decision 92: say it. Writing every field onto an occurrence whose
+            // own copy we could not read is exactly the round-5 defect — the
+            // series' subject and a deleted location, over somebody's changed
+            // occurrence.
+            tracing::warn!(
+                target: "adapter_ews::write",
+                ?err,
+                event_id = %event.id,
+                "the occurrence's own copy could not be read; refusing to write",
+            );
+            return Err(EwsError::Protocol(
+                cal_core::WriteRefusal::OccurrenceNotWritable.message("own-copy-unreadable"),
+            ));
+        }
+        Err(err) => {
+            // A single or a series head: the row is the user's own, and
+            // writing it in full is what this always did.
+            tracing::warn!(
+                target: "adapter_ews::write",
+                ?err,
+                event_id = %event.id,
+                "the current copy could not be read; writing every field",
+            );
+            None
+        }
+    };
+    let (set_xml, delete_xml) =
+        event_to_update_field_xml_on(event, before.as_ref(), server_zones, target.kind)?;
+    // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
+    // report attendees changed while `keep_attendees` suppresses that block,
+    // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits
+    // AFTER `resolve_write_target`, so an occurrence that is no longer an
+    // exception in its series is still refused rather than reported saved.
+    if set_xml.is_empty() && delete_xml.is_empty() {
+        tracing::info!(
+            target: "adapter_ews::write",
+            event_id = %event.id,
+            "nothing changed; sending no update",
+        );
+        return Ok(Event {
+            etag: before
+                .as_ref()
+                .and_then(|b| b.etag.clone())
+                .or_else(|| event.etag.clone()),
+            updated_at: Utc::now(),
+            ..event.clone()
+        });
+    }
     // Removed invitees count too: with every one removed (`clear_attendees`)
     // they may still get a cancellation (decision 74a).
     let notify = event.send_invitations && (!event.attendees.is_empty() || event.clear_attendees);
+    // The version the update is applied to is the one the read answered with,
+    // not the one the id was minted with (decision 58a). The set is a delta
+    // against THAT copy, so that copy is what it belongs on, and a server that
+    // checks the ChangeKey (this envelope asks for `AlwaysOverwrite`, so ours
+    // does not) is given the version the delta was computed from rather than
+    // whatever the host cached last. What keeps another device's change is not
+    // this key but the set: a field this edit did not touch is not in it.
+    let change_key = before
+        .as_ref()
+        .and_then(|b| b.etag.clone())
+        .or_else(|| target.change_key.clone());
     let envelope = update_calendar_item(
         &target.item_id,
-        target.change_key.as_deref(),
+        change_key.as_deref(),
         &set_xml,
         &delete_xml,
         notify,
@@ -1111,6 +1176,40 @@ async fn resolve_override_target(
             original_start.to_rfc3339(),
         ))),
     }
+}
+
+/// The provider's current copy of the item this update will write.
+///
+/// Read with the shape that carries every field `changed_fields` compares —
+/// the widened detail shape for a single or a series head, the occurrence
+/// shape for an exception — so "the location is gone" and "the last reminder
+/// is gone" are facts about the item rather than about what the shape forgot
+/// to ask for.
+///
+/// Asked by ITEM ID ALONE, never by the version the caller happens to hold:
+/// the point is the copy the server has NOW. A ChangeKey here would make a
+/// stale one (the id's, minted whenever the host last read the row) refuse the
+/// read, and with it the write it is there to make safe.
+///
+/// `Ok(None)` when the server answered without the item; a transport or parse
+/// failure is `Err`, and the caller decides what that means for the kind of
+/// item it is about to write.
+async fn read_before(
+    client: &EwsClient,
+    target: &WriteTarget,
+    calendar_id: &str,
+) -> EwsResult<Option<Event>> {
+    let ids = vec![(target.item_id.clone(), None)];
+    let body = match target.kind {
+        EventIdKind::Exception => crate::soap::get_exception_items(&ids),
+        _ => crate::soap::get_calendar_items_with_recurrence(&ids),
+    };
+    let xml = client.post_soap(body).await?;
+    let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
+    let Some(item) = items.into_iter().find(|it| it.item_id == target.item_id) else {
+        return Ok(None);
+    };
+    Ok(Some(crate::mapping::to_event(item, calendar_id)?))
 }
 
 /// Helper: the resolved (id, change_key) pair plus the kind we
@@ -2282,6 +2381,26 @@ mod tests {
     </m:UpdateItemResponseMessage>
   </m:ResponseMessages></m:UpdateItemResponse></s:Body>
 </s:Envelope>"#;
+        // The occurrence's own copy, as `read_before` asks for it: the same
+        // title and no location of its own, one day earlier than the edit.
+        let occurrence = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+        <t:Subject>Moved to Tuesday</t:Subject>
+        <t:Start>2026-10-25T23:00:00Z</t:Start>
+        <t:End>2026-10-26T23:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
         let requests = Arc::new(Mutex::new(Vec::<String>::new()));
         let seen = Arc::clone(&requests);
         let _any = server
@@ -2291,6 +2410,8 @@ mod tests {
                 let body = request.utf8_lossy_body().unwrap().into_owned();
                 let answer = if body.contains("UpdateItem") {
                     updated_body
+                } else if body.contains(r#"Id="EXC-ID""#) {
+                    occurrence
                 } else {
                     series
                 };
@@ -2338,26 +2459,54 @@ mod tests {
         let requests = requests.lock().unwrap();
         assert_eq!(
             requests.len(),
-            2,
-            "one GetItem for the series, one UpdateItem"
+            3,
+            "the series, the occurrence's own copy, the UpdateItem",
         );
-        let update = &requests[1];
+        let read = &requests[1];
+        assert!(
+            read.contains(r#"<t:ItemId Id="EXC-ID"/>"#),
+            "the second read asks for the occurrence by id alone, not for the series: {read}",
+        );
+        assert!(
+            read.contains(r#"FieldURI="calendar:OriginalStart""#),
+            "and asks in the exception's own shape: {read}",
+        );
+        let update = &requests[2];
         assert!(update.contains("UpdateItem"), "{update}");
         assert!(
             update.contains(r#"<t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>"#),
             "{update}"
         );
         assert!(!update.contains("calendar:Recurrence"), "{update}");
+        // Decision 58a, changed on purpose: this used to assert that the
+        // location was WRITTEN on every save — here, a DeleteItemField, on an
+        // occurrence that never had a location of its own. Only the slot moved,
+        // so only the slot is written.
         assert!(
-            update.contains(r#"FieldURI="calendar:Location""#),
-            "{update}"
+            !update.contains(r#"FieldURI="calendar:Location""#),
+            "an unchanged location is not written: {update}"
+        );
+        assert!(
+            !update.contains("DeleteItemField"),
+            "and nothing is deleted either: {update}"
+        );
+        assert!(
+            !update.contains("item:ReminderIsSet"),
+            "an unchanged reminder is not written: {update}"
+        );
+        assert!(!update.contains("item:Subject"), "{update}");
+        assert_eq!(
+            update.matches("<t:SetItemField>").count(),
+            3,
+            "Start, End and IsAllDayEvent, and nothing else: {update}"
         );
         assert_eq!(updated.id, override_id, "the override keeps its id");
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
     }
 
     /// Answers an exception update with `update_code` and records every
-    /// request: the series GetItem, the UpdateItem, and whatever follows.
+    /// request: the series GetItem, the GetItem for the occurrence's own copy
+    /// (decision 58a), the UpdateItem, and whatever follows.
     async fn refuse_exception_update(
         server: &mut Server,
         update_code: &'static str,
@@ -2415,6 +2564,23 @@ mod tests {
   </m:ResponseMessages></m:DeleteItemResponse>"#
                 .to_string(),
         );
+        // What the exception owns, for `read_before`: its own subject at its
+        // own time, so the refused update carries the fields the edit changed.
+        let occurrence = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+        <t:Subject>Original</t:Subject>
+        <t:Start>2026-10-20T09:00:00Z</t:Start>
+        <t:End>2026-10-20T10:00:00Z</t:End>
+        <t:OriginalStart>2026-10-20T08:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#
+                .to_string(),
+        );
         let requests = Arc::new(Mutex::new(Vec::<String>::new()));
         let seen = Arc::clone(&requests);
         server
@@ -2428,6 +2594,8 @@ mod tests {
                     &created
                 } else if body.contains("DeleteItem") {
                     &deleted
+                } else if body.contains(r#"Id="EXC-ID""#) {
+                    &occurrence
                 } else {
                     &series
                 };
@@ -2489,15 +2657,22 @@ mod tests {
         let requests = requests.lock().unwrap();
         assert_eq!(
             requests.len(),
-            4,
-            "GetItem, UpdateItem, CreateItem, DeleteItem"
+            5,
+            "the series, the occurrence's own copy, UpdateItem, CreateItem, DeleteItem",
         );
-        let create = &requests[2];
+        let update = &requests[2];
+        assert!(
+            update.contains("Retitled") && update.contains("2026-10-22T09:00:00Z"),
+            "the refused update carried the title and the time the edit changed: {update}",
+        );
+        let create = &requests[3];
         assert!(create.contains("CreateItem"), "{create}");
         assert!(create.contains("Retitled"), "{create}");
         assert!(create.contains("2026-10-22T09:00:00Z"), "{create}");
         assert!(!create.contains("<t:Recurrence>"), "{create}");
-        let delete = &requests[3];
+        // The detached single is CREATED, not updated: it is written in full,
+        // with the location the edit carries and none it does not.
+        let delete = &requests[4];
         assert!(delete.contains("DeleteItem"), "{delete}");
         assert!(
             delete.contains(r#"<t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>"#),
@@ -2527,8 +2702,366 @@ mod tests {
         );
         assert_eq!(
             requests.lock().unwrap().len(),
-            2,
-            "GetItem and UpdateItem only"
+            3,
+            "the series, the occurrence's own copy, and the UpdateItem — nothing else",
+        );
+    }
+
+    /// The server's copy of `ITEM-ID` at version `change_key`: "Standup" in
+    /// Room 2, 08:00Z to 09:00Z, plus whatever `extra` the test needs.
+    fn server_copy(change_key: &str, extra: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="ITEM-ID" ChangeKey="{change_key}"/>
+        <t:Subject>Standup</t:Subject>
+        <t:Location>Room 2</t:Location>
+        <t:Start>2026-05-20T08:00:00Z</t:Start>
+        <t:End>2026-05-20T09:00:00Z</t:End>
+{extra}
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A `GetItem` that fails with `code`.
+    fn read_fault(code: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:MessageText>no</m:MessageText>
+      <m:ResponseCode>{code}</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A successful `UpdateItem` answer leaving `ITEM-ID` at `change_key`.
+    fn update_answer(change_key: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="ITEM-ID" ChangeKey="{change_key}"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// Answers every `GetItem` with `read` and everything else with `write`,
+    /// recording each request body in order.
+    async fn read_then_write(
+        server: &mut Server,
+        read: String,
+        write: String,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        use std::sync::{Arc, Mutex};
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("<m:GetItem>") {
+                    read.clone()
+                } else {
+                    write.clone()
+                };
+                seen.lock().unwrap().push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        requests
+    }
+
+    /// The edit the host hands over for `ITEM-ID`: field for field what
+    /// [`server_copy`] holds.
+    fn saved_single() -> Event {
+        Event {
+            keep_attendees: false,
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "S:ITEM-ID|CK-V1".into(),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Standup".into(),
+            description: None,
+            location: Some("Room 2".into()),
+            start: "2026-05-20T08:00:00Z".parse().unwrap(),
+            end: "2026-05-20T09:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            etag: Some("CK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    /// A save that changes nothing the server stores sends no update at all:
+    /// an `UpdateItem` with an empty `<t:Updates>` is a fault, and on a
+    /// meeting every write can mail the guests (decision 76a). What comes
+    /// back is the version the server has, so the next save compares against
+    /// the right one.
+    #[tokio::test]
+    async fn a_save_that_builds_no_field_sends_no_update() {
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            server_copy("CK-V9", ""),
+            update_answer("CK-V2"),
+        )
+        .await;
+
+        let saved = update_event(&client_for(&server), &saved_single(), None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the read, and nothing after it: {requests:?}"
+        );
+        assert_eq!(
+            saved.etag.as_deref(),
+            Some("CK-V9"),
+            "the version the server has, not the one the edit carried",
+        );
+    }
+
+    /// The same when the diff DOES report a change the write then suppresses:
+    /// the server's guest list carries a third person this device never read,
+    /// and the host says the edit left the invitees alone (decision 71a). The
+    /// gate therefore asks the BUILT XML, not the diff.
+    #[tokio::test]
+    async fn a_save_the_attendee_rules_suppress_sends_no_update() {
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            server_copy(
+                "CK-V9",
+                "        <t:RequiredAttendees><t:Attendee><t:Mailbox>\
+<t:EmailAddress>carol@example.com</t:EmailAddress></t:Mailbox></t:Attendee>\
+</t:RequiredAttendees>",
+            ),
+            update_answer("CK-V2"),
+        )
+        .await;
+
+        let edit = Event {
+            keep_attendees: true,
+            ..saved_single()
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            1,
+            "the read, and nothing after it",
+        );
+    }
+
+    /// The update is applied to the version the read answered with, not to
+    /// the one baked into the id (which the host may have cached long ago).
+    #[tokio::test]
+    async fn the_update_carries_the_change_key_the_before_read_returned() {
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            server_copy("CK-V9", ""),
+            update_answer("CK-V10"),
+        )
+        .await;
+
+        let edit = Event {
+            title: "Standup, 15 minutes".into(),
+            ..saved_single()
+        };
+        let saved = update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "the read, then the update");
+        assert!(
+            requests[0].contains(r#"<t:ItemId Id="ITEM-ID"/>"#),
+            "the read asks by id alone: {}",
+            requests[0],
+        );
+        let update = &requests[1];
+        assert!(
+            update.contains(r#"<t:ItemId Id="ITEM-ID" ChangeKey="CK-V9"/>"#),
+            "the version the read answered with, not the id's CK-V1: {update}",
+        );
+        assert!(
+            !update.contains(r#"FieldURI="calendar:Location""#),
+            "and only the title is written: {update}",
+        );
+        assert_eq!(saved.id, "S:ITEM-ID|CK-V10");
+    }
+
+    /// A read that fails on a single or a series head is not fatal: the row is
+    /// the user's own, the save writes every field as it always did, and the
+    /// log says why (decision 102).
+    #[tokio::test]
+    async fn a_failed_before_read_on_a_single_still_saves_the_whole_edit() {
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            read_fault("ErrorItemNotFound"),
+            update_answer("CK-V2"),
+        )
+        .await;
+
+        update_event(&client_for(&server), &saved_single(), None)
+            .await
+            .expect("the save still goes through");
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "the failed read, then the update");
+        let update = &requests[1];
+        for field in ["item:Subject", "calendar:Location", "calendar:Start"] {
+            assert!(
+                update.contains(field),
+                "{field} is written without a before: {update}",
+            );
+        }
+        assert!(
+            update.contains(r#"<t:ItemId Id="ITEM-ID" ChangeKey="CK-V1"/>"#),
+            "with the only version there is, the id's: {update}",
+        );
+    }
+
+    /// An exception is the one kind where a full write is the measured defect
+    /// (live round 5): without its own copy, every field written is the
+    /// SERIES'. So a read that fails there refuses the write instead.
+    #[tokio::test]
+    async fn an_exception_whose_own_copy_cannot_be_read_is_refused() {
+        use std::sync::{Arc, Mutex};
+        let mut server = Server::new_async().await;
+        let series = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2026-10-20T09:00:00Z</t:Start>
+          <t:End>2026-10-20T10:00:00Z</t:End>
+          <t:OriginalStart>2026-10-20T08:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+            .to_string();
+        let fault = read_fault("ErrorItemNotFound");
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains(r#"Id="EXC-ID""#) {
+                    fault.clone()
+                } else {
+                    series.clone()
+                };
+                seen.lock().unwrap().push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+
+        let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("occurrence-not-writable"),
+            "the surfaces read the refusal from the start of the message: {err}",
+        );
+        assert!(err.to_string().contains("own-copy-unreadable"), "{err}");
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "the series, the unreadable copy");
+        assert!(
+            !requests.iter().any(|body| body.contains("UpdateItem")),
+            "and nothing was written",
+        );
+    }
+
+    /// The diff belongs to the update path alone. An exception Exchange will
+    /// not move is CREATED elsewhere, and a create writes everything it has —
+    /// there is nothing on the server yet to compare with.
+    #[tokio::test]
+    async fn a_detached_exception_still_writes_every_field() {
+        let mut server = Server::new_async().await;
+        let requests =
+            refuse_exception_update(&mut server, "ErrorOccurrenceCrossingBoundary").await;
+
+        let edit = Event {
+            location: Some("Room 5".into()),
+            reminders: vec![cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 15 },
+                sound: None,
+            }],
+            ..exception_moved_to_thursday()
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .expect("detached");
+
+        let requests = requests.lock().unwrap();
+        let create = &requests[3];
+        assert!(create.contains("CreateItem"), "{create}");
+        assert!(
+            create.contains("<t:Location>Room 5</t:Location>"),
+            "{create}"
+        );
+        assert!(
+            create.contains("<t:ReminderIsSet>true</t:ReminderIsSet>"),
+            "{create}",
+        );
+        assert!(
+            create.contains("<t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart>"),
+            "{create}",
         );
     }
 
