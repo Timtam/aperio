@@ -380,10 +380,13 @@ export default function EventEditorModal({
   // does not describe the keyed event leaves it as it was.
   const privateSeedRef = useRef<{
     reminders: Reminder[];
+    /** Whether a row was stored at all — an emptied list is one too, and a
+     *  key the save leaves behind still has to be retired. */
+    hadRow: boolean;
     title: string;
     startsAt: string;
     landed: boolean;
-  }>({ reminders: [], title: '', startsAt: '', landed: false });
+  }>({ reminders: [], hadRow: false, title: '', startsAt: '', landed: false });
   // True while the rows on screen came from the CALENDAR's default reminders
   // rather than from the event itself (see the overlay effect below). While it
   // holds, the save sends `[]` — the default stays a default instead of being
@@ -573,6 +576,7 @@ export default function EventEditorModal({
                 if (remindersTouchedRef.current) return;
                 privateSeedRef.current = {
                   reminders: row?.reminders ?? [],
+                  hadRow: row !== undefined,
                   title: row?.title ?? '',
                   startsAt: row?.starts_at ?? '',
                   landed: true,
@@ -896,7 +900,7 @@ export default function EventEditorModal({
         from:
           !oldKeyLivesOn &&
           seed.landed &&
-          seed.reminders.length > 0 &&
+          seed.hadRow &&
           original != null &&
           oldEvent != null
             ? { calendar_id: original.calendar_id, event_id: oldEvent }
@@ -1017,11 +1021,9 @@ export default function EventEditorModal({
         // The provider cannot keep a changed occurrence inside its series, so
         // the occurrence leaves it: the series skips the slot (EXDATE) and a
         // STANDALONE event carries the edits. Mirrors the desktop EventDialog.
-        await addEventExdate(
-          occurrenceWriteKind.seriesId,
-          occurrenceWriteKind.occurrence,
-          original.calendar_id,
-        );
+        // The copy comes FIRST, as in the move: a create that fails — another
+        // calendar's account offline, say — then leaves the series whole,
+        // where skipping first would have lost the occurrence.
         const created = await createEvent({
           calendar_id: calId,
           title: trimmedTitle,
@@ -1040,6 +1042,11 @@ export default function EventEditorModal({
           // standalone copy (decision 72a).
           ...organizerOf(original),
         });
+        await addEventExdate(
+          occurrenceWriteKind.seriesId,
+          occurrenceWriteKind.occurrence,
+          original.calendar_id,
+        );
         // The series lives on without this slot: it keeps its key.
         await savePrivate(created, { oldKeyLivesOn: true });
         if (!isLocalCal) {
@@ -1049,10 +1056,14 @@ export default function EventEditorModal({
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
         );
         // The other copies have a series each, so carrying this means carving
-        // the same occurrence out of them — not updating a row.
+        // the same occurrence out of them — not updating a row. An override
+        // the provider already keeps (moved here to another calendar) is its
+        // own "before"; the slot's time would offer a move the user never made.
         if (
           await offerToCarry(
-            occurrenceBefore(original, occurrenceWriteKind.occurrence),
+            isProviderOverride(original)
+              ? original
+              : occurrenceBefore(original, occurrenceWriteKind.occurrence),
             created,
             'occurrence',
             occurrenceWriteKind.occurrence,

@@ -21,16 +21,10 @@ describe('privateReminderWrites', () => {
     expect(privateReminderWrites({ to, from: null })).toEqual([to]);
   });
 
-  it('empties the old key first, under the new signature, when the provider minted a new id', () => {
+  it('retires the old key without a signature when the provider minted a new id', () => {
     expect(privateReminderWrites({ to, from: { calendar_id: 'cal', event_id: 'S:item|ck1' } })).toEqual([
-      {
-        calendar_id: 'cal',
-        event_id: 'S:item|ck1',
-        reminders: [],
-        title: 'Zahnarzt',
-        starts_at: '2026-06-15T09:00:00.000Z',
-      },
       to,
+      { calendar_id: 'cal', event_id: 'S:item|ck1', reminders: [], title: '', starts_at: '' },
     ]);
   });
 

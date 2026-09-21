@@ -697,6 +697,11 @@ export function EventDialog({
   const autoReminders = useRef<EditableReminder[]>([]);
   // The initialState this dialog last reset to — the pristine baseline.
   const appliedInitialRef = useRef<FormState | null>(null);
+  // The stored private list that baseline carried. A save may only write the
+  // private rows the form ends up with — an empty list included — when THIS
+  // list reached the form: then a missing row is the user's decision, not a
+  // read that came back after they had started typing.
+  const landedPrivateSeedRef = useRef<readonly Reminder[] | null>(null);
 
   // Reset the form whenever the dialog is opened with new context.
   //
@@ -722,6 +727,7 @@ export function EventDialog({
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
+      landedPrivateSeedRef.current = null;
       return;
     }
     const baseline = appliedInitialRef.current;
@@ -732,6 +738,7 @@ export function EventDialog({
       JSON.stringify(formRef.current) === JSON.stringify(baseline);
     if (!pristine) return; // user touched the form → their edits win
     appliedInitialRef.current = initialState;
+    landedPrivateSeedRef.current = privateSeed.reminders;
     setForm(initialState);
       // Whatever the prefill put on top of the baseline is gone with it, so
       // it has to be allowed to land again. Without this the prefill latched
@@ -760,7 +767,13 @@ export function EventDialog({
     setAvailability(null);
     setAvailabilityWindow(null);
     setAvailabilityError(null);
-  }, [isOpen, initialState, remindersWereFromDefault, initialScope]);
+  }, [
+    isOpen,
+    initialState,
+    remindersWereFromDefault,
+    initialScope,
+    privateSeed.reminders,
+  ]);
 
   /**
    * A prefill handed in by the quick-add, applied once per opening.
@@ -1043,10 +1056,13 @@ export function EventDialog({
         // The stored rows arrive asynchronously and reach the form only while
         // it is still pristine. If they never landed, their absence from the
         // rows is ignorance, not a decision — and writing an empty list would
-        // destroy them.
+        // destroy them. If they did, the user removing the last one IS a
+        // decision, and it must be written: judging by the rows still in the
+        // form mistook that for a seed that never arrived, and the removed
+        // reminder went on ringing on every device.
         const privateSeedLanded =
           privateSeed.reminders.length === 0 ||
-          form.reminders.some((r) => r.attach === false);
+          landedPrivateSeedRef.current === privateSeed.reminders;
         // Write them against whatever the appointment ended up being — a
         // create mints an id, an occurrence override makes a new event, a
         // series split makes a tail. The signature travels with them so the
@@ -1254,10 +1270,12 @@ export function EventDialog({
           if (occurrenceWriteKind.kind === 'carve-out') {
             // The provider cannot keep a changed occurrence inside its series,
             // so the occurrence leaves it: the series skips the slot and a
-            // standalone event takes its place.
+            // standalone event takes its place. The copy comes FIRST, as in
+            // the move (`moveActions.ts`): a create that fails — another
+            // calendar's account offline, say — then leaves the series whole,
+            // where skipping first would have lost the occurrence.
             const occIso = occurrenceWriteKind.occurrence;
             {
-              await addEventExdate(seriesId, occIso, event.calendar_id);
               const created = await apiCreateEvent({
                 calendar_id: form.calendarId,
                 title: trimmedTitle,
@@ -1274,6 +1292,7 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
+              await addEventExdate(seriesId, occIso, event.calendar_id);
               // The series lives on without this slot: it keeps its key.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
@@ -1538,7 +1557,7 @@ export function EventDialog({
       // decision to write or ignorance to leave alone, and which signature a
       // save that does not describe the keyed event keeps (see `savePrivate`).
       privateSeed.hadRow,
-      privateSeed.reminders.length,
+      privateSeed.reminders,
       privateSeed.title,
       privateSeed.startsAt,
       dialogCalendarId,

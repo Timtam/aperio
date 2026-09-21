@@ -10,17 +10,17 @@
  * written into its series — because that row is the other event's, and emptying
  * it would silence every occurrence the save did not touch.
  *
- * Same calendar: the old key is emptied FIRST, under the NEW signature, and the
- * new row follows. The reminder scan then finds the old key's event under its
- * new id and keeps the row already there — the later write — so the old key
- * folds away and nothing is left behind. Emptied after the new row, under the
- * old signature, it was the later write, and the scan used it to empty the
- * event's reminders.
+ * A key the event left is retired WITHOUT a signature
+ * (`EventRemindersRepo::retire` in the core): emptied, so a peer holding the
+ * old list loses to it and stops firing, and never repaired. With a signature,
+ * the reminder scan would repoint it onto whatever event in its calendar
+ * carries that title and start, where — as the later write — it would empty
+ * that event's reminders. That was the event it left, under its new id; and
+ * when a twin shares the title and start, the row waits until the event
+ * changes or goes, and then empties the twin.
  *
- * Another calendar: the old calendar's scan never sees the event again, so the
- * old key is retired WITHOUT a signature (`EventRemindersRepo::retire` in the
- * core): emptied, so a peer holding the old list stops firing, and never
- * repaired onto whatever else in that calendar shares the title and start.
+ * The retired row stays, inert: the scan skips it and nothing fires from an
+ * empty list. One per such save, until the log compaction learns to drop them.
  */
 export interface PrivateRemindersWrite<R> {
   calendar_id: string;
@@ -37,18 +37,6 @@ export function privateReminderWrites<R>(input: {
   const { to, from } = input;
   if (from == null || (from.calendar_id === to.calendar_id && from.event_id === to.event_id)) {
     return [to];
-  }
-  if (from.calendar_id === to.calendar_id) {
-    return [
-      {
-        calendar_id: from.calendar_id,
-        event_id: from.event_id,
-        reminders: [],
-        title: to.title,
-        starts_at: to.starts_at,
-      },
-      to,
-    ];
   }
   return [
     to,

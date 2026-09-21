@@ -2273,31 +2273,55 @@ Siehe DESIGN §4.2.
   - Auf dem Handy nicht getestet.
 
   ✅ **Private Erinnerungen gingen beim Speichern verloren** (behoben
-  2026-09-21, gefunden bei der Prüfung von 112/113 und in der Review von #92).
-  Die Editoren leerten beim Speichern den Schlüssel, unter dem sie den Termin
-  geöffnet hatten, sobald der gespeicherte Termin einen anderen trug — mit
-  Titel und Start als Kennung und als jüngster Eintrag. Das traf:
+  2026-09-21 in #92, gefunden bei der Prüfung von 112/113 und in den zwei
+  Reviews von #92). Die Editoren leerten beim Speichern den Schlüssel, unter
+  dem sie den Termin geöffnet hatten, sobald der gespeicherte Termin einen
+  anderen trug — mit Titel und Start als Kennung und als jüngster Eintrag.
+  Das traf:
   - **Exchange**, bei jedem Speichern (neue Id): die Reparatur hielt den
     geleerten Eintrag für denselben Termin und leerte dessen Erinnerungen.
-    Jetzt wird der alte Schlüssel ZUERST geleert, mit der NEUEN Kennung,
-    dann der neue geschrieben: die Reparatur faltet beide zusammen, und es
-    bleibt nichts liegen.
   - **„Nur dieses Vorkommen“** auf Exchange, Graph und lokalen Kalendern
     (das Vorkommen wird herausgetrennt): die Serie verlor ihre privaten
     Erinnerungen, jede andere Woche blieb stumm. Ebenso **„diesen und alle
-    folgenden“** für die Wochen vor dem Teilungspunkt. Jetzt bleibt der
-    Schlüssel der Serie unangetastet, wenn die Serie weiterlebt.
-  - **„Nur dieses Vorkommen“ mit Kalenderwechsel**: geht jetzt als
-    Heraustrennen (die Serie bleibt, die Kopie entsteht im Zielkalender),
-    nicht mehr als Ausnahme, die es im anderen Kalender nicht geben kann.
-  - **Umziehen in einen anderen Kalender**: der alte Schlüssel wird OHNE
-    Kennung geleert (`EventRemindersRepo::retire`), damit die Reparatur ihn
-    dort nie auf eine Kopie mit gleichem Titel und Start schiebt. Auch eine
-    Liste, die du selbst geleert hattest, zieht jetzt mit um.
-  Die Regel steht einmal, in `shared/privateReminderWrites.ts`, und beide
-  Editoren nutzen sie. Eine Liste, die du selbst leerst, behält ihre
-  Kennung: Sie muss dem Termin auf dem anderen Gerät folgen. Offen: das Handy
-  hat keinen Testläufer; die Tests laufen am Desktop-Editor.
+    folgenden“** für die Wochen vor dem Teilungspunkt.
+  - **„Nur dieses Vorkommen“ mit Kalenderwechsel**: ging als Ausnahme, die
+    es im anderen Kalender nicht geben kann.
+  Jetzt, in `shared/privateReminderWrites.ts` für beide Editoren: Lebt der
+  Termin des alten Schlüssels weiter (Heraustrennen, Teilen, Ausnahme), bleibt
+  der Schlüssel unangetastet. Hat der Termin ihn verlassen (neue Id oder
+  anderer Kalender), wird er OHNE Kennung geleert
+  (`EventRemindersRepo::retire`, 115): Die Reparatur fasst ihn nie an, auch
+  nicht, wenn ein Zwilling mit gleichem Titel und Start im Kalender steht.
+  Das Zusammenfalten unter der neuen Kennung (erste Überarbeitung) hat die
+  zweite Review widerlegt: Bei einem Zwilling blieb der Eintrag liegen und
+  leerte später den Zwilling. Außerdem:
+  - Ein Vorkommen mit Kalenderwechsel wird herausgetrennt, und zwar Kopie
+    ZUERST, dann der Platz in der Serie: scheitert das Anlegen, bleibt die
+    Serie ganz (beide Editoren, wie das Verschieben).
+  - Der Desktop speichert jetzt auch das Entfernen der letzten privaten
+    Erinnerung (116); sie klingelte vorher weiter, überall.
+  - Das Umziehen in einen anderen Kalender nimmt auch eine selbst geleerte
+    Liste mit.
+  Eine Liste, die du selbst leerst, behält ihre Kennung: Sie muss dem Termin
+  auf dem anderen Gerät folgen. Offen: das Handy hat keinen Testläufer; die
+  Tests laufen am Desktop-Editor.
+
+  🚩 **Folgen aus den Reviews von #92:**
+  - **Löschen erreicht die anderen Geräte nicht** (116: eigener PR, als
+    Nächstes): `forget_event` löscht die private Zeile nur auf dem löschenden
+    Gerät. Die anderen behalten sie, signiert, und die Reparatur schiebt sie
+    auf einen Termin mit gleichem Titel und Start. Plan: statt löschen
+    `retire` und das Sync-Ereignis senden, auf beiden Hosts.
+  - **Liegengebliebene leere Zeilen aufräumen**: jedes Exchange-Speichern
+    eines Termins mit privaten Erinnerungen hinterlässt eine leere Zeile
+    ohne Kennung. Wirkungslos, aber sie wächst. Kandidat: der Compactor
+    entfernt sie jenseits von `gc_horizon`, wenn jedes Gerät sie gesehen hat.
+  - **Reparatur bei Zwillingen** (`cal_core::plan_repairs`): benennt ein
+    anderes Gerät einen Termin um und die Id wechselt, bevor dieses Gerät
+    den Sync gelesen hat, passt die alte Kennung nur noch auf den Zwilling,
+    und die Erinnerungen wandern dorthin. Vorschlag der Review: solange zwei
+    Termine dieselbe Kennung tragen, keine speichern. Trifft auch Gruppen,
+    Farben und Besprechungen.
 
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;

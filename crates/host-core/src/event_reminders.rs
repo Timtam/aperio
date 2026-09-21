@@ -109,11 +109,9 @@ impl<'a> EventRemindersRepo<'a> {
     ///
     /// The signature (`title`, `starts_at`) is that of the event the key NAMES.
     /// A list the user emptied keeps it, so the decision follows the event when
-    /// another device finds its id reminted. A key its event left for another
-    /// calendar has none: see [`Self::retire`]. A key its event left for a new
-    /// id in the SAME calendar is emptied under the new signature, before the
-    /// new row is written, so the scan folds it into the new row
-    /// (`privateReminderWrites` in `shared/`, which both editors use).
+    /// another device finds its id reminted. A key its event LEFT — for a new
+    /// id, or another calendar — names nothing any more and has none: see
+    /// [`Self::retire`].
     pub fn set(
         &self,
         calendar_id: &str,
@@ -272,7 +270,8 @@ impl<'a> EventRemindersRepo<'a> {
     /// appointment that is no longer there. It is retired without a signature
     /// ([`Self::retire`]). A list the user had emptied moves like any other.
     ///
-    /// Returns both rows to emit, or `None` when the event had no row.
+    /// Returns both rows to emit, or `None` when the key did not change or the
+    /// event had no row.
     pub fn relocate(
         &self,
         old_calendar_id: &str,
@@ -302,17 +301,21 @@ impl<'a> EventRemindersRepo<'a> {
         Ok(Some((moved, emptied)))
     }
 
-    /// Empty the row of a key whose event moved to ANOTHER calendar, and give
-    /// it NO signature.
+    /// Empty the row of a key its event left — the provider minted a new id
+    /// (Exchange does on every save), or the event moved to another calendar
+    /// — and give it NO signature.
     ///
     /// The emptied list is still the record of a decision: a peer that holds
     /// the old list under this key loses to it and stops firing. But it must
-    /// never be found again. The old calendar's reminder scan never sees the
-    /// event there any more, so with a signature its repair
-    /// (`cal_core::plan_repairs`) would move the row onto whatever else in
-    /// that calendar carries the title and start — a copy, say — where, as the
-    /// later write, it would replace that event's reminders with nothing. A row
-    /// without a signature is never repaired.
+    /// never be found again. With a signature, the reminder scan's repair
+    /// (`cal_core::plan_repairs`) would move the row onto whatever event in
+    /// that calendar carries the title and start — the very event that left
+    /// the key, under its new id, or a twin once that event changes or goes —
+    /// where, as the later write, it would replace that event's reminders with
+    /// nothing. A row without a signature is never repaired.
+    ///
+    /// The row stays, inert: nothing fires from an empty list, and the scan
+    /// skips it.
     pub fn retire(
         &self,
         calendar_id: &str,
