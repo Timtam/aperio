@@ -1941,6 +1941,137 @@ mod tests {
         );
     }
 
+    /// A twin — another event in the calendar with the same title and start,
+    /// say the user's placeholder and the invitation — must never inherit the
+    /// key an Exchange save left behind. Signed, that key waited out the
+    /// ambiguous scans and, once its event was deleted, landed on the twin as
+    /// the later write and emptied it.
+    #[test]
+    fn a_key_left_behind_never_empties_a_twin() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        let signature = start.to_rfc3339();
+        let one_day_before = vec![Reminder {
+            kind: ReminderKind::Relative {
+                minutes_before: 1440,
+            },
+            sound: None,
+        }];
+        repo.set(
+            "cal",
+            "twin",
+            &one_day_before,
+            "Jour fixe",
+            &signature,
+            "2026-06-01T08:00:00Z",
+        )
+        .unwrap();
+        repo.set(
+            "cal",
+            "S:item|ck1",
+            &one_hour_before(),
+            "Jour fixe",
+            &signature,
+            "2026-06-01T09:00:00Z",
+        )
+        .unwrap();
+        // The save, in `privateReminderWrites`' order.
+        repo.set(
+            "cal",
+            "S:item|ck2",
+            &one_hour_before(),
+            "Jour fixe",
+            &signature,
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+        repo.retire("cal", "S:item|ck1", "2026-06-01T10:00:01Z")
+            .unwrap();
+
+        let both = vec![
+            event_named("S:item|ck2", "cal", "Jour fixe", start),
+            event_named("twin", "cal", "Jour fixe", start),
+        ];
+        heal_local_reminders_for_calendar(&db, "cal", &both, scan_window());
+        // The user deletes the event; the twin stays.
+        repo.forget_event("cal", "S:item|ck2").unwrap();
+        let twin_alone = vec![event_named("twin", "cal", "Jour fixe", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &twin_alone, scan_window());
+
+        assert!(moved.is_empty(), "{moved:?}");
+        assert_eq!(
+            repo.get("cal", "twin").unwrap().unwrap().reminders,
+            one_day_before
+        );
+    }
+
+    /// An Exchange save mints a new id. The editor writes the reminders under
+    /// the new id and retires the old key; the scan that follows must leave
+    /// the new row alone. It used to find the emptied row by its signature,
+    /// take it for the same event reminted, and — the later write — empty the
+    /// event's reminders.
+    #[test]
+    fn a_retired_key_never_empties_the_event_that_took_it_over() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        // Before the save: the reminders under the id the event carried then.
+        repo.set(
+            "cal",
+            "S:item|ck1",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T09:00:00Z",
+        )
+        .unwrap();
+        // The save: the editor writes them under the new id, then retires
+        // the old key — the later write.
+        repo.set(
+            "cal",
+            "S:item|ck2",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+        repo.retire("cal", "S:item|ck1", "2026-06-01T10:00:01Z")
+            .unwrap();
+
+        let events = vec![event_named("S:item|ck2", "cal", "Zahnarzt", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events, scan_window());
+        assert!(moved.is_empty(), "{moved:?}");
+        assert_eq!(
+            repo.get("cal", "S:item|ck2").unwrap().unwrap().reminders,
+            one_hour_before()
+        );
+    }
+
+    /// A list the user emptied is a decision about the event, and it follows
+    /// the event to a reminted id like any other list.
+    #[test]
+    fn a_list_the_user_emptied_follows_its_event() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "old-id",
+            &[],
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+
+        let events = vec![event_named("new-id", "cal", "Zahnarzt", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events, scan_window());
+        assert_eq!(moved, vec![("old-id".to_string(), "new-id".to_string())]);
+        assert!(repo.get("cal", "new-id").unwrap().unwrap().is_empty());
+    }
+
     /// A row keyed by a series learns the SERIES' signature, not whichever of
     /// its rows the provider happened to send first.
     ///

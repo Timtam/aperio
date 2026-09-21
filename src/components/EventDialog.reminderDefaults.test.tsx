@@ -22,12 +22,27 @@ const privateRows = vi.hoisted(() => ({ current: [] as unknown[] }));
 /** What the host would return for `update_event` — a real event shape, since
  *  the dialog keys the private row by what came BACK from the save. */
 const savedEvent = vi.hoisted(() => ({ current: null as unknown }));
+/** What the host would return for `get_event_by_id` — the series master a
+ *  split reads its rule from. */
+const seriesMaster = vi.hoisted(() => ({ current: null as unknown }));
+/** Set to make `create_event` fail, as an offline account would. */
+const createFails = vi.hoisted(() => ({ current: false }));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     void payload;
     if (command === 'list_event_local_reminders') return Promise.resolve(privateRows.current);
+    if (command === 'get_event_by_id' && seriesMaster.current) {
+      return Promise.resolve(seriesMaster.current);
+    }
     if (command === 'update_event' && savedEvent.current) {
       return Promise.resolve(savedEvent.current);
+    }
+    // A carve-out creates the standalone copy; the dialog keys its private
+    // reminders by what came back.
+    if (command === 'create_event') {
+      if (createFails.current) return Promise.reject(new Error('offline'));
+      const request = (payload as { request: { calendar_id: string } }).request;
+      return Promise.resolve({ ...EVENT, id: 'created-1', calendar_id: request.calendar_id });
     }
     return Promise.resolve([]);
   }),
@@ -44,6 +59,12 @@ const CALENDARS: Calendar[] = [
   {
     id: 'cal-work',
     name: 'Arbeit',
+    read_only: false,
+    account_id: 'acc-icloud',
+  } as unknown as Calendar,
+  {
+    id: 'cal-home',
+    name: 'Privat',
     read_only: false,
     account_id: 'acc-icloud',
   } as unknown as Calendar,
@@ -78,7 +99,7 @@ const IN_APERIO: DefaultReminder = {
 const STORE = {
   calendars: CALENDARS as Calendar[],
   colorLabels: [],
-  selectedCalendarIds: new Set(['cal-work']),
+  selectedCalendarIds: new Set(['cal-work', 'cal-home']),
 };
 const VIEW_STATE = { showHiddenCalendarTargets: false, anchor: new Date() };
 const DIALOG_STATE = { openEventGroupCarry: () => {} };
@@ -118,14 +139,24 @@ afterEach(() => {
   defaults = [];
   privateRows.current = [];
   savedEvent.current = null;
+  seriesMaster.current = null;
+  createFails.current = false;
+  (CALENDARS[0] as { stores_occurrence_exceptions?: boolean }).stores_occurrence_exceptions =
+    undefined;
 });
 
-async function openEditor(calendarDefaults: DefaultReminder[]) {
+async function openEditor(
+  calendarDefaults: DefaultReminder[],
+  {
+    event = EVENT,
+    initialScope,
+  }: { event?: CalendarEvent; initialScope?: 'occurrence' | 'this_and_future' | 'series' } = {},
+) {
   defaults = calendarDefaults;
   const { EventDialog } = await import('./EventDialog');
   render(
     <StrictMode>
-      <EventDialog isOpen onClose={() => {}} event={EVENT} />
+      <EventDialog isOpen onClose={() => {}} event={event} initialScope={initialScope} />
     </StrictMode>,
   );
   // The dialog is up once its calendar picker is. The generous window is for
@@ -320,6 +351,209 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
       const payload = call[1] as { reminders: unknown } | undefined;
       expect(payload?.reminders).toEqual(stored);
     }
+  });
+
+  /** The private-reminder writes the save sent, in order. */
+  const privateWrites = () =>
+    invokeMock.mock.calls
+      .filter((call) => call[0] === 'set_event_local_reminders')
+      .map((call) => {
+        // The client sends the host's camelCase argument names.
+        const args = call[1] as {
+          calendarId: string;
+          eventId: string;
+          reminders: unknown[];
+          title: string;
+          startsAt: string;
+        };
+        return {
+          calendar_id: args.calendarId,
+          event_id: args.eventId,
+          reminders: args.reminders,
+          title: args.title,
+          starts_at: args.startsAt,
+        };
+      });
+
+  const STORED = [{ kind: { type: 'relative', minutes_before: 1440 }, sound: null }];
+  const storedRow = (eventId: string) => ({
+    calendar_id: 'cal-work',
+    event_id: eventId,
+    reminders: STORED,
+    title: 'Zahnarzt',
+    starts_at: '2026-06-15T09:00:00.000Z',
+    updated_at: '2026-06-01T10:00:00.000Z',
+  });
+
+  /** One occurrence of a weekly series, as the grid hands it over. */
+  const OCCURRENCE = {
+    ...EVENT,
+    id: 'series-1@2026-06-15T09:00:00.000Z',
+    series_id: 'series-1',
+    occurrence_start: '2026-06-15T09:00:00.000Z',
+    recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [], tzid: null },
+  } as unknown as CalendarEvent;
+
+  it('moves them to the id a save minted, and retires the old key without a signature', async () => {
+    // Exchange mints a new id on every save. The old key is emptied so a peer
+    // holding the old list stops firing — and without a signature, so the
+    // scan never carries it onto the event under its new id, or onto a twin
+    // with the same title and start, where the later write would empty it.
+    // The new row describes the event as SAVED, renamed and moved.
+    privateRows.current = [storedRow('ev-1')];
+    savedEvent.current = {
+      ...EVENT,
+      id: 'ev-1-reminted',
+      title: 'Zahnarzt Dr. X',
+      start: '2026-06-15T10:00:00.000Z',
+      end: '2026-06-15T11:00:00.000Z',
+      reminders: [],
+    };
+    await openEditor([]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$|^title$/i }), {
+      target: { value: 'Zahnarzt Dr. X' },
+    });
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(2));
+
+    expect(privateWrites()).toEqual([
+      {
+        calendar_id: 'cal-work',
+        event_id: 'ev-1-reminted',
+        reminders: STORED,
+        title: 'Zahnarzt Dr. X',
+        starts_at: '2026-06-15T10:00:00.000Z',
+      },
+      { calendar_id: 'cal-work', event_id: 'ev-1', reminders: [], title: '', starts_at: '' },
+    ]);
+  });
+
+  it('writes the removal of the last one', async () => {
+    // The only private reminder, removed: that is a decision, and it has to
+    // reach the store — or it goes on ringing here and on every device.
+    privateRows.current = [storedRow('ev-1')];
+    savedEvent.current = { ...EVENT, reminders: [] };
+    await openEditor([]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }).click();
+    await waitFor(() => expect(reminderRows()).toHaveLength(0));
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(1));
+
+    expect(privateWrites()).toEqual([
+      {
+        calendar_id: 'cal-work',
+        event_id: 'ev-1',
+        reminders: [],
+        title: 'Zahnarzt',
+        starts_at: EVENT.start,
+      },
+    ]);
+  });
+
+  it('empties the private list when its last reminder moves onto the appointment', async () => {
+    // Otherwise it rings twice: once from the provider, once from Aperio.
+    privateRows.current = [storedRow('ev-1')];
+    savedEvent.current = { ...EVENT, reminders: STORED };
+    await openEditor([]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    fireEvent.change(screen.getByRole('combobox', { name: /Gilt|Applies/i }), {
+      target: { value: 'attach' },
+    });
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(1));
+
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-work', event_id: 'ev-1', reminders: [] }),
+    ]);
+    const update = invokeMock.mock.calls.find((call) => call[0] === 'update_event');
+    expect((update?.[1] as { event: { reminders: unknown[] } }).event.reminders).toEqual(STORED);
+  });
+
+  it('keeps the occurrence in its series when the copy cannot be created', async () => {
+    // The copy comes first: skipping the slot first lost the occurrence
+    // whenever the create failed — another calendar's account offline, say.
+    createFails.current = true;
+    await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
+    fireEvent.change(screen.getByRole('combobox', { name: /kalender/i }), {
+      target: { value: 'cal-home' },
+    });
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
+    );
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'add_event_exdate')).toBe(false);
+  });
+
+  it('leaves the series key alone when the series is split at an occurrence', async () => {
+    // The head keeps every week before the split: emptying its key would
+    // silence them on every device.
+    seriesMaster.current = {
+      ...EVENT,
+      id: 'series-1',
+      start: '2026-06-01T09:00:00.000Z',
+      end: '2026-06-01T10:00:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [], tzid: null },
+    };
+    privateRows.current = [storedRow('series-1')];
+    await openEditor([], { event: OCCURRENCE, initialScope: 'this_and_future' });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(1));
+
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true);
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
+    ]);
+  });
+
+  it('leaves the series key alone when one occurrence is carved out of it', async () => {
+    // The series lives on without this one slot: emptying its key would
+    // silence every other week, on every device.
+    privateRows.current = [storedRow('series-1')];
+    await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(1));
+
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'add_event_exdate')).toBe(true);
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
+    ]);
+  });
+
+  it('carves an occurrence out of its series when the save moves it to another calendar', async () => {
+    // Even on a calendar that keeps exceptions: an exception only exists
+    // inside its series, and the series is not going anywhere.
+    (CALENDARS[0] as { stores_occurrence_exceptions?: boolean }).stores_occurrence_exceptions =
+      true;
+    privateRows.current = [storedRow('series-1')];
+    await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    fireEvent.change(screen.getByRole('combobox', { name: /kalender/i }), {
+      target: { value: 'cal-home' },
+    });
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    await waitFor(() => expect(privateWrites()).toHaveLength(1));
+
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(false);
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'add_event_exdate')).toBe(true);
+    const created = invokeMock.mock.calls.find((call) => call[0] === 'create_event');
+    expect((created?.[1] as { request: { calendar_id: string } }).request.calendar_id).toBe(
+      'cal-home',
+    );
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-home', event_id: 'created-1', reminders: STORED }),
+    ]);
   });
 
   it('offers no placement choice on a calendar only Aperio reads', async () => {
