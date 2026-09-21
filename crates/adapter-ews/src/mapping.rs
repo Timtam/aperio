@@ -530,6 +530,21 @@ pub struct ModifiedOccurrence {
     /// written before this field existed loads as `false`.
     #[serde(default)]
     pub cancelled: bool,
+    /// The exception's OWN item, as its per-occurrence `GetItem` answered.
+    ///
+    /// A changed occurrence is an item of its own on the server, with its own
+    /// subject, body, location, reminder and times. The enrichment used to
+    /// read all of that and keep one boolean; the row then showed the SERIES'
+    /// content under the occurrence's slot (decision 58a, measured in live
+    /// round 5).
+    ///
+    /// `None` when that GetItem has not run, failed, or answered for another
+    /// slot: the emitted row then inherits the series' content exactly as it
+    /// always did, because a row with a guessed subject would be worse than a
+    /// row with an inherited one. `#[serde(default)]` keeps persisted state
+    /// written before this field existed loadable.
+    #[serde(default)]
+    pub own: Option<Box<ParsedItem>>,
 }
 
 /// One invitee from a CalendarItem's `RequiredAttendees` /
@@ -1308,6 +1323,28 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"body" if inside_item && !inside_modified_occurrence => {
                         text_target = Some("body");
                     }
+                    // What an OCCURRENCE owns beside its times. The shape only
+                    // began asking for these with decision 58a: an exception
+                    // read here used to keep the series' location, reminder and
+                    // all-day flag because nothing ever parsed its own.
+                    b"location" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("location");
+                    }
+                    b"isalldayevent" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("all_day");
+                    }
+                    b"reminderisset" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("reminder_on");
+                    }
+                    b"reminderminutesbeforestart" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("reminder_mins");
+                    }
+                    b"datetimecreated" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("created");
+                    }
+                    b"lastmodifiedtime" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("modified");
+                    }
                     b"start" if inside_deleted_occurrence => {
                         text_target = Some("deleted_occurrence_start");
                     }
@@ -1519,6 +1556,21 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     Some("appointment_state") => {
                         current.appointment_state = s.parse::<i32>().ok();
                     }
+                    Some("location") => {
+                        let acc = current.location.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
+                    Some("all_day") => {
+                        current.is_all_day = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("reminder_on") => {
+                        current.reminder_is_set = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("reminder_mins") => {
+                        current.reminder_minutes_before_start = s.parse::<i64>().ok();
+                    }
+                    Some("created") => current.created = parse_ews_datetime(s),
+                    Some("modified") => current.last_modified = parse_ews_datetime(s),
                     Some("item_type") => {
                         let acc = current.item_type.get_or_insert_with(String::new);
                         acc.push_str(s);
@@ -2244,6 +2296,86 @@ fn ews_all_day_boundary(when: DateTime<Utc>) -> DateTime<Utc> {
 /// Re-anchor an all-day boundary read from EWS at LOCAL midnight of the
 /// intended calendar day — the app-internal all-day convention.
 ///
+/// The `Event` for ONE changed occurrence of a series.
+///
+/// With the occurrence's own item in hand (`ov.own`, read by the enrichment),
+/// every field the OCCURRENCE owns comes from it — through the same
+/// [`to_event`] every other row goes through, so the all-day anchor, the
+/// organizer and attendee rules (67a, 70a) and the timestamp fallbacks are the
+/// ones already written down, not a second copy of them. Only what the SERIES
+/// owns, or what no provider stores, is taken from the master.
+///
+/// Without it the row is the master's content at the occurrence's own slot,
+/// exactly as before decision 58a: a row with an INHERITED subject is wrong,
+/// but a row with a GUESSED one would be worse.
+pub fn override_event(
+    master_ev: &Event,
+    master_item: &ParsedItem,
+    ov: &ModifiedOccurrence,
+    calendar_id: &str,
+) -> EwsResult<Event> {
+    let Some(own) = ov.own.as_deref() else {
+        return Ok(inherited_override_event(master_ev, master_item, ov));
+    };
+    let mut row = to_event(own.clone(), calendar_id)?;
+    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    // An exception carries no rule of its own; the master keeps the series.
+    row.recurrence = None;
+    // The slot comes from the master's own list, which is what the expander
+    // vacated. All-day is read off the OCCURRENCE now, so a row's flag and its
+    // boundaries always agree — the master's flag decided this before, and a
+    // series can hold an occurrence that is not all-day.
+    if row.all_day {
+        row.start = all_day_local_anchor(ov.start);
+        row.end = all_day_local_anchor(ov.end);
+    } else {
+        row.start = ov.start;
+        row.end = ov.end;
+    }
+    row.etag = ov.change_key.clone();
+    // Cancelled from either side: the organizer withdrew this one instance, or
+    // the whole series is gone.
+    row.cancelled = master_ev.cancelled || ov.cancelled || row.cancelled;
+    // Device-local or series-owned, and never stored per occurrence: EWS keeps
+    // no colour at all, and the calendar is the master's.
+    row.calendar_id = master_ev.calendar_id.clone();
+    row.color_label = master_ev.color_label.clone();
+    row.color_hex = master_ev.color_hex.clone();
+    row.scheduling_silenced = master_ev.scheduling_silenced;
+    // `to_event` falls back to "now" for a missing timestamp, which would make
+    // an occurrence's `updated_at` churn on every read and beat the cache. A
+    // timestamp the server did not give is the master's.
+    if own.created.is_none() {
+        row.created_at = master_ev.created_at;
+    }
+    if own.last_modified.is_none() {
+        row.updated_at = master_ev.updated_at;
+    }
+    Ok(row)
+}
+
+/// The pre-58a row: the master's content at the occurrence's own slot. Used
+/// where the occurrence's own item could not be read.
+fn inherited_override_event(
+    master_ev: &Event,
+    master_item: &ParsedItem,
+    ov: &ModifiedOccurrence,
+) -> Event {
+    let mut row = master_ev.clone();
+    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    row.recurrence = None;
+    if master_item.is_all_day {
+        row.start = all_day_local_anchor(ov.start);
+        row.end = all_day_local_anchor(ov.end);
+    } else {
+        row.start = ov.start;
+        row.end = ov.end;
+    }
+    row.etag = ov.change_key.clone();
+    row.cancelled = master_ev.cancelled || ov.cancelled;
+    row
+}
+
 /// EWS hands back a plain instant that is midnight of the intended day
 /// in SOME zone (the mailbox timezone, or UTC for boundaries we wrote
 /// ourselves) without saying which. Sampling 12 hours INTO the day lands
@@ -3547,9 +3679,11 @@ impl ModifiedOccurrenceBuilder {
             start: self.start?,
             end: self.end?,
             original_start: self.original_start?,
-            // Filled later by the per-override GetItem enrichment; the inline
-            // ModifiedOccurrences shape carries no cancelled flag.
+            // Both filled later by the per-occurrence GetItem enrichment; the
+            // inline ModifiedOccurrences shape carries neither the cancelled
+            // flag nor anything the occurrence owns.
             cancelled: false,
+            own: None,
         })
     }
 }
@@ -5993,6 +6127,96 @@ mod tests {
     /// An exception read on its own carries the slot it fills as its own
     /// `OriginalStart`; a master's `OriginalStart`s belong to its modified
     /// occurrences and must not leak onto the master.
+    /// Decision 58a: the GetItem parser knew neither the location, nor the
+    /// reminder, nor the all-day flag, nor the timestamps — the shape never
+    /// asked for them, so an occurrence read through it could only inherit the
+    /// series'. Both are fixed; this is the parser half.
+    #[test]
+    fn get_item_reads_what_an_occurrence_owns() {
+        let dt = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC" ChangeKey="ECK"/>
+        <t:Subject>Nur dieser Termin</t:Subject>
+        <t:Body BodyType="Text">Agenda der Ausnahme</t:Body>
+        <t:DateTimeCreated>2026-07-01T09:00:00Z</t:DateTimeCreated>
+        <t:LastModifiedTime>2026-08-19T08:00:00Z</t:LastModifiedTime>
+        <t:ReminderIsSet>true</t:ReminderIsSet>
+        <t:ReminderMinutesBeforeStart>5</t:ReminderMinutesBeforeStart>
+        <t:Location>Raum 2</t:Location>
+        <t:Start>2026-08-20T15:00:00Z</t:Start>
+        <t:End>2026-08-20T15:30:00Z</t:End>
+        <t:IsAllDayEvent>false</t:IsAllDayEvent>
+        <t:CalendarItemType>Exception</t:CalendarItemType>
+        <t:OriginalStart>2026-08-20T12:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let items = parse_get_calendar_items_response(xml).expect("parses");
+        let exc = items.iter().find(|i| i.item_id == "EXC").expect("the item");
+        assert_eq!(exc.location.as_deref(), Some("Raum 2"));
+        assert!(exc.reminder_is_set);
+        assert_eq!(exc.reminder_minutes_before_start, Some(5));
+        assert!(!exc.is_all_day);
+        assert_eq!(exc.created, Some(dt("2026-07-01T09:00:00Z")));
+        assert_eq!(exc.last_modified, Some(dt("2026-08-19T08:00:00Z")));
+        assert_eq!(exc.subject, "Nur dieser Termin");
+        assert_eq!(exc.body.as_deref(), Some("Agenda der Ausnahme"));
+    }
+
+    /// The same names occur INSIDE `<t:ModifiedOccurrences>`, where they
+    /// describe the slot rather than the master. A master's own location must
+    /// not be overwritten by a nested one.
+    #[test]
+    fn a_masters_own_fields_survive_its_occurrence_list() {
+        let dt = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+        <t:Subject>Serie</t:Subject>
+        <t:Location>Raum 1</t:Location>
+        <t:IsAllDayEvent>false</t:IsAllDayEvent>
+        <t:ReminderIsSet>true</t:ReminderIsSet>
+        <t:ReminderMinutesBeforeStart>60</t:ReminderMinutesBeforeStart>
+        <t:Start>2026-07-06T09:00:00Z</t:Start>
+        <t:End>2026-07-06T10:00:00Z</t:End>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC" ChangeKey="ECK"/>
+          <t:Start>2026-07-23T15:00:00Z</t:Start>
+          <t:End>2026-07-23T16:00:00Z</t:End>
+          <t:OriginalStart>2026-07-20T09:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let items = parse_get_calendar_items_response(xml).expect("parses");
+        let master = items.first().expect("the master");
+        assert_eq!(master.location.as_deref(), Some("Raum 1"));
+        assert_eq!(master.reminder_minutes_before_start, Some(60));
+        assert_eq!(master.modified_occurrences.len(), 1);
+        assert_eq!(
+            master.modified_occurrences[0].start,
+            dt("2026-07-23T15:00:00Z")
+        );
+        // The list carries no item of its own until the enrichment reads one.
+        assert!(master.modified_occurrences[0].own.is_none());
+    }
+
     #[test]
     fn get_item_reads_an_exceptions_own_original_start() {
         let xml = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -6181,6 +6405,7 @@ mod tests {
             end: "2026-01-10T15:30:00Z".parse().unwrap(),
             original_start: "2026-01-10T08:00:00Z".parse().unwrap(),
             cancelled: false,
+            own: None,
         }];
 
         let ev = to_event(item, "cal").unwrap();
@@ -6225,6 +6450,7 @@ mod tests {
             end: "2026-01-11T00:00:00Z".parse().unwrap(),
             original_start: orig,
             cancelled: false,
+            own: None,
         }];
 
         let ev = to_event(item, "cal").unwrap();

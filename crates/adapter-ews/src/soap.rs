@@ -581,6 +581,12 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
         <t:AdditionalProperties>
           <t:FieldURI FieldURI="item:Subject"/>
           <t:FieldURI FieldURI="item:Body"/>
+          <t:FieldURI FieldURI="item:DateTimeCreated"/>
+          <t:FieldURI FieldURI="item:LastModifiedTime"/>
+          <t:FieldURI FieldURI="item:ReminderIsSet"/>
+          <t:FieldURI FieldURI="item:ReminderMinutesBeforeStart"/>
+          <t:FieldURI FieldURI="calendar:Location"/>
+          <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
           <t:FieldURI FieldURI="calendar:Start"/>
           <t:FieldURI FieldURI="calendar:End"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
@@ -592,6 +598,66 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:EndTimeZone"/>
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
+          <t:FieldURI FieldURI="calendar:Organizer"/>
+          <t:FieldURI FieldURI="calendar:MyResponseType"/>
+          <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
+          <t:FieldURI FieldURI="calendar:OptionalAttendees"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+{item_ids_xml}      </m:ItemIds>
+    </m:GetItem>"#,
+    );
+    wrap(&body)
+}
+
+/// `GetItem` against EXCEPTION items: everything a changed occurrence owns,
+/// and none of the series machinery it cannot carry.
+///
+/// A changed occurrence of a series is an item of its own on the server, with
+/// its own subject, body, location, reminder and times. Aperio used to read
+/// none of that and show the SERIES' content under the occurrence's slot
+/// (decision 58a, measured in live round 5). This is the shape that asks for
+/// what the occurrence owns.
+///
+/// `calendar:OriginalStart` rides along so the caller can prove the item it
+/// got back still fills the slot the master named. `calendar:Recurrence`,
+/// `ModifiedOccurrences`, `DeletedOccurrences` and the zone properties are
+/// deliberately absent: an exception has none of them, on any batch.
+pub fn get_exception_items(ids: &[(String, Option<String>)]) -> String {
+    let mut item_ids_xml = String::new();
+    for (id, ck) in ids {
+        let attr = match ck {
+            Some(ck) => format!(
+                r#"        <t:ItemId Id="{}" ChangeKey="{}"/>"#,
+                escape_xml(id),
+                escape_xml(ck),
+            ),
+            None => format!(r#"        <t:ItemId Id="{}"/>"#, escape_xml(id)),
+        };
+        item_ids_xml.push_str(&attr);
+        item_ids_xml.push('\n');
+    }
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:BodyType>Text</t:BodyType>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject"/>
+          <t:FieldURI FieldURI="item:Body"/>
+          <t:FieldURI FieldURI="item:DateTimeCreated"/>
+          <t:FieldURI FieldURI="item:LastModifiedTime"/>
+          <t:FieldURI FieldURI="item:ReminderIsSet"/>
+          <t:FieldURI FieldURI="item:ReminderMinutesBeforeStart"/>
+          <t:FieldURI FieldURI="calendar:Location"/>
+          <t:FieldURI FieldURI="calendar:Start"/>
+          <t:FieldURI FieldURI="calendar:End"/>
+          <t:FieldURI FieldURI="calendar:OriginalStart"/>
+          <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
+          <t:FieldURI FieldURI="calendar:IsCancelled"/>
+          <t:FieldURI FieldURI="calendar:AppointmentState"/>
+          <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Organizer"/>
           <t:FieldURI FieldURI="calendar:MyResponseType"/>
           <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
@@ -1172,6 +1238,70 @@ mod tests {
             "{body}"
         );
         assert!(body.contains(r#"InstanceIndex="3""#), "{body}");
+    }
+
+    /// Decision 58a: what a changed occurrence OWNS has to be asked for. The
+    /// bug that hid here for a year was a shape that never mentioned the
+    /// location, the reminder or the all-day flag — so the parser could not
+    /// read them, and the row could only inherit the series'.
+    #[test]
+    fn the_occurrence_request_asks_for_what_it_owns() {
+        let body = get_exception_items(&[("OCC".into(), Some("OCK".into()))]);
+        for field in [
+            "item:Subject",
+            "item:Body",
+            "item:DateTimeCreated",
+            "item:LastModifiedTime",
+            "item:ReminderIsSet",
+            "item:ReminderMinutesBeforeStart",
+            "calendar:Location",
+            "calendar:Start",
+            "calendar:End",
+            "calendar:IsAllDayEvent",
+            "calendar:OriginalStart",
+        ] {
+            assert!(
+                body.contains(&format!(r#"FieldURI="{field}""#)),
+                "{field} must be asked for: {body}"
+            );
+        }
+        // And none of the series machinery an occurrence cannot carry.
+        for absent in [
+            "calendar:Recurrence",
+            "calendar:ModifiedOccurrences",
+            "calendar:DeletedOccurrences",
+            "calendar:StartTimeZone",
+        ] {
+            assert!(
+                !body.contains(&format!(r#"FieldURI="{absent}""#)),
+                "{absent} has no place in an occurrence request: {body}"
+            );
+        }
+        assert!(
+            body.contains(r#"<t:ItemId Id="OCC" ChangeKey="OCK"/>"#),
+            "{body}"
+        );
+    }
+
+    /// The detail shape every master goes through is also the one part 2 reads
+    /// its "before" from, so a field it does not ask for would make "clear the
+    /// location" and "remove the last reminder" into silent no-ops.
+    #[test]
+    fn the_detail_request_asks_for_what_a_write_compares() {
+        let body = get_calendar_items_with_recurrence(&[("M".into(), None)]);
+        for field in [
+            "calendar:Location",
+            "calendar:IsAllDayEvent",
+            "item:ReminderIsSet",
+            "item:ReminderMinutesBeforeStart",
+            "item:DateTimeCreated",
+            "item:LastModifiedTime",
+        ] {
+            assert!(
+                body.contains(&format!(r#"FieldURI="{field}""#)),
+                "{field} must be asked for: {body}"
+            );
+        }
     }
 
     /// Both requests that fill the item cache ask for the end zone as well as

@@ -35,6 +35,18 @@ The endpoint is discovered or user-supplied.
 - **ChangeKey churn.** An edited item keeps its item id but rotates the
   `ChangeKey` embedded in the composite id, so the cache purges the whole
   native group before re-inserting (avoids stale duplicates).
+- **An exception carries its own content.** A changed occurrence is an item of
+  its own on the server, with its own subject, body, location and reminder. The
+  read used to build its row from the SERIES and fetch the exception's item
+  only to keep one boolean from it (`cancelled`), so the occurrence appeared
+  under the series' subject and a save wrote that subject back (decision 58a,
+  measured in live round 5). The per-occurrence `GetItem` now keeps the item
+  (`ModifiedOccurrence::own`) and `mapping::override_event` builds the row from
+  it through the same `to_event` every other row goes through; only what the
+  SERIES owns — the calendar, the colour, the slot in the pattern — still comes
+  from the master. An item that cannot be read, or that answers for another
+  slot, leaves the row inheriting the series' content and says so in the log:
+  an inherited value is wrong, a guessed one would be worse.
 - **Exceptions keep their rule field.** Editing one changed occurrence writes
   to the exception's own item, which the override id finds from the series
   head on every write. That update never sends `DeleteItemField

@@ -145,9 +145,10 @@ keinen, dort ist die Wahl Tonis Sache.
   kleiner PR für den Ausnahme-Fehler, den die dritte Runde gefunden hat. Danach
   folgt der Lesefehler im Kern (48a). Dann kommt der Exchange-Schreiber mit 47a
   und dem Datumsfehler, danach die weiteren Stufen.
-- **58a — der Betreff einer Ausnahme** ist eine eigene, spätere Aufgabe
-  außerhalb dieses Entwurfs. Heute zeigt Aperio eine Ausnahme unter dem Betreff
-  der Serie.
+- **58a — der Betreff einer Ausnahme** war eine eigene Aufgabe außerhalb
+  dieses Entwurfs und ist seit 2026-09-21 gebaut: eine Ausnahme trägt ihren
+  eigenen Betreff, Ort, Text und ihre eigene Erinnerung, weil der Adapter ihr
+  eigenes Element jetzt behält, statt es zu lesen und wegzuwerfen.
 - **61a — zwei ältere Ausnahme-Fehler vor 48a.** Die Prüfung des
   Ausnahme-Fixes hat zwei ältere Fehler gefunden (siehe TODO): Das Handy ändert
   eine Exchange-Ausnahme nicht direkt, und Verschieben „nur dieses Vorkommen“
