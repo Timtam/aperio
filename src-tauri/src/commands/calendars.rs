@@ -915,12 +915,9 @@ pub async fn delete_event(
         super::forget_event_grouping(&db, &event_log, cid, &id);
         // A private reminder cannot go on naming an appointment that is gone —
         // and an orphan is not inert here: the scan's repair would re-point it
-        // at the one event of the calendar sharing its title and start.
-        if let Err(err) =
-            host_core::event_reminders::EventRemindersRepo::new(&db.shared()).forget_event(cid, &id)
-        {
-            tracing::warn!(event_id = %id, ?err, "couldn't drop the event's private reminders");
-        }
+        // at the one event of the calendar sharing its title and start. On
+        // every device, so the retirement travels.
+        super::forget_event_local_reminders(&db, &event_log, cid, &id);
     }
     scheduler.invalidate();
     Ok(())

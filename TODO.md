@@ -2307,11 +2307,14 @@ Siehe DESIGN §4.2.
   Tests laufen am Desktop-Editor.
 
   🚩 **Folgen aus den Reviews von #92:**
-  - **Löschen erreicht die anderen Geräte nicht** (116: eigener PR, als
-    Nächstes): `forget_event` löscht die private Zeile nur auf dem löschenden
-    Gerät. Die anderen behalten sie, signiert, und die Reparatur schiebt sie
-    auf einen Termin mit gleichem Titel und Start. Plan: statt löschen
-    `retire` und das Sync-Ereignis senden, auf beiden Hosts.
+  - ✅ **Löschen erreicht die anderen Geräte** (116, eigener PR):
+    `forget_event` löschte die private Zeile nur auf dem löschenden Gerät;
+    die anderen behielten sie, signiert, und die Reparatur schob sie auf einen
+    Termin mit gleichem Titel und Start. Jetzt leert es sie OHNE Kennung
+    (`retire`) und sendet sie, auf beiden Hosts; ohne Zeile wird nichts
+    geschrieben. Nicht abgedeckt: ein Termin, den ein anderes Programm löscht
+    (Outlook, iPhone-Kalender) — das fängt erst die Reparatur bei
+    Zwillingen unten.
   - **Liegengebliebene leere Zeilen aufräumen**: jedes Exchange-Speichern
     eines Termins mit privaten Erinnerungen hinterlässt eine leere Zeile
     ohne Kennung. Wirkungslos, aber sie wächst. Kandidat: der Compactor
