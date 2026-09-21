@@ -2154,15 +2154,20 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// so a save that moved an occurrence by an hour also wrote back its title, its
 /// body and its reminder, and a save that changed nothing still went out.
 ///
-/// This is a TWO-way comparison, edit against server. It cannot tell a field
-/// the user changed from one the host holds stale: if another device renamed
-/// the event after this one read it, the old title differs from the server's
-/// and is written back, exactly as before. Telling those apart needs the copy
-/// the editor opened, which the host does not send.
+/// That comparison alone is TWO-way, edit against server: it cannot tell a
+/// field the user changed from one this device holds stale. The third side is
+/// the copy the editor opened (decision 106): the host marks the fields the
+/// edit left as that copy has them ([`Event::keep_fields`]), and those are not
+/// written, with or without `before` — the provider's value, whatever it is
+/// now, stays. A kept rule that must go along with a moved start is the
+/// server's rule, rebuilt on that start.
 ///
-/// Without it every field is written, exactly as before. The emitted set is
-/// always a SUBSET of what `before = None` emits — never a superset — so a
-/// suppressed field can only ever be one whose value the server already has.
+/// Without `before`, every field not kept is written. With it, what is emitted
+/// is a SUBSET of what the same event emits without — never a superset, and
+/// never another value — except that a kept rule and its zone are the server's
+/// own. So a field the COMPARISON suppresses is one whose value the server
+/// already has; a field `keep_fields` suppresses may differ from the server's,
+/// on purpose.
 pub fn event_to_update_field_xml_on(
     event: &Event,
     before: Option<&Event>,
@@ -2322,22 +2327,36 @@ pub fn event_to_update_field_xml_on(
     // rule: an edit without one says nothing about the server's.
     // A missing copy's rule is unknown, not equal: a blind write whose slot
     // moves writes the edit's rule with it.
+    //
+    // A KEPT rule is the server's (decision 106): when the slot takes it along,
+    // the server's rule is rebuilt on the start being written, never this
+    // device's copy of it, which may be stale — another device's COUNT or
+    // UNTIL would go. Its zone with it: `same_recurrence` counts the zone as
+    // part of the rule. And a server copy without a rule stays without one.
+    let rule_of: &Event = match before {
+        Some(server) if !may(EventField::Recurrence) => server,
+        _ => event,
+    };
     let built_rule = |ev: &Event| {
         ev.recurrence
             .as_ref()
             .map(|rec| rrule_to_ews_recurrence(&rec.rrule, ev.start).ok())
     };
+    let written_rule = rule_of
+        .recurrence
+        .as_ref()
+        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, event.start).ok());
     let rule_follows_slot = slot_changed && start_moves && event.recurrence.is_some();
     let rule_changed = touches(EventField::Recurrence)
         || ((may(EventField::Recurrence) || rule_follows_slot)
-            && built_rule(event) != before.and_then(built_rule));
+            && written_rule != before.and_then(built_rule));
     // Two locks on the rule, on purpose. The diff is one: an exception has no
     // rule on either side, so nothing is emitted. The `target` check below is
     // the other, and it is the one that still holds when there is no `before`.
     // Together they also stop an ordinary single's save from carrying a
     // pointless `DeleteItemField calendar:Recurrence` every time.
     if rule_changed {
-        if let Some(rec) = &event.recurrence {
+        if let Some(rec) = &rule_of.recurrence {
             let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
             // Wrap the recurrence element in a SetItemField against
             // calendar:Recurrence. EWS expects the body's inner shape to
@@ -2362,7 +2381,7 @@ pub fn event_to_update_field_xml_on(
     // without moving the series.
     let zone_may_change = rule_changed || touches(EventField::AllDay) || slot_changed;
     if let Some(windows) =
-        series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
+        series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones)
             .filter(|_| zone_may_change)
     {
         let win = escape_xml(windows);
@@ -5788,6 +5807,34 @@ mod tests {
                             event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
                         );
                         for block in with {
+                            // The one exception, on purpose: a kept rule and
+                            // its zone are the SERVER's, rebuilt on the start
+                            // being written (decision 106) — so they are the
+                            // server's own values, not this device's.
+                            let rule_or_zone = [
+                                "calendar:Recurrence",
+                                "calendar:StartTimeZone",
+                                "calendar:EndTimeZone",
+                            ]
+                            .iter()
+                            .any(|f| block.contains(&format!(r#"FieldURI="{f}""#)));
+                            if rule_or_zone && keep.contains(&EventField::Recurrence) {
+                                let rule = before.recurrence.as_ref().map(|r| {
+                                    rrule_to_ews_recurrence(&r.rrule, edit.start).unwrap()
+                                });
+                                let zone = series_windows_zone(
+                                    edit.all_day,
+                                    before.recurrence.as_ref(),
+                                    Some(&server),
+                                );
+                                assert!(
+                                    rule.is_some_and(|rule| block.contains(&rule))
+                                        || zone.is_some_and(|zone| block.contains(zone)),
+                                    "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: a \
+                                     kept rule or zone that is not the server's:\n{block}",
+                                );
+                                continue;
+                            }
                             assert!(
                                 without.contains(&block),
                                 "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: written \
@@ -6169,6 +6216,107 @@ mod tests {
             "{set}"
         );
         assert!(del.is_empty(), "no rule is deleted: {del}");
+    }
+
+    /// A kept rule that must go along with a moved start is the SERVER's rule,
+    /// rebuilt on that start: another device's end-after-five survives a drag
+    /// of the series to another day.
+    #[test]
+    fn a_kept_rule_is_the_servers_when_the_slot_takes_it_along() {
+        let opened = zoned_master(Some("Europe/Berlin"));
+        let server = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;COUNT=5".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            ..opened.clone()
+        };
+        let mut dragged = Event {
+            start: opened.start + chrono::Duration::days(1),
+            end: opened.end + chrono::Duration::days(1),
+            ..opened.clone()
+        };
+        dragged.keep_fields = cal_core::event_diff::kept_fields(&dragged, Some(&opened), true);
+        assert!(dragged.keep_fields.contains(&EventField::Recurrence));
+
+        let (set, del) = event_to_update_field_xml_on(
+            &dragged,
+            Some(&server),
+            None,
+            EventIdKind::RecurringMaster,
+        )
+        .unwrap();
+        assert!(
+            set.contains("<t:NumberOfOccurrences>5</t:NumberOfOccurrences>"),
+            "the server's end: {set}"
+        );
+        assert!(
+            set.contains("<t:StartDate>2026-05-21</t:StartDate>"),
+            "{set}"
+        );
+        assert!(del.is_empty(), "{del}");
+    }
+
+    /// A series another device has since made a single stays a single when
+    /// this one moves it: a kept rule is rebuilt only onto a rule that is there.
+    #[test]
+    fn a_moved_series_never_restores_a_rule_the_server_dropped() {
+        let opened = Event {
+            etag: Some("v1".into()),
+            ..zoned_master(Some("Europe/Berlin"))
+        };
+        let server = Event {
+            recurrence: None,
+            ..opened.clone()
+        };
+        let mut moved = Event {
+            start: opened.start + chrono::Duration::hours(1),
+            end: opened.end + chrono::Duration::hours(1),
+            ..opened.clone()
+        };
+        moved.keep_fields = cal_core::event_diff::kept_fields(&moved, Some(&opened), true);
+
+        let (set, del) =
+            event_to_update_field_xml_on(&moved, Some(&server), None, EventIdKind::RecurringMaster)
+                .unwrap();
+        assert!(set.contains(r#"FieldURI="calendar:Start""#), "{set}");
+        assert!(!set.contains("calendar:Recurrence"), "{set}");
+        assert!(!del.contains("calendar:Recurrence"), "{del}");
+        assert!(!set.contains("TimeZone"), "no zone for a single: {set}");
+    }
+
+    /// A kept rule's zone is the server's too: another device moved the series
+    /// to New York, and lengthening it here does not put it back in Berlin.
+    #[test]
+    fn a_kept_rules_zone_is_the_servers() {
+        let opened = zoned_master(Some("Europe/Berlin"));
+        let server = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some("America/New_York".into()),
+            }),
+            ..opened.clone()
+        };
+        let mut longer = Event {
+            end: opened.end + chrono::Duration::minutes(30),
+            ..opened.clone()
+        };
+        longer.keep_fields = cal_core::event_diff::kept_fields(&longer, Some(&opened), true);
+
+        let (set, _) = event_to_update_field_xml_on(
+            &longer,
+            Some(&server),
+            None,
+            EventIdKind::RecurringMaster,
+        )
+        .unwrap();
+        assert!(
+            set.contains(r#"<t:StartTimeZone Id="Eastern Standard Time"/>"#),
+            "{set}"
+        );
+        assert!(!set.contains("W. Europe"), "{set}");
     }
 
     /// An event the user moved but whose rule they never touched — there was

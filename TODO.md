@@ -2191,7 +2191,8 @@ Siehe DESIGN §4.2.
     demselben Grund schreibt eine Ausnahme, deren Zeile noch den Serieninhalt
     erbt (Teil 1, die eigene Fassung war beim Lesen nicht lesbar), diesen
     Inhalt weiter zurück, wo er sich unterscheidet. Beides braucht die
-    Fassung, die der Bearbeiter geöffnet hat. ✅ Das ist 106, gleich unten.
+    Fassung, die der Bearbeiter geöffnet hat. ✅ Mit 106 geschlossen, solange
+    die geöffnete Fassung bewiesen ist; ohne Beweis bleibt es (siehe unten).
   - Auf dem Handy nicht getestet.
   ✅ **Dreiseitig: geschrieben wird, was der Bearbeiter geändert hat** (106,
   erledigt 2026-09-21). Der Host vergleicht vor jedem Speichern die
@@ -2202,14 +2203,24 @@ Siehe DESIGN §4.2.
   eines anderen Geräts, oder bei einer Ausnahme mit geerbter Zeile ihr eigener
   Inhalt. Die Cache-Fassung zählt nur, wenn sie beweisbar die geöffnete ist:
   - dieselbe Version (ETag) wie die Bearbeitung, und
-  - der Kalender wurde seit Aperios letztem Schreiben dort neu gelesen. Ein
-    Speichern markiert den Cache nur als veraltet; die Zeile bleibt die von
-    VOR dem Speichern. Ohne diese Prüfung sähe die Wiederherstellung nach
-    einer gescheiterten Serien-Teilung unberührt aus und würde nie
-    geschrieben — die folgenden Termine wären still weg (gefunden in der
-    Plan-Prüfung, zusammen mit dem Entfernen eines gerade angehängten
-    Meetings). Ohne Beweis gilt nichts als behalten, und es bleibt beim
-    zweiseitigen Vergleich aus Teil 2.
+  - der ganze Kalender wurde neu gelesen, und zwar von einer Aktualisierung,
+    die NACH Aperios letztem Schreiben dort BEGONNEN hat, während gerade
+    nichts geschrieben wird (`CacheStore::events_proven`). Ein Speichern
+    markiert den Cache nur als veraltet; die Zeile bleibt die von VOR dem
+    Speichern. Ohne diese Prüfung sähe die Wiederherstellung nach einer
+    gescheiterten Serien-Teilung unberührt aus und würde nie geschrieben —
+    die folgenden Termine wären still weg (gefunden in der Plan-Prüfung,
+    zusammen mit dem Entfernen eines gerade angehängten Meetings).
+    Der Nachweis ist ein Zählerstand, kein Zeitstempel (gefunden in der
+    Review von #90): Jedes Speichern zählt ihn beim Beginn und beim Ende
+    hoch, auch wenn es mit einem Fehler endet — ein Fehler kann trotzdem
+    beim Server angekommen sein —, und jede Aktualisierung merkt sich den
+    Stand, bei dem sie begonnen hat. Eine Aktualisierung, die vor oder während
+    eines Speicherns gelesen hat, beweist darum nichts, egal wer von beiden
+    zuletzt fertig wird. Ein Zeitstempel konnte genau das nicht: Eine
+    laufende Aktualisierung konnte ihn kurz nach dem Speichern wieder setzen.
+    Ohne Beweis gilt nichts als behalten, und es bleibt beim zweiseitigen
+    Vergleich aus Teil 2.
   Dazu:
   - Eine Zeile, die den Serieninhalt erbt, hat eine eigene Version
     (`inherited:…`, `ITEM_PARSER` 4), damit sie nie für die eigene Fassung
@@ -2221,8 +2232,13 @@ Siehe DESIGN §4.2.
   - Regel und Start gehören zusammen: Setzt ein Speichern einen anderen Start
     auf den Server, geht die Regel neu gebaut mit; ändert der Bearbeiter die
     Regel und der Server hat einen anderen Start, geht der Zeitraum mit. Eine
-    behaltene Regel unter einem Start, der bleibt, bleibt, wie der Server sie
-    hat.
+    behaltene Regel ist dabei die des SERVERS, auf den neuen Start gebaut,
+    mit ihrer Zone — so überlebt das „endet nach 5 Terminen" oder die neue
+    Zone eines anderen Geräts. Eine Serie, die ein anderes Gerät zum
+    Einzeltermin gemacht hat, wird nicht wieder zur Serie.
+  - Beim Mitnehmen in eine Termingruppe bietet Aperio an, was der Bearbeiter
+    gespeichert hat, nicht was eine neu angelegte Ausnahme vom Server
+    übernommen hat (Desktop und Handy).
   - Das Feld wird tolerant gelesen: Ein unbekannter Eintrag fällt weg, und das
     Feld wird geschrieben. Ein Plugin scheitert nie daran.
   Offen geblieben:
@@ -2231,7 +2247,16 @@ Siehe DESIGN §4.2.
     dann wie in Teil 2 verloren gehen. Das schließt erst eine Fassung, die der
     Editor selbst mitschickt.
   - Nach einem Speichern gilt bis zur nächsten Aktualisierung für den ganzen
-    Kalender nichts als behalten. Grob, aber sicher.
+    Kalender nichts als behalten; nach einem Neustart bis zur ersten. Grob:
+    dann wird eher zu viel geschrieben als zu wenig. Und zu diesem „zu viel"
+    gehört der Runde-5-Fall: Eine Ausnahme, deren Zeile den Serieninhalt
+    erbt, schreibt ohne Beweis Titel, Ort und Erinnerung der Serie über ihre
+    eigenen, und eine abgelöste Ausnahme wird mit ihnen angelegt — wie in
+    Teil 2, nur seltener.
+  - Speichert Aperio anders als über das Bearbeiten (Zusage, Meeting
+    anhängen, einen Termin überspringen) und scheitert das nach dem Server,
+    zählt nur das erfolgreiche Ende den Stand hoch. Das betrifft nur ein
+    Zurücknehmen genau so einer Änderung vor der nächsten Aktualisierung.
   - CalDAV, Google und Graph lesen `keep_fields` noch nicht. CalDAV folgt mit
     der Bewahrung (58a Teil 3).
   - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie

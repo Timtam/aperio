@@ -681,6 +681,11 @@ export default function EventEditorModal({
       next: CalendarEvent,
       scope: CarryScope = 'series',
       occurrenceIso?: string | null,
+      // What the user SAVED, when the row that came back differs from it: an
+      // Exchange exception detached as a single takes what the user did not
+      // touch from its own copy (decision 106), and that is not a change of
+      // theirs to offer the other copies.
+      edited: CalendarEvent = next,
     ): Promise<boolean> => {
       const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
         title: ev.title,
@@ -702,7 +707,7 @@ export default function EventEditorModal({
           event_id: seriesIdOf(saved),
         };
         const before = fieldsOf(saved);
-        const after = fieldsOf(next);
+        const after = fieldsOf(edited);
         const plan = planCarry(
           group,
           anchor,
@@ -983,6 +988,7 @@ export default function EventEditorModal({
             updated,
             'occurrence',
             occurrenceIsoOf(original),
+            overrideRow,
           )
         ) {
           return;

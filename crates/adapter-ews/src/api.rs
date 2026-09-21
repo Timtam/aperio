@@ -783,13 +783,14 @@ pub async fn update_event(
             return Err(err);
         }
         Err(err) => {
-            // A single or a series head: the row is the user's own, and
-            // writing it in full is what this always did.
+            // A single or a series head: the row is the user's own, so it is
+            // written without a comparison — every field the host did not mark
+            // as left alone (decision 106).
             tracing::warn!(
                 target: "adapter_ews::write",
                 ?err,
                 event_id = %event.id,
-                "the current copy could not be read; writing every field",
+                "the current copy could not be read; writing every field not kept",
             );
             None
         }

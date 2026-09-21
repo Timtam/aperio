@@ -1342,12 +1342,19 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   dritte Seite ist die Fassung, die der Bearbeiter geöffnet hat (106): Was die
   Bearbeitung davon unverändert lässt, gehört dem Anbieter. Diese Fassung ist
   die des Host-Caches, und sie zählt nur mit Beweis — dieselbe Version wie die
-  Bearbeitung, und der Kalender seit Aperios letztem Schreiben neu gelesen.
-  Ohne Beweis gilt nichts als behalten. Denn ein Cache, der nach dem Speichern
-  nur als veraltet markiert ist, hält noch die Zeile von vorher, und eine
-  Bearbeitung, die daraus neu gebaut wird (eine Wiederherstellung, ein
-  Zurücksetzen), sähe unberührt aus und würde nie geschrieben. Im Zweifel
-  schreibt Aperio lieber einen veralteten Wert als gar keinen gewollten.
+  Bearbeitung, und der Kalender ganz neu gelesen von einer Aktualisierung, die
+  nach Aperios letztem Schreiben dort begonnen hat. Ohne Beweis gilt nichts als
+  behalten. Denn ein Cache, der nach dem Speichern nur als veraltet markiert
+  ist, hält noch die Zeile von vorher, und eine Bearbeitung, die daraus neu
+  gebaut wird (eine Wiederherstellung, ein Zurücksetzen), sähe unberührt aus
+  und würde nie geschrieben. Der Beweis ist ein Zählerstand, den jedes
+  Speichern vor und nach dem Schreiben erhöht, auch wenn es scheitert, und den
+  jede Aktualisierung bei ihrem Beginn festhält; so beweist eine
+  Aktualisierung, die mit einem Speichern um die Wette lief, nie etwas. Im
+  Zweifel schreibt Aperio lieber einen veralteten Wert als gar keinen
+  gewollten. Eine behaltene Wiederholungsregel ist die des Anbieters: Muss sie
+  mit einem verschobenen Start neu geschrieben werden, dann seine, auf den
+  neuen Start gebaut.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was

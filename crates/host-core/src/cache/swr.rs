@@ -302,6 +302,7 @@ pub async fn refresh_events(
                 // snapshot toward the true set, instead of jittering the
                 // visible count with each retry's different skip set.
                 let mut changes = cs.changes;
+                let fetched = changes.len();
                 if !cs.unfetched.is_empty() {
                     // The cache is the ONLY place these rows still exist. An
                     // empty result here is indistinguishable from "nothing was
@@ -336,9 +337,14 @@ pub async fn refresh_events(
                     };
                     changes.extend(kept);
                 }
-                let changed = cache
-                    .replace_calendar_events(account, calendar, window, &changes)
-                    .unwrap_or(true);
+                let carried_unfetched = changes.len() > fetched;
+                let replaced = cache.replace_calendar_events(account, calendar, window, &changes);
+                // Decision 106: every row now is what this fetch read — unless
+                // some were carried over unread.
+                if replaced.is_ok() && !carried_unfetched {
+                    cache.mark_events_refreshed(account, calendar, gen);
+                }
+                let changed = replaced.unwrap_or(true);
                 let _ = cache.set_token(
                     account,
                     SyncScope::Events,
@@ -347,17 +353,21 @@ pub async fn refresh_events(
                 );
                 Ok(changed)
             } else {
-                Ok(cache
-                    .apply_events_delta(
-                        account,
-                        calendar,
-                        &Delta {
-                            changes: cs.changes,
-                            deletions: cs.deletions,
-                            new_token: cs.new_token,
-                        },
-                    )
-                    .unwrap_or(true))
+                let applied = cache.apply_events_delta(
+                    account,
+                    calendar,
+                    &Delta {
+                        changes: cs.changes,
+                        deletions: cs.deletions,
+                        new_token: cs.new_token,
+                    },
+                );
+                // Decision 106: a delta is every change since the token,
+                // this app's own writes among them.
+                if applied.is_ok() {
+                    cache.mark_events_refreshed(account, calendar, gen);
+                }
+                Ok(applied.unwrap_or(true))
             }
         }
         Err(cal_core::Error::Unsupported(_)) => {

@@ -598,7 +598,11 @@ pub async fn update_event(
     let read_account = registry
         .account_for_calendar(&read_calendar)
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    host_core::event_write::guard_update(&cache, &read_account, &read_calendar, &mut event);
+    // Held until this command returns, however it returns: while it is, and
+    // after, no cached row of the calendar counts as an opened copy until a
+    // refresh has read it again (decision 106).
+    let _write =
+        host_core::event_write::guard_update(&cache, &read_account, &read_calendar, &mut event);
 
     // Cross-calendar move detection. When the frontend captured the
     // event's *original* calendar_id on dialog open and passes it
