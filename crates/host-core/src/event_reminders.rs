@@ -109,8 +109,11 @@ impl<'a> EventRemindersRepo<'a> {
     ///
     /// The signature (`title`, `starts_at`) is that of the event the key NAMES.
     /// A list the user emptied keeps it, so the decision follows the event when
-    /// another device finds its id reminted. A key that names no event any more
-    /// has none: see [`Self::retire`].
+    /// another device finds its id reminted. A key its event left for another
+    /// calendar has none: see [`Self::retire`]. A key its event left for a new
+    /// id in the SAME calendar is emptied under the new signature, before the
+    /// new row is written, so the scan folds it into the new row
+    /// (`privateReminderWrites` in `shared/`, which both editors use).
     pub fn set(
         &self,
         calendar_id: &str,
@@ -266,9 +269,10 @@ impl<'a> EventRemindersRepo<'a> {
     /// The old row is EMPTIED rather than deleted, for the reason the
     /// migration gives: a peer that still holds the old list has to have
     /// something to lose against, or it would go on ringing for an
-    /// appointment that is no longer there.
+    /// appointment that is no longer there. It is retired without a signature
+    /// ([`Self::retire`]). A list the user had emptied moves like any other.
     ///
-    /// Returns both rows to emit, or `None` when there was nothing to carry.
+    /// Returns both rows to emit, or `None` when the event had no row.
     pub fn relocate(
         &self,
         old_calendar_id: &str,
@@ -283,9 +287,9 @@ impl<'a> EventRemindersRepo<'a> {
         let Some(row) = self.get(old_calendar_id, old_event_id)? else {
             return Ok(None);
         };
-        if row.is_empty() {
-            return Ok(None);
-        }
+        // An emptied list moves too: it is the user's decision about this
+        // event, and it must not stay behind signed in the old calendar, where
+        // the repair would carry it onto a copy with the same title and start.
         let moved = self.set(
             new_calendar_id,
             new_event_id,
@@ -298,21 +302,17 @@ impl<'a> EventRemindersRepo<'a> {
         Ok(Some((moved, emptied)))
     }
 
-    /// Empty the row of a key that no longer names an event — the event moved
-    /// to another calendar, or the provider minted a new id for it — and give
+    /// Empty the row of a key whose event moved to ANOTHER calendar, and give
     /// it NO signature.
     ///
     /// The emptied list is still the record of a decision: a peer that holds
     /// the old list under this key loses to it and stops firing. But it must
-    /// never be found again. With a signature, the reminder scan's repair
-    /// (`cal_core::plan_repairs`) would take it for a row whose event was
-    /// reminted and move it onto the event that now carries that title and
-    /// start — the very event that took over the key — where, as the later
-    /// write, it would replace that event's reminders with nothing. That is
-    /// what an Exchange save did: the id changes with every save, the editor
-    /// moves the reminders to the new id and empties the old one, and the next
-    /// scan emptied the new one too. A row without a signature is never
-    /// repaired.
+    /// never be found again. The old calendar's reminder scan never sees the
+    /// event there any more, so with a signature its repair
+    /// (`cal_core::plan_repairs`) would move the row onto whatever else in
+    /// that calendar carries the title and start — a copy, say — where, as the
+    /// later write, it would replace that event's reminders with nothing. A row
+    /// without a signature is never repaired.
     pub fn retire(
         &self,
         calendar_id: &str,
@@ -428,6 +428,26 @@ mod tests {
             .unwrap();
         let kept = repo.get("cal", "kept").unwrap().unwrap();
         assert_eq!((kept.title.as_str(), kept.starts_at.as_str()), ("T", "S"));
+    }
+
+    /// A list the user emptied moves with its event, and the old key is
+    /// retired like any other.
+    #[test]
+    fn relocating_carries_an_emptied_list() {
+        let db = db();
+        let repo = EventRemindersRepo::new(&db);
+        repo.set("home", "ev", &[], "T", "S", "2026-06-01T10:00:00Z")
+            .unwrap();
+        let (moved, emptied) = repo
+            .relocate("home", "ev", "work", "ev2", "2026-06-02T10:00:00Z")
+            .unwrap()
+            .expect("an emptied list is carried too");
+        assert!(moved.is_empty());
+        assert_eq!((moved.title.as_str(), moved.starts_at.as_str()), ("T", "S"));
+        assert_eq!(
+            (emptied.title.as_str(), emptied.starts_at.as_str()),
+            ("", "")
+        );
     }
 
     /// A move to another calendar leaves the old key retired: emptied, and

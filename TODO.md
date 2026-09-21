@@ -2272,17 +2272,33 @@ Siehe DESIGN §4.2.
     71a abzuwägen (die eigene Zeile des Organisators). Entscheidung offen.
   - Auf dem Handy nicht getestet.
 
-  ✅ **Private Erinnerungen an Exchange-Terminen gingen nach einer Bearbeitung
-  verloren** (behoben 2026-09-21, gefunden bei der Prüfung von 112/113).
-  Exchange vergibt bei jedem Speichern eine neue Id. Der Editor schrieb die
-  privaten Erinnerungen unter die neue Id und leerte den alten Schlüssel —
-  mit Titel und Start als Kennung. Die Reparatur beim nächsten Laden hielt
-  den geleerten Eintrag für denselben Termin und ließ ihn als jüngeren
-  gewinnen: Die Erinnerungen waren weg. Jetzt räumt der Editor den alten
-  Schlüssel OHNE Kennung ab (`EventRemindersRepo::retire`, beide Editoren
-  über `retiredPrivateReminders`), und das Umziehen zwischen Kalendern
-  ebenso. Eine Liste, die du selbst leerst, behält ihre Kennung: Sie muss
-  dem Termin auf dem anderen Gerät folgen.
+  ✅ **Private Erinnerungen gingen beim Speichern verloren** (behoben
+  2026-09-21, gefunden bei der Prüfung von 112/113 und in der Review von #92).
+  Die Editoren leerten beim Speichern den Schlüssel, unter dem sie den Termin
+  geöffnet hatten, sobald der gespeicherte Termin einen anderen trug — mit
+  Titel und Start als Kennung und als jüngster Eintrag. Das traf:
+  - **Exchange**, bei jedem Speichern (neue Id): die Reparatur hielt den
+    geleerten Eintrag für denselben Termin und leerte dessen Erinnerungen.
+    Jetzt wird der alte Schlüssel ZUERST geleert, mit der NEUEN Kennung,
+    dann der neue geschrieben: die Reparatur faltet beide zusammen, und es
+    bleibt nichts liegen.
+  - **„Nur dieses Vorkommen“** auf Exchange, Graph und lokalen Kalendern
+    (das Vorkommen wird herausgetrennt): die Serie verlor ihre privaten
+    Erinnerungen, jede andere Woche blieb stumm. Ebenso **„diesen und alle
+    folgenden“** für die Wochen vor dem Teilungspunkt. Jetzt bleibt der
+    Schlüssel der Serie unangetastet, wenn die Serie weiterlebt.
+  - **„Nur dieses Vorkommen“ mit Kalenderwechsel**: geht jetzt als
+    Heraustrennen (die Serie bleibt, die Kopie entsteht im Zielkalender),
+    nicht mehr als Ausnahme, die es im anderen Kalender nicht geben kann.
+  - **Umziehen in einen anderen Kalender**: der alte Schlüssel wird OHNE
+    Kennung geleert (`EventRemindersRepo::retire`), damit die Reparatur ihn
+    dort nie auf eine Kopie mit gleichem Titel und Start schiebt. Auch eine
+    Liste, die du selbst geleert hattest, zieht jetzt mit um.
+  Die Regel steht einmal, in `shared/privateReminderWrites.ts`, und beide
+  Editoren nutzen sie. Eine Liste, die du selbst leerst, behält ihre
+  Kennung: Sie muss dem Termin auf dem anderen Gerät folgen. Offen: das Handy
+  hat keinen Testläufer; die Tests laufen am Desktop-Editor.
+
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;
   2. der Lesefehler im Kern (48a);

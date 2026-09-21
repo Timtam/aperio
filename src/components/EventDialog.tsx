@@ -61,7 +61,7 @@ import {
   pickerMisreadsRule,
   planCarry,
   recurrenceSummaryText,
-  retiredPrivateReminders,
+  privateReminderWrites,
   seriesDayKey,
   worthCarrying,
   type CarryableFields,
@@ -1057,7 +1057,16 @@ export function EventDialog({
         // something to lose against. A failure here never fails the save — the
         // appointment is already stored, and a lost private reminder is worth
         // less than an error the user cannot act on.
-        const savePrivate = async (saved: CalendarEvent) => {
+        //
+        // `oldKeyLivesOn` is for a save that leaves the event the dialog opened
+        // where it was — an occurrence carved out of its series, the tail of a
+        // split, an occurrence written into its series. Its row is that
+        // event's and stays; only a save of the SAME event under another key
+        // clears the old one (`privateReminderWrites`).
+        const savePrivate = async (
+          saved: CalendarEvent,
+          { oldKeyLivesOn = false }: { oldKeyLivesOn?: boolean } = {},
+        ) => {
           const hadSomethingToLose =
             privateSeed.reminders.length > 0 && privateSeedLanded;
           if (privateReminders.length === 0 && !hadSomethingToLose) return;
@@ -1067,32 +1076,30 @@ export function EventDialog({
           // occurrence, not the series the row names — so only a save of the
           // series itself refreshes it; otherwise whatever was stored stands.
           const describesTheKeyedEvent = saved.id === seriesId;
-          await setEventLocalReminders({
-            calendar_id: saved.calendar_id,
-            event_id: seriesId,
-            reminders: privateReminders,
-            title: describesTheKeyedEvent
-              ? saved.title
-              : privateSeed.title || saved.title,
-            starts_at: describesTheKeyedEvent
-              ? saved.start
-              : privateSeed.startsAt || saved.start,
-          }).catch(() => undefined);
-          // The appointment moved to another calendar, or the provider minted
-          // a new id for it: the old row names an event that is not there any
-          // more. Retire it — emptied, so a peer holding the old list stops
-          // firing, and WITHOUT a signature, so the scan's repair never takes
-          // it for this very event reminted and empties the new row.
           const oldCalendar = dialogCalendarId;
           const oldEvent = event ? seriesIdOf(event) : null;
-          const keyChanged =
-            oldCalendar != null &&
-            oldEvent != null &&
-            (oldCalendar !== saved.calendar_id || oldEvent !== seriesId);
-          if (keyChanged && privateSeed.hadRow) {
-            await setEventLocalReminders(
-              retiredPrivateReminders(oldCalendar, oldEvent),
-            ).catch(() => undefined);
+          const writes = privateReminderWrites({
+            to: {
+              calendar_id: saved.calendar_id,
+              event_id: seriesId,
+              reminders: privateReminders,
+              title: describesTheKeyedEvent
+                ? saved.title
+                : privateSeed.title || saved.title,
+              starts_at: describesTheKeyedEvent
+                ? saved.start
+                : privateSeed.startsAt || saved.start,
+            },
+            from:
+              !oldKeyLivesOn &&
+              privateSeed.hadRow &&
+              oldCalendar != null &&
+              oldEvent != null
+                ? { calendar_id: oldCalendar, event_id: oldEvent }
+                : null,
+          });
+          for (const write of writes) {
+            await setEventLocalReminders(write).catch(() => undefined);
           }
         };
 
@@ -1171,6 +1178,10 @@ export function EventDialog({
             row: event,
             calendar: calendars.find((c) => c.id === event.calendar_id),
             scope: editScope,
+            // An occurrence that also changes calendar leaves its series: the
+            // series stays where it is, so the copy cannot be an exception of it.
+            destination:
+              form.calendarId !== event.calendar_id ? 'another-calendar' : 'in-series',
           });
           if (occurrenceWriteKind.kind === 'in-place') {
             const overrideRow: CalendarEvent = {
@@ -1202,7 +1213,8 @@ export function EventDialog({
               overrideRow,
               event.calendar_id,
             );
-            await savePrivate(overrideRow);
+            // The occurrence stays in its series: the series keeps its key.
+            await savePrivate(overrideRow, { oldKeyLivesOn: true });
             if (!storesColorNatively) {
               await setEventColor(
                 landed.id,
@@ -1262,7 +1274,8 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
-              await savePrivate(created);
+              // The series lives on without this slot: it keeps its key.
+              await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
@@ -1356,10 +1369,11 @@ export function EventDialog({
                 },
                 plan,
               );
-              // The tail is a continuation of the same appointment, so the
-              // private reminders follow it rather than staying on the head,
-              // which now ends before the change the user just made.
-              await savePrivate(created);
+              // The tail is a continuation of the same appointment, so it gets
+              // the private list under its new id. The head keeps its own
+              // under the series key: it still has every occurrence before
+              // the change.
+              await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
