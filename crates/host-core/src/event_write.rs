@@ -68,7 +68,7 @@ pub fn guard_update(
             None
         }
     };
-    cal_core::attendee::guard_update(event, read.as_ref());
+    cal_core::attendee::guard_update(event, read.as_ref(), proven);
     // Always assigned, never merged: an event that comes back from a save and
     // is sent again must not carry an old list in.
     event.keep_fields = cal_core::event_diff::kept_fields(event, read.as_ref(), proven);

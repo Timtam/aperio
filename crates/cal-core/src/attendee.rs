@@ -220,19 +220,22 @@ pub fn invitee_write(event: &Event, now: &[String], current: &[String]) -> Invit
 }
 
 /// The write rule for an update, run by the host before the adapter sees the
-/// event. `read` is the event as it was last read, when the host has it.
+/// event. `read` is the event as it was last read, when the host has it, and
+/// `refreshed_since_last_write` whether the host read it from the provider
+/// after this app's last write there (decision 106).
 ///
 /// - The organizer leaves the attendee list, and the responses.
 /// - The send intent survives only for an event the account organizes, with
 ///   someone else invited, or with invitees just removed, who may be told
 ///   (decision 74a).
-/// - When `read` shows the same invitees, [`Event::keep_attendees`] tells the
-///   adapter to leave the provider's list as it is (decision 71a), so a title
-///   or time change never rewrites who is invited.
+/// - When `read` shows the same invitees, and is provably the copy the edit
+///   was made from, [`Event::keep_attendees`] tells the adapter to leave the
+///   provider's list as it is (decision 71a), so a title or time change never
+///   rewrites who is invited.
 /// - When the edit removed every invitee `read` shows,
 ///   [`Event::clear_attendees`] tells the adapter to write the list empty,
 ///   which it never does for an empty list alone.
-pub fn guard_update(event: &mut Event, read: Option<&Event>) {
+pub fn guard_update(event: &mut Event, read: Option<&Event>, refreshed_since_last_write: bool) {
     let organizer = event.organizer.clone();
     event.attendees = without_organizer(&event.attendees, organizer.as_deref());
     if let Some(organizer) = organizer.as_deref().map(normalize_address) {
@@ -241,9 +244,24 @@ pub fn guard_update(event: &mut Event, read: Option<&Event>) {
             .retain(|r| normalize_address(&r.email) != organizer);
     }
     let before = read.map(|read| without_organizer(&read.attendees, read.organizer.as_deref()));
-    event.keep_attendees = before
-        .as_deref()
-        .is_some_and(|before| same_invitees(before, &event.attendees));
+    // Decision 107: "the same invitees as when it was opened" counts only
+    // where the host's copy is provably the one the edit was made from — the
+    // proof decision 106 asks for every other field. A save only marks the
+    // host's copy stale, so until the next refresh it predates that save, and
+    // a guest removed, saved and added back would look unchanged here and
+    // never be written. Without the proof the adapter compares the edit's list
+    // with the provider's own at write time (`invitee_write`), as for any
+    // change of guests. A provider that does not version its events keeps
+    // 71a's protection on the refresh alone: an ETag cannot prove there what
+    // it proves elsewhere, and without the keep every title change would
+    // rewrite the list.
+    let opened = read.is_some_and(|read| {
+        refreshed_since_last_write && (read.etag.is_none() || read.etag == event.etag)
+    });
+    event.keep_attendees = opened
+        && before
+            .as_deref()
+            .is_some_and(|before| same_invitees(before, &event.attendees));
     event.clear_attendees =
         event.attendees.is_empty() && before.as_deref().is_some_and(|before| !before.is_empty());
     event.send_invitations &=
@@ -509,18 +527,18 @@ mod tests {
         #[test]
         fn the_update_guard_drops_the_organizer_and_the_send_nobody_needs() {
             let mut alone = event(Some("toni@x"), &["Toni <TONI@x>"]);
-            guard_update(&mut alone, None);
+            guard_update(&mut alone, None, true);
             assert!(alone.attendees.is_empty());
             assert!(!alone.send_invitations, "nobody else to notify");
 
             let mut meeting = event(Some("toni@x"), &["Toni <toni@x>", "bob@x"]);
-            guard_update(&mut meeting, None);
+            guard_update(&mut meeting, None, true);
             assert_eq!(meeting.attendees, ["bob@x"]);
             assert!(meeting.send_invitations);
 
             let mut invitation = event(Some("boss@x"), &["me@x", "bob@x"]);
             invitation.organized_elsewhere = true;
-            guard_update(&mut invitation, None);
+            guard_update(&mut invitation, None, true);
             assert!(!invitation.send_invitations, "only the organizer notifies");
         }
 
@@ -530,16 +548,53 @@ mod tests {
         fn the_update_guard_keeps_an_unchanged_list() {
             let read = event(Some("toni@x"), &["Toni <toni@x>", "Bob <bob@x>", "carol@x"]);
             let mut same = event(Some("toni@x"), &["CAROL@x", "bob@x"]);
-            guard_update(&mut same, Some(&read));
+            guard_update(&mut same, Some(&read), true);
             assert!(same.keep_attendees);
 
             let mut changed = event(Some("toni@x"), &["bob@x"]);
-            guard_update(&mut changed, Some(&read));
+            guard_update(&mut changed, Some(&read), true);
             assert!(!changed.keep_attendees, "carol was removed");
 
             let mut unknown = event(Some("toni@x"), &["bob@x"]);
-            guard_update(&mut unknown, None);
+            guard_update(&mut unknown, None, true);
             assert!(!unknown.keep_attendees, "nothing to compare with: write");
+        }
+
+        /// Decision 107: without proof that the host's copy is the one the
+        /// edit was made from, the same invitees prove nothing — a guest
+        /// removed, saved and added back before the refresh looks unchanged.
+        /// A provider that versions its events must also show the edit's
+        /// version; one that does not keeps 71a on the refresh alone.
+        #[test]
+        fn the_same_invitees_count_only_on_a_proven_copy() {
+            let read = event(Some("toni@x"), &["bob@x"]);
+            let mut readded = event(Some("toni@x"), &["bob@x"]);
+            guard_update(&mut readded, Some(&read), false);
+            assert!(!readded.keep_attendees, "a save since the read: write");
+
+            let versioned = Event {
+                etag: Some("v1".into()),
+                ..event(Some("toni@x"), &["bob@x"])
+            };
+            let mut other_version = Event {
+                etag: Some("v0".into()),
+                ..event(Some("toni@x"), &["bob@x"])
+            };
+            guard_update(&mut other_version, Some(&versioned), true);
+            assert!(!other_version.keep_attendees, "another version: write");
+            let mut same_version = Event {
+                etag: Some("v1".into()),
+                ..event(Some("toni@x"), &["bob@x"])
+            };
+            guard_update(&mut same_version, Some(&versioned), true);
+            assert!(same_version.keep_attendees);
+
+            let mut unversioned = event(Some("toni@x"), &["bob@x"]);
+            guard_update(&mut unversioned, Some(&read), true);
+            assert!(
+                unversioned.keep_attendees,
+                "no versions: the refresh proves it"
+            );
         }
 
         /// Decision 74a: removing the last invitee clears the provider's
@@ -549,25 +604,33 @@ mod tests {
         fn removing_the_last_invitee_clears_the_list() {
             let read = event(Some("toni@x"), &["Toni <toni@x>", "bob@x"]);
             let mut removed = event(Some("toni@x"), &[]);
-            guard_update(&mut removed, Some(&read));
+            guard_update(&mut removed, Some(&read), true);
             assert!(removed.clear_attendees);
             assert!(!removed.keep_attendees);
             assert!(removed.send_invitations, "bob may get a cancellation");
 
             let mut elsewhere = event(Some("boss@x"), &[]);
             elsewhere.organized_elsewhere = true;
-            guard_update(&mut elsewhere, Some(&event(Some("boss@x"), &["bob@x"])));
+            guard_update(
+                &mut elsewhere,
+                Some(&event(Some("boss@x"), &["bob@x"])),
+                true,
+            );
             assert!(elsewhere.clear_attendees);
             assert!(!elsewhere.send_invitations, "only the organizer notifies");
 
             let mut alone = event(Some("toni@x"), &[]);
-            guard_update(&mut alone, Some(&event(Some("toni@x"), &["Toni <toni@x>"])));
+            guard_update(
+                &mut alone,
+                Some(&event(Some("toni@x"), &["Toni <toni@x>"])),
+                true,
+            );
             assert!(!alone.clear_attendees, "the organizer was never a guest");
             assert!(alone.keep_attendees);
             assert!(!alone.send_invitations);
 
             let mut unknown = event(Some("toni@x"), &[]);
-            guard_update(&mut unknown, None);
+            guard_update(&mut unknown, None, true);
             assert!(!unknown.clear_attendees, "nothing read: nothing cleared");
             assert!(!unknown.send_invitations);
         }

@@ -1429,14 +1429,14 @@ fn reconcile_cache_generation_resets_external_accounts_once() {
 
 /// The host's write guard, as both hosts call it before an update (decisions
 /// 67a, 70a, 71a).
-#[test]
-fn the_write_guard_compares_with_the_cached_read() {
+#[tokio::test]
+async fn the_write_guard_compares_with_the_cached_read() {
     let store = setup();
     // As an older read left it in the cache: the organizer among the invitees.
     let mut read = event("ev-1", 9, 10);
     read.organizer = Some("toni@example.com".into());
     read.attendees = vec!["Toni <toni@example.com>".into(), "bob@example.com".into()];
-    store.upsert_event(ACC, CAL, &read).unwrap();
+    refresh_with(&store, vec![read.clone()]).await;
 
     // A title edit: the same invitees, so the adapter leaves the list alone.
     let mut edit = read.clone();
@@ -1479,6 +1479,47 @@ async fn refresh_with(store: &CacheStore, rows: Vec<Event>) {
     super::swr::refresh_events(store, &adapter, ACC, CAL, wide())
         .await
         .unwrap();
+}
+
+/// Decision 107: a guest removed, saved and added back before the refresh is
+/// written. The cached row still shows the guest, so the list looks unchanged
+/// — but a save has landed since that row was read, and it proves nothing.
+#[tokio::test]
+async fn a_guest_added_back_right_after_a_save_is_written() {
+    let store = setup();
+    let mut read = event("ev-1", 9, 10);
+    read.attendees = vec!["bob@example.com".into()];
+    refresh_with(&store, vec![read.clone()]).await;
+
+    let mut removed = read.clone();
+    removed.attendees = Vec::new();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut removed,
+    ));
+
+    let mut added_back = read.clone();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut added_back,
+    ));
+    assert!(!added_back.keep_attendees, "the re-add must be written");
+
+    // Once the calendar is read again, an unchanged list is left alone.
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut retitled = read.clone();
+    retitled.title = "Renamed".into();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut retitled,
+    ));
+    assert!(retitled.keep_attendees);
 }
 
 /// Decision 106: after a refresh, the guard marks the fields the edit left as

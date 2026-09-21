@@ -2266,10 +2266,20 @@ Siehe DESIGN §4.2.
     Zurücknehmen genau so einer Änderung vor der nächsten Aktualisierung.
   - CalDAV, Google und Graph lesen `keep_fields` noch nicht. CalDAV folgt mit
     der Bewahrung (58a Teil 3).
-  - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie
+  - ✅ Die Gästelisten-Regel (71a, `keep_attendees`) hatte dieselbe Falle wie
     oben: Gast entfernt, gespeichert, vor der Aktualisierung wieder
-    hinzugefügt — das Hinzufügen wird nicht geschrieben. Gegen den Grund von
-    71a abzuwägen (die eigene Zeile des Organisators). Entscheidung offen.
+    hinzugefügt — das Hinzufügen wurde nicht geschrieben. Behoben mit 107
+    (2026-09-21): „dieselben Gäste wie beim Öffnen" zählt nur mit dem
+    Nachweis aus 106. Ohne ihn vergleicht der Adapter die Liste mit der des
+    Anbieters, wie bei jeder Gäste-Änderung; die ausgeblendete Zeile des
+    Organisators ist dann demselben Risiko ausgesetzt wie bei jedem normalen
+    Hinzufügen eines Gastes, nur im kurzen Fenster nach einem Speichern.
+    Ein Anbieter ohne Versionsnummer (der Geräte-Kalender) behält 71a nach
+    einer Aktualisierung; sonst schriebe jede Titeländerung die Liste neu.
+    Offen: Den letzten Gast kurz nach dem Hinzufügen wieder zu entfernen,
+    wird weiterhin nicht geschrieben. Die veraltete Zeile hatte noch keine
+    Gäste, und eine leere Liste allein lädt nie jemanden aus (74a) — das zu
+    unterscheiden braucht die Fassung, die der Editor selbst mitschickt.
   - Auf dem Handy nicht getestet.
 
   Toni hat die Reihenfolge festgelegt (57a):

@@ -1233,6 +1233,12 @@ Regel steht einmal im Kern, in `cal_core::attendee`:
   dann, wenn ein neuer ChangeKey die Id inzwischen geändert hat) und setzt
   `keep_attendees`, wenn dieselben Leute eingeladen sind. EWS, Google und Graph
   lassen die Liste beim Anbieter dann unberührt, mit der Zeile des Organisators.
+  Das gilt nur, wenn der Stand im Cache beweisbar der geöffnete ist, mit
+  demselben Nachweis wie in 106 (107): Nach einem Speichern zeigt der Cache bis
+  zur nächsten Aktualisierung noch die Liste von vorher, und ein Gast, der
+  entfernt und gleich wieder hinzugefügt wurde, sähe unverändert aus. Ohne
+  Nachweis wird die Liste mit der des Anbieters verglichen, wie bei jeder
+  Gäste-Änderung.
   CalDAV liest vor jedem Schreiben die Kopie des Servers und trägt
   `ORGANIZER`, `ATTENDEE`, `SEQUENCE` und `STATUS` wörtlich weiter; nur eine
   geänderte Gästeliste ändert Zeilen (siehe unten, „Ein iCloud-Termin behält
