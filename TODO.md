@@ -2149,8 +2149,50 @@ Siehe DESIGN §4.2.
     Antwort gilt einem anderen Platz), erbt die Zeile weiter den Serieninhalt
     und es steht im Log (102). Sichtbar machen erst, wenn Live-Runde 7 zeigt,
     dass der Fall eintritt.
-  - Das SCHREIBEN setzt weiterhin alle Felder; dass es die richtigen sind, ist
-    die halbe Miete. „Nur geänderte Felder schreiben" ist Teil 2.
+  ✅ **Ein Speichern schreibt nur, was sich vom Server unterscheidet** (58a,
+  Teil 2, erledigt 2026-09-21). Ein `UpdateItem` setzte jedes Feld, das die
+  Zeile gerade trug — eine um eine halbe Stunde verschobene Ausnahme schrieb
+  auch Betreff, Text und Erinnerung zurück, und ein Speichern, das nichts
+  änderte, ging trotzdem raus. Jetzt liest der Adapter vor dem Schreiben die
+  Fassung des SERVERS (`api::read_before`, nach Id, nie nach Version) und
+  schreibt nur die Felder, deren Wert sich von ihr unterscheidet
+  (`cal_core::event_diff::changed_fields`). Ändert ein Speichern nichts, was
+  der Server speichert, geht gar kein `UpdateItem` raus.
+  Absichtlich anders als „so wenig wie möglich":
+  - Der Zeitraum ist EINE Tatsache: Start, Ende und Ganztag gehen zusammen
+    raus, sobald eines davon sich ändert. Exchange prüft einen Start gegen das
+    gespeicherte Ende, und der Ganztags-Rand schreibt beide Grenzen neu.
+  - Die Regel wird so verglichen, wie sie auf den Draht geht, nicht nur als
+    Text: ihr Startdatum ist das Datum des Serienstarts, und ohne `BYDAY`
+    wiederholt sie sich am Wochentag des Starts. Eine Serie, die auf einen
+    anderen Tag gezogen wird, schreibt ihre Regel deshalb neu (gefunden in
+    der Review von #89 — sonst behält Exchange den alten ersten Tag).
+  - Die Gastliste entscheiden weiter die Gast-Regeln (71a, 74a), nicht der
+    Vergleich: nur der Aufrufer weiß, ob der Bearbeiter die Liste angefasst
+    hat.
+  - Die Zone fährt an der REGEL mit, nicht an der Uhrzeit: von wöchentlich auf
+    täglich, ohne die Serie zu verschieben, trägt sie trotzdem mit (41a).
+  - Eine AUSNAHME wird nie ohne ihre eigene Fassung geschrieben — alle Felder
+    zu schreiben wäre genau der gemessene Fehler. Antwortet der Server ohne
+    sie, sagt Aperio „Dieser Termin lässt sich nicht einzeln ändern"
+    (`occurrence-not-writable`). Scheitert die Anfrage selbst (Netz,
+    Anmeldung, Server beschäftigt), bleibt es bei dieser Fehlermeldung, denn
+    ein neuer Versuch kann klappen. Bei einem Einzeltermin oder einer Serie
+    wird wie früher alles geschrieben und das Log sagt warum (102).
+  - Was gebaut wurde entscheidet, ob überhaupt geschickt wird, nicht der
+    Vergleich: ein `UpdateItem` mit leerem `<t:Updates>` ist ein Fehler.
+  Kosten: eine zusätzliche Abfrage pro Speichern (bei einer Ausnahme die
+  zweite, nach der Serie).
+  Offen geblieben:
+  - Der Vergleich ist ZWEISEITIG, Bearbeitung gegen Server. Er kann ein Feld,
+    das der Bearbeiter geändert hat, nicht von einem unterscheiden, das
+    Aperio veraltet hält: hat ein anderes Gerät den Titel geändert, nachdem
+    Aperio ihn gelesen hat, geht der alte Titel zurück — wie vorher. Aus
+    demselben Grund schreibt eine Ausnahme, deren Zeile noch den Serieninhalt
+    erbt (Teil 1, die eigene Fassung war beim Lesen nicht lesbar), diesen
+    Inhalt weiter zurück, wo er sich unterscheidet. Beides braucht die
+    Fassung, die der Bearbeiter geöffnet hat.
+  - Auf dem Handy nicht getestet.
 
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;
@@ -2269,9 +2311,11 @@ Siehe DESIGN §4.2.
     bestätigt. Das ist 58a, als Nächstes nach dem iCloud-Fix (78a).
     ✅ Die ANZEIGE ist behoben (58a Teil 1): die Ausnahme trägt ihren eigenen
     Betreff, Ort, Text und ihre eigene Erinnerung, und damit schreibt ein
-    Speichern auch die eigenen Werte zurück. Teil 2 („nur geänderte Felder
-    schreiben") nimmt dem Schreibweg zusätzlich die Fälle, in denen ein
-    anderes Gerät zwischen Öffnen und Speichern etwas geändert hat.
+    Speichern auch die eigenen Werte zurück.
+    ✅ Teil 2: ein Speichern schreibt nur noch die Felder, deren Wert sich
+    von der Fassung des Servers unterscheidet. Was ein anderes Gerät
+    zwischen Öffnen und Speichern geändert hat, schützt das NICHT (siehe
+    oben, „Offen geblieben").
   - E1: Toni speicherte versehentlich das iCloud-Original einer eigenen
     Besprechung; der Gast verschwand, und iCloud sagte ihm ab. E2 fiel damit
     aus.

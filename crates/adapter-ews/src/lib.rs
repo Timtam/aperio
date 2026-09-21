@@ -2531,14 +2531,20 @@ mod server_zone_tests {
         }
     }
 
-    /// What each recorded request was: a zone request, a create naming
-    /// São Tomé's id, or a create without a zone.
+    /// What each recorded request was: a zone request, the read a write makes
+    /// first (decision 58a), a create naming São Tomé's id, or a create
+    /// without a zone.
     fn shapes(requests: &[String]) -> Vec<&'static str> {
         requests
             .iter()
             .map(|body| {
                 if body.contains("GetServerTimeZones") {
                     "zones"
+                } else if body.contains("<m:GetItem>") {
+                    // Before the zone shapes: the detail shape names
+                    // `calendar:StartTimeZone`, so a read would read as a
+                    // write that carries a zone.
+                    "read"
                 } else if body.contains(r#"<t:StartTimeZone Id="Sao Tome Standard Time"/>"#) {
                     "with id"
                 } else if body.contains("TimeZone") {
@@ -2664,6 +2670,11 @@ mod server_zone_tests {
             scheduling_silenced: false,
         };
         adapter.update_event(series).await.expect("update");
-        assert_eq!(shapes(&requests.lock().unwrap()), ["no zone"]);
+        assert_eq!(
+            shapes(&requests.lock().unwrap()),
+            // The read is decision 58a's; what this test measures is the
+            // write after it, which still neither asks for zones nor names one.
+            ["read", "no zone"],
+        );
     }
 }

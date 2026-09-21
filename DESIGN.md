@@ -1319,6 +1319,28 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   Kalender, die Farbe, der Platz im Takt — kommt weiter von ihr. Ist die eigene
   Fassung nicht lesbar, erbt die Zeile wie früher den Serieninhalt und es steht
   im Log: eine geerbte Angabe ist falsch, eine geratene wäre schlimmer.
+- **Ein Speichern schreibt nur, was sich vom Anbieter unterscheidet (58a).**
+  Wer einen Termin um eine halbe Stunde verschiebt, ändert seine Uhrzeit —
+  nicht seinen Titel, nicht seinen Ort, nicht seine Erinnerung. Ein
+  Schreibweg, der trotzdem jedes Feld setzt, das die Zeile gerade trägt, macht
+  aus jeder Falschanzeige einen Datenverlust. Deshalb liest ein Adapter, der es
+  kann, vor dem Schreiben die Fassung des ANBIETERS und schreibt nur die
+  Felder, deren Wert sich von ihr unterscheidet; der Vergleich steht einmal im
+  Kern (`cal_core::event_diff::changed_fields`), damit jeder Adapter dieselbe
+  Grenze zieht. Drei Dinge bleiben dabei bewusst grob: der Zeitraum ist eine
+  Tatsache und geht ganz raus (Start, Ende, Ganztag), die Gastliste
+  entscheiden die Gast-Regeln und nicht der Vergleich, und eine Zone fährt an
+  der Wiederholungsregel mit. Die Regel selbst wird verglichen, wie sie
+  geschrieben würde, denn ihr erster Tag hängt am Start und steht nicht im
+  Regeltext. Und was gebaut wurde entscheidet, ob überhaupt geschrieben wird:
+  ändert ein Speichern nichts, was der Anbieter speichert, unterbleibt es —
+  bei einem Anbieter, der jeder Änderung eine Mail an alle Gäste folgen
+  lässt, ist ein Schreiben ohne Inhalt keine Kleinigkeit (76a).
+  Was dieser Vergleich NICHT kann: Er ist zweiseitig, Bearbeitung gegen
+  Anbieter. Ein Feld, das der Bearbeiter nicht angefasst hat, das Aperio aber
+  veraltet hält, unterscheidet sich vom Anbieter und wird geschrieben — die
+  Änderung eines anderen Geräts geht dann verloren wie früher. Das zu
+  unterscheiden braucht die Fassung, die der Bearbeiter geöffnet hat.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was
