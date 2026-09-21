@@ -208,7 +208,11 @@ pub struct SyncedFolderState {
 ///    body and reminder. A state written by parser 2 holds occurrences whose
 ///    `own` is `None` and whose cached rows carry the series' content, and
 ///    the enrichment alone would not mend the rows already handed out.
-pub const ITEM_PARSER: u32 = 3;
+/// 4: a row that inherits the series' content carries a version of its own
+///    (`inherited:{occurrence key}:{series key}`, decision 106), so the host
+///    can never take it for the occurrence's own copy. Rows handed out by
+///    parser 3 carry the occurrence's bare key for both.
+pub const ITEM_PARSER: u32 = 4;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -779,13 +783,14 @@ pub async fn update_event(
             return Err(err);
         }
         Err(err) => {
-            // A single or a series head: the row is the user's own, and
-            // writing it in full is what this always did.
+            // A single or a series head: the row is the user's own, so it is
+            // written without a comparison — every field the host did not mark
+            // as left alone (decision 106).
             tracing::warn!(
                 target: "adapter_ews::write",
                 ?err,
                 event_id = %event.id,
-                "the current copy could not be read; writing every field",
+                "the current copy could not be read; writing every field not kept, and a kept rule with a moved slot",
             );
             None
         }
@@ -838,7 +843,15 @@ pub async fn update_event(
             if target.kind == EventIdKind::Exception
                 && code == "ErrorOccurrenceCrossingBoundary" =>
         {
-            return detach_exception(client, event, &target, server_zones).await;
+            // The detached single is CREATED, and a create writes everything
+            // it has. What the user did not touch is the occurrence's own, not
+            // whatever this device's row said (decision 106): an exception is
+            // never written without its own copy, so `before` is here.
+            let detached = match before.as_ref() {
+                Some(own) => cal_core::event_diff::take_kept_content(event, own),
+                None => event.clone(),
+            };
+            return detach_exception(client, &detached, &target, server_zones).await;
         }
         other => other?,
     };
@@ -1360,6 +1373,7 @@ fn build_event_from_new(
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
@@ -1874,6 +1888,7 @@ mod tests {
             .await;
         let starting = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "S:ITEM-ID|CK-V1".into(),
@@ -2318,6 +2333,7 @@ mod tests {
 
         let starting = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             // Occurrence-prefixed id — update_event should resolve
@@ -2438,6 +2454,7 @@ mod tests {
             crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
         let edit = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: override_id.clone(),
@@ -2624,6 +2641,7 @@ mod tests {
         let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
@@ -2811,6 +2829,7 @@ mod tests {
     fn saved_single() -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "S:ITEM-ID|CK-V1".into(),
@@ -2892,6 +2911,7 @@ mod tests {
 
         let edit = Event {
             keep_attendees: true,
+            keep_fields: Vec::new(),
             ..saved_single()
         };
         update_event(&client_for(&server), &edit, None)
@@ -3086,6 +3106,131 @@ mod tests {
         assert!(
             !requests.iter().any(|body| body.contains("UpdateItem")),
             "nothing was written",
+        );
+    }
+
+    /// The fields a time-only edit leaves alone, as the host marks them.
+    fn kept_but_the_slot() -> Vec<cal_core::event_diff::EventField> {
+        use cal_core::event_diff::EventField;
+        EventField::ALL
+            .into_iter()
+            .filter(|f| {
+                !matches!(
+                    f,
+                    EventField::Start
+                        | EventField::End
+                        | EventField::Attendees
+                        | EventField::ColorHex
+                )
+            })
+            .collect()
+    }
+
+    /// Decision 106: another device renamed the event after this one read it.
+    /// A time-only save leaves the title as the server has it, although this
+    /// device's copy — and so the edit — still carries the old one.
+    #[tokio::test]
+    async fn another_devices_title_survives_a_time_only_save() {
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            server_copy("CK-V9", ""),
+            update_answer("CK-V10"),
+        )
+        .await;
+
+        let edit = Event {
+            title: "Standup, before the rename".into(),
+            start: "2026-05-20T09:00:00Z".parse().unwrap(),
+            end: "2026-05-20T10:00:00Z".parse().unwrap(),
+            keep_fields: kept_but_the_slot(),
+            ..saved_single()
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        let update = &requests[1];
+        assert!(!update.contains("item:Subject"), "{update}");
+        assert!(update.contains(r#"FieldURI="calendar:Start""#), "{update}");
+    }
+
+    /// A read that fails on a single still writes in full what the user did
+    /// not leave alone — and nothing they did.
+    #[tokio::test]
+    async fn a_failed_read_still_leaves_the_kept_fields_alone() {
+        use cal_core::event_diff::EventField;
+        let mut server = Server::new_async().await;
+        let requests = read_then_write(
+            &mut server,
+            read_fault("ErrorServerBusy"),
+            update_answer("CK-V2"),
+        )
+        .await;
+
+        let edit = Event {
+            title: "Standup, renamed".into(),
+            keep_fields: EventField::ALL
+                .into_iter()
+                .filter(|f| {
+                    !matches!(
+                        f,
+                        EventField::Title | EventField::Attendees | EventField::ColorHex
+                    )
+                })
+                .collect(),
+            ..saved_single()
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .expect("the save goes through");
+
+        let requests = requests.lock().unwrap();
+        let update = &requests[1];
+        assert!(update.contains("item:Subject"), "{update}");
+        for field in ["calendar:Location", "calendar:Start", "item:ReminderIsSet"] {
+            assert!(!update.contains(field), "{field} was left alone: {update}");
+        }
+    }
+
+    /// An exception Exchange will not move is created again as a single. What
+    /// the user did not touch comes from the occurrence's own copy, not from a
+    /// row that inherited the series' (decision 106).
+    #[tokio::test]
+    async fn a_detached_occurrence_takes_what_the_user_did_not_touch_from_its_own_copy() {
+        use cal_core::event_diff::EventField;
+        let mut server = Server::new_async().await;
+        let requests =
+            refuse_exception_update(&mut server, "ErrorOccurrenceCrossingBoundary").await;
+
+        let edit = Event {
+            title: "The series' title".into(),
+            keep_fields: vec![
+                EventField::Title,
+                EventField::Description,
+                EventField::Location,
+                EventField::Reminders,
+            ],
+            ..exception_moved_to_thursday()
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .expect("detached");
+
+        let requests = requests.lock().unwrap();
+        let update = &requests[2];
+        assert!(!update.contains("item:Subject"), "{update}");
+        let create = &requests[3];
+        assert!(create.contains("CreateItem"), "{create}");
+        assert!(
+            create.contains("<t:Subject>Original</t:Subject>"),
+            "{create}"
+        );
+        assert!(!create.contains("The series' title"), "{create}");
+        assert!(
+            create.contains("2026-10-22T09:00:00Z"),
+            "the slot is the edit's: {create}"
         );
     }
 

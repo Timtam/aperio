@@ -2093,6 +2093,7 @@ mod tests {
     fn moved_override() -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "master-1::rid::2026-06-01T18:00:00Z".into(),

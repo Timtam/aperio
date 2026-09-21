@@ -3327,7 +3327,9 @@ impl Host {
         // did not change stays as the provider has it (decisions 67a, 70a,
         // 71a). Compared with the event as read, in the calendar it was read
         // from. Mirrors the desktop `update_event`.
-        {
+        // The ticket is held until this call returns, however it returns
+        // (decision 106). Mirrors the desktop `update_event`.
+        let _write = {
             let read_calendar = previous_calendar_id
                 .clone()
                 .unwrap_or_else(|| event.calendar_id.clone());
@@ -3340,8 +3342,8 @@ impl Host {
                 &read_account,
                 &read_calendar,
                 &mut event,
-            );
-        }
+            )
+        };
 
         let target_local = self.is_local_calendar(&event.calendar_id);
         let is_move = previous_calendar_id

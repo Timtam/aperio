@@ -165,6 +165,27 @@ pub struct CacheStore {
     refresh_generations: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<(String, &'static str, String), u64>>,
     >,
+    /// Decision 106: per (account, calendar), the refresh generation at which
+    /// the last event refresh that re-read the whole calendar BEGAN its fetch,
+    /// and how many event writes of this app are in flight there. See
+    /// [`Self::events_proven`]. In-memory like the generations it is compared
+    /// with: after a restart nothing is proven until the first refresh.
+    event_proofs:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<(String, String), EventProof>>>,
+}
+
+/// See [`CacheStore::events_proven`].
+#[derive(Debug, Default, Clone, Copy)]
+struct EventProof {
+    /// What [`CacheStore::event_proof_mark`] said when the last
+    /// whole-calendar refresh began.
+    refreshed_from: Option<(u64, u64)>,
+    /// Event writes ended so far, however they ended. One in flight is
+    /// `writes_in_flight`; together the two cover any refresh that read
+    /// before a write had landed.
+    writes_seen: u64,
+    /// Event writes begun and not yet ended.
+    writes_in_flight: u32,
 }
 
 /// Which logical container/item-set a [`SyncState`] row describes.
@@ -361,6 +382,9 @@ impl CacheStore {
             refresh_generations: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            event_proofs: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -387,6 +411,89 @@ impl CacheStore {
             .expect("cache refresh-generation poisoned")
             .entry((account.to_string(), scope.as_str(), container.to_string()))
             .or_insert(0) += 1;
+    }
+
+    /// Whether every cached event of `calendar` was read from the provider
+    /// AFTER this app's last write there — begun and ended — with no write in
+    /// flight now (decision 106). Only then does a cached row stand for the
+    /// copy an editor opened, rather than for one from before a save the user
+    /// may be undoing.
+    ///
+    /// The proof is a MARK, compared when asked: [`Self::event_proof_mark`] as
+    /// it stood when the last whole-calendar refresh began its fetch, against
+    /// the mark now. The mark moves with every invalidation (the refresh
+    /// generation) and with every event write's begin and end, however the
+    /// write ends ([`crate::event_write::EventWriteTicket`]). So a refresh that
+    /// fetched before or during a write proves nothing, whichever of the two
+    /// reaches the database last; and a refresh can only write under the mark
+    /// it began with ([`Self::replace_calendar_events_if_current`]), so an
+    /// older one never lands after a newer one.
+    pub fn events_proven(&self, account: &str, calendar: &str) -> bool {
+        let generation = self.refresh_generation(account, SyncScope::Events, calendar);
+        let proof = self
+            .event_proofs
+            .lock()
+            .expect("cache event proof poisoned")
+            .get(&(account.to_string(), calendar.to_string()))
+            .copied()
+            .unwrap_or_default();
+        proof.writes_in_flight == 0 && proof.refreshed_from == Some((generation, proof.writes_seen))
+    }
+
+    /// The calendar's refresh generation and the event writes seen so far. A
+    /// refresh takes it BEFORE its fetch and hands it to
+    /// [`Self::mark_events_refreshed`] once it has written every row.
+    pub(crate) fn event_proof_mark(&self, account: &str, calendar: &str) -> (u64, u64) {
+        let generation = self.refresh_generation(account, SyncScope::Events, calendar);
+        let writes = self
+            .event_proofs
+            .lock()
+            .expect("cache event proof poisoned")
+            .get(&(account.to_string(), calendar.to_string()))
+            .map_or(0, |proof| proof.writes_seen);
+        (generation, writes)
+    }
+
+    /// A refresh that began at `mark` has just written every event of
+    /// `calendar` it knows of. Only for a refresh that re-read the whole
+    /// calendar: a range, or a replace that carried rows it did not fetch,
+    /// proves nothing about the rows it left alone.
+    pub(crate) fn mark_events_refreshed(&self, account: &str, calendar: &str, mark: (u64, u64)) {
+        self.event_proofs
+            .lock()
+            .expect("cache event proof poisoned")
+            .entry((account.to_string(), calendar.to_string()))
+            .or_default()
+            .refreshed_from = Some(mark);
+    }
+
+    /// An event write in `calendar` begins: whatever a refresh has read so far
+    /// may predate it. Counted in the proof's own mark, not in the refresh
+    /// generation: a write that fails must not throw away a refresh that is
+    /// running meanwhile, since nothing would start another one.
+    pub(crate) fn begin_event_write(&self, account: &str, calendar: &str) {
+        let mut proofs = self
+            .event_proofs
+            .lock()
+            .expect("cache event proof poisoned");
+        let proof = proofs
+            .entry((account.to_string(), calendar.to_string()))
+            .or_default();
+        proof.writes_in_flight += 1;
+    }
+
+    /// The write begun by [`Self::begin_event_write`] has ended, whether or not
+    /// it succeeded: a failure may still have reached the provider.
+    pub(crate) fn end_event_write(&self, account: &str, calendar: &str) {
+        let mut proofs = self
+            .event_proofs
+            .lock()
+            .expect("cache event proof poisoned");
+        let proof = proofs
+            .entry((account.to_string(), calendar.to_string()))
+            .or_default();
+        proof.writes_seen += 1;
+        proof.writes_in_flight = proof.writes_in_flight.saturating_sub(1);
     }
 
     // ── Events ───────────────────────────────────────────────────────
@@ -633,6 +740,37 @@ impl CacheStore {
         range: DateRange,
         events: &[Event],
     ) -> DbResult<bool> {
+        Ok(self
+            .replace_calendar_events_checked(account, calendar, range, events, None)?
+            .unwrap_or(false))
+    }
+
+    /// [`Self::replace_calendar_events`] for a refresh whose fetch began at
+    /// refresh generation `generation`: written only if nothing invalidated
+    /// the calendar since, asked INSIDE the write transaction, under the
+    /// database's writer lock. `Ok(None)` when it was not written. Asked only
+    /// before the lock, a refresh that fetched before a save could pass the
+    /// question, wait for the lock, and land after the save's invalidation —
+    /// and after a newer refresh that already holds the save.
+    pub fn replace_calendar_events_if_current(
+        &self,
+        account: &str,
+        calendar: &str,
+        range: DateRange,
+        events: &[Event],
+        generation: u64,
+    ) -> DbResult<Option<bool>> {
+        self.replace_calendar_events_checked(account, calendar, range, events, Some(generation))
+    }
+
+    fn replace_calendar_events_checked(
+        &self,
+        account: &str,
+        calendar: &str,
+        range: DateRange,
+        events: &[Event],
+        generation: Option<u64>,
+    ) -> DbResult<Option<bool>> {
         let now = now_ts();
         let (ws, we) = (ts(&range.start), ts(&range.end));
         let mut incoming = HashMap::with_capacity(events.len());
@@ -640,6 +778,11 @@ impl CacheStore {
             incoming.insert(ev.id.as_str(), to_json(ev, "cache_events")?);
         }
         self.db.with_tx(|tx| {
+            if generation.is_some_and(|generation| {
+                self.refresh_generation(account, SyncScope::Events, calendar) != generation
+            }) {
+                return Ok(None);
+            }
             let unchanged = rows_match(
                 tx,
                 "SELECT id, payload FROM cache_events
@@ -678,7 +821,7 @@ impl CacheStore {
                    consecutive_failures = 0",
                 params![account, calendar, ws, we, now],
             )?;
-            Ok(!unchanged)
+            Ok(Some(!unchanged))
         })
     }
 
@@ -777,8 +920,39 @@ impl CacheStore {
         calendar: &str,
         delta: &Delta<Event>,
     ) -> DbResult<bool> {
+        Ok(self
+            .apply_events_delta_checked(account, calendar, delta, None)?
+            .unwrap_or(false))
+    }
+
+    /// [`Self::apply_events_delta`] for a refresh whose fetch began at refresh
+    /// generation `generation`, under the same rule as
+    /// [`Self::replace_calendar_events_if_current`]. `Ok(None)` when it was not
+    /// written, token included.
+    pub fn apply_events_delta_if_current(
+        &self,
+        account: &str,
+        calendar: &str,
+        delta: &Delta<Event>,
+        generation: u64,
+    ) -> DbResult<Option<bool>> {
+        self.apply_events_delta_checked(account, calendar, delta, Some(generation))
+    }
+
+    fn apply_events_delta_checked(
+        &self,
+        account: &str,
+        calendar: &str,
+        delta: &Delta<Event>,
+        generation: Option<u64>,
+    ) -> DbResult<Option<bool>> {
         let now = now_ts();
         self.db.with_tx(|tx| {
+            if generation.is_some_and(|generation| {
+                self.refresh_generation(account, SyncScope::Events, calendar) != generation
+            }) {
+                return Ok(None);
+            }
             let mut changed = !delta.changes.is_empty();
             // Clear the native group of every incoming change BEFORE
             // upserting. An updated provider resource keeps its native id
@@ -828,7 +1002,7 @@ impl CacheStore {
                    consecutive_failures = 0",
                 params![account, calendar, delta.new_token, now],
             )?;
-            Ok(changed)
+            Ok(Some(changed))
         })
     }
 

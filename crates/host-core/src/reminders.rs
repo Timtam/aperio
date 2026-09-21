@@ -2767,6 +2767,7 @@ mod tests {
     fn make_event(reminders: Vec<Reminder>) -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-1".into(),

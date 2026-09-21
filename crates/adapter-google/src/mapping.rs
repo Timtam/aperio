@@ -443,6 +443,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
 
     Ok(Some(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
@@ -1021,6 +1022,7 @@ mod tests {
         // DST-correctly on its side (parity with the read path).
         let ev = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-z".into(),
@@ -1063,6 +1065,7 @@ mod tests {
         let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
         let ev = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-all-day".into(),
@@ -1265,6 +1268,7 @@ mod tests {
     fn event_to_body_serialises_recurrence_with_exdates() {
         let ev = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "ev-1".into(),

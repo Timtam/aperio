@@ -783,6 +783,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),

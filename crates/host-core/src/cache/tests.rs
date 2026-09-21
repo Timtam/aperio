@@ -2,6 +2,7 @@
 
 use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
 use crate::db::DbHandle;
+use cal_core::event_diff::EventField;
 use cal_core::{
     Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, Section, Task, TaskList,
     TaskPriority, TaskStatus,
@@ -48,6 +49,7 @@ fn wide() -> DateRange {
 fn event(id: &str, start_h: u32, end_h: u32) -> Event {
     Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: false,
         id: id.into(),
@@ -1440,7 +1442,7 @@ fn the_write_guard_compares_with_the_cached_read() {
     let mut edit = read.clone();
     edit.title = "Renamed".into();
     edit.send_invitations = true;
-    crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
     assert_eq!(edit.attendees, ["bob@example.com"], "never the organizer");
     assert!(edit.keep_attendees);
     assert!(
@@ -1451,21 +1453,298 @@ fn the_write_guard_compares_with_the_cached_read() {
     // Carol invited: the list is written.
     let mut invite = read.clone();
     invite.attendees.push("carol@example.com".into());
-    crate::event_write::guard_update(&store, ACC, CAL, &mut invite);
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut invite);
     assert!(!invite.keep_attendees);
 
     // Someone else's meeting notifies nobody.
     let mut theirs = read.clone();
     theirs.organized_elsewhere = true;
     theirs.send_invitations = true;
-    crate::event_write::guard_update(&store, ACC, CAL, &mut theirs);
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut theirs);
     assert!(!theirs.send_invitations);
 
     // Moved from another calendar: compared with the read there, and with
     // nothing cached there, the list is written as always.
     let mut moved = read.clone();
-    crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
+    let _ = crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
     assert!(!moved.keep_attendees);
+}
+
+/// A whole-calendar refresh through the SWR path, answered with `rows`.
+async fn refresh_with(store: &CacheStore, rows: Vec<Event>) {
+    let adapter = PartialBootstrapAdapter {
+        changes: rows,
+        unfetched: Vec::new(),
+    };
+    super::swr::refresh_events(store, &adapter, ACC, CAL, wide())
+        .await
+        .unwrap();
+}
+
+/// Decision 106: after a refresh, the guard marks the fields the edit left as
+/// the cached copy has them.
+#[tokio::test]
+async fn the_write_guard_marks_what_the_edit_left_alone() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+
+    let mut edit = read.clone();
+    edit.title = "Renamed".into();
+    let write = crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
+    assert_eq!(
+        edit.keep_fields,
+        [
+            EventField::Description,
+            EventField::Location,
+            EventField::Start,
+            EventField::End,
+            EventField::AllDay,
+            EventField::Recurrence,
+            EventField::Reminders,
+        ]
+    );
+    drop(write);
+
+    // Always assigned, never merged: a list an event brings along is replaced.
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut resent = read.clone();
+    resent.keep_fields = vec![EventField::Title];
+    resent.title = "Renamed again".into();
+    let _write = crate::event_write::guard_update(&store, ACC, CAL, &mut resent);
+    assert!(!resent.keep_fields.is_empty(), "proven: something is kept");
+    assert!(!resent.keep_fields.contains(&EventField::Title));
+}
+
+/// A write only marks the cache stale; the row stays the one from BEFORE the
+/// write. An edit rebuilt from it — a split's restore, a revert right after a
+/// save — must not look untouched, or it is never written. So after a write,
+/// however it ended, nothing is kept until a refresh has read the calendar
+/// again; an invalidation alone does the same.
+#[tokio::test]
+async fn a_write_keeps_nothing_until_the_calendar_is_read_again() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+
+    // A save — here one that failed after the provider may have applied it:
+    // the ticket is dropped on the error path like any other.
+    let mut truncate = read.clone();
+    truncate.title = "Cut short".into();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut truncate,
+    ));
+
+    let mut restore = read.clone();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut restore,
+    ));
+    assert!(restore.keep_fields.is_empty(), "{:?}", restore.keep_fields);
+
+    // The refresh brings the server's copy, at its new version: an edit still
+    // carrying the old one proves nothing either.
+    let refreshed = Event {
+        etag: Some("etag-ev-1-v2".into()),
+        ..read.clone()
+    };
+    refresh_with(&store, vec![refreshed.clone()]).await;
+    let mut stale = read.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut stale,
+    ));
+    assert!(stale.keep_fields.is_empty(), "{:?}", stale.keep_fields);
+
+    // An edit made from the refreshed copy is proven again...
+    refresh_with(&store, vec![refreshed.clone()]).await;
+    let mut fresh = refreshed.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut fresh,
+    ));
+    assert!(!fresh.keep_fields.is_empty());
+
+    // ...until anything invalidates the calendar.
+    refresh_with(&store, vec![refreshed.clone()]).await;
+    store.invalidate(ACC, SyncScope::Events, CAL).unwrap();
+    let mut after = refreshed.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut after,
+    ));
+    assert!(after.keep_fields.is_empty(), "{:?}", after.keep_fields);
+}
+
+/// The race the review of #90 found: a refresh that BEGAN before a write and
+/// commits after it — after the save's invalidation, even — must not count.
+/// The proof is the mark the refresh began at, compared when asked, so the
+/// order the two reach the database in does not matter — here even for a
+/// write that got past the generation check.
+#[tokio::test]
+async fn a_refresh_that_began_before_a_write_proves_nothing() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+
+    // The refresh begins and reads the provider...
+    let began = store.event_proof_mark(ACC, CAL);
+    // ...a save runs to its end and invalidates...
+    let mut save = read.clone();
+    save.title = "Saved".into();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut save,
+    ));
+    store.invalidate(ACC, SyncScope::Events, CAL).unwrap();
+    // ...and only then does the refresh write what it read before the save.
+    store
+        .replace_calendar_events(ACC, CAL, wide(), std::slice::from_ref(&read))
+        .unwrap();
+    store.mark_events_refreshed(ACC, CAL, began);
+
+    let mut revert = read.clone();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut revert,
+    ));
+    assert!(revert.keep_fields.is_empty(), "{:?}", revert.keep_fields);
+}
+
+/// A refresh that fetched before an invalidation cannot write at all: it is
+/// asked again under the writer lock, so it can never land after a newer
+/// refresh that already holds the save.
+#[test]
+fn a_refresh_from_before_an_invalidation_cannot_write() {
+    let store = setup();
+    let old = event("ev-1", 9, 10);
+    let began = store.refresh_generation(ACC, SyncScope::Events, CAL);
+    store.invalidate(ACC, SyncScope::Events, CAL).unwrap();
+    let written = store
+        .replace_calendar_events_if_current(ACC, CAL, wide(), std::slice::from_ref(&old), began)
+        .unwrap();
+    assert_eq!(written, None);
+    let delta = Delta {
+        changes: vec![old],
+        deletions: Vec::new(),
+        new_token: Some("t".into()),
+    };
+    let written = store
+        .apply_events_delta_if_current(ACC, CAL, &delta, began)
+        .unwrap();
+    assert_eq!(written, None);
+    assert!(store.read_events(ACC, CAL, wide()).unwrap().is_empty());
+}
+
+/// A save that fails does not throw away a refresh running beside it: nothing
+/// would start another one, and the view would stay stale. The refresh still
+/// proves nothing about that save.
+#[tokio::test]
+async fn a_failed_write_leaves_a_refresh_running_beside_it_alone() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+
+    let began = store.refresh_generation(ACC, SyncScope::Events, CAL);
+    let mark = store.event_proof_mark(ACC, CAL);
+    let mut failed = read.clone();
+    failed.title = "Never saved".into();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut failed,
+    ));
+
+    let newer = Event {
+        title: "From the server".into(),
+        ..read.clone()
+    };
+    let written = store
+        .replace_calendar_events_if_current(ACC, CAL, wide(), std::slice::from_ref(&newer), began)
+        .unwrap();
+    assert_eq!(written, Some(true), "the refresh still writes");
+    store.mark_events_refreshed(ACC, CAL, mark);
+    assert!(!store.events_proven(ACC, CAL), "but proves nothing");
+}
+
+/// While a write is in flight, a refresh that began after it started may still
+/// have read the provider before the write landed: nothing is kept for a
+/// second save meanwhile, nor after the write ends.
+#[tokio::test]
+async fn a_write_in_flight_proves_nothing() {
+    let read = event("ev-1", 9, 10);
+
+    // A second save while the first is in flight.
+    let store = setup();
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut first = read.clone();
+    first.title = "First".into();
+    let in_flight = crate::event_write::guard_update(&store, ACC, CAL, &mut first);
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut second = read.clone();
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut second,
+    ));
+    assert!(second.keep_fields.is_empty(), "{:?}", second.keep_fields);
+    drop(in_flight);
+
+    // The next save after the write ended, however it ended, with only that
+    // refresh in between.
+    let store = setup();
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut first = read.clone();
+    first.title = "First".into();
+    let in_flight = crate::event_write::guard_update(&store, ACC, CAL, &mut first);
+    refresh_with(&store, vec![read.clone()]).await;
+    drop(in_flight);
+    let mut next = read.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut next,
+    ));
+    assert!(next.keep_fields.is_empty(), "{:?}", next.keep_fields);
+}
+
+/// A full replace that carried rows over unread proves nothing about them.
+#[tokio::test]
+async fn a_refresh_that_carried_unread_rows_proves_nothing() {
+    let store = setup();
+    let kept = event("hrefA|uid-a", 8, 9);
+    store
+        .replace_calendar_events(ACC, CAL, wide(), std::slice::from_ref(&kept))
+        .unwrap();
+    let adapter = PartialBootstrapAdapter {
+        changes: vec![event("hrefB|uid-b", 10, 11)],
+        unfetched: vec!["hrefA".into()],
+    };
+    super::swr::refresh_events(&store, &adapter, ACC, CAL, wide())
+        .await
+        .unwrap();
+
+    let mut edit = kept.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut edit,
+    ));
+    assert!(edit.keep_fields.is_empty(), "{:?}", edit.keep_fields);
+}
+
+/// A row only ever stored, never refreshed as a calendar, proves nothing.
+#[test]
+fn a_calendar_never_refreshed_keeps_nothing() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    store.upsert_event(ACC, CAL, &read).unwrap();
+    let mut edit = read.clone();
+    drop(crate::event_write::guard_update(
+        &store, ACC, CAL, &mut edit,
+    ));
+    assert!(edit.keep_fields.is_empty(), "{:?}", edit.keep_fields);
 }
 
 /// The write guard compares an edit with the event as last read; this is the
@@ -1771,13 +2050,16 @@ impl cal_core::CalendarFeature for PartialBootstrapAdapter {
         &self,
         _calendar_id: &str,
         _range: DateRange,
-        _since_token: Option<&str>,
+        since_token: Option<&str>,
     ) -> cal_core::Result<cal_core::ChangeSet<Event>> {
         Ok(cal_core::ChangeSet {
             changes: self.changes.clone(),
-            full_resync: true,
+            // The first read is a full one; once it holds a token, the
+            // adapter answers with a delta, as a real one would.
+            full_resync: since_token.is_none(),
             complete: true,
             unfetched: self.unfetched.clone(),
+            new_token: Some("token".into()),
             ..Default::default()
         })
     }

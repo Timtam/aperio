@@ -175,6 +175,23 @@ pub struct Event {
     /// on the server. NOT persisted and meaningless on a read.
     #[serde(default, skip_serializing_if = "is_false")]
     pub keep_attendees: bool,
+    /// Transient write-only signal: the fields the edit left exactly as the
+    /// copy the editor opened has them (decision 106), so an adapter that
+    /// writes field by field leaves them as the provider has them — even where
+    /// that differs from this device's copy, because then it is somebody
+    /// else's change. The host sets it (`event_diff::kept_fields`) from the
+    /// event as last read, and only when that copy is provably the one the
+    /// editor opened. Empty means nothing is known and every field may be
+    /// written. Never names the invitees (`keep_attendees` has its own rule)
+    /// or the colour. NOT persisted and meaningless on a read; decoded
+    /// leniently, so a token this build does not know is dropped and that
+    /// field is written.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::event_diff::keep_fields_wire"
+    )]
+    pub keep_fields: Vec<crate::event_diff::EventField>,
     /// Transient write-only signal: the edit removed every invitee the event
     /// had when it was last read, so the adapter writes the provider's list
     /// empty. An empty [`attendees`](Self::attendees) alone never clears a

@@ -268,6 +268,7 @@ fn map_event(
 
     Ok(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,

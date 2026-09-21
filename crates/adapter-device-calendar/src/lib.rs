@@ -209,6 +209,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
     };
     Ok(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: false,
         id: d.id,

@@ -610,6 +610,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
 
     Ok(Some(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
