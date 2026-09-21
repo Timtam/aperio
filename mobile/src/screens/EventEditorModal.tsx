@@ -105,6 +105,7 @@ import {
   isProviderOverride,
   occurrenceWrite,
   planCarry,
+  retiredPrivateReminders,
   seriesIdOf,
   worthCarrying,
   type CarryableFields,
@@ -882,22 +883,19 @@ export default function EventEditorModal({
         starts_at: describesTheKeyedEvent ? saved.start : seed.startsAt || saved.start,
       }).catch(() => undefined);
       // The appointment moved to another calendar, or the provider minted a
-      // new id: the old row names an event that is not there any more, and the
-      // scan's repair could re-point it at whatever else shares its title and
-      // start. Empty it — a peer holding the old one then stops firing.
+      // new id: the old row names an event that is not there any more. Retire
+      // it — emptied, so a peer holding the old list stops firing, and WITHOUT
+      // a signature, so the scan's repair never takes it for this very event
+      // reminted and empties the new row. Mirrors the desktop EventDialog.
       const oldEvent = original ? seriesIdOf(original) : null;
       const keyChanged =
         original != null &&
         oldEvent != null &&
         (original.calendar_id !== saved.calendar_id || oldEvent !== seriesId);
       if (keyChanged && seed.landed && seed.reminders.length > 0) {
-        await setEventLocalReminders({
-          calendar_id: original.calendar_id,
-          event_id: oldEvent,
-          reminders: [],
-          title: seed.title,
-          starts_at: seed.startsAt,
-        }).catch(() => undefined);
+        await setEventLocalReminders(
+          retiredPrivateReminders(original.calendar_id, oldEvent),
+        ).catch(() => undefined);
       }
     };
     // Keep the series' EXDATE exceptions and its zone when editing; an event

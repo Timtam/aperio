@@ -5,6 +5,7 @@ export * from './types';
 export * from './errors';
 export * from './ordering';
 export * from './reminderPrefs';
+export * from './retiredPrivateReminders';
 export * from './taskStatus';
 export * from './taskCapabilities';
 export * from './taskGrouping';

@@ -2272,6 +2272,17 @@ Siehe DESIGN §4.2.
     71a abzuwägen (die eigene Zeile des Organisators). Entscheidung offen.
   - Auf dem Handy nicht getestet.
 
+  ✅ **Private Erinnerungen an Exchange-Terminen gingen nach einer Bearbeitung
+  verloren** (behoben 2026-09-21, gefunden bei der Prüfung von 112/113).
+  Exchange vergibt bei jedem Speichern eine neue Id. Der Editor schrieb die
+  privaten Erinnerungen unter die neue Id und leerte den alten Schlüssel —
+  mit Titel und Start als Kennung. Die Reparatur beim nächsten Laden hielt
+  den geleerten Eintrag für denselben Termin und ließ ihn als jüngeren
+  gewinnen: Die Erinnerungen waren weg. Jetzt räumt der Editor den alten
+  Schlüssel OHNE Kennung ab (`EventRemindersRepo::retire`, beide Editoren
+  über `retiredPrivateReminders`), und das Umziehen zwischen Kalendern
+  ebenso. Eine Liste, die du selbst leerst, behält ihre Kennung: Sie muss
+  dem Termin auf dem anderen Gerät folgen.
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;
   2. der Lesefehler im Kern (48a);

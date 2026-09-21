@@ -61,6 +61,7 @@ import {
   pickerMisreadsRule,
   planCarry,
   recurrenceSummaryText,
+  retiredPrivateReminders,
   seriesDayKey,
   worthCarrying,
   type CarryableFields,
@@ -1079,9 +1080,9 @@ export function EventDialog({
           }).catch(() => undefined);
           // The appointment moved to another calendar, or the provider minted
           // a new id for it: the old row names an event that is not there any
-          // more, and the scan's repair could re-point it at whatever else in
-          // that calendar shares its title and start. Empty it — the emptied
-          // list is the record, and a peer holding the old one stops firing.
+          // more. Retire it — emptied, so a peer holding the old list stops
+          // firing, and WITHOUT a signature, so the scan's repair never takes
+          // it for this very event reminted and empties the new row.
           const oldCalendar = dialogCalendarId;
           const oldEvent = event ? seriesIdOf(event) : null;
           const keyChanged =
@@ -1089,13 +1090,9 @@ export function EventDialog({
             oldEvent != null &&
             (oldCalendar !== saved.calendar_id || oldEvent !== seriesId);
           if (keyChanged && privateSeed.hadRow) {
-            await setEventLocalReminders({
-              calendar_id: oldCalendar,
-              event_id: oldEvent,
-              reminders: [],
-              title: privateSeed.title,
-              starts_at: privateSeed.startsAt,
-            }).catch(() => undefined);
+            await setEventLocalReminders(
+              retiredPrivateReminders(oldCalendar, oldEvent),
+            ).catch(() => undefined);
           }
         };
 

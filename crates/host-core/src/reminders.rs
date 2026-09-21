@@ -1941,6 +1941,72 @@ mod tests {
         );
     }
 
+    /// An Exchange save mints a new id. The editor writes the reminders under
+    /// the new id and retires the old key; the scan that follows must leave
+    /// the new row alone. It used to find the retired row by its signature,
+    /// take it for the same event reminted, and — the later write — empty the
+    /// event's reminders.
+    #[test]
+    fn a_retired_key_never_empties_the_event_that_took_it_over() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        // Before the save: the reminders under the id the event carried then.
+        repo.set(
+            "cal",
+            "S:item|ck1",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T09:00:00Z",
+        )
+        .unwrap();
+        // The save: the editor writes them under the new id, then retires
+        // the old key — the later write.
+        repo.set(
+            "cal",
+            "S:item|ck2",
+            &one_hour_before(),
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+        repo.retire("cal", "S:item|ck1", "2026-06-01T10:00:01Z")
+            .unwrap();
+
+        let events = vec![event_named("S:item|ck2", "cal", "Zahnarzt", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events, scan_window());
+        assert!(moved.is_empty(), "{moved:?}");
+        assert_eq!(
+            repo.get("cal", "S:item|ck2").unwrap().unwrap().reminders,
+            one_hour_before()
+        );
+    }
+
+    /// A list the user emptied is a decision about the event, and it follows
+    /// the event to a reminted id like any other list.
+    #[test]
+    fn a_list_the_user_emptied_follows_its_event() {
+        let db = prefs_db();
+        let repo = crate::event_reminders::EventRemindersRepo::new(&db);
+        let start = Utc.with_ymd_and_hms(2026, 6, 15, 9, 0, 0).unwrap();
+        repo.set(
+            "cal",
+            "old-id",
+            &[],
+            "Zahnarzt",
+            &start.to_rfc3339(),
+            "2026-06-01T10:00:00Z",
+        )
+        .unwrap();
+
+        let events = vec![event_named("new-id", "cal", "Zahnarzt", start)];
+        let moved = heal_local_reminders_for_calendar(&db, "cal", &events, scan_window());
+        assert_eq!(moved, vec![("old-id".to_string(), "new-id".to_string())]);
+        assert!(repo.get("cal", "new-id").unwrap().unwrap().is_empty());
+    }
+
     /// A row keyed by a series learns the SERIES' signature, not whichever of
     /// its rows the provider happened to send first.
     ///
