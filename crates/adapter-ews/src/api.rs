@@ -203,7 +203,12 @@ pub struct SyncedFolderState {
 /// 1: stage 4 review — items carry `end_time_zone` (decision 43b).
 /// 2: items carry `my_response_type`, whether the mailbox organizes them
 ///    (decision 70a).
-pub const ITEM_PARSER: u32 = 2;
+/// 3: a changed occurrence carries its OWN item (`ModifiedOccurrence::own`,
+///    decision 58a), so the row stops showing the series' subject, location,
+///    body and reminder. A state written by parser 2 holds occurrences whose
+///    `own` is `None` and whose cached rows carry the series' content, and
+///    the enrichment alone would not mend the rows already handed out.
+pub const ITEM_PARSER: u32 = 3;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -533,7 +538,7 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
         }
     }
 
-    enrich_occurrence_cancellations(client, state, &to_enrich).await?;
+    enrich_occurrence_details(client, state, &to_enrich).await?;
 
     Ok(())
 }
@@ -562,7 +567,7 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
 ///   * A genuine transport/parse failure IS propagated (`?`): the surrounding
 ///     drain then fails without persisting, so the next drain re-runs from the
 ///     same sync cookie and retries — rather than baking in a half-filled state.
-async fn enrich_occurrence_cancellations(
+async fn enrich_occurrence_details(
     client: &EwsClient,
     state: &mut SyncedFolderState,
     to_enrich: &[(String, Option<String>)],
@@ -570,16 +575,33 @@ async fn enrich_occurrence_cancellations(
     let enriched: std::collections::HashSet<&str> =
         to_enrich.iter().map(|(id, _)| id.as_str()).collect();
 
-    // Exception refs from the masters we just enriched. De-dup by item id so a
-    // series with many overrides doesn't re-request the same exception twice.
+    // WHICH occurrences to ask about:
+    //   - those of the masters just enriched, as always;
+    //   - every occurrence still without its own item, whatever master it
+    //     belongs to. A master is enriched once (`detail_fetched`), so an
+    //     occurrence whose GetItem failed that one time would otherwise keep
+    //     the series' subject for ever;
+    //   - those whose ChangeKey moved since we read them: the master's inline
+    //     list was just re-read, and a bumped key is the server saying this
+    //     occurrence changed.
+    // De-duplicated by item id, so a series with many occurrences asks once.
     let mut seen = std::collections::HashSet::new();
     let exception_refs: Vec<(String, Option<String>)> = state
         .items
         .values()
-        .filter(|it| enriched.contains(it.item_id.as_str()))
-        .flat_map(|it| it.modified_occurrences.iter())
-        .filter(|ov| seen.insert(ov.item_id.clone()))
-        .map(|ov| (ov.item_id.clone(), ov.change_key.clone()))
+        .flat_map(|it| {
+            let fresh = enriched.contains(it.item_id.as_str());
+            it.modified_occurrences.iter().map(move |ov| (fresh, ov))
+        })
+        .filter(|(fresh, ov)| {
+            let stale_key = ov
+                .own
+                .as_deref()
+                .is_some_and(|own| own.change_key != ov.change_key);
+            *fresh || ov.own.is_none() || stale_key
+        })
+        .filter(|(_, ov)| seen.insert(ov.item_id.clone()))
+        .map(|(_, ov)| (ov.item_id.clone(), ov.change_key.clone()))
         .collect();
 
     if exception_refs.is_empty() {
@@ -589,33 +611,65 @@ async fn enrich_occurrence_cancellations(
     tracing::info!(
         target: "adapter_ews::sync",
         exceptions = exception_refs.len(),
-        "GetItem fan-out for occurrence-exception cancelled-state",
+        "GetItem fan-out for the occurrences' own items",
     );
 
-    let mut cancelled_by_id: std::collections::HashMap<String, bool> =
+    let mut own_by_id: std::collections::HashMap<String, crate::mapping::ParsedItem> =
         std::collections::HashMap::new();
     for batch in exception_refs.chunks(GET_ITEM_BATCH_SIZE) {
-        let body = crate::soap::get_calendar_items_with_recurrence(batch);
+        let body = crate::soap::get_exception_items(batch);
         // `post_soap_raw` skips the fault check so a per-item Error (a deleted or
-        // inaccessible exception) doesn't poison the whole batch; the successful
+        // inaccessible occurrence) doesn't poison the whole batch; the successful
         // rows still parse. Transport failures still surface as `Err` here.
         let xml = client.post_soap_raw(body).await?;
+        // A fault for the WHOLE batch parses as "no items", which used to read
+        // as "nothing changed" and left every occurrence with the series'
+        // content, silently. Name it — the code and the ids it hit — and go on
+        // to the next batch; the per-item tolerance above is untouched.
+        if let Err(err) = crate::soap::check_for_fault(&xml) {
+            tracing::warn!(
+                target: "adapter_ews::sync",
+                error = %err,
+                ids = ?batch.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+                "the server refused a whole batch of occurrence items; \
+                 those occurrences keep the series' content for now",
+            );
+            continue;
+        }
         let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
-        for exc in &parsed {
-            cancelled_by_id.insert(exc.item_id.clone(), crate::mapping::resolve_cancelled(exc));
+        for exc in parsed {
+            own_by_id.insert(exc.item_id.clone(), exc);
         }
     }
 
-    if cancelled_by_id.is_empty() {
+    if own_by_id.is_empty() {
         return Ok(());
     }
+    // Stamped across EVERY cached master, not only the ones just enriched:
+    // the request list above may hold occurrences of a master enriched long
+    // ago, and dropping their answers on the floor would mean asking for them
+    // again on every drain, for ever.
     for it in state.items.values_mut() {
-        if !enriched.contains(it.item_id.as_str()) {
-            continue;
-        }
         for ov in it.modified_occurrences.iter_mut() {
-            if let Some(&cancelled) = cancelled_by_id.get(&ov.item_id) {
-                ov.cancelled = cancelled;
+            let Some(own) = own_by_id.get(&ov.item_id) else {
+                continue;
+            };
+            ov.cancelled = crate::mapping::resolve_cancelled(own);
+            // The item must still fill the slot the master named. A server
+            // that answers for another slot has moved the occurrence under
+            // us, and inheriting the series' content is the safe reading.
+            match own.original_start {
+                Some(slot) if slot != ov.original_start => {
+                    tracing::warn!(
+                        target: "adapter_ews::sync",
+                        item = %ov.item_id,
+                        expected = %ov.original_start,
+                        answered = %slot,
+                        "an occurrence item answered for another slot; keeping the series' content",
+                    );
+                    ov.own = None;
+                }
+                _ => ov.own = Some(Box::new(own.clone())),
             }
         }
     }
@@ -1850,6 +1904,241 @@ mod tests {
         assert_eq!(item.attendees.len(), 1);
         assert_eq!(item.attendees[0].email, "me@example.com");
         assert_eq!(item.attendees[0].response_type.as_deref(), Some("Accept"));
+    }
+
+    /// Decision 58a, end to end: a cold drain reads a series with one changed
+    /// occurrence, and the occurrence's own item survives into the cached
+    /// state instead of one boolean of it.
+    #[tokio::test]
+    async fn the_occurrences_own_item_is_kept_not_dropped() {
+        let mut server = Server::new_async().await;
+        let sync_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>COOKIE-1</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>
+        <t:Create>
+          <t:CalendarItem>
+            <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+            <t:Subject>Austausch</t:Subject>
+            <t:Location>Raum 1</t:Location>
+            <t:Start>2026-07-23T12:00:00Z</t:Start>
+            <t:End>2026-07-23T12:30:00Z</t:End>
+            <t:IsRecurring>true</t:IsRecurring>
+            <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+          </t:CalendarItem>
+        </t:Create>
+      </m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        // The master's own detail GET carries its occurrence list; the second
+        // GET (the fan-out this test is about) answers for the occurrence.
+        let master_detail = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+        <t:Subject>Austausch</t:Subject>
+        <t:Location>Raum 1</t:Location>
+        <t:Start>2026-07-23T12:00:00Z</t:Start>
+        <t:End>2026-07-23T12:30:00Z</t:End>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:DailyRecurrence><t:Interval>14</t:Interval></t:DailyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-07-23Z</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="OCC" ChangeKey="OCK"/>
+          <t:Start>2026-08-20T15:00:00Z</t:Start>
+          <t:End>2026-08-20T15:30:00Z</t:End>
+          <t:OriginalStart>2026-08-20T12:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let occurrence_detail = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="OCC" ChangeKey="OCK"/>
+        <t:Subject>Nur dieser Termin</t:Subject>
+        <t:Location>Raum 2</t:Location>
+        <t:Start>2026-08-20T15:00:00Z</t:Start>
+        <t:End>2026-08-20T15:30:00Z</t:End>
+        <t:OriginalStart>2026-08-20T12:00:00Z</t:OriginalStart>
+        <t:CalendarItemType>Exception</t:CalendarItemType>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_body)
+            .create_async()
+            .await;
+        // The fan-out for the occurrence asks with the exception shape, which
+        // never mentions ModifiedOccurrences — that is how the two GETs are
+        // told apart here, and it is also the shape's own promise.
+        let _occurrence = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"(?s)GetItem.*calendar:OriginalStart"#.into(),
+            ))
+            .with_status(200)
+            .with_body(occurrence_detail)
+            .create_async()
+            .await;
+        let _master = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"(?s)GetItem.*calendar:ModifiedOccurrences"#.into(),
+            ))
+            .with_status(200)
+            .with_body(master_detail)
+            .create_async()
+            .await;
+
+        let state = sync_events_to_completion(&client_for(&server), "FA|FCK", Default::default())
+            .await
+            .unwrap();
+        let master = state.items.get("MASTER").expect("the master is cached");
+        let occurrence = master
+            .modified_occurrences
+            .first()
+            .expect("the occurrence is cached");
+        let own = occurrence
+            .own
+            .as_deref()
+            .expect("the occurrence's own item is kept");
+        assert_eq!(own.subject, "Nur dieser Termin");
+        assert_eq!(own.location.as_deref(), Some("Raum 2"));
+        // And the master keeps its own, which is what it used to lend out.
+        assert_eq!(master.subject, "Austausch");
+        assert_eq!(master.location.as_deref(), Some("Raum 1"));
+    }
+
+    /// An item that answers for ANOTHER slot has been moved under us. Taking
+    /// it would put one occurrence's content on another's day, so the row
+    /// keeps the series' content and the mismatch is said out loud.
+    #[tokio::test]
+    async fn an_occurrence_item_for_another_slot_is_refused() {
+        let mut server = Server::new_async().await;
+        let sync_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>COOKIE-1</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes><t:Create><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+        <t:Subject>Austausch</t:Subject>
+        <t:Start>2026-07-23T12:00:00Z</t:Start>
+        <t:End>2026-07-23T12:30:00Z</t:End>
+        <t:IsRecurring>true</t:IsRecurring>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+      </t:CalendarItem></t:Create></m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let master_detail = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="MCK"/>
+        <t:Subject>Austausch</t:Subject>
+        <t:Start>2026-07-23T12:00:00Z</t:Start>
+        <t:End>2026-07-23T12:30:00Z</t:End>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:DailyRecurrence><t:Interval>14</t:Interval></t:DailyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-07-23Z</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="OCC" ChangeKey="OCK"/>
+          <t:Start>2026-08-20T15:00:00Z</t:Start>
+          <t:End>2026-08-20T15:30:00Z</t:End>
+          <t:OriginalStart>2026-08-20T12:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        // Same item id, but it says it fills the slot a fortnight earlier.
+        let wrong_slot = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="OCC" ChangeKey="OCK"/>
+        <t:Subject>Ein anderer Termin</t:Subject>
+        <t:Start>2026-08-06T15:00:00Z</t:Start>
+        <t:End>2026-08-06T15:30:00Z</t:End>
+        <t:OriginalStart>2026-08-06T12:00:00Z</t:OriginalStart>
+        <t:CalendarItemType>Exception</t:CalendarItemType>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_body)
+            .create_async()
+            .await;
+        let _occurrence = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"(?s)GetItem.*calendar:OriginalStart"#.into(),
+            ))
+            .with_status(200)
+            .with_body(wrong_slot)
+            .create_async()
+            .await;
+        let _master = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"(?s)GetItem.*calendar:ModifiedOccurrences"#.into(),
+            ))
+            .with_status(200)
+            .with_body(master_detail)
+            .create_async()
+            .await;
+
+        let state = sync_events_to_completion(&client_for(&server), "FA|FCK", Default::default())
+            .await
+            .unwrap();
+        let occurrence = state.items["MASTER"]
+            .modified_occurrences
+            .first()
+            .expect("the occurrence is cached");
+        assert!(
+            occurrence.own.is_none(),
+            "an item for another slot must not be taken",
+        );
     }
 
     #[tokio::test]

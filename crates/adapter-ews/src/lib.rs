@@ -794,8 +794,10 @@ enum ItemEmit {
 ///     on a calendar folder shouldn't surface them.
 ///   - Recurring masters always pass (the frontend expander handles the
 ///     visible window), and each in-range [`ModifiedOccurrence`] is emitted
-///     as a synthetic standalone event at the moved time, inheriting the
-///     master's content. The master's EXDATE list (built in `to_event`)
+///     as a synthetic standalone event at the moved time, carrying the
+///     OCCURRENCE's own content where the enrichment could read it
+///     (`mapping::override_event`, decision 58a) and the master's where it
+///     could not. The master's EXDATE list (built in `to_event`)
 ///     already vacates the original slot, so the expander doesn't double-
 ///     render. The synthetic id is derived from the master's, so it shares
 ///     the master's `native_id` host-side and is purged together with it.
@@ -827,35 +829,12 @@ fn emit_item_events(
             if ov.end < range.start || ov.start >= range.end {
                 continue;
             }
-            let mut override_ev = ev.clone();
-            // `{master}::rid::{original_start}` — the shape CalDAV and Google
-            // already emit and the only one the shared frontend recognises as
-            // an override. It used to be `#override:`, a marker nothing read:
-            // the editor took these rows for standalone events and never
-            // offered the occurrence-or-series prompt, and the write path
-            // parsed the suffix into the ChangeKey. See
-            // `mapping::RECURRENCE_ID_MARKER`.
-            override_ev.id = crate::mapping::encode_override_event_id(&ev.id, ov.original_start);
-            override_ev.recurrence = None;
-            // Anchor an all-day override to LOCAL midnight, exactly as `to_event`
-            // does for the master and its EXDATEs, so the override lands on the
-            // same calendar day the EXDATE vacated (no off-by-a-day duplicate on
-            // non-UTC devices).
-            if item.is_all_day {
-                override_ev.start = crate::mapping::all_day_local_anchor(ov.start);
-                override_ev.end = crate::mapping::all_day_local_anchor(ov.end);
-            } else {
-                override_ev.start = ov.start;
-                override_ev.end = ov.end;
-            }
-            override_ev.etag = ov.change_key.clone();
-            // A cancelled occurrence (organizer withdrew just this instance)
-            // arrives as a cancelled exception item; its cancelled state is
-            // resolved by the per-override GetItem enrichment. Carry it (and
-            // the master's own cancelled state) onto the emitted override so a
-            // single cancelled occurrence is dimmed + announced.
-            override_ev.cancelled = ev.cancelled || ov.cancelled;
-            out.push(override_ev);
+            // The occurrence's OWN content where the enrichment could read it,
+            // the master's where it could not (decision 58a). The id is
+            // `{master}::rid::{original_start}` either way — the shape CalDAV
+            // and Google emit, and the only one the shared frontend takes for
+            // an occurrence rather than a standalone event.
+            out.push(crate::mapping::override_event(&ev, item, ov, calendar_id)?);
         }
     }
     let outcome = if ev.recurrence.is_some() {
@@ -2178,6 +2157,139 @@ mod occurrence_cancellation_tests {
     /// one the organizer cancelled, one merely moved. The cancelled occurrence's
     /// emitted override must carry `cancelled=true` (so it is dimmed + announced);
     /// the moved one must stay `false`; the master stays a non-cancelled series.
+    /// Decision 58a, measured in live round 5: a changed occurrence showed the
+    /// SERIES' subject, location, body and reminder, and saving wrote them
+    /// back over it. Its own item is read now, and the row is built from it.
+    #[test]
+    fn a_changed_occurrence_carries_its_own_content() {
+        let own = ParsedItem {
+            item_id: "OCC-MOVED".into(),
+            change_key: Some("CK-OCC".into()),
+            subject: "Nur dieser Termin: Retrospektive".into(),
+            body: Some("Agenda der Ausnahme".into()),
+            location: Some("Raum 2".into()),
+            start: Some(dt("2026-08-20T15:00:00Z")),
+            end: Some(dt("2026-08-20T15:30:00Z")),
+            original_start: Some(dt("2026-08-20T12:00:00Z")),
+            reminder_is_set: true,
+            reminder_minutes_before_start: Some(5),
+            created: Some(dt("2026-07-01T09:00:00Z")),
+            last_modified: Some(dt("2026-08-19T08:00:00Z")),
+            ..Default::default()
+        };
+        let master = ParsedItem {
+            item_id: "M1".into(),
+            subject: "Austausch Frank - Toni".into(),
+            location: Some("Raum 1".into()),
+            body: Some("Agenda der Serie".into()),
+            start: Some(dt("2026-07-23T12:00:00Z")),
+            end: Some(dt("2026-07-23T12:30:00Z")),
+            is_recurring: true,
+            reminder_is_set: true,
+            reminder_minutes_before_start: Some(60),
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 14 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            modified_occurrences: vec![ModifiedOccurrence {
+                item_id: "OCC-MOVED".into(),
+                change_key: Some("CK-OCC".into()),
+                start: dt("2026-08-20T15:00:00Z"),
+                end: dt("2026-08-20T15:30:00Z"),
+                original_start: dt("2026-08-20T12:00:00Z"),
+                cancelled: false,
+                own: Some(Box::new(own)),
+            }],
+            ..Default::default()
+        };
+        let range = DateRange {
+            start: dt("2026-08-01T00:00:00Z"),
+            end: dt("2026-09-01T00:00:00Z"),
+        };
+        let mut out = Vec::new();
+        emit_item_events(&master, "cal", range, &mut out).unwrap();
+
+        let occurrence = out
+            .iter()
+            .find(|e| e.id.contains("::rid::"))
+            .expect("the occurrence is emitted");
+        assert_eq!(occurrence.title, "Nur dieser Termin: Retrospektive");
+        assert_eq!(occurrence.location.as_deref(), Some("Raum 2"));
+        assert_eq!(
+            occurrence.description.as_deref(),
+            Some("Agenda der Ausnahme")
+        );
+        assert_eq!(
+            occurrence.reminders.len(),
+            1,
+            "its own reminder, not the series' hour"
+        );
+        assert!(
+            matches!(
+                occurrence.reminders[0].kind,
+                cal_core::ReminderKind::Relative { minutes_before: 5 }
+            ),
+            "{:?}",
+            occurrence.reminders
+        );
+        // The slot is still the master's, and the rule stays with the series.
+        assert_eq!(occurrence.start, dt("2026-08-20T15:00:00Z"));
+        assert!(occurrence.recurrence.is_none());
+        assert_eq!(occurrence.etag.as_deref(), Some("CK-OCC"));
+        assert_eq!(occurrence.calendar_id, "cal");
+        // Its own timestamps, not a fresh "now" that would churn every read.
+        assert_eq!(occurrence.updated_at, dt("2026-08-19T08:00:00Z"));
+
+        let master_ev = out
+            .iter()
+            .find(|e| e.recurrence.is_some())
+            .expect("the master is emitted");
+        assert_eq!(master_ev.title, "Austausch Frank - Toni");
+        assert_eq!(master_ev.location.as_deref(), Some("Raum 1"));
+    }
+
+    /// Where the occurrence's own item could not be read, the row is what it
+    /// always was: the series' content at the occurrence's own slot. Wrong,
+    /// but not invented — and the write refuses rather than persisting it.
+    #[test]
+    fn an_unread_occurrence_still_inherits_the_series() {
+        let master = ParsedItem {
+            item_id: "M1".into(),
+            subject: "Austausch Frank - Toni".into(),
+            location: Some("Raum 1".into()),
+            start: Some(dt("2026-07-23T12:00:00Z")),
+            end: Some(dt("2026-07-23T12:30:00Z")),
+            is_recurring: true,
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 14 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            modified_occurrences: vec![ModifiedOccurrence {
+                item_id: "OCC-MOVED".into(),
+                change_key: None,
+                start: dt("2026-08-20T15:00:00Z"),
+                end: dt("2026-08-20T15:30:00Z"),
+                original_start: dt("2026-08-20T12:00:00Z"),
+                cancelled: false,
+                own: None,
+            }],
+            ..Default::default()
+        };
+        let range = DateRange {
+            start: dt("2026-08-01T00:00:00Z"),
+            end: dt("2026-09-01T00:00:00Z"),
+        };
+        let mut out = Vec::new();
+        emit_item_events(&master, "cal", range, &mut out).unwrap();
+        let occurrence = out
+            .iter()
+            .find(|e| e.id.contains("::rid::"))
+            .expect("the occurrence is emitted");
+        assert_eq!(occurrence.title, "Austausch Frank - Toni");
+        assert_eq!(occurrence.location.as_deref(), Some("Raum 1"));
+        assert_eq!(occurrence.start, dt("2026-08-20T15:00:00Z"));
+    }
+
     #[test]
     fn cancelled_occurrence_override_is_emitted_cancelled() {
         let master = ParsedItem {
@@ -2198,6 +2310,7 @@ mod occurrence_cancellation_tests {
                     end: dt("2026-08-06T12:30:00Z"),
                     original_start: dt("2026-08-06T12:00:00Z"),
                     cancelled: true,
+                    own: None,
                 },
                 ModifiedOccurrence {
                     item_id: "OCC-MOVED".into(),
@@ -2206,6 +2319,7 @@ mod occurrence_cancellation_tests {
                     end: dt("2026-08-20T15:30:00Z"),
                     original_start: dt("2026-08-20T12:00:00Z"),
                     cancelled: false,
+                    own: None,
                 },
             ],
             ..Default::default()

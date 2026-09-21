@@ -1308,6 +1308,17 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   Absage nichts“, und bei einer fremden Einladung „Der Organisator erfährt
   davon nichts“ statt „bekommt eine Absage“. Ein Schalter wird dort nie
   angeboten: Er würde um etwas bitten, das niemand tut.
+- **Eine Ausnahme gehört sich selbst (58a).** Ein einzeln geänderter Termin
+  einer Exchange-Serie ist auf dem Server ein eigenes Element mit eigenem
+  Betreff, Ort, Text und eigener Erinnerung. Aperio baute seine Zeile trotzdem
+  aus der SERIE und holte die eigene Fassung zwar ab, behielt davon aber nur
+  „abgesagt oder nicht" — der Termin erschien unter dem Serientitel, und jedes
+  Speichern schrieb diesen Titel zurück (Live-Runde 5, von Toni bestätigt).
+  Jetzt trägt die Ausnahme ihr eigenes Element, und ihre Zeile entsteht daraus
+  durch dieselbe Abbildung wie jede andere. Was die SERIE besitzt — der
+  Kalender, die Farbe, der Platz im Takt — kommt weiter von ihr. Ist die eigene
+  Fassung nicht lesbar, erbt die Zeile wie früher den Serieninhalt und es steht
+  im Log: eine geerbte Angabe ist falsch, eine geratene wäre schlimmer.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was

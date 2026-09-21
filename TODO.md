@@ -2134,9 +2134,23 @@ Siehe DESIGN §4.2.
   mit `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheiterte.
   Jetzt bleibt das Löschen bei einer Ausnahme weg. Die zurückgegebene Ausnahme
   behält ihre Override-Id. Auf dem Handy wirkt das mit dem nächsten Build.
-  🚩 **Ausnahmen zeigen den Betreff der Serie.** Aperio baut eine Ausnahme aus
-  der Serie und liest ihren eigenen Betreff, Ort und Text nicht nach. Das ist
-  eine eigene, spätere Aufgabe außerhalb der Zeitzonen (58a).
+  ✅ **Ausnahmen zeigen ihren eigenen Betreff** (58a, Teil 1, erledigt
+  2026-09-21). Aperio baute die Zeile einer geänderten Ausnahme aus dem MASTER
+  (`lib.rs`, `let mut override_ev = ev.clone()`) und holte ihre eigene Fassung
+  zwar vom Server, behielt davon aber ein einziges Bit (`cancelled`). Jetzt
+  trägt `ModifiedOccurrence::own` das Element der Ausnahme, `override_event`
+  baut die Zeile daraus — durch dasselbe `to_event` wie jede andere Zeile, also
+  mit Ganztags-Anker, Organisator- und Gast-Regeln (67a, 70a) und den
+  Zeitstempel-Rückfällen —, und die Abfrage fragt endlich nach Ort, Erinnerung,
+  Ganztag und den Zeitstempeln. `ITEM_PARSER` 3 lässt einen alten Stand einmal
+  neu einlesen.
+  Offen geblieben:
+  - Ist die eigene Fassung nicht lesbar (Server antwortet nicht, Element fehlt,
+    Antwort gilt einem anderen Platz), erbt die Zeile weiter den Serieninhalt
+    und es steht im Log (102). Sichtbar machen erst, wenn Live-Runde 7 zeigt,
+    dass der Fall eintritt.
+  - Das SCHREIBEN setzt weiterhin alle Felder; dass es die richtigen sind, ist
+    die halbe Miete. „Nur geänderte Felder schreiben" ist Teil 2.
 
   Toni hat die Reihenfolge festgelegt (57a):
   1. der Ausnahme-Fehler als kleiner eigener PR;
@@ -2253,6 +2267,11 @@ Siehe DESIGN §4.2.
     Exchange-Termine mit dem Titel der Serie, und jedes Speichern schreibt
     Titel, Ort, Text und Erinnerung der Serie zurück. Toni hat das live
     bestätigt. Das ist 58a, als Nächstes nach dem iCloud-Fix (78a).
+    ✅ Die ANZEIGE ist behoben (58a Teil 1): die Ausnahme trägt ihren eigenen
+    Betreff, Ort, Text und ihre eigene Erinnerung, und damit schreibt ein
+    Speichern auch die eigenen Werte zurück. Teil 2 („nur geänderte Felder
+    schreiben") nimmt dem Schreibweg zusätzlich die Fälle, in denen ein
+    anderes Gerät zwischen Öffnen und Speichern etwas geändert hat.
   - E1: Toni speicherte versehentlich das iCloud-Original einer eigenen
     Besprechung; der Gast verschwand, und iCloud sagte ihm ab. E2 fiel damit
     aus.
