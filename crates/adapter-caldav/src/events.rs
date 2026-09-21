@@ -198,6 +198,7 @@ pub async fn create_event(
 
     Ok(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: false,
         send_invitations: false,
@@ -1974,6 +1975,7 @@ END:VCALENDAR\r
     fn sample_existing_event(cal_url: &Url) -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "abc-123@aperio".into(),
@@ -2931,6 +2933,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         // The truncated master, serialised the same way update_event would.
         let master = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "series-1@aperio".into(),

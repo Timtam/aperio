@@ -382,6 +382,7 @@ mod tests {
                 send_invitations: true,
                 truncate_tail_overrides: false,
                 keep_attendees: false,
+                keep_fields: Vec::new(),
                 clear_attendees: false,
                 created_at: at,
                 updated_at: at,

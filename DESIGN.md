@@ -1336,11 +1336,18 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   ändert ein Speichern nichts, was der Anbieter speichert, unterbleibt es —
   bei einem Anbieter, der jeder Änderung eine Mail an alle Gäste folgen
   lässt, ist ein Schreiben ohne Inhalt keine Kleinigkeit (76a).
-  Was dieser Vergleich NICHT kann: Er ist zweiseitig, Bearbeitung gegen
-  Anbieter. Ein Feld, das der Bearbeiter nicht angefasst hat, das Aperio aber
-  veraltet hält, unterscheidet sich vom Anbieter und wird geschrieben — die
-  Änderung eines anderen Geräts geht dann verloren wie früher. Das zu
-  unterscheiden braucht die Fassung, die der Bearbeiter geöffnet hat.
+  Zweiseitig allein reicht nicht: Ein Feld, das der Bearbeiter nicht angefasst
+  hat, das Aperio aber veraltet hält, unterscheidet sich vom Anbieter und
+  würde geschrieben — die Änderung eines anderen Geräts ginge verloren. Die
+  dritte Seite ist die Fassung, die der Bearbeiter geöffnet hat (106): Was die
+  Bearbeitung davon unverändert lässt, gehört dem Anbieter. Diese Fassung ist
+  die des Host-Caches, und sie zählt nur mit Beweis — dieselbe Version wie die
+  Bearbeitung, und der Kalender seit Aperios letztem Schreiben neu gelesen.
+  Ohne Beweis gilt nichts als behalten. Denn ein Cache, der nach dem Speichern
+  nur als veraltet markiert ist, hält noch die Zeile von vorher, und eine
+  Bearbeitung, die daraus neu gebaut wird (eine Wiederherstellung, ein
+  Zurücksetzen), sähe unberührt aus und würde nie geschrieben. Im Zweifel
+  schreibt Aperio lieber einen veralteten Wert als gar keinen gewollten.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was

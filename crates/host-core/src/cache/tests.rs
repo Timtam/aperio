@@ -2,6 +2,7 @@
 
 use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
 use crate::db::DbHandle;
+use cal_core::event_diff::EventField;
 use cal_core::{
     Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, Section, Task, TaskList,
     TaskPriority, TaskStatus,
@@ -48,6 +49,7 @@ fn wide() -> DateRange {
 fn event(id: &str, start_h: u32, end_h: u32) -> Event {
     Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: false,
         id: id.into(),
@@ -1466,6 +1468,89 @@ fn the_write_guard_compares_with_the_cached_read() {
     let mut moved = read.clone();
     crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
     assert!(!moved.keep_attendees);
+}
+
+/// Decision 106: the guard marks the fields the edit left as the cached copy
+/// has them — while that copy is fresh from the provider.
+#[test]
+fn the_write_guard_marks_what_the_edit_left_alone() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    store
+        .replace_calendar_events(ACC, CAL, wide(), std::slice::from_ref(&read))
+        .unwrap();
+
+    let mut edit = read.clone();
+    edit.title = "Renamed".into();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
+    assert_eq!(
+        edit.keep_fields,
+        [
+            EventField::Description,
+            EventField::Location,
+            EventField::Start,
+            EventField::End,
+            EventField::AllDay,
+            EventField::Recurrence,
+            EventField::Reminders,
+        ]
+    );
+
+    // Always assigned, never merged: a list an event brings along is replaced.
+    let mut resent = read.clone();
+    resent.keep_fields = vec![EventField::Title];
+    resent.title = "Renamed again".into();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut resent);
+    assert!(!resent.keep_fields.contains(&EventField::Title));
+}
+
+/// Every write only marks the cache stale; the row stays the one from BEFORE
+/// the write until the next refresh. An edit rebuilt from it — a split's
+/// restore, a revert right after a save — must not look untouched, or it is
+/// never written. So nothing is kept until the calendar was read again.
+#[test]
+fn a_write_to_the_calendar_keeps_nothing_until_the_next_refresh() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    store
+        .replace_calendar_events(ACC, CAL, wide(), std::slice::from_ref(&read))
+        .unwrap();
+    // A save lands in this calendar: the hosts invalidate, the row stays.
+    store.invalidate(ACC, SyncScope::Events, CAL).unwrap();
+
+    let mut restore = read.clone();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut restore);
+    assert!(restore.keep_fields.is_empty(), "{:?}", restore.keep_fields);
+
+    // The refresh brings the server's copy, at its new version: an edit still
+    // carrying the old one proves nothing either.
+    let refreshed = Event {
+        etag: Some("etag-ev-1-v2".into()),
+        ..read.clone()
+    };
+    store
+        .replace_calendar_events(ACC, CAL, wide(), std::slice::from_ref(&refreshed))
+        .unwrap();
+    let mut stale = read.clone();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut stale);
+    assert!(stale.keep_fields.is_empty(), "{:?}", stale.keep_fields);
+
+    // An edit made from the refreshed copy is proven again.
+    let mut fresh = refreshed.clone();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut fresh);
+    assert!(!fresh.keep_fields.is_empty());
+}
+
+/// A row that was only ever stored, never refreshed as a calendar, has no
+/// stamp: nothing is kept.
+#[test]
+fn a_calendar_never_refreshed_keeps_nothing() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    store.upsert_event(ACC, CAL, &read).unwrap();
+    let mut edit = read.clone();
+    crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
+    assert!(edit.keep_fields.is_empty(), "{:?}", edit.keep_fields);
 }
 
 /// The write guard compares an edit with the event as last read; this is the

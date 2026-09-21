@@ -454,6 +454,7 @@ mod tests {
     fn meeting_event(id: &str, title: &str, start: DateTime<Utc>) -> cal_core::Event {
         cal_core::Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),

@@ -72,6 +72,7 @@ mod tests {
     fn invitation() -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: true,
             id: "ev-1".into(),

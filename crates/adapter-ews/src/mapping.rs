@@ -1889,6 +1889,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
 
     Ok(Event {
         keep_attendees: false,
+        keep_fields: Vec::new(),
         clear_attendees: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
@@ -2171,12 +2172,21 @@ pub fn event_to_update_field_xml_on(
     let mut set = String::new();
     let mut del = String::new();
 
-    // `None` means "no copy to compare with": then everything is written.
+    // `None` means "no copy to compare with": then everything the edit did not
+    // leave alone is written.
     let changed = before.map(|b| cal_core::event_diff::changed_fields(event, b));
+    // Decision 106: a field the edit left exactly as the editor opened it is
+    // the provider's. Where the provider's value differs from this device's,
+    // that difference is somebody else's change — another device, or an
+    // occurrence's own content under a row that inherited the series' — and
+    // writing the stale copy back would undo it. The host marks these fields
+    // (`Event::keep_fields`); an empty list means nothing is known.
+    let may = |field: EventField| !event.keep_fields.contains(&field);
     let touches = |field: EventField| {
-        changed
-            .as_ref()
-            .is_none_or(|fields| fields.contains(&field))
+        may(field)
+            && changed
+                .as_ref()
+                .is_none_or(|fields| fields.contains(&field))
     };
 
     if touches(EventField::Title) {
@@ -2210,13 +2220,23 @@ pub fn event_to_update_field_xml_on(
             }
         }
     }
+    // Whether the start this update would put on the server is not the one
+    // already there. Without a copy to compare with, it may be.
+    let start_moves = before.is_none_or(|b| b.start != event.start);
     // The slot is ONE fact, written as one group: `ews_all_day_boundary`
     // rewrites both boundaries from `all_day`, and Exchange validates a Start
     // against the End it has stored. Writing one of the three without the
     // others is how a whole update faults, or how a stored instant is silently
     // re-read. Predictable beats minimal.
-    let slot_changed =
-        touches(EventField::Start) || touches(EventField::End) || touches(EventField::AllDay);
+    //
+    // A rule the user changed is built from the edit's start (below), so it
+    // brings the slot along when that start is not the server's — a kept start
+    // another device has since moved. Otherwise the new rule's first day and
+    // the server's start would name different days.
+    let slot_changed = touches(EventField::Start)
+        || touches(EventField::End)
+        || touches(EventField::AllDay)
+        || (touches(EventField::Recurrence) && event.recurrence.is_some() && start_moves);
     if slot_changed {
         // Same all-day boundary pinning as the create path.
         let (wire_start, wire_end) = if event.all_day {
@@ -2293,13 +2313,24 @@ pub fn event_to_update_field_xml_on(
     // compares equal on the text alone and would keep its old StartDate on the
     // server. So the rule is asked twice: as text, which also catches a rule
     // that no longer builds, and as what would go on the wire.
+    //
+    // Who may cause the second: the rule itself when the edit did not leave
+    // it alone; or a slot that moves the server's start, for an event that has
+    // a rule — a kept rule is then rebuilt from the start it now stands on.
+    // A kept rule under a start that stays is left as the server has it, so
+    // another device's COUNT or UNTIL survives. And the slot never deletes a
+    // rule: an edit without one says nothing about the server's.
+    // A missing copy's rule is unknown, not equal: a blind write whose slot
+    // moves writes the edit's rule with it.
     let built_rule = |ev: &Event| {
         ev.recurrence
             .as_ref()
             .map(|rec| rrule_to_ews_recurrence(&rec.rrule, ev.start).ok())
     };
+    let rule_follows_slot = slot_changed && start_moves && event.recurrence.is_some();
     let rule_changed = touches(EventField::Recurrence)
-        || before.is_some_and(|b| built_rule(event) != built_rule(b));
+        || ((may(EventField::Recurrence) || rule_follows_slot)
+            && built_rule(event) != before.and_then(built_rule));
     // Two locks on the rule, on purpose. The diff is one: an exception has no
     // rule on either side, so nothing is emitted. The `target` check below is
     // the other, and it is the one that still holds when there is no `before`.
@@ -2446,7 +2477,18 @@ fn inherited_override_event(
         row.start = ov.start;
         row.end = ov.end;
     }
-    row.etag = ov.change_key.clone();
+    // Its content is the SERIES', so its version must be too. The occurrence's
+    // own key alone would give this row and the row of the occurrence's own
+    // copy the same ETag, though they say different things — and the host
+    // takes an equal ETag as proof that the editor opened this very content
+    // (decision 106). Marked, and naming the master's key, so a flip between
+    // the two, or a change to the series, is never the same version. Nothing
+    // sends a row's ETag to Exchange: a write reads the item first and uses
+    // the key that read returns.
+    row.etag = match (ov.change_key.as_deref(), master_ev.etag.as_deref()) {
+        (Some(own), Some(series)) => Some(format!("inherited:{own}:{series}")),
+        _ => None,
+    };
     row.cancelled = master_ev.cancelled || ov.cancelled;
     row
 }
@@ -4304,6 +4346,7 @@ mod tests {
     fn zoned_master(tzid: Option<&str>) -> Event {
         Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
@@ -5141,6 +5184,7 @@ mod tests {
     fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
         let ev = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
@@ -5411,6 +5455,7 @@ mod tests {
     fn event_to_update_field_xml_deletes_empty_optional_fields() {
         let ev = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "IID|CK".into(),
@@ -5666,6 +5711,7 @@ mod tests {
                 "invitees kept",
                 Event {
                     keep_attendees: true,
+                    keep_fields: Vec::new(),
                     ..base.clone()
                 },
             ),
@@ -5701,32 +5747,53 @@ mod tests {
             ),
         ];
         let server = ServerTimeZones::new(["w. europe standard time"]);
-        for (before_name, before) in &variants {
-            for (edit_name, edit) in &variants {
-                for kind in [
-                    EventIdKind::Single,
-                    EventIdKind::Exception,
-                    EventIdKind::RecurringMaster,
-                ] {
-                    let blocks = |(set, del): (String, String)| -> Vec<String> {
-                        update_blocks(&set)
-                            .into_iter()
-                            .chain(update_blocks(&del))
-                            .collect()
+        // What the host may mark kept (decision 106): nothing, some, all.
+        let keeps: [Vec<EventField>; 5] = [
+            Vec::new(),
+            vec![
+                EventField::Title,
+                EventField::Location,
+                EventField::Reminders,
+            ],
+            vec![EventField::Start, EventField::End, EventField::AllDay],
+            vec![EventField::Recurrence, EventField::Start],
+            EventField::ALL
+                .into_iter()
+                .filter(|f| !matches!(f, EventField::Attendees | EventField::ColorHex))
+                .collect(),
+        ];
+        for keep in &keeps {
+            for (before_name, before) in &variants {
+                for (edit_name, edit) in &variants {
+                    let edit = &Event {
+                        keep_fields: keep.clone(),
+                        ..edit.clone()
                     };
-                    let with = blocks(
-                        event_to_update_field_xml_on(edit, Some(before), Some(&server), kind)
-                            .unwrap(),
-                    );
-                    let without = blocks(
-                        event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
-                    );
-                    for block in with {
-                        assert!(
-                            without.contains(&block),
-                            "{kind:?}, {before_name} -> {edit_name}: written with a before but \
-                             not without one, or with another value:\n{block}",
+                    for kind in [
+                        EventIdKind::Single,
+                        EventIdKind::Exception,
+                        EventIdKind::RecurringMaster,
+                    ] {
+                        let blocks = |(set, del): (String, String)| -> Vec<String> {
+                            update_blocks(&set)
+                                .into_iter()
+                                .chain(update_blocks(&del))
+                                .collect()
+                        };
+                        let with = blocks(
+                            event_to_update_field_xml_on(edit, Some(before), Some(&server), kind)
+                                .unwrap(),
                         );
+                        let without = blocks(
+                            event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
+                        );
+                        for block in with {
+                            assert!(
+                                without.contains(&block),
+                                "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: written \
+                             with a before but not without one, or with another value:\n{block}",
+                            );
+                        }
                     }
                 }
             }
@@ -5899,6 +5966,238 @@ mod tests {
             );
             assert!(set.contains(also), "{rrule}: {set}");
         }
+    }
+
+    /// Every field but the slot, as the host marks an edit that only moved it.
+    fn all_but_the_slot() -> Vec<EventField> {
+        EventField::ALL
+            .into_iter()
+            .filter(|f| {
+                !matches!(
+                    f,
+                    EventField::Start
+                        | EventField::End
+                        | EventField::Attendees
+                        | EventField::ColorHex
+                )
+            })
+            .collect()
+    }
+
+    /// Decision 106, the round-5 remnant. A row that inherited the SERIES'
+    /// content (#88's fallback), moved by the user. What the user did not
+    /// touch is kept, so the occurrence's own title, place and reminder —
+    /// which differ from the row's — are not overwritten with the series'.
+    #[test]
+    fn an_inherited_occurrence_writes_only_what_the_user_moved() {
+        let opened = Event {
+            etag: Some("inherited:ECK:MCK".into()),
+            location: Some("Room 1".into()),
+            ..saved_single("Standup")
+        };
+        let own = Event {
+            title: "Kickoff".into(),
+            location: Some("Room 7".into()),
+            reminders: quarter_hour(),
+            ..opened.clone()
+        };
+        let mut moved = Event {
+            start: opened.start + chrono::Duration::hours(2),
+            end: opened.end + chrono::Duration::hours(2),
+            ..opened.clone()
+        };
+        moved.keep_fields = cal_core::event_diff::kept_fields(&moved, Some(&opened), true);
+
+        let (set, del) =
+            event_to_update_field_xml_on(&moved, Some(&own), None, EventIdKind::Exception).unwrap();
+        assert_eq!(
+            field_uris(&set),
+            ["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"],
+            "{set}"
+        );
+        assert!(del.is_empty(), "{del}");
+
+        // Without the host's proof, the comparison with the server alone writes
+        // the row's stale content back — what #89 did, and still does then.
+        let blind = Event {
+            keep_fields: Vec::new(),
+            ..moved.clone()
+        };
+        let (set, _) =
+            event_to_update_field_xml_on(&blind, Some(&own), None, EventIdKind::Exception).unwrap();
+        assert!(set.contains("<t:Subject>Standup</t:Subject>"), "{set}");
+    }
+
+    /// A zoned weekly series (no BYDAY), which another device has since moved
+    /// from Wednesday to Thursday; this device's copy still says Wednesday.
+    fn series_moved_elsewhere() -> (Event, Event) {
+        let opened = zoned_master(Some("Europe/Berlin"));
+        let server = Event {
+            start: opened.start + chrono::Duration::days(1),
+            end: opened.end + chrono::Duration::days(1),
+            ..opened.clone()
+        };
+        (opened, server)
+    }
+
+    /// A slot that puts a start on the server that is not the server's takes
+    /// the rule along, rebuilt from that start — even a kept rule. Otherwise
+    /// the start says Wednesday and the stored rule's first day Thursday.
+    #[test]
+    fn a_slot_that_moves_the_servers_start_rebuilds_a_kept_rule() {
+        let (opened, server) = series_moved_elsewhere();
+        let mut longer = Event {
+            end: opened.end + chrono::Duration::minutes(30),
+            ..opened.clone()
+        };
+        longer.keep_fields = cal_core::event_diff::kept_fields(&longer, Some(&opened), true);
+        assert!(longer.keep_fields.contains(&EventField::Start));
+        assert!(longer.keep_fields.contains(&EventField::Recurrence));
+
+        let (set, _) = event_to_update_field_xml_on(
+            &longer,
+            Some(&server),
+            None,
+            EventIdKind::RecurringMaster,
+        )
+        .unwrap();
+        assert!(
+            field_uris(&set).contains(&"calendar:Recurrence".to_string()),
+            "{set}"
+        );
+        assert!(
+            set.contains("<t:StartDate>2026-05-20</t:StartDate>"),
+            "{set}"
+        );
+        assert!(
+            set.contains("<t:DaysOfWeek>Wednesday</t:DaysOfWeek>"),
+            "{set}"
+        );
+    }
+
+    /// A kept rule under a start that stays where the server has it is the
+    /// server's: another device's COUNT survives a change to the duration.
+    #[test]
+    fn a_kept_rule_under_a_start_that_stays_is_left_as_the_server_has_it() {
+        let opened = zoned_master(Some("Europe/Berlin"));
+        let server = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;COUNT=5".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            ..opened.clone()
+        };
+        let mut longer = Event {
+            end: opened.end + chrono::Duration::minutes(30),
+            ..opened.clone()
+        };
+        longer.keep_fields = cal_core::event_diff::kept_fields(&longer, Some(&opened), true);
+
+        let (set, _) = event_to_update_field_xml_on(
+            &longer,
+            Some(&server),
+            None,
+            EventIdKind::RecurringMaster,
+        )
+        .unwrap();
+        assert!(
+            !field_uris(&set).contains(&"calendar:Recurrence".to_string()),
+            "{set}"
+        );
+    }
+
+    /// And the other way round: a rule the user changed, built from a kept
+    /// start another device has since moved, brings its slot along.
+    #[test]
+    fn a_changed_rule_on_a_start_the_server_moved_brings_the_slot_along() {
+        let (opened, server) = series_moved_elsewhere();
+        let mut daily = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=DAILY".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            ..opened.clone()
+        };
+        daily.keep_fields = cal_core::event_diff::kept_fields(&daily, Some(&opened), true);
+        assert!(daily.keep_fields.contains(&EventField::Start));
+
+        let (set, _) =
+            event_to_update_field_xml_on(&daily, Some(&server), None, EventIdKind::RecurringMaster)
+                .unwrap();
+        let written = field_uris(&set);
+        for field in ["calendar:Start", "calendar:End", "calendar:Recurrence"] {
+            assert!(written.contains(&field.to_string()), "{field}: {set}");
+        }
+    }
+
+    /// Without a copy to compare with, a moved series still writes its rule —
+    /// a missing copy's rule is unknown, not equal — and a moved single never
+    /// deletes one.
+    #[test]
+    fn a_blind_write_that_moves_a_series_writes_its_rule() {
+        let series = zoned_master(Some("Europe/Berlin"));
+        let moved = Event {
+            start: series.start + chrono::Duration::days(1),
+            end: series.end + chrono::Duration::days(1),
+            keep_fields: all_but_the_slot(),
+            ..series.clone()
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&moved, None, None, EventIdKind::RecurringMaster).unwrap();
+        assert!(
+            set.contains("<t:StartDate>2026-05-21</t:StartDate>"),
+            "{set}"
+        );
+        assert!(del.is_empty(), "{del}");
+
+        let single = Event {
+            keep_fields: all_but_the_slot(),
+            ..saved_single("Standup")
+        };
+        let moved = Event {
+            start: single.start + chrono::Duration::days(1),
+            end: single.end + chrono::Duration::days(1),
+            ..single
+        };
+        let (set, del) =
+            event_to_update_field_xml_on(&moved, None, None, EventIdKind::Single).unwrap();
+        assert_eq!(
+            field_uris(&set),
+            ["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"],
+            "{set}"
+        );
+        assert!(del.is_empty(), "no rule is deleted: {del}");
+    }
+
+    /// An event the user moved but whose rule they never touched — there was
+    /// none when they opened it — does not delete the rule another device has
+    /// since given it.
+    #[test]
+    fn a_moved_event_never_deletes_a_rule_it_did_not_touch() {
+        let opened = Event {
+            etag: Some("v1".into()),
+            ..saved_single("Standup")
+        };
+        let server = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: None,
+            }),
+            ..opened.clone()
+        };
+        let mut moved = Event {
+            start: opened.start + chrono::Duration::days(1),
+            end: opened.end + chrono::Duration::days(1),
+            ..opened.clone()
+        };
+        moved.keep_fields = cal_core::event_diff::kept_fields(&moved, Some(&opened), true);
+
+        let (_, del) =
+            event_to_update_field_xml_on(&moved, Some(&server), None, EventIdKind::Single).unwrap();
+        assert!(!del.contains("calendar:Recurrence"), "{del}");
     }
 
     /// A rule that did not change is neither written nor deleted — and a

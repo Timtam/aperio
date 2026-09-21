@@ -320,7 +320,12 @@ than writing a plugin, this is the checklist.
   `aperio_plugin_set_host_channel`. These are free functions with no instance
   handle; a host that predates one never looks it up, and a plugin that lacks one
   is simply asked to do less.
-- Adding a `#[serde(default)]` field to a JSON payload.
+- Adding a `#[serde(default)]` field to a JSON payload. A field whose values
+  come from a closed set must be decoded leniently: a host newer than the
+  plugin will send values the plugin's build has never seen, and one unknown
+  value must not fail the whole payload. `Event::keep_fields` is the model — a
+  field name the plugin does not know is dropped, so that field is written as
+  it always was.
 - Adding an optional manifest block.
 
 ## Where the authoritative list lives

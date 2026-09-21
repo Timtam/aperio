@@ -902,6 +902,7 @@ mod tests {
     ) -> cal_core::Event {
         cal_core::Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),
@@ -952,6 +953,7 @@ mod tests {
 
         let mk = |id: &str| cal_core::Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: id.into(),
@@ -1240,6 +1242,7 @@ mod tests {
 
         let mut events = vec![cal_core::Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "dav:evt".into(),

@@ -2290,6 +2290,65 @@ mod occurrence_cancellation_tests {
         assert_eq!(occurrence.start, dt("2026-08-20T15:00:00Z"));
     }
 
+    /// The series' content under an occurrence's slot is a different version
+    /// from the occurrence's own copy, although both belong to one occurrence
+    /// key: the host takes an equal ETag as proof that the editor opened this
+    /// very content (decision 106), and a flip between the two must never pass
+    /// for "the same".
+    #[test]
+    fn an_inherited_row_is_never_the_same_version_as_the_occurrences_own() {
+        let own = ParsedItem {
+            item_id: "OCC-MOVED".into(),
+            subject: "Retrospektive".into(),
+            start: Some(dt("2026-08-20T15:00:00Z")),
+            end: Some(dt("2026-08-20T15:30:00Z")),
+            ..Default::default()
+        };
+        let master = |own: Option<ParsedItem>, occurrence_key: Option<&str>| ParsedItem {
+            item_id: "M1".into(),
+            change_key: Some("MCK".into()),
+            subject: "Austausch Frank - Toni".into(),
+            start: Some(dt("2026-07-23T12:00:00Z")),
+            end: Some(dt("2026-07-23T12:30:00Z")),
+            is_recurring: true,
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 14 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            modified_occurrences: vec![ModifiedOccurrence {
+                item_id: "OCC-MOVED".into(),
+                change_key: occurrence_key.map(str::to_string),
+                start: dt("2026-08-20T15:00:00Z"),
+                end: dt("2026-08-20T15:30:00Z"),
+                original_start: dt("2026-08-20T12:00:00Z"),
+                cancelled: false,
+                own: own.map(Box::new),
+            }],
+            ..Default::default()
+        };
+        let range = DateRange {
+            start: dt("2026-08-01T00:00:00Z"),
+            end: dt("2026-09-01T00:00:00Z"),
+        };
+        let etag_of = |item: &ParsedItem| {
+            let mut out = Vec::new();
+            emit_item_events(item, "cal", range, &mut out).unwrap();
+            out.into_iter()
+                .find(|e| e.id.contains("::rid::"))
+                .expect("the occurrence is emitted")
+                .etag
+        };
+        assert_eq!(
+            etag_of(&master(Some(own), Some("CK-OCC"))).as_deref(),
+            Some("CK-OCC")
+        );
+        assert_eq!(
+            etag_of(&master(None, Some("CK-OCC"))).as_deref(),
+            Some("inherited:CK-OCC:MCK")
+        );
+        assert_eq!(etag_of(&master(None, None)), None, "no version is invented");
+    }
+
     #[test]
     fn cancelled_occurrence_override_is_emitted_cancelled() {
         let master = ParsedItem {
@@ -2639,6 +2698,7 @@ mod server_zone_tests {
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
             keep_attendees: false,
+            keep_fields: Vec::new(),
             clear_attendees: false,
             organized_elsewhere: false,
             id: "S:IID|CK".into(),
