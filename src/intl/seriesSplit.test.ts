@@ -419,6 +419,27 @@ describe('occurrenceOfSeries', () => {
   });
 });
 
+describe('occurrenceOfSeries on a series of days', () => {
+  it('opens on the day the slot names, however it was spelled', () => {
+    // Decision 95: another writer may spell the day hours off this device's
+    // local midnight. The occurrence opens on the series' own day, as the
+    // views show it — not a day early west of Greenwich.
+    const localMidnight = (y: number, m: number, d: number) =>
+      new Date(y, m - 1, d).toISOString();
+    const days = {
+      ...weekly,
+      all_day: true,
+      start: localMidnight(2026, 8, 3),
+      end: localMidnight(2026, 8, 4),
+    };
+    const day = new Date(2026, 7, 24).getTime();
+    for (const offsetHours of [-5, 0, 5]) {
+      const spelled = new Date(day + offsetHours * 3_600_000).toISOString();
+      expect(occurrenceOfSeries(days, spelled).start).toBe(localMidnight(2026, 8, 24));
+    }
+  });
+});
+
 describe('readSeriesRows', () => {
   it("asks around the series and the cutoff, and keeps only the series' own rows", async () => {
     const asked: { calendar_id: string; start: string; end: string }[] = [];

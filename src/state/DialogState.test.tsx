@@ -85,6 +85,9 @@ function Probe() {
       <span data-testid="failed">
         {m.kind === 'eventEditScope' && m.seriesLoadFailed ? String(m.seriesLoadFailed) : ''}
       </span>
+      <span data-testid="failed-scope">
+        {m.kind === 'eventEditScope' ? (m.seriesLoadFailedScope ?? '') : ''}
+      </span>
       <button type="button" onClick={() => d.openEventDialog(occurrence)}>
         open-occ
       </button>
@@ -269,13 +272,39 @@ describe('DialogState recurring-edit scope prompt', () => {
     expect(screen.getByTestId('scope').textContent).toBe('this_and_future');
   });
 
-  it('keeps the prompt when that series cannot be loaded', async () => {
+  it('keeps the prompt when that series cannot be loaded, and names the choice that failed', async () => {
     invokeMock.mockResolvedValue(null);
     renderProbe();
     await click('open-override');
     await click('choose-future');
     expect(screen.getByTestId('kind').textContent).toBe('eventEditScope');
     expect(screen.getByTestId('failed').textContent).toBe('1');
+    expect(screen.getByTestId('failed-scope').textContent).toBe('this_and_future');
+  });
+
+  it('opens what was chosen last when the choice changes while the series loads', async () => {
+    const load = pendingLoad();
+    invokeMock.mockReturnValue(load.promise);
+    renderProbe();
+    await click('open-override');
+    await click('choose-future');
+    await click('choose-series');
+    expect(seriesLoads()).toBe(1);
+    await act(async () => {
+      load.answer(series);
+    });
+    expect(screen.getByTestId('event').textContent).toBe('evt-1');
+    expect(screen.getByTestId('scope').textContent).toBe('series');
+  });
+
+  it('opens a series that no longer repeats as itself, not at a slot it no longer has', async () => {
+    invokeMock.mockResolvedValue({ ...series, recurrence: null });
+    renderProbe();
+    await click('open-override');
+    await click('choose-future');
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    expect(screen.getByTestId('event').textContent).toBe('evt-1');
+    expect(screen.getByTestId('scope').textContent).toBe('none');
   });
 
   it('"this and all following" on an ordinary occurrence opens it as it is', async () => {

@@ -57,6 +57,7 @@ export function DialogHost() {
           onThisAndFuture={() => chooseEventEditScope('this_and_future')}
           onSeries={() => chooseEventEditScope('series')}
           seriesLoadFailed={mode.seriesLoadFailed}
+          seriesLoadFailedScope={mode.seriesLoadFailedScope}
         />
       );
     case 'task':

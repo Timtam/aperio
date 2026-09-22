@@ -84,6 +84,9 @@ export type DialogMode =
       /** How often loading the whole series failed. Each failure counts, so
        *  the prompt announces a failed retry again. */
       seriesLoadFailed?: number;
+      /** The choice whose load failed — the button focus stays on, which the
+       *  failure then describes. */
+      seriesLoadFailedScope?: EventEditScope;
     }
   | {
       kind: 'task';
@@ -244,9 +247,11 @@ export interface DialogStateValue {
   ) => void;
   /** Resolve the recurring-edit scope prompt: swap the top `eventEditScope`
    *  frame for the event editor locked to `scope` (keeps the opener's
-   *  focus-return). The whole series opens the loaded series itself; when it
-   *  cannot be loaded the prompt stays, marked `seriesLoadFailed`. No-op if the
-   *  top frame isn't the scope prompt. */
+   *  focus-return). The whole series opens the loaded series itself, and so
+   *  does "this and all following" on a provider-kept occurrence, at its slot
+   *  (126); when the series cannot be loaded the prompt stays, marked
+   *  `seriesLoadFailed` for the choice that failed. No-op if the top frame
+   *  isn't the scope prompt. */
   chooseEventEditScope: (scope: EventEditScope) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
@@ -494,6 +499,9 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   // two loads could land in either order, and a failure landing first
   // replaced the prompt the success was meant for.
   const seriesLoadingFor = useRef<DialogMode | null>(null);
+  // The choice made last for that prompt. A second press while the series
+  // loads changes what opens when it lands: the user changed their mind.
+  const seriesLoadScope = useRef<EventEditScope>('series');
   const chooseEventEditScope = useCallback((scope: EventEditScope) => {
     const prompt = stackRef.current[stackRef.current.length - 1];
     if (!prompt || prompt.kind !== 'eventEditScope') return;
@@ -521,6 +529,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // describe the series: saved as the series, they moved its start to that
     // occurrence and the earlier occurrences disappeared. When the series
     // cannot be loaded the prompt stays and says so.
+    seriesLoadScope.current = scope;
     if (seriesLoadingFor.current === prompt) return;
     seriesLoadingFor.current = prompt;
     void getEventById(seriesIdOf(event), event.calendar_id)
@@ -528,18 +537,28 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       .then((series) => {
         // Only its own: a load for a prompt that was dismissed meanwhile must
         // not unblock the prompt that replaced it.
-        if (seriesLoadingFor.current === prompt) seriesLoadingFor.current = null;
-        // The scope rides along, so the editor can name the choice.
+        const own = seriesLoadingFor.current === prompt;
+        if (own) seriesLoadingFor.current = null;
+        const chosen = own ? seriesLoadScope.current : scope;
+        // The scope rides along, so the editor can name the choice. A series
+        // that no longer repeats has no slot to open at and nothing to split:
+        // it opens as itself, a plain event.
         swap(
           series == null
-            ? { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 }
-            : scope === 'series' || !slot
+            ? {
+                ...prompt,
+                seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1,
+                seriesLoadFailedScope: chosen,
+              }
+            : chosen === 'series' || !slot
               ? { kind: 'event', event: series, initialScope: 'series' }
-              : {
-                  kind: 'event',
-                  event: occurrenceOfSeries(series, slot),
-                  initialScope: 'this_and_future',
-                },
+              : !series.recurrence?.rrule
+                ? { kind: 'event', event: series }
+                : {
+                    kind: 'event',
+                    event: occurrenceOfSeries(series, slot),
+                    initialScope: 'this_and_future',
+                  },
         );
       });
   }, []);

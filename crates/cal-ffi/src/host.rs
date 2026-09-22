@@ -247,6 +247,13 @@ fn show_cancelled_events(db: &SharedConn) -> bool {
         != Some("false")
 }
 
+/// What the show-cancelled toggle hides: whole cancelled events, never a
+/// cancelled `{series}::rid::{slot}` row. That one is a deleted occurrence —
+/// the expansion needs it to hide its slot, and never shows it.
+fn hide_cancelled_events(events: &mut Vec<Event>) {
+    events.retain(|e| !e.cancelled || e.id.contains(cal_core::OVERRIDE_ID_MARKER));
+}
+
 /// Parse a wire `AttendeeStatus` (kebab-case: "accepted" / "tentative" /
 /// "declined" / "needs-action") into the core enum, via its serde rename so the
 /// mapping never drifts from the type.
@@ -3123,8 +3130,16 @@ impl Host {
                 // default-on) show-cancelled setting. Only external providers
                 // surface cancelled rows; reminders for them are suppressed
                 // separately, core-side, regardless of this toggle.
+                //
+                // A cancelled `{series}::rid::{slot}` row is not a cancelled
+                // EVENT but a deleted occurrence (Google keeps one that way,
+                // with no exception on the series): `expandAll` uses it to
+                // hide its slot and never shows it, and the series plan reads
+                // it (decision 125). Dropped here, the phone showed the deleted
+                // occurrence again and planned a cut where the desktop, which
+                // filters only after expansion, planned the whole series.
                 if !show_cancelled_events(&self.db.shared()) {
-                    events.retain(|e| !e.cancelled);
+                    hide_cancelled_events(&mut events);
                 }
                 to_json(&events)
             }
@@ -10416,6 +10431,55 @@ mod tests {
         let reread: serde_json::Value =
             serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
         assert_eq!(reread["title"], "Renamed");
+    }
+
+    /// The toggle hides whole cancelled events, and keeps a deleted
+    /// occurrence's row: without it the phone showed the occurrence again and
+    /// planned a cut where the desktop planned the whole series (125).
+    #[test]
+    fn hiding_cancelled_events_keeps_deleted_occurrence_rows() {
+        let row = |id: &str, cancelled: bool| {
+            let at = chrono::DateTime::parse_from_rfc3339("2026-08-03T08:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            Event {
+                keep_attendees: false,
+                keep_fields: Vec::new(),
+                clear_attendees: false,
+                organized_elsewhere: false,
+                id: id.to_string(),
+                calendar_id: "cal".into(),
+                title: "Standup".into(),
+                description: None,
+                location: None,
+                start: at,
+                end: at,
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                color_hex: None,
+                reminders: Vec::new(),
+                sound: None,
+                attendees: Vec::new(),
+                send_invitations: false,
+                truncate_tail_overrides: false,
+                created_at: at,
+                updated_at: at,
+                etag: None,
+                organizer: None,
+                attendee_responses: Vec::new(),
+                cancelled,
+                scheduling_silenced: false,
+            }
+        };
+        let mut events = vec![
+            row("whole-cancelled", true),
+            row("series-1::rid::2026-08-03T08:00:00Z", true),
+            row("plain", false),
+        ];
+        hide_cancelled_events(&mut events);
+        let ids: Vec<&str> = events.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["series-1::rid::2026-08-03T08:00:00Z", "plain"]);
     }
 
     #[test]

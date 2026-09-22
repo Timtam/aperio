@@ -997,7 +997,25 @@ export function occurrenceOfSeries<E extends RecurringEventLike>(
   master: E,
   slotIso: string,
 ): ExpandedOccurrence<E> {
-  const slot = new Date(slotIso);
+  // A series of days names its slot as a DAY, and another writer may have
+  // spelled that day hours off this device's local midnight (decision 95): it
+  // opens on the series' own occurrence that day names, as the views show it.
+  // With none that close, the slot stays as written — nothing is guessed.
+  let at = new Date(slotIso).getTime();
+  if (master.all_day === true && master.recurrence?.rrule && Number.isFinite(at)) {
+    const named = expandEvent(
+      { ...master, recurrence: { ...master.recurrence, exceptions: [] } },
+      { start: new Date(at - SAME_DAY_MS), end: new Date(at + SAME_DAY_MS) },
+    ).find(
+      (occ) =>
+        isExpandedOccurrence(occ) &&
+        namesTheSameDay(at, new Date(occ.occurrence_start).getTime()),
+    );
+    if (named && isExpandedOccurrence(named)) {
+      at = new Date(named.occurrence_start).getTime();
+    }
+  }
+  const slot = new Date(at);
   // A length that cannot be read is none: the occurrence still opens, where
   // an invalid instant would throw inside the load that opens it.
   const length = new Date(master.end).getTime() - new Date(master.start).getTime();

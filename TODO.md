@@ -2352,6 +2352,23 @@ Siehe DESIGN §4.2.
     als Serie an ihrer Stelle (126): Das Wiederholungsfeld zeigte „wiederholt
     sich nicht“, und ihr Titel landete auf der ganzen Serie.
     Offen: Handy ohne Testläufer — ↻ im Test.
+  - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
+    älter als #94):
+    - Die neue Serie bekommt nur die Ausnahmen des Masters. Bei Google ist ein
+      gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
+      ein abgesagtes RECURRENCE-ID: beim Teilen kommt es in der neuen Serie
+      zurück, mit Einladung. Die Zeilen hat die Planung jetzt; der Lesebereich
+      müsste bis zum Serienende reichen, und Google verwirft UTC-EXDATEs auf
+      Serien mit Zone.
+    - Exchange mischt gelöschte und geänderte Vorkommen in den Ausnahmen:
+      EWS schreibt beim Anlegen gar keine, ein anderer Kalender schreibt alle
+      (dann fehlt ein geändertes Vorkommen in beiden Hälften).
+    - Das Mitziehen schneidet eine Exchange-Kopie ein Vorkommen zu spät, wenn
+      ihr Vorkommen am Schnitttag in Outlook geändert wurde
+      (`firstOccurrenceFrom` liest die Zeilen nicht).
+    - `readSeriesRows` stößt bei langen Google-Serien ein volles Nachladen an,
+      das die folgende Schreibaktion gleich verwirft (nur Netz, Ergebnis
+      stimmt): ein `warm: false` an `get_events` auf beiden Hosts.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
