@@ -3550,12 +3550,9 @@ impl Host {
             self.forget_event_grouping(cid, &id);
             // A private reminder cannot go on naming an appointment that is
             // gone — and an orphan is not inert: the scan's repair would
-            // re-point it at the one event sharing its title and start.
-            if let Err(err) = host_core::event_reminders::EventRemindersRepo::new(&self.db.shared())
-                .forget_event(cid, &id)
-            {
-                tracing::warn!(event_id = %id, ?err, "couldn't drop the event's private reminders");
-            }
+            // re-point it at the one event sharing its title and start. On
+            // every device, so the retirement travels.
+            self.forget_event_local_reminders(cid, &id);
             self.invalidate_events_cache(cid);
         }
         Ok(())
@@ -8855,6 +8852,44 @@ impl Host {
         }
     }
 
+    /// Retire a deleted event's PRIVATE reminders, and tell the other
+    /// devices. Mirrors the desktop `forget_event_local_reminders`.
+    ///
+    /// Emptied and unsigned (`EventRemindersRepo::forget_event`): dropped only
+    /// here, the row lived on every other device, where the scan's repair
+    /// could re-point it at another appointment with the same title and start.
+    /// Best-effort, like `forget_event_grouping`: the event IS deleted by the
+    /// time this runs.
+    fn forget_event_local_reminders(&self, calendar_id: &str, event_id: &str) {
+        let shared = self.db.shared();
+        let now = chrono::Utc::now().to_rfc3339();
+        match host_core::event_reminders::EventRemindersRepo::new(&shared).forget_event(
+            calendar_id,
+            event_id,
+            &now,
+        ) {
+            Ok(Some(row)) => {
+                if let Ok(fields) = serde_json::to_value(&row) {
+                    self.writer
+                        .append(sync_core::SyncEvent::EventLocalRemindersSet(
+                            sync_core::EventPayload {
+                                id: format!("{} {}", row.calendar_id, row.event_id),
+                                fields,
+                            },
+                        ));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(
+                    event_id,
+                    ?err,
+                    "couldn't retire the deleted event's private reminders"
+                )
+            }
+        }
+    }
+
     fn relocate_event_grouping(
         &self,
         old_calendar_id: &str,
@@ -10662,6 +10697,79 @@ mod tests {
             1,
             "the event must appear exactly once after a repeat round",
         );
+    }
+
+    /// A delete on one device retires the event's private reminders on the
+    /// other too. Dropped only where it happened, the row lived on over
+    /// there, signed, for that device's scan to re-point at another
+    /// appointment with the same title and start.
+    #[test]
+    fn a_deleted_event_retires_its_private_reminders_on_every_device() {
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host_a
+            .create_event_json(new_event_json(&cal, "Zahnarzt"))
+            .unwrap();
+        let event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let event_id = event["id"].as_str().unwrap().to_string();
+        host_a
+            .set_event_local_reminders_json(
+                cal.clone(),
+                event_id.clone(),
+                r#"[{"kind":{"type":"relative","minutes_before":60},"sound":null}]"#.to_string(),
+                "Zahnarzt".to_string(),
+                event["start"].as_str().unwrap().to_string(),
+            )
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
+
+        let row_on_b = |host: &Host| -> serde_json::Value {
+            let rows: serde_json::Value =
+                serde_json::from_str(&host.event_local_reminders_json().unwrap()).unwrap();
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|r| {
+                    r["calendar_id"] == serde_json::json!(cal)
+                        && r["event_id"] == serde_json::json!(event_id)
+                })
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        };
+        assert_eq!(
+            row_on_b(&host_b)["title"],
+            "Zahnarzt",
+            "B holds the list first"
+        );
+
+        host_a
+            .delete_event(event_id.clone(), Some(cal.clone()), None)
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
+
+        let retired = row_on_b(&host_b);
+        assert_eq!(retired["reminders"], serde_json::json!([]), "{retired}");
+        assert_eq!(retired["title"], "", "{retired}");
+        assert_eq!(retired["starts_at"], "", "{retired}");
     }
 
     #[test]

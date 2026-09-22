@@ -1995,7 +1995,8 @@ mod tests {
         ];
         heal_local_reminders_for_calendar(&db, "cal", &both, scan_window());
         // The user deletes the event; the twin stays.
-        repo.forget_event("cal", "S:item|ck2").unwrap();
+        repo.forget_event("cal", "S:item|ck2", "2026-06-02T10:00:00Z")
+            .unwrap();
         let twin_alone = vec![event_named("twin", "cal", "Jour fixe", start)];
         let moved = heal_local_reminders_for_calendar(&db, "cal", &twin_alone, scan_window());
 

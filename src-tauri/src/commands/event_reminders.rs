@@ -161,3 +161,39 @@ pub(crate) fn relocate_event_local_reminders(
         Err(err) => tracing::warn!(?err, "couldn't carry the private reminders across the move",),
     }
 }
+
+/// Retire a deleted event's PRIVATE reminders, and tell the other devices.
+///
+/// Emptied and unsigned (`EventRemindersRepo::forget_event`): dropped only
+/// here, the row lived on every other device, where the scan's repair could
+/// re-point it at another appointment with the same title and start.
+///
+/// Best-effort, like the grouping cleanup beside it: the event IS deleted by
+/// the time this runs, and failing the call over the bookkeeping would report
+/// a delete that happened as a failure.
+pub(crate) fn forget_event_local_reminders(
+    db: &DbHandle,
+    event_log: &EventLogWriter,
+    calendar_id: &str,
+    event_id: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    match EventRemindersRepo::new(&db.shared()).forget_event(calendar_id, event_id, &now) {
+        Ok(Some(row)) => {
+            if let Ok(fields) = serde_json::to_value(&row) {
+                event_log.append(SyncEvent::EventLocalRemindersSet(EventPayload {
+                    id: format!("{} {}", row.calendar_id, row.event_id),
+                    fields,
+                }));
+            }
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(
+                event_id,
+                ?err,
+                "couldn't retire the deleted event's private reminders"
+            )
+        }
+    }
+}

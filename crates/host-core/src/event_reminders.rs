@@ -325,21 +325,39 @@ impl<'a> EventRemindersRepo<'a> {
         self.set(calendar_id, event_id, &[], "", "", updated_at)
     }
 
-    /// Drop the row of an event that is gone.
+    /// Retire the row of an event that was deleted, for the caller to emit.
     ///
     /// An orphan here is not inert, unlike a leftover colour override: the
     /// repair in the reminder scan repoints a row whose id it cannot find onto
     /// the one event of that calendar sharing its title and start. A row left
     /// behind by a delete could therefore start ringing on a DIFFERENT
-    /// appointment — a copy of a deleted meeting, say. So the row goes with
-    /// its event.
-    pub fn forget_event(&self, calendar_id: &str, event_id: &str) -> Result<()> {
-        let conn = self.db.lock().expect("db mutex poisoned");
-        conn.execute(
-            "DELETE FROM event_local_reminders WHERE calendar_id = ? AND event_id = ?",
-            params![calendar_id, event_id],
-        )?;
-        Ok(())
+    /// appointment — a copy of a deleted meeting, say. Dropping it here did
+    /// not reach the other devices: each kept the row, signed, for its own
+    /// scan to repair. So it is retired ([`Self::retire`]) and the caller
+    /// emits it — the later write on every device that holds this key, and
+    /// never repaired.
+    ///
+    /// Only THIS key. An Exchange id changes with every edit, made anywhere,
+    /// and each device's scan moves its row to the new id silently; a device
+    /// that still holds the event under an older id keeps that row, signed.
+    /// Retiring by signature instead would hit a twin's own row just as well.
+    /// See TODO.md, 119.
+    ///
+    /// Returns the row to emit, or `None` when the event had none, or only a
+    /// retired one: that has already been said.
+    pub fn forget_event(
+        &self,
+        calendar_id: &str,
+        event_id: &str,
+        updated_at: &str,
+    ) -> Result<Option<EventLocalReminders>> {
+        match self.get(calendar_id, event_id)? {
+            None => Ok(None),
+            Some(row) if row.is_empty() && row.title.is_empty() && row.starts_at.is_empty() => {
+                Ok(None)
+            }
+            Some(_) => self.retire(calendar_id, event_id, updated_at).map(Some),
+        }
     }
 
     /// Drop the rows of a calendar that is gone. Called when a calendar is
@@ -540,19 +558,76 @@ mod tests {
         assert!(!repo.heal("cal", "nothing", "new").unwrap());
     }
 
-    /// A deleted event takes its row with it — an orphan is not inert here,
-    /// the scan's repair could re-point it at a different appointment.
+    /// A deleted event's row is retired, not dropped: emptied, so it wins over
+    /// a peer's copy, and unsigned, so no scan anywhere re-points it at a
+    /// different appointment.
     #[test]
-    fn a_deleted_event_takes_its_row_with_it() {
+    fn a_deleted_event_retires_its_row() {
         let db = db();
         let repo = EventRemindersRepo::new(&db);
         repo.set("cal", "gone", &[rel(60)], "T", "S", "2026-06-01T10:00:00Z")
             .unwrap();
         repo.set("cal", "kept", &[rel(60)], "T", "S", "2026-06-01T10:00:00Z")
             .unwrap();
-        repo.forget_event("cal", "gone").unwrap();
-        assert!(repo.get("cal", "gone").unwrap().is_none());
-        assert!(repo.get("cal", "kept").unwrap().is_some());
+        let retired = repo
+            .forget_event("cal", "gone", "2026-06-02T10:00:00Z")
+            .unwrap()
+            .expect("a row to emit");
+        assert!(retired.is_empty());
+        assert_eq!(
+            (retired.title.as_str(), retired.starts_at.as_str()),
+            ("", "")
+        );
+        assert_eq!(retired.updated_at, "2026-06-02T10:00:00Z");
+        assert_eq!(repo.get("cal", "gone").unwrap(), Some(retired));
+        assert_eq!(
+            repo.get("cal", "kept").unwrap().unwrap().reminders,
+            vec![rel(60)]
+        );
+    }
+
+    /// Nothing to say, nothing written: a delete of an event without private
+    /// reminders — most of them — leaves no row behind, and a key already
+    /// retired is not retired again.
+    #[test]
+    fn forgetting_an_event_without_a_live_row_writes_nothing() {
+        let db = db();
+        let repo = EventRemindersRepo::new(&db);
+        assert_eq!(
+            repo.forget_event("cal", "never", "2026-06-02T10:00:00Z")
+                .unwrap(),
+            None
+        );
+        assert!(repo.get("cal", "never").unwrap().is_none());
+
+        repo.retire("cal", "moved", "2026-06-01T10:00:00Z").unwrap();
+        assert_eq!(
+            repo.forget_event("cal", "moved", "2026-06-02T10:00:00Z")
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            repo.get("cal", "moved").unwrap().unwrap().updated_at,
+            "2026-06-01T10:00:00Z"
+        );
+    }
+
+    /// A list the user emptied is still a live decision about the event: its
+    /// delete retires it like any other.
+    #[test]
+    fn a_deleted_event_retires_an_emptied_list_too() {
+        let db = db();
+        let repo = EventRemindersRepo::new(&db);
+        repo.set("cal", "ev", &[], "T", "S", "2026-06-01T10:00:00Z")
+            .unwrap();
+        let retired = repo
+            .forget_event("cal", "ev", "2026-06-02T10:00:00Z")
+            .unwrap()
+            .expect("an emptied list is signed, so it is retired");
+        assert_eq!(
+            (retired.title.as_str(), retired.starts_at.as_str()),
+            ("", "")
+        );
     }
 
     #[test]
