@@ -39,6 +39,14 @@ and, if you like, create local calendars.
 
 > **Vikunja / Todoist:** Create the API token in the developer or
 > integration settings of the respective service and paste it here.
+>
+> For Vikunja, give the token **full access**. Vikunja 2.4 added permissions
+> of its own for its newer interface, among them **users search** under
+> *Projects*, which Aperio needs to list the people a task can be assigned
+> to. Vikunja never adds a new permission to an existing token, so a token
+> made before your server ran 2.4 lacks it, even with everything ticked back
+> then. Aperio then says so in the task editor's *Assigned to* field. Create
+> a new token and enter it in the account's settings.
 
 ## Creating a local calendar
 

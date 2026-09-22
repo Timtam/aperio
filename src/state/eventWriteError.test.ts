@@ -18,6 +18,26 @@ const t = (key: string, values?: Record<string, unknown>): string =>
 /** An error as the desktop host hands it over. */
 const command = (code: string, message: string) => ({ code, message });
 
+describe("a refusal on the phone, behind Expo's wrapper", () => {
+  it('is found after the cause marker, on Android and on iOS', () => {
+    const android = {
+      code: 'forbidden',
+      message:
+        "Call to function 'CalFfi.updateEventJson' has been rejected.\n\u2192 Caused by: reply-only-invitation: title",
+    };
+    const ios = new Error(
+      "Calling the 'updateEventJson' function has failed\n\u2192 Caused by: reply-only-invitation: title",
+    );
+    for (const err of [android, ios]) {
+      expect(eventWriteRefusal(err)).toEqual({
+        refusal: 'reply-only-invitation',
+        key: 'dialogs.event.writeError.replyOnly',
+        detail: 'title',
+      });
+    }
+  });
+});
+
 describe('eventWriteErrorMessage', () => {
   it('says in words that only the organizer may change a meeting', () => {
     const message = eventWriteErrorMessage(

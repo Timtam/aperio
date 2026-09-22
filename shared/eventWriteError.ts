@@ -22,12 +22,13 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
 
 /** An error as the hosts hand it over: a code and a message. */
-interface CodedError {
+export interface CodedError {
   code: string;
   message: string;
 }
 
-function coded(err: unknown): CodedError | null {
+/** The code and message a host error carries, or `null` for any other error. */
+export function codedError(err: unknown): CodedError | null {
   if (typeof err !== 'object' || err === null) return null;
   const candidate = err as { code?: unknown; message?: unknown };
   return typeof candidate.code === 'string' && typeof candidate.message === 'string'
@@ -35,11 +36,24 @@ function coded(err: unknown): CodedError | null {
     : null;
 }
 
-function messageOf(err: unknown): string {
-  const known = coded(err);
-  if (known) return known.message;
-  if (err instanceof Error) return err.message;
-  return String(err);
+/** What Expo puts before the error a native module threw. */
+const EXPO_CAUSE = '\u2192 Caused by: ';
+
+/**
+ * The text of any error, as a host, an `Error` or a bare value carries it.
+ *
+ * On the phone, Expo wraps whatever a native module threw in a sentence of its
+ * own — "Call to function 'CalFfi.…' has been rejected." on Android, "Calling
+ * the '…' function has failed" on iOS — followed by `→ Caused by: ` and the
+ * module's own message. Only that last part is the host's: a refusal token
+ * starts it, and read with the wrapper in front, no refusal was ever found on
+ * the phone and a blind user heard Expo's English instead.
+ */
+export function errorMessageText(err: unknown): string {
+  const known = codedError(err);
+  const raw = known ? known.message : err instanceof Error ? err.message : String(err);
+  const cause = raw.lastIndexOf(EXPO_CAUSE);
+  return cause === -1 ? raw : raw.slice(cause + EXPO_CAUSE.length);
 }
 
 /**
@@ -52,7 +66,7 @@ function messageOf(err: unknown): string {
 export function eventWriteRefusal(
   err: unknown,
 ): { refusal: WriteRefusal; key: string; detail: string } | null {
-  const message = messageOf(err).trim();
+  const message = errorMessageText(err).trim();
   for (const refusal of TOKENS) {
     if (!message.startsWith(refusal)) continue;
     const rest = message.slice(refusal.length);
@@ -79,15 +93,15 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   if (refusal) {
     return t(refusal.key, { detail: refusal.detail });
   }
-  const known = coded(err);
+  const known = codedError(err);
   if (known?.code === 'forbidden') {
-    return t('dialogs.event.writeError.forbidden', { detail: known.message });
+    return t('dialogs.event.writeError.forbidden', { detail: errorMessageText(err) });
   }
   if (known?.code === 'conflict') {
     return t('dialogs.event.writeError.changedOnServer');
   }
-  if (known) return `${known.code}: ${known.message}`;
+  if (known) return `${known.code}: ${errorMessageText(err)}`;
   // A plain Error reads as "Error: …" when stringified; the prefix says
   // nothing to a reader.
-  return messageOf(err).replace(/^Error:\s*/, '');
+  return errorMessageText(err).replace(/^Error:\s*/, '');
 }

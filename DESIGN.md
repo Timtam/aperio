@@ -1858,7 +1858,7 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 
 | Provider | Zuweisen an andere | Feld / Endpoint | Pool (zuweisbar) | Mehrere? |
 |---|---|---|---|---|
-| **Vikunja** | ✅ Ja | `…/tasks/{id}/assignees` (PUT / `bulk` / DELETE / GET), Schlüssel `user_id` | `GET /projects/{id}/projectusers?s=` | Ja |
+| **Vikunja** | ✅ Ja | `…/tasks/{id}/assignees` (PUT / `bulk` / DELETE / GET), Schlüssel `user_id` | v1 `GET /projects/{id}/projectusers?s=`, v2 `GET /projects/{id}/users/search?q=` (Token-Recht „users search“ unter Projects, 130) | Ja |
 | **Todoist** | ✅ Begrenzt | `assignee_id` (nur geteilte Projekte) | `GET /projects/{id}/collaborators` | **Nein, nur 1** |
 | **MS To Do** | ❌ Nein | — (Graph-`todoTask` hat kein Zuweisungsfeld) | — | — |
 | **MS Planner** | ✅ Ja (eigener Adapter) | `assignments` (AAD-GUID), Scope `Tasks.ReadWrite` — **kein** Admin-Consent | `GET /groups/{id}/members` (Group-Scope, Admin-Consent) | Ja |

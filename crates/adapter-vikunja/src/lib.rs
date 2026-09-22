@@ -311,5 +311,6 @@ fn to_core_error(err: VikunjaError) -> CoreError {
         },
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
+        Refused(m) => CoreError::Forbidden(m),
     }
 }

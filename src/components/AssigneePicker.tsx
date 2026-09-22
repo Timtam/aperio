@@ -33,6 +33,7 @@ export function AssigneePicker({
   currentUserId,
   mode = 'multiple',
   onChange,
+  labelledBy,
 }: {
   members: TaskUser[];
   value: TaskUser[];
@@ -41,6 +42,9 @@ export function AssigneePicker({
    *  render the picker at all then. */
   mode?: TaskAssignment;
   onChange: (next: TaskUser[]) => void;
+  /** The id of the field's label, so each select says which field it is
+   *  ("Assigned to") and not only its first option. */
+  labelledBy?: string;
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -98,6 +102,7 @@ export function AssigneePicker({
       <div className="assignee-picker" ref={rootRef} tabIndex={-1}>
         <select
           className="assignee-picker__single"
+          aria-labelledby={labelledBy}
           value={value[0]?.id ?? ''}
           onChange={(e) => {
             const picked = members.find((m) => m.id === e.target.value);
@@ -143,6 +148,7 @@ export function AssigneePicker({
         <select
           ref={selectRef}
           className="assignee-picker__add"
+          aria-labelledby={labelledBy}
           value=""
           onChange={(e) => {
             if (e.target.value) add(e.target.value);

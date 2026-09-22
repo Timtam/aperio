@@ -6675,7 +6675,9 @@ impl Host {
     /// as a JSON `TaskUser[]`. Empty for local lists / providers without
     /// sharing. Mirrors the desktop `task_list_members`.
     pub fn task_list_members_json(&self, list_id: String) -> Result<String, StoreError> {
-        let members = match self.route_task_list(&list_id).ok().flatten() {
+        // An unroutable list is an error, as on the desktop: an empty list
+        // would make the editor say nobody can be assigned (decision 130).
+        let members = match self.route_task_list(&list_id)? {
             None => Vec::new(),
             Some(ext) => self
                 .runtime

@@ -643,9 +643,10 @@ pub async fn get_sections(
 /// The users who can be ASSIGNED a task in `list_id` — the list's
 /// collaborator pool (DESIGN §9.7), feeding the assignee picker. Local
 /// lists have no members (returns empty); external lists hit the
-/// provider adapter (Vikunja `projectusers`, …). A non-routable or
-/// member-less backend yields an empty list, so the UI just shows no
-/// candidates rather than an error.
+/// provider adapter (Vikunja `users/search`, …), whose failure is passed
+/// on. A list no account routes is an error too, like `list_sections`:
+/// an empty list would make the editor say nobody can be assigned
+/// (decision 130), which the host does not know.
 #[tauri::command]
 pub async fn task_list_members(
     registry: State<'_, Arc<AdapterRegistry>>,
@@ -658,7 +659,10 @@ pub async fn task_list_members(
         return Ok(Vec::new());
     }
     let Some(ext) = registry.task_adapter(&account) else {
-        return Ok(Vec::new());
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("task list '{list_id}' is not routable"),
+        });
     };
     Ok(ext.list_task_list_members(&list_id).await?)
 }

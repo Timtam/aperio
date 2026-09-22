@@ -1678,7 +1678,13 @@
         "added": "{{name}} hinzugefügt",
         "removed": "{{name}} entfernt",
         "remove": "{{name}} entfernen",
-        "you": "{{name}} (ich)"
+        "you": "{{name}} (ich)",
+        "loading": "Die Personen dieser Liste werden geladen …",
+        "empty": "Auf dieser Liste gibt es niemanden zum Zuweisen.",
+        "loadFailed": "Die Personen dieser Liste konnten nicht geladen werden: {{detail}}",
+        "tokenRefused": "Die Personen dieser Liste konnten nicht geladen werden: Der Server hat den API-Token des Kontos abgelehnt. Entweder fehlt ihm das Recht „{{permission}}“, oder er ist nicht mehr gültig. Lege einen neuen Token an, am einfachsten mit vollem Zugriff, und trage ihn in den Einstellungen beim Konto ein.",
+        "loaded": "Die Personen dieser Liste sind geladen.",
+        "retry": "Erneut versuchen"
       },
       "delete": "Löschen",
       "created": "Aufgabe „{{title}}\" wurde angelegt.",

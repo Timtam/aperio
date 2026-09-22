@@ -24,6 +24,7 @@ export * from './birthdays';
 export * from './contactName';
 export * from './taskCascade';
 export * from './taskAssignment';
+export * from './assigneePool';
 export * from './dayStart';
 export * from './taskSettings';
 export * from './seriesShift';
