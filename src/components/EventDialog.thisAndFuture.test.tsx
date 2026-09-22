@@ -184,9 +184,14 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
 
+    // The time field is read on this machine's clock: the series' own day at
+    // 10:30 there, and the excluded Monday moved by as much.
     const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
-    expect(sent.start).toBe('2026-06-15T08:30:00.000Z');
-    expect(sent.recurrence?.exceptions).toEqual(['2026-07-13T08:30:00.000Z']);
+    expect(sent.start).toBe(new Date(2026, 5, 15, 10, 30).toISOString());
+    const moved = Date.parse(sent.start) - Date.parse(SERIES.start);
+    expect(sent.recurrence?.exceptions).toEqual([
+      new Date(Date.parse('2026-07-13T07:00:00.000Z') + moved).toISOString(),
+    ]);
   });
 
   it('deletes the whole series, and says why', async () => {
@@ -238,8 +243,13 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     save();
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
 
+    // Read on this machine's clock, as the field is.
     const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
-    expect(tail.start).toBe('2026-07-06T08:30:00.000Z');
-    expect(tail.recurrence?.exceptions).toEqual(['2026-07-13T08:30:00.000Z']);
+    expect(tail.start).toBe(new Date(2026, 6, 6, 10, 30).toISOString());
+    const moved = Date.parse(tail.start) - Date.parse(JULY.start);
+    expect(moved).not.toBe(0);
+    expect(tail.recurrence?.exceptions).toEqual([
+      new Date(Date.parse('2026-07-13T07:00:00.000Z') + moved).toISOString(),
+    ]);
   });
 });
