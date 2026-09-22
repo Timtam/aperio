@@ -12,10 +12,11 @@ import type { CalendarEvent } from '../api/types';
  */
 
 const { invokeMock, onFile } = vi.hoisted(() => {
-  const onFile: { master: unknown } = { master: null };
+  const onFile: { master: unknown; rows: unknown[] } = { master: null, rows: [] };
   const invokeMock = vi.fn((command: string, _payload?: unknown) => {
     void _payload;
     if (command === 'get_event_by_id') return Promise.resolve(onFile.master);
+    if (command === 'get_events') return Promise.resolve(onFile.rows);
     if (command === 'update_event') return Promise.resolve(onFile.master);
     return Promise.resolve(null);
   });
@@ -54,6 +55,7 @@ const calls = (command: string) => invokeMock.mock.calls.filter((call) => call[0
 afterEach(() => {
   invokeMock.mockClear();
   onFile.master = null;
+  onFile.rows = [];
 });
 
 describe('deleteThisAndFuture', () => {
@@ -80,6 +82,43 @@ describe('deleteThisAndFuture', () => {
     expect(sent.id).toBe('series-1');
     expect(sent.recurrence?.rrule).toBe('FREQ=WEEKLY;UNTIL=20260824T085959Z');
     expect(sent.truncate_tail_overrides).toBe(true);
+  });
+
+  it('keeps the head when an earlier occurrence was changed elsewhere, not deleted', async () => {
+    // Exchange lists the slot of an occurrence changed in Outlook among the
+    // master's exceptions and shows it as a row of its own. Deleting "this and
+    // all following" at the next one must not delete that one too (125).
+    onFile.master = {
+      ...MASTER,
+      recurrence: { ...MASTER.recurrence, exceptions: [MASTER.start] },
+    };
+    onFile.rows = [
+      {
+        ...MASTER,
+        id: `series-1::rid::${MASTER.start}`,
+        start: '2026-08-04T13:00:00.000Z',
+        end: '2026-08-04T13:15:00.000Z',
+        recurrence: null,
+      },
+    ];
+    const { deleteThisAndFuture } = await import('./deleteSeriesFromOccurrence');
+    const cut = '2026-08-10T09:00:00.000Z';
+    expect(await deleteThisAndFuture(occurrenceAt(cut), cut, false)).toBe('truncated');
+    expect(calls('delete_event')).toHaveLength(0);
+    // The rows were asked for in the series' own calendar.
+    expect((calls('get_events')[0][1] as { request: { calendar_id: string } }).request.calendar_id).toBe(
+      'cal-work',
+    );
+  });
+
+  it('deletes the series when its earlier occurrences were all deleted', async () => {
+    onFile.master = {
+      ...MASTER,
+      recurrence: { ...MASTER.recurrence, exceptions: [MASTER.start] },
+    };
+    const { deleteThisAndFuture } = await import('./deleteSeriesFromOccurrence');
+    const cut = '2026-08-10T09:00:00.000Z';
+    expect(await deleteThisAndFuture(occurrenceAt(cut), cut, false)).toBe('deleted');
   });
 
   it('writes nothing when the cut cannot be read', async () => {

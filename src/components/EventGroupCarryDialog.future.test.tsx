@@ -17,11 +17,16 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile } = vi.hoisted(() => {
   const groupOfAnchor: { current: unknown[] } = { current: [] };
+  /** The copy as `get_event_by_id` answers; COPY unless a test says otherwise. */
+  const copyOnFile: { current: unknown } = { current: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'get_event_by_id') {
-      return Promise.resolve(COPY);
+      return Promise.resolve(copyOnFile.current ?? COPY);
+    }
+    if (command === 'get_events') {
+      return Promise.resolve([]);
     }
     if (command === 'update_event') {
       return Promise.resolve((payload as { event: unknown }).event);
@@ -34,7 +39,7 @@ const { invokeMock, groupOfAnchor } = vi.hoisted(() => {
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor };
+  return { invokeMock, groupOfAnchor, copyOnFile };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -110,6 +115,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   groupOfAnchor.current = [];
+  copyOnFile.current = null;
 });
 
 async function carry() {
@@ -151,6 +157,42 @@ describe('EventGroupCarryDialog → "this and all following" to a copy with no h
     ]);
     const members = (calls('group_events')[0][1] as { members: { event_id: string }[] }).members;
     expect(members.map((m) => m.event_id)).toEqual(['ev-a', 'ev-b']);
+  });
+
+  it('rewrites a copy whose earlier occurrences were all deleted from its cut on', async () => {
+    // Two Mondays before the cut, both deleted: nothing of it is shown before,
+    // so it is written whole — from the cut, with what is left of its COUNT.
+    groupOfAnchor.current = [GROUP];
+    copyOnFile.current = {
+      ...COPY,
+      start: '2026-08-10T08:00:00.000Z',
+      end: '2026-08-10T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=10',
+        exceptions: ['2026-08-10T08:00:00.000Z', '2026-08-17T08:00:00.000Z'],
+        tzid: null,
+      },
+    };
+    await carry();
+
+    expect(calls('create_event')).toHaveLength(0);
+    const sent = (calls('update_event')[0][1] as { event: typeof COPY }).event;
+    expect(sent.id).toBe('ev-b');
+    expect(sent.start).toBe('2026-08-24T09:00:00.000Z');
+    expect(sent.recurrence).toEqual({ rrule: 'FREQ=WEEKLY;COUNT=8', exceptions: [], tzid: null });
+  });
+
+  it("moves the copy's exceptions with its new time", async () => {
+    // Left at 08:00, the excluded Monday came back at 09:00.
+    groupOfAnchor.current = [GROUP];
+    copyOnFile.current = {
+      ...COPY,
+      recurrence: { ...COPY.recurrence, exceptions: ['2026-08-31T08:00:00.000Z'] },
+    };
+    await carry();
+
+    const sent = (calls('update_event')[0][1] as { event: typeof COPY }).event;
+    expect(sent.recurrence.exceptions).toEqual(['2026-08-31T09:00:00.000Z']);
   });
 
   it('leaves the anchor where it is when it is no longer in the carried group', async () => {

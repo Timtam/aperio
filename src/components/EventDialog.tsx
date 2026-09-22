@@ -35,6 +35,7 @@ import {
   deleteEventById,
   eventGroupsForEvents,
   getEventById,
+  getEvents,
   queryFreeBusy,
   setEventColor,
   setEventLocalReminders,
@@ -54,6 +55,8 @@ import {
   seriesTimesFromOccurrenceEdit,
   seriesFromCut,
   thisAndFutureDeletedKey,
+  readSeriesRows,
+  ruleFromCut,
 } from '../intl/recurrence';
 import {
   describeRecurrence,
@@ -1321,8 +1324,12 @@ export function EventDialog({
           // "This and all following" where nothing comes before: the whole
           // series from here, written in place by the series branch below
           // (decision 118).
-          let wholeFromCut: { series: CalendarEvent; occIso: string } | null =
-            null;
+          let wholeFromCut: {
+            series: CalendarEvent;
+            occIso: string;
+            /** What the rule generated before the cut, for a COUNT the user set. */
+            occurrencesBefore: number;
+          } | null = null;
           if (isOccurrence && editScope === 'this_and_future') {
             // Split the series at this occurrence: truncate the original to end
             // just before it (keeping its own fields), then create a NEW series
@@ -1335,13 +1342,37 @@ export function EventDialog({
             // cache. A null master (cold cache) is a hard error, never a silent
             // fall-through to a whole-series edit that would move every occurrence.
             const master = await getEventById(seriesId, event.calendar_id);
-            const masterRecurrence = master?.recurrence ?? null;
-            const plan =
-              occIso && master ? planSeriesSplit(master, occIso) : null;
+            if (!occIso || !master) {
+              throw new Error(
+                t('dialogs.event.thisAndFutureLoadFailed', {
+                  title: event.title,
+                }),
+              );
+            }
+            // Loaded, but no longer a series — changed elsewhere since this row
+            // was drawn. There is nothing to split, and the form holds an
+            // occurrence of a rule that is gone: saying why beats "could not be
+            // loaded", which a retry cannot fix.
+            const masterRecurrence = master.recurrence ?? null;
+            if (!masterRecurrence?.rrule) {
+              throw new Error(
+                t('dialogs.event.thisAndFutureNotRepeating', {
+                  title: event.title,
+                }),
+              );
+            }
+            // With the rows the provider keeps for single occurrences: one
+            // changed in Outlook is listed among the master's exceptions, and
+            // only its own row says it is still there (decision 125).
+            const plan = planSeriesSplit(
+              master,
+              occIso,
+              await readSeriesRows(master, occIso, getEvents),
+            );
             // Nor is a split that cannot be planned: falling through to the
             // series edit moved every occurrence (see `planSeriesSplit`). The
             // phone has always refused it.
-            if (!occIso || !master || !masterRecurrence || plan == null) {
+            if (plan == null) {
               throw new Error(
                 t('dialogs.event.thisAndFutureLoadFailed', {
                   title: event.title,
@@ -1352,18 +1383,25 @@ export function EventDialog({
               wholeFromCut = {
                 series: seriesFromCut(master, plan, occIso),
                 occIso,
+                occurrencesBefore: plan.occurrencesBefore,
               };
             } else {
-              // What the user set in the repeat field, if they changed it; the
-              // series' own pattern from here on otherwise. Either way the
-              // exceptions follow a new time of day, or the occurrences they
-              // cancel come back at it.
+              // What the user set in the repeat field, if they changed it — its
+              // COUNT, like the one the field showed, counted from the series'
+              // first occurrence — and the series' own pattern from here on
+              // otherwise. Either way the exceptions follow a new time of day,
+              // or the occurrences they cancel come back at it.
               const ruleChanged =
                 form.rrule !== (event.recurrence?.rrule ?? null);
               const tailRecurrence = (planned: TailRecurrence) =>
                 exceptionsAtSeriesTime(
                   ruleChanged
-                    ? editedRecurrence(form.rrule, planned, form.allDay)
+                    ? editedRecurrence(
+                        form.rrule &&
+                          ruleFromCut(form.rrule, plan.occurrencesBefore),
+                        planned,
+                        form.allDay,
+                      )
                     : planned,
                   occIso,
                   start,
@@ -1446,10 +1484,13 @@ export function EventDialog({
 
           // The row that is the series. The scope prompt opens the series
           // itself, so a row of a series gets here only when no prompt set its
-          // scope, or when a split or an occurrence edit could not be planned.
-          // Its fields hold that occurrence: the series is loaded and the edit
-          // is read as a change to it, so an untouched date leaves the series
-          // start where it is and an untouched rule stays the series' rule.
+          // scope, when an occurrence edit could not be planned, or when "this
+          // and all following" has nothing before it (`wholeFromCut`, decision
+          // 118); a split that cannot be planned throws above instead. Its
+          // fields hold that occurrence: the series is read — loaded, or taken
+          // from the cut, with its start there and its rule from there on — and
+          // the edit is read as a change to it, so an untouched date leaves the
+          // series start where it is and an untouched rule stays the series'.
           const series = wholeFromCut
             ? wholeFromCut.series
             : isOccurrence
@@ -1473,7 +1514,12 @@ export function EventDialog({
             ? editedRecurrence(
                 form.rrule === (event.recurrence?.rrule ?? null)
                   ? (series.recurrence?.rrule ?? form.rrule)
-                  : form.rrule,
+                  : // A COUNT the user set counts from the series' first
+                    // occurrence, as the field showed it; from the cut, what
+                    // is left of it (decision 121).
+                    wholeFromCut && form.rrule
+                    ? ruleFromCut(form.rrule, wholeFromCut.occurrencesBefore)
+                    : form.rrule,
                 series.recurrence ?? { exceptions: [] },
                 form.allDay,
               )
@@ -1513,14 +1559,16 @@ export function EventDialog({
           const saved = await apiUpdateEvent(updated, event.calendar_id);
           // A calendar-picker move is rerouted as create-on-target +
           // delete-from-source, so the appointment comes back with the id and
-          // calendar it has NOW. The private row is keyed by exactly those.
-          await savePrivate(saved ?? updated);
+          // calendar it has NOW. The private row and the colour are keyed by
+          // exactly those.
+          const landed = saved ?? updated;
+          await savePrivate(landed);
           // Color rides update_event for local + color-capable calendars; only
           // a non-capable external needs the separate host-local override.
           if (!storesColorNatively) {
             await setEventColor(
-              updated.id,
-              updated.calendar_id,
+              landed.id,
+              landed.calendar_id,
               form.colorLabel,
             );
           }
@@ -1538,8 +1586,16 @@ export function EventDialog({
           // A "this and all following" that rewrote the whole series asks as
           // what the user chose: each copy is cut at the same point, and one
           // with earlier occurrences keeps them.
+          // Its "before" is the series at the cut, as the phone's is: the
+          // opened row may be an occurrence the provider moved, and offering
+          // the copies that move would carry a change nobody made.
           carriedToGroup = wholeFromCut
-            ? await offerToCarry(event, updated, 'future', wholeFromCut.occIso)
+            ? await offerToCarry(
+                wholeFromCut.series,
+                updated,
+                'future',
+                wholeFromCut.occIso,
+              )
             : await offerToCarry(series, updated);
         } else {
           const created = await apiCreateEvent({

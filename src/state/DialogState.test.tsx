@@ -54,6 +54,17 @@ const invitationOccurrence = {
   title: 'Aperio R6 fremde',
 } as unknown as CalendarEvent;
 
+/** One occurrence of `series` the provider keeps as a row of its own: moved
+ *  and renamed, with no rule. */
+const override = {
+  id: 'evt-1::rid::2026-07-20T08:30:00Z',
+  calendar_id: 'cal-1',
+  title: 'Tabletten später',
+  start: '2026-07-20T10:00:00Z',
+  end: '2026-07-20T10:15:00Z',
+  recurrence: null,
+} as unknown as CalendarEvent;
+
 // A plain, non-recurring row (no series_id) opens the editor directly.
 const single = {
   id: 'evt-2',
@@ -80,6 +91,9 @@ function Probe() {
       <button type="button" onClick={() => d.openEventDialog(single)}>
         open-single
       </button>
+      <button type="button" onClick={() => d.openEventDialog(override)}>
+        open-override
+      </button>
       <button
         type="button"
         onClick={() => d.openEventDialog(invitationOccurrence)}
@@ -91,6 +105,9 @@ function Probe() {
       </button>
       <button type="button" onClick={() => d.chooseEventEditScope('series')}>
         choose-series
+      </button>
+      <button type="button" onClick={() => d.chooseEventEditScope('this_and_future')}>
+        choose-future
       </button>
       <button type="button" onClick={() => d.close()}>
         cancel
@@ -233,6 +250,41 @@ describe('DialogState recurring-edit scope prompt', () => {
       load.answer(series);
     });
     expect(screen.getByTestId('kind').textContent).toBe('none');
+  });
+
+  it('"this and all following" on a provider-kept occurrence opens the series at its slot (126)', async () => {
+    // The row itself carries no rule — the repeat field said "does not
+    // repeat" — and its own title and times are that one occurrence's. The
+    // phone opens the series there; so does the desktop now.
+    invokeMock.mockResolvedValue(series);
+    renderProbe();
+    await click('open-override');
+    await click('choose-future');
+    expect(invokeMock).toHaveBeenCalledWith('get_event_by_id', {
+      id: 'evt-1',
+      calendarId: 'cal-1',
+    });
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    expect(screen.getByTestId('event').textContent).toBe('evt-1@2026-07-20T08:30:00.000Z');
+    expect(screen.getByTestId('scope').textContent).toBe('this_and_future');
+  });
+
+  it('keeps the prompt when that series cannot be loaded', async () => {
+    invokeMock.mockResolvedValue(null);
+    renderProbe();
+    await click('open-override');
+    await click('choose-future');
+    expect(screen.getByTestId('kind').textContent).toBe('eventEditScope');
+    expect(screen.getByTestId('failed').textContent).toBe('1');
+  });
+
+  it('"this and all following" on an ordinary occurrence opens it as it is', async () => {
+    renderProbe();
+    await click('open-occ');
+    await click('choose-future');
+    expect(seriesLoads()).toBe(0);
+    expect(screen.getByTestId('event').textContent).toBe(occurrence.id);
+    expect(screen.getByTestId('scope').textContent).toBe('this_and_future');
   });
 
   it('choosing "this occurrence" hands off scoped to the occurrence', async () => {

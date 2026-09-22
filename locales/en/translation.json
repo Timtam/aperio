@@ -1488,6 +1488,7 @@
       "thisAndFutureCancelledWhole": "\"{{title}}\" was cancelled; attendees notified. No earlier occurrence was left, so the whole series is cancelled.",
       "thisAndFutureUpdatedWhole": "\"{{title}}\" was changed. No earlier occurrence was left, so the change applies to the whole series.",
       "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
+      "thisAndFutureNotRepeating": "\"{{title}}\" no longer repeats; it was changed elsewhere. Nothing was changed here. Open it again to edit it.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {
         "title": "Cancel meeting?",

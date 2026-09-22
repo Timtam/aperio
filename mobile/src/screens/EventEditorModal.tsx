@@ -48,6 +48,8 @@ import {
   toIso,
   editedRecurrence,
   exceptionsAtSeriesTime,
+  readSeriesRows,
+  ruleFromCut,
   seriesFromCut,
   seriesTimesFromOccurrenceEdit,
   type TailRecurrence,
@@ -98,6 +100,7 @@ import {
   CalendarEvent,
   createEvent,
   getEventById,
+  getEvents,
   listCalendars,
   updateEvent,
 } from '../api/calendar';
@@ -1079,6 +1082,8 @@ export default function EventEditorModal({
       // "This and all following" where nothing comes before: the whole series
       // from here, written in place by the series branch below (decision 118).
       let wholeFromCut: CalendarEvent | null = null;
+      // What the rule generated before that cut, for a COUNT the user set.
+      let occurrencesBeforeCut = 0;
       if (
         editing &&
         original != null &&
@@ -1094,21 +1099,36 @@ export default function EventEditorModal({
         // each of those details decides whether the two halves line up.
         // The loaded `original` IS the master (getEventById resolves the
         // series), so its start anchors the occurrence count.
-        const plan = planSeriesSplit(original, occurrence);
+        // With the rows the provider keeps for single occurrences: one changed
+        // elsewhere is listed among the master's exceptions, and only its own
+        // row says it is still there (decision 125). Mirrors the desktop.
+        const plan = planSeriesSplit(
+          original,
+          occurrence,
+          await readSeriesRows(original, occurrence, getEvents),
+        );
         if (plan == null) {
           throw new Error(t('dialogs.event.thisAndFutureLoadFailed', { title }));
         }
         if (plan.kind === 'whole') {
           wholeFromCut = seriesFromCut(original, plan, occurrence);
+          occurrencesBeforeCut = plan.occurrencesBefore;
         } else {
           // The new series continues the original pattern — unless the user
-          // changed the repeat field, which then is its rule (decision 121).
-          // Either way the exceptions follow a new time of day, or the
-          // occurrences they cancel come back at it. Mirrors the desktop.
+          // changed the repeat field, which then is its rule (decision 121),
+          // its COUNT counted from the series' first occurrence as the field
+          // showed it. Either way the exceptions follow a new time of day, or
+          // the occurrences they cancel come back at it. Mirrors the desktop.
           const ruleChanged = recurrence !== (original.recurrence?.rrule ?? null);
           const tailRecurrence = (planned: TailRecurrence) =>
             exceptionsAtSeriesTime(
-              ruleChanged ? editedRecurrence(recurrence, planned, allDay) : planned,
+              ruleChanged
+                ? editedRecurrence(
+                    recurrence && ruleFromCut(recurrence, plan.occurrencesBefore),
+                    planned,
+                    allDay,
+                  )
+                : planned,
               occurrence,
               start,
               allDay || original.all_day,
@@ -1229,7 +1249,9 @@ export default function EventEditorModal({
           ? editedRecurrence(
               recurrence === (original.recurrence?.rrule ?? null)
                 ? (wholeFromCut.recurrence?.rrule ?? recurrence)
-                : recurrence,
+                : // A COUNT the user set counts from the series' first
+                  // occurrence; from the cut, what is left of it (121).
+                  recurrence && ruleFromCut(recurrence, occurrencesBeforeCut),
               wholeFromCut.recurrence ?? { exceptions: [] },
               allDay,
             )

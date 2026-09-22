@@ -1488,6 +1488,7 @@
       "thisAndFutureCancelledWhole": "„{{title}}\" wurde abgesagt; Teilnehmer benachrichtigt. Davor war kein Termin mehr übrig, also ist die ganze Serie abgesagt.",
       "thisAndFutureUpdatedWhole": "„{{title}}\" wurde geändert. Davor war kein Termin mehr übrig, also gilt die Änderung für die ganze Serie.",
       "thisAndFutureLoadFailed": "Die Serie „{{title}}\" konnte zum Aufteilen nicht geladen werden; es wurde nichts geändert.",
+      "thisAndFutureNotRepeating": "„{{title}}\" wiederholt sich nicht mehr; es wurde anderswo geändert. Hier wurde nichts geändert. Öffne den Termin neu, um ihn zu bearbeiten.",
       "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {
         "title": "Besprechung absagen?",

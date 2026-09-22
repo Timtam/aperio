@@ -1,5 +1,6 @@
 import {
   planSeriesSplit,
+  readSeriesRows,
   seriesIdOf,
   type SeriesDeleteOutcome,
 } from '@aperio/shared';
@@ -8,6 +9,7 @@ import {
   CalendarEvent,
   deleteEvent,
   getEventById,
+  getEvents,
   updateEvent,
 } from '../api/calendar';
 
@@ -21,7 +23,8 @@ import {
  * normal update path. `sendCancellations` asks the provider to notify attendees.
  *
  * When nothing the calendar shows comes before the cutoff — the first
- * occurrence, or every earlier one deleted — the series is DELETED instead
+ * occurrence, or every earlier one deleted, counting the occurrences the
+ * provider keeps as rows of their own (125) — the series is DELETED instead
  * (decision 118): a truncation there wrote a rule that ends before it starts,
  * which the views hide and the reminders fall back from, ringing on at the
  * series start. Which of the two happened is returned, so the caller can say
@@ -55,7 +58,10 @@ export async function deleteThisAndFuture(
     await deleteEvent(seriesId, ev.calendar_id, sendCancellations);
     return 'deleted';
   }
-  const plan = planSeriesSplit(master, occurrenceIso);
+  // With the rows the provider keeps for single occurrences (decision 125).
+  // Mirrors the desktop.
+  const rows = await readSeriesRows(master, occurrenceIso, getEvents);
+  const plan = planSeriesSplit(master, occurrenceIso, rows);
   if (plan == null) {
     throw new Error(
       `Could not read where to cut the recurring series "${ev.title}"; ` +

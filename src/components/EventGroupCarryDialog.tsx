@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   carryOnto,
+  exceptionsAtSeriesTime,
   firstOccurrenceFrom,
   futureCarryRow,
   invitationLocked,
@@ -10,6 +11,7 @@ import {
   organizerOf,
   planCarry,
   planSeriesSplit,
+  readSeriesRows,
   seriesLeftTruncated,
   writeSeriesSplit,
   type CarryableFields,
@@ -24,6 +26,7 @@ import {
   createEvent,
   eventGroupsForEvents,
   getEventById,
+  getEvents,
   groupEvents,
   isCommandError,
   ungroupEvent,
@@ -303,9 +306,13 @@ export function EventGroupCarryDialog({
             failed.push(target);
             continue;
           }
+          // With the copy's own provider-kept occurrences: one changed
+          // elsewhere is still there before the cut, though its master
+          // lists it among the exceptions (decision 125).
           const splitPlan = planSeriesSplit(
             current as CalendarEvent & CarryableFields,
             anchorIso,
+            await readSeriesRows(current, anchorIso, getEvents),
           );
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {
@@ -335,7 +342,14 @@ export function EventGroupCarryDialog({
             await updateEvent(
               {
                 ...row,
-                recurrence: { ...currentRecurrence, ...splitPlan.tail },
+                // What the copy repeats by from its cut on, its exceptions
+                // moved with a new time of day, as the anchor's are.
+                recurrence: exceptionsAtSeriesTime(
+                  { ...currentRecurrence, ...splitPlan.tail },
+                  anchorIso,
+                  row.start,
+                  row.all_day || current.all_day,
+                ),
                 send_invitations: false,
               },
               target.calendar_id,
@@ -375,7 +389,14 @@ export function EventGroupCarryDialog({
                       start: row.start,
                       end: row.end,
                       all_day: row.all_day,
-                      recurrence,
+                      // Its exceptions follow a new time of day, or the
+                      // occurrences they cancel come back at it.
+                      recurrence: exceptionsAtSeriesTime(
+                        recurrence,
+                        anchorIso,
+                        row.start,
+                        row.all_day || current.all_day,
+                      ),
                       // The copy keeps its own: what travels is what the
                       // appointment IS.
                       color_label: current.color_label,

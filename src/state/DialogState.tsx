@@ -21,7 +21,11 @@ import type {
 import { focusActiveView } from '../a11y/focusView';
 import { DialogStateContext } from './dialogStateContext';
 import { useCalendarStore } from './calendarStoreContext';
-import { isProviderOverride } from '../intl/recurrence';
+import {
+  isProviderOverride,
+  occurrenceIsoOf,
+  occurrenceOfSeries,
+} from '../intl/recurrence';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /** Which slice of a recurring series an edit applies to. */
@@ -501,8 +505,15 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       setStack((s) =>
         s[s.length - 1] === prompt ? [...s.slice(0, -1), next] : s,
       );
-    if (scope !== 'series') {
-      swap({ kind: 'event', event: prompt.event, initialScope: scope });
+    const { event } = prompt;
+    // "This and all following" on an occurrence the provider keeps as a row
+    // of its own opens the SERIES at that occurrence's slot, as the phone does
+    // (decision 126). The row carries no rule — the repeat field said "does
+    // not repeat" — and its own title and times are that one occurrence's:
+    // saved as the series from here on, they spread to every later one.
+    const slot = isProviderOverride(event) ? occurrenceIsoOf(event) : null;
+    if (scope !== 'series' && !(scope === 'this_and_future' && slot)) {
+      swap({ kind: 'event', event, initialScope: scope });
       return;
     }
     // The whole series opens as the series — its own start and end, its rule
@@ -512,7 +523,6 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // cannot be loaded the prompt stays and says so.
     if (seriesLoadingFor.current === prompt) return;
     seriesLoadingFor.current = prompt;
-    const { event } = prompt;
     void getEventById(seriesIdOf(event), event.calendar_id)
       .catch(() => null)
       .then((series) => {
@@ -521,9 +531,15 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         if (seriesLoadingFor.current === prompt) seriesLoadingFor.current = null;
         // The scope rides along, so the editor can name the choice.
         swap(
-          series
-            ? { kind: 'event', event: series, initialScope: 'series' }
-            : { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 },
+          series == null
+            ? { ...prompt, seriesLoadFailed: (prompt.seriesLoadFailed ?? 0) + 1 }
+            : scope === 'series' || !slot
+              ? { kind: 'event', event: series, initialScope: 'series' }
+              : {
+                  kind: 'event',
+                  event: occurrenceOfSeries(series, slot),
+                  initialScope: 'this_and_future',
+                },
         );
       });
   }, []);

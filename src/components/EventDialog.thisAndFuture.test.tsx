@@ -19,12 +19,13 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * id, and a delete deletes it — and the sentence says why.
  */
 
-const { invokeMock, onFile, announced, announce } = vi.hoisted(() => {
+const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hoisted(() => {
   const announced: string[] = [];
   const announce = (message: string) => {
     announced.push(message);
   };
-  const onFile: { series: unknown } = { series: null };
+  const onFile: { series: unknown; groups: unknown[] } = { series: null, groups: [] };
+  const openEventGroupCarry = vi.fn();
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'update_event') {
       return Promise.resolve((payload as { event: unknown }).event);
@@ -36,12 +37,15 @@ const { invokeMock, onFile, announced, announce } = vi.hoisted(() => {
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
     }
+    if (command === 'event_groups_for_events') {
+      return Promise.resolve(onFile.groups);
+    }
     if (command === 'calendar_current_user_email' || command === 'get_user_pref') {
       return Promise.resolve(null);
     }
     return Promise.resolve([]);
   });
-  return { invokeMock, onFile, announced, announce };
+  return { invokeMock, onFile, announced, announce, openEventGroupCarry };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -92,7 +96,7 @@ const STORE = {
   selectedCalendarIds: new Set(['cal-work']),
 };
 const VIEW_STATE = { showHiddenCalendarTargets: false, anchor: new Date() };
-const DIALOG_STATE = { openEventGroupCarry: () => {} };
+const DIALOG_STATE = { openEventGroupCarry };
 const REMINDERS = { getDefaultsFor: () => [] };
 
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
@@ -108,12 +112,18 @@ vi.mock('../state/useTitleSuggestions', async () => {
   );
   return { ...actual, useTitleSuggestions: () => [] };
 });
-// The rule picker, reduced to one button that sets a plain weekly rule.
+// The rule picker, reduced to two buttons: a plain weekly rule, and a
+// fortnightly one that ends after ten times.
 vi.mock('./RecurrenceSelector', () => ({
   RecurrenceSelector: ({ onChange }: { onChange: (rrule: string | null) => void }) => (
-    <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
-      weekly
-    </button>
+    <>
+      <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
+        weekly
+      </button>
+      <button type="button" onClick={() => onChange('FREQ=WEEKLY;INTERVAL=2;COUNT=10')}>
+        fortnightly ten
+      </button>
+    </>
   ),
 }));
 
@@ -121,6 +131,8 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   onFile.series = null;
+  onFile.groups = [];
+  openEventGroupCarry.mockClear();
   announced.length = 0;
   vi.restoreAllMocks();
 });
@@ -194,6 +206,42 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     ]);
   });
 
+  it('offers the copies the change from the cut, not a move nobody made', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.groups = [
+      {
+        id: 'g1',
+        created_at: '2026-06-01T00:00:00Z',
+        updated_at: '2026-06-01T00:00:00Z',
+        members: [
+          { calendar_id: 'cal-work', event_id: 'ev-series', title: 'Teamrunde', starts_at: SERIES.start, added_at: '2026-06-01T00:00:00Z' },
+          { calendar_id: 'cal-work', event_id: 'ev-copy', title: 'Teamrunde', starts_at: SERIES.start, added_at: '2026-06-01T00:00:01Z' },
+        ],
+      },
+    ];
+    await open(FIRST);
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$|^title$/i }), {
+      target: { value: 'Teamrunde neu' },
+    });
+    save();
+    await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+
+    const offer = openEventGroupCarry.mock.calls[0][0] as {
+      scope: string;
+      occurrence: string;
+      before: { start: string; title: string };
+      after: { start: string; title: string };
+      successor: { event_id: string } | null;
+    };
+    expect(offer.scope).toBe('future');
+    expect(offer.occurrence).toBe(SERIES.start);
+    expect(offer.before.start).toBe(SERIES.start);
+    expect(offer.after.start).toBe(SERIES.start);
+    expect(offer.after.title).toBe('Teamrunde neu');
+    expect(offer.successor?.event_id).toBe('ev-series');
+  });
+
   it('deletes the whole series, and says why', async () => {
     deviceInBerlin();
     onFile.series = SERIES;
@@ -232,6 +280,51 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
 
     const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
     expect(tail.recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
+  });
+
+  /** SERIES, ending after ten times; its July occurrence is the fourth. */
+  const COUNTED = {
+    ...SERIES,
+    recurrence: { ...SERIES.recurrence!, rrule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=10' },
+  } as CalendarEvent;
+  const COUNTED_JULY = { ...JULY, recurrence: COUNTED.recurrence } as CalendarEvent;
+
+  it('continues with what is left of a COUNT when the rule is untouched', async () => {
+    deviceInBerlin();
+    onFile.series = COUNTED;
+    await open(COUNTED_JULY);
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+
+    const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
+    expect(tail.recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO;COUNT=7');
+  });
+
+  it('reads a COUNT the user set as the series total, as the field showed it', async () => {
+    // "Ends after 10 times" on the fourth occurrence: seven from here, not ten
+    // more.
+    deviceInBerlin();
+    onFile.series = COUNTED;
+    await open(COUNTED_JULY);
+    fireEvent.click(screen.getByRole('button', { name: 'fortnightly ten' }));
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+
+    const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
+    expect(tail.recurrence?.rrule).toBe('FREQ=WEEKLY;INTERVAL=2;COUNT=7');
+  });
+
+  it('says a series that no longer repeats cannot be split, and writes nothing', async () => {
+    // Changed on another device since the row was drawn: "could not be loaded"
+    // would send the user to retry what a retry cannot fix.
+    deviceInBerlin();
+    onFile.series = { ...SERIES, recurrence: null };
+    await open(JULY);
+    save();
+    await screen.findByText(/wiederholt sich nicht mehr|no longer repeats/i);
+
+    expect(calls('update_event')).toHaveLength(0);
+    expect(calls('create_event')).toHaveLength(0);
   });
 
   it("moves the new series' exceptions to its new time", async () => {

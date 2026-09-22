@@ -1,7 +1,8 @@
 import type { CalendarEvent } from '../api/types';
-import { deleteEventById, getEventById, updateEvent } from '../api/client';
+import { deleteEventById, getEventById, getEvents, updateEvent } from '../api/client';
 import {
   planSeriesSplit,
+  readSeriesRows,
   seriesIdOf,
   type SeriesDeleteOutcome,
 } from '../intl/recurrence';
@@ -18,8 +19,9 @@ import {
  * `sendCancellations` asks the provider to notify attendees of the change.
  *
  * When nothing the calendar shows comes before the cutoff — the first
- * occurrence, or every earlier one deleted — there is nothing to keep, and the
- * series is DELETED (decision 118). Truncating it wrote a rule that ends before
+ * occurrence, or every earlier one deleted, counting the occurrences the
+ * provider keeps as rows of their own (decision 125) — there is nothing to
+ * keep, and the series is DELETED (decision 118). Truncating it wrote a rule that ends before
  * it starts: the views showed nothing, but the reminders fell back to the
  * series start and went on ringing, on every device. The delete also retires
  * whatever Aperio keeps under the series' id — private reminders, the group
@@ -58,7 +60,11 @@ export async function deleteThisAndFuture(
     await deleteEventById(seriesId, ev.calendar_id, sendCancellations);
     return 'deleted';
   }
-  const plan = planSeriesSplit(master, occurrenceIso);
+  // With the rows the provider keeps for single occurrences: an occurrence
+  // changed in Outlook is listed among the master's exceptions, and only its
+  // own row says it is still there (decision 125).
+  const rows = await readSeriesRows(master, occurrenceIso, getEvents);
+  const plan = planSeriesSplit(master, occurrenceIso, rows);
   if (plan == null) {
     throw new Error(
       `Could not read where to cut the recurring series "${ev.title}"; ` +

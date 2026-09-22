@@ -223,7 +223,7 @@ stehen.
 | gespeicherter Einzeltermin, hier zur Serie gemacht | ja | aus | wählbar; Vorgabe wie beim neuen Termin | Uhr der Serie |
 | ganze Serie | ja | aus | wählbar | gespeicherte Zone; UTC, wenn keine |
 | ganze Serie, auf „keine Wiederholung“ gestellt | – | egal | nicht da | Geräte-Uhr |
-| diesen und alle folgenden | Regeländerungen gelten nicht | aus | nur ein Hinweis: „Zeitzone der Serie: New York. Ändern lässt sie sich, wenn du die ganze Serie bearbeitest.“ | Uhr der Serie (21a) |
+| diesen und alle folgenden | ja; eine hier geänderte Regel gilt ab diesem Termin, ihr COUNT von Beginn der Serie an gezählt (121), sonst läuft das Muster der Serie weiter | aus | nur ein Hinweis: „Zeitzone der Serie: New York. Ändern lässt sie sich, wenn du die ganze Serie bearbeitest.“ | Uhr der Serie (21a) |
 | nur dieser Termin | – | egal | nicht da | Geräte-Uhr |
 | Umfang-Auswahl im Formular (Ausweichweg ohne vorherige Frage) | egal | egal | nicht da | Geräte-Uhr |
 

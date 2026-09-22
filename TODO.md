@@ -2326,17 +2326,31 @@ Siehe DESIGN §4.2.
     überall. Ebenso beim Ändern und beim Mitziehen an Kopien. Jetzt
     entscheidet `planSeriesSplit` einmal, ob vor dem Schnitt etwas zu sehen
     ist (`kind: 'cut'` oder `'whole'`); auch ein Beginn neben dem Muster und
-    lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dann:
+    lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dazu
+    liest es die Zeilen, die der Anbieter für einzelne Vorkommen führt
+    (125, `readSeriesRows`): ein in Outlook geändertes Vorkommen steht bei
+    Exchange unter den Ausnahmen, ist aber da; ein bei Google gelöschtes ist
+    eine abgesagte Zeile ohne Ausnahme. Gezählt wird nach dem Platz in der
+    Serie, nicht nach dem verschobenen Beginn. Schlägt das Lesen fehl, wird
+    nichts geschrieben. Dann:
     Löschen löscht die Serie (und leert damit ihre privaten Erinnerungen
     überall, #93), Ändern schreibt die ganze Serie an Ort und Stelle
     (dieselbe Id, also bleiben private Erinnerungen, Gruppe, Farbe,
     Besprechung), eine Kopie ohne Kopf wird als Ganzes geändert, und die
     Ansage sagt warum (123). `writeSeriesSplit` nimmt nur noch Pläne mit
     Kopf, per Typ und zur Laufzeit. Mit dabei: Beim Teilen gilt eine im
-    Formular geänderte Wiederholungsregel für die neue Serie (121), und ihre
-    Ausnahmen folgen einer neuen Uhrzeit; ein Teilen, das sich nicht planen
-    lässt, wird am Desktop abgelehnt statt zur ganzen Serie zu werden (wie
-    am Handy). Vom Anbieter gespeicherte Einzeländerungen bleiben (122).
+    Formular geänderte Wiederholungsregel für die neue Serie (121) — ihr
+    COUNT zählt wie im Feld ab Beginn der Serie, die neue Serie bekommt den
+    Rest —, und ihre Ausnahmen folgen einer neuen Uhrzeit, auch beim
+    Mitziehen an Kopien; eine Ausnahme genau auf dem Schnitt (bei Exchange ein
+    geändertes Vorkommen) versteckt nicht mehr das erste Vorkommen der neuen
+    Serie. Ein Teilen, das sich nicht planen lässt, wird am Desktop
+    abgelehnt statt zur ganzen Serie zu werden (wie am Handy); wiederholt
+    sich die Serie inzwischen nicht mehr, sagt er das. Vom Anbieter
+    gespeicherte Einzeländerungen bleiben (122). „Diesen und alle folgenden“
+    auf einer solchen Einzeländerung öffnet der Desktop jetzt wie das Handy
+    als Serie an ihrer Stelle (126): Das Wiederholungsfeld zeigte „wiederholt
+    sich nicht“, und ihr Titel landete auf der ganzen Serie.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
