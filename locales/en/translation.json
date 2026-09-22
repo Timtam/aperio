@@ -1333,7 +1333,7 @@
       "retry": "Try the rest again",
       "dismiss": "Close",
       "scopeOccurrence": "This applies to this occurrence only.",
-      "scopeFuture": "This applies to this occurrence and all following ones. Each copy series is split at the same point.",
+      "scopeFuture": "This applies to this occurrence and all following ones. Each copy changes from the same point on; its earlier occurrences stay as they are.",
       "regroupFailed_one": "The copy was updated, but the new entries could not be tied together as one appointment again.",
       "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again.",
       "truncatedNotRestored": "The series in {{calendar}} was cut short and could not be put back — it now ends at this occurrence.",
@@ -1484,6 +1484,9 @@
       "thisAndFutureDeleted": "\"{{title}}\" was deleted from this occurrence on; earlier ones stay.",
       "thisAndFutureCancelled": "\"{{title}}\" was cancelled from this occurrence on; attendees notified, earlier ones stay.",
       "thisAndFutureUpdated": "\"{{title}}\" was changed from this occurrence on; earlier ones are unchanged.",
+      "thisAndFutureDeletedWhole": "\"{{title}}\" was deleted. No earlier occurrence was left, so the whole series is gone.",
+      "thisAndFutureCancelledWhole": "\"{{title}}\" was cancelled; attendees notified. No earlier occurrence was left, so the whole series is cancelled.",
+      "thisAndFutureUpdatedWhole": "\"{{title}}\" was changed. No earlier occurrence was left, so the change applies to the whole series.",
       "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {

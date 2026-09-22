@@ -2318,18 +2318,51 @@ Siehe DESIGN §4.2.
     unter einer älteren Id führt (die Id wechselt mit jeder Änderung,
     auch in Outlook, und jedes Gerät zieht seine Zeile still nach): Geleert
     wird nur der Schlüssel, den das löschende Gerät kennt. Siehe 119.
-  - 🚩 **Gelöschte Serie klingelt weiter** (Review von #93; 118: eigener
-    PR direkt danach). „Dieses und alle folgenden löschen“ ab dem ERSTEN
-    Vorkommen löscht die Serie nicht, sondern kürzt sie auf ein Ende eine
-    Sekunde vor ihrem Beginn (`deleteThisAndFuture` → `truncateRRuleBefore`,
-    Desktop und Handy). Die Ansichten zeigen nichts mehr, aber die
-    Weckerberechnung verwirft die ungültige Regel und nimmt ersatzweise den
-    Serienbeginn (`expand_on` in `host-core/src/reminders.rs`, Vertrag
-    „an-until-before-the-start“): alle Erinnerungen der Serie klingeln
-    weiter, überall. Ebenso „diesen und alle folgenden ändern“ ab dem ersten
-    Vorkommen: der unsichtbare Kopf bleibt. Plan: ab dem ersten Vorkommen
-    die ganze Serie löschen bzw. ändern; und eine Regel, die vor ihrem
-    Beginn endet, erzeugt keine Erinnerung.
+  - ✅ **Gelöschte Serie klingelte weiter** (Review von #93; 118, behoben).
+    „Dieses und alle folgenden löschen“ ab dem ERSTEN Vorkommen kürzte die
+    Serie auf ein Ende eine Sekunde vor ihrem Beginn. Die Ansichten zeigten
+    nichts mehr, aber die Weckerberechnung verwirft so eine Regel und nahm
+    ersatzweise den Serienbeginn: alle Erinnerungen klingelten weiter,
+    überall. Ebenso beim Ändern und beim Mitziehen an Kopien. Jetzt
+    entscheidet `planSeriesSplit` einmal, ob vor dem Schnitt etwas zu sehen
+    ist (`kind: 'cut'` oder `'whole'`); auch ein Beginn neben dem Muster und
+    lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dann:
+    Löschen löscht die Serie (und leert damit ihre privaten Erinnerungen
+    überall, #93), Ändern schreibt die ganze Serie an Ort und Stelle
+    (dieselbe Id, also bleiben private Erinnerungen, Gruppe, Farbe,
+    Besprechung), eine Kopie ohne Kopf wird als Ganzes geändert, und die
+    Ansage sagt warum (123). `writeSeriesSplit` nimmt nur noch Pläne mit
+    Kopf, per Typ und zur Laufzeit. Mit dabei: Beim Teilen gilt eine im
+    Formular geänderte Wiederholungsregel für die neue Serie (121), und ihre
+    Ausnahmen folgen einer neuen Uhrzeit; ein Teilen, das sich nicht planen
+    lässt, wird am Desktop abgelehnt statt zur ganzen Serie zu werden (wie
+    am Handy). Vom Anbieter gespeicherte Einzeländerungen bleiben (122).
+    Offen: Handy ohne Testläufer — ↻ im Test.
+  - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
+    `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
+    Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
+    das als 23:59:59 UTC gespeichert ist (Aperio, Exchange, Graph), endet bei
+    einem Abendtermin westlich von UTC vor seinem Beginn: in den Ansichten
+    unsichtbar, und der Ersatz-Wecker ist seine einzige Spur. Erst diese
+    Verankerung reparieren, dann die Weckerberechnung (nur für Termine:
+    Aufgaben mit Enddatum brauchen den Ersatz).
+  - 🚩 **Nebenfunde aus dem Entwurf zu 118** (unbearbeitet):
+    - iOS-Gerätekalender: jedes Schreiben und Löschen nutzt `span:
+      .thisEvent` (`IosDeviceEventStore.swift`), trifft bei einer Serie also nur
+      das erste Vorkommen. Ungemessen.
+    - Exchange/Graph: ob `EndDate` inklusive ist — dann bliebe bei jedem
+      Kürzen ein Vorkommen zu viel. Ungemessen.
+    - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
+      Serie, dann die Kopie (dieselbe Reihenfolge, die #92 in den Editoren
+      umgedreht hat).
+    - Das Handy überspringt beim Mitziehen keine Kopie einer fremden
+      Einladung (`invitationLocked`, am Desktop schon).
+    - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
+      Worten.
+    - Die Editoren nutzen `seriesLeftTruncated` nicht: scheitert beim Teilen
+      auch das Zurücksetzen, hört man nur den ersten Fehler.
+    - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
+      Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche
     vorgemerkt, Reviews von #92/#93). Die Id eines Exchange-Termins enthält
     den ChangeKey (`encode_event_id`, `S:{id}|{ck}`), wechselt also mit

@@ -22,6 +22,7 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   addEventExdate,
   createEvent,
+  eventGroupsForEvents,
   getEventById,
   groupEvents,
   isCommandError,
@@ -324,6 +325,30 @@ export function EventGroupCarryDialog({
               title: row.title,
               starts_at: row.start,
             });
+          } else if (splitPlan.kind === 'whole') {
+            // Nothing of this copy comes before its cut point, so "this and
+            // all following" is the whole copy (decision 118): cutting it
+            // would leave a head that ends before it starts, hidden from the
+            // views and still ringing. It is rewritten in place instead — its
+            // id, and everything kept under it, stay — and like a single it
+            // leaves the group of heads for the new one.
+            await updateEvent(
+              {
+                ...row,
+                recurrence: { ...currentRecurrence, ...splitPlan.tail },
+                send_invitations: false,
+              },
+              target.calendar_id,
+            );
+            await ungroupEvent(target.calendar_id, target.event_id, true).catch(
+              () => undefined,
+            );
+            created.push({
+              calendar_id: target.calendar_id,
+              event_id: target.event_id,
+              title: row.title,
+              starts_at: row.start,
+            });
           } else {
             const tail = await writeSeriesSplit(
               {
@@ -422,6 +447,18 @@ export function EventGroupCarryDialog({
     let regroupFailed = false;
     if (members.length >= 2) {
       try {
+        // A "this and all following" that rewrote the anchor's whole series in
+        // place (decision 118) left it where it was: in THIS group, among the
+        // heads of the copies. Grouping the new rows with it would pull them
+        // in there too — heads and tails one appointment again. So it leaves
+        // first, as bookkeeping. Asked, not assumed: on a retry it may already
+        // be in the new group, and taking it out of that one would undo it.
+        if (successor) {
+          const [current] = await eventGroupsForEvents([successor]);
+          if (current?.id === group.id) {
+            await ungroupEvent(successor.calendar_id, successor.event_id, true);
+          }
+        }
         await groupEvents(members);
       } catch {
         regroupFailed = true;

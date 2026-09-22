@@ -20,6 +20,8 @@ export {
   splitRRuleForEdit,
   planSeriesSplit,
   writeSeriesSplit,
+  seriesFromCut,
+  thisAndFutureDeletedKey,
   firstOccurrenceFrom,
   seriesTimesFromOccurrenceEdit,
   exceptionsAtSeriesTime,
@@ -30,3 +32,5 @@ export {
 
 /** An expanded per-occurrence copy of the desktop `CalendarEvent`. */
 export type ExpandedEvent = ExpandedOccurrence<CalendarEvent>;
+
+export type { SeriesDeleteOutcome } from '@aperio/shared';

@@ -1,4 +1,8 @@
-import { seriesIdOf, truncateRRuleBefore } from '@aperio/shared';
+import {
+  planSeriesSplit,
+  seriesIdOf,
+  type SeriesDeleteOutcome,
+} from '@aperio/shared';
 
 import {
   CalendarEvent,
@@ -16,10 +20,18 @@ import {
  * recurrence `UNTIL` one second before the cutoff, and write it back through the
  * normal update path. `sendCancellations` asks the provider to notify attendees.
  *
+ * When nothing the calendar shows comes before the cutoff — the first
+ * occurrence, or every earlier one deleted — the series is DELETED instead
+ * (decision 118): a truncation there wrote a rule that ends before it starts,
+ * which the views hide and the reminders fall back from, ringing on at the
+ * series start. Which of the two happened is returned, so the caller can say
+ * it.
+ *
  * A master with genuinely no recurrence degrades to a plain delete, but a master
  * we could NOT load (null) is a HARD ERROR: conflating "couldn't fetch" with "no
  * recurrence" would delete the WHOLE series (wiping the earlier occurrences the
  * user meant to keep, plus emailing a full cancellation) — the opposite of intent.
+ * So is a cutoff that cannot be read: it would be written as the series' end.
  *
  * A cross-client single-occurrence change synced in as a SEPARATE RECURRENCE-ID
  * override (CalDAV/iCloud + Google) is dropped by the adapter via the
@@ -30,7 +42,7 @@ export async function deleteThisAndFuture(
   ev: CalendarEvent,
   occurrenceIso: string,
   sendCancellations: boolean,
-): Promise<void> {
+): Promise<SeriesDeleteOutcome> {
   const seriesId = seriesIdOf(ev);
   const master = await getEventById(seriesId, ev.calendar_id);
   if (master == null) {
@@ -41,19 +53,26 @@ export async function deleteThisAndFuture(
   }
   if (!master.recurrence?.rrule) {
     await deleteEvent(seriesId, ev.calendar_id, sendCancellations);
-    return;
+    return 'deleted';
   }
-  const rrule = truncateRRuleBefore(
-    master.recurrence.rrule,
-    new Date(occurrenceIso),
-    { allDay: master.all_day },
-  );
+  const plan = planSeriesSplit(master, occurrenceIso);
+  if (plan == null) {
+    throw new Error(
+      `Could not read where to cut the recurring series "${ev.title}"; ` +
+        'no changes were made.',
+    );
+  }
+  if (plan.kind === 'whole') {
+    await deleteEvent(seriesId, ev.calendar_id, sendCancellations);
+    return 'deleted';
+  }
   await updateEvent({
     ...master,
-    recurrence: { ...master.recurrence, rrule },
+    recurrence: { ...master.recurrence, rrule: plan.headRule },
     send_invitations: sendCancellations,
     // Ask the adapter to drop any provider-side override in the dropped tail
     // (CalDAV/iCloud + Google) so it doesn't survive as a ghost occurrence.
     truncate_tail_overrides: true,
   });
+  return 'truncated';
 }
