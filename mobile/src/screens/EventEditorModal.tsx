@@ -48,7 +48,11 @@ import {
   toIso,
   editedRecurrence,
   exceptionsAtSeriesTime,
+  readSeriesRows,
+  ruleFromCut,
+  seriesFromCut,
   seriesTimesFromOccurrenceEdit,
+  type TailRecurrence,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -96,6 +100,7 @@ import {
   CalendarEvent,
   createEvent,
   getEventById,
+  getEvents,
   listCalendars,
   updateEvent,
 } from '../api/calendar';
@@ -1074,6 +1079,11 @@ export default function EventEditorModal({
         navigation.goBack();
         return;
       }
+      // "This and all following" where nothing comes before: the whole series
+      // from here, written in place by the series branch below (decision 118).
+      let wholeFromCut: CalendarEvent | null = null;
+      // What the rule generated before that cut, for a COUNT the user set.
+      let occurrencesBeforeCut = 0;
       if (
         editing &&
         original != null &&
@@ -1089,82 +1099,113 @@ export default function EventEditorModal({
         // each of those details decides whether the two halves line up.
         // The loaded `original` IS the master (getEventById resolves the
         // series), so its start anchors the occurrence count.
-        const plan = planSeriesSplit(original, occurrence);
+        // With the rows the provider keeps for single occurrences: one changed
+        // elsewhere is listed among the master's exceptions, and only its own
+        // row says it is still there (decision 125). Mirrors the desktop.
+        const plan = planSeriesSplit(
+          original,
+          occurrence,
+          await readSeriesRows(original, occurrence, getEvents),
+        );
         if (plan == null) {
           throw new Error(t('dialogs.event.thisAndFutureLoadFailed', { title }));
         }
-        const masterRecurrence = original.recurrence;
-        const created = await writeSeriesSplit(
-          {
-            // Notify on the truncate too (symmetric with
-            // delete-this-and-following): on notify-flag providers attendees
-            // must learn the original series now ends before the cutoff, else
-            // they keep the old occurrences AND receive the new tail invite.
-            truncate: (headRule) =>
-              updateEvent(
-                {
-                  ...original,
-                  recurrence: { ...masterRecurrence, rrule: headRule },
-                  send_invitations: sendInvitations,
-                  truncate_tail_overrides: true,
-                },
-                original.calendar_id,
-              ),
-            createTail: (recurrence) =>
-              createEvent(
-                {
-                  calendar_id: calId,
-                  title: trimmedTitle,
-                  description: description.trim() || null,
-                  location: location.trim() || null,
-                  start,
-                  end,
-                  all_day: allDay,
-                  recurrence,
-                  color_label: colorToSend,
-                  reminders: remindersForWire,
-                  sound: null,
-                  attendees,
-                  send_invitations: sendInvitations,
-                  ...organizerOf(original),
-                },
-                // Continuation of the master — keep its zone verbatim (incl.
-                // floating) so head and tail expand identically.
-                { preserveRecurrenceZone: true },
-              ),
-            restore: () =>
-              updateEvent(
-                { ...original, send_invitations: sendInvitations },
-                original.calendar_id,
-              ),
-          },
-          plan,
-        );
-        // The tail is a continuation of the same appointment, so it gets the
-        // private list under its new id. The head keeps its own under the
-        // series key: it still has every occurrence before the change. Mirrors
-        // the desktop EventDialog.
-        await savePrivate(created, { oldKeyLivesOn: true });
-        if (!isLocalCal) {
-          await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
-        }
-        AccessibilityInfo.announceForAccessibility(
-          t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
-        );
-        // The other copies have a series each, so carrying this means splitting
-        // theirs at the same point — not updating a row.
-        if (
-          await offerToCarry(
-            occurrenceBefore(original, occurrence),
-            created,
-            'future',
-            occurrence,
-          )
-        ) {
+        if (plan.kind === 'whole') {
+          wholeFromCut = seriesFromCut(original, plan, occurrence);
+          occurrencesBeforeCut = plan.occurrencesBefore;
+        } else {
+          // The new series continues the original pattern — unless the user
+          // changed the repeat field, which then is its rule (decision 121),
+          // its COUNT counted from the series' first occurrence as the field
+          // showed it. Either way the exceptions follow a new time of day, or
+          // the occurrences they cancel come back at it. Mirrors the desktop.
+          const ruleChanged = recurrence !== (original.recurrence?.rrule ?? null);
+          const tailRecurrence = (planned: TailRecurrence) =>
+            exceptionsAtSeriesTime(
+              ruleChanged
+                ? editedRecurrence(
+                    recurrence && ruleFromCut(recurrence, plan.occurrencesBefore),
+                    planned,
+                    allDay,
+                  )
+                : planned,
+              occurrence,
+              start,
+              allDay || original.all_day,
+            );
+          const masterRecurrence = original.recurrence;
+          const created = await writeSeriesSplit(
+            {
+              // Notify on the truncate too (symmetric with
+              // delete-this-and-following): on notify-flag providers attendees
+              // must learn the original series now ends before the cutoff, else
+              // they keep the old occurrences AND receive the new tail invite.
+              truncate: (headRule) =>
+                updateEvent(
+                  {
+                    ...original,
+                    recurrence: { ...masterRecurrence, rrule: headRule },
+                    send_invitations: sendInvitations,
+                    truncate_tail_overrides: true,
+                  },
+                  original.calendar_id,
+                ),
+              createTail: (planned) =>
+                createEvent(
+                  {
+                    calendar_id: calId,
+                    title: trimmedTitle,
+                    description: description.trim() || null,
+                    location: location.trim() || null,
+                    start,
+                    end,
+                    all_day: allDay,
+                    recurrence: tailRecurrence(planned),
+                    color_label: colorToSend,
+                    reminders: remindersForWire,
+                    sound: null,
+                    attendees,
+                    send_invitations: sendInvitations,
+                    ...organizerOf(original),
+                  },
+                  // Continuation of the master — keep its zone verbatim (incl.
+                  // floating) so head and tail expand identically.
+                  { preserveRecurrenceZone: true },
+                ),
+              restore: () =>
+                updateEvent(
+                  { ...original, send_invitations: sendInvitations },
+                  original.calendar_id,
+                ),
+            },
+            plan,
+          );
+          // The tail is a continuation of the same appointment, so it gets the
+          // private list under its new id. The head keeps its own under the
+          // series key: it still has every occurrence before the change. Mirrors
+          // the desktop EventDialog.
+          await savePrivate(created, { oldKeyLivesOn: true });
+          if (!isLocalCal) {
+            await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+          }
+          AccessibilityInfo.announceForAccessibility(
+            t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+          );
+          // The other copies have a series each, so carrying this means splitting
+          // theirs at the same point — not updating a row.
+          if (
+            await offerToCarry(
+              occurrenceBefore(original, occurrence),
+              created,
+              'future',
+              occurrence,
+            )
+          ) {
+            return;
+          }
+          navigation.goBack();
           return;
         }
-        navigation.goBack();
-        return;
       }
       if (editing && original != null) {
         // Send the loaded event back whole with the edits applied — preserves
@@ -1179,8 +1220,11 @@ export default function EventEditorModal({
         // today; should one (the scope control in the form), its fields hold
         // that occurrence, so the edit is read as a change to the series: an
         // untouched date leaves the series start where it is.
+        // A series rewritten from a cut (decision 118) is read from there: its
+        // start is the cut, its rule the one it has from the cut on.
+        const base = wholeFromCut ?? original;
         const seededOccurrence =
-          isOccurrence && occurrence != null && original.recurrence != null
+          isOccurrence && occurrence != null && base.recurrence != null
             ? {
                 start: occurrence,
                 end: new Date(
@@ -1192,16 +1236,29 @@ export default function EventEditorModal({
             : null;
         const times = seededOccurrence
           ? seriesTimesFromOccurrenceEdit(
-              original,
-              original.recurrence?.tzid,
+              base,
+              base.recurrence?.tzid,
               seededOccurrence,
               { start, end },
               allDay,
             )
           : { start, end };
+        // An untouched repeat field keeps the rule the series has from the cut
+        // on; a changed one is the user's.
+        const seriesRecurrence = wholeFromCut
+          ? editedRecurrence(
+              recurrence === (original.recurrence?.rrule ?? null)
+                ? (wholeFromCut.recurrence?.rrule ?? recurrence)
+                : // A COUNT the user set counts from the series' first
+                  // occurrence; from the cut, what is left of it (121).
+                  recurrence && ruleFromCut(recurrence, occurrencesBeforeCut),
+              wholeFromCut.recurrence ?? { exceptions: [] },
+              allDay,
+            )
+          : recurrenceToSend;
         const updated = await updateEvent(
           {
-            ...original,
+            ...base,
             title: trimmedTitle,
             calendar_id: calId,
             all_day: allDay,
@@ -1214,10 +1271,10 @@ export default function EventEditorModal({
             // A new time of day takes the exceptions along, or the occurrences
             // they cancel would come back at that time.
             recurrence: exceptionsAtSeriesTime(
-              recurrenceToSend,
-              original.start,
+              seriesRecurrence,
+              base.start,
               times.start,
-              allDay || original.all_day,
+              allDay || base.all_day,
             ),
             attendees,
             send_invitations: sendInvitations,
@@ -1232,15 +1289,31 @@ export default function EventEditorModal({
           await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
         }
         AccessibilityInfo.announceForAccessibility(
-          t('dialogs.event.updated', { title: updated.title }),
+          t(
+            wholeFromCut
+              ? 'dialogs.event.thisAndFutureUpdatedWhole'
+              : 'dialogs.event.updated',
+            { title: updated.title },
+          ),
         );
         // The appointment may exist several times over. Ask — after the save,
         // so the user's own change is never at stake — whether the other
-        // copies should follow (DESIGN-event-groups.md, Stufe 2). Only for a
-        // whole-event edit: the occurrence and this-and-following branches
-        // return above, because "which copy of which occurrence" is a question
-        // this cannot answer yet.
-        if (await offerToCarry(original, updated)) return;
+        // copies should follow (DESIGN-event-groups.md, Stufe 2). A "this and
+        // all following" that rewrote the whole series asks as what the user
+        // chose: each copy is cut at the same point, and one with earlier
+        // occurrences keeps them.
+        if (
+          wholeFromCut && occurrence != null
+            ? await offerToCarry(
+                occurrenceBefore(original, occurrence),
+                updated,
+                'future',
+                occurrence,
+              )
+            : await offerToCarry(original, updated)
+        ) {
+          return;
+        }
       } else {
         const created = await createEvent({
           calendar_id: calId,

@@ -3,11 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   firstOccurrenceFrom,
   futureCarryRow,
+  occurrenceOfSeries,
   planSeriesSplit,
+  readSeriesRows,
+  ruleFromCut,
+  seriesFromCut,
   seriesLeftTruncated,
+  thisAndFutureDeletedKey,
   truncateRRuleBefore,
   writeSeriesSplit,
+  type SeriesCutPlan,
   type SeriesSplitPlan,
+  type WholeSeriesPlan,
 } from '@aperio/shared';
 
 /** A weekly Monday series, ten times, starting 2026-08-03. */
@@ -23,14 +30,26 @@ const weekly = {
   },
 };
 
+/** The plan, which must keep a head. */
+function cutOf(plan: SeriesSplitPlan | null): SeriesCutPlan {
+  expect(plan?.kind).toBe('cut');
+  return plan as SeriesCutPlan;
+}
+
+/** The plan, which must have no head. */
+function wholeOf(plan: SeriesSplitPlan | null): WholeSeriesPlan {
+  expect(plan?.kind).toBe('whole');
+  return plan as WholeSeriesPlan;
+}
+
 describe('planSeriesSplit', () => {
   it('ends the head before the cutoff and gives the tail what is left', () => {
     // Split at the fourth occurrence: three stay, seven move.
-    const plan = planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z');
+    const plan = planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z', []);
     expect(plan).not.toBeNull();
     expect(plan?.occurrencesBefore).toBe(3);
-    expect(plan?.headRule).toContain('UNTIL=20260824T075959Z');
-    expect(plan?.headRule).not.toContain('COUNT');
+    expect(cutOf(plan).headRule).toContain('UNTIL=20260824T075959Z');
+    expect(cutOf(plan).headRule).not.toContain('COUNT');
     expect(plan?.tail.rrule).toBe('FREQ=WEEKLY;COUNT=7');
   });
 
@@ -42,7 +61,7 @@ describe('planSeriesSplit', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, exceptions: ['2026-08-10T08:00:00.000Z'] },
     };
-    const plan = planSeriesSplit(withHole, '2026-08-24T08:00:00.000Z');
+    const plan = planSeriesSplit(withHole, '2026-08-24T08:00:00.000Z', []);
     expect(plan?.occurrencesBefore).toBe(3);
     expect(plan?.tail.rrule).toBe('FREQ=WEEKLY;COUNT=7');
   });
@@ -58,7 +77,7 @@ describe('planSeriesSplit', () => {
         exceptions: ['2026-08-10T08:00:00.000Z', '2026-09-07T08:00:00.000Z'],
       },
     };
-    const plan = planSeriesSplit(withHoles, '2026-08-24T08:00:00.000Z');
+    const plan = planSeriesSplit(withHoles, '2026-08-24T08:00:00.000Z', []);
     expect(plan?.tail.exceptions).toEqual(['2026-09-07T08:00:00.000Z']);
   });
 
@@ -67,12 +86,12 @@ describe('planSeriesSplit', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, tzid: 'Europe/Berlin' },
     };
-    expect(planSeriesSplit(zoned, '2026-08-24T08:00:00.000Z')?.tail.tzid).toBe(
+    expect(planSeriesSplit(zoned, '2026-08-24T08:00:00.000Z', [])?.tail.tzid).toBe(
       'Europe/Berlin',
     );
     // A floating series stays floating: stamping only the tail would make the
     // two halves expand an hour apart across a DST boundary.
-    expect(planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z')?.tail.tzid).toBeNull();
+    expect(planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z', [])?.tail.tzid).toBeNull();
   });
 
   it('leaves an open-ended series open', () => {
@@ -80,9 +99,9 @@ describe('planSeriesSplit', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY' },
     };
-    const plan = planSeriesSplit(open, '2026-08-24T08:00:00.000Z');
+    const plan = planSeriesSplit(open, '2026-08-24T08:00:00.000Z', []);
     expect(plan?.tail.rrule).toBe('FREQ=WEEKLY');
-    expect(plan?.headRule).toContain('UNTIL=');
+    expect(cutOf(plan).headRule).toContain('UNTIL=');
   });
 
   it('emits a date-only UNTIL for an all-day series, on the day BEFORE the cut', () => {
@@ -103,16 +122,16 @@ describe('planSeriesSplit', () => {
       start: localMidnight(2026, 8, 3),
       end: localMidnight(2026, 8, 4),
     };
-    const plan = planSeriesSplit(allDay, localMidnight(2026, 8, 24));
-    expect(plan?.headRule).toContain('UNTIL=20260823');
-    expect(plan?.headRule).not.toContain('UNTIL=20260823T');
+    const plan = planSeriesSplit(allDay, localMidnight(2026, 8, 24), []);
+    expect(cutOf(plan).headRule).toContain('UNTIL=20260823');
+    expect(cutOf(plan).headRule).not.toContain('UNTIL=20260823T');
   });
 
   it('keeps a timed series UNTIL to the second', () => {
     // The counterpart: a timed series' UNTIL is a UTC datetime, one second
     // before the cutoff, and must NOT be read in local terms.
-    const plan = planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z');
-    expect(plan?.headRule).toContain('UNTIL=20260824T075959Z');
+    const plan = planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z', []);
+    expect(cutOf(plan).headRule).toContain('UNTIL=20260824T075959Z');
   });
 
   it('truncates an all-day series to the day before, in local terms', () => {
@@ -128,11 +147,154 @@ describe('planSeriesSplit', () => {
     );
   });
 
+  // Decision 118: nothing the calendar shows before the cutoff means no head.
+  // Cutting anyway wrote a rule that ends before it starts — hidden from the
+  // views, and the reminders fell back to the series start and rang on.
+  it('has no head at the first occurrence', () => {
+    const plan = wholeOf(planSeriesSplit(weekly, weekly.start, []));
+    expect(plan.occurrencesBefore).toBe(0);
+    expect(plan.tail.rrule).toBe('FREQ=WEEKLY;COUNT=10');
+    expect('headRule' in plan).toBe(false);
+  });
+
+  it('has no head when the series starts off its own pattern', () => {
+    // Monday start, Wednesdays only: the rule's first occurrence is the
+    // Wednesday, and nothing comes before it.
+    const offPattern = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY;BYDAY=WE;COUNT=10' },
+    };
+    const plan = wholeOf(planSeriesSplit(offPattern, '2026-08-05T08:00:00.000Z', []));
+    expect(plan.occurrencesBefore).toBe(0);
+  });
+
+  it('has no head when every earlier occurrence was deleted', () => {
+    // The first two Mondays are gone; cutting at the third leaves nothing
+    // shown before it — though COUNT still counts them, so the series keeps
+    // eight from here.
+    const bothGone = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-03T08:00:00.000Z', '2026-08-10T08:00:00.000Z'],
+      },
+    };
+    const plan = wholeOf(planSeriesSplit(bothGone, '2026-08-17T08:00:00.000Z', []));
+    expect(plan.occurrencesBefore).toBe(2);
+    expect(plan.tail.rrule).toBe('FREQ=WEEKLY;COUNT=8');
+    expect(plan.tail.exceptions).toEqual([]);
+  });
+
+  it('keeps a head when one earlier occurrence is still shown', () => {
+    const oneGone = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-08-03T08:00:00.000Z'] },
+    };
+    cutOf(planSeriesSplit(oneGone, '2026-08-17T08:00:00.000Z', []));
+  });
+
+  it('has no head at the first day of an all-day series, or of a zoned one', () => {
+    const localMidnight = (y: number, m: number, d: number) =>
+      new Date(y, m - 1, d).toISOString();
+    const allDay = {
+      ...weekly,
+      all_day: true,
+      start: localMidnight(2026, 8, 3),
+      end: localMidnight(2026, 8, 4),
+    };
+    wholeOf(planSeriesSplit(allDay, allDay.start, []));
+    const zoned = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, tzid: 'Europe/Berlin' },
+    };
+    wholeOf(planSeriesSplit(zoned, zoned.start, []));
+  });
+
+  // Decision 125: the master's exceptions alone cannot say what is shown.
+  // Exchange lists the slot of an occurrence changed in Outlook among them,
+  // and shows it as a row of its own.
+  it('keeps a head when an earlier occurrence was changed, not deleted (Exchange)', () => {
+    const changedFirst = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-08-03T08:00:00.000Z'] },
+    };
+    const moved = {
+      ...weekly,
+      id: 'ev-1::rid::2026-08-03T08:00:00.000Z',
+      start: '2026-08-04T12:00:00.000Z',
+      end: '2026-08-04T13:00:00.000Z',
+      recurrence: null,
+    };
+    cutOf(planSeriesSplit(changedFirst, '2026-08-10T08:00:00.000Z', [moved]));
+    // Without its row, the same master reads as nothing before.
+    wholeOf(planSeriesSplit(changedFirst, '2026-08-10T08:00:00.000Z', []));
+  });
+
+  it('has no head when the only earlier occurrence was cancelled (Google)', () => {
+    // Google writes no exception: it keeps the deleted occurrence as a
+    // cancelled row of its own.
+    const cancelled = {
+      ...weekly,
+      id: 'ev-1::rid::2026-08-03T08:00:00.000Z',
+      recurrence: null,
+      cancelled: true,
+    };
+    wholeOf(planSeriesSplit(weekly, '2026-08-10T08:00:00.000Z', [cancelled]));
+  });
+
+  it("counts a row by its slot, and ignores another series' rows", () => {
+    const firstGone = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-08-03T08:00:00.000Z'] },
+    };
+    // Another series' row on the same day is not this series' head.
+    const other = {
+      ...weekly,
+      id: 'ev-9::rid::2026-08-03T08:00:00.000Z',
+      recurrence: null,
+    };
+    wholeOf(planSeriesSplit(firstGone, '2026-08-10T08:00:00.000Z', [other]));
+    // This series' row for a LATER slot, moved before the cutoff, is not in
+    // the head either: a cut drops it.
+    const laterMovedEarly = {
+      ...weekly,
+      id: 'ev-1::rid::2026-08-17T08:00:00.000Z',
+      start: '2026-08-05T08:00:00.000Z',
+      end: '2026-08-05T09:00:00.000Z',
+      recurrence: null,
+    };
+    wholeOf(planSeriesSplit(firstGone, '2026-08-10T08:00:00.000Z', [laterMovedEarly]));
+  });
+
+  it("does not hide a new series' first occurrence behind a changed slot's exception", () => {
+    // Exchange: the occurrence cut at was changed in Outlook, so its slot is
+    // an exception of the master. The new series starts on that slot.
+    const changedAtCut = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-24T08:00:00.000Z', '2026-09-07T08:00:00.000Z'],
+      },
+    };
+    const plan = cutOf(planSeriesSplit(changedAtCut, '2026-08-24T08:00:00.000Z', []));
+    expect(plan.tail.exceptions).toEqual(['2026-09-07T08:00:00.000Z']);
+  });
+
+  it("keeps the exception on the slot when the series is written whole", () => {
+    // In place, the provider's row for that slot goes on standing in for it.
+    const changedFirst = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-08-03T08:00:00.000Z'] },
+    };
+    const plan = wholeOf(planSeriesSplit(changedFirst, weekly.start, []));
+    expect(plan.tail.exceptions).toEqual(['2026-08-03T08:00:00.000Z']);
+  });
+
   it('refuses an event that carries no rule', () => {
     // The caller must not fall through to a whole-series edit on this: that
     // moves every occurrence, which is what the scope question prevents.
     const single = { ...weekly, recurrence: null };
-    expect(planSeriesSplit(single, '2026-08-24T08:00:00.000Z')).toBeNull();
+    expect(planSeriesSplit(single, '2026-08-24T08:00:00.000Z', [])).toBeNull();
   });
 });
 
@@ -202,8 +364,139 @@ describe('firstOccurrenceFrom', () => {
   });
 });
 
+describe('seriesFromCut', () => {
+  it('is the master itself at the first occurrence', () => {
+    const plan = wholeOf(planSeriesSplit(weekly, weekly.start, []));
+    const series = seriesFromCut(weekly, plan, weekly.start);
+    expect(series.start).toBe(weekly.start);
+    expect(series.end).toBe(weekly.end);
+    expect(series.recurrence).toEqual(weekly.recurrence);
+  });
+
+  it('starts where the series is first seen, with the COUNT that is left', () => {
+    const bothGone = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-03T08:00:00.000Z', '2026-08-10T08:00:00.000Z'],
+      },
+    };
+    const cut = '2026-08-17T08:00:00.000Z';
+    const series = seriesFromCut(bothGone, wholeOf(planSeriesSplit(bothGone, cut, [])), cut);
+    expect(series.start).toBe(cut);
+    expect(series.end).toBe('2026-08-17T09:00:00.000Z');
+    expect(series.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;COUNT=8',
+      exceptions: [],
+      tzid: null,
+    });
+  });
+});
+
+describe('ruleFromCut', () => {
+  it('leaves what is left of a COUNT counted from the first occurrence', () => {
+    expect(ruleFromCut('FREQ=WEEKLY;INTERVAL=2;COUNT=10', 4)).toBe(
+      'FREQ=WEEKLY;INTERVAL=2;COUNT=6',
+    );
+    expect(ruleFromCut('RRULE:FREQ=DAILY;COUNT=3', 5)).toBe('FREQ=DAILY;COUNT=1');
+    expect(ruleFromCut('FREQ=WEEKLY;UNTIL=20261231T235959Z', 4)).toBe(
+      'FREQ=WEEKLY;UNTIL=20261231T235959Z',
+    );
+  });
+});
+
+describe('occurrenceOfSeries', () => {
+  it('is the occurrence at the slot, shaped as the views expand it', () => {
+    const occ = occurrenceOfSeries(weekly, '2026-08-24T08:00:00.000Z');
+    expect(occ).toMatchObject({
+      id: 'ev-1@2026-08-24T08:00:00.000Z',
+      series_id: 'ev-1',
+      occurrence_start: '2026-08-24T08:00:00.000Z',
+      start: '2026-08-24T08:00:00.000Z',
+      end: '2026-08-24T09:00:00.000Z',
+      recurrence: weekly.recurrence,
+    });
+  });
+});
+
+describe('occurrenceOfSeries on a series of days', () => {
+  it('opens on the day the slot names, however it was spelled', () => {
+    // Decision 95: another writer may spell the day hours off this device's
+    // local midnight. The occurrence opens on the series' own day, as the
+    // views show it — not a day early west of Greenwich.
+    const localMidnight = (y: number, m: number, d: number) =>
+      new Date(y, m - 1, d).toISOString();
+    const days = {
+      ...weekly,
+      all_day: true,
+      start: localMidnight(2026, 8, 3),
+      end: localMidnight(2026, 8, 4),
+    };
+    const day = new Date(2026, 7, 24).getTime();
+    for (const offsetHours of [-5, 0, 5]) {
+      const spelled = new Date(day + offsetHours * 3_600_000).toISOString();
+      expect(occurrenceOfSeries(days, spelled).start).toBe(localMidnight(2026, 8, 24));
+    }
+  });
+});
+
+describe('readSeriesRows', () => {
+  it("asks around the series and the cutoff, and keeps only the series' own rows", async () => {
+    const asked: { calendar_id: string; start: string; end: string }[] = [];
+    const own = { ...weekly, id: 'ev-1::rid::2026-08-03T08:00:00.000Z', recurrence: null };
+    const other = { ...weekly, id: 'ev-9::rid::2026-08-03T08:00:00.000Z', recurrence: null };
+    const rows = await readSeriesRows(
+      { ...weekly, calendar_id: 'cal' },
+      '2026-08-24T08:00:00.000Z',
+      async (range) => {
+        asked.push(range);
+        return [weekly, own, other];
+      },
+    );
+    expect(rows).toEqual([own]);
+    expect(asked).toEqual([
+      {
+        calendar_id: 'cal',
+        start: '2026-07-03T08:00:00.000Z',
+        end: '2026-09-24T08:00:00.000Z',
+      },
+    ]);
+  });
+});
+
+describe('thisAndFutureDeletedKey', () => {
+  it('says the whole series went when nothing came before', () => {
+    expect(thisAndFutureDeletedKey('deleted', false)).toBe(
+      'dialogs.event.thisAndFutureDeletedWhole',
+    );
+    expect(thisAndFutureDeletedKey('deleted', true)).toBe(
+      'dialogs.event.thisAndFutureCancelledWhole',
+    );
+    expect(thisAndFutureDeletedKey('truncated', false)).toBe(
+      'dialogs.event.thisAndFutureDeleted',
+    );
+    expect(thisAndFutureDeletedKey('truncated', true)).toBe(
+      'dialogs.event.thisAndFutureCancelled',
+    );
+  });
+});
+
 describe('writeSeriesSplit', () => {
-  const plan: SeriesSplitPlan = {
+  it('refuses a series with nothing before the cutoff, and writes nothing', async () => {
+    // The type refuses it already; this is the plan that got past it.
+    const io = {
+      truncate: vi.fn(async () => undefined),
+      createTail: vi.fn(async () => ({ id: 'tail' })),
+      restore: vi.fn(async () => undefined),
+    };
+    const whole = planSeriesSplit(weekly, weekly.start, []);
+    await expect(writeSeriesSplit(io, whole as SeriesCutPlan)).rejects.toThrow();
+    expect(io.truncate).not.toHaveBeenCalled();
+    expect(io.createTail).not.toHaveBeenCalled();
+  });
+
+  const plan: SeriesCutPlan = {
+    kind: 'cut',
     headRule: 'FREQ=WEEKLY;UNTIL=20260824T075959Z',
     tail: { rrule: 'FREQ=WEEKLY;COUNT=7', exceptions: [], tzid: null },
     occurrencesBefore: 3,
@@ -365,7 +658,8 @@ describe('carrying a future edit to another copy', () => {
     anchorIso: string;
     /** The row the tail (or the single event) is written with. */
     row: typeof current;
-    /** False when the copy is a single event: updated in place, not split. */
+    /** False when the copy is updated in place, not split: a single event, or
+     *  a series with nothing before its cut point (decision 118). */
     split: boolean;
     headRule: string | null;
     tailRule: string | null;
@@ -376,9 +670,12 @@ describe('carrying a future edit to another copy', () => {
     // These fixtures all carry readable instants; a null here would be the
     // test's own mistake, not the rule's.
     if (row == null) throw new Error('the fixture has an unreadable cut point');
-    const plan = planSeriesSplit(current, anchorIso);
+    const plan = planSeriesSplit(current, anchorIso, []);
     if (plan == null) {
       return { anchorIso, row, split: false, headRule: null, tailRule: null };
+    }
+    if (plan.kind === 'whole') {
+      return { anchorIso, row, split: false, headRule: null, tailRule: plan.tail.rrule };
     }
     let headRule: string | null = null;
     let tailRule: string | null = null;
@@ -431,6 +728,27 @@ describe('carrying a future edit to another copy', () => {
     expect(result?.row.reminders).toEqual(['-PT30M']);
     expect(result?.row.color_label).toBe('blue');
     expect(result?.row.calendar_id).toBe('private');
+  });
+
+  it('rewrites a copy in place when nothing of it comes before its cut point', async () => {
+    // The copy starts on the day the anchor was cut: cutting it would leave a
+    // head that ends before it starts, hidden and still ringing (118).
+    const startsAtTheCut = {
+      ...copy,
+      start: '2026-08-24T08:00:00.000Z',
+      end: '2026-08-24T09:00:00.000Z',
+    };
+    const result = await carryFuture(
+      startsAtTheCut,
+      '2026-08-24T08:00:00.000Z',
+      stood,
+      movedAnHourLater,
+      ['start', 'end'],
+    );
+    expect(result?.split).toBe(false);
+    expect(result?.headRule).toBeNull();
+    expect(result?.tailRule).toBe('FREQ=WEEKLY;COUNT=10');
+    expect(result?.row.start).toBe('2026-08-24T09:00:00.000Z');
   });
 
   it('cuts a differently-patterned copy at its own next occurrence', async () => {

@@ -958,20 +958,76 @@ export function splitRRuleForEdit(
   opts: { allDay?: boolean } = {},
 ): { oldRule: string; newRule: string } {
   const oldRule = truncateRRuleBefore(rrule, cutoff, opts);
+  return { oldRule, newRule: ruleFromCut(rrule, occurrencesBeforeCutoff) };
+}
+
+/**
+ * A rule read from a cut on: its COUNT less the occurrences before the cut
+ * (clamped to at least one), every other part as it is. No prefix.
+ *
+ * A COUNT counts from the series' first occurrence — which is what the editor
+ * shows in its repeat field for any occurrence of the series. So the rule a
+ * user set there for "this and all following" (decision 121) is read the same
+ * way as an untouched one: "ends after 10 times" on the fifth occurrence
+ * leaves six from here, not ten more.
+ */
+export function ruleFromCut(rrule: string, occurrencesBeforeCutoff: number): string {
   const body = rrule.trim().replace(/^RRULE:/i, '');
   const parts = body.split(';').filter(Boolean);
   const countIdx = parts.findIndex((p) => p.toUpperCase().startsWith('COUNT='));
   if (countIdx === -1) {
-    return { oldRule, newRule: body };
+    return body;
   }
   const count = Number(parts[countIdx].slice('COUNT='.length));
   const remaining = Number.isFinite(count)
     ? Math.max(1, count - Math.max(0, occurrencesBeforeCutoff))
     : count;
-  const newParts = parts.map((p, i) =>
-    i === countIdx ? `COUNT=${remaining}` : p,
-  );
-  return { oldRule, newRule: newParts.join(';') };
+  return parts.map((p, i) => (i === countIdx ? `COUNT=${remaining}` : p)).join(';');
+}
+
+/**
+ * The occurrence of `master` at `slotIso`, shaped as the views expand it.
+ *
+ * For a slot the master's own expansion does not produce — one the provider
+ * keeps as a row of its own, which the master skips — so an editor can open
+ * "this and all following" on the series at that point, with the series'
+ * fields, as it does for any other occurrence (decision 126).
+ */
+export function occurrenceOfSeries<E extends RecurringEventLike>(
+  master: E,
+  slotIso: string,
+): ExpandedOccurrence<E> {
+  // A series of days names its slot as a DAY, and another writer may have
+  // spelled that day hours off this device's local midnight (decision 95): it
+  // opens on the series' own occurrence that day names, as the views show it.
+  // With none that close, the slot stays as written — nothing is guessed.
+  let at = new Date(slotIso).getTime();
+  if (master.all_day === true && master.recurrence?.rrule && Number.isFinite(at)) {
+    const named = expandEvent(
+      { ...master, recurrence: { ...master.recurrence, exceptions: [] } },
+      { start: new Date(at - SAME_DAY_MS), end: new Date(at + SAME_DAY_MS) },
+    ).find(
+      (occ) =>
+        isExpandedOccurrence(occ) &&
+        namesTheSameDay(at, new Date(occ.occurrence_start).getTime()),
+    );
+    if (named && isExpandedOccurrence(named)) {
+      at = new Date(named.occurrence_start).getTime();
+    }
+  }
+  const slot = new Date(at);
+  // A length that cannot be read is none: the occurrence still opens, where
+  // an invalid instant would throw inside the load that opens it.
+  const length = new Date(master.end).getTime() - new Date(master.start).getTime();
+  const duration = Number.isFinite(length) ? Math.max(0, length) : 0;
+  return {
+    ...master,
+    id: `${master.id}@${slot.toISOString()}`,
+    series_id: master.id,
+    occurrence_start: slot.toISOString(),
+    start: slot.toISOString(),
+    end: new Date(slot.getTime() + duration).toISOString(),
+  };
 }
 
 /**

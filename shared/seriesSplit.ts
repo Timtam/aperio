@@ -29,9 +29,32 @@
 // `writeSeriesSplit`. What each caller still owns is the SHAPE of the row it
 // creates — a copy keeps its own colour, reminders and calendar, and only the
 // caller knows those.
+//
+// And one case is no split at all (decision 118). When nothing the calendar
+// shows lies before the cutoff — the user picked the first occurrence, or every
+// earlier one was deleted — there is no head to keep. Cutting it anyway wrote a
+// rule that ends before it starts: the views showed nothing, but the reminder
+// expansion rejects such a rule and falls back to the series start, so the
+// deleted series went on ringing, on every device. "This and all following" is
+// then the whole series, and the plan says so (`kind: 'whole'`): a delete
+// deletes it, an edit rewrites it in place, keeping its id.
+//
+// What the calendar shows is the master AND the occurrences the provider keeps
+// as rows of their own (decision 125). A master's exceptions alone cannot say
+// it: Exchange lists the slot of every occurrence changed in Outlook among
+// them, next to the deleted ones, and Google keeps a deleted occurrence as a
+// cancelled row instead. So the plan reads the series' rows too
+// (`readSeriesRows`), and every caller has to hand them over.
 
 import type { RecurringEventLike } from './recurrence';
-import { expandEvent, splitRRuleForEdit } from './recurrence';
+import {
+  expandAll,
+  expandEvent,
+  isExpandedOccurrence,
+  overrideRecurrenceIso,
+  overrideSeriesId,
+  splitRRuleForEdit,
+} from './recurrence';
 
 /** The least a master needs for its series to be split. */
 export interface SplittableEvent extends RecurringEventLike {
@@ -45,11 +68,14 @@ export interface TailRecurrence {
   tzid: string | null;
 }
 
-/** What splitting this series at this occurrence would do. */
-export interface SeriesSplitPlan {
-  /** The rule the ORIGINAL series keeps: everything strictly before the cutoff. */
-  headRule: string;
-  /** The recurrence the NEW tail series is created with. */
+/** What cutting this series at this occurrence would do. */
+export type SeriesSplitPlan = SeriesCutPlan | WholeSeriesPlan;
+
+interface SeriesPlanCommon {
+  /**
+   * The recurrence from the cutoff on: the NEW tail series' after a cut, the
+   * series' own after a whole-series rewrite.
+   */
   tail: TailRecurrence;
   /**
    * How many occurrences the RULE generates before the cutoff.
@@ -60,8 +86,63 @@ export interface SeriesSplitPlan {
   occurrencesBefore: number;
 }
 
+/** The series keeps a head: at least one occurrence before the cutoff. */
+export interface SeriesCutPlan extends SeriesPlanCommon {
+  kind: 'cut';
+  /** The rule the ORIGINAL series keeps: everything strictly before the cutoff. */
+  headRule: string;
+}
+
+/**
+ * Nothing the calendar shows lies before the cutoff, so "this and all
+ * following" is the whole series. There is no head rule on purpose: every
+ * caller has to decide what the whole series means for it, and the compiler
+ * says so wherever one does not.
+ */
+export interface WholeSeriesPlan extends SeriesPlanCommon {
+  kind: 'whole';
+}
+
+/** How far a moved occurrence is still looked for: before the series' start,
+ *  and past the cutoff. */
+const MOVED_REACH_MS = 31 * 24 * 60 * 60 * 1000;
+
+/**
+ * The rows of this series the provider keeps besides the master — its changed
+ * and its cancelled occurrences — that the plan needs to know what is shown
+ * before the cutoff (decision 125).
+ *
+ * Read through the caller's own `getEvents`, over the stretch from a month
+ * before the series starts to a month past the cutoff: a row counts by the
+ * slot it stands in for, and it may have been moved to either side. A read
+ * that fails throws: guessing "nothing there" would delete or rewrite a series
+ * whose earlier occurrences are on screen.
+ */
+export async function readSeriesRows<
+  E extends RecurringEventLike,
+  M extends SplittableEvent & { calendar_id: string },
+>(
+  master: M,
+  cutoffIso: string,
+  getEvents: (range: { calendar_id: string; start: string; end: string }) => Promise<E[]>,
+): Promise<E[]> {
+  const cutoff = new Date(cutoffIso).getTime();
+  const from = new Date(master.start).getTime() - MOVED_REACH_MS;
+  if (!Number.isFinite(cutoff) || !Number.isFinite(from)) return [];
+  const rows = await getEvents({
+    calendar_id: master.calendar_id,
+    start: new Date(from).toISOString(),
+    end: new Date(Math.max(cutoff, from) + MOVED_REACH_MS).toISOString(),
+  });
+  return rows.filter((row) => overrideSeriesId(row) === master.id);
+}
+
 /**
  * The arithmetic of a split, decided before anything is written.
+ *
+ * `rows` are the series' own rows besides the master (`readSeriesRows`); rows
+ * of other series are ignored. They decide, with the master, whether anything
+ * is shown before the cutoff.
  *
  * `null` when there is nothing to split: the master carries no rule at all, or
  * the cutoff is not a moment. A caller that gets `null` for an event it
@@ -72,6 +153,7 @@ export interface SeriesSplitPlan {
 export function planSeriesSplit<E extends SplittableEvent>(
   master: E,
   cutoffIso: string,
+  rows: readonly RecurringEventLike[],
 ): SeriesSplitPlan | null {
   const recurrence = master.recurrence;
   if (!recurrence?.rrule) return null;
@@ -95,20 +177,127 @@ export function planSeriesSplit<E extends SplittableEvent>(
     occurrencesBefore,
     { allDay: master.all_day },
   );
+  // The EXDATEs from the cutoff on move to the tail with the occurrences they
+  // suppress. Which side the cutoff's OWN slot falls on depends on the plan,
+  // below. It can carry an exception only when the provider keeps that
+  // occurrence as a row of its own — Exchange lists such slots among the
+  // exceptions — because a deleted occurrence cannot have been opened.
+  const tailWith = (keep: (at: number) => boolean): TailRecurrence => ({
+    rrule: newRule,
+    exceptions: (recurrence.exceptions ?? []).filter((x) =>
+      keep(new Date(x).getTime()),
+    ),
+    tzid: recurrence.tzid ?? null,
+  });
 
+  // What the calendar shows of the HEAD — unlike the count above, which is
+  // the rule's and feeds COUNT. The master's occurrences before the cutoff,
+  // less its exceptions and the slots its own rows stand in for (the reading
+  // the views make, `expandAll`), plus those rows that are not cancelled and
+  // stand in for a slot before the cutoff: the ones a cut keeps. Nothing
+  // there means no head: the cutoff is the first occurrence, or the series
+  // starts off its own pattern, or every earlier occurrence was deleted. A
+  // rule that cannot be read comes back as the master itself, so it counts as
+  // a head and is cut as before.
+  //
+  // A row counts by its SLOT, not by where it was moved: a cut keeps the rows
+  // of the slots before it and drops the others, wherever they are shown. A
+  // series of days names its slot as a day, and another writer may have
+  // spelled that day hours off its local midnight (decision 95), so a slot
+  // counts as before only when it is at least half a day before the cutoff.
+  const slotMargin = master.all_day ? 12 * 60 * 60 * 1000 : 0;
+  const slotBefore = (row: RecurringEventLike) => {
+    const at = Date.parse(overrideRecurrenceIso(row) ?? '');
+    return Number.isFinite(at) && at < cutoff.getTime() - slotMargin;
+  };
+  const ownRows = rows.filter((row) => overrideSeriesId(row) === master.id);
+  const headShown = expandAll([master as RecurringEventLike, ...ownRows], {
+    start: new Date(master.start),
+    end: new Date(cutoff.getTime() - 1),
+  }).filter(
+    (shown) => shown === master || isExpandedOccurrence(shown) || slotBefore(shown),
+  ).length;
+  const at = cutoff.getTime();
+  if (headShown === 0) {
+    // Written whole, in place: an exception on the cutoff's own slot stays, so
+    // the occurrence the provider keeps there goes on standing in for it
+    // (decision 122).
+    return {
+      kind: 'whole',
+      tail: tailWith((x) => x >= at - slotMargin),
+      occurrencesBefore,
+    };
+  }
+  // A NEW series from the cutoff: the slot it starts on is the occurrence
+  // being edited, and the cut drops the provider's row for it. An exception
+  // there would hide the new series' first occurrence.
   return {
+    kind: 'cut',
     headRule: oldRule,
-    tail: {
-      rrule: newRule,
-      // The EXDATEs at or after the cutoff move to the tail with the
-      // occurrences they suppress.
-      exceptions: (recurrence.exceptions ?? []).filter(
-        (x) => new Date(x).getTime() >= cutoff.getTime(),
-      ),
-      tzid: recurrence.tzid ?? null,
-    },
+    tail: tailWith((x) => (master.all_day ? x >= at + slotMargin : x > at)),
     occurrencesBefore,
   };
+}
+
+/**
+ * The series as it stands from the cutoff on, for a plan with no head.
+ *
+ * It starts at the cutoff and repeats by the plan's `tail`: the same pattern,
+ * a COUNT less what the rule generated before, the exceptions from the cutoff
+ * on. For the usual case — the cutoff IS the series' first occurrence — that is
+ * the master exactly. For a series that starts off its own pattern, or whose
+ * earlier occurrences were all deleted, it is the same appointment anchored
+ * where it is first seen, which is what a whole-series edit then reads its
+ * change against.
+ */
+export function seriesFromCut<E extends SplittableEvent & { end: string }>(
+  master: E,
+  plan: WholeSeriesPlan,
+  cutoffIso: string,
+): E {
+  const cutoff = new Date(cutoffIso).getTime();
+  const start = new Date(master.start).getTime();
+  const sameStart = cutoff === start;
+  const duration = new Date(master.end).getTime() - start;
+  return {
+    ...master,
+    start: sameStart ? master.start : new Date(cutoff).toISOString(),
+    end: sameStart ? master.end : new Date(cutoff + duration).toISOString(),
+    recurrence: {
+      ...master.recurrence,
+      rrule: plan.tail.rrule,
+      exceptions: plan.tail.exceptions,
+      tzid: plan.tail.tzid,
+    },
+  };
+}
+
+/** What "delete this and all following" did. */
+export type SeriesDeleteOutcome =
+  /** The series ends just before the cutoff; the earlier occurrences stay. */
+  | 'truncated'
+  /** Nothing came before the cutoff: the whole series was deleted. */
+  | 'deleted';
+
+/**
+ * The sentence for a "delete this and all following", by what it did.
+ *
+ * One table for every place that deletes from an occurrence — the editor, the
+ * four views, the phone — so none of them says "the earlier ones stay" about a
+ * series that had none and is gone.
+ */
+export function thisAndFutureDeletedKey(
+  outcome: SeriesDeleteOutcome,
+  notified: boolean,
+): string {
+  if (outcome === 'deleted') {
+    return notified
+      ? 'dialogs.event.thisAndFutureCancelledWhole'
+      : 'dialogs.event.thisAndFutureDeletedWhole';
+  }
+  return notified
+    ? 'dialogs.event.thisAndFutureCancelled'
+    : 'dialogs.event.thisAndFutureDeleted';
 }
 
 /**
@@ -233,8 +422,16 @@ export function seriesLeftTruncated(err: unknown): boolean {
  */
 export async function writeSeriesSplit<Created>(
   io: SeriesSplitIo<Created>,
-  plan: SeriesSplitPlan,
+  plan: SeriesCutPlan,
 ): Promise<Created> {
+  // The type already refuses a plan with no head; this refuses one that got
+  // past it. Truncating such a series writes a rule that ends before it
+  // starts — the deleted series that goes on ringing (decision 118).
+  if ((plan as SeriesSplitPlan).kind !== 'cut') {
+    throw new Error(
+      'A series with nothing before the cutoff is not split: it is written whole.',
+    );
+  }
   await io.truncate(plan.headRule);
   try {
     return await io.createTail(plan.tail);

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   carryOnto,
+  exceptionsAtSeriesTime,
   firstOccurrenceFrom,
   futureCarryRow,
   invitationLocked,
@@ -10,6 +11,7 @@ import {
   organizerOf,
   planCarry,
   planSeriesSplit,
+  readSeriesRows,
   seriesLeftTruncated,
   writeSeriesSplit,
   type CarryableFields,
@@ -22,7 +24,9 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   addEventExdate,
   createEvent,
+  eventGroupsForEvents,
   getEventById,
+  getEvents,
   groupEvents,
   isCommandError,
   ungroupEvent,
@@ -302,9 +306,13 @@ export function EventGroupCarryDialog({
             failed.push(target);
             continue;
           }
+          // With the copy's own provider-kept occurrences: one changed
+          // elsewhere is still there before the cut, though its master
+          // lists it among the exceptions (decision 125).
           const splitPlan = planSeriesSplit(
             current as CalendarEvent & CarryableFields,
             anchorIso,
+            await readSeriesRows(current, anchorIso, getEvents),
           );
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {
@@ -315,6 +323,37 @@ export function EventGroupCarryDialog({
             await updateEvent(row, target.calendar_id);
             // Bookkeeping, not a refusal: this copy is on its way straight
             // back into the new group two steps down.
+            await ungroupEvent(target.calendar_id, target.event_id, true).catch(
+              () => undefined,
+            );
+            created.push({
+              calendar_id: target.calendar_id,
+              event_id: target.event_id,
+              title: row.title,
+              starts_at: row.start,
+            });
+          } else if (splitPlan.kind === 'whole') {
+            // Nothing of this copy comes before its cut point, so "this and
+            // all following" is the whole copy (decision 118): cutting it
+            // would leave a head that ends before it starts, hidden from the
+            // views and still ringing. It is rewritten in place instead — its
+            // id, and everything kept under it, stay — and like a single it
+            // leaves the group of heads for the new one.
+            await updateEvent(
+              {
+                ...row,
+                // What the copy repeats by from its cut on, its exceptions
+                // moved with a new time of day, as the anchor's are.
+                recurrence: exceptionsAtSeriesTime(
+                  { ...currentRecurrence, ...splitPlan.tail },
+                  anchorIso,
+                  row.start,
+                  row.all_day || current.all_day,
+                ),
+                send_invitations: false,
+              },
+              target.calendar_id,
+            );
             await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
             );
@@ -350,7 +389,14 @@ export function EventGroupCarryDialog({
                       start: row.start,
                       end: row.end,
                       all_day: row.all_day,
-                      recurrence,
+                      // Its exceptions follow a new time of day, or the
+                      // occurrences they cancel come back at it.
+                      recurrence: exceptionsAtSeriesTime(
+                        recurrence,
+                        anchorIso,
+                        row.start,
+                        row.all_day || current.all_day,
+                      ),
                       // The copy keeps its own: what travels is what the
                       // appointment IS.
                       color_label: current.color_label,
@@ -422,6 +468,18 @@ export function EventGroupCarryDialog({
     let regroupFailed = false;
     if (members.length >= 2) {
       try {
+        // A "this and all following" that rewrote the anchor's whole series in
+        // place (decision 118) left it where it was: in THIS group, among the
+        // heads of the copies. Grouping the new rows with it would pull them
+        // in there too — heads and tails one appointment again. So it leaves
+        // first, as bookkeeping. Asked, not assumed: on a retry it may already
+        // be in the new group, and taking it out of that one would undo it.
+        if (successor) {
+          const [current] = await eventGroupsForEvents([successor]);
+          if (current?.id === group.id) {
+            await ungroupEvent(successor.calendar_id, successor.event_id, true);
+          }
+        }
         await groupEvents(members);
       } catch {
         regroupFailed = true;

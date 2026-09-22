@@ -176,9 +176,14 @@ oder die **ganze Serie** beziehen soll – dieselben drei Umfänge wie bei ander
 Kalendern (Google, Outlook). **Diesen und alle folgenden** teilt die Serie am
 gewählten Termin: Die früheren Termine bleiben unangetastet, dieser und jeder
 spätere werden geändert (beim Bearbeiten übernimmt ab hier eine neue Serie) oder
-entfernt (beim Löschen). **Die ganze Serie** öffnet die Serie selbst, mit ihrem
-eigenen Beginn und Ende, auch wenn du sie von einem späteren Termin aus geöffnet
-hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
+entfernt (beim Löschen). Die neue Serie wiederholt sich so, wie es das Feld für
+die Wiederholung sagt: Änderst du dort die Regel, folgt die neue Serie ihr;
+lässt du sie, läuft das Muster einfach weiter. Liegt vor dem gewählten Termin
+keiner mehr – du hast den ersten gewählt, oder alle früheren sind gelöscht –,
+gibt es nichts zu behalten: Das Bearbeiten ändert die ganze Serie, die derselbe
+Eintrag bleibt, und das Löschen entfernt die Serie. Aperio sagt es dir dann.
+**Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
+auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
 Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
 Termin bearbeiten**, und wird beim Öffnen vorgelesen. Am Desktop wiederholt das
 Formular sie im schreibgeschützten Feld **Anwenden auf**, das du wie jedes andere
@@ -297,7 +302,8 @@ aus der Serie geschnitten und ein Einzeltermin an seine Stelle gesetzt. Bei
 geteilt — die früheren Vorkommen bleiben unangetastet, die späteren tragen die
 Änderung. Läuft eine Kopie in einem anderen Takt (zweiwöchentlich gegen
 wöchentlich), wird sie an ihrem eigenen nächsten Vorkommen geteilt; hat sie ab
-dort keines mehr, wird sie genannt statt still übergangen.
+dort keines mehr, wird sie genannt statt still übergangen, und hat sie davor
+keines, wird sie als Ganzes geändert statt geteilt.
 
 Der Dialog sagt jedes Mal dazu, welche Vorkommen betroffen sind. Und weil beide
 Umfänge NEUE Einträge erzeugen, werden die anschließend wieder miteinander

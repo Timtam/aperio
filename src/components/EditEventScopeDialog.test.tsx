@@ -5,7 +5,10 @@ import { EditEventScopeDialog } from './EditEventScopeDialog';
 
 const noop = () => {};
 
-function renderPrompt(seriesLoadFailed?: number) {
+function renderPrompt(
+  seriesLoadFailed?: number,
+  seriesLoadFailedScope?: 'series' | 'this_and_future',
+) {
   return render(
     <EditEventScopeDialog
       isOpen
@@ -15,6 +18,7 @@ function renderPrompt(seriesLoadFailed?: number) {
       onThisAndFuture={noop}
       onSeries={noop}
       seriesLoadFailed={seriesLoadFailed}
+      seriesLoadFailedScope={seriesLoadFailedScope}
     />,
   );
 }
@@ -38,6 +42,18 @@ describe('EditEventScopeDialog', () => {
     renderPrompt(1);
     const series = screen.getByRole('button', { name: /ganze serie|whole series/i });
     expect(series.getAttribute('aria-describedby')).toBe(screen.getByRole('alert').id);
+  });
+
+  it('lets the failure be read again from "This and all following" when that one failed', () => {
+    // It loads the series too, for an occurrence the provider keeps (126), and
+    // focus stays on it.
+    renderPrompt(1, 'this_and_future');
+    const future = screen.getByRole('button', {
+      name: /diesen und alle folgenden|this and all following/i,
+    });
+    expect(future.getAttribute('aria-describedby')).toBe(screen.getByRole('alert').id);
+    const series = screen.getByRole('button', { name: /ganze serie|whole series/i });
+    expect(series.getAttribute('aria-describedby')).toBeNull();
   });
 
   it('puts a new alert in place when a retry fails too', () => {

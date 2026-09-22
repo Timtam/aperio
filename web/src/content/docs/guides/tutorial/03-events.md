@@ -162,6 +162,12 @@ the **whole series** — the same three scopes other calendars (Google, Outlook)
 offer. **This and all following** splits the series at the chosen occurrence:
 the earlier occurrences stay untouched, and this one plus every later one are
 changed (on edit, a new series takes over from here) or removed (on delete).
+The new series repeats the way the repeat field says: change the rule there and
+the new series follows it, leave it alone and the pattern simply continues.
+When nothing comes before the chosen occurrence — you picked the first one, or
+every earlier one was deleted — there is nothing to keep: an edit changes the
+whole series, which stays the same entry, and a delete removes the series.
+Aperio says so when it happens.
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
 occurrence, and a new date moves the start of the series. The editor's title
@@ -274,7 +280,8 @@ event put in its place. Choose **this and all following** and each copy's series
 is split at the same point — the earlier occurrences stay untouched, the later
 ones carry the change. A copy running to a different pattern (fortnightly
 against weekly) is split at its OWN next occurrence; a copy with none left from
-there on is named rather than quietly skipped.
+there on is named rather than quietly skipped, and a copy with nothing before
+that point is changed as a whole instead of split.
 
 The dialog says which occurrences it is about. And because both scopes create
 NEW entries, those are tied together afterwards — otherwise the appointment you

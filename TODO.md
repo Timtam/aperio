@@ -2318,18 +2318,82 @@ Siehe DESIGN §4.2.
     unter einer älteren Id führt (die Id wechselt mit jeder Änderung,
     auch in Outlook, und jedes Gerät zieht seine Zeile still nach): Geleert
     wird nur der Schlüssel, den das löschende Gerät kennt. Siehe 119.
-  - 🚩 **Gelöschte Serie klingelt weiter** (Review von #93; 118: eigener
-    PR direkt danach). „Dieses und alle folgenden löschen“ ab dem ERSTEN
-    Vorkommen löscht die Serie nicht, sondern kürzt sie auf ein Ende eine
-    Sekunde vor ihrem Beginn (`deleteThisAndFuture` → `truncateRRuleBefore`,
-    Desktop und Handy). Die Ansichten zeigen nichts mehr, aber die
-    Weckerberechnung verwirft die ungültige Regel und nimmt ersatzweise den
-    Serienbeginn (`expand_on` in `host-core/src/reminders.rs`, Vertrag
-    „an-until-before-the-start“): alle Erinnerungen der Serie klingeln
-    weiter, überall. Ebenso „diesen und alle folgenden ändern“ ab dem ersten
-    Vorkommen: der unsichtbare Kopf bleibt. Plan: ab dem ersten Vorkommen
-    die ganze Serie löschen bzw. ändern; und eine Regel, die vor ihrem
-    Beginn endet, erzeugt keine Erinnerung.
+  - ✅ **Gelöschte Serie klingelte weiter** (Review von #93; 118, behoben).
+    „Dieses und alle folgenden löschen“ ab dem ERSTEN Vorkommen kürzte die
+    Serie auf ein Ende eine Sekunde vor ihrem Beginn. Die Ansichten zeigten
+    nichts mehr, aber die Weckerberechnung verwirft so eine Regel und nahm
+    ersatzweise den Serienbeginn: alle Erinnerungen klingelten weiter,
+    überall. Ebenso beim Ändern und beim Mitziehen an Kopien. Jetzt
+    entscheidet `planSeriesSplit` einmal, ob vor dem Schnitt etwas zu sehen
+    ist (`kind: 'cut'` oder `'whole'`); auch ein Beginn neben dem Muster und
+    lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dazu
+    liest es die Zeilen, die der Anbieter für einzelne Vorkommen führt
+    (125, `readSeriesRows`): ein in Outlook geändertes Vorkommen steht bei
+    Exchange unter den Ausnahmen, ist aber da; ein bei Google gelöschtes ist
+    eine abgesagte Zeile ohne Ausnahme. Gezählt wird nach dem Platz in der
+    Serie, nicht nach dem verschobenen Beginn. Schlägt das Lesen fehl, wird
+    nichts geschrieben. Dann:
+    Löschen löscht die Serie (und leert damit ihre privaten Erinnerungen
+    überall, #93), Ändern schreibt die ganze Serie an Ort und Stelle
+    (dieselbe Id, also bleiben private Erinnerungen, Gruppe, Farbe,
+    Besprechung), eine Kopie ohne Kopf wird als Ganzes geändert, und die
+    Ansage sagt warum (123). `writeSeriesSplit` nimmt nur noch Pläne mit
+    Kopf, per Typ und zur Laufzeit. Mit dabei: Beim Teilen gilt eine im
+    Formular geänderte Wiederholungsregel für die neue Serie (121) — ihr
+    COUNT zählt wie im Feld ab Beginn der Serie, die neue Serie bekommt den
+    Rest —, und ihre Ausnahmen folgen einer neuen Uhrzeit, auch beim
+    Mitziehen an Kopien; eine Ausnahme genau auf dem Schnitt (bei Exchange ein
+    geändertes Vorkommen) versteckt nicht mehr das erste Vorkommen der neuen
+    Serie. Ein Teilen, das sich nicht planen lässt, wird am Desktop
+    abgelehnt statt zur ganzen Serie zu werden (wie am Handy); wiederholt
+    sich die Serie inzwischen nicht mehr, sagt er das. Vom Anbieter
+    gespeicherte Einzeländerungen bleiben (122). „Diesen und alle folgenden“
+    auf einer solchen Einzeländerung öffnet der Desktop jetzt wie das Handy
+    als Serie an ihrer Stelle (126): Das Wiederholungsfeld zeigte „wiederholt
+    sich nicht“, und ihr Titel landete auf der ganzen Serie.
+    Offen: Handy ohne Testläufer — ↻ im Test.
+  - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
+    älter als #94):
+    - Die neue Serie bekommt nur die Ausnahmen des Masters. Bei Google ist ein
+      gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
+      ein abgesagtes RECURRENCE-ID: beim Teilen kommt es in der neuen Serie
+      zurück, mit Einladung. Die Zeilen hat die Planung jetzt; der Lesebereich
+      müsste bis zum Serienende reichen, und Google verwirft UTC-EXDATEs auf
+      Serien mit Zone.
+    - Exchange mischt gelöschte und geänderte Vorkommen in den Ausnahmen:
+      EWS schreibt beim Anlegen gar keine, ein anderer Kalender schreibt alle
+      (dann fehlt ein geändertes Vorkommen in beiden Hälften).
+    - Das Mitziehen schneidet eine Exchange-Kopie ein Vorkommen zu spät, wenn
+      ihr Vorkommen am Schnitttag in Outlook geändert wurde
+      (`firstOccurrenceFrom` liest die Zeilen nicht).
+    - `readSeriesRows` stößt bei langen Google-Serien ein volles Nachladen an,
+      das die folgende Schreibaktion gleich verwirft (nur Netz, Ergebnis
+      stimmt): ein `warm: false` an `get_events` auf beiden Hosts.
+  - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
+    `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
+    Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
+    das als 23:59:59 UTC gespeichert ist (Aperio, Exchange, Graph), endet bei
+    einem Abendtermin westlich von UTC vor seinem Beginn: in den Ansichten
+    unsichtbar, und der Ersatz-Wecker ist seine einzige Spur. Erst diese
+    Verankerung reparieren, dann die Weckerberechnung (nur für Termine:
+    Aufgaben mit Enddatum brauchen den Ersatz).
+  - 🚩 **Nebenfunde aus dem Entwurf zu 118** (unbearbeitet):
+    - iOS-Gerätekalender: jedes Schreiben und Löschen nutzt `span:
+      .thisEvent` (`IosDeviceEventStore.swift`), trifft bei einer Serie also nur
+      das erste Vorkommen. Ungemessen.
+    - Exchange/Graph: ob `EndDate` inklusive ist — dann bliebe bei jedem
+      Kürzen ein Vorkommen zu viel. Ungemessen.
+    - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
+      Serie, dann die Kopie (dieselbe Reihenfolge, die #92 in den Editoren
+      umgedreht hat).
+    - Das Handy überspringt beim Mitziehen keine Kopie einer fremden
+      Einladung (`invitationLocked`, am Desktop schon).
+    - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
+      Worten.
+    - Die Editoren nutzen `seriesLeftTruncated` nicht: scheitert beim Teilen
+      auch das Zurücksetzen, hört man nur den ersten Fehler.
+    - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
+      Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche
     vorgemerkt, Reviews von #92/#93). Die Id eines Exchange-Termins enthält
     den ChangeKey (`encode_event_id`, `S:{id}|{ck}`), wechselt also mit

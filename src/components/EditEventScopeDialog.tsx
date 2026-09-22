@@ -29,6 +29,10 @@ export interface EditEventScopeDialogProps {
   /** How often the whole series failed to load. The prompt stays and says so;
    *  each new count is announced again. */
   seriesLoadFailed?: number;
+  /** Which choice's load failed: "this and all following" loads the series
+   *  too, for an occurrence the provider keeps (126). The failure describes
+   *  that button, where focus stays. */
+  seriesLoadFailedScope?: 'series' | 'occurrence' | 'this_and_future';
 }
 
 export function EditEventScopeDialog({
@@ -39,6 +43,7 @@ export function EditEventScopeDialog({
   onThisAndFuture,
   onSeries,
   seriesLoadFailed = 0,
+  seriesLoadFailedScope = 'series',
 }: EditEventScopeDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -68,7 +73,8 @@ export function EditEventScopeDialog({
       {seriesLoadFailed > 0 && (
         // A fresh node for every failure: an unchanged alert is not announced
         // again, and a retry that failed too would pass in silence. It also
-        // describes "Whole series", where focus stays, so it can be read again.
+        // describes the button that failed, where focus stays, so it can be
+        // read again.
         <p key={seriesLoadFailed} id={failureId} role="alert" className="form__error">
           {t('dialogs.editScope.seriesLoadFailed', { title })}
         </p>
@@ -90,6 +96,11 @@ export function EditEventScopeDialog({
           type="button"
           onClick={onThisAndFuture}
           className="form__action"
+          aria-describedby={
+            seriesLoadFailed > 0 && seriesLoadFailedScope === 'this_and_future'
+              ? failureId
+              : undefined
+          }
         >
           {t('dialogs.editScope.thisAndFuture')}
         </button>
@@ -97,7 +108,11 @@ export function EditEventScopeDialog({
           type="button"
           onClick={onSeries}
           className="form__action form__action--primary"
-          aria-describedby={seriesLoadFailed > 0 ? failureId : undefined}
+          aria-describedby={
+            seriesLoadFailed > 0 && seriesLoadFailedScope !== 'this_and_future'
+              ? failureId
+              : undefined
+          }
         >
           {t('dialogs.editScope.series')}
         </button>

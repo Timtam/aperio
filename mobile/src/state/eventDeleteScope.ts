@@ -9,6 +9,7 @@ import {
   silentSentence,
   occurrenceIsoOf,
   seriesIdOf,
+  thisAndFutureDeletedKey,
   type NoticeCalendar,
 } from '@aperio/shared';
 
@@ -50,11 +51,16 @@ export function confirmDeleteEvent(
   // Non-null only for an expanded occurrence of a recurring series.
   const occurrence = occurrenceIsoOf(ev);
 
-  const run = (fn: () => Promise<void>, message: string) => {
+  // The message may depend on what the write did: "delete this and all
+  // following" at the first occurrence deletes the whole series (118).
+  const run = <R>(
+    fn: () => Promise<R>,
+    message: string | ((result: R) => string),
+  ) => {
     void (async () => {
       try {
-        await fn();
-        onSuccess(message);
+        const result = await fn();
+        onSuccess(typeof message === 'function' ? message(result) : message);
       } catch (err) {
         // The one place every mobile delete path reports from: a refusal is
         // said in words, not as "forbidden: reply-only-invitation: …".
@@ -84,13 +90,15 @@ export function confirmDeleteEvent(
         : t('dialogs.event.occurrenceDeleted', { title: ev.title }),
     );
 
-  // Remove this occurrence AND all following ones (truncate the series).
+  // Remove this occurrence AND all following ones: truncate the series, or
+  // delete it when nothing comes before (decision 118).
   const removeThisAndFuture = (sendCancellations: boolean) =>
     run(
       () => deleteThisAndFuture(ev, occurrence!, sendCancellations),
-      sendCancellations
-        ? t('dialogs.event.thisAndFutureCancelled', { title: ev.title })
-        : t('dialogs.event.thisAndFutureDeleted', { title: ev.title }),
+      (outcome) =>
+        t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+          title: ev.title,
+        }),
     );
 
   // Recurring-occurrence delete. Rendered as an in-app dialog (NOT Alert): the

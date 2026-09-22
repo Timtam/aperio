@@ -44,6 +44,7 @@ import {
   isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
+  thisAndFutureDeletedKey,
 } from '../../intl/recurrence';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
@@ -1057,14 +1058,13 @@ export function WeekView() {
           );
         } else if (scope === 'this_and_future' && occIso) {
           // Truncate the series so it ends just before this occurrence.
-          await deleteThisAndFuture(ev, occIso, sendCancellations);
+          // At the first occurrence there is nothing to keep, and the whole
+          // series goes; the sentence says which (decision 118).
+          const outcome = await deleteThisAndFuture(ev, occIso, sendCancellations);
           announce(
-            t(
-              sendCancellations
-                ? 'dialogs.event.thisAndFutureCancelled'
-                : 'dialogs.event.thisAndFutureDeleted',
-              { title: ev.title },
-            ),
+            t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+              title: ev.title,
+            }),
           );
         } else {
           // Series deletes always target the master row.
