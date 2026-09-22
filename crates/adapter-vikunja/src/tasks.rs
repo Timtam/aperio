@@ -76,6 +76,7 @@ use cal_core::{
 };
 use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::api::VikunjaClient;
 use crate::error::{VikunjaError, VikunjaResult};
@@ -912,30 +913,47 @@ pub async fn delete_task_list(client: &VikunjaClient, list_id: &str) -> VikunjaR
 /// The users with access to the project, i.e. the valid assignee pool
 /// (DESIGN §9.7): v1 `GET /projects/{id}/projectusers`; v2 dropped that
 /// endpoint in favour of `GET /projects/{id}/users/search` (empty query =
-/// everyone with access). Degrades to an empty list on error so the picker
-/// shows no candidates rather than erroring.
+/// everyone with access, the owner included).
+///
+/// A failure is an error, not an empty pool. It used to read as "nobody to
+/// assign", and the editor hid the field without a word: a token made before
+/// Vikunja 2.4 lacks the v2-only permission `users search` (Projects), which
+/// Vikunja never adds to an existing token, and every assignee picker went
+/// silently missing (decision 130). A 401 here is that — or an expired token;
+/// Vikunja answers both alike — so it names the permission this read needs
+/// (`cal_core::ReadRefusal::TokenRefused`), and the surfaces say so.
 pub async fn list_task_list_members(
     client: &VikunjaClient,
     list_id: &str,
 ) -> VikunjaResult<Vec<TaskUser>> {
     let project_id = parse_id(list_id, "task list id")?;
-    // The degrade-to-empty contract covers the version probe too — a
-    // first-call flake must not surface as a picker error.
-    let Ok(version) = client.version().await else {
-        return Ok(Vec::new());
-    };
-    let path = match version {
-        crate::api::ApiVersion::V1 => format!("/projects/{project_id}/projectusers"),
-        crate::api::ApiVersion::V2 => format!("/projects/{project_id}/users/search"),
+    let version = client.version().await?;
+    let (path, permission) = match version {
+        crate::api::ApiVersion::V1 => (
+            format!("/projects/{project_id}/projectusers"),
+            "projectusers (projects)",
+        ),
+        crate::api::ApiVersion::V2 => (
+            format!("/projects/{project_id}/users/search"),
+            "users search (projects)",
+        ),
     };
     // One plain request on both surfaces: v2's `users/search` returns the
     // envelope but declares NO page/per_page params (it is served
     // unpaginated), so walking pages here could only misfire.
-    let users: Vec<VikunjaUser> = match client.get_page(&path).await {
-        Ok((u, _)) => u,
-        Err(_) => return Ok(Vec::new()),
-    };
-    Ok(users.into_iter().map(map_user).collect())
+    match client.get_page::<VikunjaUser>(&path).await {
+        Ok((users, _)) => Ok(users.into_iter().map(map_user).collect()),
+        Err(VikunjaError::Http { status: 401, .. }) => {
+            warn!(%path, "vikunja refused the token for a list's assignee pool (401)");
+            Err(VikunjaError::Refused(
+                cal_core::ReadRefusal::TokenRefused.message(permission),
+            ))
+        }
+        Err(err) => {
+            warn!(%path, %err, "vikunja could not list a list's assignee pool");
+            Err(err)
+        }
+    }
 }
 
 /// `GET /user` — the authenticated account's own identity ("me"),
@@ -3887,6 +3905,48 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].id, "3");
         assert_eq!(members[0].name, "bob");
+    }
+
+    /// Decision 130: a token without the v2-only `users search` permission —
+    /// every token made before Vikunja 2.4 — gets a 401 here. That used to be
+    /// an empty pool, and the editor hid the field without a word.
+    #[tokio::test]
+    async fn a_refused_token_names_the_permission_the_pool_needs() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v2/projects/7/users/search")
+            .with_status(401)
+            .with_body(r#"{"code":11,"message":"missing, malformed, expired or otherwise invalid token provided"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        match list_task_list_members(&client, "7").await {
+            Err(VikunjaError::Refused(message)) => {
+                assert_eq!(message, "token-refused: users search (projects)")
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(matches!(
+            crate::to_core_error(VikunjaError::Refused("token-refused: x".into())),
+            cal_core::Error::Forbidden(m) if m == "token-refused: x"
+        ));
+    }
+
+    /// Any other failure is an error too, not "nobody to assign".
+    #[tokio::test]
+    async fn a_failed_pool_is_an_error_not_an_empty_list() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v2/projects/7/users/search")
+            .with_status(500)
+            .with_body("boom")
+            .create_async()
+            .await;
+        let client = fixture_client_v2(&server.url());
+        match list_task_list_members(&client, "7").await {
+            Err(VikunjaError::Http { status: 500, .. }) => {}
+            other => panic!("expected Http 500, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -1678,7 +1678,12 @@
         "added": "{{name}} hinzugefügt",
         "removed": "{{name}} entfernt",
         "remove": "{{name}} entfernen",
-        "you": "{{name}} (ich)"
+        "you": "{{name}} (ich)",
+        "loading": "Die Personen dieser Liste werden geladen …",
+        "empty": "Auf dieser Liste gibt es niemanden zum Zuweisen.",
+        "loadFailed": "Die Personen dieser Liste konnten nicht geladen werden: {{detail}}",
+        "tokenRefused": "Die Personen dieser Liste konnten nicht geladen werden: Der Server hat den Zugangs-Token des Kontos abgelehnt. Entweder fehlt ihm das Recht „{{permission}}“ – ein Token, der älter ist als dieses Recht, bekommt es nie –, oder er ist abgelaufen. Lege einen neuen Token an, am einfachsten mit vollem Zugriff, und trage ihn in den Einstellungen beim Konto ein.",
+        "retry": "Erneut versuchen"
       },
       "delete": "Löschen",
       "created": "Aufgabe „{{title}}\" wurde angelegt.",

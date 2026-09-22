@@ -22,12 +22,13 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
 
 /** An error as the hosts hand it over: a code and a message. */
-interface CodedError {
+export interface CodedError {
   code: string;
   message: string;
 }
 
-function coded(err: unknown): CodedError | null {
+/** The code and message a host error carries, or `null` for any other error. */
+export function codedError(err: unknown): CodedError | null {
   if (typeof err !== 'object' || err === null) return null;
   const candidate = err as { code?: unknown; message?: unknown };
   return typeof candidate.code === 'string' && typeof candidate.message === 'string'
@@ -35,8 +36,9 @@ function coded(err: unknown): CodedError | null {
     : null;
 }
 
-function messageOf(err: unknown): string {
-  const known = coded(err);
+/** The text of any error, as a host, an `Error` or a bare value carries it. */
+export function errorMessageText(err: unknown): string {
+  const known = codedError(err);
   if (known) return known.message;
   if (err instanceof Error) return err.message;
   return String(err);
@@ -52,7 +54,7 @@ function messageOf(err: unknown): string {
 export function eventWriteRefusal(
   err: unknown,
 ): { refusal: WriteRefusal; key: string; detail: string } | null {
-  const message = messageOf(err).trim();
+  const message = errorMessageText(err).trim();
   for (const refusal of TOKENS) {
     if (!message.startsWith(refusal)) continue;
     const rest = message.slice(refusal.length);
@@ -79,7 +81,7 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   if (refusal) {
     return t(refusal.key, { detail: refusal.detail });
   }
-  const known = coded(err);
+  const known = codedError(err);
   if (known?.code === 'forbidden') {
     return t('dialogs.event.writeError.forbidden', { detail: known.message });
   }
@@ -89,5 +91,5 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   if (known) return `${known.code}: ${known.message}`;
   // A plain Error reads as "Error: …" when stringified; the prefix says
   // nothing to a reader.
-  return messageOf(err).replace(/^Error:\s*/, '');
+  return errorMessageText(err).replace(/^Error:\s*/, '');
 }

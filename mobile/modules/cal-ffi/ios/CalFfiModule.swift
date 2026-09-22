@@ -131,8 +131,9 @@ public class CalFfiModule: Module {
     override var reason: String { writeDetail }
   }
 
-  /// Re-throw a refused event write with its code intact. Everything else
-  /// falls through untouched.
+  /// Re-throw a refused event write — or a refused read, whose message starts
+  /// with a `cal_core::ReadRefusal` token — with its code intact. Everything
+  /// else falls through untouched.
   private func eventCoded<T>(_ block: () throws -> T) throws -> T {
     do {
       return try block()
@@ -957,8 +958,10 @@ public class CalFfiModule: Module {
       }
     }
 
+    // Coded, so a refused read keeps its token (`cal_core::ReadRefusal`) and
+    // the editor can say which permission the account's token lacks.
     AsyncFunction("taskListMembersJson") { (listId: String) -> String in
-      try self.host.taskListMembersJson(listId: listId)
+      try self.eventCoded { try self.host.taskListMembersJson(listId: listId) }
     }
 
     AsyncFunction("taskCurrentUserJson") { (listId: String) -> String in

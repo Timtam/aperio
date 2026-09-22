@@ -28,6 +28,12 @@ pub enum VikunjaError {
 
     #[error("invalid configuration: {0}")]
     Config(String),
+
+    /// The server refused a read the account may not make, as a message that
+    /// starts with a `cal_core::ReadRefusal` token for the surfaces to
+    /// translate.
+    #[error("refused: {0}")]
+    Refused(String),
 }
 
 pub type VikunjaResult<T> = std::result::Result<T, VikunjaError>;

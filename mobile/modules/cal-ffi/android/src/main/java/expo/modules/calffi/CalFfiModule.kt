@@ -207,7 +207,8 @@ class CalFfiModule : Module() {
    * nothing and a blind user heard the English token read out.
    *
    * The codes are the desktop's (`forbidden`, `conflict`, `network`), so one
-   * translator serves both surfaces.
+   * translator serves both surfaces. A refused read (`cal_core::ReadRefusal`,
+   * the assignee pool) goes through here too.
    */
   private inline fun <T> eventCoded(block: () -> T): T =
     try {
@@ -854,8 +855,10 @@ class CalFfiModule : Module() {
       eventCoded { host.respondToEvent(calendarId, eventId, status, sendResponse) }
     }
 
+    // Coded, so a refused read keeps its token (`cal_core::ReadRefusal`) and
+    // the editor can say which permission the account's token lacks.
     AsyncFunction("taskListMembersJson") { listId: String ->
-      host.taskListMembersJson(listId)
+      eventCoded { host.taskListMembersJson(listId) }
     }
 
     AsyncFunction("taskCurrentUserJson") { listId: String ->

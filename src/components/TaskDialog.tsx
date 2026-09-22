@@ -14,6 +14,7 @@ import { DescriptionLinks } from './DescriptionLinks';
 import { SignatureButton } from './SignatureButton';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { useDateFormat } from '../intl/dateFormat';
 import {
   createSection,
@@ -30,10 +31,13 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import {
   selectableTaskLists,
+  assigneeField,
+  assigneePoolErrorMessage,
   clampAssignees,
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  type AssigneePool,
 } from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
 import {
@@ -207,6 +211,7 @@ export function TaskDialog({
   const subtaskHintId = useId();
   const moveLockHintId = useId();
   const sectionFieldId = useId();
+  const assigneeFailureId = useId();
 
   // Subtasks: children of the task currently being edited. Only
   // meaningful in edit mode — a brand-new task has no id yet, so
@@ -407,8 +412,11 @@ export function TaskDialog({
   // user's and Save treats the status as an explicit change.
   const statusTouched = useRef(false);
   // Assignee picker data (DESIGN §9.7): the targeted list's member pool
-  // + the connected account's own id, loaded per list when open.
-  const [members, setMembers] = useState<TaskUser[]>([]);
+  // + the connected account's own id, loaded per list when open. The pool
+  // keeps where its read stands, so a failure is said, not an empty list
+  // that hides the field (decision 130); a retry reads it again.
+  const [pool, setPool] = useState<AssigneePool>({ status: 'ready', members: [] });
+  const [poolRead, setPoolRead] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Live mirrors for the pristine check below — refs, so the reset effect
@@ -588,20 +596,23 @@ export function TaskDialog({
   }, [isOpen, sectionsEnabled, form.listId, sectionsByList, loadSections]);
 
   // Load the assignee pool + "me" identity for the targeted list. Empty
-  // for local lists / providers without sharing, which hides the picker.
+  // for local lists / providers without sharing — whose lists hold no
+  // assignees, so the field is hidden there anyway. A failed read is kept
+  // as such: the field says why, instead of disappearing.
   useEffect(() => {
     if (!isOpen || !form.listId) {
-      setMembers([]);
+      setPool({ status: 'ready', members: [] });
       setCurrentUserId(null);
       return;
     }
     let cancelled = false;
+    setPool({ status: 'loading' });
     void taskListMembers(form.listId)
       .then((m) => {
-        if (!cancelled) setMembers(m);
+        if (!cancelled) setPool({ status: 'ready', members: m });
       })
-      .catch(() => {
-        if (!cancelled) setMembers([]);
+      .catch((error: unknown) => {
+        if (!cancelled) setPool({ status: 'failed', error });
       });
     void taskCurrentUser(form.listId)
       .then((u) => {
@@ -613,7 +624,8 @@ export function TaskDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, form.listId]);
+  }, [isOpen, form.listId, poolRead]);
+  const assignees = assigneeField(assignmentMode, pool);
 
   // If the chosen section no longer belongs to the selected list (the
   // user switched lists), drop it back to ungrouped.
@@ -1465,18 +1477,47 @@ export function TaskDialog({
           )}
         </label>
 
-        {assignmentMode !== 'none' && members.length > 0 && (
+        {assignees !== 'hidden' && (
           <div className="form__field">
             <span className="form__label">
               {t('dialogs.task.fields.assignees')}
             </span>
-            <AssigneePicker
-              members={members}
-              value={form.assignees}
-              currentUserId={currentUserId}
-              mode={assignmentMode}
-              onChange={(next) => update('assignees', next)}
-            />
+            {assignees === 'picker' && pool.status === 'ready' && (
+              <AssigneePicker
+                members={pool.members}
+                value={form.assignees}
+                currentUserId={currentUserId}
+                mode={assignmentMode}
+                onChange={(next) => update('assignees', next)}
+              />
+            )}
+            {assignees === 'loading' && (
+              <FocusableNote className="form__hint">
+                {t('dialogs.task.assignees.loading')}
+              </FocusableNote>
+            )}
+            {assignees === 'empty' && (
+              <FocusableNote className="form__hint">
+                {t('dialogs.task.assignees.empty')}
+              </FocusableNote>
+            )}
+            {assignees === 'failed' && pool.status === 'failed' && (
+              <>
+                {/* Read with the button, where focus lands: a static
+                    paragraph is invisible to focus-mode traversal. */}
+                <p id={assigneeFailureId} className="form__error">
+                  {assigneePoolErrorMessage(pool.error, t)}
+                </p>
+                <button
+                  type="button"
+                  className="form__action"
+                  aria-describedby={assigneeFailureId}
+                  onClick={() => setPoolRead((n) => n + 1)}
+                >
+                  {t('dialogs.task.assignees.retry')}
+                </button>
+              </>
+            )}
           </div>
         )}
 

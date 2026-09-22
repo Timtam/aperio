@@ -40,6 +40,15 @@ du Konten und legst bei Bedarf lokale Kalender an.
 > **Vikunja / Todoist:** Den API-Token erzeugst du in den Entwickler- bzw.
 > Integrations-Einstellungen des jeweiligen Dienstes und fügst ihn hier
 > ein.
+>
+> Gib dem Token bei Vikunja **vollen Zugriff**. Vikunja 2.4 hat für seine
+> neuere Schnittstelle eigene Rechte eingeführt, darunter **users search**
+> unter *Projects*; das braucht Aperio, um die Personen aufzulisten, denen du
+> eine Aufgabe zuweisen kannst. Einem bestehenden Token fügt Vikunja nie ein
+> neues Recht hinzu: Ein Token, der vor dem Update deines Servers auf 2.4
+> angelegt wurde, hat es nicht, auch wenn damals alles angehakt war. Aperio
+> sagt das dann im Feld *Zugewiesen an* des Aufgaben-Editors. Lege einen
+> neuen Token an und trage ihn in den Einstellungen beim Konto ein.
 
 ## Einen lokalen Kalender anlegen
 

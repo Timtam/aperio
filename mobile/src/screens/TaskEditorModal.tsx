@@ -33,11 +33,14 @@ import {
   isImportantPriority,
   normalPriority,
   selectableTaskLists,
+  assigneeField,
+  assigneePoolErrorMessage,
   clampAssignees,
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
   toBackend,
+  type AssigneePool,
 } from '@aperio/shared';
 
 import {
@@ -87,9 +90,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // The rich task editor — a faithful RN port of the desktop TaskDialog, sub-4
 // CORE: title, list, section, status, priority, scheduled + deadline date/time,
 // description (+ a read-only "completed on" line). Recurrence and reminders are
-// sub-4b; assignees / per-task sound / colour label stay desktop-only or are
-// preserved-as-read on edit. Pure JS — no native bridge change: it assembles a
-// full CreateTaskRequest / Task that round-trips through the existing JSON
+// sub-4b; assignees (the same field states as the desktop, `assigneeField`),
+// per-task sound and colour label came later. Pure JS — no native bridge
+// change: it assembles a full CreateTaskRequest / Task that round-trips through the existing JSON
 // bridge. Every picker is a collapsed SelectFieldButton — one focus stop;
 // the options open in a dialog (RN has no native <select>).
 
@@ -259,7 +262,10 @@ export default function TaskEditorModal({
   // The selected list's assignable member pool + the connected account's own id
   // ("me"), for the assignee picker. Both empty/null for local lists and
   // providers without sharing — the picker is then hidden (§9.7).
-  const [members, setMembers] = useState<TaskUser[]>([]);
+  // Where the read of the list's people stands: a failure is said, not an
+  // empty list that hides the field (decision 130). Mirrors the desktop.
+  const [pool, setPool] = useState<AssigneePool>({ status: 'ready', members: [] });
+  const [poolRead, setPoolRead] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Create mode only: subtask titles staged on the form, written right after the
   // parent on Save (the parent has no id to reference yet). Edit mode manages
@@ -372,36 +378,36 @@ export default function TaskEditorModal({
 
   // Load the selected list's assignable member pool + "me" for the assignee
   // picker. Both come back empty/null for local lists + providers without
-  // sharing (the picker is then hidden), so this runs for any list; a stale
-  // in-flight result from a previous list is ignored.
+  // sharing, whose lists hold no assignees, so this runs for any list; a stale
+  // in-flight result from a previous list is ignored. The two are read apart,
+  // as on the desktop: "me" failing used to take the pool down with it.
   useEffect(() => {
     const list = form.listId;
     if (!list) {
-      setMembers([]);
+      setPool({ status: 'ready', members: [] });
       setCurrentUserId(null);
       return;
     }
     let cancelled = false;
-    void (async () => {
-      try {
-        const [pool, me] = await Promise.all([
-          taskListMembers(list),
-          taskCurrentUser(list),
-        ]);
-        if (cancelled) return;
-        setMembers(pool);
-        setCurrentUserId(me?.id ?? null);
-      } catch {
-        if (!cancelled) {
-          setMembers([]);
-          setCurrentUserId(null);
-        }
-      }
-    })();
+    setPool({ status: 'loading' });
+    void taskListMembers(list)
+      .then((members) => {
+        if (!cancelled) setPool({ status: 'ready', members });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setPool({ status: 'failed', error });
+      });
+    void taskCurrentUser(list)
+      .then((me) => {
+        if (!cancelled) setCurrentUserId(me?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserId(null);
+      });
     return () => {
       cancelled = true;
     };
-  }, [form.listId]);
+  }, [form.listId, poolRead]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -600,6 +606,9 @@ export default function TaskEditorModal({
   const assignmentMode = taskAssignmentMode(
     taskLists.find((l) => l.id === form.listId),
   );
+  // What the "Assigned to" field shows: hidden only where the list cannot
+  // hold assignees at all (decision 130).
+  const assignees = assigneeField(assignmentMode, pool);
   // Moving a task to a list that holds ONE assignee has to trim the form, not
   // just the picker: the form would otherwise still carry both, the save would
   // send both, and the adapter would drop one without saying so.
@@ -1222,16 +1231,50 @@ export default function TaskEditorModal({
         />
       )}
 
-      {/* Assignees — only when the selected list has an assignable member pool
-          (external, sharing-capable providers). Hidden for local lists. */}
-      {assignmentMode !== 'none' && members.length > 0 && (
+      {/* Assignees — wherever the selected list can hold them (external,
+          sharing-capable providers); hidden for local lists. While the people
+          load, when there are none, or when they could not be read, the field
+          says so instead of disappearing (decision 130). */}
+      {assignees === 'picker' && pool.status === 'ready' && (
         <AssigneePicker
-          members={members}
+          members={pool.members}
           value={form.assignees}
           currentUserId={currentUserId}
           mode={assignmentMode}
           onChange={(next) => update('assignees', next)}
         />
+      )}
+      {(assignees === 'loading' || assignees === 'empty' || assignees === 'failed') && (
+        <View style={styles.field}>
+          <Text style={styles.legend} accessibilityRole="header">
+            {t('dialogs.task.fields.assignees')}
+          </Text>
+          {assignees === 'loading' && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.task.assignees.loading')}
+            </Text>
+          )}
+          {assignees === 'empty' && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.task.assignees.empty')}
+            </Text>
+          )}
+          {assignees === 'failed' && pool.status === 'failed' && (
+            <>
+              <Text style={styles.error} accessibilityRole="text">
+                {assigneePoolErrorMessage(pool.error, t)}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('dialogs.task.assignees.retry')}
+                onPress={() => setPoolRead((n) => n + 1)}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+              >
+                <Text style={styles.ghostButtonText}>{t('dialogs.task.assignees.retry')}</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
       )}
 
       {/* Subtasks — edit mode manages real children live (mutations persist

@@ -14,6 +14,15 @@ A personal **API token** the user mints in Vikunja, sent as a `Bearer`
 token. The server base URL is user-supplied (self-hosted or hosted
 instance).
 
+Token permissions are per route and fixed when the token is created. Routes
+that exist only in v2 carry permissions of their own, and a token made
+before the server ran 2.4 never has them: the assignee pool
+(`GET /api/v2/projects/{id}/users/search`) needs **users search** under
+*Projects*. Vikunja answers a missing permission and an expired token with
+the same `401` (code 11), so the adapter reports that read as
+`cal_core::ReadRefusal::TokenRefused` with the permission as the detail, and
+the editors name it instead of hiding the field (decision 130).
+
 ## API versions
 
 Vikunja 2.4.0 introduced **API v2** and froze v1 (deprecated in 3.0,

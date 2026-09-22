@@ -1678,7 +1678,12 @@
         "added": "Added {{name}}",
         "removed": "Removed {{name}}",
         "remove": "Remove {{name}}",
-        "you": "{{name}} (me)"
+        "you": "{{name}} (me)",
+        "loading": "Loading the people on this list …",
+        "empty": "Nobody on this list can be assigned.",
+        "loadFailed": "The people on this list could not be loaded: {{detail}}",
+        "tokenRefused": "The people on this list could not be loaded: the server refused the account's token. Either the token lacks the permission \"{{permission}}\" — a token made before that permission existed never gets it — or it has expired. Create a new token, most simply with full access, and enter it in the account's settings.",
+        "retry": "Try again"
       },
       "delete": "Delete",
       "created": "Task \"{{title}}\" created.",
