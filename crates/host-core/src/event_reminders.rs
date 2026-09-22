@@ -334,7 +334,14 @@ impl<'a> EventRemindersRepo<'a> {
     /// appointment — a copy of a deleted meeting, say. Dropping it here did
     /// not reach the other devices: each kept the row, signed, for its own
     /// scan to repair. So it is retired ([`Self::retire`]) and the caller
-    /// emits it — the later write everywhere, and never repaired anywhere.
+    /// emits it — the later write on every device that holds this key, and
+    /// never repaired.
+    ///
+    /// Only THIS key. An Exchange id changes with every edit, made anywhere,
+    /// and each device's scan moves its row to the new id silently; a device
+    /// that still holds the event under an older id keeps that row, signed.
+    /// Retiring by signature instead would hit a twin's own row just as well.
+    /// See TODO.md, 119.
     ///
     /// Returns the row to emit, or `None` when the event had none, or only a
     /// retired one: that has already been said.

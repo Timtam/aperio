@@ -2314,7 +2314,31 @@ Siehe DESIGN §4.2.
     (`retire`) und sendet sie, auf beiden Hosts; ohne Zeile wird nichts
     geschrieben. Nicht abgedeckt: ein Termin, den ein anderes Programm löscht
     (Outlook, iPhone-Kalender) — das fängt erst die Reparatur bei
-    Zwillingen unten.
+    Zwillingen unten. Und ein Exchange-Termin, den ein anderes Gerät noch
+    unter einer älteren Id führt (die Id wechselt mit jeder Änderung,
+    auch in Outlook, und jedes Gerät zieht seine Zeile still nach): Geleert
+    wird nur der Schlüssel, den das löschende Gerät kennt. Siehe 119.
+  - 🚩 **Gelöschte Serie klingelt weiter** (Review von #93; 118: eigener
+    PR direkt danach). „Dieses und alle folgenden löschen“ ab dem ERSTEN
+    Vorkommen löscht die Serie nicht, sondern kürzt sie auf ein Ende eine
+    Sekunde vor ihrem Beginn (`deleteThisAndFuture` → `truncateRRuleBefore`,
+    Desktop und Handy). Die Ansichten zeigen nichts mehr, aber die
+    Weckerberechnung verwirft die ungültige Regel und nimmt ersatzweise den
+    Serienbeginn (`expand_on` in `host-core/src/reminders.rs`, Vertrag
+    „an-until-before-the-start“): alle Erinnerungen der Serie klingeln
+    weiter, überall. Ebenso „diesen und alle folgenden ändern“ ab dem ersten
+    Vorkommen: der unsichtbare Kopf bleibt. Plan: ab dem ersten Vorkommen
+    die ganze Serie löschen bzw. ändern; und eine Regel, die vor ihrem
+    Beginn endet, erzeugt keine Erinnerung.
+  - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche
+    vorgemerkt, Reviews von #92/#93). Die Id eines Exchange-Termins enthält
+    den ChangeKey (`encode_event_id`, `S:{id}|{ck}`), wechselt also mit
+    jeder Änderung, auch in Outlook. Daraus folgen die Neuvergaben hinter
+    #92, dem 58a-Bogen und den veralteten Schlüsseln auf anderen Geräten.
+    Zu prüfen: nur per ItemId schlüsseln und den ChangeKey beim Schreiben
+    frisch holen (wie schon bei Kalender-Ids und Ausnahmen), mit Migration
+    der gespeicherten Schlüssel (private Erinnerungen, Gruppen, Farben,
+    Besprechungen, Cache). Erst messen und entwerfen, dann entscheiden.
   - **Liegengebliebene leere Zeilen aufräumen**: jedes Exchange-Speichern
     eines Termins mit privaten Erinnerungen hinterlässt eine leere Zeile
     ohne Kennung. Wirkungslos, aber sie wächst. Kandidat: der Compactor
