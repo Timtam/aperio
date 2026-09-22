@@ -124,18 +124,28 @@ describe('TaskDialog → "Assigned to"', () => {
     // The refusal's own sentence, not the general "could not be loaded" with
     // the raw message in it.
     expect(failure.textContent).toMatch(
-      /Zugangs-Token des Kontos abgelehnt|refused the account's token/,
+      /API-Token des Kontos abgelehnt|refused the account's API token/,
     );
     expect(failure.textContent).not.toMatch(/token-refused/);
     const retry = screen.getByRole('button', { name: /erneut versuchen|try again/i });
     expect(retry.getAttribute('aria-describedby')).toBe(failure.id);
 
+    // The button unmounts the moment it is pressed; focus must not fall out
+    // of the field, and ends on the picker once the people arrive.
+    retry.focus();
     fireEvent.click(retry);
     await waitFor(() => expect(poolReads()).toBe(2));
     await waitFor(() =>
       expect(screen.queryByText(/users search \(projects\)/)).toBeNull(),
     );
     expect(screen.queryByRole('button', { name: /erneut versuchen|try again/i })).toBeNull();
+    const field = screen.getByRole('group', { name: /zugewiesen an|assigned to/i });
+    await waitFor(() => expect(field.contains(document.activeElement)).toBe(true));
+    expect(document.activeElement?.tagName).toBe('SELECT');
+    // The select says which field it is, not only its first option.
+    expect(screen.getByRole('combobox', { name: /zugewiesen an|assigned to/i })).toBe(
+      document.activeElement,
+    );
   });
 
   it('says any other failure too, with what the host said', async () => {

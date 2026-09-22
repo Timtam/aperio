@@ -91,9 +91,11 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // CORE: title, list, section, status, priority, scheduled + deadline date/time,
 // description (+ a read-only "completed on" line). Recurrence and reminders are
 // sub-4b; assignees (the same field states as the desktop, `assigneeField`),
-// per-task sound and colour label came later. Pure JS — no native bridge
-// change: it assembles a full CreateTaskRequest / Task that round-trips through the existing JSON
-// bridge. Every picker is a collapsed SelectFieldButton — one focus stop;
+// per-task sound and colour label came later. Saving is pure JS: it assembles
+// a full CreateTaskRequest / Task that round-trips through the existing JSON
+// bridge. The assignee pool's read is not quite: its refusal token
+// (`cal_core::ReadRefusal`) reaches the editor because both native modules
+// wrap `taskListMembersJson` in `eventCoded`. Every picker is a collapsed SelectFieldButton — one focus stop;
 // the options open in a dialog (RN has no native <select>).
 
 interface FormState {
@@ -266,6 +268,10 @@ export default function TaskEditorModal({
   // empty list that hides the field (decision 130). Mirrors the desktop.
   const [pool, setPool] = useState<AssigneePool>({ status: 'ready', members: [] });
   const [poolRead, setPoolRead] = useState(0);
+  // "Try again" unmounts the moment it is pressed. Focus goes to the field's
+  // label, which stays while the people load, and the outcome is said.
+  const assigneesLabelRef = useRef<Text>(null);
+  const poolRetried = useRef(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Create mode only: subtask titles staged on the form, written right after the
   // parent on Save (the parent has no id to reference yet). Edit mode manages
@@ -609,6 +615,17 @@ export default function TaskEditorModal({
   // What the "Assigned to" field shows: hidden only where the list cannot
   // hold assignees at all (decision 130).
   const assignees = assigneeField(assignmentMode, pool);
+  useEffect(() => {
+    if (!poolRetried.current || pool.status === 'loading') return;
+    poolRetried.current = false;
+    AccessibilityInfo.announceForAccessibility(
+      pool.status === 'failed'
+        ? assigneePoolErrorMessage(pool.error, t)
+        : pool.members.length === 0
+          ? t('dialogs.task.assignees.empty')
+          : t('dialogs.task.assignees.loaded'),
+    );
+  }, [pool, t]);
   // Moving a task to a list that holds ONE assignee has to trim the form, not
   // just the picker: the form would otherwise still carry both, the save would
   // send both, and the adapter would drop one without saying so.
@@ -1246,7 +1263,8 @@ export default function TaskEditorModal({
       )}
       {(assignees === 'loading' || assignees === 'empty' || assignees === 'failed') && (
         <View style={styles.field}>
-          <Text style={styles.legend} accessibilityRole="header">
+          {/* A plain label, like the picker's own and every other field's. */}
+          <Text ref={assigneesLabelRef} style={styles.legend}>
             {t('dialogs.task.fields.assignees')}
           </Text>
           {assignees === 'loading' && (
@@ -1267,7 +1285,17 @@ export default function TaskEditorModal({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('dialogs.task.assignees.retry')}
-                onPress={() => setPoolRead((n) => n + 1)}
+                onPress={() => {
+                  poolRetried.current = true;
+                  AccessibilityInfo.announceForAccessibility(
+                    t('dialogs.task.assignees.loading'),
+                  );
+                  setPoolRead((n) => n + 1);
+                  requestAnimationFrame(() => {
+                    const tag = findNodeHandle(assigneesLabelRef.current);
+                    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+                  });
+                }}
                 style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
               >
                 <Text style={styles.ghostButtonText}>{t('dialogs.task.assignees.retry')}</Text>

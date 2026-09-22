@@ -2740,6 +2740,29 @@ Vorschlag aus der Prüfung:
 Windows und Linux laufen über `npm run tauri -- build` und sind nicht
 betroffen.
 
+### B9 · Personen einer Liste: ein Fehler wird gesagt (130) `[~]`
+
+✅ Das Feld „Zugewiesen an“ verschwand bei Toni von jeder Vikunja-Aufgabe. Die
+Personen kommen auf v2 aus `GET /api/v2/projects/{id}/users/search`, einem Weg mit
+eigenem Token-Recht („users search“ unter Projects). Vikunja gibt einem
+bestehenden Token nie ein neues Recht; sein Token von vor 2.4 bekam 401, und der
+Adapter machte aus jedem Fehler eine leere Liste, die das Feld versteckte. Jetzt:
+`cal_core::ReadRefusal::TokenRefused` nennt das Recht, jeder andere Fehler bleibt
+einer (Vikunja und Todoist; bei Todoist heißt nur 403 „niemand“), beide Hosts
+melden eine nicht routbare Liste, und `assigneeField` zeigt das Feld immer, wo die
+Liste Zuweisungen kennt: lädt, Fehler mit Neu-Versuch, niemand, Auswahl. Das Handy
+liest die Meldung hinter Expos Vorspann („Call to function … Caused by:“; gilt
+auch für die Schreib-Ablehnungen) und lädt Personen und „ich“ getrennt. Der
+Fokus bleibt nach „Erneut versuchen“ im Feld (Desktop), am Handy geht er auf die
+Beschriftung und das Ergebnis wird angesagt. ↻ im Test (Handy ohne Testläufer).
+
+🚩 **Offen:** Am Handy tragen nur `forbidden`, `conflict` und `network` ihren
+Code nach JS (`eventCoded` in `CalFfiModule.swift`/`.kt`). Andere Fehler (502,
+404, …) kommen als technischer Name der nativen Ausnahme an, etwa
+„StoreException$Protocol: detail=…“. Braucht die übrigen Varianten im
+nativen Code, mit den Codes des Desktops; das lässt sich nur in einem
+Handy-Build prüfen.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)

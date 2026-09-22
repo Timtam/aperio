@@ -7,6 +7,10 @@
 // (decision 130). Now the field is there whenever the list can hold assignees
 // at all, and it says what it knows: still loading, could not be read and why,
 // nobody to assign, or the picker. Both editors ask the same two functions.
+//
+// "Nobody to assign" is a claim, so an adapter may only answer an empty list
+// when the provider said there is nobody; a read that failed has to be an
+// error, or this field states something the code does not know.
 
 import { codedError, errorMessageText } from './eventWriteError';
 import type { ReadRefusal } from './generated/ReadRefusal';
@@ -72,7 +76,8 @@ export function assigneePoolErrorMessage(err: unknown, t: Translate): string {
   const refusal = readRefusal(err);
   if (refusal) return t(refusal.key, { permission: refusal.detail });
   const known = codedError(err);
+  const text = errorMessageText(err);
   return t('dialogs.task.assignees.loadFailed', {
-    detail: known ? `${known.code}: ${known.message}` : errorMessageText(err),
+    detail: known ? `${known.code}: ${text}` : text,
   });
 }

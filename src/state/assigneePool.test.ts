@@ -39,6 +39,31 @@ describe('assigneePoolErrorMessage', () => {
     );
   });
 
+  it("reads the token on the phone, behind Expo's wrapper", () => {
+    // Android: Expo keeps the code and puts its sentence before the message.
+    const android = {
+      code: 'forbidden',
+      message:
+        "Call to function 'CalFfi.taskListMembersJson' has been rejected.\n\u2192 Caused by: token-refused: users search (projects)",
+    };
+    // iOS: Expo drops the code and describes the cause.
+    const ios = new Error(
+      "Calling the 'taskListMembersJson' function has failed\n\u2192 Caused by: token-refused: users search (projects)",
+    );
+    for (const err of [android, ios]) {
+      expect(assigneePoolErrorMessage(err, t)).toBe(
+        'dialogs.task.assignees.tokenRefused {"permission":"users search (projects)"}',
+      );
+    }
+    // Any other failure is said without the wrapper too.
+    expect(
+      assigneePoolErrorMessage(
+        { code: 'network', message: "Call to function 'x' has been rejected.\n\u2192 Caused by: offline" },
+        t,
+      ),
+    ).toBe('dialogs.task.assignees.loadFailed {"detail":"network: offline"}');
+  });
+
   it('reads the token from any error that carries it', () => {
     expect(assigneePoolErrorMessage(new Error('token-refused: x'), t)).toBe(
       'dialogs.task.assignees.tokenRefused {"permission":"x"}',

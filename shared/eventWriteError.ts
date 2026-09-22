@@ -36,12 +36,24 @@ export function codedError(err: unknown): CodedError | null {
     : null;
 }
 
-/** The text of any error, as a host, an `Error` or a bare value carries it. */
+/** What Expo puts before the error a native module threw. */
+const EXPO_CAUSE = '\u2192 Caused by: ';
+
+/**
+ * The text of any error, as a host, an `Error` or a bare value carries it.
+ *
+ * On the phone, Expo wraps whatever a native module threw in a sentence of its
+ * own — "Call to function 'CalFfi.…' has been rejected." on Android, "Calling
+ * the '…' function has failed" on iOS — followed by `→ Caused by: ` and the
+ * module's own message. Only that last part is the host's: a refusal token
+ * starts it, and read with the wrapper in front, no refusal was ever found on
+ * the phone and a blind user heard Expo's English instead.
+ */
 export function errorMessageText(err: unknown): string {
   const known = codedError(err);
-  if (known) return known.message;
-  if (err instanceof Error) return err.message;
-  return String(err);
+  const raw = known ? known.message : err instanceof Error ? err.message : String(err);
+  const cause = raw.lastIndexOf(EXPO_CAUSE);
+  return cause === -1 ? raw : raw.slice(cause + EXPO_CAUSE.length);
 }
 
 /**
@@ -83,12 +95,12 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   }
   const known = codedError(err);
   if (known?.code === 'forbidden') {
-    return t('dialogs.event.writeError.forbidden', { detail: known.message });
+    return t('dialogs.event.writeError.forbidden', { detail: errorMessageText(err) });
   }
   if (known?.code === 'conflict') {
     return t('dialogs.event.writeError.changedOnServer');
   }
-  if (known) return `${known.code}: ${known.message}`;
+  if (known) return `${known.code}: ${errorMessageText(err)}`;
   // A plain Error reads as "Error: …" when stringified; the prefix says
   // nothing to a reader.
   return errorMessageText(err).replace(/^Error:\s*/, '');

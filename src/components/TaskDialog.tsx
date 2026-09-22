@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -212,6 +213,7 @@ export function TaskDialog({
   const moveLockHintId = useId();
   const sectionFieldId = useId();
   const assigneeFailureId = useId();
+  const assigneeLabelId = useId();
 
   // Subtasks: children of the task currently being edited. Only
   // meaningful in edit mode — a brand-new task has no id yet, so
@@ -626,6 +628,22 @@ export function TaskDialog({
     };
   }, [isOpen, form.listId, poolRead]);
   const assignees = assigneeField(assignmentMode, pool);
+  // Each state of the field is its own element, so a change of state removes
+  // the one that had focus: "Try again" unmounts the moment it is pressed, and
+  // the loading note does when the people arrive. Focus then fell to the page,
+  // out of the dialog's reach for a screen reader. While focus is in the
+  // field, the new state's element takes it — and speaks for itself: the notes
+  // carry their sentence, the retry button its failure, the picker its label.
+  const assigneeFieldRef = useRef<HTMLDivElement>(null);
+  const focusInAssignees = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusInAssignees.current) return;
+    const field = assigneeFieldRef.current;
+    if (!field || field.contains(document.activeElement)) return;
+    field
+      .querySelector<HTMLElement>('select, button, input, [tabindex="0"]')
+      ?.focus({ preventScroll: true });
+  }, [assignees]);
 
   // If the chosen section no longer belongs to the selected list (the
   // user switched lists), drop it back to ungrouped.
@@ -1478,8 +1496,26 @@ export function TaskDialog({
         </label>
 
         {assignees !== 'hidden' && (
-          <div className="form__field">
-            <span className="form__label">
+          <div
+            ref={assigneeFieldRef}
+            className="form__field"
+            role="group"
+            aria-labelledby={assigneeLabelId}
+            onFocus={() => {
+              focusInAssignees.current = true;
+            }}
+            onBlur={(e) => {
+              // Only a real move away clears it: an element that unmounts
+              // blurs with nowhere to go.
+              if (
+                e.relatedTarget instanceof HTMLElement &&
+                !assigneeFieldRef.current?.contains(e.relatedTarget)
+              ) {
+                focusInAssignees.current = false;
+              }
+            }}
+          >
+            <span id={assigneeLabelId} className="form__label">
               {t('dialogs.task.fields.assignees')}
             </span>
             {assignees === 'picker' && pool.status === 'ready' && (
@@ -1489,6 +1525,7 @@ export function TaskDialog({
                 currentUserId={currentUserId}
                 mode={assignmentMode}
                 onChange={(next) => update('assignees', next)}
+                labelledBy={assigneeLabelId}
               />
             )}
             {assignees === 'loading' && (

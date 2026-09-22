@@ -63,6 +63,7 @@ use uuid::Uuid;
 
 use crate::api::TodoistClient;
 use crate::error::{TodoistError, TodoistResult};
+use tracing::warn;
 
 // ── Public adapter-side surface ────────────────────────────────────────
 
@@ -286,22 +287,27 @@ pub async fn delete_task_list(client: &TodoistClient, list_id: &str) -> TodoistR
 /// `GET /projects/{id}/collaborators` — the users who share the project,
 /// i.e. the valid assignee pool (DESIGN §9.7). A personal (non-shared)
 /// project has no collaborators endpoint payload of interest; Todoist
-/// returns just the owner, and projects the user can't share yield an
-/// error which we soften to an empty list so the picker shows no
-/// candidates rather than failing the whole task load.
+/// returns just the owner, and a project the user can't share answers 403,
+/// which means nobody to assign.
+///
+/// Every other failure is an error. It used to be an empty list too, and the
+/// editor now says "nobody on this list can be assigned" for an empty list
+/// (decision 130) — a claim a revoked token or an offline phone does not
+/// support. `resolve_assignee_names` reads its own failure as before.
 pub async fn list_task_list_members(
     client: &TodoistClient,
     list_id: &str,
 ) -> TodoistResult<Vec<TaskUser>> {
     let encoded = urlencoding(list_id);
-    let entries: Vec<CollaboratorEntry> = match client
-        .get_json(&format!("/projects/{encoded}/collaborators"))
-        .await
-    {
-        Ok(e) => e,
-        Err(_) => return Ok(Vec::new()),
-    };
-    Ok(entries.into_iter().map(map_collaborator).collect())
+    let path = format!("/projects/{encoded}/collaborators");
+    match client.get_json::<Vec<CollaboratorEntry>>(&path).await {
+        Ok(entries) => Ok(entries.into_iter().map(map_collaborator).collect()),
+        Err(TodoistError::Http { status: 403, .. }) => Ok(Vec::new()),
+        Err(err) => {
+            warn!(%path, %err, "todoist could not list a project's collaborators");
+            Err(err)
+        }
+    }
 }
 
 // ── Membership / sharing (DESIGN §9.7) ──────────────────────────────────
@@ -2109,7 +2115,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_task_list_members_empty_on_error() {
+    async fn a_project_that_cannot_be_shared_has_nobody_to_assign() {
         let mut server = Server::new_async().await;
         let _m = server
             .mock("GET", "/projects/P1/collaborators")
@@ -2123,6 +2129,26 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    /// Decision 130: only the 403 means nobody to assign; a revoked token or a
+    /// server error is said, not read as an empty project.
+    #[tokio::test]
+    async fn a_failed_collaborator_read_is_an_error() {
+        for status in [401u16, 500] {
+            let mut server = Server::new_async().await;
+            let _m = server
+                .mock("GET", "/projects/P1/collaborators")
+                .with_status(usize::from(status))
+                .with_body("nope")
+                .create_async()
+                .await;
+            let client = fixture_client(&server.url());
+            match list_task_list_members(&client, "P1").await {
+                Err(TodoistError::Http { status: got, .. }) => assert_eq!(got, status),
+                other => panic!("expected Http {status}, got {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]
