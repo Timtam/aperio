@@ -47,6 +47,8 @@ const SHARED: TaskList = {
   read_only: false,
   task_capabilities: { ...DEFAULT_TASK_CAPABILITIES, task_assignment: 'multiple' },
 } as unknown as TaskList;
+/** Another shared list, to switch to. */
+const OTHER: TaskList = { ...SHARED, id: 'list-other', name: 'Arbeit' } as unknown as TaskList;
 /** A local list: nobody to assign, ever. */
 const LOCAL: TaskList = {
   id: 'list-local',
@@ -56,8 +58,8 @@ const LOCAL: TaskList = {
 } as unknown as TaskList;
 
 const STORE = {
-  taskLists: [SHARED, LOCAL],
-  selectedTaskListIds: new Set(['list-shared', 'list-local']),
+  taskLists: [SHARED, OTHER, LOCAL],
+  selectedTaskListIds: new Set(['list-shared', 'list-other', 'list-local']),
   colorLabels: [],
   sectionsByList: {},
   loadSections: () => Promise.resolve(),
@@ -139,13 +141,29 @@ describe('TaskDialog → "Assigned to"', () => {
       expect(screen.queryByText(/users search \(projects\)/)).toBeNull(),
     );
     expect(screen.queryByRole('button', { name: /erneut versuchen|try again/i })).toBeNull();
-    const field = screen.getByRole('group', { name: /zugewiesen an|assigned to/i });
-    await waitFor(() => expect(field.contains(document.activeElement)).toBe(true));
-    expect(document.activeElement?.tagName).toBe('SELECT');
     // The select says which field it is, not only its first option.
-    expect(screen.getByRole('combobox', { name: /zugewiesen an|assigned to/i })).toBe(
-      document.activeElement,
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /zugewiesen an|assigned to/i })).toBe(
+        document.activeElement,
+      ),
     );
+  });
+
+  it('never takes focus from outside the field when the list changes', async () => {
+    // A click on the dialog's text blurs the field to nowhere; later, a new
+    // list read must not pull focus off the list select, where arrow keys
+    // would then assign a person.
+    members.answers = [() => Promise.resolve([{ id: '3', name: 'bob', email: null }])];
+    await open('list-shared');
+    const picker = await screen.findByRole('combobox', { name: /zugewiesen an|assigned to/i });
+    picker.focus();
+    picker.blur();
+    const list = screen.getByRole('combobox', { name: /^liste$|^list$/i });
+    list.focus();
+    fireEvent.change(list, { target: { value: 'list-other' } });
+    await waitFor(() => expect(poolReads()).toBe(2));
+    await screen.findByRole('combobox', { name: /zugewiesen an|assigned to/i });
+    expect(document.activeElement).toBe(list);
   });
 
   it('says any other failure too, with what the host said', async () => {

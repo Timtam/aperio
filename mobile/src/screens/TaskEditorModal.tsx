@@ -618,13 +618,23 @@ export default function TaskEditorModal({
   useEffect(() => {
     if (!poolRetried.current || pool.status === 'loading') return;
     poolRetried.current = false;
-    AccessibilityInfo.announceForAccessibility(
+    // Queued, so the label's own speech does not cut it off.
+    AccessibilityInfo.announceForAccessibilityWithOptions(
       pool.status === 'failed'
         ? assigneePoolErrorMessage(pool.error, t)
         : pool.members.length === 0
           ? t('dialogs.task.assignees.empty')
           : t('dialogs.task.assignees.loaded'),
+      { queue: true },
     );
+    // People arrived: the state that held the cursor is gone, and the
+    // picker's label takes it, as the desktop moves focus to the picker.
+    if (pool.status === 'ready' && pool.members.length > 0) {
+      requestAnimationFrame(() => {
+        const tag = findNodeHandle(assigneesLabelRef.current);
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      });
+    }
   }, [pool, t]);
   // Moving a task to a list that holds ONE assignee has to trim the form, not
   // just the picker: the form would otherwise still carry both, the save would
@@ -1259,6 +1269,7 @@ export default function TaskEditorModal({
           currentUserId={currentUserId}
           mode={assignmentMode}
           onChange={(next) => update('assignees', next)}
+          labelRef={assigneesLabelRef}
         />
       )}
       {(assignees === 'loading' || assignees === 'empty' || assignees === 'failed') && (
@@ -1287,14 +1298,16 @@ export default function TaskEditorModal({
                 accessibilityLabel={t('dialogs.task.assignees.retry')}
                 onPress={() => {
                   poolRetried.current = true;
-                  AccessibilityInfo.announceForAccessibility(
+                  // The label is on screen and stays while the people load:
+                  // focus it first, so what follows is said after it rather
+                  // than cut off by it.
+                  const tag = findNodeHandle(assigneesLabelRef.current);
+                  if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+                  AccessibilityInfo.announceForAccessibilityWithOptions(
                     t('dialogs.task.assignees.loading'),
+                    { queue: true },
                   );
                   setPoolRead((n) => n + 1);
-                  requestAnimationFrame(() => {
-                    const tag = findNodeHandle(assigneesLabelRef.current);
-                    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-                  });
                 }}
                 style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
               >

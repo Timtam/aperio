@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, type Ref } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -34,6 +34,7 @@ export function AssigneePicker({
   currentUserId,
   mode = 'multiple',
   onChange,
+  labelRef,
 }: {
   members: TaskUser[];
   value: TaskUser[];
@@ -42,6 +43,9 @@ export function AssigneePicker({
    *  render the picker at all then. */
   mode?: TaskAssignment;
   onChange: (next: TaskUser[]) => void;
+  /** The field's label, so the editor can put the screen reader's cursor on
+   *  it when the picker replaces a state whose label had it. */
+  labelRef?: Ref<Text>;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -97,7 +101,7 @@ export function AssigneePicker({
     const chosenId = value[0]?.id ?? null;
     return (
       <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.task.fields.assignees')}</Text>
+        <Text ref={labelRef} style={styles.label}>{t('dialogs.task.fields.assignees')}</Text>
         <View
           accessibilityRole="radiogroup"
           accessibilityLabel={t('dialogs.task.fields.assignees')}
@@ -135,7 +139,7 @@ export function AssigneePicker({
 
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{t('dialogs.task.fields.assignees')}</Text>
+      <Text ref={labelRef} style={styles.label}>{t('dialogs.task.fields.assignees')}</Text>
 
       {value.length > 0 && (
         <View

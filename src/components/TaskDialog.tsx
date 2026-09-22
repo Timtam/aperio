@@ -631,18 +631,24 @@ export function TaskDialog({
   // Each state of the field is its own element, so a change of state removes
   // the one that had focus: "Try again" unmounts the moment it is pressed, and
   // the loading note does when the people arrive. Focus then fell to the page,
-  // out of the dialog's reach for a screen reader. While focus is in the
-  // field, the new state's element takes it — and speaks for itself: the notes
-  // carry their sentence, the retry button its failure, the picker its label.
+  // out of the dialog's reach for a screen reader. When focus was in the field
+  // and has fallen out, the new state's element takes it — and speaks for
+  // itself: the notes carry their sentence, the retry button its failure, the
+  // picker's select its label, which it is preferred for over a chip's
+  // "Remove". Only focus that fell out is recovered: a blur to nowhere (a
+  // click on the dialog's text) leaves the flag set, and taking focus from the
+  // list select then let arrow keys meant for the list assign a person.
   const assigneeFieldRef = useRef<HTMLDivElement>(null);
   const focusInAssignees = useRef(false);
   useLayoutEffect(() => {
     if (!focusInAssignees.current) return;
     const field = assigneeFieldRef.current;
-    if (!field || field.contains(document.activeElement)) return;
-    field
-      .querySelector<HTMLElement>('select, button, input, [tabindex="0"]')
-      ?.focus({ preventScroll: true });
+    const active = document.activeElement;
+    if (!field || (active !== null && active !== document.body)) return;
+    const target =
+      field.querySelector<HTMLElement>('select') ??
+      field.querySelector<HTMLElement>('button, input, [tabindex="0"]');
+    target?.focus({ preventScroll: true });
   }, [assignees]);
 
   // If the chosen section no longer belongs to the selected list (the
@@ -1500,7 +1506,9 @@ export function TaskDialog({
             ref={assigneeFieldRef}
             className="form__field"
             role="group"
-            aria-labelledby={assigneeLabelId}
+            // The picker's selects carry the label themselves; named here too,
+            // NVDA said "Assigned to" twice on entering them.
+            aria-labelledby={assignees === 'picker' ? undefined : assigneeLabelId}
             onFocus={() => {
               focusInAssignees.current = true;
             }}
