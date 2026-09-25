@@ -45,7 +45,15 @@
 // them, next to the deleted ones, and Google keeps a deleted occurrence as a
 // cancelled row instead. So the plan reads the series' rows too
 // (`readSeriesRows`), and every caller has to hand them over.
+//
+// Those rows are read by the series' id, not by a stretch of dates (decision
+// 135): a row counts by the slot it names, its own times can lie anywhere,
+// and the series can run for years. The host answers with every row its cache
+// holds for the series, cancelled ones included, and with how far that cache
+// reaches (decision 139) — Exchange and CalDAV hand over the whole calendar,
+// Google only a window around today.
 
+import type { SeriesReach } from './generated/SeriesReach';
 import type { RecurringEventLike } from './recurrence';
 import {
   expandAll,
@@ -103,20 +111,51 @@ export interface WholeSeriesPlan extends SeriesPlanCommon {
   kind: 'whole';
 }
 
-/** How far a moved occurrence is still looked for: before the series' start,
- *  and past the cutoff. */
+export type { SeriesReach } from './generated/SeriesReach';
+
+/**
+ * The rows of one series besides its master, and how far the host's cache
+ * reaches: past it, a row the provider keeps may simply not be here.
+ */
+export interface SeriesRows<E> {
+  rows: E[];
+  reach: SeriesReach;
+}
+
+/**
+ * What a host is asked for the rows of a series. `start` and `end` are for a
+ * host that predates the series read — a phone whose native library is older
+ * than its app — which reads that stretch instead; a current host ignores them.
+ */
+export interface SeriesRowsRequest {
+  calendar_id: string;
+  series_id: string;
+  start: string;
+  end: string;
+}
+
+/**
+ * A phone host's answer to a series read. A native library older than the
+ * series read ignores the series and answers with the events of the request's
+ * stretch, as a list; how far those reach, nobody knows.
+ */
+export function seriesRowsFromHost<E>(answer: SeriesRows<E> | E[]): SeriesRows<E> {
+  return Array.isArray(answer) ? { rows: answer, reach: { kind: 'unknown' } } : answer;
+}
+
+/** How far a moved occurrence is still looked for by a host that can only read
+ *  a stretch of dates: before the series' start, and past the cutoff. */
 const MOVED_REACH_MS = 31 * 24 * 60 * 60 * 1000;
 
 /**
  * The rows of this series the provider keeps besides the master — its changed
  * and its cancelled occurrences — that the plan needs to know what is shown
- * before the cutoff (decision 125).
+ * before the cutoff (decision 125), and how far they reach.
  *
- * Read through the caller's own `getEvents`, over the stretch from a month
- * before the series starts to a month past the cutoff: a row counts by the
- * slot it stands in for, and it may have been moved to either side. A read
- * that fails throws: guessing "nothing there" would delete or rewrite a series
- * whose earlier occurrences are on screen.
+ * Read by the series' id through the caller's own `getSeriesRows`, whatever
+ * their dates. A master without a rule has no such rows and is not read. A
+ * read that fails throws: guessing "nothing there" would delete or rewrite a
+ * series whose earlier occurrences are on screen.
  */
 export async function readSeriesRows<
   E extends RecurringEventLike,
@@ -124,17 +163,25 @@ export async function readSeriesRows<
 >(
   master: M,
   cutoffIso: string,
-  getEvents: (range: { calendar_id: string; start: string; end: string }) => Promise<E[]>,
-): Promise<E[]> {
+  getSeriesRows: (request: SeriesRowsRequest) => Promise<SeriesRows<E>>,
+): Promise<SeriesRows<E>> {
+  if (!master.recurrence?.rrule) return { rows: [], reach: { kind: 'complete' } };
   const cutoff = new Date(cutoffIso).getTime();
   const from = new Date(master.start).getTime() - MOVED_REACH_MS;
-  if (!Number.isFinite(cutoff) || !Number.isFinite(from)) return [];
-  const rows = await getEvents({
+  if (!Number.isFinite(cutoff) || !Number.isFinite(from)) {
+    return { rows: [], reach: { kind: 'unknown' } };
+  }
+  const answer = await getSeriesRows({
     calendar_id: master.calendar_id,
+    series_id: master.id,
     start: new Date(from).toISOString(),
     end: new Date(Math.max(cutoff, from) + MOVED_REACH_MS).toISOString(),
   });
-  return rows.filter((row) => overrideSeriesId(row) === master.id);
+  // An older host answers with every event of the stretch.
+  return {
+    rows: answer.rows.filter((row) => overrideSeriesId(row) === master.id),
+    reach: answer.reach,
+  };
 }
 
 /**

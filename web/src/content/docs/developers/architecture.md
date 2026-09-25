@@ -186,6 +186,13 @@ the [Plugin Developer docs](/plugins/abi-reference/).
     container→account routes and emits `cache-updated`; `CacheSyncListener`
     then re-runs the affected catalog *and* invalidates the item hooks so
     rows that couldn't be routed on the cold paint fill in.
+  - One read only looks: `get_series_rows` (on the phone, `get_events_json`
+    with a `series_id`) returns the cached rows of one series besides its
+    master — its changed and cancelled occurrences, whatever their dates — by
+    id, with how far the cache reaches (`SeriesReach`: `complete`, a
+    `window`, or `unknown` after a write). Splitting a series needs every
+    such row, so this read never refreshes, never repairs bindings and never
+    hides cancelled rows.
   - On the frontend, `CalendarStore` exposes a **per-source** loading flag
     (`calendarsLoading`/`taskListsLoading`/`contactListsLoading`), and each
     data hook gates on the one catalog it needs (events → calendars, tasks →

@@ -700,6 +700,7 @@ pub fn run() {
             commands::create_calendar,
             commands::delete_calendar,
             commands::get_events,
+            commands::get_series_rows,
             commands::create_event,
             commands::update_event,
             commands::delete_event,

@@ -35,6 +35,7 @@ use crate::db::{DbError, DbHandle, DbResult};
 mod observer;
 mod refresh;
 mod search;
+mod series;
 mod swr;
 
 #[cfg(test)]
@@ -122,6 +123,7 @@ pub use observer::{CacheObserver, CacheRefreshStatus};
 pub use refresh::{
     CacheRefresher, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
 };
+pub use series::{series_rows, SeriesReach, SeriesRows};
 pub use swr::{
     event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
     refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,

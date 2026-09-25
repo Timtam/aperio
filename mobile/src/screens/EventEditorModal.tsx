@@ -100,7 +100,7 @@ import {
   CalendarEvent,
   createEvent,
   getEventById,
-  getEvents,
+  getSeriesRows,
   listCalendars,
   updateEvent,
 } from '../api/calendar';
@@ -1105,7 +1105,7 @@ export default function EventEditorModal({
         const plan = planSeriesSplit(
           original,
           occurrence,
-          await readSeriesRows(original, occurrence, getEvents),
+          (await readSeriesRows(original, occurrence, getSeriesRows)).rows,
         );
         if (plan == null) {
           throw new Error(t('dialogs.event.thisAndFutureLoadFailed', { title }));

@@ -35,7 +35,7 @@ import {
   deleteEventById,
   eventGroupsForEvents,
   getEventById,
-  getEvents,
+  getSeriesRows,
   queryFreeBusy,
   setEventColor,
   setEventLocalReminders,
@@ -1367,7 +1367,7 @@ export function EventDialog({
             const plan = planSeriesSplit(
               master,
               occIso,
-              await readSeriesRows(master, occIso, getEvents),
+              (await readSeriesRows(master, occIso, getSeriesRows)).rows,
             );
             // Nor is a split that cannot be planned: falling through to the
             // series edit moved every occurrence (see `planSeriesSplit`). The

@@ -9,6 +9,7 @@ import {
   ruleFromCut,
   seriesFromCut,
   seriesLeftTruncated,
+  seriesRowsFromHost,
   thisAndFutureDeletedKey,
   truncateRRuleBefore,
   writeSeriesSplit,
@@ -441,26 +442,69 @@ describe('occurrenceOfSeries on a series of days', () => {
 });
 
 describe('readSeriesRows', () => {
-  it("asks around the series and the cutoff, and keeps only the series' own rows", async () => {
-    const asked: { calendar_id: string; start: string; end: string }[] = [];
-    const own = { ...weekly, id: 'ev-1::rid::2026-08-03T08:00:00.000Z', recurrence: null };
-    const other = { ...weekly, id: 'ev-9::rid::2026-08-03T08:00:00.000Z', recurrence: null };
-    const rows = await readSeriesRows(
+  const own = { ...weekly, id: 'ev-1::rid::2026-08-03T08:00:00.000Z', recurrence: null };
+  const other = { ...weekly, id: 'ev-9::rid::2026-08-03T08:00:00.000Z', recurrence: null };
+
+  it("asks for the series by its id, and passes on how far the rows reach", async () => {
+    const asked: unknown[] = [];
+    const reach = {
+      kind: 'window' as const,
+      start: '2026-06-01T00:00:00Z',
+      end: '2027-09-01T00:00:00Z',
+    };
+    const answer = await readSeriesRows(
       { ...weekly, calendar_id: 'cal' },
       '2026-08-24T08:00:00.000Z',
-      async (range) => {
-        asked.push(range);
-        return [weekly, own, other];
+      async (request) => {
+        asked.push(request);
+        return { rows: [own], reach };
       },
     );
-    expect(rows).toEqual([own]);
+    expect(answer).toEqual({ rows: [own], reach });
+    // The stretch is for a phone whose native library predates the series
+    // read: a month around the series' start and the cutoff, as before.
     expect(asked).toEqual([
       {
         calendar_id: 'cal',
+        series_id: 'ev-1',
         start: '2026-07-03T08:00:00.000Z',
         end: '2026-09-24T08:00:00.000Z',
       },
     ]);
+  });
+
+  it("keeps only the series' own rows from an older host's events", async () => {
+    const answer = await readSeriesRows(
+      { ...weekly, calendar_id: 'cal' },
+      '2026-08-24T08:00:00.000Z',
+      async () => seriesRowsFromHost([weekly, own, other]),
+    );
+    expect(answer).toEqual({ rows: [own], reach: { kind: 'unknown' } });
+  });
+
+  it('reads nothing for an event without a rule', async () => {
+    const read = vi.fn();
+    const answer = await readSeriesRows(
+      { ...weekly, recurrence: null, calendar_id: 'cal' },
+      '2026-08-24T08:00:00.000Z',
+      read,
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(answer).toEqual({ rows: [], reach: { kind: 'complete' } });
+  });
+});
+
+describe('seriesRowsFromHost', () => {
+  it("takes a current host's answer as it is", () => {
+    const answer = { rows: [weekly], reach: { kind: 'complete' as const } };
+    expect(seriesRowsFromHost(answer)).toBe(answer);
+  });
+
+  it("reads an older host's list of events as rows whose reach nobody knows", () => {
+    expect(seriesRowsFromHost([weekly])).toEqual({
+      rows: [weekly],
+      reach: { kind: 'unknown' },
+    });
   });
 });
 

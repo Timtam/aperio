@@ -31,6 +31,9 @@ const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     void payload;
     if (command === 'list_event_local_reminders') return Promise.resolve(privateRows.current);
+    if (command === 'get_series_rows') {
+      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+    }
     if (command === 'get_event_by_id' && seriesMaster.current) {
       return Promise.resolve(seriesMaster.current);
     }

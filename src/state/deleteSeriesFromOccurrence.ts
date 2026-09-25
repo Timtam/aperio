@@ -1,5 +1,5 @@
 import type { CalendarEvent } from '../api/types';
-import { deleteEventById, getEventById, getEvents, updateEvent } from '../api/client';
+import { deleteEventById, getEventById, getSeriesRows, updateEvent } from '../api/client';
 import {
   planSeriesSplit,
   readSeriesRows,
@@ -63,7 +63,7 @@ export async function deleteThisAndFuture(
   // With the rows the provider keeps for single occurrences: an occurrence
   // changed in Outlook is listed among the master's exceptions, and only its
   // own row says it is still there (decision 125).
-  const rows = await readSeriesRows(master, occurrenceIso, getEvents);
+  const { rows } = await readSeriesRows(master, occurrenceIso, getSeriesRows);
   const plan = planSeriesSplit(master, occurrenceIso, rows);
   if (plan == null) {
     throw new Error(

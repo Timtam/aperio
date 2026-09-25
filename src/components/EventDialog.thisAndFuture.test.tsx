@@ -37,6 +37,9 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
     }
+    if (command === 'get_series_rows') {
+      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+    }
     if (command === 'event_groups_for_events') {
       return Promise.resolve(onFile.groups);
     }

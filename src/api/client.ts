@@ -7,6 +7,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
   localizeBirthdayCalendarName,
+  type SeriesRows,
+  type SeriesRowsRequest,
   type ZoneOffsets,
   type ZoneOffsetsQuestion,
 } from '@aperio/shared';
@@ -95,6 +97,14 @@ export interface EventRangeRequest {
 
 export const getEvents = (request: EventRangeRequest) =>
   invoke<CalendarEvent[]>('get_events', { request });
+
+/** The cached rows of one series besides its master, whatever their dates, and
+ *  how far the cache reaches (decisions 135 and 139). The stretch in the
+ *  request is only for an older phone host; the desktop never needs it. */
+export const getSeriesRows = ({ calendar_id, series_id }: SeriesRowsRequest) =>
+  invoke<SeriesRows<CalendarEvent>>('get_series_rows', {
+    request: { calendar_id, series_id },
+  });
 
 export interface CreateEventRequest extends NewEvent {
   calendar_id: string;
