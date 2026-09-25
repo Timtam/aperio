@@ -182,6 +182,12 @@ lässt du sie, läuft das Muster einfach weiter. Liegt vor dem gewählten Termin
 keiner mehr – du hast den ersten gewählt, oder alle früheren sind gelöscht –,
 gibt es nichts zu behalten: Das Bearbeiten ändert die ganze Serie, die derselbe
 Eintrag bleibt, und das Löschen entfernt die Serie. Aperio sagt es dir dann.
+Beim Bearbeiten legt Aperio zuerst die neue Serie an und beendet dann die alte
+davor. Scheitert das Beenden, löscht Aperio die neue wieder, und nichts hat sich
+geändert. Nur wenn unklar ist, ob die alte schon beendet wurde, etwa nach einer
+abgerissenen Verbindung, bleiben beide stehen: Deine Änderung gilt als
+gespeichert, und Aperio nennt den Tag, ab dem die Serie möglicherweise doppelt
+steht, damit du nachsiehst, statt ein zweites Mal zu speichern.
 **Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
 auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
 Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen

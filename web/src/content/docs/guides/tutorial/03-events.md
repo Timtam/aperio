@@ -167,7 +167,12 @@ the new series follows it, leave it alone and the pattern simply continues.
 When nothing comes before the chosen occurrence — you picked the first one, or
 every earlier one was deleted — there is nothing to keep: an edit changes the
 whole series, which stays the same entry, and a delete removes the series.
-Aperio says so when it happens.
+Aperio says so when it happens. On an edit, Aperio first creates the new series
+and then ends the old one before it. If ending the old one fails, Aperio deletes
+the new one again, and nothing has changed. Only when it cannot tell whether the
+old one was already ended, for example after a lost connection, does it keep
+both: your change counts as saved, and Aperio names the day from which the
+series may show twice, so you can check it instead of saving a second time.
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
 occurrence, and a new date moves the start of the series. The editor's title

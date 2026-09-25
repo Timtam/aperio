@@ -24,10 +24,23 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
   const announce = (message: string) => {
     announced.push(message);
   };
-  const onFile: { series: unknown; groups: unknown[] } = { series: null, groups: [] };
+  const onFile: {
+    series: unknown;
+    groups: unknown[];
+    truncateFails: unknown;
+    deleteFails: unknown;
+  } = {
+    series: null,
+    groups: [],
+    truncateFails: null,
+    deleteFails: null,
+  };
   const openEventGroupCarry = vi.fn();
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'update_event') {
+      // The truncate of a split: the only update these tests make after a
+      // create.
+      if (onFile.truncateFails != null) return Promise.reject(onFile.truncateFails);
       return Promise.resolve((payload as { event: unknown }).event);
     }
     if (command === 'create_event') {
@@ -36,6 +49,9 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
     }
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
+    }
+    if (command === 'delete_event' && onFile.deleteFails != null) {
+      return Promise.reject(onFile.deleteFails);
     }
     if (command === 'get_series_rows') {
       return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
@@ -135,6 +151,8 @@ afterEach(() => {
   invokeMock.mockClear();
   onFile.series = null;
   onFile.groups = [];
+  onFile.truncateFails = null;
+  onFile.deleteFails = null;
   openEventGroupCarry.mockClear();
   announced.length = 0;
   vi.restoreAllMocks();
@@ -265,7 +283,7 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     await open(JULY);
     fireEvent.click(screen.getByRole('button', { name: 'weekly' }));
     save();
-    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
 
     const truncated = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
     expect(truncated.recurrence?.rrule).toContain('UNTIL=');
@@ -328,6 +346,84 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
 
     expect(calls('update_event')).toHaveLength(0);
     expect(calls('create_event')).toHaveLength(0);
+  });
+
+  it('creates the new series before it cuts the old one short (136)', async () => {
+    // The other order lost data when the create failed: the head went back
+    // with its rule, but not with the occurrences the cut had dropped.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    await open(JULY);
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+
+    const order = invokeMock.mock.calls
+      .map((call) => call[0])
+      .filter((command) => command === 'create_event' || command === 'update_event');
+    expect(order).toEqual(['create_event', 'update_event']);
+    expect(calls('delete_event')).toHaveLength(0);
+  });
+
+  it('deletes the new series again when cutting the old one was refused', async () => {
+    // A conflict: nothing reached the provider, so the undo is exact.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateFails = { code: 'conflict', message: 'etag mismatch' };
+    await open(JULY);
+    save();
+    await screen.findByText(
+      /auf dem Server geändert, seit du ihn geöffnet hast|changed on the server since you opened it/,
+    );
+
+    expect(calls('delete_event')).toHaveLength(1);
+    expect(calls('delete_event')[0][1]).toEqual({
+      id: 'tail-1',
+      calendarId: 'cal-work',
+      // Told as the create was: nobody was invited, so nobody hears of it.
+      sendCancellations: false,
+    });
+  });
+
+  it('keeps both, counts the change written and names the day when the cut may have landed (144, 145)', async () => {
+    // The answer was lost: the old series may already end at the cutoff, and
+    // deleting the new one would lose everything from there. The new series
+    // stands, so the save is done — said with the doubt, not as a failure a
+    // second save would repeat.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateFails = { code: 'network', message: 'connection reset' };
+    await open(JULY);
+    save();
+    await waitFor(() =>
+      expect(announced.some((line) => /möglicherweise doppelt|may show twice/.test(line))).toBe(
+        true,
+      ),
+    );
+
+    expect(calls('delete_event')).toHaveLength(0);
+    const said = announced.find((line) => /möglicherweise doppelt|may show twice/.test(line))!;
+    expect(said).toMatch(/Teamrunde/);
+    expect(said).toMatch(/6\. Juli 2026|July 6, 2026/);
+    expect(said).toMatch(/network: connection reset/);
+    // Not also the plain "changed", and no error on the form.
+    expect(announced.some((line) => /bleiben unverändert|stay unchanged/.test(line))).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says the series may show twice when the new one cannot be deleted again', async () => {
+    // Refused, so the old series still runs through the cutoff — and the undo
+    // failed. A second save would write the new series once more: said.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateFails = { code: 'conflict', message: 'etag mismatch' };
+    onFile.deleteFails = { code: 'network', message: 'connection reset' };
+    await open(JULY);
+    save();
+    const said = await screen.findByText(/möglicherweise doppelt|may now show twice/);
+
+    expect(calls('delete_event')).toHaveLength(1);
+    expect(said.textContent).toMatch(/Teamrunde/);
+    expect(said.textContent).toMatch(/bevor du erneut speicherst|before saving again/);
   });
 
   it("moves the new series' exceptions to its new time", async () => {

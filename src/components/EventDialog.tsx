@@ -57,6 +57,8 @@ import {
   thisAndFutureDeletedKey,
   readSeriesRows,
   ruleFromCut,
+  seriesMaybeShownTwice,
+  cutoffDay,
 } from '../intl/recurrence';
 import {
   describeRecurrence,
@@ -1409,25 +1411,11 @@ export function EventDialog({
                 );
               // The arithmetic — the COUNT the tail keeps, the EXDATEs that
               // travel with it, the zone it inherits — lives in
-              // `planSeriesSplit`; the order and the recovery in
+              // `planSeriesSplit`; the order and the undo in
               // `writeSeriesSplit`. See shared/seriesSplit.ts for why each of
               // those details decides whether the two halves line up.
-              const created = await writeSeriesSplit(
+              const written = await writeSeriesSplit(
                 {
-                  // Notify on the truncate too (symmetric with delete-this-and-
-                  // following): on notify-flag providers attendees must be told
-                  // the original series now ends before the cutoff, or they keep
-                  // the old occurrences AND get the new tail invite.
-                  truncate: (headRule) =>
-                    apiUpdateEvent(
-                      {
-                        ...master,
-                        recurrence: { ...masterRecurrence, rrule: headRule },
-                        send_invitations: sendInvitations,
-                        truncate_tail_overrides: true,
-                      },
-                      master.calendar_id,
-                    ),
                   createTail: (recurrence) =>
                     apiCreateEvent(
                       {
@@ -1450,14 +1438,40 @@ export function EventDialog({
                       // (incl. floating) so head and tail expand identically.
                       { preserveRecurrenceZone: true },
                     ),
-                  restore: () =>
+                  // Notify on the truncate too (symmetric with delete-this-and-
+                  // following): on notify-flag providers attendees must be told
+                  // the original series now ends before the cutoff, or they keep
+                  // the old occurrences AND get the new tail invite.
+                  truncate: (headRule) =>
                     apiUpdateEvent(
-                      { ...master, send_invitations: sendInvitations },
+                      {
+                        ...master,
+                        recurrence: { ...masterRecurrence, rrule: headRule },
+                        send_invitations: sendInvitations,
+                        truncate_tail_overrides: true,
+                      },
                       master.calendar_id,
                     ),
+                  // The undo of the create, told as the create was.
+                  removeTail: (tail) =>
+                    deleteEventById(tail.id, tail.calendar_id, sendInvitations),
                 },
                 plan,
-              );
+              ).catch((err: unknown) => {
+                // The old series was not cut, and the new one could not be
+                // deleted again: it may stand twice. That is said first, with
+                // what went wrong.
+                throw seriesMaybeShownTwice(err)
+                  ? new Error(
+                      t('dialogs.event.thisAndFutureMaybeTwice', {
+                        title: trimmedTitle,
+                        date: cutoffDay(occIso, i18n.language),
+                        detail: eventWriteErrorMessage(err, t),
+                      }),
+                    )
+                  : err;
+              });
+              const created = written.tail;
               // The tail is a continuation of the same appointment, so it gets
               // the private list under its new id. The head keeps its own
               // under the series key: it still has every occurrence before
@@ -1470,8 +1484,17 @@ export function EventDialog({
                   form.colorLabel,
                 );
               }
+              // The new series is written even when cutting the old one short
+              // may not have reached the provider (145): then the old one may
+              // still run through the cutoff, and that is what gets said.
               announce(
-                t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+                written.headCut === 'done'
+                  ? t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle })
+                  : t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                      title: trimmedTitle,
+                      date: cutoffDay(occIso, i18n.language),
+                      detail: eventWriteErrorMessage(written.failure, t),
+                    }),
               );
               // The other copies have a series each, so carrying this means
               // splitting theirs at the same point — not updating a row.
@@ -1666,6 +1689,7 @@ export function EventDialog({
       offerToCarry,
       onClose,
       t,
+      i18n.language,
     ],
   );
 

@@ -1336,7 +1336,8 @@
       "scopeFuture": "This applies to this occurrence and all following ones. Each copy changes from the same point on; its earlier occurrences stay as they are.",
       "regroupFailed_one": "The copy was updated, but the new entries could not be tied together as one appointment again.",
       "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again.",
-      "truncatedNotRestored": "The series in {{calendar}} was cut short and could not be put back — it now ends at this occurrence.",
+      "maybeShownTwice": "In {{calendar}}, the series may now show twice from {{date}}: the old one could not be cut short, nor its new part deleted again. Please check it there.",
+      "unsureCut": "In {{calendar}}, the series may show twice from {{date}}: its new part was created, but whether the old one now ends before it is unclear. Please check it there.",
       "skippedInvitation": "The copy in {{calendar}} was not changed — someone else organizes it."
     },
     "eventGroup": {
@@ -1489,6 +1490,8 @@
       "thisAndFutureUpdatedWhole": "\"{{title}}\" was changed. No earlier occurrence was left, so the change applies to the whole series.",
       "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
       "thisAndFutureNotRepeating": "\"{{title}}\" no longer repeats; it was changed elsewhere. Nothing was changed here. Open it again to edit it.",
+      "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar before saving again.",
+      "thisAndFutureUpdatedMaybeTwice": "\"{{title}}\" was changed from this occurrence on. But whether the old series now ends before it is unclear ({{detail}}): from {{date}} it may show twice. Please check it.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {
         "title": "Cancel meeting?",

@@ -51,6 +51,8 @@ import {
   readSeriesRows,
   ruleFromCut,
   seriesFromCut,
+  seriesMaybeShownTwice,
+  cutoffDay,
   seriesTimesFromOccurrenceEdit,
   type TailRecurrence,
 } from '@aperio/shared';
@@ -99,6 +101,7 @@ import {
   Calendar,
   CalendarEvent,
   createEvent,
+  deleteEvent,
   getEventById,
   getSeriesRows,
   listCalendars,
@@ -1095,7 +1098,7 @@ export default function EventEditorModal({
         // "This and all following": split the series at this occurrence. The
         // arithmetic — the COUNT the tail keeps, the EXDATEs that travel with
         // it, the zone it inherits — lives in `planSeriesSplit`; the order and
-        // the recovery in `writeSeriesSplit`. See shared/seriesSplit.ts for why
+        // the undo in `writeSeriesSplit`. See shared/seriesSplit.ts for why
         // each of those details decides whether the two halves line up.
         // The loaded `original` IS the master (getEventById resolves the
         // series), so its start anchors the occurrence count.
@@ -1134,22 +1137,8 @@ export default function EventEditorModal({
               allDay || original.all_day,
             );
           const masterRecurrence = original.recurrence;
-          const created = await writeSeriesSplit(
+          const written = await writeSeriesSplit(
             {
-              // Notify on the truncate too (symmetric with
-              // delete-this-and-following): on notify-flag providers attendees
-              // must learn the original series now ends before the cutoff, else
-              // they keep the old occurrences AND receive the new tail invite.
-              truncate: (headRule) =>
-                updateEvent(
-                  {
-                    ...original,
-                    recurrence: { ...masterRecurrence, rrule: headRule },
-                    send_invitations: sendInvitations,
-                    truncate_tail_overrides: true,
-                  },
-                  original.calendar_id,
-                ),
               createTail: (planned) =>
                 createEvent(
                   {
@@ -1172,14 +1161,40 @@ export default function EventEditorModal({
                   // floating) so head and tail expand identically.
                   { preserveRecurrenceZone: true },
                 ),
-              restore: () =>
+              // Notify on the truncate too (symmetric with
+              // delete-this-and-following): on notify-flag providers attendees
+              // must learn the original series now ends before the cutoff, else
+              // they keep the old occurrences AND receive the new tail invite.
+              truncate: (headRule) =>
                 updateEvent(
-                  { ...original, send_invitations: sendInvitations },
+                  {
+                    ...original,
+                    recurrence: { ...masterRecurrence, rrule: headRule },
+                    send_invitations: sendInvitations,
+                    truncate_tail_overrides: true,
+                  },
                   original.calendar_id,
                 ),
+              // The undo of the create, told as the create was.
+              removeTail: (tail) =>
+                deleteEvent(tail.id, tail.calendar_id, sendInvitations),
             },
             plan,
-          );
+          ).catch((err: unknown) => {
+            // The old series was not cut, and the new one could not be deleted
+            // again: it may stand twice. That is said first, with what went
+            // wrong. Mirrors the desktop.
+            throw seriesMaybeShownTwice(err)
+              ? new Error(
+                  t('dialogs.event.thisAndFutureMaybeTwice', {
+                    title: trimmedTitle,
+                    date: cutoffDay(occurrence, i18n.language),
+                    detail: eventWriteErrorMessage(err, t),
+                  }),
+                )
+              : err;
+          });
+          const created = written.tail;
           // The tail is a continuation of the same appointment, so it gets the
           // private list under its new id. The head keeps its own under the
           // series key: it still has every occurrence before the change. Mirrors
@@ -1188,8 +1203,17 @@ export default function EventEditorModal({
           if (!isLocalCal) {
             await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
           }
+          // The new series is written even when cutting the old one short may
+          // not have reached the provider (145): then the old one may still run
+          // through the cutoff, and that is what gets said. Mirrors the desktop.
           AccessibilityInfo.announceForAccessibility(
-            t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+            written.headCut === 'done'
+              ? t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle })
+              : t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                  title: trimmedTitle,
+                  date: cutoffDay(occurrence, i18n.language),
+                  detail: eventWriteErrorMessage(written.failure, t),
+                }),
           );
           // The other copies have a series each, so carrying this means splitting
           // theirs at the same point — not updating a row.
@@ -1382,6 +1406,7 @@ export default function EventEditorModal({
     startDate,
     startTime,
     t,
+    i18n.language,
     title,
   ]);
 

@@ -20,6 +20,8 @@ export {
   splitRRuleForEdit,
   planSeriesSplit,
   writeSeriesSplit,
+  seriesMaybeShownTwice,
+  cutoffDay,
   seriesFromCut,
   thisAndFutureDeletedKey,
   readSeriesRows,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { eventWriteErrorMessage, eventWriteRefusal } from '@aperio/shared';
+import { eventWriteErrorMessage, eventWriteRefusal, writeNeverLanded } from '@aperio/shared';
 import i18n from '../i18n';
 
 /**
@@ -95,5 +95,31 @@ describe('eventWriteErrorMessage', () => {
     expect(eventWriteErrorMessage('plain', t)).toBe('plain');
     // A message that only starts like a token is not one.
     expect(eventWriteRefusal(command('forbidden', 'server-refused-by-proxy: x'))).toBeNull();
+  });
+});
+
+describe('writeNeverLanded', () => {
+  it('holds for a refusing code, on either surface', () => {
+    for (const code of ['conflict', 'forbidden', 'invalid_input', 'not_found', 'auth', 'unsupported']) {
+      expect(writeNeverLanded(command(code, 'no')), code).toBe(true);
+    }
+    // The phone throws an Error with a code on it.
+    expect(writeNeverLanded(Object.assign(new Error('no'), { code: 'conflict' }))).toBe(true);
+  });
+
+  it('holds for a refusal token, whatever code carried it', () => {
+    // An unknown identity is a network error, but no request went out.
+    expect(writeNeverLanded(command('network', 'identity-unknown: me@example.org'))).toBe(true);
+    expect(writeNeverLanded(new Error('server-refused: quota'))).toBe(true);
+  });
+
+  it('never holds where the write may have reached the provider', () => {
+    expect(writeNeverLanded(command('network', 'connection reset'))).toBe(false);
+    expect(writeNeverLanded(command('protocol', 'unreadable answer'))).toBe(false);
+    expect(writeNeverLanded(command('internal', 'cache write failed'))).toBe(false);
+    // No code at all: on the phone, every code but three arrives this way.
+    expect(writeNeverLanded(new Error('Call to function has been rejected.'))).toBe(false);
+    expect(writeNeverLanded('offline')).toBe(false);
+    expect(writeNeverLanded(null)).toBe(false);
   });
 });

@@ -1,10 +1,10 @@
 // Splitting a series at one of its occurrences — "this and all following".
 //
-// The move itself is two writes that must both happen or neither: the original
-// series is truncated to end just before the chosen occurrence, and a NEW
-// series takes over from there carrying the change. Between those two writes
-// the appointment has a hole in it, and every detail of the arithmetic decides
-// whether the two halves line up afterwards:
+// The move itself is two writes that must both happen or neither: a NEW series
+// takes over from the chosen occurrence carrying the change, and the original
+// series is truncated to end just before it. Between those two writes the
+// appointment shows twice from the cutoff, and every detail of the arithmetic
+// decides whether the two halves line up afterwards:
 //
 //   - RFC-5545 COUNT counts every slot the RULE generates, INCLUDING the ones
 //     an EXDATE suppresses. Counting the visible occurrences before the cutoff
@@ -20,12 +20,21 @@
 //   - Attendees have to hear about the truncation as well as the new tail. On
 //     notify-flag providers a silent truncate leaves them holding the old
 //     occurrences AND an invitation to the new ones.
-//   - And if creating the tail fails, the head must be put back — with the same
-//     notify flag, or their calendars stay diverged from the organiser's.
+//   - The tail is created FIRST and the head cut after (decision 136). The
+//     other order lost data: a cut that landed and a tail that did not left
+//     the series ending at the cutoff, and putting the head back restored only
+//     its rule — the changed and deleted occurrences the cut had dropped at the
+//     provider stayed dropped. Deleting a series just created is an exact undo.
+//   - But only when the cut certainly never reached the provider (decision
+//     144). After a network failure it may have landed, and deleting the tail
+//     then would leave the series ending at the cutoff after all. So both stay,
+//     and the user is told the series may show twice from the cutoff. The new
+//     series is there, so the split counts as written (decision 145): it gets
+//     what a written tail gets, and nothing offers to write it again.
 //
 // That reasoning lived inline in both editors, and carrying an edit to a
 // group's other copies would have made it four. It lives here now: the
-// arithmetic in `planSeriesSplit`, the order and the recovery in
+// arithmetic in `planSeriesSplit`, the order and the undo in
 // `writeSeriesSplit`. What each caller still owns is the SHAPE of the row it
 // creates — a copy keeps its own colour, reminders and calendar, and only the
 // caller knows those.
@@ -53,6 +62,9 @@
 // reaches (decision 139) — Exchange and CalDAV hand over the whole calendar,
 // Google only a window around today.
 
+import { localDateKey } from './dateKey';
+import { writeNeverLanded } from './eventWriteError';
+import { formatLongDay } from './intlNames';
 import type { SeriesReach } from './generated/SeriesReach';
 import type { RecurringEventLike } from './recurrence';
 import {
@@ -411,6 +423,8 @@ export function firstOccurrenceFrom<E extends SplittableEvent>(
  * are the same everywhere and belong to `writeSeriesSplit`.
  */
 export interface SeriesSplitIo<Created> {
+  /** Create the tail series with this recurrence, keeping the zone verbatim. */
+  createTail(recurrence: TailRecurrence): Promise<Created>;
   /**
    * Write the master back ending just before the cutoff.
    *
@@ -420,57 +434,93 @@ export interface SeriesSplitIo<Created> {
    * ghosts against the new series.
    */
   truncate(headRule: string): Promise<unknown>;
-  /** Create the tail series with this recurrence, keeping the zone verbatim. */
-  createTail(recurrence: TailRecurrence): Promise<Created>;
   /**
-   * Put the master back as it was.
+   * Delete the tail `createTail` just made.
    *
-   * Called only when the tail could not be created. Must carry the SAME notify
-   * flag as `truncate`: if attendees were told the series ends early, they have
-   * to be told it is whole again.
+   * Called only when the truncate certainly changed nothing. Must carry the
+   * SAME notify flag as `createTail`: attendees invited to the new series have
+   * to hear that it is gone again.
    */
-  restore(): Promise<unknown>;
+  removeTail(created: Created): Promise<unknown>;
 }
 
-/** Marks a thrown error whose series was left truncated. */
-const RESTORE_FAILED = Symbol.for('aperio.seriesSplit.restoreFailed');
+/**
+ * The day a split cuts at, written out in `language`: the day the user sees
+ * the occurrence on, for a sentence that has to name it after the dialog is
+ * gone.
+ */
+export function cutoffDay(cutoffIso: string, language: string): string {
+  const at = new Date(cutoffIso);
+  return Number.isNaN(at.getTime())
+    ? cutoffIso
+    : formatLongDay(localDateKey(at), language);
+}
 
 /**
- * Whether this failure left the series SHORTER than it was.
+ * A split that was written: the new series, and whether the old one certainly
+ * ends before the cutoff.
+ *
+ * `unsure` when cutting the old one short failed in a way that may have
+ * reached the provider (decision 144). The new series stands either way, so
+ * the caller treats it as written — its private reminders, its colour, its
+ * group — and says that the series may show twice from the cutoff, with what
+ * went wrong (`failure`), instead of that it changed (decision 145).
+ */
+export type SeriesSplitWritten<Created> =
+  | { tail: Created; headCut: 'done' }
+  | { tail: Created; headCut: 'unsure'; failure: unknown };
+
+/** Marks a thrown error after which the series may show twice. */
+const MAYBE_SHOWN_TWICE = Symbol.for('aperio.seriesSplit.maybeShownTwice');
+
+/**
+ * Whether this failure may have left the series showing TWICE from the cutoff.
  *
  * The ordinary failure of a split changes nothing: the tail could not be
- * created, the head went back as it was, and the caller reports an error over
- * an untouched calendar. When the restore fails too, the series really does end
- * at the cutoff now — every appointment from there on is gone. That is a
- * different thing to tell the user, and reporting it as "not changed" would be
- * the opposite of true.
+ * created, or the truncate was refused and the tail deleted again, and the
+ * caller reports an error over an untouched calendar. But when the tail could
+ * not be deleted after all, it may stand next to the old series, which runs
+ * through the cutoff. That is a different thing to tell the user, and
+ * reporting it as "not changed" would be the opposite of true.
  */
-export function seriesLeftTruncated(err: unknown): boolean {
+export function seriesMaybeShownTwice(err: unknown): boolean {
   return (
     typeof err === 'object' &&
     err !== null &&
-    (err as Record<symbol, unknown>)[RESTORE_FAILED] === true
+    (err as Record<symbol, unknown>)[MAYBE_SHOWN_TWICE] === true
   );
 }
 
+/** The failure as thrown, marked: an object carries the mark itself. */
+function markedShownTwice(err: unknown): unknown {
+  const carrier =
+    typeof err === 'object' && err !== null ? err : new Error(String(err));
+  (carrier as Record<symbol, unknown>)[MAYBE_SHOWN_TWICE] = true;
+  return carrier;
+}
+
 /**
- * Truncate, then create the tail — and put the master back if the tail fails.
+ * Create the tail, then truncate — and delete the tail if the truncate was
+ * refused.
  *
- * The failure path is the reason this is one function. A tail that could not be
- * created leaves a series that silently ENDS at the cutoff: every appointment
- * from there on is simply gone, and nothing on screen says so. Restoring the
- * head turns that into an ordinary error the caller can report, with the
- * calendar exactly as it was.
+ * The failure path is the reason this is one function. Deleting the series
+ * just created is an exact undo, but only when the truncate certainly changed
+ * nothing (`writeNeverLanded`): after a failure that may have reached the
+ * provider, deleting the tail would leave a series that ends at the cutoff,
+ * every appointment from there on gone. So then both stay (decision 144), and
+ * the split is returned as written, with the old series' cut `unsure`
+ * (decision 145): thrown, it would invite the caller to write it again, and
+ * the new series would stand twice.
  *
- * The ORIGINAL failure is what gets thrown either way — it is what the caller is
- * waiting for, and a second message about a failed repair would bury it. But a
- * failed restore is marked on it, so a caller that wants to say "and this one is
- * now short" can (`seriesLeftTruncated`).
+ * A refused truncate throws its ORIGINAL failure — it is what the caller is
+ * waiting for, and a second message about a failed repair would bury it. When
+ * the tail could not be deleted either, that is marked on it, so the caller
+ * can say the series may show twice (`seriesMaybeShownTwice`).
  */
 export async function writeSeriesSplit<Created>(
   io: SeriesSplitIo<Created>,
   plan: SeriesCutPlan,
-): Promise<Created> {
+): Promise<SeriesSplitWritten<Created>> {
   // The type already refuses a plan with no head; this refuses one that got
   // past it. Truncating such a series writes a rule that ends before it
   // starts — the deleted series that goes on ringing (decision 118).
@@ -479,17 +529,17 @@ export async function writeSeriesSplit<Created>(
       'A series with nothing before the cutoff is not split: it is written whole.',
     );
   }
-  await io.truncate(plan.headRule);
+  const tail = await io.createTail(plan.tail);
   try {
-    return await io.createTail(plan.tail);
+    await io.truncate(plan.headRule);
   } catch (err) {
+    if (!writeNeverLanded(err)) return { tail, headCut: 'unsure', failure: err };
     try {
-      await io.restore();
+      await io.removeTail(tail);
     } catch {
-      if (typeof err === 'object' && err !== null) {
-        (err as Record<symbol, unknown>)[RESTORE_FAILED] = true;
-      }
+      throw markedShownTwice(err);
     }
     throw err;
   }
+  return { tail, headCut: 'done' };
 }

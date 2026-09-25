@@ -11,8 +11,9 @@ import {
   organizerOf,
   planCarry,
   planSeriesSplit,
+  cutoffDay,
   readSeriesRows,
-  seriesLeftTruncated,
+  seriesMaybeShownTwice,
   writeSeriesSplit,
   type CarryableFields,
   type CarryScope,
@@ -24,6 +25,7 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   addEventExdate,
   createEvent,
+  deleteEventById,
   eventGroupsForEvents,
   getEventById,
   getSeriesRows,
@@ -57,7 +59,10 @@ type CarryOutcome =
   /** Some copies could not be written. */
   | { kind: 'partly'; done: number; failed: CarryTarget[] }
   /** Every copy was written, but the new rows are not tied together yet. */
-  | { kind: 'regroup'; done: number };
+  | { kind: 'regroup'; done: number }
+  /** Every copy was written, and some series may show twice: said, and left
+   *  on screen, with nothing to try again (decision 145). */
+  | { kind: 'written'; done: number };
 
 export interface EventGroupCarryDialogProps {
   isOpen: boolean;
@@ -102,7 +107,7 @@ export function EventGroupCarryDialog({
   successor,
   onChanged,
 }: EventGroupCarryDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { calendars } = useCalendarStore();
   const [busy, setBusy] = useState(false);
@@ -122,6 +127,10 @@ export function EventGroupCarryDialog({
   /** The rows written so far, kept across a retry so the regrouping at the end
    *  ties ALL of them together and not just the last pass's. */
   const [createdRows, setCreatedRows] = useState<NewGroupMember[]>([]);
+  /** What a pass said about copies whose series may now show twice, kept
+   *  across a retry: they are written and not offered again, so this is the
+   *  only place they are still named. */
+  const [doubts, setDoubts] = useState<string[]>([]);
   const closeRef = useRef<HTMLButtonElement>(null);
   const outcomeRef = useRef<HTMLParagraphElement>(null);
   /**
@@ -171,6 +180,7 @@ export function EventGroupCarryDialog({
     setOutcome(null);
     setPending(null);
     setCreatedRows([]);
+    setDoubts([]);
     queueMicrotask(() => closeRef.current?.focus());
   }, [isOpen]);
 
@@ -192,6 +202,8 @@ export function EventGroupCarryDialog({
     setBusy(true);
     setError(null);
     const failed: CarryTarget[] = [];
+    // Copies whose series may now show twice from the cut, said in words.
+    const unsure: string[] = [];
     // Copies somebody else organizes: among the ones that did not change, and
     // the report says why (77a).
     const lockedOut: CarryTarget[] = [];
@@ -202,6 +214,9 @@ export function EventGroupCarryDialog({
     for (const target of targets) {
       // The user closed it. Stop writing copies into a dialog that is gone.
       if (!open.current) return;
+      // Where this copy's series is split, once it is: a failure after that
+      // names the day.
+      let splitAt: string | null = null;
       try {
         const current = await getEventById(target.event_id, target.calendar_id);
         if (current == null) {
@@ -364,21 +379,9 @@ export function EventGroupCarryDialog({
               starts_at: row.start,
             });
           } else {
-            const tail = await writeSeriesSplit(
+            splitAt = anchorIso;
+            const written = await writeSeriesSplit(
               {
-                truncate: (headRule) =>
-                  updateEvent(
-                    {
-                      ...current,
-                      recurrence: { ...currentRecurrence, rrule: headRule },
-                      // The copies are the user's own bookkeeping — the invite
-                      // went out from the anchor, and telling every copy's
-                      // attendees again would mail them twice.
-                      send_invitations: false,
-                      truncate_tail_overrides: true,
-                    },
-                    target.calendar_id,
-                  ),
                 createTail: (recurrence) =>
                   createEvent(
                     {
@@ -410,14 +413,36 @@ export function EventGroupCarryDialog({
                     // verbatim so both halves expand alike.
                     { preserveRecurrenceZone: true },
                   ),
-                restore: () =>
+                truncate: (headRule) =>
                   updateEvent(
-                    { ...current, send_invitations: false },
+                    {
+                      ...current,
+                      recurrence: { ...currentRecurrence, rrule: headRule },
+                      // The copies are the user's own bookkeeping — the invite
+                      // went out from the anchor, and telling every copy's
+                      // attendees again would mail them twice.
+                      send_invitations: false,
+                      truncate_tail_overrides: true,
+                    },
                     target.calendar_id,
                   ),
+                removeTail: (tail) =>
+                  deleteEventById(tail.id, tail.calendar_id, false),
               },
               splitPlan,
             );
+            const tail = written.tail;
+            // Written, but the copy's old series may still run through the
+            // cut (145): the new row is real, so it counts and is grouped, and
+            // the doubt is said instead of offering to write it again.
+            if (written.headCut === 'unsure') {
+              unsure.push(
+                t('dialogs.eventGroupCarry.unsureCut', {
+                  calendar: calendarName(target.calendar_id),
+                  date: cutoffDay(anchorIso, i18n.language),
+                }),
+              );
+            }
             created.push({
               calendar_id: tail.calendar_id,
               event_id: tail.id,
@@ -435,17 +460,21 @@ export function EventGroupCarryDialog({
         }
         done += 1;
       } catch (err) {
-        failed.push(target);
-        // A split that failed AND could not be undone leaves this copy's series
-        // ending at the cutoff. Reporting that as "not changed" would be the
-        // opposite of true, so it gets said in its own words.
-        if (seriesLeftTruncated(err)) {
-          setError(
-            t('dialogs.eventGroupCarry.truncatedNotRestored', {
+        // A split whose new series could not be taken back may show this copy
+        // twice from the cut. Reporting that as "not changed" would be the
+        // opposite of true, and trying again would write the new series a
+        // second time: it is said in its own words, and not offered again.
+        if (seriesMaybeShownTwice(err) && splitAt != null) {
+          unsure.push(
+            t('dialogs.eventGroupCarry.maybeShownTwice', {
               calendar: calendarName(target.calendar_id),
+              date: cutoffDay(splitAt, i18n.language),
             }),
           );
-        } else if (isCommandError(err)) {
+          continue;
+        }
+        failed.push(target);
+        if (isCommandError(err)) {
           setError(err.message);
         }
       }
@@ -487,6 +516,11 @@ export function EventGroupCarryDialog({
     }
     if (!open.current) return;
     setCreatedRows(created);
+    const allDoubts = [...doubts, ...unsure];
+    setDoubts(allDoubts);
+    // Said once, with whatever else this pass reports: the live region keeps
+    // only the last of two announcements in the same frame.
+    const doubtful = unsure.length === 0 ? '' : ` ${unsure.join(' ')}`;
     setBusy(false);
     onChanged?.();
     // The whole point of the dialog: say what actually happened, including
@@ -510,7 +544,7 @@ export function EventGroupCarryDialog({
       announce(
         `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${
           why === '' ? '' : ` ${why}`
-        }`,
+        }${doubtful}`,
       );
       // Stays open. A half-carried group is exactly the state this feature
       // exists to prevent, so the user has to see it and can retry the rest.
@@ -524,7 +558,15 @@ export function EventGroupCarryDialog({
       // what the user was promised.
       setOutcome({ kind: 'regroup', done });
       setPending([]);
-      announce(t('dialogs.eventGroupCarry.regroupFailed', { count: done }));
+      announce(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`);
+      return;
+    }
+    if (allDoubts.length > 0) {
+      // Every copy is written, but some may show twice: closing would take
+      // the only words that say which ones.
+      setOutcome({ kind: 'written', done });
+      setPending([]);
+      announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
       return;
     }
     announce(t('dialogs.eventGroupCarry.done', { count: done }));
@@ -546,12 +588,14 @@ export function EventGroupCarryDialog({
         >
           {outcome.kind === 'regroup'
             ? t('dialogs.eventGroupCarry.regroupFailed', { count: outcome.done })
-            : t('dialogs.eventGroupCarry.partly', {
-                done: outcome.done,
-                failed: outcome.failed
-                  .map((target) => calendarName(target.calendar_id))
-                  .join(', '),
-              })}
+            : outcome.kind === 'written'
+              ? t('dialogs.eventGroupCarry.done', { count: outcome.done })
+              : t('dialogs.eventGroupCarry.partly', {
+                  done: outcome.done,
+                  failed: outcome.failed
+                    .map((target) => calendarName(target.calendar_id))
+                    .join(', '),
+                })}
         </FocusableNote>
       ) : (
         <FocusableNote id={messageId} className="form__message">
@@ -604,6 +648,14 @@ export function EventGroupCarryDialog({
         </FocusableNote>
       ))}
 
+      {/* The copies written whose series may show twice. Each is its own
+          note, so the list is read one copy at a time. */}
+      {doubts.map((doubt) => (
+        <FocusableNote key={doubt} className="form__hint form__hint--warning">
+          {doubt}
+        </FocusableNote>
+      ))}
+
       {error && (
         <p className="form__error" role="alert">
           {error}
@@ -623,18 +675,21 @@ export function EventGroupCarryDialog({
               : 'dialogs.eventGroupCarry.keep',
           )}
         </button>
-        <button
-          type="button"
-          onClick={() => void carry()}
-          className="form__action form__action--primary"
-          aria-disabled={busy || !canRetry || undefined}
-        >
-          {t(
-            outcome
-              ? 'dialogs.eventGroupCarry.retry'
-              : 'dialogs.eventGroupCarry.carry',
-          )}
-        </button>
+        {/* Nothing is left to try once every copy is written. */}
+        {outcome?.kind !== 'written' && (
+          <button
+            type="button"
+            onClick={() => void carry()}
+            className="form__action form__action--primary"
+            aria-disabled={busy || !canRetry || undefined}
+          >
+            {t(
+              outcome
+                ? 'dialogs.eventGroupCarry.retry'
+                : 'dialogs.eventGroupCarry.carry',
+            )}
+          </button>
+        )}
       </div>
     </Modal>
   );

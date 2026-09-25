@@ -78,6 +78,37 @@ export function eventWriteRefusal(
   return null;
 }
 
+/**
+ * The codes with which a host says a write was turned down as a whole: the
+ * copy on the server moved on, the account may not, the write made no sense,
+ * the event is gone, the sign-in failed, the provider cannot do it.
+ */
+const REFUSED_CODES = new Set([
+  'conflict',
+  'forbidden',
+  'invalid_input',
+  'not_found',
+  'auth',
+  'unsupported',
+]);
+
+/**
+ * Whether a failed write certainly changed nothing at the provider.
+ *
+ * A refusal token or a refusing code says so. Anything else may have reached
+ * the provider before its answer was lost — a network failure above all, but
+ * also a protocol error on an answer that could not be read, or an error that
+ * arrived without a code (on the phone, every code but `forbidden`, `conflict`
+ * and `network` does, see TODO B9). Those are never taken as "nothing
+ * happened": a caller that undoes on the strength of it would undo half of a
+ * write that went through.
+ */
+export function writeNeverLanded(err: unknown): boolean {
+  if (eventWriteRefusal(err)) return true;
+  const code = codedError(err)?.code;
+  return code != null && REFUSED_CODES.has(code);
+}
+
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
 /**

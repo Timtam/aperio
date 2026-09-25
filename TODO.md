@@ -2383,6 +2383,26 @@ Siehe DESIGN §4.2.
       muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
       liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
       ein frisch erzeugtes `.so`, ohne Testläufer — ↻ im Test.
+    - ✅ **Teilen kürzte zuerst** (136, 144). Scheiterte danach das Anlegen,
+      stellte das Wiederherstellen nur die Regel zurück: die geänderten und
+      gelöschten Vorkommen, die das Kürzen beim Anbieter verworfen hatte
+      (Google löscht sie, CalDAV schreibt sie nicht mehr), waren still weg.
+      Jetzt legt `writeSeriesSplit` erst die neue Serie an und kürzt dann; die
+      Editoren und beide Mitzieh-Dialoge folgen. Scheitert das Kürzen sicher
+      (`writeNeverLanded`: Ablehnungs-Token oder Code `conflict`, `forbidden`,
+      `invalid_input`, `not_found`, `auth`, `unsupported`), wird die neue Serie
+      mit derselben Benachrichtigung wieder gelöscht. Sonst (Netz, Protokoll,
+      ohne Code) bleiben beide stehen (144), und das Teilen gilt als
+      geschrieben (145, `headCut: 'unsure'`): Die neue Serie bekommt private
+      Erinnerungen, Farbe und Gruppe, die Ansage sagt, ab welchem Tag die Serie
+      möglicherweise doppelt steht, und nichts bietet an, sie noch einmal zu
+      schreiben (der Mitzieh-Dialog bleibt mit dem Hinweis offen, ohne „erneut
+      versuchen“). Scheitert nach einer Ablehnung auch das Löschen der neuen
+      Serie, ist es ein Fehler mit demselben Hinweis (`seriesMaybeShownTwice`);
+      der Editor bittet, vor dem erneuten Speichern zu prüfen. Am Handy kommen
+      nur `forbidden`, `conflict` und `network` mit Code an (B9), jede andere
+      Ablehnung gilt dort also vorsichtig als unklar. Handy ohne Testläufer —
+      ↻ im Test.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,

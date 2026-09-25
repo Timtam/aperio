@@ -1333,7 +1333,8 @@
       "scopeFuture": "Betrifft dieses und alle folgenden Vorkommen. Jede Kopie ändert sich ab derselben Stelle; ihre früheren Vorkommen bleiben, wie sie sind.",
       "regroupFailed_one": "Die Kopie wurde geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
-      "truncatedNotRestored": "Die Serie in {{calendar}} wurde gekürzt und konnte nicht wiederhergestellt werden — sie endet jetzt bei diesem Vorkommen.",
+      "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
+      "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
       "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes."
     },
     "eventGroup": {
@@ -1489,6 +1490,8 @@
       "thisAndFutureUpdatedWhole": "„{{title}}\" wurde geändert. Davor war kein Termin mehr übrig, also gilt die Änderung für die ganze Serie.",
       "thisAndFutureLoadFailed": "Die Serie „{{title}}\" konnte zum Aufteilen nicht geladen werden; es wurde nichts geändert.",
       "thisAndFutureNotRepeating": "„{{title}}\" wiederholt sich nicht mehr; es wurde anderswo geändert. Hier wurde nichts geändert. Öffne den Termin neu, um ihn zu bearbeiten.",
+      "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender, bevor du erneut speicherst.",
+      "thisAndFutureUpdatedMaybeTwice": "„{{title}}\" wurde ab diesem Termin geändert. Ob die alte Serie jetzt davor endet, ist aber unklar ({{detail}}): Ab {{date}} steht sie möglicherweise doppelt. Bitte prüfen.",
       "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
