@@ -13,6 +13,9 @@ import CalFfi from '../../modules/cal-ffi';
 import {
   localizeBirthdayCalendarName,
   type Calendar,
+  seriesRowsFromHost,
+  type SeriesRows,
+  type SeriesRowsRequest,
   withCreatedRecurrenceZone,
 } from '@aperio/shared';
 import i18n from '../../i18n';
@@ -160,6 +163,20 @@ export const getEvents = async (
   request: EventRangeRequest,
 ): Promise<CalendarEvent[]> =>
   JSON.parse(await CalFfi.getEventsJson(JSON.stringify(request))) as CalendarEvent[];
+
+/** The cached rows of one series besides its master, whatever their dates, and
+ *  how far the cache reaches (decisions 135 and 139) — the desktop's
+ *  `get_series_rows`. It rides on the events read so that a native library
+ *  older than the app still answers: that one ignores `series_id` and returns
+ *  the events of the request's stretch (`seriesRowsFromHost`). */
+export const getSeriesRows = async (
+  request: SeriesRowsRequest,
+): Promise<SeriesRows<CalendarEvent>> =>
+  seriesRowsFromHost(
+    JSON.parse(await CalFfi.getEventsJson(JSON.stringify(request))) as
+      | SeriesRows<CalendarEvent>
+      | CalendarEvent[],
+  );
 
 /** One event by id; `null` when absent (the Host returns JSON `null`). Pass the
  *  owning `calendarId` so an EXTERNAL event resolves via the SWR cache — the

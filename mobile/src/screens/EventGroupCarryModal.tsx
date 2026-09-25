@@ -21,7 +21,7 @@ import {
   addEventExdate,
   createEvent,
   getEventById,
-  getEvents,
+  getSeriesRows,
   listCalendars,
   updateEvent,
   type Calendar,
@@ -271,7 +271,7 @@ export default function EventGroupCarryModal({
           const splitPlan = planSeriesSplit(
             current as CalendarEvent & CarryableFields,
             anchorIso,
-            await readSeriesRows(current, anchorIso, getEvents),
+            (await readSeriesRows(current, anchorIso, getSeriesRows)).rows,
           );
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {

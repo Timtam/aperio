@@ -16,7 +16,9 @@ const { invokeMock, onFile } = vi.hoisted(() => {
   const invokeMock = vi.fn((command: string, _payload?: unknown) => {
     void _payload;
     if (command === 'get_event_by_id') return Promise.resolve(onFile.master);
-    if (command === 'get_events') return Promise.resolve(onFile.rows);
+    if (command === 'get_series_rows') {
+      return Promise.resolve({ rows: onFile.rows, reach: { kind: 'complete' } });
+    }
     if (command === 'update_event') return Promise.resolve(onFile.master);
     return Promise.resolve(null);
   });
@@ -105,10 +107,10 @@ describe('deleteThisAndFuture', () => {
     const cut = '2026-08-10T09:00:00.000Z';
     expect(await deleteThisAndFuture(occurrenceAt(cut), cut, false)).toBe('truncated');
     expect(calls('delete_event')).toHaveLength(0);
-    // The rows were asked for in the series' own calendar.
-    expect((calls('get_events')[0][1] as { request: { calendar_id: string } }).request.calendar_id).toBe(
-      'cal-work',
-    );
+    // The rows were asked for by the series, in its own calendar.
+    expect(calls('get_series_rows')[0][1]).toEqual({
+      request: { calendar_id: 'cal-work', series_id: 'series-1' },
+    });
   });
 
   it('deletes the series when its earlier occurrences were all deleted', async () => {

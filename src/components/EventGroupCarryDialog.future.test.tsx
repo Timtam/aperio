@@ -25,8 +25,8 @@ const { invokeMock, groupOfAnchor, copyOnFile } = vi.hoisted(() => {
     if (command === 'get_event_by_id') {
       return Promise.resolve(copyOnFile.current ?? COPY);
     }
-    if (command === 'get_events') {
-      return Promise.resolve([]);
+    if (command === 'get_series_rows') {
+      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
     }
     if (command === 'update_event') {
       return Promise.resolve((payload as { event: unknown }).event);

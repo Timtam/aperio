@@ -528,11 +528,22 @@ struct CreateCalendarRequest {
 
 /// Event-range read request — the desktop `get_events` payload. `start`/`end`
 /// are RFC-3339 UTC instants (chrono parses them).
+///
+/// With a `series_id`, the read is the desktop's `get_series_rows` instead
+/// (decisions 135 and 139): the rows of that series, whatever their dates, and
+/// how far the cache reaches — an object, not a list of events. It rides on
+/// this request rather than a method of its own so that a `.so` built before it
+/// still works with the bridge: that one ignores the field and answers with
+/// the range's events, which the frontend reads as the old answer. For the same
+/// reason `get_events_json`'s own doc comment stays as it is: UniFFI's checksum
+/// covers it, and a changed checksum fails every older `.so` at load.
 #[derive(serde::Deserialize)]
 struct EventRangeRequest {
     calendar_id: String,
     start: chrono::DateTime<chrono::Utc>,
     end: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    series_id: Option<String>,
 }
 
 /// Free/busy lookup request — the desktop `query_free_busy` payload.
@@ -3004,6 +3015,16 @@ impl Host {
     /// so a recurring master is returned only when its stored span overlaps.
     pub fn get_events_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: EventRangeRequest = from_json("request", &request_json)?;
+        if let Some(series_id) = req.series_id.as_deref() {
+            let rows = host_core::cache::series_rows(
+                &self.registry,
+                &self.cache,
+                &req.calendar_id,
+                series_id,
+            )
+            .map_err(map_store_err)?;
+            return to_json(&rows);
+        }
         let range = DateRange::new(req.start, req.end);
 
         // Birthday calendars are synthesised, not stored: derive their events
@@ -10521,6 +10542,57 @@ mod tests {
         let events: serde_json::Value =
             serde_json::from_str(&host.get_events_json(range.to_string()).unwrap()).unwrap();
         assert!(events.as_array().unwrap().is_empty());
+    }
+
+    /// A request with a `series_id` is the series read (decisions 135 and 139):
+    /// an object with the rows and their reach, where an older `.so` answers
+    /// with the range's events. The frontend tells the two apart by shape.
+    #[test]
+    fn a_series_read_answers_with_rows_and_their_reach() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let request = serde_json::json!({
+            "calendar_id": cal,
+            "start": "2026-06-01T00:00:00Z",
+            "end": "2026-07-01T00:00:00Z",
+            "series_id": "ev-1",
+        });
+        let answer: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(request.to_string()).unwrap()).unwrap();
+        // A local calendar keeps no occurrence rows, and misses none.
+        assert_eq!(
+            answer,
+            serde_json::json!({ "rows": [], "reach": { "kind": "complete" } }),
+        );
+    }
+
+    #[test]
+    fn a_series_read_of_a_calendar_it_cannot_route_is_an_error() {
+        let (_dir, host, _kc) = open_host();
+        host.registry
+            .note_calendar_route("cal-ext", "acc-without-adapter");
+        let request = serde_json::json!({
+            "calendar_id": "cal-ext",
+            "start": "2026-06-01T00:00:00Z",
+            "end": "2026-07-01T00:00:00Z",
+            "series_id": "ev-1",
+        });
+        let err = host.get_events_json(request.to_string()).unwrap_err();
+        assert!(matches!(err, StoreError::NotFound), "{err:?}");
+    }
+
+    #[test]
+    fn a_series_read_refuses_an_occurrence_for_a_series() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let request = serde_json::json!({
+            "calendar_id": cal,
+            "start": "2026-06-01T00:00:00Z",
+            "end": "2026-07-01T00:00:00Z",
+            "series_id": "ev-1::rid::2026-06-01T09:00:00Z",
+        });
+        let err = host.get_events_json(request.to_string()).unwrap_err();
+        assert!(matches!(err, StoreError::InvalidField { .. }), "{err:?}");
     }
 
     // ─── Sync (writer + status) ──────────────────────────────────────────────

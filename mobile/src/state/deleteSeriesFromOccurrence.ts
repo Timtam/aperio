@@ -9,7 +9,7 @@ import {
   CalendarEvent,
   deleteEvent,
   getEventById,
-  getEvents,
+  getSeriesRows,
   updateEvent,
 } from '../api/calendar';
 
@@ -60,7 +60,7 @@ export async function deleteThisAndFuture(
   }
   // With the rows the provider keeps for single occurrences (decision 125).
   // Mirrors the desktop.
-  const rows = await readSeriesRows(master, occurrenceIso, getEvents);
+  const { rows } = await readSeriesRows(master, occurrenceIso, getSeriesRows);
   const plan = planSeriesSplit(master, occurrenceIso, rows);
   if (plan == null) {
     throw new Error(

@@ -2357,18 +2357,32 @@ Siehe DESIGN §4.2.
     - Die neue Serie bekommt nur die Ausnahmen des Masters. Bei Google ist ein
       gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
       ein abgesagtes RECURRENCE-ID: beim Teilen kommt es in der neuen Serie
-      zurück, mit Einladung. Die Zeilen hat die Planung jetzt; der Lesebereich
-      müsste bis zum Serienende reichen, und Google verwirft UTC-EXDATEs auf
-      Serien mit Zone.
+      zurück, mit Einladung. Die Zeilen liest die Planung jetzt nach der
+      Serie (135, unten), bei Google aber nur so weit, wie der Zwischenspeicher
+      reicht; Google verwirft außerdem UTC-EXDATEs auf Serien mit Zone.
     - Exchange mischt gelöschte und geänderte Vorkommen in den Ausnahmen:
       EWS schreibt beim Anlegen gar keine, ein anderer Kalender schreibt alle
       (dann fehlt ein geändertes Vorkommen in beiden Hälften).
     - Das Mitziehen schneidet eine Exchange-Kopie ein Vorkommen zu spät, wenn
       ihr Vorkommen am Schnitttag in Outlook geändert wurde
       (`firstOccurrenceFrom` liest die Zeilen nicht).
-    - `readSeriesRows` stößt bei langen Google-Serien ein volles Nachladen an,
-      das die folgende Schreibaktion gleich verwirft (nur Netz, Ergebnis
-      stimmt): ein `warm: false` an `get_events` auf beiden Hosts.
+    - ✅ `readSeriesRows` las über einen Datumsbereich bis einen Monat nach dem
+      Schnitt und stieß bei langen Google-Serien ein volles Nachladen an. Jetzt
+      liest es nach der Serie (135): jede Zeile `{Serie}::rid::…` aus dem
+      Zwischenspeicher, gleich welches Datum, abgesagte mit, ohne Nachladen
+      und ohne Reparaturen (Desktop `get_series_rows`, Handy `get_events_json`
+      mit `series_id`, beide über `host_core::cache::series_rows`). Der Host
+      meldet dazu, wie weit sein Zwischenspeicher reicht (139): ganz (Exchange,
+      CalDAV, lokal), ein Fenster (Google, etwa ein Jahr voraus) oder
+      unbekannt (nach einem Schreiben bis zum nächsten Abgleich). Das Fenster
+      bürgt für Zeilen nach ihrer JETZIGEN Zeit: eine abgesagte Zeile steht an
+      ihrem Platz, fehlt also nur, wenn der Platz draußen liegt; ein aus dem
+      Fenster verschobenes Vorkommen fehlt, wo immer sein Platz liegt. Die
+      Nachfrage vor dem Teilen kommt mit der gemeinsamen Regel für die
+      Ausnahmen der neuen Serie, erst dann zählen die Zeilen dafür, und sie
+      muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
+      liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
+      ein frisch erzeugtes `.so`, ohne Testläufer — ↻ im Test.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,

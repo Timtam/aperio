@@ -12,7 +12,7 @@ use tauri::{AppHandle, State};
 
 use super::cache_swr;
 use super::cache_swr::TauriCacheObserver;
-use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
+use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SeriesRows, SyncScope};
 
 use plugin_core::{PluginManager, RecurrenceCapabilities};
 
@@ -493,6 +493,35 @@ pub async fn get_events(
         );
     }
     Ok(cached)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeriesRowsRequest {
+    pub calendar_id: String,
+    pub series_id: String,
+}
+
+/// The cached rows of one series besides its master, whatever their dates and
+/// cancelled ones included, and how far the calendar's cache reaches
+/// (decisions 135 and 139). What splitting a series needs to know which of its
+/// occurrences were changed or deleted.
+///
+/// Unlike `get_events` it never warms, heals or hides cancelled rows: it only
+/// looks at what the cache holds. The phone answers the same question through
+/// `get_events_json` with a `series_id`; both go through
+/// `host_core::cache::series_rows`.
+#[tauri::command]
+pub async fn get_series_rows(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    request: SeriesRowsRequest,
+) -> CommandResult<SeriesRows> {
+    Ok(crate::cache::series_rows(
+        &registry,
+        &cache,
+        &request.calendar_id,
+        &request.series_id,
+    )?)
 }
 
 #[derive(Debug, Deserialize)]
