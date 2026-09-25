@@ -11,8 +11,9 @@
 //!
 //! What the cache holds is not always the whole calendar. Exchange and CalDAV
 //! keep every row; Google keeps the rows of a window around today. So the read
-//! says how far its rows reach (decision 139), and the frontend asks before it
-//! trusts rows that stop short of the series' end.
+//! says how far its rows reach (decision 139), and the frontend can ask before
+//! it trusts rows that may be missing. What a window vouches for is where a row
+//! stands NOW, not the slot it names: see [`SeriesReach::Window`].
 
 use serde::Serialize;
 
@@ -32,8 +33,12 @@ pub enum SeriesReach {
     /// calendar (Exchange, CalDAV), or the calendar keeps no such rows at all
     /// (local and birthday calendars).
     Complete,
-    /// Only the rows of events inside this stretch are sure to be here. A row
-    /// whose slot lies outside it may be missing.
+    /// Only the rows whose event now lies inside this stretch are sure to be
+    /// here. A provider that fills its cache for a window (Google) filters
+    /// its rows by the time they are shown, not by the slot they name, on the
+    /// full read and on every delta. So a cancelled row, which stands at its
+    /// slot, is missing only when that slot lies outside; a changed one moved
+    /// out of the stretch is missing whatever its slot.
     Window {
         start: chrono::DateTime<chrono::Utc>,
         end: chrono::DateTime<chrono::Utc>,
@@ -404,6 +409,88 @@ mod tests {
             let got = series_rows(&registry, &cache, calendar, "ev-1").unwrap();
             assert_eq!(got, SeriesRows::none(), "{calendar}");
         }
+    }
+
+    /// An external calendar's adapter, which a series read must never call: it
+    /// only looks at the cache.
+    struct NeverAsked;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for NeverAsked {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("a series read never asks the provider")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::CalendarFeature for NeverAsked {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<cal_core::Calendar>> {
+            unreachable!("a series read never asks the provider")
+        }
+        async fn get_events(
+            &self,
+            _calendar: &str,
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<Event>> {
+            unreachable!("a series read never asks the provider")
+        }
+        async fn create_event(
+            &self,
+            _calendar: &str,
+            _event: cal_core::NewEvent,
+        ) -> cal_core::Result<Event> {
+            unreachable!("a series read never asks the provider")
+        }
+        async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
+            unreachable!("a series read never asks the provider")
+        }
+        async fn delete_event(&self, _id: &str, _notify: bool) -> cal_core::Result<()> {
+            unreachable!("a series read never asks the provider")
+        }
+        async fn get_free_busy(
+            &self,
+            _emails: &[&str],
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+            unreachable!("a series read never asks the provider")
+        }
+        fn calendar_color(&self, _calendar: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    #[test]
+    fn an_external_calendar_is_read_from_its_accounts_cache() {
+        let registry = registry();
+        registry.register_host_adapter(ACC, Some(Arc::new(NeverAsked)), None);
+        registry.note_calendar_route(CAL, ACC);
+        let cache = setup();
+        cache
+            .replace_calendar_events(
+                ACC,
+                CAL,
+                window(2026, 2027),
+                &[
+                    row("ev-1::rid::2031-06-01T09:00:00Z", 2031, true),
+                    row("ev-2::rid::2026-06-01T09:00:00Z", 2026, false),
+                ],
+            )
+            .unwrap();
+        let got = series_rows(&registry, &cache, CAL, "ev-1").unwrap();
+        assert_eq!(ids(&got), vec!["ev-1::rid::2031-06-01T09:00:00Z"]);
+        assert_eq!(
+            got.reach,
+            SeriesReach::Window {
+                start: window(2026, 2027).start,
+                end: window(2026, 2027).end,
+            },
+        );
     }
 
     #[test]

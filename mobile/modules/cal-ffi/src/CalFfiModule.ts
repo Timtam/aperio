@@ -303,7 +303,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Delete a local calendar (its events cascade). */
   deleteCalendar(id: string): Promise<void>;
   /** Events overlapping a range, from `{calendar_id, start, end}` (RFC-3339);
-   *  returns a JSON `Event[]`. */
+   *  returns a JSON `Event[]`. With a `series_id` too, it is the series read
+   *  (decisions 135 and 139): a current library answers with a JSON
+   *  `SeriesRows` (`{rows, reach}`) instead, while an older one ignores the
+   *  field and still answers with the range's `Event[]`. Read it through
+   *  `getSeriesRows` (src/api/calendar.ts), which takes both. */
   getEventsJson(requestJson: string): Promise<string>;
   /** One event by id as JSON (`Event` or `null`). `calendarId` routes the
    *  lookup: a LOCAL calendar (or null) reads the stored row; an EXTERNAL one

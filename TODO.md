@@ -2357,8 +2357,9 @@ Siehe DESIGN §4.2.
     - Die neue Serie bekommt nur die Ausnahmen des Masters. Bei Google ist ein
       gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
       ein abgesagtes RECURRENCE-ID: beim Teilen kommt es in der neuen Serie
-      zurück, mit Einladung. Die Zeilen liest die Planung jetzt ganz (135,
-      unten); Google verwirft aber UTC-EXDATEs auf Serien mit Zone.
+      zurück, mit Einladung. Die Zeilen liest die Planung jetzt nach der
+      Serie (135, unten), bei Google aber nur so weit, wie der Zwischenspeicher
+      reicht; Google verwirft außerdem UTC-EXDATEs auf Serien mit Zone.
     - Exchange mischt gelöschte und geänderte Vorkommen in den Ausnahmen:
       EWS schreibt beim Anlegen gar keine, ein anderer Kalender schreibt alle
       (dann fehlt ein geändertes Vorkommen in beiden Hälften).
@@ -2373,11 +2374,15 @@ Siehe DESIGN §4.2.
       mit `series_id`, beide über `host_core::cache::series_rows`). Der Host
       meldet dazu, wie weit sein Zwischenspeicher reicht (139): ganz (Exchange,
       CalDAV, lokal), ein Fenster (Google, etwa ein Jahr voraus) oder
-      unbekannt (nach einem Schreiben bis zum nächsten Abgleich). Ein älteres
-      Handy-.so ignoriert das Feld und liest wie bisher; dann gilt die
-      Reichweite als unbekannt. Die Nachfrage vor dem Teilen kommt mit der
-      gemeinsamen Regel für die Ausnahmen der neuen Serie, erst dann zählen
-      die Zeilen dafür.
+      unbekannt (nach einem Schreiben bis zum nächsten Abgleich). Das Fenster
+      bürgt für Zeilen nach ihrer JETZIGEN Zeit: eine abgesagte Zeile steht an
+      ihrem Platz, fehlt also nur, wenn der Platz draußen liegt; ein aus dem
+      Fenster verschobenes Vorkommen fehlt, wo immer sein Platz liegt. Die
+      Nachfrage vor dem Teilen kommt mit der gemeinsamen Regel für die
+      Ausnahmen der neuen Serie, erst dann zählen die Zeilen dafür, und sie
+      muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
+      liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
+      ein frisch erzeugtes `.so`, ohne Testläufer — ↻ im Test.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
