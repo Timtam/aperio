@@ -192,6 +192,21 @@ function namesTheSameDay(stored: number, occurrence: number): boolean {
   return Math.abs(stored - occurrence) < SAME_DAY_MS;
 }
 
+/**
+ * Whether two instants name the same occurrence of `series`: exactly for a
+ * timed series, the same day for a series of days (decision 95). It is the
+ * reading the views make of a series' exceptions (`expandEvent`) and of the
+ * rows that stand in for its occurrences (`expandAll`), and a split reads them
+ * the same way (`deletedSlots`), so the two cannot drift apart.
+ */
+export function sameSlot(
+  series: { all_day?: boolean; recurrence?: { tzid?: string | null } | null },
+  a: number,
+  b: number,
+): boolean {
+  return readsCalendarDays(series) ? namesTheSameDay(a, b) : a === b;
+}
+
 /** The timed reading: an instant is an instant, compared exactly. */
 function namesExactly(instants: readonly number[]): (d: Date) => boolean {
   const set = new Set(instants);
@@ -746,14 +761,11 @@ export function expandAll<E extends RecurringEventLike>(
     if (!replaced || replaced.length === 0) return occs;
     // Drop the master occurrences an override stands in for (matched on the
     // original occurrence instant). Keep anything we can't place — never hide.
-    const byDay = readsCalendarDays(ev);
     return occs.filter((o) => {
       const iso = occurrenceIsoOf(o);
       if (iso == null) return true;
       const at = new Date(iso).getTime();
-      return !replaced.some((slot) =>
-        byDay ? namesTheSameDay(slot, at) : slot === at,
-      );
+      return !replaced.some((slot) => sameSlot(ev, slot, at));
     });
   });
   // `start` is an ISO instant — a machine string, not text.

@@ -10,6 +10,7 @@ import {
   seriesFromCut,
   seriesMaybeShownTwice,
   cutoffDay,
+  deletedSlots,
   seriesRowsFromHost,
   thisAndFutureDeletedKey,
   truncateRRuleBefore,
@@ -300,9 +301,183 @@ describe('planSeriesSplit', () => {
   });
 });
 
+/** A row the provider keeps for one occurrence of `weekly` (`ev-1`), shown
+ *  where `start` says, standing in for `slot`. */
+type RecurringRow = {
+  id: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  cancelled?: boolean;
+  recurrence: null;
+};
+const rowOf = (
+  slot: string,
+  shown: { start: string; end: string } = {
+    start: slot,
+    end: new Date(Date.parse(slot) + 3_600_000).toISOString(),
+  },
+  extra: Partial<RecurringRow> = {},
+  series = 'ev-1',
+): RecurringRow => ({
+  id: `${series}::rid::${slot}`,
+  start: shown.start,
+  end: shown.end,
+  all_day: false,
+  recurrence: null,
+  ...extra,
+});
+/** The weekly series, a Monday at 08:00 UTC, without an end. */
+const endless = {
+  ...weekly,
+  recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY' },
+};
+const CUT = '2026-08-24T08:00:00.000Z';
+
+describe('deletedSlots (decision 134)', () => {
+  it('reads a cancelled row as a deleted occurrence, with no exception for it', () => {
+    // Google keeps a deleted occurrence that way.
+    const cancelled = rowOf('2026-09-07T08:00:00Z', undefined, { cancelled: true, start: '2026-09-07T08:00:00Z', end: '2026-09-07T08:00:00Z' });
+    expect(deletedSlots(weekly, [cancelled])).toEqual(['2026-09-07T08:00:00.000Z']);
+  });
+
+  it('reads an exception with a live row as a changed occurrence, not a deleted one', () => {
+    // Exchange lists the slot of an occurrence changed in Outlook among the
+    // exceptions, and keeps the occurrence as a row of its own.
+    const master = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-09-07T08:00:00.000Z'] },
+    };
+    const moved = rowOf('2026-09-07T08:00:00Z', {
+      start: '2026-09-08T10:00:00.000Z',
+      end: '2026-09-08T11:00:00.000Z',
+    });
+    expect(deletedSlots(master, [moved])).toEqual([]);
+    // Without the row, the exception is a deletion, in its own spelling.
+    expect(deletedSlots(master, [])).toEqual(['2026-09-07T08:00:00.000Z']);
+  });
+
+  it('names each slot once, in order, however it is spelled', () => {
+    const master = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-09-14T08:00:00Z', '2026-09-07T08:00:00.000Z'],
+      },
+    };
+    const cancelled = rowOf('2026-09-07T08:00:00Z', undefined, { cancelled: true });
+    expect(deletedSlots(master, [cancelled])).toEqual([
+      '2026-09-07T08:00:00.000Z',
+      '2026-09-14T08:00:00Z',
+    ]);
+  });
+
+  it('leaves the rows of other series alone', () => {
+    const other = rowOf('2026-09-07T08:00:00Z', undefined, { cancelled: true }, 'ev-10');
+    expect(deletedSlots(weekly, [other])).toEqual([]);
+  });
+
+  it('matches a day of a series of days however the day was spelled', () => {
+    // A series of days names a day; another writer may have stored it hours
+    // off the local midnight the occurrence has (decision 95).
+    const monday = new Date(2026, 7, 31).toISOString();
+    const days = {
+      ...weekly,
+      all_day: true,
+      start: new Date(2026, 7, 3).toISOString(),
+      end: new Date(2026, 7, 4).toISOString(),
+      recurrence: { ...weekly.recurrence, exceptions: [monday] },
+    };
+    const sameDayLater = new Date(Date.parse(monday) + 5 * 3_600_000).toISOString();
+    const changed = rowOf(sameDayLater, undefined, { all_day: true });
+    // The exception's day has a live row: changed, not deleted.
+    expect(deletedSlots(days, [changed])).toEqual([]);
+  });
+});
+
+describe('planSeriesSplit: what the new series leaves out', () => {
+  it('leaves out an occurrence Google keeps deleted as a cancelled row', () => {
+    const cancelled = rowOf('2026-08-31T08:00:00Z', undefined, { cancelled: true });
+    expect(cutOf(planSeriesSplit(weekly, CUT, [cancelled])).tail.exceptions).toEqual([
+      '2026-08-31T08:00:00.000Z',
+    ]);
+  });
+
+  it('leaves it out years ahead too', () => {
+    // How far the rows reach is the host's to say; the rule takes them all.
+    const later = rowOf('2028-08-28T08:00:00Z', undefined, { cancelled: true });
+    expect(cutOf(planSeriesSplit(endless, CUT, [later])).tail.exceptions).toEqual([
+      '2028-08-28T08:00:00.000Z',
+    ]);
+  });
+
+  it('keeps an occurrence changed in Outlook, and deletes it from neither half', () => {
+    const master = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-09-07T08:00:00.000Z'] },
+    };
+    const moved = rowOf('2026-09-07T08:00:00Z', {
+      start: '2026-09-07T12:00:00.000Z',
+      end: '2026-09-07T13:00:00.000Z',
+    });
+    expect(cutOf(planSeriesSplit(master, CUT, [moved])).tail.exceptions).toEqual([]);
+  });
+
+  it('leaves out a slot once when an exception and a cancelled row both name it', () => {
+    const master = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-09-07T08:00:00.000Z'] },
+    };
+    const cancelled = rowOf('2026-09-07T08:00:00Z', undefined, { cancelled: true });
+    expect(cutOf(planSeriesSplit(master, CUT, [cancelled])).tail.exceptions).toEqual([
+      '2026-09-07T08:00:00.000Z',
+    ]);
+  });
+
+  it('still leaves out a plain exception, and nothing before the cut', () => {
+    const master = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-10T08:00:00.000Z', '2026-09-07T08:00:00.000Z'],
+      },
+    };
+    expect(cutOf(planSeriesSplit(master, CUT, [])).tail.exceptions).toEqual([
+      '2026-09-07T08:00:00.000Z',
+    ]);
+  });
+});
+
+describe('firstOccurrenceFrom with the series\' rows (decision 141)', () => {
+  it('finds an occurrence changed in Outlook on the cut day, by its slot', () => {
+    // Exchange lists its slot among the exceptions; it is there all the same.
+    // Read from the exceptions alone, the copy was cut a week late and kept
+    // its old content on the cut day.
+    const copy = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: [CUT] },
+    };
+    const moved = rowOf('2026-08-24T08:00:00Z', {
+      start: '2026-08-24T10:00:00.000Z',
+      end: '2026-08-24T11:00:00.000Z',
+    });
+    expect(firstOccurrenceFrom(copy, CUT, [moved])).toBe(CUT);
+  });
+
+  it('passes over an occurrence Google keeps deleted as a cancelled row', () => {
+    const cancelled = rowOf('2026-08-24T08:00:00Z', undefined, { cancelled: true });
+    expect(firstOccurrenceFrom(weekly, CUT, [cancelled])).toBe('2026-08-31T08:00:00.000Z');
+  });
+
+  it('leaves the rows of other series alone', () => {
+    const other = rowOf('2026-08-24T08:00:00Z', undefined, { cancelled: true }, 'ev-10');
+    expect(firstOccurrenceFrom(weekly, CUT, [other])).toBe(CUT);
+  });
+});
+
 describe('firstOccurrenceFrom', () => {
   it('is the cutoff itself when the series has an occurrence there', () => {
-    expect(firstOccurrenceFrom(weekly, '2026-08-24T08:00:00.000Z')).toBe(
+    expect(firstOccurrenceFrom(weekly, '2026-08-24T08:00:00.000Z', [])).toBe(
       '2026-08-24T08:00:00.000Z',
     );
   });
@@ -318,7 +493,7 @@ describe('firstOccurrenceFrom', () => {
       start: '2026-08-03T07:45:00.000Z',
       end: '2026-08-03T09:00:00.000Z',
     };
-    expect(firstOccurrenceFrom(startsEarlier, '2026-08-24T08:00:00.000Z')).toBe(
+    expect(firstOccurrenceFrom(startsEarlier, '2026-08-24T08:00:00.000Z', [])).toBe(
       '2026-08-24T07:45:00.000Z',
     );
   });
@@ -330,7 +505,7 @@ describe('firstOccurrenceFrom', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=10' },
     };
-    expect(firstOccurrenceFrom(fortnightly, '2026-08-24T08:00:00.000Z')).toBe(
+    expect(firstOccurrenceFrom(fortnightly, '2026-08-24T08:00:00.000Z', [])).toBe(
       '2026-08-31T08:00:00.000Z',
     );
   });
@@ -344,7 +519,7 @@ describe('firstOccurrenceFrom', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, rrule: 'FREQ=YEARLY;INTERVAL=3;COUNT=5' },
     };
-    expect(firstOccurrenceFrom(everyThreeYears, '2026-08-24T08:00:00.000Z')).toBe(
+    expect(firstOccurrenceFrom(everyThreeYears, '2026-08-24T08:00:00.000Z', [])).toBe(
       '2029-08-03T08:00:00.000Z',
     );
   });
@@ -354,15 +529,15 @@ describe('firstOccurrenceFrom', () => {
       ...weekly,
       recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY;COUNT=2' },
     };
-    expect(firstOccurrenceFrom(short, '2026-08-24T08:00:00.000Z')).toBeNull();
+    expect(firstOccurrenceFrom(short, '2026-08-24T08:00:00.000Z', [])).toBeNull();
   });
 
   it('treats a single event as its own only occurrence', () => {
     const single = { ...weekly, recurrence: null };
-    expect(firstOccurrenceFrom(single, '2026-08-03T08:00:00.000Z')).toBe(
+    expect(firstOccurrenceFrom(single, '2026-08-03T08:00:00.000Z', [])).toBe(
       '2026-08-03T08:00:00.000Z',
     );
-    expect(firstOccurrenceFrom(single, '2026-08-24T08:00:00.000Z')).toBeNull();
+    expect(firstOccurrenceFrom(single, '2026-08-24T08:00:00.000Z', [])).toBeNull();
   });
 });
 
@@ -744,6 +919,8 @@ describe('carrying a future edit to another copy', () => {
       description: string | null;
     },
     changed: ('title' | 'start' | 'end' | 'all_day' | 'location' | 'description')[],
+    /** The copy's own provider-kept rows, read first, as the dialogs do. */
+    rows: RecurringRow[] = [],
   ): Promise<{
     /** Where this copy is cut. */
     anchorIso: string;
@@ -755,13 +932,13 @@ describe('carrying a future edit to another copy', () => {
     headRule: string | null;
     tailRule: string | null;
   } | null> {
-    const anchorIso = firstOccurrenceFrom(current, cutoffIso);
+    const anchorIso = firstOccurrenceFrom(current, cutoffIso, rows);
     if (anchorIso == null) return null;
     const row = futureCarryRow(current, anchorIso, before, after, changed);
     // These fixtures all carry readable instants; a null here would be the
     // test's own mistake, not the rule's.
     if (row == null) throw new Error('the fixture has an unreadable cut point');
-    const plan = planSeriesSplit(current, anchorIso, []);
+    const plan = planSeriesSplit(current, anchorIso, rows);
     if (plan == null) {
       return { anchorIso, row, split: false, headRule: null, tailRule: null };
     }
@@ -801,6 +978,33 @@ describe('carrying a future edit to another copy', () => {
     start: '2026-08-24T09:00:00.000Z',
     end: '2026-08-24T10:00:00.000Z',
   };
+
+  it('cuts a copy at its occurrence changed in Outlook, not a week later (141)', async () => {
+    // The copy's own cut-day occurrence was changed in Outlook: its slot is
+    // among the exceptions, and a row stands in it. Read with the rows, the
+    // copy is cut there, and that day carries the change.
+    const changedThere = {
+      ...copy,
+      recurrence: { ...copy.recurrence, exceptions: ['2026-08-24T08:00:00.000Z'] },
+    };
+    const moved: RecurringRow = {
+      id: 'ev-private::rid::2026-08-24T08:00:00Z',
+      start: '2026-08-24T10:00:00.000Z',
+      end: '2026-08-24T11:00:00.000Z',
+      all_day: false,
+      recurrence: null,
+    };
+    const result = await carryFuture(
+      changedThere,
+      '2026-08-24T08:00:00.000Z',
+      stood,
+      movedAnHourLater,
+      ['start', 'end'],
+      [moved],
+    );
+    expect(result?.anchorIso).toBe('2026-08-24T08:00:00.000Z');
+    expect(result?.headRule).toContain('UNTIL=20260824T075959Z');
+  });
 
   it('cuts the copy series and hands the tail the change, not the copy own life', async () => {
     const result = await carryFuture(

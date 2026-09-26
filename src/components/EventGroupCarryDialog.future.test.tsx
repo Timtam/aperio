@@ -17,7 +17,9 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
+  /** The copy's own provider-kept rows, as `get_series_rows` answers. */
+  const rowsOnFile: { current: unknown[] } = { current: [] };
   /** What the dialog announced, in order. */
   const announced: string[] = [];
   const groupOfAnchor: { current: unknown[] } = { current: [] };
@@ -35,7 +37,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, annou
       return Promise.resolve(copyOnFile.current ?? COPY);
     }
     if (command === 'get_series_rows') {
-      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+      return Promise.resolve({ rows: rowsOnFile.current, reach: { kind: 'complete' } });
     }
     if (command === 'create_event') {
       const request = (payload as { request: Record<string, unknown> }).request;
@@ -53,7 +55,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, annou
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced, rowsOnFile };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -137,6 +139,7 @@ afterEach(() => {
   truncateFails.current = null;
   deleteFails.current = null;
   announced.length = 0;
+  rowsOnFile.current = [];
 });
 
 async function carry() {
@@ -311,5 +314,38 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     expect(said.textContent).toMatch(/Privat/);
     expect(calls('delete_event')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
+  });
+});
+
+describe('EventGroupCarryDialog → where a copy with rows of its own is cut (141)', () => {
+  /** The copy from two Mondays before the cut: it keeps a head, so it is split. */
+  const SPLIT_COPY = {
+    ...COPY,
+    start: '2026-08-10T08:00:00.000Z',
+    end: '2026-08-10T09:00:00.000Z',
+  };
+
+  it('passes over the copy\'s cut-day occurrence Google keeps deleted', async () => {
+    // The row says the occurrence on the cut day is gone: the copy's own next
+    // one is a week later, and that is where its new part starts.
+    copyOnFile.current = SPLIT_COPY;
+    rowsOnFile.current = [
+      {
+        ...SPLIT_COPY,
+        id: 'ev-b::rid::2026-08-24T08:00:00Z',
+        start: CUT,
+        end: CUT,
+        recurrence: null,
+        cancelled: true,
+      },
+    ];
+    await carry();
+
+    const tail = (calls('create_event')[0][1] as { request: { start: string } }).request;
+    expect(tail.start).toBe('2026-08-31T09:00:00.000Z');
+    const head = (calls('update_event')[0][1] as { event: typeof COPY }).event;
+    expect(head.recurrence.rrule).toContain('UNTIL=20260831T075959Z');
+    // Read once, before the anchor: one read serves both.
+    expect(calls('get_series_rows')).toHaveLength(1);
   });
 });
