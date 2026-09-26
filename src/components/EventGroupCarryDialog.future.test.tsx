@@ -17,7 +17,9 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced } = vi.hoisted(() => {
+  /** What the dialog announced, in order. */
+  const announced: string[] = [];
   const groupOfAnchor: { current: unknown[] } = { current: [] };
   /** The copy as `get_event_by_id` answers; COPY unless a test says otherwise. */
   const copyOnFile: { current: unknown } = { current: null };
@@ -51,7 +53,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails } = vi
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -65,7 +67,11 @@ const CALENDARS = [
 ] as unknown as Calendar[];
 const STORE = { calendars: CALENDARS, colorLabels: [], selectedCalendarIds: new Set(['work']) };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
-vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../a11y/announcerContext', () => ({
+  useAnnouncer: () => (message: string) => {
+    announced.push(message);
+  },
+}));
 
 const CUT = '2026-08-24T08:00:00.000Z';
 
@@ -130,6 +136,7 @@ afterEach(() => {
   copyOnFile.current = null;
   truncateFails.current = null;
   deleteFails.current = null;
+  announced.length = 0;
 });
 
 async function carry() {
@@ -285,8 +292,15 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     const members = (calls('group_events')[0][1] as { members: { event_id: string }[] }).members;
     expect(members.map((m) => m.event_id)).toEqual(['ev-a', 'ev-b-tail']);
     expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
-    // The dialog stays, or the only words that name the copy would go with it.
+    // The dialog stays, or the only words that name the copy would go with it,
+    // counting the copy as written.
     expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/Eine Kopie aktualisiert|One copy updated/)).toBeTruthy();
+    // Said once, the count and the doubt together.
+    const doubt = announced.filter((line) => /möglicherweise doppelt|may show twice/.test(line));
+    expect(doubt).toHaveLength(1);
+    expect(doubt[0]).toMatch(/Eine Kopie aktualisiert|One copy updated/);
+    expect(doubt[0]).toMatch(/Privat/);
   });
 
   it('does not offer a copy again whose new part could not be deleted', async () => {

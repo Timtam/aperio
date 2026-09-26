@@ -21,6 +21,15 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
 
+/** The same refusals as a reason alone, for a sentence that goes on to say
+ *  what DID change. */
+const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
+  'reply-only-invitation': 'dialogs.event.writeError.reason.replyOnly',
+  'server-refused': 'dialogs.event.writeError.reason.serverRefused',
+  'identity-unknown': 'dialogs.event.writeError.reason.identityUnknown',
+  'occurrence-not-writable': 'dialogs.event.writeError.reason.occurrenceNotWritable',
+};
+
 /** An error as the hosts hand it over: a code and a message. */
 export interface CodedError {
   code: string;
@@ -135,4 +144,25 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   // A plain Error reads as "Error: …" when stringified; the prefix says
   // nothing to a reader.
   return errorMessageText(err).replace(/^Error:\s*/, '');
+}
+
+/**
+ * Why a write failed, as a clause for a sentence of the caller's: the reason
+ * `eventWriteErrorMessage` gives, without its "Nothing was changed". A split
+ * whose new series could not be taken back again did change something, and
+ * the sentence that says so must not say the opposite in the middle.
+ */
+export function eventWriteFailureReason(err: unknown, t: Translate): string {
+  const refusal = eventWriteRefusal(err);
+  if (refusal) {
+    return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
+  }
+  const known = codedError(err);
+  if (known?.code === 'forbidden') {
+    return t('dialogs.event.writeError.reason.forbidden', { detail: errorMessageText(err) });
+  }
+  if (known?.code === 'conflict') {
+    return t('dialogs.event.writeError.reason.changedOnServer');
+  }
+  return eventWriteErrorMessage(err, t);
 }

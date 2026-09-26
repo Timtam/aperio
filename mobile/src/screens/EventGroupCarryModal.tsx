@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-native';
+import {
+  AccessibilityInfo,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+} from 'react-native';
 
 import {
   carryOnto,
@@ -63,8 +70,10 @@ type CarryOutcome =
   | { kind: 'partly'; done: number; failed: CarryTarget[] }
   /** Every copy was written, but the new rows are not tied together yet. */
   | { kind: 'regroup'; done: number }
-  /** Every copy was written, and some series may show twice: said, and left
-   *  on screen, with nothing to try again (decision 145). */
+  /** No copy is left to offer again, and some series may show twice: a copy
+   *  written while its old series may still run through the cut (decision
+   *  145), or one whose new part could not be deleted again after its cut
+   *  was refused. Said, and left on screen, with nothing to try again. */
   | { kind: 'written'; done: number };
 
 export default function EventGroupCarryModal({
@@ -106,6 +115,10 @@ export default function EventGroupCarryModal({
    *  across a retry: they are written and not offered again, so this is the
    *  only place they are still named. Mirrors the desktop. */
   const [doubts, setDoubts] = useState<string[]>([]);
+  /** The outcome line, which takes the cursor when the button the user just
+   *  pressed goes away (outcome 'written'), and what is said after it. */
+  const outcomeRef = useRef<Text>(null);
+  const sayAfterOutcome = useRef('');
   /**
    * Whether this screen is still here.
    *
@@ -509,13 +522,13 @@ export default function EventGroupCarryModal({
       return;
     }
     if (allDoubts.length > 0) {
-      // Every copy is written, but some may show twice: leaving would take the
-      // only words that say which ones.
+      // No copy is left to offer again, but some may show twice: leaving would
+      // take the only words that say which ones. The button just pressed goes
+      // away, so the outcome line takes the cursor and reads itself; the
+      // doubts are said after it (the effect below).
+      sayAfterOutcome.current = doubtful.trim();
       setOutcome({ kind: 'written', done });
       setPending([]);
-      AccessibilityInfo.announceForAccessibility(
-        `${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`,
-      );
       return;
     }
     AccessibilityInfo.announceForAccessibility(
@@ -541,6 +554,23 @@ export default function EventGroupCarryModal({
     navigation,
   ]);
 
+  // The outcome 'written' removes the button that held the cursor. Without a
+  // new place it was stranded, and the screen reader jumped to the top and
+  // spoke over the doubts; the desktop focuses its outcome note the same way.
+  useEffect(() => {
+    if (outcome?.kind !== 'written') return;
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(outcomeRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      const said = sayAfterOutcome.current;
+      sayAfterOutcome.current = '';
+      // Queued, so the line's own speech does not cut it off.
+      if (said !== '') {
+        AccessibilityInfo.announceForAccessibilityWithOptions(said, { queue: true });
+      }
+    });
+  }, [outcome]);
+
   return (
     <FormScrollView
       style={styles.screen}
@@ -551,10 +581,13 @@ export default function EventGroupCarryModal({
         {t('dialogs.eventGroupCarry.title')}
       </Text>
 
+      {/* Not a live region: every outcome is announced as it is set, doubts
+          included, and on Android a live region's own reading of just this
+          line cut that announcement off. */}
       <Text
+        ref={outcomeRef}
         style={outcome ? styles.warning : styles.intro}
         accessibilityRole="text"
-        accessibilityLiveRegion={outcome ? 'assertive' : 'none'}
       >
         {outcome
           ? outcome.kind === 'regroup'
@@ -638,7 +671,7 @@ export default function EventGroupCarryModal({
         </Text>
       )}
 
-      {/* Nothing is left to try once every copy is written. */}
+      {/* Nothing is left to try once no copy is outstanding. */}
       {outcome?.kind !== 'written' && (
         <Pressable
           accessibilityRole="button"

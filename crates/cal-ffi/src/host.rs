@@ -3333,7 +3333,16 @@ impl Host {
                 }));
             }
         }
-        self.invalidate_events_cache(&created.calendar_id);
+        // A new row changes none the cache holds: what a refresh proved about
+        // them stands (decision 106), or the truncate that follows a split's
+        // create would write back every field it carries. Mirrors the desktop.
+        let account = self
+            .registry
+            .account_for_calendar(&created.calendar_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self
+            .cache
+            .invalidate_after_create(&account, &created.calendar_id);
         to_json(&created)
     }
 

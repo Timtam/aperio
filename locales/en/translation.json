@@ -1641,7 +1641,15 @@
         "identityUnknown": "Aperio could not read this account's own addresses on the calendar server, so it cannot change a meeting there. Nothing was changed.",
         "occurrenceNotWritable": "This one occurrence cannot be changed on its own inside its series. Nothing was changed.",
         "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
-        "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version."
+        "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
+        "reason": {
+          "replyOnly": "only the organizer can change this meeting",
+          "serverRefused": "the calendar server refused it ({{detail}})",
+          "identityUnknown": "Aperio could not read this account's own addresses on the calendar server",
+          "occurrenceNotWritable": "this occurrence cannot be changed on its own inside its series",
+          "forbidden": "the provider does not allow it ({{detail}})",
+          "changedOnServer": "it changed on the server since you opened it"
+        }
       },
       "deleteAndDecline": "Delete and decline"
     },

@@ -64,6 +64,7 @@ import {
   describeRecurrence,
   eventPrefillFrom,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -630,6 +631,21 @@ export function EventDialog({
   );
 
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A split that is written while cutting the old series short may not have
+   * reached the provider (decisions 145 and 146): what the editor says in
+   * place of the form, and what closing it goes on to — the other copies, or
+   * away. Everything is saved; the sentence is the one thing left to take in,
+   * so it stays on screen, focused, until the user closes it.
+   */
+  const [splitNotice, setSplitNotice] = useState<{
+    sentence: string;
+    proceed: () => Promise<void>;
+  } | null>(null);
+  const splitNoticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (splitNotice) splitNoticeRef.current?.focus();
+  }, [splitNotice]);
   /** Why the offer's calendar was not adopted, when it was not. Rendered
    *  beside the picker AND announced — a sighted user sees the disagreement
    *  and needs the reason just as much. */
@@ -736,6 +752,7 @@ export function EventDialog({
     if (!isOpen) {
       appliedInitialRef.current = null;
       landedPrivateSeedRef.current = null;
+      setSplitNotice(null);
       return;
     }
     const baseline = appliedInitialRef.current;
@@ -1333,9 +1350,10 @@ export function EventDialog({
             occurrencesBefore: number;
           } | null = null;
           if (isOccurrence && editScope === 'this_and_future') {
-            // Split the series at this occurrence: truncate the original to end
-            // just before it (keeping its own fields), then create a NEW series
-            // from here carrying the edits. The new series continues the
+            // Split the series at this occurrence: create a NEW series from
+            // here carrying the edits, then truncate the original to end just
+            // before it (keeping its own fields; the order is decision 136,
+            // see `writeSeriesSplit`). The new series continues the
             // original PATTERN (with the remaining COUNT) — unless the user
             // changed the rule in the form, which then is the new series' rule
             // (decision 121).
@@ -1466,7 +1484,7 @@ export function EventDialog({
                       t('dialogs.event.thisAndFutureMaybeTwice', {
                         title: trimmedTitle,
                         date: cutoffDay(occIso, i18n.language),
-                        detail: eventWriteErrorMessage(err, t),
+                        detail: eventWriteFailureReason(err, t),
                       }),
                     )
                   : err;
@@ -1484,23 +1502,34 @@ export function EventDialog({
                   form.colorLabel,
                 );
               }
-              // The new series is written even when cutting the old one short
-              // may not have reached the provider (145): then the old one may
-              // still run through the cutoff, and that is what gets said.
-              announce(
-                written.headCut === 'done'
-                  ? t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle })
-                  : t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
-                      title: trimmedTitle,
-                      date: cutoffDay(occIso, i18n.language),
-                      detail: eventWriteErrorMessage(written.failure, t),
-                    }),
-              );
               // The other copies have a series each, so carrying this means
               // splitting theirs at the same point — not updating a row.
-              if (!(await offerToCarry(event, created, 'future', occIso))) {
-                onClose();
+              const goOn = async () => {
+                if (!(await offerToCarry(event, created, 'future', occIso))) {
+                  onClose();
+                }
+              };
+              // The new series is written even when cutting the old one short
+              // may not have reached the provider (145): then the old one may
+              // still run through the cutoff. That is said on screen, focused,
+              // and the editor goes on only once it is closed (146) — an
+              // announcement alone was never seen, and the carry dialog
+              // opening next spoke over it.
+              if (written.headCut === 'unsure') {
+                setSplitNotice({
+                  sentence: t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                    title: trimmedTitle,
+                    date: cutoffDay(occIso, i18n.language),
+                    detail: eventWriteFailureReason(written.failure, t),
+                  }),
+                  proceed: goOn,
+                });
+                return;
               }
+              announce(
+                t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+              );
+              await goOn();
               return;
             }
           }
@@ -1946,6 +1975,41 @@ export function EventDialog({
               onClick={onClose}
             >
               {t('dialogs.event.birthdayClose')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (splitNotice) {
+    const close = () => {
+      const { proceed } = splitNotice;
+      setSplitNotice(null);
+      void proceed();
+    };
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={close}
+        title={title}
+        className="modal--form"
+        dismissOnBackdrop={false}
+      >
+        <div className="form">
+          <FocusableNote
+            ref={splitNoticeRef}
+            className="form__hint form__hint--warning"
+          >
+            {splitNotice.sentence}
+          </FocusableNote>
+          <div className="form__actions">
+            <button
+              type="button"
+              className="form__action form__action--primary"
+              onClick={close}
+            >
+              {t('dialogs.close')}
             </button>
           </div>
         </div>

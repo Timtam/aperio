@@ -184,10 +184,12 @@ gibt es nichts zu behalten: Das Bearbeiten ändert die ganze Serie, die derselbe
 Eintrag bleibt, und das Löschen entfernt die Serie. Aperio sagt es dir dann.
 Beim Bearbeiten legt Aperio zuerst die neue Serie an und beendet dann die alte
 davor. Scheitert das Beenden, löscht Aperio die neue wieder, und nichts hat sich
-geändert. Nur wenn unklar ist, ob die alte schon beendet wurde, etwa nach einer
+geändert. Ist unklar, ob die alte schon beendet wurde, etwa nach einer
 abgerissenen Verbindung, bleiben beide stehen: Deine Änderung gilt als
-gespeichert, und Aperio nennt den Tag, ab dem die Serie möglicherweise doppelt
-steht, damit du nachsiehst, statt ein zweites Mal zu speichern.
+gespeichert, und der Editor bleibt mit einem Hinweis offen, der den Tag nennt,
+ab dem die Serie möglicherweise doppelt steht, bis du ihn schließt. Scheitert
+auch das Löschen der neuen, sagt Aperio auch das und bittet dich, den Kalender
+zu prüfen, bevor du erneut speicherst.
 **Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
 auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
 Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
@@ -291,7 +293,11 @@ zur Gruppe.
 
 Geht dabei etwas schief, bleibt der Dialog offen und sagt, welche Kalender
 nicht geschrieben werden konnten; **Rest erneut versuchen** nimmt genau die noch
-einmal vor. Halb mitgezogen ist der eine Zustand, den Sie sehen müssen.
+einmal vor. Halb mitgezogen ist der eine Zustand, den Sie sehen müssen. Anders
+eine Kopie, deren Serie ab dem Schnitt möglicherweise doppelt steht: Ihr neuer
+Teil ist angelegt, deshalb wird sie nicht noch einmal angeboten, und ein Hinweis
+nennt stattdessen ihren Kalender und den Tag. Bleiben nur solche Hinweise, bleibt
+der Dialog mit ihnen offen, ohne **Rest erneut versuchen**.
 
 Mitgezogen wird nur, was der Termin IST: Titel, wann, wo, Beschreibung.
 **Erinnerungen bleiben bei jeder Kopie** — die Privatkopie gibt es meist genau

@@ -4,11 +4,18 @@
 //! connections well below reqwest's default 90 s pool-idle window. A
 //! request that rides such a dead pooled socket fails with reqwest's
 //! "error sending request" — a connection-level failure *before* any
-//! HTTP response exists, so the server demonstrably never processed the
-//! request and one replay on a fresh connection is safe for every verb
-//! we use. The shorter `pool_idle_timeout` on the shared clients (see
-//! `CaldavAdapter::new`) makes the stale-socket case rare; this retry
-//! heals the rest (including genuine one-off network blips).
+//! HTTP response exists. One replay on a fresh connection is safe for every
+//! verb we use, because each of them is idempotent. The shorter
+//! `pool_idle_timeout` on the shared clients (see `CaldavAdapter::new`)
+//! makes the stale-socket case rare; this retry heals the rest (including
+//! genuine one-off network blips).
+//!
+//! But the same error also comes from a connection that died AFTER the
+//! request went out and before the answer came back, and then the server may
+//! have processed the first attempt. The replay's answer then describes that
+//! attempt: a guarded write gets 412 (its ETag is gone), a delete gets 404.
+//! A caller for whom that answer matters asks `send_retrying_marked`, which
+//! says whether it replayed.
 //!
 //! Deliberately NOT retried: timeouts (the server may be mid-processing
 //! — replaying a write could double-apply it), redirect-policy errors,
@@ -30,20 +37,29 @@ pub(crate) fn is_transient_send_error(err: &reqwest::Error) -> bool {
 /// `send()` with a single retry on a transient connection failure.
 pub(crate) trait SendRetrying {
     async fn send_retrying(self) -> reqwest::Result<Response>;
+    /// As `send_retrying`, and whether the answer is the replay's: the first
+    /// attempt may then have reached the server (see the module doc).
+    async fn send_retrying_marked(self) -> reqwest::Result<(Response, bool)>;
 }
 
 impl SendRetrying for RequestBuilder {
     async fn send_retrying(self) -> reqwest::Result<Response> {
+        self.send_retrying_marked()
+            .await
+            .map(|(response, _)| response)
+    }
+
+    async fn send_retrying_marked(self) -> reqwest::Result<(Response, bool)> {
         // `try_clone` is `None` only for streaming bodies; every CalDAV
         // request carries a string/no body. A non-clonable request just
         // skips the retry and surfaces the original error.
         let retry = self.try_clone();
         match self.send().await {
             Err(err) if is_transient_send_error(&err) => match retry {
-                Some(builder) => builder.send().await,
+                Some(builder) => builder.send().await.map(|response| (response, true)),
                 None => Err(err),
             },
-            other => other,
+            other => other.map(|response| (response, false)),
         }
     }
 }

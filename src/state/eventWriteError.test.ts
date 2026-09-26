@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { eventWriteErrorMessage, eventWriteRefusal, writeNeverLanded } from '@aperio/shared';
+import {
+  eventWriteErrorMessage,
+  eventWriteFailureReason,
+  eventWriteRefusal,
+  writeNeverLanded,
+} from '@aperio/shared';
 import i18n from '../i18n';
 
 /**
@@ -121,5 +126,35 @@ describe('writeNeverLanded', () => {
     expect(writeNeverLanded(new Error('Call to function has been rejected.'))).toBe(false);
     expect(writeNeverLanded('offline')).toBe(false);
     expect(writeNeverLanded(null)).toBe(false);
+  });
+});
+
+describe('eventWriteFailureReason', () => {
+  it('gives the reason alone, never "nothing was changed"', () => {
+    // For a sentence that goes on to say what DID change: a split's new
+    // series that could not be taken back.
+    for (const err of [
+      command('conflict', 'etag mismatch'),
+      command('forbidden', 'read-only calendar'),
+      command('forbidden', 'reply-only-invitation: title'),
+      command('network', 'server-refused: quota'),
+      command('network', 'identity-unknown: me@example.org'),
+      command('invalid_input', 'occurrence-not-writable: 2026-08-24'),
+    ]) {
+      const reason = eventWriteFailureReason(err, t);
+      expect(reason, err.message).not.toMatch(/nichts geändert|erneut/);
+      expect(reason, err.message).not.toBe('');
+    }
+    expect(eventWriteFailureReason(command('conflict', 'etag mismatch'), t)).toMatch(
+      /auf dem Server geändert/,
+    );
+    expect(eventWriteFailureReason(command('forbidden', 'read-only calendar'), t)).toMatch(
+      /read-only calendar/,
+    );
+  });
+
+  it('keeps the message of anything else', () => {
+    const err = command('network', 'connection reset');
+    expect(eventWriteFailureReason(err, t)).toBe(eventWriteErrorMessage(err, t));
   });
 });

@@ -787,12 +787,23 @@ async fn put_resource(
         let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let (response, replayed) = client
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_retrying_marked()
         .await?;
+    // A 412 on the replay of a guarded write: the connection died after the
+    // first PUT went out, and that one may have landed — its new ETag is what
+    // refuses the replay. Read as a refusal, a caller would undo around a write
+    // that went through: splitting a series deleted its new part while the old
+    // part was already cut short (decision 144). So it is what it is, unsure.
+    if replayed && if_match.is_some() && response.status() == StatusCode::PRECONDITION_FAILED {
+        return Err(CaldavError::Network(format!(
+            "the connection to '{resource}' broke after the change was sent; \
+             it may have been saved"
+        )));
+    }
     check_write(response).await
 }
 
@@ -1086,13 +1097,21 @@ pub async fn delete_event(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let (response, replayed) = client
         .delete(resource.clone())
         .headers(headers)
-        .send_retrying()
+        .send_retrying_marked()
         .await?;
     if response.status() == StatusCode::NOT_FOUND {
-        return Ok(DeleteOutcome::NotFound);
+        // On a replay, the first DELETE may have removed it before the
+        // connection broke: gone is what was asked for. Read as "not here",
+        // the walker went on to the next calendar and reported the event
+        // found nowhere, and undoing a split's new part said it could not.
+        return Ok(if replayed {
+            DeleteOutcome::Deleted
+        } else {
+            DeleteOutcome::NotFound
+        });
     }
     check_write(response).await?;
     Ok(DeleteOutcome::Deleted)
@@ -1733,6 +1752,91 @@ END:VCALENDAR</c:calendar-data>
         let seen = paths.lock().unwrap().clone();
         assert_eq!(seen.len(), 2, "exactly one replay");
         assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
+    }
+
+    /// A server whose first connection reads the request and dies without an
+    /// answer, and whose second answers the replay with `reply`. Returns its
+    /// base URL.
+    async fn first_attempt_lost_then(reply: &'static [u8]) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                drop(sock);
+            }
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(reply).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        base
+    }
+
+    /// A guarded PUT whose first attempt may have landed: the replay's 412 is
+    /// that attempt's new ETag, not someone else's change. Reported as a
+    /// conflict, a split deleted its new part around a truncate that went
+    /// through (decision 144).
+    #[tokio::test]
+    async fn a_412_on_the_replay_of_a_guarded_put_is_unsure() {
+        let base = first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let resource = Url::parse(&format!("{base}/calendars/alice/work/abc.ics")).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            Some("\"etag-1\""),
+            &creds(&base),
+        )
+        .await
+        .expect_err("the replay was refused");
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// Without a replay, a 412 is what it says: the copy moved on.
+    #[tokio::test]
+    async fn a_412_without_a_replay_is_a_conflict() {
+        let mut server = Server::new_async().await;
+        let _put = server
+            .mock("PUT", "/calendars/alice/work/abc.ics")
+            .with_status(412)
+            .create_async()
+            .await;
+        let resource =
+            Url::parse(&format!("{}/calendars/alice/work/abc.ics", server.url())).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            Some("\"etag-1\""),
+            &creds(&server.url()),
+        )
+        .await
+        .expect_err("refused");
+        assert!(
+            matches!(err, CaldavError::Http { status: 412, .. }),
+            "{err:?}"
+        );
+    }
+
+    /// A DELETE whose first attempt may have removed the event: the replay's
+    /// 404 is the event gone, as asked.
+    #[tokio::test]
+    async fn a_404_on_the_replay_of_a_delete_is_deleted() {
+        let base =
+            first_attempt_lost_then(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let outcome = delete_event(&client(), &cal_url, "abc", None, &creds(&base))
+            .await
+            .expect("gone is what was asked for");
+        assert!(matches!(outcome, DeleteOutcome::Deleted), "{outcome:?}");
     }
 
     /// A plain event's copy on the server, with `summary` as its title.

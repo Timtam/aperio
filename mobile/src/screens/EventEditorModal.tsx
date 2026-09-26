@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   StyleSheet,
   Switch,
@@ -31,6 +32,7 @@ import {
   allDayWireEnd,
   describeRecurrence,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -218,6 +220,27 @@ export default function EventEditorModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A split that is written while cutting the old series short may not have
+   * reached the provider (decisions 145 and 146): what the editor says in
+   * place of the form, and what closing it goes on to — the other copies, or
+   * away. Everything is saved; the sentence is the one thing left to take in,
+   * so it stays on screen, focused, until the user closes it. Mirrors the
+   * desktop.
+   */
+  const [splitNotice, setSplitNotice] = useState<{
+    sentence: string;
+    proceed: () => Promise<void>;
+  } | null>(null);
+  const splitNoticeRef = useRef<Text>(null);
+  useEffect(() => {
+    if (splitNotice == null) return;
+    // After the render that put it there, so the node exists.
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(splitNoticeRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, [splitNotice]);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   // Accounts whose calendars never store a reminder Aperio writes: the device
@@ -1189,7 +1212,7 @@ export default function EventEditorModal({
                   t('dialogs.event.thisAndFutureMaybeTwice', {
                     title: trimmedTitle,
                     date: cutoffDay(occurrence, i18n.language),
-                    detail: eventWriteErrorMessage(err, t),
+                    detail: eventWriteFailureReason(err, t),
                   }),
                 )
               : err;
@@ -1203,31 +1226,40 @@ export default function EventEditorModal({
           if (!isLocalCal) {
             await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
           }
-          // The new series is written even when cutting the old one short may
-          // not have reached the provider (145): then the old one may still run
-          // through the cutoff, and that is what gets said. Mirrors the desktop.
-          AccessibilityInfo.announceForAccessibility(
-            written.headCut === 'done'
-              ? t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle })
-              : t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
-                  title: trimmedTitle,
-                  date: cutoffDay(occurrence, i18n.language),
-                  detail: eventWriteErrorMessage(written.failure, t),
-                }),
-          );
           // The other copies have a series each, so carrying this means splitting
           // theirs at the same point — not updating a row.
-          if (
-            await offerToCarry(
-              occurrenceBefore(original, occurrence),
-              created,
-              'future',
-              occurrence,
-            )
-          ) {
+          const goOn = async () => {
+            if (
+              await offerToCarry(
+                occurrenceBefore(original, occurrence),
+                created,
+                'future',
+                occurrence,
+              )
+            ) {
+              return;
+            }
+            navigation.goBack();
+          };
+          // The new series is written even when cutting the old one short may
+          // not have reached the provider (145): then the old one may still run
+          // through the cutoff. That is said on screen, focused, and the editor
+          // goes on only once it is closed (146). Mirrors the desktop.
+          if (written.headCut === 'unsure') {
+            setSplitNotice({
+              sentence: t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                title: trimmedTitle,
+                date: cutoffDay(occurrence, i18n.language),
+                detail: eventWriteFailureReason(written.failure, t),
+              }),
+              proceed: goOn,
+            });
             return;
           }
-          navigation.goBack();
+          AccessibilityInfo.announceForAccessibility(
+            t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+          );
+          await goOn();
           return;
         }
       }
@@ -1518,6 +1550,28 @@ export default function EventEditorModal({
           <Text style={styles.primaryButtonText}>
             {t('dialogs.event.birthdayClose')}
           </Text>
+        </Pressable>
+      </FormScrollView>
+    );
+  }
+
+  if (splitNotice != null) {
+    return (
+      <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <Text ref={splitNoticeRef} style={styles.error} accessibilityRole="text">
+          {splitNotice.sentence}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.close')}
+          onPress={() => {
+            const { proceed } = splitNotice;
+            setSplitNotice(null);
+            void proceed();
+          }}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+        >
+          <Text style={styles.primaryButtonText}>{t('dialogs.close')}</Text>
         </Pressable>
       </FormScrollView>
     );

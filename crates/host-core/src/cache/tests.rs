@@ -1521,6 +1521,66 @@ async fn the_write_guard_marks_what_the_edit_left_alone() {
 /// save — must not look untouched, or it is never written. So after a write,
 /// however it ended, nothing is kept until a refresh has read the calendar
 /// again; an invalidation alone does the same.
+/// A create changes no row the cache holds, so it keeps what a refresh proved
+/// about them (decision 106): a split creates its new series first and
+/// truncates the old one right after (136), and the truncate must still leave
+/// the fields it did not change as the provider has them. The calendar is
+/// still invalidated: the next read fetches the new row.
+#[tokio::test]
+async fn a_create_keeps_what_the_calendar_proved() {
+    let store = setup();
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+    assert!(store.events_proven(ACC, CAL));
+    let generation = store.refresh_generation(ACC, SyncScope::Events, CAL);
+
+    store.invalidate_after_create(ACC, CAL).unwrap();
+
+    assert!(store.events_proven(ACC, CAL), "a create disproves nothing");
+    assert!(
+        store.refresh_generation(ACC, SyncScope::Events, CAL) > generation,
+        "a refresh in flight must still drop what it read",
+    );
+    assert!(
+        store.event_window(ACC, CAL).unwrap().is_none(),
+        "the next read fetches"
+    );
+    let mut truncate = read.clone();
+    truncate.recurrence = Some(EventRecurrence {
+        rrule: "FREQ=WEEKLY;UNTIL=20260824T075959Z".into(),
+        exceptions: Vec::new(),
+        tzid: None,
+    });
+    drop(crate::event_write::guard_update(
+        &store,
+        ACC,
+        CAL,
+        &mut truncate,
+    ));
+    assert!(
+        truncate.keep_fields.contains(&EventField::Title),
+        "{:?}",
+        truncate.keep_fields,
+    );
+}
+
+/// ...but it proves nothing new: a calendar not proven before, or one where a
+/// write is in flight, stays unproven.
+#[tokio::test]
+async fn a_create_proves_nothing_new() {
+    let store = setup();
+    store.invalidate_after_create(ACC, CAL).unwrap();
+    assert!(!store.events_proven(ACC, CAL), "never read");
+
+    let read = event("ev-1", 9, 10);
+    refresh_with(&store, vec![read.clone()]).await;
+    let mut edit = read.clone();
+    let ticket = crate::event_write::guard_update(&store, ACC, CAL, &mut edit);
+    store.invalidate_after_create(ACC, CAL).unwrap();
+    drop(ticket);
+    assert!(!store.events_proven(ACC, CAL), "a write was in flight");
+}
+
 #[tokio::test]
 async fn a_write_keeps_nothing_until_the_calendar_is_read_again() {
     let store = setup();

@@ -2399,7 +2399,22 @@ Siehe DESIGN §4.2.
       schreiben (der Mitzieh-Dialog bleibt mit dem Hinweis offen, ohne „erneut
       versuchen“). Scheitert nach einer Ablehnung auch das Löschen der neuen
       Serie, ist es ein Fehler mit demselben Hinweis (`seriesMaybeShownTwice`);
-      der Editor bittet, vor dem erneuten Speichern zu prüfen. Am Handy kommen
+      der Editor bittet, vor dem erneuten Speichern zu prüfen. Beim unklaren
+      Kürzen bleibt der Editor mit dem Hinweis offen, fokussiert, nur mit
+      „Schließen“; erst danach geht es zum Mitziehen oder zu (146). Ein Anlegen
+      behält den Nachweis aus 106 (`invalidate_after_create`), sonst schrieb das
+      Kürzen danach auf Exchange alle Felder zurück. CalDAV liest die Antwort
+      einer Wiederholung als das, was sie ist: 412 nach dem erneuten Senden
+      eines bewachten PUT ist „unklar“, 404 nach dem erneuten DELETE ist
+      „gelöscht“.
+    - 🚩 **Sichere Ablehnungen als Ablehnung kennzeichnen** (147, eigener PR
+      direkt nach #97): EWS-Fehlerantworten, HTTP 400/429 bei Google und
+      Microsoft, CalDAV-Prüfungen „nothing was saved“ kommen als `protocol` an;
+      beim Teilen bleiben dann beide Serien mit Warnung stehen, obwohl sicher
+      nichts gekürzt wurde. Die Adapter sollen sie mit `server-refused`
+      kennzeichnen. Dazu Graph: nach erfolgreichem `/cancel` liefert das
+      folgende DELETE womöglich 404 (die Absage verschiebt das Ereignis), das
+      Löschen gilt dann als gescheitert. Am Handy kommen
       nur `forbidden`, `conflict` und `network` mit Code an (B9), jede andere
       Ablehnung gilt dort also vorsichtig als unklar. Handy ohne Testläufer —
       ↻ im Test.
@@ -2424,8 +2439,10 @@ Siehe DESIGN §4.2.
       Einladung (`invitationLocked`, am Desktop schon).
     - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
       Worten.
-    - Die Editoren nutzen `seriesLeftTruncated` nicht: scheitert beim Teilen
-      auch das Zurücksetzen, hört man nur den ersten Fehler.
+    - ✅ Die Editoren nutzten `seriesLeftTruncated` nicht: scheiterte beim
+      Teilen auch das Zurücksetzen, hörte man nur den ersten Fehler. Das
+      Zurücksetzen gibt es nicht mehr (136); scheitert das Zurücknehmen der
+      neuen Serie, sagen es beide Editoren (`seriesMaybeShownTwice`, oben).
     - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
       Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche

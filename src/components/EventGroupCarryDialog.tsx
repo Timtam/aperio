@@ -60,8 +60,10 @@ type CarryOutcome =
   | { kind: 'partly'; done: number; failed: CarryTarget[] }
   /** Every copy was written, but the new rows are not tied together yet. */
   | { kind: 'regroup'; done: number }
-  /** Every copy was written, and some series may show twice: said, and left
-   *  on screen, with nothing to try again (decision 145). */
+  /** No copy is left to offer again, and some series may show twice: a copy
+   *  written while its old series may still run through the cut (decision
+   *  145), or one whose new part could not be deleted again after its cut
+   *  was refused. Said, and left on screen, with nothing to try again. */
   | { kind: 'written'; done: number };
 
 export interface EventGroupCarryDialogProps {
@@ -562,8 +564,8 @@ export function EventGroupCarryDialog({
       return;
     }
     if (allDoubts.length > 0) {
-      // Every copy is written, but some may show twice: closing would take
-      // the only words that say which ones.
+      // No copy is left to offer again, but some may show twice: closing
+      // would take the only words that say which ones.
       setOutcome({ kind: 'written', done });
       setPending([]);
       announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
@@ -675,7 +677,7 @@ export function EventGroupCarryDialog({
               : 'dialogs.eventGroupCarry.keep',
           )}
         </button>
-        {/* Nothing is left to try once every copy is written. */}
+        {/* Nothing is left to try once no copy is outstanding. */}
         {outcome?.kind !== 'written' && (
           <button
             type="button"

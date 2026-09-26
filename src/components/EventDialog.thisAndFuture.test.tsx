@@ -74,6 +74,15 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const CALENDARS: Calendar[] = [
   { id: 'cal-work', name: 'Arbeit', read_only: false, account_id: 'acc-icloud' } as unknown as Calendar,
+  // A calendar whose server tells the attendees of every change.
+  {
+    id: 'cal-meet',
+    name: 'Besprechungen',
+    read_only: false,
+    account_id: 'acc-exchange',
+    supports_scheduling: true,
+    always_notifies_attendees: true,
+  } as unknown as Calendar,
 ];
 
 /** A weekly Monday 09:00 series in Berlin summer time; one July Monday excluded. */
@@ -169,11 +178,11 @@ function deviceInBerlin() {
 
 const calls = (command: string) => invokeMock.mock.calls.filter((call) => call[0] === command);
 
-async function open(event: CalendarEvent) {
+async function open(event: CalendarEvent, onClose: () => void = () => {}) {
   const { EventDialog } = await import('./EventDialog');
   render(
     <StrictMode>
-      <EventDialog isOpen onClose={() => {}} event={event} initialScope="this_and_future" />
+      <EventDialog isOpen onClose={onClose} event={event} initialScope="this_and_future" />
     </StrictMode>,
   );
   await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
@@ -384,30 +393,59 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     });
   });
 
-  it('keeps both, counts the change written and names the day when the cut may have landed (144, 145)', async () => {
+  it('keeps both, counts the change written and says so on screen when the cut may have landed (144-146)', async () => {
     // The answer was lost: the old series may already end at the cutoff, and
     // deleting the new one would lose everything from there. The new series
-    // stands, so the save is done — said with the doubt, not as a failure a
-    // second save would repeat.
+    // stands, so the save is done — and the editor stays with the doubt,
+    // focused and on screen, not as a failure a second save would repeat.
     deviceInBerlin();
     onFile.series = SERIES;
     onFile.truncateFails = { code: 'network', message: 'connection reset' };
-    await open(JULY);
+    const onClose = vi.fn();
+    await open(JULY, onClose);
     save();
-    await waitFor(() =>
-      expect(announced.some((line) => /möglicherweise doppelt|may show twice/.test(line))).toBe(
-        true,
-      ),
-    );
+    const said = await screen.findByText(/möglicherweise doppelt|may show twice/);
 
+    expect(said.textContent).toMatch(/Teamrunde/);
+    expect(said.textContent).toMatch(/6\. Juli 2026|July 6, 2026/);
+    expect(said.textContent).toMatch(/network: connection reset/);
+    await waitFor(() => expect(document.activeElement).toBe(said));
     expect(calls('delete_event')).toHaveLength(0);
-    const said = announced.find((line) => /möglicherweise doppelt|may show twice/.test(line))!;
-    expect(said).toMatch(/Teamrunde/);
-    expect(said).toMatch(/6\. Juli 2026|July 6, 2026/);
-    expect(said).toMatch(/network: connection reset/);
-    // Not also the plain "changed", and no error on the form.
+    // Written like any new series: its colour follows it (the private list,
+    // empty here, would too).
+    expect(calls('set_event_color').map((call) => (call[1] as { eventId: string }).eventId)).toContain(
+      'tail-1',
+    );
+    // Nothing to save again, nor the plain "changed", nor an error.
+    expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull();
     expect(announced.some((line) => /bleiben unverändert|stay unchanged/.test(line))).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Closing it goes on as a save would: no copies to carry, so away.
+    fireEvent.click(screen.getByText(/^(Schließen|Close)$/, { selector: 'button.form__action' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('undoes the new series as it was sent, telling the attendees it invited (144)', async () => {
+    // Refused on a calendar that informs attendees: the new series' invitation
+    // went out, so its deletion has to be told too.
+    deviceInBerlin();
+    const meeting = { ...SERIES, calendar_id: 'cal-meet', attendees: ['a@example.org'] };
+    onFile.series = meeting;
+    onFile.truncateFails = { code: 'conflict', message: 'etag mismatch' };
+    await open({ ...JULY, calendar_id: 'cal-meet', attendees: ['a@example.org'] } as CalendarEvent);
+    save();
+    await waitFor(() => expect(calls('delete_event')).toHaveLength(1));
+
+    const created = (calls('create_event')[0][1] as { request: { send_invitations: boolean } })
+      .request;
+    expect(created.send_invitations).toBe(true);
+    expect(calls('delete_event')[0][1]).toEqual({
+      id: 'tail-1',
+      calendarId: 'cal-meet',
+      sendCancellations: true,
+    });
   });
 
   it('says the series may show twice when the new one cannot be deleted again', async () => {
@@ -424,6 +462,10 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     expect(calls('delete_event')).toHaveLength(1);
     expect(said.textContent).toMatch(/Teamrunde/);
     expect(said.textContent).toMatch(/bevor du erneut speicherst|before saving again/);
+    // The reason, and not the refusal's own "nothing was changed": something
+    // was.
+    expect(said.textContent).toMatch(/auf dem Server geändert|changed on the server/);
+    expect(said.textContent).not.toMatch(/nichts geändert|Nothing was changed/);
   });
 
   it("moves the new series' exceptions to its new time", async () => {

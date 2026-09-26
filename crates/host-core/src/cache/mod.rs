@@ -1488,6 +1488,50 @@ impl CacheStore {
         })
     }
 
+    /// [`Self::invalidate`] after an event was CREATED in `calendar`, keeping
+    /// what decision 106 proved about the rows already there.
+    ///
+    /// A create adds a row and changes none the cache holds, so a calendar
+    /// whose rows were read from the provider after this app's last write
+    /// stays proven for them. Dropping the proof made the next update of an
+    /// existing event there write every field it carries, not only the ones it
+    /// changed: splitting a series creates the new series first and truncates
+    /// the old one right after (decision 136), and on Exchange that truncate
+    /// then wrote this device's copy back over a change another device had
+    /// made. The invalidation itself still happens — the next read must fetch
+    /// the new row, and a refresh in flight must not land over it. The proof
+    /// survives only if no other write of this app in the calendar began or
+    /// ended meanwhile.
+    pub fn invalidate_after_create(&self, account: &str, calendar: &str) -> DbResult<()> {
+        let key = (account.to_string(), calendar.to_string());
+        let proven_with = {
+            let generation = self.refresh_generation(account, SyncScope::Events, calendar);
+            self.event_proofs
+                .lock()
+                .expect("cache event proof poisoned")
+                .get(&key)
+                .copied()
+                .filter(|proof| {
+                    proof.writes_in_flight == 0
+                        && proof.refreshed_from == Some((generation, proof.writes_seen))
+                })
+                .map(|proof| proof.writes_seen)
+        };
+        self.invalidate(account, SyncScope::Events, calendar)?;
+        if let Some(writes) = proven_with {
+            let generation = self.refresh_generation(account, SyncScope::Events, calendar);
+            let mut proofs = self
+                .event_proofs
+                .lock()
+                .expect("cache event proof poisoned");
+            let proof = proofs.entry(key).or_default();
+            if proof.writes_seen == writes && proof.writes_in_flight == 0 {
+                proof.refreshed_from = Some((generation, writes));
+            }
+        }
+        Ok(())
+    }
+
     /// Drop the delta cursor + window + freshness for EVERY event container
     /// owned by `account`, forcing the next refresh of each to do a full
     /// resync (the cached rows stay as an offline fallback). Unlike

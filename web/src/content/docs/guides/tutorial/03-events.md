@@ -169,10 +169,12 @@ every earlier one was deleted — there is nothing to keep: an edit changes the
 whole series, which stays the same entry, and a delete removes the series.
 Aperio says so when it happens. On an edit, Aperio first creates the new series
 and then ends the old one before it. If ending the old one fails, Aperio deletes
-the new one again, and nothing has changed. Only when it cannot tell whether the
-old one was already ended, for example after a lost connection, does it keep
-both: your change counts as saved, and Aperio names the day from which the
-series may show twice, so you can check it instead of saving a second time.
+the new one again, and nothing has changed. When it cannot tell whether the old
+one was already ended, for example after a lost connection, both stay: your
+change counts as saved, and the editor stays open with a note naming the day
+from which the series may show twice, until you close it. If deleting the new
+one fails as well, Aperio says so too, and asks you to check the calendar before
+saving again.
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
 occurrence, and a new date moves the start of the series. The editor's title
@@ -269,7 +271,10 @@ what makes them a group.
 
 If something goes wrong along the way, the dialog stays open and says which
 calendars could not be written; **Try the rest again** retries exactly those.
-Half-carried is the one state you have to see.
+Half-carried is the one state you have to see. A copy whose series may now show
+twice from the cut is different: its new part was created, so it is not offered
+again, and a note names its calendar and the day instead. When only such notes
+are left, the dialog stays open with them and without **Try the rest again**.
 
 Only what the appointment IS travels: title, when, where, and the description.
 Reminders stay with each copy — the private copy usually exists precisely
