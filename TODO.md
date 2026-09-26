@@ -2354,18 +2354,39 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
-    - Die neue Serie bekommt nur die Ausnahmen des Masters. Bei Google ist ein
+    - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein
       gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
-      ein abgesagtes RECURRENCE-ID: beim Teilen kommt es in der neuen Serie
-      zurück, mit Einladung. Die Zeilen liest die Planung jetzt nach der
-      Serie (135, unten), bei Google aber nur so weit, wie der Zwischenspeicher
-      reicht; Google verwirft außerdem UTC-EXDATEs auf Serien mit Zone.
-    - Exchange mischt gelöschte und geänderte Vorkommen in den Ausnahmen:
-      EWS schreibt beim Anlegen gar keine, ein anderer Kalender schreibt alle
-      (dann fehlt ein geändertes Vorkommen in beiden Hälften).
-    - Das Mitziehen schneidet eine Exchange-Kopie ein Vorkommen zu spät, wenn
-      ihr Vorkommen am Schnitttag in Outlook geändert wurde
-      (`firstOccurrenceFrom` liest die Zeilen nicht).
+      ein abgesagtes RECURRENCE-ID: beim Teilen kam es in der neuen Serie
+      zurück, mit Einladung. Und Exchange mischt gelöschte und geänderte
+      Vorkommen in den Ausnahmen: ein anderer Kalender schrieb alle, dann
+      fehlte ein geändertes Vorkommen in beiden Hälften. Jetzt bekommt die
+      neue Serie genau die Plätze, für die der Kalender nichts zeigt
+      (`deletedSlots`): eine Ausnahme ohne lebende Zeile, jede abgesagte
+      Zeile; ein geändertes Vorkommen ist keine Löschung. Plätze gleichen wie
+      in den Ansichten (`sameSlot`: genau bei Uhrzeit, nach Tag bei
+      ganztägig). Offen: Google kennt die Zeilen nur so weit, wie der
+      Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
+      Vorkommen kommen zurück (150: benennen, später gezielt bei Google
+      nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
+      nicht (140), Google verwirft UTC-EXDATEs auf Serien mit Zone (137).
+    - ✅ Das Mitziehen schnitt eine Exchange-Kopie ein Vorkommen zu spät, wenn
+      ihr Vorkommen am Schnitttag in Outlook geändert wurde, und eine
+      Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
+      jetzt die Zeilen der Kopie und schneidet nach dem Platz in der Serie
+      (141); beide Mitzieh-Dialoge lesen die Zeilen einmal, vor dem Anker.
+    - 🚩 **Tail-Regel bei Wechsel und neuer Regel** (PR 3b): wechselt die neue
+      Serie zwischen ganztägig und mit Uhrzeit, trifft eine Ausnahme um 18 Uhr
+      den FOLGENDEN Tag (halber Tag Abstand); eine geänderte Regel behält
+      Ausnahmen an Tagen, die sie nie erzeugt (EWS bricht dann beim Löschen
+      ab). Offen ist die Frage, ob Löschungen mitwandern, wenn „dieser und alle
+      folgenden“ das Datum verschiebt (heute bleiben sie auf ihrem Tag).
+    - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
+      geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
+      das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des
+      Kopfs und das Vorkommen der neuen Serie. Seit #99 auch ein Tag mit
+      EXDATE und RECURRENCE-ID zugleich, den die neue Serie früher ausließ. Zu
+      beheben beim Kürzen, nicht in der Tail-Regel (Exchange bräuchte sonst
+      wieder beide Hälften ohne sein geändertes Vorkommen).
     - ✅ `readSeriesRows` las über einen Datumsbereich bis einen Monat nach dem
       Schnitt und stieß bei langen Google-Serien ein volles Nachladen an. Jetzt
       liest es nach der Serie (135): jede Zeile `{Serie}::rid::…` aus dem

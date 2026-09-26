@@ -55,6 +55,12 @@
 // cancelled row instead. So the plan reads the series' rows too
 // (`readSeriesRows`), and every caller has to hand them over.
 //
+// The same rows decide what the NEW series must not show (decision 134): the
+// occurrences the calendar shows nothing for (`deletedSlots`). Taken from the
+// master's exceptions alone, a split brought back every occurrence Google
+// keeps deleted as a cancelled row, and it deleted from both halves every
+// occurrence Exchange lists among its exceptions because it was CHANGED.
+//
 // Those rows are read by the series' id, not by a stretch of dates (decision
 // 135): a row counts by the slot it names, its own times can lie anywhere,
 // and the series can run for years. The host answers with every row its cache
@@ -73,6 +79,7 @@ import {
   isExpandedOccurrence,
   overrideRecurrenceIso,
   overrideSeriesId,
+  slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
 
@@ -197,6 +204,54 @@ export async function readSeriesRows<
 }
 
 /**
+ * The slots of this series the calendar shows nothing for, from its master and
+ * its rows (`readSeriesRows`): the occurrences a series that continues it must
+ * not show either.
+ *
+ * - A master's exception with no live row of the series in its slot: the
+ *   provider deleted that occurrence. An exception WITH a live row is no
+ *   deletion: Exchange lists the slot of every occurrence changed in Outlook
+ *   among the exceptions, and that occurrence is there.
+ * - Every cancelled row's slot: Google keeps a deleted occurrence as a
+ *   cancelled row and lists no exception for it; CalDAV can do the same with a
+ *   `STATUS:CANCELLED` override.
+ *
+ * Slots match as the views match them (`sameSlot`): exactly for a timed series,
+ * by day for a series of days. An exception keeps its own spelling, a row's slot
+ * is written as the instant it names; each slot comes once, in order. Rows of
+ * other series are ignored.
+ */
+export function deletedSlots(
+  master: SplittableEvent,
+  rows: readonly RecurringEventLike[],
+): string[] {
+  const own = rows.filter((row) => overrideSeriesId(row) === master.id);
+  const slotOf = (row: RecurringEventLike) => Date.parse(overrideRecurrenceIso(row) ?? '');
+  const live = own
+    .filter((row) => !row.cancelled)
+    .map(slotOf)
+    .filter((at) => Number.isFinite(at));
+  const same = slotMatcher(master);
+  const found: { iso: string; at: number }[] = [];
+  const add = (iso: string, at: number) => {
+    if (!found.some((slot) => same(slot.at, at))) found.push({ iso, at });
+  };
+  for (const iso of master.recurrence?.exceptions ?? []) {
+    const at = Date.parse(iso);
+    if (!Number.isFinite(at)) continue;
+    if (live.some((slot) => same(slot, at))) continue;
+    add(iso, at);
+  }
+  for (const row of own) {
+    if (!row.cancelled) continue;
+    const at = slotOf(row);
+    if (Number.isFinite(at)) add(new Date(at).toISOString(), at);
+  }
+  // Instants, compared as numbers: two spellings of one instant are one.
+  return found.sort((a, b) => a.at - b.at).map((slot) => slot.iso);
+}
+
+/**
  * The arithmetic of a split, decided before anything is written.
  *
  * `rows` are the series' own rows besides the master (`readSeriesRows`); rows
@@ -290,10 +345,27 @@ export function planSeriesSplit<E extends SplittableEvent>(
   // A NEW series from the cutoff: the slot it starts on is the occurrence
   // being edited, and the cut drops the provider's row for it. An exception
   // there would hide the new series' first occurrence.
+  //
+  // It owns no rows of its own, so every occurrence the calendar shows
+  // nothing for is an exception of it (`deletedSlots`) — a cancelled row's
+  // slot included, a changed occurrence's slot not: the new series shows that
+  // occurrence at its pattern time, with the new series' content. The old
+  // series keeps its rows up to the cut. After it, a timed series loses them
+  // with the truncate (Exchange drops them itself); an all-day series on
+  // Google or CalDAV keeps them, because the adapters skip that cleanup for
+  // days, so a changed all-day occurrence after the cut shows twice — the
+  // head's row and the new series' occurrence. That was so before this rule
+  // too, and it goes with the truncate, not here: keeping the exception for
+  // it would take the changed occurrences of Exchange out of both halves.
+  const after = (x: number) => (master.all_day ? x >= at + slotMargin : x > at);
   return {
     kind: 'cut',
     headRule: oldRule,
-    tail: tailWith((x) => (master.all_day ? x >= at + slotMargin : x > at)),
+    tail: {
+      rrule: newRule,
+      exceptions: deletedSlots(master, ownRows).filter((x) => after(Date.parse(x))),
+      tzid: recurrence.tzid ?? null,
+    },
     occurrencesBefore,
   };
 }
@@ -381,6 +453,7 @@ export function thisAndFutureDeletedKey(
 export function firstOccurrenceFrom<E extends SplittableEvent>(
   master: E,
   fromIso: string,
+  rows: readonly RecurringEventLike[],
 ): string | null {
   const from = new Date(fromIso);
   if (!Number.isFinite(from.getTime())) return null;
@@ -402,11 +475,22 @@ export function firstOccurrenceFrom<E extends SplittableEvent>(
   // The range starts one duration EARLIER than the cutoff because `expandEvent`
   // selects by start: an occurrence already running at the cutoff begins before
   // it, and it is the one being split at, not the next one.
+  //
+  // Which occurrences there ARE is what the calendar shows (decision 141): an
+  // occurrence changed in Outlook is there although Exchange lists its slot
+  // among the exceptions, and one Google deleted is gone although no
+  // exception names it. So the series is read with its deleted slots
+  // (`deletedSlots`), and an occurrence counts at its SLOT, not where it was
+  // moved, as the plan cuts.
+  const shown = {
+    ...master,
+    recurrence: { ...master.recurrence, exceptions: deletedSlots(master, rows) },
+  };
   const DAY_MS = 24 * 60 * 60 * 1000;
   const searchFrom = new Date(from.getTime() - duration);
   for (const days of [400, 1_200, 4_000, 15_000]) {
     const horizon = new Date(from.getTime() + days * DAY_MS);
-    const found = expandEvent(master, { start: searchFrom, end: horizon }).find(
+    const found = expandEvent(shown, { start: searchFrom, end: horizon }).find(
       (occ) => new Date(occ.start).getTime() + duration > from.getTime(),
     );
     if (found) return found.start;
