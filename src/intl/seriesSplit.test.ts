@@ -8,7 +8,8 @@ import {
   readSeriesRows,
   ruleFromCut,
   seriesFromCut,
-  seriesLeftTruncated,
+  seriesMaybeShownTwice,
+  cutoffDay,
   seriesRowsFromHost,
   thisAndFutureDeletedKey,
   truncateRRuleBefore,
@@ -526,17 +527,20 @@ describe('thisAndFutureDeletedKey', () => {
 });
 
 describe('writeSeriesSplit', () => {
+  /** A host error, as both surfaces hand it over. */
+  const coded = (code: string, message: string) => ({ code, message });
+
   it('refuses a series with nothing before the cutoff, and writes nothing', async () => {
     // The type refuses it already; this is the plan that got past it.
     const io = {
-      truncate: vi.fn(async () => undefined),
       createTail: vi.fn(async () => ({ id: 'tail' })),
-      restore: vi.fn(async () => undefined),
+      truncate: vi.fn(async () => undefined),
+      removeTail: vi.fn(async () => undefined),
     };
     const whole = planSeriesSplit(weekly, weekly.start, []);
     await expect(writeSeriesSplit(io, whole as SeriesCutPlan)).rejects.toThrow();
-    expect(io.truncate).not.toHaveBeenCalled();
     expect(io.createTail).not.toHaveBeenCalled();
+    expect(io.truncate).not.toHaveBeenCalled();
   });
 
   const plan: SeriesCutPlan = {
@@ -546,106 +550,149 @@ describe('writeSeriesSplit', () => {
     occurrencesBefore: 3,
   };
 
-  it('truncates first, then creates the tail', async () => {
-    const order: string[] = [];
-    const created = await writeSeriesSplit(
-      {
-        truncate: async (rule) => {
-          order.push(`truncate:${rule}`);
-        },
-        createTail: async (rec) => {
-          order.push(`create:${rec.rrule}`);
-          return { id: 'tail' };
-        },
-        restore: async () => {
-          order.push('restore');
-        },
-      },
-      plan,
-    );
-    expect(created).toEqual({ id: 'tail' });
-    expect(order).toEqual([
-      'truncate:FREQ=WEEKLY;UNTIL=20260824T075959Z',
-      'create:FREQ=WEEKLY;COUNT=7',
-    ]);
-  });
-
-  it('puts the master back when the tail cannot be created', async () => {
-    // Without this the series simply ENDS at the cutoff: every appointment from
-    // there on is gone, and nothing on screen says so.
-    const restore = vi.fn(async () => undefined);
-    await expect(
-      writeSeriesSplit(
-        {
-          truncate: async () => undefined,
-          createTail: async () => {
-            throw new Error('the server said no');
-          },
-          restore,
-        },
-        plan,
-      ),
-    ).rejects.toThrow('the server said no');
-    expect(restore).toHaveBeenCalledOnce();
-  });
-
-  it('marks the failure when the restore failed, so the caller can say so', async () => {
-    // Reporting "not changed" would be the opposite of true: the series really
-    // does end at the cutoff now.
-    let caught: unknown;
+  /** Runs a split whose truncate fails with `failure`; says what happened. */
+  async function truncateFailsWith(
+    failure: unknown,
+    removal: () => Promise<unknown> = async () => undefined,
+  ) {
+    const removeTail = vi.fn(removal);
+    let caught: unknown = null;
+    let written: unknown = null;
     try {
-      await writeSeriesSplit(
+      written = await writeSeriesSplit(
         {
-          truncate: async () => undefined,
-          createTail: async () => {
-            throw new Error('the server said no');
+          createTail: async () => ({ id: 'tail' }),
+          truncate: async () => {
+            throw failure;
           },
-          restore: async () => {
-            throw new Error('and the restore failed as well');
-          },
+          removeTail,
         },
         plan,
       );
     } catch (err) {
       caught = err;
     }
-    expect(seriesLeftTruncated(caught)).toBe(true);
-    // An ordinary failure — restore worked — is NOT marked.
-    let ordinary: unknown;
+    return { caught, written, removeTail };
+  }
+
+  it('creates the tail first, then truncates (136)', async () => {
+    // The other order lost data: a truncate that landed and a tail that did
+    // not left the series ending at the cutoff, and putting the head back
+    // restored only its rule.
+    const order: string[] = [];
+    const created = await writeSeriesSplit(
+      {
+        createTail: async (rec) => {
+          order.push(`create:${rec.rrule}`);
+          return { id: 'tail' };
+        },
+        truncate: async (rule) => {
+          order.push(`truncate:${rule}`);
+        },
+        removeTail: async () => {
+          order.push('remove');
+        },
+      },
+      plan,
+    );
+    expect(created).toEqual({ tail: { id: 'tail' }, headCut: 'done' });
+    expect(order).toEqual([
+      'create:FREQ=WEEKLY;COUNT=7',
+      'truncate:FREQ=WEEKLY;UNTIL=20260824T075959Z',
+    ]);
+  });
+
+  it('writes nothing more when the tail cannot be created', async () => {
+    const truncate = vi.fn(async () => undefined);
+    const removeTail = vi.fn(async () => undefined);
+    let caught: unknown = null;
     try {
       await writeSeriesSplit(
         {
-          truncate: async () => undefined,
           createTail: async () => {
             throw new Error('the server said no');
           },
-          restore: async () => undefined,
+          truncate,
+          removeTail,
         },
         plan,
       );
     } catch (err) {
-      ordinary = err;
+      caught = err;
     }
-    expect(seriesLeftTruncated(ordinary)).toBe(false);
+    expect((caught as Error).message).toBe('the server said no');
+    expect(truncate).not.toHaveBeenCalled();
+    expect(removeTail).not.toHaveBeenCalled();
+    // The calendar is as it was.
+    expect(seriesMaybeShownTwice(caught)).toBe(false);
   });
 
-  it('reports the original failure even when the restore fails too', async () => {
-    // The restore failing is worth nothing to the user; the write that failed
-    // is what they are waiting to hear about.
-    await expect(
-      writeSeriesSplit(
-        {
-          truncate: async () => undefined,
-          createTail: async () => {
-            throw new Error('the server said no');
-          },
-          restore: async () => {
-            throw new Error('and the restore failed as well');
-          },
-        },
-        plan,
-      ),
-    ).rejects.toThrow('the server said no');
+  it('deletes the tail again when the truncate was refused', async () => {
+    // A conflict, a missing right: the truncate changed nothing, so deleting
+    // the series just created leaves the calendar exactly as it was.
+    for (const refused of [
+      coded('conflict', 'the series changed on the server'),
+      coded('forbidden', 'read-only calendar'),
+      coded('invalid_input', 'no rule'),
+      // A refusal token says so whatever code carried it: an unknown identity
+      // travels as a network error, but no request went out.
+      coded('network', 'identity-unknown: me@example.org'),
+    ]) {
+      const { caught, removeTail } = await truncateFailsWith(refused);
+      expect(caught, refused.message).toBe(refused);
+      expect(removeTail, refused.message).toHaveBeenCalledWith({ id: 'tail' });
+      expect(seriesMaybeShownTwice(caught), refused.message).toBe(false);
+    }
+  });
+
+  it('keeps both when the truncate may have landed, and counts the tail written (144, 145)', async () => {
+    // The answer may be lost after the provider cut the series. Deleting the
+    // tail then would leave the series ending at the cutoff after all; and
+    // throwing would invite the caller to write the tail a second time.
+    for (const unsure of [
+      coded('network', 'connection reset'),
+      coded('protocol', 'unreadable answer'),
+      coded('internal', 'cache write failed'),
+      new Error('Call to function has been rejected.'),
+      'offline',
+    ]) {
+      const { caught, written, removeTail } = await truncateFailsWith(unsure);
+      expect(caught).toBeNull();
+      expect(removeTail).not.toHaveBeenCalled();
+      expect(written).toEqual({ tail: { id: 'tail' }, headCut: 'unsure', failure: unsure });
+    }
+  });
+
+  it('marks it when the tail cannot be deleted again', async () => {
+    const refused = coded('conflict', 'the series changed on the server');
+    const { caught, removeTail } = await truncateFailsWith(refused, async () => {
+      throw new Error('and the delete failed as well');
+    });
+    expect(removeTail).toHaveBeenCalledOnce();
+    // The failure the user is waiting to hear about, not the repair's.
+    expect(caught).toBe(refused);
+    expect(seriesMaybeShownTwice(caught)).toBe(true);
+  });
+
+  it('marks a refusal that is no object on an error of its own', async () => {
+    const { caught } = await truncateFailsWith('server-refused: quota', async () => {
+      throw new Error('and the delete failed as well');
+    });
+    expect((caught as Error).message).toBe('server-refused: quota');
+    expect(seriesMaybeShownTwice(caught)).toBe(true);
+  });
+});
+
+describe('cutoffDay', () => {
+  it('names the day the occurrence is on, in the reader language', () => {
+    // Half past midnight local time: the UTC day may be the one before.
+    const iso = new Date(2026, 7, 24, 0, 30).toISOString();
+    expect(cutoffDay(iso, 'de')).toBe('24. August 2026');
+    expect(cutoffDay(iso, 'en')).toBe('August 24, 2026');
+  });
+
+  it('keeps what it cannot read', () => {
+    expect(cutoffDay('not a date', 'de')).toBe('not a date');
   });
 });
 
@@ -732,7 +779,7 @@ describe('carrying a future edit to another copy', () => {
           tailRule = recurrence.rrule;
           return { id: 'ev-private-tail' };
         },
-        restore: async () => undefined,
+        removeTail: async () => undefined,
       },
       plan,
     );

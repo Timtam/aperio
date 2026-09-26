@@ -596,7 +596,10 @@ pub async fn create_event(
             }));
         }
     } else {
-        let _ = cache.invalidate(&account, SyncScope::Events, &request.calendar_id);
+        // A new row changes none the cache holds: what a refresh proved about
+        // them stands (decision 106), or the truncate that follows a split's
+        // create would write back every field it carries.
+        let _ = cache.invalidate_after_create(&account, &request.calendar_id);
     }
     scheduler.invalidate();
     Ok(event)

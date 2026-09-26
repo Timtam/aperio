@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-native';
+import {
+  AccessibilityInfo,
+  findNodeHandle,
+  Pressable,
+  StyleSheet,
+  Text,
+} from 'react-native';
 
 import {
   carryOnto,
@@ -11,8 +17,9 @@ import {
   organizerOf,
   planCarry,
   planSeriesSplit,
+  cutoffDay,
   readSeriesRows,
-  seriesLeftTruncated,
+  seriesMaybeShownTwice,
   writeSeriesSplit,
   type CarryableFields,
 } from '@aperio/shared';
@@ -20,6 +27,7 @@ import {
 import {
   addEventExdate,
   createEvent,
+  deleteEvent,
   getEventById,
   getSeriesRows,
   listCalendars,
@@ -60,7 +68,12 @@ type CarryOutcome =
   /** Some copies could not be written. */
   | { kind: 'partly'; done: number; failed: CarryTarget[] }
   /** Every copy was written, but the new rows are not tied together yet. */
-  | { kind: 'regroup'; done: number };
+  | { kind: 'regroup'; done: number }
+  /** No copy is left to offer again, and some series may show twice: a copy
+   *  written while its old series may still run through the cut (decision
+   *  145), or one whose new part could not be deleted again after its cut
+   *  was refused. Said, and left on screen, with nothing to try again. */
+  | { kind: 'written'; done: number };
 
 export default function EventGroupCarryModal({
   route,
@@ -75,7 +88,7 @@ export default function EventGroupCarryModal({
     occurrence,
     successor,
   } = route.params;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   useCancelHeader(navigation);
 
@@ -97,6 +110,15 @@ export default function EventGroupCarryModal({
   /** The rows written so far, kept across a retry so the regrouping at the end
    *  ties ALL of them together and not just the last pass's. */
   const [createdRows, setCreatedRows] = useState<NewGroupMember[]>([]);
+  /** What a pass said about copies whose series may now show twice, kept
+   *  across a retry: they are written and not offered again, so this is the
+   *  only place they are still named. Mirrors the desktop. */
+  const [doubts, setDoubts] = useState<string[]>([]);
+  /** The outcome line, which takes the cursor whenever a pass ends with an
+   *  outcome, as the desktop's outcome note does, and what it then reads: the
+   *  outcome, the last failure and this pass's doubts, in one utterance. */
+  const outcomeRef = useRef<Text>(null);
+  const [outcomeSaid, setOutcomeSaid] = useState('');
   /**
    * Whether this screen is still here.
    *
@@ -169,6 +191,10 @@ export default function EventGroupCarryModal({
     setBusy(true);
     setError(null);
     const failed: CarryTarget[] = [];
+    // Copies whose series may now show twice from the cut, said in words.
+    const unsure: string[] = [];
+    // The last failure said on screen, which the outcome line reads too.
+    let lastError = '';
     // The rows created so far, to be joined into a group of their own — the
     // earlier passes' included, so a retry ties the whole set together.
     const created: NewGroupMember[] = [...createdRows];
@@ -176,6 +202,9 @@ export default function EventGroupCarryModal({
     for (const target of targets) {
       // The user left. Stop writing copies into a screen that is gone.
       if (!alive.current) return;
+      // Where this copy's series is split, once it is: a failure after that
+      // names the day. Mirrors the desktop.
+      let splitAt: string | null = null;
       try {
         const current = await getEventById(target.event_id, target.calendar_id);
         if (current == null) {
@@ -323,21 +352,9 @@ export default function EventGroupCarryModal({
               starts_at: row.start,
             });
           } else {
-            const tail = await writeSeriesSplit(
+            splitAt = anchorIso;
+            const written = await writeSeriesSplit(
               {
-                truncate: (headRule) =>
-                  updateEvent(
-                    {
-                      ...current,
-                      recurrence: { ...currentRecurrence, rrule: headRule },
-                      // The copies are the user's own bookkeeping — the invite
-                      // went out from the anchor, and telling every copy's
-                      // attendees again would mail them twice.
-                      send_invitations: false,
-                      truncate_tail_overrides: true,
-                    },
-                    target.calendar_id,
-                  ),
                 createTail: (recurrence) =>
                   createEvent(
                     {
@@ -369,14 +386,36 @@ export default function EventGroupCarryModal({
                     // verbatim so both halves expand alike.
                     { preserveRecurrenceZone: true },
                   ),
-                restore: () =>
+                truncate: (headRule) =>
                   updateEvent(
-                    { ...current, send_invitations: false },
+                    {
+                      ...current,
+                      recurrence: { ...currentRecurrence, rrule: headRule },
+                      // The copies are the user's own bookkeeping — the invite
+                      // went out from the anchor, and telling every copy's
+                      // attendees again would mail them twice.
+                      send_invitations: false,
+                      truncate_tail_overrides: true,
+                    },
                     target.calendar_id,
                   ),
+                removeTail: (tail) =>
+                  deleteEvent(tail.id, tail.calendar_id, false),
               },
               splitPlan,
             );
+            const tail = written.tail;
+            // Written, but the copy's old series may still run through the
+            // cut (145): the new row is real, so it counts and is grouped, and
+            // the doubt is said instead of offering to write it again.
+            if (written.headCut === 'unsure') {
+              unsure.push(
+                t('dialogs.eventGroupCarry.unsureCut', {
+                  calendar: calendarName(target.calendar_id),
+                  date: cutoffDay(anchorIso, i18n.language),
+                }),
+              );
+            }
             created.push({
               calendar_id: tail.calendar_id,
               event_id: tail.id,
@@ -394,20 +433,28 @@ export default function EventGroupCarryModal({
         }
         done += 1;
       } catch (err) {
-        failed.push(target);
-        // A split that failed AND could not be undone leaves this copy's series
-        // ending at the cutoff. Reporting that as "not changed" would be the
-        // opposite of true, so it gets said in its own words.
-        const message = seriesLeftTruncated(err)
-          ? t('dialogs.eventGroupCarry.truncatedNotRestored', {
+        // A split whose new series could not be taken back may show this copy
+        // twice from the cut. Reporting that as "not changed" would be the
+        // opposite of true, and trying again would write the new series a
+        // second time: it is said in its own words, and not offered again.
+        // Mirrors the desktop.
+        if (seriesMaybeShownTwice(err) && splitAt != null) {
+          unsure.push(
+            t('dialogs.eventGroupCarry.maybeShownTwice', {
               calendar: calendarName(target.calendar_id),
-            })
-          : errorMessage(err);
+              date: cutoffDay(splitAt, i18n.language),
+            }),
+          );
+          continue;
+        }
+        failed.push(target);
+        const message = errorMessage(err);
         if (!alive.current) return;
         setError(message);
-        // `accessibilityLiveRegion` below is ANDROID ONLY, so on iOS this
-        // announce is the only channel VoiceOver has.
-        if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
+        // Said with the outcome, by the outcome line: announced here as well,
+        // or through a live region, it cut the outcome off (Android) or was
+        // cut off by it (iOS).
+        lastError = message;
       }
     }
     // The rows this carry created are copies of each other exactly as the ones
@@ -444,6 +491,13 @@ export default function EventGroupCarryModal({
     }
     if (!alive.current) return;
     setCreatedRows(created);
+    const allDoubts = [...doubts, ...unsure];
+    setDoubts(allDoubts);
+    // Said once, with whatever else this pass reports, by the outcome line that
+    // takes the cursor: a second utterance in the same frame would cut the
+    // first off, and a queued announcement is queued on iOS only.
+    const doubtful = unsure.length === 0 ? '' : ` ${unsure.join(' ')}`;
+    const failure = lastError === '' ? '' : ` ${lastError}`;
     setBusy(false);
     // The whole point of the screen: say what actually happened, including
     // what did not.
@@ -452,11 +506,11 @@ export default function EventGroupCarryModal({
       // the same title — that is what made them a group — so a list of titles
       // said nothing about which copy is now out of step.
       const names = failed.map((target) => calendarName(target.calendar_id));
+      setOutcomeSaid(
+        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${failure}${doubtful}`,
+      );
       setOutcome({ kind: 'partly', done, failed });
       setPending(failed);
-      AccessibilityInfo.announceForAccessibility(
-        t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') }),
-      );
       // Stays open: a half-carried group is the state this feature exists to
       // prevent, so it has to be seen, and the rest can be retried.
       return;
@@ -465,11 +519,17 @@ export default function EventGroupCarryModal({
       // Every copy was written; only the new rows are not tied together yet.
       // Said, and left on screen, because "the appointment is one row again" is
       // what the user was promised.
+      setOutcomeSaid(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`);
       setOutcome({ kind: 'regroup', done });
       setPending([]);
-      AccessibilityInfo.announceForAccessibility(
-        t('dialogs.eventGroupCarry.regroupFailed', { count: done }),
-      );
+      return;
+    }
+    if (allDoubts.length > 0) {
+      // No copy is left to offer again, but some may show twice: leaving would
+      // take the only words that say which ones.
+      setOutcomeSaid(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
+      setOutcome({ kind: 'written', done });
+      setPending([]);
       return;
     }
     AccessibilityInfo.announceForAccessibility(
@@ -481,6 +541,7 @@ export default function EventGroupCarryModal({
     targets,
     outcome,
     createdRows,
+    doubts,
     successor,
     group.id,
     plan.changed,
@@ -490,8 +551,21 @@ export default function EventGroupCarryModal({
     occurrence,
     calendarName,
     t,
+    i18n.language,
     navigation,
   ]);
+
+  // Every outcome puts the cursor on the outcome line, which reads what the
+  // pass has to say, as the desktop focuses its outcome note. The outcome
+  // 'written' also removes the button that held the cursor: without a new
+  // place it was stranded, and the screen reader jumped to the top.
+  useEffect(() => {
+    if (!outcome) return;
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(outcomeRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, [outcome]);
 
   return (
     <FormScrollView
@@ -503,20 +577,26 @@ export default function EventGroupCarryModal({
         {t('dialogs.eventGroupCarry.title')}
       </Text>
 
+      {/* Not a live region: every outcome is announced as it is set, doubts
+          included, and on Android a live region's own reading of just this
+          line cut that announcement off. */}
       <Text
+        ref={outcomeRef}
         style={outcome ? styles.warning : styles.intro}
         accessibilityRole="text"
-        accessibilityLiveRegion={outcome ? 'assertive' : 'none'}
+        accessibilityLabel={outcome && outcomeSaid !== '' ? outcomeSaid : undefined}
       >
         {outcome
           ? outcome.kind === 'regroup'
             ? t('dialogs.eventGroupCarry.regroupFailed', { count: outcome.done })
-            : t('dialogs.eventGroupCarry.partly', {
-                done: outcome.done,
-                failed: outcome.failed
-                  .map((target) => calendarName(target.calendar_id))
-                  .join(', '),
-              })
+            : outcome.kind === 'written'
+              ? t('dialogs.eventGroupCarry.done', { count: outcome.done })
+              : t('dialogs.eventGroupCarry.partly', {
+                  done: outcome.done,
+                  failed: outcome.failed
+                    .map((target) => calendarName(target.calendar_id))
+                    .join(', '),
+                })
           : calendars == null
             ? t('dialogs.eventGroup.loading')
             : t('dialogs.eventGroupCarry.message', {
@@ -570,33 +650,41 @@ export default function EventGroupCarryModal({
         </Text>
       ))}
 
+      {/* The copies written whose series may show twice, one line each.
+          Mirrors the desktop. */}
+      {doubts.map((doubt) => (
+        <Text key={doubt} style={styles.warning} accessibilityRole="text">
+          {doubt}
+        </Text>
+      ))}
+
+      {/* Not a live region: the outcome line reads it with the outcome. */}
       {error != null && (
-        <Text
-          style={styles.error}
-          accessibilityRole="text"
-          accessibilityLiveRegion="assertive"
-        >
+        <Text style={styles.error} accessibilityRole="text">
           {error}
         </Text>
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t(
-          outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
-        )}
-        accessibilityState={{ disabled: busy || !canRetry }}
-        onPress={() => void carry()}
-        style={styles.action}
-      >
-        <Text
-          style={[styles.actionText, (busy || !canRetry) && styles.disabled]}
-        >
-          {t(
+      {/* Nothing is left to try once no copy is outstanding. */}
+      {outcome?.kind !== 'written' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(
             outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
           )}
-        </Text>
-      </Pressable>
+          accessibilityState={{ disabled: busy || !canRetry }}
+          onPress={() => void carry()}
+          style={styles.action}
+        >
+          <Text
+            style={[styles.actionText, (busy || !canRetry) && styles.disabled]}
+          >
+            {t(
+              outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
+            )}
+          </Text>
+        </Pressable>
+      )}
 
       <Pressable
         accessibilityRole="button"

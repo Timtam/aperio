@@ -17,18 +17,32 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced } = vi.hoisted(() => {
+  /** What the dialog announced, in order. */
+  const announced: string[] = [];
   const groupOfAnchor: { current: unknown[] } = { current: [] };
   /** The copy as `get_event_by_id` answers; COPY unless a test says otherwise. */
   const copyOnFile: { current: unknown } = { current: null };
+  /** What cutting a copy's series short fails with, when a test says so. */
+  const truncateFails: { current: unknown } = { current: null };
+  /** What deleting a copy's new part fails with, when a test says so. */
+  const deleteFails: { current: unknown } = { current: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
+    if (command === 'delete_event' && deleteFails.current != null) {
+      return Promise.reject(deleteFails.current);
+    }
     if (command === 'get_event_by_id') {
       return Promise.resolve(copyOnFile.current ?? COPY);
     }
     if (command === 'get_series_rows') {
       return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
     }
+    if (command === 'create_event') {
+      const request = (payload as { request: Record<string, unknown> }).request;
+      return Promise.resolve({ ...request, id: 'ev-b-tail' });
+    }
     if (command === 'update_event') {
+      if (truncateFails.current != null) return Promise.reject(truncateFails.current);
       return Promise.resolve((payload as { event: unknown }).event);
     }
     if (command === 'event_groups_for_events') {
@@ -39,7 +53,7 @@ const { invokeMock, groupOfAnchor, copyOnFile } = vi.hoisted(() => {
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -53,7 +67,11 @@ const CALENDARS = [
 ] as unknown as Calendar[];
 const STORE = { calendars: CALENDARS, colorLabels: [], selectedCalendarIds: new Set(['work']) };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
-vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../a11y/announcerContext', () => ({
+  useAnnouncer: () => (message: string) => {
+    announced.push(message);
+  },
+}));
 
 const CUT = '2026-08-24T08:00:00.000Z';
 
@@ -116,6 +134,9 @@ afterEach(() => {
   invokeMock.mockClear();
   groupOfAnchor.current = [];
   copyOnFile.current = null;
+  truncateFails.current = null;
+  deleteFails.current = null;
+  announced.length = 0;
 });
 
 async function carry() {
@@ -204,5 +225,91 @@ describe('EventGroupCarryDialog → "this and all following" to a copy with no h
     expect(calls('ungroup_event').map((call) => call[1])).toEqual([
       { calendarId: 'private', eventId: 'ev-b', bookkeeping: true },
     ]);
+  });
+});
+
+describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
+  /** The copy from two Mondays before the cut: it keeps a head, so it is split. */
+  const SPLIT_COPY = {
+    ...COPY,
+    start: '2026-08-10T08:00:00.000Z',
+    end: '2026-08-10T09:00:00.000Z',
+  };
+
+  async function carryWhileTheCutFailsWith(failure: unknown) {
+    copyOnFile.current = SPLIT_COPY;
+    truncateFails.current = failure;
+    const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
+    render(
+      <EventGroupCarryDialog
+        isOpen
+        onClose={() => {}}
+        group={GROUP}
+        anchor={ANCHOR}
+        before={STOOD}
+        after={MOVED}
+        scope="future"
+        occurrence={CUT}
+        successor={SUCCESSOR}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
+  }
+
+  it('creates the new part first, then cuts the copy short (136)', async () => {
+    copyOnFile.current = SPLIT_COPY;
+    await carry();
+
+    const order = invokeMock.mock.calls
+      .map((call) => call[0])
+      .filter((command) => command === 'create_event' || command === 'update_event');
+    expect(order).toEqual(['create_event', 'update_event']);
+  });
+
+  it('deletes the new part again when cutting the copy short was refused', async () => {
+    await carryWhileTheCutFailsWith({ code: 'conflict', message: 'etag mismatch' });
+    await waitFor(() => expect(calls('delete_event')).toHaveLength(1));
+
+    expect(calls('delete_event')[0][1]).toEqual({
+      id: 'ev-b-tail',
+      calendarId: 'private',
+      // The copies' writes tell nobody; neither does their undo.
+      sendCancellations: false,
+    });
+    expect(screen.queryByText(/möglicherweise doppelt|may now show twice/)).toBeNull();
+  });
+
+  it('counts a copy written when its cut may have landed, and names its calendar and day (144, 145)', async () => {
+    await carryWhileTheCutFailsWith({ code: 'network', message: 'connection reset' });
+    const said = await screen.findByText(/möglicherweise doppelt|may show twice/);
+
+    expect(said.textContent).toMatch(/Privat/);
+    expect(said.textContent).toMatch(/24\. August 2026|August 24, 2026/);
+    expect(calls('delete_event')).toHaveLength(0);
+    // Written: its new part joins the new group, and nothing offers to write
+    // it again — that would put the new series there twice.
+    await waitFor(() => expect(calls('group_events')).toHaveLength(1));
+    const members = (calls('group_events')[0][1] as { members: { event_id: string }[] }).members;
+    expect(members.map((m) => m.event_id)).toEqual(['ev-a', 'ev-b-tail']);
+    expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
+    // The dialog stays, or the only words that name the copy would go with it,
+    // counting the copy as written.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/Eine Kopie aktualisiert|One copy updated/)).toBeTruthy();
+    // Said once, the count and the doubt together.
+    const doubt = announced.filter((line) => /möglicherweise doppelt|may show twice/.test(line));
+    expect(doubt).toHaveLength(1);
+    expect(doubt[0]).toMatch(/Eine Kopie aktualisiert|One copy updated/);
+    expect(doubt[0]).toMatch(/Privat/);
+  });
+
+  it('does not offer a copy again whose new part could not be deleted', async () => {
+    deleteFails.current = { code: 'network', message: 'connection reset' };
+    await carryWhileTheCutFailsWith({ code: 'conflict', message: 'etag mismatch' });
+    const said = await screen.findByText(/möglicherweise doppelt|may now show twice/);
+
+    expect(said.textContent).toMatch(/Privat/);
+    expect(calls('delete_event')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
   });
 });

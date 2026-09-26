@@ -57,11 +57,14 @@ import {
   thisAndFutureDeletedKey,
   readSeriesRows,
   ruleFromCut,
+  seriesMaybeShownTwice,
+  cutoffDay,
 } from '../intl/recurrence';
 import {
   describeRecurrence,
   eventPrefillFrom,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -628,6 +631,34 @@ export function EventDialog({
   );
 
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A split that is written while cutting the old series short may not have
+   * reached the provider (decisions 145 and 146): what the editor says in
+   * place of the form, and what closing it goes on to — the other copies, or
+   * away. Everything is saved; the sentence is the one thing left to take in,
+   * so it stays on screen, focused, until the user closes it.
+   */
+  const [splitNotice, setSplitNotice] = useState<{
+    sentence: string;
+    proceed: () => Promise<void>;
+  } | null>(null);
+  const splitNoticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (splitNotice) splitNoticeRef.current?.focus();
+  }, [splitNotice]);
+  // Closing the notice goes on — once. It stays until the dialog closes or the
+  // carry replaces it, so the form never comes back in between with a live
+  // Save and the cursor on nothing.
+  const leavingNotice = useRef(false);
+  // Whether the editor is still open: a save the user walked away from must
+  // not put a notice into a dialog that is gone, or into the next one opened.
+  const shownRef = useRef(isOpen);
+  useEffect(() => {
+    shownRef.current = isOpen;
+    return () => {
+      shownRef.current = false;
+    };
+  }, [isOpen]);
   /** Why the offer's calendar was not adopted, when it was not. Rendered
    *  beside the picker AND announced — a sighted user sees the disagreement
    *  and needs the reason just as much. */
@@ -734,6 +765,8 @@ export function EventDialog({
     if (!isOpen) {
       appliedInitialRef.current = null;
       landedPrivateSeedRef.current = null;
+      setSplitNotice(null);
+      leavingNotice.current = false;
       return;
     }
     const baseline = appliedInitialRef.current;
@@ -1331,9 +1364,10 @@ export function EventDialog({
             occurrencesBefore: number;
           } | null = null;
           if (isOccurrence && editScope === 'this_and_future') {
-            // Split the series at this occurrence: truncate the original to end
-            // just before it (keeping its own fields), then create a NEW series
-            // from here carrying the edits. The new series continues the
+            // Split the series at this occurrence: create a NEW series from
+            // here carrying the edits, then truncate the original to end just
+            // before it (keeping its own fields; the order is decision 136,
+            // see `writeSeriesSplit`). The new series continues the
             // original PATTERN (with the remaining COUNT) — unless the user
             // changed the rule in the form, which then is the new series' rule
             // (decision 121).
@@ -1409,25 +1443,11 @@ export function EventDialog({
                 );
               // The arithmetic — the COUNT the tail keeps, the EXDATEs that
               // travel with it, the zone it inherits — lives in
-              // `planSeriesSplit`; the order and the recovery in
+              // `planSeriesSplit`; the order and the undo in
               // `writeSeriesSplit`. See shared/seriesSplit.ts for why each of
               // those details decides whether the two halves line up.
-              const created = await writeSeriesSplit(
+              const written = await writeSeriesSplit(
                 {
-                  // Notify on the truncate too (symmetric with delete-this-and-
-                  // following): on notify-flag providers attendees must be told
-                  // the original series now ends before the cutoff, or they keep
-                  // the old occurrences AND get the new tail invite.
-                  truncate: (headRule) =>
-                    apiUpdateEvent(
-                      {
-                        ...master,
-                        recurrence: { ...masterRecurrence, rrule: headRule },
-                        send_invitations: sendInvitations,
-                        truncate_tail_overrides: true,
-                      },
-                      master.calendar_id,
-                    ),
                   createTail: (recurrence) =>
                     apiCreateEvent(
                       {
@@ -1450,14 +1470,40 @@ export function EventDialog({
                       // (incl. floating) so head and tail expand identically.
                       { preserveRecurrenceZone: true },
                     ),
-                  restore: () =>
+                  // Notify on the truncate too (symmetric with delete-this-and-
+                  // following): on notify-flag providers attendees must be told
+                  // the original series now ends before the cutoff, or they keep
+                  // the old occurrences AND get the new tail invite.
+                  truncate: (headRule) =>
                     apiUpdateEvent(
-                      { ...master, send_invitations: sendInvitations },
+                      {
+                        ...master,
+                        recurrence: { ...masterRecurrence, rrule: headRule },
+                        send_invitations: sendInvitations,
+                        truncate_tail_overrides: true,
+                      },
                       master.calendar_id,
                     ),
+                  // The undo of the create, told as the create was.
+                  removeTail: (tail) =>
+                    deleteEventById(tail.id, tail.calendar_id, sendInvitations),
                 },
                 plan,
-              );
+              ).catch((err: unknown) => {
+                // The old series was not cut, and the new one could not be
+                // deleted again: it may stand twice. That is said first, with
+                // what went wrong.
+                throw seriesMaybeShownTwice(err)
+                  ? new Error(
+                      t('dialogs.event.thisAndFutureMaybeTwice', {
+                        title: trimmedTitle,
+                        date: cutoffDay(occIso, i18n.language),
+                        detail: eventWriteFailureReason(err, t),
+                      }),
+                    )
+                  : err;
+              });
+              const created = written.tail;
               // The tail is a continuation of the same appointment, so it gets
               // the private list under its new id. The head keeps its own
               // under the series key: it still has every occurrence before
@@ -1470,14 +1516,39 @@ export function EventDialog({
                   form.colorLabel,
                 );
               }
+              // The other copies have a series each, so carrying this means
+              // splitting theirs at the same point — not updating a row.
+              const goOn = async () => {
+                if (!(await offerToCarry(event, created, 'future', occIso))) {
+                  onClose();
+                }
+              };
+              // The new series is written even when cutting the old one short
+              // may not have reached the provider (145): then the old one may
+              // still run through the cutoff. That is said on screen, focused,
+              // and the editor goes on only once it is closed (146) — an
+              // announcement alone was never seen, and the carry dialog
+              // opening next spoke over it.
+              if (written.headCut === 'unsure') {
+                const sentence = t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                  title: trimmedTitle,
+                  date: cutoffDay(occIso, i18n.language),
+                  detail: eventWriteFailureReason(written.failure, t),
+                });
+                // Left while it saved: no dialog to put the notice in, so it
+                // is said, once, and nothing opens after the user has gone.
+                if (!shownRef.current) {
+                  announce(sentence);
+                  return;
+                }
+                leavingNotice.current = false;
+                setSplitNotice({ sentence, proceed: goOn });
+                return;
+              }
               announce(
                 t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
               );
-              // The other copies have a series each, so carrying this means
-              // splitting theirs at the same point — not updating a row.
-              if (!(await offerToCarry(event, created, 'future', occIso))) {
-                onClose();
-              }
+              await goOn();
               return;
             }
           }
@@ -1666,6 +1737,7 @@ export function EventDialog({
       offerToCarry,
       onClose,
       t,
+      i18n.language,
     ],
   );
 
@@ -1922,6 +1994,41 @@ export function EventDialog({
               onClick={onClose}
             >
               {t('dialogs.event.birthdayClose')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (splitNotice) {
+    const close = () => {
+      if (leavingNotice.current) return;
+      leavingNotice.current = true;
+      void splitNotice.proceed();
+    };
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={close}
+        title={title}
+        className="modal--form"
+        dismissOnBackdrop={false}
+      >
+        <div className="form">
+          <FocusableNote
+            ref={splitNoticeRef}
+            className="form__hint form__hint--warning"
+          >
+            {splitNotice.sentence}
+          </FocusableNote>
+          <div className="form__actions">
+            <button
+              type="button"
+              className="form__action form__action--primary"
+              onClick={close}
+            >
+              {t('dialogs.close')}
             </button>
           </div>
         </div>

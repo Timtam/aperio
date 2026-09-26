@@ -787,12 +787,26 @@ async fn put_resource(
         let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let (response, first_may_have_landed) = client
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_retrying_marked()
         .await?;
+    // A 412 on the replay of a guarded write: the connection died after the
+    // first PUT went out, and that one may have landed — its new ETag is what
+    // refuses the replay. Read as a refusal, a caller would undo around a write
+    // that went through: splitting a series deleted its new part while the old
+    // part was already cut short (decision 144). So it is what it is, unsure.
+    if first_may_have_landed
+        && if_match.is_some()
+        && response.status() == StatusCode::PRECONDITION_FAILED
+    {
+        return Err(CaldavError::Network(format!(
+            "the connection to '{resource}' broke after the change was sent; \
+             it may have been saved"
+        )));
+    }
     check_write(response).await
 }
 
@@ -1047,7 +1061,8 @@ fn splice_overrides_before_end(vcal: &str, overrides: &[&str]) -> String {
 /// Outcome of a DELETE attempt. Distinguishes "we just removed
 /// the row" from "the row wasn't here in the first place" so the
 /// home-set walkers in `lib.rs` know whether they've actually
-/// done the work or should keep looking in the next calendar.
+/// done the work or should keep looking in the next calendar
+/// ([`DeleteWalk`] holds their rule).
 ///
 /// The direct-API delete (single-calendar caller already knows
 /// the URL) treats both as success — idempotent semantics for
@@ -1062,6 +1077,52 @@ pub enum DeleteOutcome {
     /// URL we computed. Idempotent success for direct callers,
     /// "keep walking" for the home-set search.
     NotFound,
+    /// Server returned 404 to a REPLAYED delete whose first attempt may
+    /// have reached it: the first one may have removed the resource, or it
+    /// was never at this URL. A direct caller reads it as gone. A walker
+    /// keeps looking — a bare id names a different URL in every calendar —
+    /// and counts it as done only if no calendar holds the event after all.
+    GoneOnReplay,
+}
+
+/// Where a walk over every calendar (or task list) stands, DELETE by
+/// DELETE: the rule both home-set walkers in `lib.rs` follow.
+#[derive(Debug, Default)]
+pub(crate) struct DeleteWalk {
+    gone_on_replay: bool,
+    last_err: Option<CaldavError>,
+}
+
+impl DeleteWalk {
+    /// Take one calendar's outcome. `true` when the walk is done: the event
+    /// was removed there.
+    pub(crate) fn step(&mut self, outcome: CaldavResult<DeleteOutcome>) -> bool {
+        match outcome {
+            Ok(DeleteOutcome::Deleted) => return true,
+            Ok(DeleteOutcome::NotFound) => {}
+            Ok(DeleteOutcome::GoneOnReplay) => self.gone_on_replay = true,
+            // Non-404 errors might be transient (auth hiccup, server
+            // hiccup). Remember the last one in case nothing else works,
+            // but keep walking — the resource might still live in another
+            // calendar we haven't tried yet.
+            Err(err) => self.last_err = Some(err),
+        }
+        false
+    }
+
+    /// The walk found no calendar that removed it. A replayed 404 counts as
+    /// gone when no calendar failed: the first DELETE may have removed it,
+    /// and none of the others holds it. `missing` names it otherwise.
+    pub(crate) fn finish(self, missing: String) -> Result<(), CaldavError> {
+        match self.last_err {
+            Some(err) => Err(err),
+            None if self.gone_on_replay => Ok(()),
+            None => Err(CaldavError::Http {
+                status: 404,
+                message: missing,
+            }),
+        }
+    }
 }
 
 /// Delete an event from the server. `event_id` is the UID; the URL
@@ -1069,10 +1130,11 @@ pub enum DeleteOutcome {
 /// passes an `etag`, an `If-Match` header is added so the server
 /// refuses to delete a row that has changed under it.
 ///
-/// 404 is treated as a non-error outcome (`DeleteOutcome::NotFound`)
-/// — idempotent semantics for "make sure this row is gone". The
-/// home-set walker uses the typed outcome to keep searching past
-/// 404s for the calendar that actually owns the resource.
+/// 404 is treated as a non-error outcome (`DeleteOutcome::NotFound`, or
+/// `GoneOnReplay` when the first attempt may have removed it) —
+/// idempotent semantics for "make sure this row is gone". The home-set
+/// walker uses the typed outcome to keep searching past 404s for the
+/// calendar that actually owns the resource.
 pub async fn delete_event(
     client: &Client,
     calendar_url: &Url,
@@ -1086,13 +1148,22 @@ pub async fn delete_event(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let (response, first_may_have_landed) = client
         .delete(resource.clone())
         .headers(headers)
-        .send_retrying()
+        .send_retrying_marked()
         .await?;
     if response.status() == StatusCode::NOT_FOUND {
-        return Ok(DeleteOutcome::NotFound);
+        // On a replay, the first DELETE may have removed it before the
+        // connection broke. Read as "not here", every calendar answered 404
+        // and the event was reported found nowhere: undoing a split's new
+        // part said it could not. But it may just as well never have been
+        // here, so the walker keeps looking (`DeleteWalk`).
+        return Ok(if first_may_have_landed {
+            DeleteOutcome::GoneOnReplay
+        } else {
+            DeleteOutcome::NotFound
+        });
     }
     check_write(response).await?;
     Ok(DeleteOutcome::Deleted)
@@ -1733,6 +1804,137 @@ END:VCALENDAR</c:calendar-data>
         let seen = paths.lock().unwrap().clone();
         assert_eq!(seen.len(), 2, "exactly one replay");
         assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
+    }
+
+    /// A server whose first connection reads the request and dies without an
+    /// answer, and whose second answers the replay with `reply`. Returns its
+    /// base URL.
+    async fn first_attempt_lost_then(reply: &'static [u8]) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                drop(sock);
+            }
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(reply).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        base
+    }
+
+    /// A guarded PUT whose first attempt may have landed: the replay's 412 is
+    /// that attempt's new ETag, not someone else's change. Reported as a
+    /// conflict, a split deleted its new part around a truncate that went
+    /// through (decision 144).
+    #[tokio::test]
+    async fn a_412_on_the_replay_of_a_guarded_put_is_unsure() {
+        let base = first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let resource = Url::parse(&format!("{base}/calendars/alice/work/abc.ics")).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            Some("\"etag-1\""),
+            &creds(&base),
+        )
+        .await
+        .expect_err("the replay was refused");
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// Without a replay, a 412 is what it says: the copy moved on.
+    #[tokio::test]
+    async fn a_412_without_a_replay_is_a_conflict() {
+        let mut server = Server::new_async().await;
+        let _put = server
+            .mock("PUT", "/calendars/alice/work/abc.ics")
+            .with_status(412)
+            .create_async()
+            .await;
+        let resource =
+            Url::parse(&format!("{}/calendars/alice/work/abc.ics", server.url())).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            Some("\"etag-1\""),
+            &creds(&server.url()),
+        )
+        .await
+        .expect_err("refused");
+        assert!(
+            matches!(err, CaldavError::Http { status: 412, .. }),
+            "{err:?}"
+        );
+    }
+
+    /// A DELETE whose first attempt may have removed the event: the replay's
+    /// 404 says it is gone — or never was at this URL.
+    #[tokio::test]
+    async fn a_404_on_the_replay_of_a_delete_is_gone_on_replay() {
+        let base =
+            first_attempt_lost_then(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let outcome = delete_event(&client(), &cal_url, "abc", None, &creds(&base))
+            .await
+            .expect("a 404 is no error");
+        assert_eq!(outcome, DeleteOutcome::GoneOnReplay);
+    }
+
+    fn gone(status: u16) -> CaldavError {
+        CaldavError::Http {
+            status,
+            message: String::new(),
+        }
+    }
+
+    /// A replayed 404 in a calendar that never held the event must not end
+    /// the walk: the calendar that holds it still gets its DELETE. Stopping
+    /// there reported a split's new series deleted while it stood.
+    #[test]
+    fn a_walk_goes_on_past_a_replayed_404() {
+        let mut walk = DeleteWalk::default();
+        assert!(
+            !walk.step(Ok(DeleteOutcome::GoneOnReplay)),
+            "not done in calendar A"
+        );
+        assert!(walk.step(Ok(DeleteOutcome::Deleted)), "done in calendar B");
+    }
+
+    /// ...and when no calendar holds it, the replayed 404 was the first DELETE
+    /// removing it: gone, as asked. A failure elsewhere still wins — the event
+    /// may live where the DELETE failed.
+    #[test]
+    fn a_replayed_404_found_nowhere_else_is_gone() {
+        let mut walk = DeleteWalk::default();
+        walk.step(Ok(DeleteOutcome::GoneOnReplay));
+        walk.step(Ok(DeleteOutcome::NotFound));
+        assert!(walk.finish("nowhere".into()).is_ok());
+
+        let mut walk = DeleteWalk::default();
+        walk.step(Ok(DeleteOutcome::GoneOnReplay));
+        walk.step(Err(gone(500)));
+        assert!(matches!(
+            walk.finish("nowhere".into()),
+            Err(CaldavError::Http { status: 500, .. })
+        ));
+
+        let mut walk = DeleteWalk::default();
+        walk.step(Ok(DeleteOutcome::NotFound));
+        assert!(matches!(
+            walk.finish("nowhere".into()),
+            Err(CaldavError::Http { status: 404, .. })
+        ));
     }
 
     /// A plain event's copy on the server, with `summary` as its title.

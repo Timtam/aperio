@@ -2383,6 +2383,48 @@ Siehe DESIGN §4.2.
       muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
       liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
       ein frisch erzeugtes `.so`, ohne Testläufer — ↻ im Test.
+    - ✅ **Teilen kürzte zuerst** (136, 144). Scheiterte danach das Anlegen,
+      stellte das Wiederherstellen nur die Regel zurück: die geänderten und
+      gelöschten Vorkommen, die das Kürzen beim Anbieter verworfen hatte
+      (Google löscht sie, CalDAV schreibt sie nicht mehr), waren still weg.
+      Jetzt legt `writeSeriesSplit` erst die neue Serie an und kürzt dann; die
+      Editoren und beide Mitzieh-Dialoge folgen. Scheitert das Kürzen sicher
+      (`writeNeverLanded`: Ablehnungs-Token oder Code `conflict`, `forbidden`,
+      `invalid_input`, `not_found`, `auth`, `unsupported`), wird die neue Serie
+      mit derselben Benachrichtigung wieder gelöscht. Sonst (Netz, Protokoll,
+      ohne Code) bleiben beide stehen (144), und das Teilen gilt als
+      geschrieben (145, `headCut: 'unsure'`): Die neue Serie bekommt private
+      Erinnerungen, Farbe und Gruppe, die Ansage sagt, ab welchem Tag die Serie
+      möglicherweise doppelt steht, und nichts bietet an, sie noch einmal zu
+      schreiben (der Mitzieh-Dialog bleibt mit dem Hinweis offen, ohne „erneut
+      versuchen“). Scheitert nach einer Ablehnung auch das Löschen der neuen
+      Serie, ist es ein Fehler mit demselben Hinweis (`seriesMaybeShownTwice`);
+      der Editor bittet, vor dem erneuten Speichern zu prüfen. Beim unklaren
+      Kürzen bleibt der Editor mit dem Hinweis offen, fokussiert, nur mit
+      „Schließen“; erst danach geht es zum Mitziehen oder zu (146). Ein Anlegen
+      behält den Nachweis aus 106 (`invalidate_after_create`), sonst schrieb das
+      Kürzen danach auf Exchange alle Felder zurück. CalDAV liest die Antwort
+      einer Wiederholung als das, was sie ist: 412 nach dem erneuten Senden
+      eines bewachten PUT ist „unklar“; 404 nach dem erneuten DELETE ist
+      „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
+      es nur als gelöscht, wenn kein anderer Kalender den Termin hat
+      (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
+      davon: da ging nichts hinaus.
+    - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
+      Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
+      Wiederholung 405 (die Liste gibt es schon): gemeldet als Fehler, ein
+      erneuter Versuch legt eine zweite Liste an. Vor #97 schon so.
+    - 🚩 **Sichere Ablehnungen als Ablehnung kennzeichnen** (147, eigener PR
+      direkt nach #97): EWS-Fehlerantworten, HTTP 400/429 bei Google und
+      Microsoft, CalDAV-Prüfungen „nothing was saved“ kommen als `protocol` an;
+      beim Teilen bleiben dann beide Serien mit Warnung stehen, obwohl sicher
+      nichts gekürzt wurde. Die Adapter sollen sie mit `server-refused`
+      kennzeichnen. Dazu Graph: nach erfolgreichem `/cancel` liefert das
+      folgende DELETE womöglich 404 (die Absage verschiebt das Ereignis), das
+      Löschen gilt dann als gescheitert. Am Handy kommen
+      nur `forbidden`, `conflict` und `network` mit Code an (B9), jede andere
+      Ablehnung gilt dort also vorsichtig als unklar. Handy ohne Testläufer —
+      ↻ im Test.
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
@@ -2404,8 +2446,10 @@ Siehe DESIGN §4.2.
       Einladung (`invitationLocked`, am Desktop schon).
     - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
       Worten.
-    - Die Editoren nutzen `seriesLeftTruncated` nicht: scheitert beim Teilen
-      auch das Zurücksetzen, hört man nur den ersten Fehler.
+    - ✅ Die Editoren nutzten `seriesLeftTruncated` nicht: scheiterte beim
+      Teilen auch das Zurücksetzen, hörte man nur den ersten Fehler. Das
+      Zurücksetzen gibt es nicht mehr (136); scheitert das Zurücknehmen der
+      neuen Serie, sagen es beide Editoren (`seriesMaybeShownTwice`, oben).
     - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
       Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche

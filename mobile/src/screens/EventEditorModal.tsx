@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   StyleSheet,
   Switch,
@@ -31,6 +32,7 @@ import {
   allDayWireEnd,
   describeRecurrence,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -51,6 +53,8 @@ import {
   readSeriesRows,
   ruleFromCut,
   seriesFromCut,
+  seriesMaybeShownTwice,
+  cutoffDay,
   seriesTimesFromOccurrenceEdit,
   type TailRecurrence,
 } from '@aperio/shared';
@@ -93,12 +97,14 @@ import {
   type EditableReminder,
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
+import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
   Calendar,
   CalendarEvent,
   createEvent,
+  deleteEvent,
   getEventById,
   getSeriesRows,
   listCalendars,
@@ -215,6 +221,62 @@ export default function EventEditorModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A split that is written while cutting the old series short may not have
+   * reached the provider (decisions 145 and 146): what the editor says in
+   * place of the form, and what closing it goes on to — the other copies, or
+   * away. Everything is saved; the sentence is the one thing left to take in,
+   * so it stays on screen, focused, until the user closes it. Mirrors the
+   * desktop.
+   */
+  const [splitNotice, setSplitNotice] = useState<{
+    sentence: string;
+    proceed: () => Promise<void>;
+  } | null>(null);
+  const splitNoticeRef = useRef<Text>(null);
+  useEffect(() => {
+    if (splitNotice == null) return;
+    // After the render that put it there, so the node exists.
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(splitNoticeRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, [splitNotice]);
+  // Whether the editor is still on screen: a save the user walked away from
+  // must not put a notice on a screen that is gone.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
+  // Closing the notice goes on — once. It stays on screen until the editor is
+  // replaced or goes away, so nothing of the form comes back in between.
+  const leavingNotice = useRef(false);
+  const closeNotice = useCallback(() => {
+    if (splitNotice == null || leavingNotice.current) return;
+    leavingNotice.current = true;
+    void splitNotice.proceed();
+  }, [splitNotice]);
+  // Every way out of the notice goes on as its Close does, as the desktop's
+  // Escape does: the header button, the swipe and the Android back button.
+  // "Cancel" would also have said the saved split was about to be undone.
+  useEffect(() => {
+    if (splitNotice == null) return;
+    leavingNotice.current = false;
+    navigation.setOptions({
+      headerLeft: () => (
+        <HeaderCancelButton label={t('dialogs.close')} onPress={closeNotice} />
+      ),
+      gestureEnabled: false,
+    });
+    return navigation.addListener('beforeRemove', (event) => {
+      if (leavingNotice.current) return;
+      event.preventDefault();
+      closeNotice();
+    });
+  }, [splitNotice, navigation, t, closeNotice]);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   // Accounts whose calendars never store a reminder Aperio writes: the device
@@ -1095,7 +1157,7 @@ export default function EventEditorModal({
         // "This and all following": split the series at this occurrence. The
         // arithmetic — the COUNT the tail keeps, the EXDATEs that travel with
         // it, the zone it inherits — lives in `planSeriesSplit`; the order and
-        // the recovery in `writeSeriesSplit`. See shared/seriesSplit.ts for why
+        // the undo in `writeSeriesSplit`. See shared/seriesSplit.ts for why
         // each of those details decides whether the two halves line up.
         // The loaded `original` IS the master (getEventById resolves the
         // series), so its start anchors the occurrence count.
@@ -1134,22 +1196,8 @@ export default function EventEditorModal({
               allDay || original.all_day,
             );
           const masterRecurrence = original.recurrence;
-          const created = await writeSeriesSplit(
+          const written = await writeSeriesSplit(
             {
-              // Notify on the truncate too (symmetric with
-              // delete-this-and-following): on notify-flag providers attendees
-              // must learn the original series now ends before the cutoff, else
-              // they keep the old occurrences AND receive the new tail invite.
-              truncate: (headRule) =>
-                updateEvent(
-                  {
-                    ...original,
-                    recurrence: { ...masterRecurrence, rrule: headRule },
-                    send_invitations: sendInvitations,
-                    truncate_tail_overrides: true,
-                  },
-                  original.calendar_id,
-                ),
               createTail: (planned) =>
                 createEvent(
                   {
@@ -1172,14 +1220,40 @@ export default function EventEditorModal({
                   // floating) so head and tail expand identically.
                   { preserveRecurrenceZone: true },
                 ),
-              restore: () =>
+              // Notify on the truncate too (symmetric with
+              // delete-this-and-following): on notify-flag providers attendees
+              // must learn the original series now ends before the cutoff, else
+              // they keep the old occurrences AND receive the new tail invite.
+              truncate: (headRule) =>
                 updateEvent(
-                  { ...original, send_invitations: sendInvitations },
+                  {
+                    ...original,
+                    recurrence: { ...masterRecurrence, rrule: headRule },
+                    send_invitations: sendInvitations,
+                    truncate_tail_overrides: true,
+                  },
                   original.calendar_id,
                 ),
+              // The undo of the create, told as the create was.
+              removeTail: (tail) =>
+                deleteEvent(tail.id, tail.calendar_id, sendInvitations),
             },
             plan,
-          );
+          ).catch((err: unknown) => {
+            // The old series was not cut, and the new one could not be deleted
+            // again: it may stand twice. That is said first, with what went
+            // wrong. Mirrors the desktop.
+            throw seriesMaybeShownTwice(err)
+              ? new Error(
+                  t('dialogs.event.thisAndFutureMaybeTwice', {
+                    title: trimmedTitle,
+                    date: cutoffDay(occurrence, i18n.language),
+                    detail: eventWriteFailureReason(err, t),
+                  }),
+                )
+              : err;
+          });
+          const created = written.tail;
           // The tail is a continuation of the same appointment, so it gets the
           // private list under its new id. The head keeps its own under the
           // series key: it still has every occurrence before the change. Mirrors
@@ -1188,22 +1262,44 @@ export default function EventEditorModal({
           if (!isLocalCal) {
             await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
           }
+          // The other copies have a series each, so carrying this means splitting
+          // theirs at the same point — not updating a row.
+          const goOn = async () => {
+            if (
+              await offerToCarry(
+                occurrenceBefore(original, occurrence),
+                created,
+                'future',
+                occurrence,
+              )
+            ) {
+              return;
+            }
+            navigation.goBack();
+          };
+          // The new series is written even when cutting the old one short may
+          // not have reached the provider (145): then the old one may still run
+          // through the cutoff. That is said on screen, focused, and the editor
+          // goes on only once it is closed (146). Mirrors the desktop.
+          if (written.headCut === 'unsure') {
+            const sentence = t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+              title: trimmedTitle,
+              date: cutoffDay(occurrence, i18n.language),
+              detail: eventWriteFailureReason(written.failure, t),
+            });
+            // Left while it saved: no screen to put the notice on, so it is
+            // said — once, and nothing navigates from a screen that is gone.
+            if (!shown.current) {
+              AccessibilityInfo.announceForAccessibility(sentence);
+              return;
+            }
+            setSplitNotice({ sentence, proceed: goOn });
+            return;
+          }
           AccessibilityInfo.announceForAccessibility(
             t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
           );
-          // The other copies have a series each, so carrying this means splitting
-          // theirs at the same point — not updating a row.
-          if (
-            await offerToCarry(
-              occurrenceBefore(original, occurrence),
-              created,
-              'future',
-              occurrence,
-            )
-          ) {
-            return;
-          }
-          navigation.goBack();
+          await goOn();
           return;
         }
       }
@@ -1382,6 +1478,7 @@ export default function EventEditorModal({
     startDate,
     startTime,
     t,
+    i18n.language,
     title,
   ]);
 
@@ -1493,6 +1590,24 @@ export default function EventEditorModal({
           <Text style={styles.primaryButtonText}>
             {t('dialogs.event.birthdayClose')}
           </Text>
+        </Pressable>
+      </FormScrollView>
+    );
+  }
+
+  if (splitNotice != null) {
+    return (
+      <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <Text ref={splitNoticeRef} style={styles.error} accessibilityRole="text">
+          {splitNotice.sentence}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.close')}
+          onPress={closeNotice}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+        >
+          <Text style={styles.primaryButtonText}>{t('dialogs.close')}</Text>
         </Pressable>
       </FormScrollView>
     );
