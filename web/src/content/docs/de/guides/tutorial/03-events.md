@@ -189,10 +189,12 @@ abgerissenen Verbindung, bleiben beide stehen: Deine Änderung gilt als
 gespeichert, und der Editor bleibt mit einem Hinweis offen, der den Tag nennt,
 ab dem die Serie möglicherweise doppelt steht, bis du ihn schließt. Scheitert
 auch das Löschen der neuen, sagt Aperio auch das und bittet dich, den Kalender
-zu prüfen, bevor du erneut speicherst. Gelöschte Termine bleiben in der neuen
-Serie gelöscht, und in einer anderen Kalender-App geänderte bleiben erhalten.
-Bei Google kennt Aperio gelöschte Termine nur etwa ein Jahr voraus: Ein weiter
-vorn gelöschter kommt in der neuen Serie wieder.
+zu prüfen, bevor du erneut speicherst. Gelöschte Termine lässt Aperio in der
+neuen Serie weg, und in einer anderen Kalender-App geänderte bleiben darin, zur
+üblichen Uhrzeit und mit dem Inhalt der neuen Serie. Noch behält nicht jeder
+Kalender diese Löschungen: CalDAV-Kalender tun es, bei Exchange und bei
+Google-Serien mit Uhrzeit kann ein gelöschter Termin vorerst wiederkommen. Bei
+Google kennt Aperio gelöschte Termine außerdem nur etwa ein Jahr voraus.
 **Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
 auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
 Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen

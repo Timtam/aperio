@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  canonicalZoneThroughCore,
+  expansionClockThroughCore,
+  seriesClockZoneThroughCore,
+} from '../wasm/coreRules';
+
+import {
   firstOccurrenceFrom,
   futureCarryRow,
   occurrenceOfSeries,
@@ -11,6 +17,8 @@ import {
   seriesMaybeShownTwice,
   cutoffDay,
   deletedSlots,
+  expandAll,
+  installSeriesClockRules,
   seriesRowsFromHost,
   thisAndFutureDeletedKey,
   truncateRRuleBefore,
@@ -1162,5 +1170,58 @@ describe('carrying a future edit to another copy', () => {
     expect(result?.split).toBe(false);
     expect(result?.row.start).toBe('2026-08-03T09:00:00.000Z');
     expect(result?.row.reminders).toEqual(['-PT30M']);
+  });
+});
+
+describe('the slot rule, asked once per series', () => {
+  it('asks the core for a series clock a handful of times, not once per comparison', () => {
+    // Which clock a series is read on crosses the WASM or FFI boundary. A
+    // year of a daily series against sixty rows of its own asked it for every
+    // comparison — tens of thousands of calls on the phone.
+    let asked = 0;
+    installSeriesClockRules({
+      seriesClockZone: seriesClockZoneThroughCore,
+      canonicalZone: canonicalZoneThroughCore,
+      expansionClock: (allDay, tzid) => {
+        asked += 1;
+        return expansionClockThroughCore(allDay, tzid);
+      },
+    });
+    try {
+      const daily = {
+        ...weekly,
+        recurrence: { ...weekly.recurrence, rrule: 'FREQ=DAILY' },
+      };
+      const rows = Array.from({ length: 60 }, (_, i) =>
+        rowOf(new Date(Date.parse(weekly.start) + i * 7 * 86_400_000).toISOString()),
+      );
+      const range = { start: new Date('2026-08-01T00:00:00Z'), end: new Date('2027-08-01T00:00:00Z') };
+      asked = 0;
+      expandAll([daily, ...rows], range);
+      expect(asked).toBeLessThan(10);
+      // The split's reading compares every exception with every row, and
+      // every cancelled row with every slot found so far.
+      const excepted = {
+        ...daily,
+        recurrence: {
+          ...daily.recurrence,
+          exceptions: rows.map((row) => row.id.split('::rid::')[1]),
+        },
+      };
+      const cancelled = rows.map((_row, i) =>
+        rowOf(new Date(Date.parse(weekly.start) + (i * 7 + 3) * 86_400_000).toISOString(), undefined, {
+          cancelled: true,
+        }),
+      );
+      asked = 0;
+      expect(deletedSlots(excepted, [...rows, ...cancelled])).toHaveLength(60);
+      expect(asked).toBeLessThan(10);
+    } finally {
+      installSeriesClockRules({
+        seriesClockZone: seriesClockZoneThroughCore,
+        canonicalZone: canonicalZoneThroughCore,
+        expansionClock: expansionClockThroughCore,
+      });
+    }
   });
 });

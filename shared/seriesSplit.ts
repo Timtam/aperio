@@ -79,7 +79,7 @@ import {
   isExpandedOccurrence,
   overrideRecurrenceIso,
   overrideSeriesId,
-  sameSlot,
+  slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
 
@@ -231,14 +231,15 @@ export function deletedSlots(
     .filter((row) => !row.cancelled)
     .map(slotOf)
     .filter((at) => Number.isFinite(at));
+  const same = slotMatcher(master);
   const found: { iso: string; at: number }[] = [];
   const add = (iso: string, at: number) => {
-    if (!found.some((slot) => sameSlot(master, slot.at, at))) found.push({ iso, at });
+    if (!found.some((slot) => same(slot.at, at))) found.push({ iso, at });
   };
   for (const iso of master.recurrence?.exceptions ?? []) {
     const at = Date.parse(iso);
     if (!Number.isFinite(at)) continue;
-    if (live.some((slot) => sameSlot(master, slot, at))) continue;
+    if (live.some((slot) => same(slot, at))) continue;
     add(iso, at);
   }
   for (const row of own) {
@@ -347,8 +348,15 @@ export function planSeriesSplit<E extends SplittableEvent>(
   //
   // It owns no rows of its own, so every occurrence the calendar shows
   // nothing for is an exception of it (`deletedSlots`) — a cancelled row's
-  // slot included, a changed occurrence's slot not. The old series keeps its
-  // rows up to the cut; the ones after it go with the truncate.
+  // slot included, a changed occurrence's slot not: the new series shows that
+  // occurrence at its pattern time, with the new series' content. The old
+  // series keeps its rows up to the cut. After it, a timed series loses them
+  // with the truncate (Exchange drops them itself); an all-day series on
+  // Google or CalDAV keeps them, because the adapters skip that cleanup for
+  // days, so a changed all-day occurrence after the cut shows twice — the
+  // head's row and the new series' occurrence. That was so before this rule
+  // too, and it goes with the truncate, not here: keeping the exception for
+  // it would take the changed occurrences of Exchange out of both halves.
   const after = (x: number) => (master.all_day ? x >= at + slotMargin : x > at);
   return {
     kind: 'cut',

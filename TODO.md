@@ -2380,6 +2380,13 @@ Siehe DESIGN §4.2.
       Ausnahmen an Tagen, die sie nie erzeugt (EWS bricht dann beim Löschen
       ab). Offen ist die Frage, ob Löschungen mitwandern, wenn „dieser und alle
       folgenden“ das Datum verschiebt (heute bleiben sie auf ihrem Tag).
+    - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
+      geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
+      das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des
+      Kopfs und das Vorkommen der neuen Serie. Seit #99 auch ein Tag mit
+      EXDATE und RECURRENCE-ID zugleich, den die neue Serie früher ausließ. Zu
+      beheben beim Kürzen, nicht in der Tail-Regel (Exchange bräuchte sonst
+      wieder beide Hälften ohne sein geändertes Vorkommen).
     - ✅ `readSeriesRows` las über einen Datumsbereich bis einen Monat nach dem
       Schnitt und stieß bei langen Google-Serien ein volles Nachladen an. Jetzt
       liest es nach der Serie (135): jede Zeile `{Serie}::rid::…` aus dem
