@@ -97,6 +97,7 @@ import {
   type EditableReminder,
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
+import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
@@ -241,6 +242,41 @@ export default function EventEditorModal({
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     });
   }, [splitNotice]);
+  // Whether the editor is still on screen: a save the user walked away from
+  // must not put a notice on a screen that is gone.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
+  // Closing the notice goes on — once. It stays on screen until the editor is
+  // replaced or goes away, so nothing of the form comes back in between.
+  const leavingNotice = useRef(false);
+  const closeNotice = useCallback(() => {
+    if (splitNotice == null || leavingNotice.current) return;
+    leavingNotice.current = true;
+    void splitNotice.proceed();
+  }, [splitNotice]);
+  // Every way out of the notice goes on as its Close does, as the desktop's
+  // Escape does: the header button, the swipe and the Android back button.
+  // "Cancel" would also have said the saved split was about to be undone.
+  useEffect(() => {
+    if (splitNotice == null) return;
+    leavingNotice.current = false;
+    navigation.setOptions({
+      headerLeft: () => (
+        <HeaderCancelButton label={t('dialogs.close')} onPress={closeNotice} />
+      ),
+      gestureEnabled: false,
+    });
+    return navigation.addListener('beforeRemove', (event) => {
+      if (leavingNotice.current) return;
+      event.preventDefault();
+      closeNotice();
+    });
+  }, [splitNotice, navigation, t, closeNotice]);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   // Accounts whose calendars never store a reminder Aperio writes: the device
@@ -1246,14 +1282,18 @@ export default function EventEditorModal({
           // through the cutoff. That is said on screen, focused, and the editor
           // goes on only once it is closed (146). Mirrors the desktop.
           if (written.headCut === 'unsure') {
-            setSplitNotice({
-              sentence: t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
-                title: trimmedTitle,
-                date: cutoffDay(occurrence, i18n.language),
-                detail: eventWriteFailureReason(written.failure, t),
-              }),
-              proceed: goOn,
+            const sentence = t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+              title: trimmedTitle,
+              date: cutoffDay(occurrence, i18n.language),
+              detail: eventWriteFailureReason(written.failure, t),
             });
+            // Left while it saved: no screen to put the notice on, so it is
+            // said — once, and nothing navigates from a screen that is gone.
+            if (!shown.current) {
+              AccessibilityInfo.announceForAccessibility(sentence);
+              return;
+            }
+            setSplitNotice({ sentence, proceed: goOn });
             return;
           }
           AccessibilityInfo.announceForAccessibility(
@@ -1564,11 +1604,7 @@ export default function EventEditorModal({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('dialogs.close')}
-          onPress={() => {
-            const { proceed } = splitNotice;
-            setSplitNotice(null);
-            void proceed();
-          }}
+          onPress={closeNotice}
           style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
         >
           <Text style={styles.primaryButtonText}>{t('dialogs.close')}</Text>

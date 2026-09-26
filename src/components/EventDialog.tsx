@@ -646,6 +646,19 @@ export function EventDialog({
   useEffect(() => {
     if (splitNotice) splitNoticeRef.current?.focus();
   }, [splitNotice]);
+  // Closing the notice goes on — once. It stays until the dialog closes or the
+  // carry replaces it, so the form never comes back in between with a live
+  // Save and the cursor on nothing.
+  const leavingNotice = useRef(false);
+  // Whether the editor is still open: a save the user walked away from must
+  // not put a notice into a dialog that is gone, or into the next one opened.
+  const shownRef = useRef(isOpen);
+  useEffect(() => {
+    shownRef.current = isOpen;
+    return () => {
+      shownRef.current = false;
+    };
+  }, [isOpen]);
   /** Why the offer's calendar was not adopted, when it was not. Rendered
    *  beside the picker AND announced — a sighted user sees the disagreement
    *  and needs the reason just as much. */
@@ -753,6 +766,7 @@ export function EventDialog({
       appliedInitialRef.current = null;
       landedPrivateSeedRef.current = null;
       setSplitNotice(null);
+      leavingNotice.current = false;
       return;
     }
     const baseline = appliedInitialRef.current;
@@ -1516,14 +1530,19 @@ export function EventDialog({
               // announcement alone was never seen, and the carry dialog
               // opening next spoke over it.
               if (written.headCut === 'unsure') {
-                setSplitNotice({
-                  sentence: t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
-                    title: trimmedTitle,
-                    date: cutoffDay(occIso, i18n.language),
-                    detail: eventWriteFailureReason(written.failure, t),
-                  }),
-                  proceed: goOn,
+                const sentence = t('dialogs.event.thisAndFutureUpdatedMaybeTwice', {
+                  title: trimmedTitle,
+                  date: cutoffDay(occIso, i18n.language),
+                  detail: eventWriteFailureReason(written.failure, t),
                 });
+                // Left while it saved: no dialog to put the notice in, so it
+                // is said, once, and nothing opens after the user has gone.
+                if (!shownRef.current) {
+                  announce(sentence);
+                  return;
+                }
+                leavingNotice.current = false;
+                setSplitNotice({ sentence, proceed: goOn });
                 return;
               }
               announce(
@@ -1984,9 +2003,9 @@ export function EventDialog({
 
   if (splitNotice) {
     const close = () => {
-      const { proceed } = splitNotice;
-      setSplitNotice(null);
-      void proceed();
+      if (leavingNotice.current) return;
+      leavingNotice.current = true;
+      void splitNotice.proceed();
     };
     return (
       <Modal

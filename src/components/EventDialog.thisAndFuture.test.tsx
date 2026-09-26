@@ -427,6 +427,41 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it('goes on to the other copies once the notice is closed, by Escape too, and once (146)', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.groups = [
+      {
+        id: 'g1',
+        created_at: '2026-06-01T00:00:00Z',
+        updated_at: '2026-06-01T00:00:00Z',
+        members: [
+          { calendar_id: 'cal-work', event_id: 'ev-series', title: 'Teamrunde', starts_at: SERIES.start, added_at: '2026-06-01T00:00:00Z' },
+          { calendar_id: 'cal-work', event_id: 'ev-copy', title: 'Teamrunde', starts_at: SERIES.start, added_at: '2026-06-01T00:00:01Z' },
+        ],
+      },
+    ];
+    onFile.truncateFails = { code: 'network', message: 'connection reset' };
+    const onClose = vi.fn();
+    await open(JULY, onClose);
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$|^title$/i }), {
+      target: { value: 'Teamrunde neu' },
+    });
+    save();
+    const said = await screen.findByText(/möglicherweise doppelt|may show twice/);
+    // Nothing goes on while the notice is up.
+    expect(openEventGroupCarry).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(said, { key: 'Escape' });
+    await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+    expect((openEventGroupCarry.mock.calls[0][0] as { scope: string }).scope).toBe('future');
+    // The notice stays until the carry replaces it, and goes on no second time.
+    fireEvent.keyDown(screen.getByText(/möglicherweise doppelt|may show twice/), { key: 'Escape' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(openEventGroupCarry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull();
+  });
+
   it('undoes the new series as it was sent, telling the attendees it invited (144)', async () => {
     // Refused on a calendar that informs attendees: the new series' invitation
     // went out, so its deletion has to be told too.

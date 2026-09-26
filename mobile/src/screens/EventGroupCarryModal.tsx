@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   findNodeHandle,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -115,10 +114,11 @@ export default function EventGroupCarryModal({
    *  across a retry: they are written and not offered again, so this is the
    *  only place they are still named. Mirrors the desktop. */
   const [doubts, setDoubts] = useState<string[]>([]);
-  /** The outcome line, which takes the cursor when the button the user just
-   *  pressed goes away (outcome 'written'), and what is said after it. */
+  /** The outcome line, which takes the cursor whenever a pass ends with an
+   *  outcome, as the desktop's outcome note does, and what it then reads: the
+   *  outcome, the last failure and this pass's doubts, in one utterance. */
   const outcomeRef = useRef<Text>(null);
-  const sayAfterOutcome = useRef('');
+  const [outcomeSaid, setOutcomeSaid] = useState('');
   /**
    * Whether this screen is still here.
    *
@@ -193,6 +193,8 @@ export default function EventGroupCarryModal({
     const failed: CarryTarget[] = [];
     // Copies whose series may now show twice from the cut, said in words.
     const unsure: string[] = [];
+    // The last failure said on screen, which the outcome line reads too.
+    let lastError = '';
     // The rows created so far, to be joined into a group of their own — the
     // earlier passes' included, so a retry ties the whole set together.
     const created: NewGroupMember[] = [...createdRows];
@@ -449,9 +451,10 @@ export default function EventGroupCarryModal({
         const message = errorMessage(err);
         if (!alive.current) return;
         setError(message);
-        // `accessibilityLiveRegion` below is ANDROID ONLY, so on iOS this
-        // announce is the only channel VoiceOver has.
-        if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
+        // Said with the outcome, by the outcome line: announced here as well,
+        // or through a live region, it cut the outcome off (Android) or was
+        // cut off by it (iOS).
+        lastError = message;
       }
     }
     // The rows this carry created are copies of each other exactly as the ones
@@ -490,9 +493,11 @@ export default function EventGroupCarryModal({
     setCreatedRows(created);
     const allDoubts = [...doubts, ...unsure];
     setDoubts(allDoubts);
-    // Said once, with whatever else this pass reports: a second announcement
-    // in the same frame would cut the first off.
+    // Said once, with whatever else this pass reports, by the outcome line that
+    // takes the cursor: a second utterance in the same frame would cut the
+    // first off, and a queued announcement is queued on iOS only.
     const doubtful = unsure.length === 0 ? '' : ` ${unsure.join(' ')}`;
+    const failure = lastError === '' ? '' : ` ${lastError}`;
     setBusy(false);
     // The whole point of the screen: say what actually happened, including
     // what did not.
@@ -501,11 +506,11 @@ export default function EventGroupCarryModal({
       // the same title — that is what made them a group — so a list of titles
       // said nothing about which copy is now out of step.
       const names = failed.map((target) => calendarName(target.calendar_id));
+      setOutcomeSaid(
+        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${failure}${doubtful}`,
+      );
       setOutcome({ kind: 'partly', done, failed });
       setPending(failed);
-      AccessibilityInfo.announceForAccessibility(
-        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${doubtful}`,
-      );
       // Stays open: a half-carried group is the state this feature exists to
       // prevent, so it has to be seen, and the rest can be retried.
       return;
@@ -514,19 +519,15 @@ export default function EventGroupCarryModal({
       // Every copy was written; only the new rows are not tied together yet.
       // Said, and left on screen, because "the appointment is one row again" is
       // what the user was promised.
+      setOutcomeSaid(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`);
       setOutcome({ kind: 'regroup', done });
       setPending([]);
-      AccessibilityInfo.announceForAccessibility(
-        `${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`,
-      );
       return;
     }
     if (allDoubts.length > 0) {
       // No copy is left to offer again, but some may show twice: leaving would
-      // take the only words that say which ones. The button just pressed goes
-      // away, so the outcome line takes the cursor and reads itself; the
-      // doubts are said after it (the effect below).
-      sayAfterOutcome.current = doubtful.trim();
+      // take the only words that say which ones.
+      setOutcomeSaid(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
       setOutcome({ kind: 'written', done });
       setPending([]);
       return;
@@ -554,20 +555,15 @@ export default function EventGroupCarryModal({
     navigation,
   ]);
 
-  // The outcome 'written' removes the button that held the cursor. Without a
-  // new place it was stranded, and the screen reader jumped to the top and
-  // spoke over the doubts; the desktop focuses its outcome note the same way.
+  // Every outcome puts the cursor on the outcome line, which reads what the
+  // pass has to say, as the desktop focuses its outcome note. The outcome
+  // 'written' also removes the button that held the cursor: without a new
+  // place it was stranded, and the screen reader jumped to the top.
   useEffect(() => {
-    if (outcome?.kind !== 'written') return;
+    if (!outcome) return;
     requestAnimationFrame(() => {
       const tag = findNodeHandle(outcomeRef.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-      const said = sayAfterOutcome.current;
-      sayAfterOutcome.current = '';
-      // Queued, so the line's own speech does not cut it off.
-      if (said !== '') {
-        AccessibilityInfo.announceForAccessibilityWithOptions(said, { queue: true });
-      }
     });
   }, [outcome]);
 
@@ -588,6 +584,7 @@ export default function EventGroupCarryModal({
         ref={outcomeRef}
         style={outcome ? styles.warning : styles.intro}
         accessibilityRole="text"
+        accessibilityLabel={outcome && outcomeSaid !== '' ? outcomeSaid : undefined}
       >
         {outcome
           ? outcome.kind === 'regroup'
@@ -661,12 +658,9 @@ export default function EventGroupCarryModal({
         </Text>
       ))}
 
+      {/* Not a live region: the outcome line reads it with the outcome. */}
       {error != null && (
-        <Text
-          style={styles.error}
-          accessibilityRole="text"
-          accessibilityLiveRegion="assertive"
-        >
+        <Text style={styles.error} accessibilityRole="text">
           {error}
         </Text>
       )}

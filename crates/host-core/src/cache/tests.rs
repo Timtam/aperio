@@ -1516,11 +1516,6 @@ async fn the_write_guard_marks_what_the_edit_left_alone() {
     assert!(!resent.keep_fields.contains(&EventField::Title));
 }
 
-/// A write only marks the cache stale; the row stays the one from BEFORE the
-/// write. An edit rebuilt from it — a split's restore, a revert right after a
-/// save — must not look untouched, or it is never written. So after a write,
-/// however it ended, nothing is kept until a refresh has read the calendar
-/// again; an invalidation alone does the same.
 /// A create changes no row the cache holds, so it keeps what a refresh proved
 /// about them (decision 106): a split creates its new series first and
 /// truncates the old one right after (136), and the truncate must still leave
@@ -1581,6 +1576,12 @@ async fn a_create_proves_nothing_new() {
     assert!(!store.events_proven(ACC, CAL), "a write was in flight");
 }
 
+/// A write only marks the cache stale; the row stays the one from BEFORE the
+/// write. An edit rebuilt from it — a split's restore, a revert right after a
+/// save — must not look untouched, or it is never written. So after a write,
+/// however it ended, nothing is kept until a refresh has read the calendar
+/// again; an invalidation alone does the same (a create's does not:
+/// `a_create_keeps_what_the_calendar_proved`).
 #[tokio::test]
 async fn a_write_keeps_nothing_until_the_calendar_is_read_again() {
     let store = setup();

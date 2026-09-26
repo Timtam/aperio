@@ -2405,8 +2405,15 @@ Siehe DESIGN §4.2.
       behält den Nachweis aus 106 (`invalidate_after_create`), sonst schrieb das
       Kürzen danach auf Exchange alle Felder zurück. CalDAV liest die Antwort
       einer Wiederholung als das, was sie ist: 412 nach dem erneuten Senden
-      eines bewachten PUT ist „unklar“, 404 nach dem erneuten DELETE ist
-      „gelöscht“.
+      eines bewachten PUT ist „unklar“; 404 nach dem erneuten DELETE ist
+      „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
+      es nur als gelöscht, wenn kein anderer Kalender den Termin hat
+      (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
+      davon: da ging nichts hinaus.
+    - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
+      Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
+      Wiederholung 405 (die Liste gibt es schon): gemeldet als Fehler, ein
+      erneuter Versuch legt eine zweite Liste an. Vor #97 schon so.
     - 🚩 **Sichere Ablehnungen als Ablehnung kennzeichnen** (147, eigener PR
       direkt nach #97): EWS-Fehlerantworten, HTTP 400/429 bei Google und
       Microsoft, CalDAV-Prüfungen „nothing was saved“ kommen als `protocol` an;

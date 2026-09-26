@@ -1208,7 +1208,7 @@ impl CalendarFeature for CaldavAdapter {
             // the loop below falls through to the not-found error.
             None => Vec::new(),
         };
-        let mut last_err: Option<CoreError> = None;
+        let mut walk = events::DeleteWalk::default();
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
                 Ok(u) => u,
@@ -1217,24 +1217,14 @@ impl CalendarFeature for CaldavAdapter {
             // Without an ETag we don't bother with If-Match — the
             // user explicitly chose to delete this row, so a
             // concurrent modification is informational at best.
-            match events::delete_event(&self.http, &cal_url, event_id, None, &self.credentials)
-                .await
-            {
-                Ok(events::DeleteOutcome::Deleted) => return Ok(()),
-                Ok(events::DeleteOutcome::NotFound) => continue,
-                Err(err) => {
-                    // Non-404 errors might be transient (auth
-                    // hiccup, server hiccup). Remember the last
-                    // one in case nothing else works, but keep
-                    // walking — the resource might still live in
-                    // another calendar we haven't tried yet.
-                    last_err = Some(to_core_error(err));
-                }
+            let outcome =
+                events::delete_event(&self.http, &cal_url, event_id, None, &self.credentials).await;
+            if walk.step(outcome) {
+                return Ok(());
             }
         }
-        Err(last_err.unwrap_or_else(|| {
-            CoreError::NotFound(format!("event '{event_id}' not found in any calendar"))
-        }))
+        walk.finish(format!("event '{event_id}' not found in any calendar"))
+            .map_err(to_core_error)
     }
 
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> CoreResult<Vec<FreeBusy>> {
@@ -1428,23 +1418,20 @@ impl TasksFeature for CaldavAdapter {
             // No calendar home (CardDAV-only) → nothing to walk.
             None => Vec::new(),
         };
-        let mut last_err: Option<CoreError> = None;
+        let mut walk = events::DeleteWalk::default();
         for list in lists {
             let url = match Url::parse(&list.id) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
-            match tasks::delete_task(&self.http, &url, task_id, None, &self.credentials).await {
-                Ok(events::DeleteOutcome::Deleted) => return Ok(()),
-                Ok(events::DeleteOutcome::NotFound) => continue,
-                Err(err) => {
-                    last_err = Some(to_core_error(err));
-                }
+            let outcome =
+                tasks::delete_task(&self.http, &url, task_id, None, &self.credentials).await;
+            if walk.step(outcome) {
+                return Ok(());
             }
         }
-        Err(last_err.unwrap_or_else(|| {
-            CoreError::NotFound(format!("task '{task_id}' not found in any list"))
-        }))
+        walk.finish(format!("task '{task_id}' not found in any list"))
+            .map_err(to_core_error)
     }
 
     async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
