@@ -1429,8 +1429,11 @@ fn to_update_error(err: EwsError) -> CoreError {
 }
 
 /// The SOAP codes with which Exchange turns an `UpdateItem` down before it
-/// saves anything: the request does not validate, the item moved on
-/// meanwhile, or the server throttles. See [`to_update_error`].
+/// saves anything: the request does not validate, or the server throttles.
+/// See [`to_update_error`]. The update is sent with `AlwaysOverwrite`, so no
+/// ChangeKey is checked before the save, and a conflict code
+/// (`ErrorIrresolvableConflict`, `ErrorStaleObject`) comes from somewhere
+/// else: it is not on this list and stays unsure.
 const REFUSED_UPDATE_CODES: &[&str] = &[
     "ErrorServerBusy",
     "ErrorInvalidRequest",
@@ -1441,8 +1444,6 @@ const REFUSED_UPDATE_CODES: &[&str] = &[
     "ErrorCalendarInvalidRecurrence",
     "ErrorInvalidIdMalformed",
     "ErrorInvalidChangeKey",
-    "ErrorIrresolvableConflict",
-    "ErrorStaleObject",
 ];
 
 /// The code, without the namespace prefix a fault's `faultcode` carries
@@ -1532,6 +1533,8 @@ mod update_refusal_tests {
             "ErrorMailboxStoreUnavailable",
             "Unknown",
             "s:Server",
+            "ErrorIrresolvableConflict",
+            "ErrorStaleObject",
         ] {
             assert!(
                 matches!(to_update_error(soap(code)), CoreError::Protocol(_)),

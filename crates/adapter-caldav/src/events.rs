@@ -818,9 +818,19 @@ async fn put_resource(
     // part while the old part was already cut short (decision 144). So it is
     // what it is, unsure.
     if first_may_have_landed && !response.status().is_success() {
+        // The answer itself is kept for the log: it may be the first
+        // attempt's, or a refusal the replay met on its own.
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        tracing::warn!(
+            %resource,
+            status,
+            body = %body.chars().take(200).collect::<String>(),
+            "a replayed PUT was answered with a failure; the first attempt may have been saved",
+        );
         return Err(CaldavError::Network(format!(
-            "the connection to '{resource}' broke after the change was sent; \
-             it may have been saved"
+            "the connection to '{resource}' broke after the change was sent \
+             (the replay was answered HTTP {status}); it may have been saved"
         )));
     }
     check_write(response).await
@@ -1885,7 +1895,11 @@ END:VCALENDAR</c:calendar-data>
         )
         .await
         .expect_err("the replay was refused");
-        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+        match err {
+            // The replay's answer is kept, for whoever reads the error.
+            CaldavError::Network(msg) => assert!(msg.contains("HTTP 429"), "{msg}"),
+            other => panic!("expected unsure, got {other:?}"),
+        }
     }
 
     /// Without a replay, a 412 is what it says: the copy moved on.

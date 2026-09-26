@@ -743,9 +743,35 @@ fn to_update_error(err: GoogleError) -> CoreError {
 /// The reason a JSON error answer gives (`{"error":{"message":"…"}}`),
 /// trimmed, for the sentence that says the server refused: "HTTP 400" alone
 /// tells the user nothing they can act on.
+///
+/// The error keeps only the first 300 characters of the answer, so a longer
+/// envelope arrives cut and is no JSON any more. The first `"message"`
+/// string is then read as far as it goes: it is the error's own, before the
+/// details and the request ids that make an envelope long.
 fn server_reason(body: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    let reason = value.get("error")?.get("message")?.as_str()?.trim();
+    let reason = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(value) => value.get("error")?.get("message")?.as_str()?.to_string(),
+        Err(_) => {
+            let rest = &body[body.find("\"message\"")? + "\"message\"".len()..];
+            let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+            let rest = rest.strip_prefix('"')?;
+            let mut out = String::new();
+            let mut escaped = false;
+            for c in rest.chars() {
+                match (escaped, c) {
+                    (true, _) => {
+                        out.push(c);
+                        escaped = false;
+                    }
+                    (false, '\\') => escaped = true,
+                    (false, '"') => break,
+                    (false, _) => out.push(c),
+                }
+            }
+            out
+        }
+    };
+    let reason = reason.trim();
     if reason.is_empty() {
         return None;
     }
@@ -843,6 +869,32 @@ mod delta_tests {
                 other => panic!("{status}: {other:?}"),
             }
         }
+    }
+
+    /// The error keeps only the first 300 characters of an answer, so a
+    /// realistic envelope arrives cut: its reason is still read.
+    #[test]
+    fn the_reason_is_read_from_a_cut_answer() {
+        let long = "The recurrence rule does not generate an occurrence on the start date \
+                    of the event, so the event cannot be saved as it is.";
+        let body = format!(
+            r#"{{"error":{{"code":400,"message":"{long}","errors":[{{"domain":"global","reason":"invalid","message":"{long}"}}],"innerError":{{"date":"2026-09-26T10:00:00","request-id":"0f6c1d2e-9a8b-4c3d-8e7f-6a5b4c3d2e1f"}}}}}}"#
+        );
+        let cut: String = body.chars().take(300).collect();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&cut).is_err(),
+            "the test must cut"
+        );
+        assert_eq!(server_reason(&cut).as_deref(), Some(long));
+        // A reason cut itself is read as far as it goes.
+        let cut_early: String = body.chars().take(60).collect();
+        assert!(server_reason(&cut_early).is_some_and(|r| long.starts_with(&r)));
+        // No message, no reason.
+        assert_eq!(
+            server_reason(r#"{"error":{"code":"ErrorInvalidRequest"}}"#),
+            None
+        );
+        assert_eq!(server_reason("<html>Bad Request</html>"), None);
     }
 
     const PATCH_PATH: &str = r"^/calendars/primary/events/master-1";

@@ -2429,14 +2429,17 @@ Siehe DESIGN §4.2.
       Grund, den Google und Microsoft nennen, und bei EWS die bekannten Prüf-
       und Drosselungsfehler (`REFUSED_UPDATE_CODES`, auch als SOAP-Fault mit
       HTTP 500), als `server-refused`; jeder andere EWS-Code bleibt unklar,
-      weil eine Besprechung erst gespeichert und dann verschickt wird. CalDAVs
+      weil eine Besprechung erst gespeichert und dann verschickt wird; die
+      Konfliktcodes auch, denn Aperio schreibt mit `AlwaysOverwrite`. CalDAVs
       eigene Prüfungen kommen als neue Marke `unsafe-to-write` („Aperio kann
-      diesen Termin nicht sicher ändern“). Antwortet der Server auf eine
-      CalDAV-Wiederholung mit einem Fehler, bleibt es unklar: der erste
+      diesen Termin nicht sicher ändern“). `server-refused` und
+      `unsafe-to-write` reisen als `forbidden` und kommen so auch am Handy an.
+      Antwortet der Server auf eine CalDAV-Wiederholung mit einem Fehler,
+      bleibt es unklar (`network`, die Antwort steht im Protokoll): der erste
       Versuch kann angekommen sein. Scheitert bei Google oder Microsoft die
       Erneuerung des Tokens (400/401 am Token-Endpunkt), ist es ein
-      Anmeldefehler, keine Ablehnung des Kalenderservers. Beide reisen als `forbidden` und kommen so
-      auch am Handy an. Graph: ein DELETE, das nach erfolgreichem `/cancel`
+      Anmeldefehler (`auth`), keine Ablehnung des Kalenderservers; am Handy
+      kommt er ohne Code an und bleibt dort unklar. Graph: ein DELETE, das nach erfolgreichem `/cancel`
       nichts mehr findet, gilt als erledigt (die Absage verschiebt das
       Ereignis nach „Gelöschte Elemente“, mit neuer Id). Nicht hier: Anlegen
       und Löschen melden solche Ablehnungen weiter als `protocol` (für das
