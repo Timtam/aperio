@@ -729,12 +729,27 @@ fn to_update_error(err: GoogleError) -> CoreError {
     match err {
         GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
             tracing::warn!(status, %message, "Google refused the update");
-            CoreError::Forbidden(
-                cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
-            )
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(
+                &match server_reason(&message) {
+                    Some(reason) => format!("HTTP {status}: {reason}"),
+                    None => format!("HTTP {status}"),
+                },
+            ))
         }
         other => to_core_error(other),
     }
+}
+
+/// The reason a JSON error answer gives (`{"error":{"message":"…"}}`),
+/// trimmed, for the sentence that says the server refused: "HTTP 400" alone
+/// tells the user nothing they can act on.
+fn server_reason(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let reason = value.get("error")?.get("message")?.as_str()?.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    Some(reason.chars().take(160).collect())
 }
 
 fn to_core_error(err: GoogleError) -> CoreError {
@@ -820,12 +835,43 @@ mod delta_tests {
                 .update_event(truncated_master())
                 .await
                 .unwrap_err();
+            // The server's own reason travels with the status.
             match err {
                 CoreError::Forbidden(msg) => {
-                    assert_eq!(msg, format!("server-refused: HTTP {status}"))
+                    assert_eq!(msg, format!("server-refused: HTTP {status}: no"))
                 }
                 other => panic!("{status}: {other:?}"),
             }
+        }
+    }
+
+    const PATCH_PATH: &str = r"^/calendars/primary/events/master-1";
+
+    /// The save met an expired access token, and the token endpoint refused
+    /// the refresh (a revoked grant answers 400 `invalid_grant`): a sign-in
+    /// failure, as the error the user can act on — not the calendar server
+    /// refusing the change.
+    #[tokio::test]
+    async fn a_refused_token_refresh_during_an_update_is_a_sign_in_failure() {
+        let mut server = Server::new_async().await;
+        let _write = server
+            .mock("PATCH", Matcher::Regex(PATCH_PATH.into()))
+            .with_status(401)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        match err {
+            CoreError::Authentication(msg) => assert!(msg.contains("invalid_grant"), "{msg}"),
+            other => panic!("expected a sign-in failure, got {other:?}"),
         }
     }
 

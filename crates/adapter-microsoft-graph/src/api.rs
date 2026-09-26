@@ -240,7 +240,7 @@ impl ApiState {
             .await
             .map_err(|err| {
                 warn!(?err, "refresh-token grant failed");
-                err
+                refresh_refused(err)
             })?;
         let mut guard = self.tokens.lock().await;
         guard.access_token = fresh.access_token;
@@ -249,6 +249,24 @@ impl ApiState {
         }
         guard.expires_at = fresh.expires_at;
         Ok(())
+    }
+}
+
+/// A token endpoint that answered the refresh with 400 or 401 — a revoked or
+/// expired grant (`invalid_grant`), a client it does not know — refused the
+/// sign-in, not the request that needed it: said as a 401, the write that was
+/// waiting for the token reads as a sign-in failure. As its own status, an
+/// update read it as the calendar server refusing the change (decision 147).
+/// Anything else keeps its error.
+fn refresh_refused(err: GraphError) -> GraphError {
+    match err {
+        GraphError::Http { status, message } if status == 400 || status == 401 => {
+            GraphError::Http {
+                status: 401,
+                message: format!("token refresh refused (HTTP {status}): {message}"),
+            }
+        }
+        other => other,
     }
 }
 

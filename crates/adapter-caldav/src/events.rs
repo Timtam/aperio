@@ -810,15 +810,14 @@ async fn put_resource(
         .body(body)
         .send_retrying_marked()
         .await?;
-    // A 412 on the replay of a guarded write: the connection died after the
-    // first PUT went out, and that one may have landed — its new ETag is what
-    // refuses the replay. Read as a refusal, a caller would undo around a write
-    // that went through: splitting a series deleted its new part while the old
-    // part was already cut short (decision 144). So it is what it is, unsure.
-    if first_may_have_landed
-        && if_match.is_some()
-        && response.status() == StatusCode::PRECONDITION_FAILED
-    {
+    // Any refusal of a replay whose first attempt may have landed: the
+    // connection died after the first PUT went out, and the answer may be
+    // about that one — a 412 because its new ETag refuses the replay, a 429 or
+    // a 507 because it was taken. Read as a refusal, a caller would undo
+    // around a write that went through: splitting a series deleted its new
+    // part while the old part was already cut short (decision 144). So it is
+    // what it is, unsure.
+    if first_may_have_landed && !response.status().is_success() {
         return Err(CaldavError::Network(format!(
             "the connection to '{resource}' broke after the change was sent; \
              it may have been saved"
@@ -1862,6 +1861,26 @@ END:VCALENDAR</c:calendar-data>
             &resource,
             standup_body("Cut short"),
             Some("\"etag-1\""),
+            &creds(&base),
+        )
+        .await
+        .expect_err("the replay was refused");
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// ...and so is any other refusal of that replay: a 429 may be the server
+    /// throttling a second copy of what it already stored.
+    #[tokio::test]
+    async fn any_refusal_of_a_replayed_put_is_unsure() {
+        let base =
+            first_attempt_lost_then(b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n")
+                .await;
+        let resource = Url::parse(&format!("{base}/calendars/alice/work/abc.ics")).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            None,
             &creds(&base),
         )
         .await

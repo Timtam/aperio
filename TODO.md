@@ -2425,11 +2425,17 @@ Siehe DESIGN §4.2.
       gekürzt wurde. Jetzt meldet jeder Adapter beim Ändern eines Termins
       (`update_event`) eine Ablehnung als solche: ein HTTP-Status, mit dem der
       Server das Schreiben ganz abgelehnt hat
-      (`WriteRefusal::refused_status`: 400, 413, 415, 422, 429, 507), und bei
-      EWS jede SOAP-Fehlerantwort auf das eine `UpdateItem` außer internen
-      Server- und Zeitüberschreitungsfehlern, als `server-refused`; CalDAVs
-      eigene Prüfungen als neue Marke `unsafe-to-write` („Aperio kann diesen
-      Termin nicht sicher ändern“). Beide reisen als `forbidden` und kommen so
+      (`WriteRefusal::refused_status`: 400, 413, 415, 422, 429, 507), samt dem
+      Grund, den Google und Microsoft nennen, und bei EWS die bekannten Prüf-
+      und Drosselungsfehler (`REFUSED_UPDATE_CODES`, auch als SOAP-Fault mit
+      HTTP 500), als `server-refused`; jeder andere EWS-Code bleibt unklar,
+      weil eine Besprechung erst gespeichert und dann verschickt wird. CalDAVs
+      eigene Prüfungen kommen als neue Marke `unsafe-to-write` („Aperio kann
+      diesen Termin nicht sicher ändern“). Antwortet der Server auf eine
+      CalDAV-Wiederholung mit einem Fehler, bleibt es unklar: der erste
+      Versuch kann angekommen sein. Scheitert bei Google oder Microsoft die
+      Erneuerung des Tokens (400/401 am Token-Endpunkt), ist es ein
+      Anmeldefehler, keine Ablehnung des Kalenderservers. Beide reisen als `forbidden` und kommen so
       auch am Handy an. Graph: ein DELETE, das nach erfolgreichem `/cancel`
       nichts mehr findet, gilt als erledigt (die Absage verschiebt das
       Ereignis nach „Gelöschte Elemente“, mit neuer Id). Nicht hier: Anlegen

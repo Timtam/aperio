@@ -926,8 +926,6 @@ impl CaldavAdapter {
     }
 }
 
-/// Translate a CalDAV-specific error into the shared `cal_core::Error`
-/// shape so the rest of the app can pattern-match it uniformly.
 /// [`to_core_error`] for an update. A status with which the server turned the
 /// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
 /// not a protocol error: a caller deciding whether the write may have landed —
@@ -945,6 +943,8 @@ fn to_update_error(err: CaldavError) -> CoreError {
     }
 }
 
+/// Translate a CalDAV-specific error into the shared `cal_core::Error`
+/// shape so the rest of the app can pattern-match it uniformly.
 fn to_core_error(err: CaldavError) -> CoreError {
     match err {
         CaldavError::Network(msg) => CoreError::Network(msg),

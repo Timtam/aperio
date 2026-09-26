@@ -1390,10 +1390,13 @@ impl ContactsFeature for EwsAdapter {
 /// splitting a series undoes its new part only when the cut certainly did not
 /// (decision 144) — must be told that nothing was written.
 ///
-/// An update is one `UpdateItem` of one item, so a SOAP error answer to it
-/// wrote nothing, whatever its code — except the server's own internal and
-/// timeout errors, which may come after part of the work was done. The codes
-/// [`to_core_error`] already names (sign-in, not found) keep their error.
+/// Only the SOAP codes with which Exchange turns an `UpdateItem` down while it
+/// checks or throttles the request count ([`REFUSED_UPDATE_CODES`]): a meeting
+/// update may save the item and then fail while sending it (send-as denied, a
+/// quota, the store going away), so any other code says nothing either way.
+/// Such a code is read from a SOAP fault sent with HTTP 500 too — the usual
+/// shape of `ErrorServerBusy`. The codes [`to_core_error`] already names
+/// (sign-in, not found) keep their error.
 fn to_update_error(err: EwsError) -> CoreError {
     match err {
         EwsError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
@@ -1402,28 +1405,51 @@ fn to_update_error(err: EwsError) -> CoreError {
                 cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
             )
         }
-        EwsError::Soap { code, message } if soap_refused_update(&code) => {
+        EwsError::Http {
+            status: 500,
+            message,
+        } => match soap::check_for_fault(&message) {
+            Err(EwsError::Soap { code, message: why }) if refused_update_code(&code).is_some() => {
+                let code = refused_update_code(&code).unwrap_or_default();
+                tracing::warn!(%code, %why, "Exchange refused the update");
+                CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
+            }
+            _ => to_core_error(EwsError::Http {
+                status: 500,
+                message,
+            }),
+        },
+        EwsError::Soap { code, message } if refused_update_code(&code).is_some() => {
+            let code = refused_update_code(&code).unwrap_or_default();
             tracing::warn!(%code, %message, "Exchange refused the update");
-            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(&code))
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
         other => to_core_error(other),
     }
 }
 
-/// Whether a SOAP error answer to one item's `UpdateItem` certainly wrote
-/// nothing; see [`to_update_error`].
-fn soap_refused_update(code: &str) -> bool {
-    let named = matches!(
-        code,
-        "ErrorAccessDenied"
-            | "ErrorInvalidAccessToken"
-            | "ErrorPasswordExpired"
-            | "ErrorADUnavailable"
-            | "ErrorNoFreeBusyAccess"
-            | "ErrorItemNotFound"
-            | "ErrorFolderNotFound"
-    );
-    !named && !code.contains("InternalServer") && !code.contains("Timeout")
+/// The SOAP codes with which Exchange turns an `UpdateItem` down before it
+/// saves anything: the request does not validate, the item moved on
+/// meanwhile, or the server throttles. See [`to_update_error`].
+const REFUSED_UPDATE_CODES: &[&str] = &[
+    "ErrorServerBusy",
+    "ErrorInvalidRequest",
+    "ErrorSchemaValidation",
+    "ErrorInvalidPropertySet",
+    "ErrorInvalidPropertyDelete",
+    "ErrorInvalidPropertyUpdateSentMessage",
+    "ErrorCalendarInvalidRecurrence",
+    "ErrorInvalidIdMalformed",
+    "ErrorInvalidChangeKey",
+    "ErrorIrresolvableConflict",
+    "ErrorStaleObject",
+];
+
+/// The code, without the namespace prefix a fault's `faultcode` carries
+/// (`a:ErrorServerBusy`), when it is one of [`REFUSED_UPDATE_CODES`].
+fn refused_update_code(code: &str) -> Option<&str> {
+    let bare = code.rsplit(':').next().unwrap_or(code);
+    REFUSED_UPDATE_CODES.contains(&bare).then_some(bare)
 }
 
 fn to_core_error(err: EwsError) -> CoreError {
@@ -1467,8 +1493,8 @@ mod update_refusal_tests {
         }
     }
 
-    /// An update is one `UpdateItem` of one item: a SOAP error answer wrote
-    /// nothing, and is a refusal (decision 144).
+    /// Exchange turned the update down while checking or throttling it:
+    /// nothing was saved, and it is a refusal (decision 144).
     #[test]
     fn a_soap_error_answer_to_an_update_is_a_refusal() {
         for code in [
@@ -1490,14 +1516,22 @@ mod update_refusal_tests {
         }
     }
 
-    /// ...except where the server's own failure may come after part of the
-    /// work, and where the error is already named.
+    /// ...but any other code may come after the item was saved — a meeting
+    /// update saves, then sends — and stays unsure; a named error keeps its
+    /// name.
     #[test]
     fn a_server_failure_stays_unsure_and_a_named_error_keeps_its_name() {
         for code in [
             "ErrorInternalServerError",
             "ErrorInternalServerTransientError",
             "ErrorTimeoutExpired",
+            "ErrorSendAsDenied",
+            "ErrorQuotaExceeded",
+            "ErrorSubmissionQuotaExceeded",
+            "ErrorMessageSizeExceeded",
+            "ErrorMailboxStoreUnavailable",
+            "Unknown",
+            "s:Server",
         ] {
             assert!(
                 matches!(to_update_error(soap(code)), CoreError::Protocol(_)),
@@ -1516,6 +1550,44 @@ mod update_refusal_tests {
             to_update_error(EwsError::Http {
                 status: 503,
                 message: "busy".into(),
+            }),
+            CoreError::Protocol(_)
+        ));
+    }
+
+    fn fault_500(code: &str) -> EwsError {
+        EwsError::Http {
+            status: 500,
+            message: format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <s:Fault>
+      <faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:{code}</faultcode>
+      <faultstring xml:lang="en-US">The server cannot service this request right now. Try again later.</faultstring>
+    </s:Fault>
+  </s:Body>
+</s:Envelope>"#
+            ),
+        }
+    }
+
+    /// Exchange throttles with a SOAP fault sent as HTTP 500: read from the
+    /// fault, it is the refusal it names; any other 500 stays unsure.
+    #[test]
+    fn a_throttling_fault_sent_as_500_is_a_refusal() {
+        match to_update_error(fault_500("ErrorServerBusy")) {
+            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: ErrorServerBusy"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            to_update_error(fault_500("ErrorInternalServerError")),
+            CoreError::Protocol(_)
+        ));
+        assert!(matches!(
+            to_update_error(EwsError::Http {
+                status: 500,
+                message: "<html>Server Error</html>".into(),
             }),
             CoreError::Protocol(_)
         ));
