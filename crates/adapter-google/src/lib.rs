@@ -353,7 +353,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
         api::update_event(&self.state, &event)
             .await
-            .map_err(to_core_error)
+            .map_err(to_update_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
@@ -720,6 +720,23 @@ fn is_read_only_google_list(list_id: &str) -> bool {
         || list_id == contacts::GOOGLE_DIRECTORY_LIST_ID
 }
 
+/// [`to_core_error`] for an update. A status with which the server turned the
+/// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
+/// not a protocol error: a caller deciding whether the write may have landed —
+/// splitting a series undoes its new part only when the cut certainly did not
+/// (decision 144) — must be told that nothing was written.
+fn to_update_error(err: GoogleError) -> CoreError {
+    match err {
+        GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            tracing::warn!(status, %message, "Google refused the update");
+            CoreError::Forbidden(
+                cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
+            )
+        }
+        other => to_core_error(other),
+    }
+}
+
 fn to_core_error(err: GoogleError) -> CoreError {
     use GoogleError::*;
     match err {
@@ -745,6 +762,91 @@ mod delta_tests {
     use super::*;
     use chrono::TimeZone;
     use mockito::{Matcher, Server};
+
+    /// A series head, cut short: what splitting a series writes.
+    fn truncated_master() -> Event {
+        Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "master-1".into(),
+            calendar_id: "primary".into(),
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 7, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 8, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;UNTIL=20260824T065959Z".into(),
+                exceptions: vec![],
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    /// Google read the truncate and turned it down whole: nothing was written,
+    /// and the caller must know that for certain (decision 144), not as a
+    /// protocol error it has to treat as maybe landed.
+    #[tokio::test]
+    async fn an_update_google_turned_down_is_a_refusal() {
+        for status in [400, 429] {
+            let mut server = Server::new_async().await;
+            let _patch = server
+                .mock(
+                    "PATCH",
+                    Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+                )
+                .with_status(status)
+                .with_body(r#"{"error":{"message":"no"}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .update_event(truncated_master())
+                .await
+                .unwrap_err();
+            match err {
+                CoreError::Forbidden(msg) => {
+                    assert_eq!(msg, format!("server-refused: HTTP {status}"))
+                }
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+    }
+
+    /// A server error says nothing about what was written: unsure, as before.
+    #[tokio::test]
+    async fn an_update_that_failed_in_the_server_is_not_a_refusal() {
+        let mut server = Server::new_async().await;
+        let _patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+            )
+            .with_status(503)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Protocol(_)), "{err:?}");
+    }
 
     /// Build an adapter whose API + token endpoints point at the mock
     /// server. The access token is valid for an hour so no refresh fires.

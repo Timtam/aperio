@@ -41,6 +41,12 @@ pub enum WriteRefusal {
     /// the same thing: this occurrence could not be saved on its own. Carving
     /// it out instead is never done behind their back (decision 92).
     OccurrenceNotWritable,
+    /// Aperio did not write, because the event could not be written without
+    /// risking what else its resource holds: the resource cannot be read
+    /// block by block, it holds no such event, or its components name
+    /// different organizers. The detail is a machine token for the log, as
+    /// for [`Self::OccurrenceNotWritable`].
+    UnsafeToWrite,
 }
 
 impl WriteRefusal {
@@ -51,7 +57,24 @@ impl WriteRefusal {
             Self::ServerRefused => "server-refused",
             Self::IdentityUnknown => "identity-unknown",
             Self::OccurrenceNotWritable => "occurrence-not-writable",
+            Self::UnsafeToWrite => "unsafe-to-write",
         }
+    }
+
+    /// Whether a server that answered a write with this HTTP status turned the
+    /// write down whole: it read the request and wrote nothing (bad request,
+    /// too large, wrong media type, unprocessable, too many requests, no
+    /// storage). The statuses the adapters already name — 401, 403, 404, 409,
+    /// 412 — carry their own error; a 5xx may come after a part was written
+    /// and says nothing either way.
+    ///
+    /// Where a write is refused this way, an adapter reports
+    /// [`Self::ServerRefused`] rather than a protocol error, so that a caller
+    /// deciding whether the write may have landed (splitting a series undoes
+    /// its new part only when the cut certainly did not, decision 144) is told
+    /// the truth.
+    pub const fn refused_status(status: u16) -> bool {
+        matches!(status, 400 | 413 | 415 | 422 | 429 | 507)
     }
 
     /// The message: the token, and the detail behind a colon when there is one.
@@ -74,6 +97,8 @@ impl WriteRefusal {
             Self::ReplyOnlyInvitation,
             Self::ServerRefused,
             Self::IdentityUnknown,
+            Self::OccurrenceNotWritable,
+            Self::UnsafeToWrite,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -115,6 +140,40 @@ mod tests {
             WriteRefusal::parse("server-refused: need-privileges"),
             Some((WriteRefusal::ServerRefused, "need-privileges"))
         );
+    }
+
+    #[test]
+    fn every_refusal_is_read_back() {
+        for refusal in [
+            WriteRefusal::ReplyOnlyInvitation,
+            WriteRefusal::ServerRefused,
+            WriteRefusal::IdentityUnknown,
+            WriteRefusal::OccurrenceNotWritable,
+            WriteRefusal::UnsafeToWrite,
+        ] {
+            let msg = refusal.message("detail");
+            assert_eq!(
+                WriteRefusal::parse(&msg),
+                Some((refusal, "detail")),
+                "{msg}"
+            );
+            // The token is the serialized name the surfaces look up.
+            assert_eq!(
+                serde_json::to_value(refusal).unwrap(),
+                serde_json::json!(refusal.token()),
+            );
+        }
+    }
+
+    #[test]
+    fn a_refusing_status_is_one_that_wrote_nothing() {
+        for status in [400, 413, 415, 422, 429, 507] {
+            assert!(WriteRefusal::refused_status(status), "{status}");
+        }
+        // Named elsewhere (401, 403, 404, 409, 412), or unknown either way.
+        for status in [200, 401, 403, 404, 409, 412, 500, 502, 503, 504] {
+            assert!(!WriteRefusal::refused_status(status), "{status}");
+        }
     }
 
     #[test]

@@ -3,4 +3,4 @@
 /**
  * The reason a write did not happen.
  */
-export type WriteRefusal = "reply-only-invitation" | "server-refused" | "identity-unknown" | "occurrence-not-writable";
+export type WriteRefusal = "reply-only-invitation" | "server-refused" | "identity-unknown" | "occurrence-not-writable" | "unsafe-to-write";

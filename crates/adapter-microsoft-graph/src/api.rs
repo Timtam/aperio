@@ -527,11 +527,13 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
 }
 
 /// `POST /me/events/{id}/cancel` — the ORGANIZER cancels a meeting: Graph
-/// emails a cancellation to every attendee and marks the event cancelled
-/// server-side (it stays on the organizer's calendar as `isCancelled` until
-/// deleted). Organizer-only; Graph rejects it for a non-organizer or a
-/// non-meeting. The caller (`delete_event` with `send_cancellations`) pairs it
-/// with a follow-up DELETE to actually remove the row.
+/// emails a cancellation to every attendee and marks the event cancelled.
+/// Microsoft documents that the action moves the event to Deleted Items, and a
+/// move gives an Outlook item a new id unless immutable ids are asked for
+/// (this adapter does not), so the id may be gone afterwards. Organizer-only;
+/// Graph rejects it for a non-organizer or a non-meeting. The caller
+/// (`delete_event` with `send_cancellations`) pairs it with a follow-up DELETE
+/// to remove the row wherever it still is, and takes a 404 there as done.
 pub async fn cancel_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(event_id);
     let path = format!("/me/events/{id_enc}/cancel");

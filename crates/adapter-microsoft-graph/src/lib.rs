@@ -350,12 +350,13 @@ impl CalendarFeature for MicrosoftGraphAdapter {
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
         api::update_event(&self.state, &event)
             .await
-            .map_err(to_core_error)
+            .map_err(to_update_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
         // Graph's event-id is mailbox-wide unique — no calendar
         // walk required, unlike Google.
+        let mut cancelled = false;
         if send_cancellations {
             // Organizer cancellation: notify attendees first (Graph marks the
             // event cancelled), then remove it. Graph's `/cancel` is
@@ -371,7 +372,7 @@ impl CalendarFeature for MicrosoftGraphAdapter {
             // transient failure doesn't silently drop the cancellation and
             // delete anyway.
             match api::cancel_event(&self.state, event_id).await {
-                Ok(()) => {}
+                Ok(()) => cancelled = true,
                 Err(GraphError::Http { status, .. }) if status == 400 || status == 403 => {
                     tracing::debug!(
                         status,
@@ -382,9 +383,14 @@ impl CalendarFeature for MicrosoftGraphAdapter {
                 Err(err) => return Err(to_core_error(err)),
             }
         }
-        api::delete_event(&self.state, event_id)
-            .await
-            .map_err(to_core_error)
+        match api::delete_event(&self.state, event_id).await {
+            // `/cancel` moved the event to Deleted Items, and a move gives an
+            // Outlook item a new id: the old one is gone, which is what was
+            // asked. Reported as a failure, undoing a split's new series said
+            // it could not, while it was cancelled and off the calendar.
+            Err(GraphError::Http { status: 404, .. }) if cancelled => Ok(()),
+            other => other.map_err(to_core_error),
+        }
     }
 
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> CoreResult<Vec<FreeBusy>> {
@@ -732,6 +738,23 @@ fn urlencoding(s: &str) -> String {
     out
 }
 
+/// [`to_core_error`] for an update. A status with which the server turned the
+/// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
+/// not a protocol error: a caller deciding whether the write may have landed —
+/// splitting a series undoes its new part only when the cut certainly did not
+/// (decision 144) — must be told that nothing was written.
+fn to_update_error(err: GraphError) -> CoreError {
+    match err {
+        GraphError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            tracing::warn!(status, %message, "Graph refused the update");
+            CoreError::Forbidden(
+                cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
+            )
+        }
+        other => to_core_error(other),
+    }
+}
+
 fn to_core_error(err: GraphError) -> CoreError {
     use GraphError::*;
     match err {
@@ -757,6 +780,125 @@ mod delta_tests {
     use super::*;
     use chrono::TimeZone;
     use mockito::{Matcher, Server};
+
+    /// A series head, cut short: what splitting a series writes.
+    fn truncated_master() -> Event {
+        Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "ev-1".into(),
+            calendar_id: "cal-1".into(),
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 7, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 8, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;UNTIL=20260824T065959Z".into(),
+                exceptions: vec![],
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    /// Graph read the truncate and turned it down whole: a refusal, so a split
+    /// takes its new part back (decision 144).
+    #[tokio::test]
+    async fn an_update_graph_turned_down_is_a_refusal() {
+        let mut server = Server::new_async().await;
+        // The read before the write may fail; it is only for the body.
+        let _get = server
+            .mock("GET", "/me/events/ev-1")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _patch = server
+            .mock("PATCH", "/me/events/ev-1")
+            .with_status(400)
+            .with_body(r#"{"error":{"code":"ErrorInvalidRequest"}}"#)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        match err {
+            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: HTTP 400"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `/cancel` moves the event to Deleted Items, which gives it a new id: the
+    /// DELETE that follows may find nothing, and that is the event gone.
+    #[tokio::test]
+    async fn a_delete_that_finds_nothing_after_the_cancel_is_done() {
+        let mut server = Server::new_async().await;
+        let _cancel = server
+            .mock("POST", "/me/events/ev-1/cancel")
+            .with_status(202)
+            .create_async()
+            .await;
+        let _delete = server
+            .mock("DELETE", "/me/events/ev-1")
+            .with_status(404)
+            .create_async()
+            .await;
+        adapter_for(&server)
+            .delete_event("ev-1", true)
+            .await
+            .expect("cancelled, and gone");
+    }
+
+    /// ...but only after a cancel: without one, a 404 is an event not found,
+    /// and after one, any other failure is still a failure.
+    #[tokio::test]
+    async fn a_delete_that_finds_nothing_without_a_cancel_is_not_found() {
+        let mut server = Server::new_async().await;
+        let _delete = server
+            .mock("DELETE", "/me/events/ev-1")
+            .with_status(404)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .delete_event("ev-1", false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+
+        let mut server = Server::new_async().await;
+        let _cancel = server
+            .mock("POST", "/me/events/ev-1/cancel")
+            .with_status(202)
+            .create_async()
+            .await;
+        let _delete = server
+            .mock("DELETE", "/me/events/ev-1")
+            .with_status(500)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .delete_event("ev-1", true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Protocol(_)), "{err:?}");
+    }
 
     fn adapter_for(server: &Server) -> MicrosoftGraphAdapter {
         let mut adapter = MicrosoftGraphAdapter::new(

@@ -2409,22 +2409,32 @@ Siehe DESIGN §4.2.
       „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
       es nur als gelöscht, wenn kein anderer Kalender den Termin hat
       (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
-      davon: da ging nichts hinaus.
+      davon: da ging nichts hinaus. Am Handy kommen nur `forbidden`,
+      `conflict` und `network` mit Code an (B9); eine Ablehnung mit Marke
+      (`server-refused`, `unsafe-to-write`) reist aber als `forbidden` und
+      wird erkannt, jede andere gilt dort vorsichtig als unklar. Handy ohne
+      Testläufer — ↻ im Test.
     - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
       Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
       Wiederholung 405 (die Liste gibt es schon): gemeldet als Fehler, ein
       erneuter Versuch legt eine zweite Liste an. Vor #97 schon so.
-    - 🚩 **Sichere Ablehnungen als Ablehnung kennzeichnen** (147, eigener PR
-      direkt nach #97): EWS-Fehlerantworten, HTTP 400/429 bei Google und
-      Microsoft, CalDAV-Prüfungen „nothing was saved“ kommen als `protocol` an;
-      beim Teilen bleiben dann beide Serien mit Warnung stehen, obwohl sicher
-      nichts gekürzt wurde. Die Adapter sollen sie mit `server-refused`
-      kennzeichnen. Dazu Graph: nach erfolgreichem `/cancel` liefert das
-      folgende DELETE womöglich 404 (die Absage verschiebt das Ereignis), das
-      Löschen gilt dann als gescheitert. Am Handy kommen
-      nur `forbidden`, `conflict` und `network` mit Code an (B9), jede andere
-      Ablehnung gilt dort also vorsichtig als unklar. Handy ohne Testläufer —
-      ↻ im Test.
+    - ✅ **Sichere Ablehnungen als Ablehnung gekennzeichnet** (147). EWS-
+      Fehlerantworten, HTTP 400/429 bei Google und Microsoft und CalDAVs eigene
+      Prüfungen „nothing was saved“ kamen als `protocol` an; beim Teilen
+      blieben dann beide Serien mit Warnung stehen, obwohl sicher nichts
+      gekürzt wurde. Jetzt meldet jeder Adapter beim Ändern eines Termins
+      (`update_event`) eine Ablehnung als solche: ein HTTP-Status, mit dem der
+      Server das Schreiben ganz abgelehnt hat
+      (`WriteRefusal::refused_status`: 400, 413, 415, 422, 429, 507), und bei
+      EWS jede SOAP-Fehlerantwort auf das eine `UpdateItem` außer internen
+      Server- und Zeitüberschreitungsfehlern, als `server-refused`; CalDAVs
+      eigene Prüfungen als neue Marke `unsafe-to-write` („Aperio kann diesen
+      Termin nicht sicher ändern“). Beide reisen als `forbidden` und kommen so
+      auch am Handy an. Graph: ein DELETE, das nach erfolgreichem `/cancel`
+      nichts mehr findet, gilt als erledigt (die Absage verschiebt das
+      Ereignis nach „Gelöschte Elemente“, mit neuer Id). Nicht hier: Anlegen
+      und Löschen melden solche Ablehnungen weiter als `protocol` (für das
+      Teilen zählt nur das Kürzen).
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,

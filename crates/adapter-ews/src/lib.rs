@@ -1000,7 +1000,7 @@ impl CalendarFeature for EwsAdapter {
         };
         api::update_event(&self.client, &event, zones.as_ref())
             .await
-            .map_err(to_core_error)
+            .map_err(to_update_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
@@ -1384,6 +1384,48 @@ impl ContactsFeature for EwsAdapter {
     }
 }
 
+/// [`to_core_error`] for an update. A status with which the server turned the
+/// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
+/// not a protocol error: a caller deciding whether the write may have landed —
+/// splitting a series undoes its new part only when the cut certainly did not
+/// (decision 144) — must be told that nothing was written.
+///
+/// An update is one `UpdateItem` of one item, so a SOAP error answer to it
+/// wrote nothing, whatever its code — except the server's own internal and
+/// timeout errors, which may come after part of the work was done. The codes
+/// [`to_core_error`] already names (sign-in, not found) keep their error.
+fn to_update_error(err: EwsError) -> CoreError {
+    match err {
+        EwsError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            tracing::warn!(status, %message, "Exchange refused the update");
+            CoreError::Forbidden(
+                cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
+            )
+        }
+        EwsError::Soap { code, message } if soap_refused_update(&code) => {
+            tracing::warn!(%code, %message, "Exchange refused the update");
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(&code))
+        }
+        other => to_core_error(other),
+    }
+}
+
+/// Whether a SOAP error answer to one item's `UpdateItem` certainly wrote
+/// nothing; see [`to_update_error`].
+fn soap_refused_update(code: &str) -> bool {
+    let named = matches!(
+        code,
+        "ErrorAccessDenied"
+            | "ErrorInvalidAccessToken"
+            | "ErrorPasswordExpired"
+            | "ErrorADUnavailable"
+            | "ErrorNoFreeBusyAccess"
+            | "ErrorItemNotFound"
+            | "ErrorFolderNotFound"
+    );
+    !named && !code.contains("InternalServer") && !code.contains("Timeout")
+}
+
 fn to_core_error(err: EwsError) -> CoreError {
     use EwsError::*;
     match err {
@@ -1411,6 +1453,72 @@ fn to_core_error(err: EwsError) -> CoreError {
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
         DiscoveryFailed(m) => CoreError::NotFound(m),
+    }
+}
+
+#[cfg(test)]
+mod update_refusal_tests {
+    use super::*;
+
+    fn soap(code: &str) -> EwsError {
+        EwsError::Soap {
+            code: code.into(),
+            message: "no".into(),
+        }
+    }
+
+    /// An update is one `UpdateItem` of one item: a SOAP error answer wrote
+    /// nothing, and is a refusal (decision 144).
+    #[test]
+    fn a_soap_error_answer_to_an_update_is_a_refusal() {
+        for code in [
+            "ErrorServerBusy",
+            "ErrorInvalidPropertySet",
+            "ErrorCalendarInvalidRecurrence",
+        ] {
+            match to_update_error(soap(code)) {
+                CoreError::Forbidden(msg) => assert_eq!(msg, format!("server-refused: {code}")),
+                other => panic!("{code}: {other:?}"),
+            }
+        }
+        match to_update_error(EwsError::Http {
+            status: 429,
+            message: "slow down".into(),
+        }) {
+            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: HTTP 429"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// ...except where the server's own failure may come after part of the
+    /// work, and where the error is already named.
+    #[test]
+    fn a_server_failure_stays_unsure_and_a_named_error_keeps_its_name() {
+        for code in [
+            "ErrorInternalServerError",
+            "ErrorInternalServerTransientError",
+            "ErrorTimeoutExpired",
+        ] {
+            assert!(
+                matches!(to_update_error(soap(code)), CoreError::Protocol(_)),
+                "{code}"
+            );
+        }
+        assert!(matches!(
+            to_update_error(soap("ErrorAccessDenied")),
+            CoreError::Authentication(_)
+        ));
+        assert!(matches!(
+            to_update_error(soap("ErrorItemNotFound")),
+            CoreError::NotFound(_)
+        ));
+        assert!(matches!(
+            to_update_error(EwsError::Http {
+                status: 503,
+                message: "busy".into(),
+            }),
+            CoreError::Protocol(_)
+        ));
     }
 }
 
