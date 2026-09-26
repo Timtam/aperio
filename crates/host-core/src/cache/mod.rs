@@ -281,9 +281,13 @@ const CONFIRM_THRESHOLD: i64 = 2;
 /// opposed to a network blip)? Substring match over the usual suspects —
 /// conservative on purpose: a false "auth" only makes the UI suggest
 /// re-checking the password. The OAuth needles matter because a revoked
-/// Google/Graph grant surfaces as the TOKEN endpoint's HTTP 400 body
-/// (`{"error":"invalid_grant",...}`) embedded in a protocol error, not
-/// as a 401 — exactly the case where re-authenticating is the fix.
+/// grant's text carries the TOKEN endpoint's body
+/// (`{"error":"invalid_grant",...}`): Google and Graph now report such a
+/// refused refresh as an authentication error ("token refresh refused (HTTP
+/// 400): …"), but the builtin-oauth adapters (Drive, Dropbox, Webex), plugin
+/// messages passed through verbatim and older plugin builds still carry it
+/// as "protocol error: … HTTP 400: …" — exactly the case where
+/// re-authenticating is the fix.
 pub fn is_auth_shaped(error: &str) -> bool {
     let lower = error.to_lowercase();
     [

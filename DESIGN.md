@@ -1404,9 +1404,12 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     folgenden“ wird nicht angeboten: Das schriebe die Regel um, die nur der
     Organisator ändern darf.
   - Eine Ablehnung reist als Marke (`cal_core::WriteRefusal`:
-    `reply-only-invitation:`, `server-refused:`, `identity-unknown:`), und
-    beide Oberflächen sagen daraus einen Satz in der Sprache des Nutzers
-    (`shared/eventWriteError.ts`). `CACHE_GENERATION` 4, damit eine
+    `reply-only-invitation:`, `server-refused:`, `identity-unknown:`,
+    `occurrence-not-writable:`, `unsafe-to-write:`), und beide Oberflächen
+    sagen daraus einen Satz in der Sprache des Nutzers
+    (`shared/eventWriteError.ts`). Eine Marke heißt auch: Es wurde sicher
+    nichts geschrieben (`writeNeverLanded`); beim Ändern eines Termins melden
+    alle Adapter eine Ablehnung des Servers so (147). `CACHE_GENERATION` 4, damit eine
     gespeicherte Kalenderliste ohne das neue Merkmal neu gelesen wird.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit

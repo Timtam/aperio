@@ -331,20 +331,32 @@ async fn update_master(
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url_for_event(&cal_url, &event.id)?;
     let (body, server_etag) = get_resource(client, &resource, credentials).await?;
-    let refused =
-        |why: &str| CaldavError::Protocol(format!("{}: {why}; nothing was saved", event.id));
+    // Nothing is written, and the caller must know it for certain: splitting a
+    // series takes its new part back only after a refusal like this one
+    // (decision 144), so it travels as one, not as a protocol error.
+    let refused = |token: &str, why: &str| {
+        tracing::warn!(event_id = %event.id, why, "refusing to write the event; nothing was saved");
+        CaldavError::Forbidden(WriteRefusal::UnsafeToWrite.message(token))
+    };
     let own = ctx.identity.clone().unwrap_or_default();
-    let blocks = vevent_blocks(&body, cal_url.as_str(), &own)
-        .ok_or_else(|| refused("its resource cannot be read block by block"))?;
+    let blocks = vevent_blocks(&body, cal_url.as_str(), &own).ok_or_else(|| {
+        refused(
+            "unreadable-blocks",
+            "its resource cannot be read block by block",
+        )
+    })?;
     let (_, uid) = decode_event_id(&event.id);
     let master = blocks
         .iter()
         .find(|b| {
             override_recurrence_id(&b.event.id).is_none() && decode_event_id(&b.event.id).1 == uid
         })
-        .ok_or_else(|| refused("its resource holds no such event"))?;
+        .ok_or_else(|| refused("no-such-event", "its resource holds no such event"))?;
     if !one_organizer(&body, &blocks) {
-        return Err(refused("its components name different organizers"));
+        return Err(refused(
+            "mixed-organizers",
+            "its components name different organizers",
+        ));
     }
     if ctx.schedules && attendee_copy(&body[master.range.clone()], ctx)? {
         return write_attendee_copy(
@@ -381,7 +393,12 @@ async fn update_master(
         |rid| cutoff.is_none_or(|until| rid <= until),
         |block| apply_to_block(block, &plan.change),
     )
-    .ok_or_else(|| refused("its resource cannot be read block by block"))?;
+    .ok_or_else(|| {
+        refused(
+            "unreadable-blocks",
+            "its resource cannot be read block by block",
+        )
+    })?;
     let if_match = event.etag.as_deref().or(server_etag.as_deref());
     let new_etag = put_resource(client, &resource, new_body, if_match, credentials).await?;
 
@@ -793,18 +810,27 @@ async fn put_resource(
         .body(body)
         .send_retrying_marked()
         .await?;
-    // A 412 on the replay of a guarded write: the connection died after the
-    // first PUT went out, and that one may have landed — its new ETag is what
-    // refuses the replay. Read as a refusal, a caller would undo around a write
-    // that went through: splitting a series deleted its new part while the old
-    // part was already cut short (decision 144). So it is what it is, unsure.
-    if first_may_have_landed
-        && if_match.is_some()
-        && response.status() == StatusCode::PRECONDITION_FAILED
-    {
+    // Any refusal of a replay whose first attempt may have landed: the
+    // connection died after the first PUT went out, and the answer may be
+    // about that one — a 412 because its new ETag refuses the replay, a 429 or
+    // a 507 because it was taken. Read as a refusal, a caller would undo
+    // around a write that went through: splitting a series deleted its new
+    // part while the old part was already cut short (decision 144). So it is
+    // what it is, unsure.
+    if first_may_have_landed && !response.status().is_success() {
+        // The answer itself is kept for the log: it may be the first
+        // attempt's, or a refusal the replay met on its own.
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        tracing::warn!(
+            %resource,
+            status,
+            body = %body.chars().take(200).collect::<String>(),
+            "a replayed PUT was answered with a failure; the first attempt may have been saved",
+        );
         return Err(CaldavError::Network(format!(
-            "the connection to '{resource}' broke after the change was sent; \
-             it may have been saved"
+            "the connection to '{resource}' broke after the change was sent \
+             (the replay was answered HTTP {status}); it may have been saved"
         )));
     }
     check_write(response).await
@@ -1852,6 +1878,30 @@ END:VCALENDAR</c:calendar-data>
         assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
     }
 
+    /// ...and so is any other refusal of that replay: a 429 may be the server
+    /// throttling a second copy of what it already stored.
+    #[tokio::test]
+    async fn any_refusal_of_a_replayed_put_is_unsure() {
+        let base =
+            first_attempt_lost_then(b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n")
+                .await;
+        let resource = Url::parse(&format!("{base}/calendars/alice/work/abc.ics")).unwrap();
+        let err = put_resource(
+            &client(),
+            &resource,
+            standup_body("Cut short"),
+            None,
+            &creds(&base),
+        )
+        .await
+        .expect_err("the replay was refused");
+        match err {
+            // The replay's answer is kept, for whoever reads the error.
+            CaldavError::Network(msg) => assert!(msg.contains("HTTP 429"), "{msg}"),
+            other => panic!("expected unsure, got {other:?}"),
+        }
+    }
+
     /// Without a replay, a 412 is what it says: the copy moved on.
     #[tokio::test]
     async fn a_412_without_a_replay_is_a_conflict() {
@@ -2204,6 +2254,44 @@ END:VCALENDAR\r
             cancelled: false,
             scheduling_silenced: false,
         }
+    }
+
+    /// A resource whose blocks name different organizers is not written: a
+    /// refusal of Aperio's own, said as one (decision 144), not a protocol
+    /// error the caller has to treat as maybe written.
+    #[tokio::test]
+    async fn an_update_aperio_will_not_write_is_a_refusal() {
+        let mut server = Server::new_async().await;
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:abc-123@aperio\r\nDTSTAMP:20260520T060000Z\r\nSUMMARY:Standup\r\n\
+DTSTART:20260520T080000Z\r\nDTEND:20260520T083000Z\r\nRRULE:FREQ=DAILY\r\n\
+ORGANIZER:mailto:alice@example.org\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:abc-123@aperio\r\nDTSTAMP:20260520T060000Z\r\nSUMMARY:Standup\r\n\
+RECURRENCE-ID:20260521T080000Z\r\nDTSTART:20260521T090000Z\r\nDTEND:20260521T093000Z\r\n\
+ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let _get = serve_copy(&mut server, body.to_string()).await;
+        let put = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
+            .expect(0)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = update_event(
+            &client(),
+            sample_existing_event(&cal_url),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            CaldavError::Forbidden(msg) => assert_eq!(msg, "unsafe-to-write: mixed-organizers"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        put.assert_async().await;
     }
 
     #[tokio::test]

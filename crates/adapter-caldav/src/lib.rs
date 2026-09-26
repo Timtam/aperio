@@ -926,6 +926,23 @@ impl CaldavAdapter {
     }
 }
 
+/// [`to_core_error`] for an update. A status with which the server turned the
+/// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
+/// not a protocol error: a caller deciding whether the write may have landed —
+/// splitting a series undoes its new part only when the cut certainly did not
+/// (decision 144) — must be told that nothing was written.
+fn to_update_error(err: CaldavError) -> CoreError {
+    match err {
+        CaldavError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            tracing::warn!(status, %message, "the server refused the update");
+            CoreError::Forbidden(
+                cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
+            )
+        }
+        other => to_core_error(other),
+    }
+}
+
 /// Translate a CalDAV-specific error into the shared `cal_core::Error`
 /// shape so the rest of the app can pattern-match it uniformly.
 fn to_core_error(err: CaldavError) -> CoreError {
@@ -1091,7 +1108,7 @@ impl CalendarFeature for CaldavAdapter {
         let ctx = self.write_ctx().await?;
         events::update_event(&self.http, event, &self.credentials, &ctx)
             .await
-            .map_err(to_core_error)
+            .map_err(to_update_error)
     }
 
     async fn add_event_exdate(
@@ -1691,6 +1708,39 @@ fn contact_matches(c: &Contact, needle_lower: &str) -> bool {
     c.emails
         .iter()
         .any(|e| e.value.to_lowercase().contains(needle_lower))
+}
+
+#[cfg(test)]
+mod update_refusal_tests {
+    use super::*;
+
+    /// A status with which the server turned the update down whole is a
+    /// refusal (decision 144); a server failure and the named statuses keep
+    /// their error.
+    #[test]
+    fn an_update_the_server_turned_down_is_a_refusal() {
+        for status in [400, 413, 415, 422, 429, 507] {
+            match to_update_error(CaldavError::Http {
+                status,
+                message: "no".into(),
+            }) {
+                CoreError::Forbidden(msg) => {
+                    assert_eq!(msg, format!("server-refused: HTTP {status}"))
+                }
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+        let http = |status| CaldavError::Http {
+            status,
+            message: "no".into(),
+        };
+        assert!(matches!(to_update_error(http(500)), CoreError::Protocol(_)));
+        assert!(matches!(to_update_error(http(412)), CoreError::Conflict(_)));
+        assert!(matches!(
+            to_update_error(CaldavError::Network("reset".into())),
+            CoreError::Network(_)
+        ));
+    }
 }
 
 #[cfg(test)]

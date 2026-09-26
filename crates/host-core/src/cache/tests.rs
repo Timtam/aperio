@@ -2628,12 +2628,15 @@ fn auth_shaped_heuristic() {
     assert!(super::is_auth_shaped("HTTP 401 Unauthorized"));
     assert!(super::is_auth_shaped("server said: invalid credentials"));
     assert!(super::is_auth_shaped("403 Forbidden"));
-    // Revoked OAuth grant: the token endpoint's HTTP 400 body embedded
-    // in a protocol error — the exact string shape both OAuth adapters
-    // record (Google/Graph map token failures to a 400, not a 401).
+    // Revoked OAuth grant: the token endpoint's HTTP 400 body embedded in
+    // a protocol error — the shape builtin-oauth adapters and older plugin
+    // builds record — and as Google and Graph report it now.
     assert!(super::is_auth_shaped(
         "protocol error: Google HTTP 400: {\"error\":\"invalid_grant\",\
          \"error_description\":\"Token has been expired or revoked.\"}"
+    ));
+    assert!(super::is_auth_shaped(
+        "authentication failed: token refresh refused (HTTP 400): {\"error\":\"invalid_grant\"}"
     ));
     assert!(!super::is_auth_shaped("connection reset by peer"));
     assert!(!super::is_auth_shaped("timeout after 30s"));

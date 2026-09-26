@@ -353,7 +353,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
         api::update_event(&self.state, &event)
             .await
-            .map_err(to_core_error)
+            .map_err(to_update_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
@@ -720,6 +720,64 @@ fn is_read_only_google_list(list_id: &str) -> bool {
         || list_id == contacts::GOOGLE_DIRECTORY_LIST_ID
 }
 
+/// [`to_core_error`] for an update. A status with which the server turned the
+/// write down whole ([`cal_core::WriteRefusal::refused_status`]) is a refusal,
+/// not a protocol error: a caller deciding whether the write may have landed —
+/// splitting a series undoes its new part only when the cut certainly did not
+/// (decision 144) — must be told that nothing was written.
+fn to_update_error(err: GoogleError) -> CoreError {
+    match err {
+        GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            tracing::warn!(status, %message, "Google refused the update");
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(
+                &match server_reason(&message) {
+                    Some(reason) => format!("HTTP {status}: {reason}"),
+                    None => format!("HTTP {status}"),
+                },
+            ))
+        }
+        other => to_core_error(other),
+    }
+}
+
+/// The reason a JSON error answer gives (`{"error":{"message":"…"}}`),
+/// trimmed, for the sentence that says the server refused: "HTTP 400" alone
+/// tells the user nothing they can act on.
+///
+/// The error keeps only the first 300 characters of the answer, so a longer
+/// envelope arrives cut and is no JSON any more. The first `"message"`
+/// string is then read as far as it goes: it is the error's own, before the
+/// details and the request ids that make an envelope long.
+fn server_reason(body: &str) -> Option<String> {
+    let reason = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(value) => value.get("error")?.get("message")?.as_str()?.to_string(),
+        Err(_) => {
+            let rest = &body[body.find("\"message\"")? + "\"message\"".len()..];
+            let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+            let rest = rest.strip_prefix('"')?;
+            let mut out = String::new();
+            let mut escaped = false;
+            for c in rest.chars() {
+                match (escaped, c) {
+                    (true, _) => {
+                        out.push(c);
+                        escaped = false;
+                    }
+                    (false, '\\') => escaped = true,
+                    (false, '"') => break,
+                    (false, _) => out.push(c),
+                }
+            }
+            out
+        }
+    };
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    Some(reason.chars().take(160).collect())
+}
+
 fn to_core_error(err: GoogleError) -> CoreError {
     use GoogleError::*;
     match err {
@@ -745,6 +803,148 @@ mod delta_tests {
     use super::*;
     use chrono::TimeZone;
     use mockito::{Matcher, Server};
+
+    /// A series head, cut short: what splitting a series writes.
+    fn truncated_master() -> Event {
+        Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "master-1".into(),
+            calendar_id: "primary".into(),
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 7, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2026, 6, 1, 8, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;UNTIL=20260824T065959Z".into(),
+                exceptions: vec![],
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    /// Google read the truncate and turned it down whole: nothing was written,
+    /// and the caller must know that for certain (decision 144), not as a
+    /// protocol error it has to treat as maybe landed.
+    #[tokio::test]
+    async fn an_update_google_turned_down_is_a_refusal() {
+        for status in [400, 429] {
+            let mut server = Server::new_async().await;
+            let _patch = server
+                .mock(
+                    "PATCH",
+                    Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+                )
+                .with_status(status)
+                .with_body(r#"{"error":{"message":"no"}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .update_event(truncated_master())
+                .await
+                .unwrap_err();
+            // The server's own reason travels with the status.
+            match err {
+                CoreError::Forbidden(msg) => {
+                    assert_eq!(msg, format!("server-refused: HTTP {status}: no"))
+                }
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+    }
+
+    /// The error keeps only the first 300 characters of an answer, so a
+    /// realistic envelope arrives cut: its reason is still read.
+    #[test]
+    fn the_reason_is_read_from_a_cut_answer() {
+        let long = "The recurrence rule does not generate an occurrence on the start date \
+                    of the event, so the event cannot be saved as it is.";
+        let body = format!(
+            r#"{{"error":{{"code":400,"message":"{long}","errors":[{{"domain":"global","reason":"invalid","message":"{long}"}}],"innerError":{{"date":"2026-09-26T10:00:00","request-id":"0f6c1d2e-9a8b-4c3d-8e7f-6a5b4c3d2e1f"}}}}}}"#
+        );
+        let cut: String = body.chars().take(300).collect();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&cut).is_err(),
+            "the test must cut"
+        );
+        assert_eq!(server_reason(&cut).as_deref(), Some(long));
+        // A reason cut itself is read as far as it goes.
+        let cut_early: String = body.chars().take(60).collect();
+        assert!(server_reason(&cut_early).is_some_and(|r| long.starts_with(&r)));
+        // No message, no reason.
+        assert_eq!(
+            server_reason(r#"{"error":{"code":"ErrorInvalidRequest"}}"#),
+            None
+        );
+        assert_eq!(server_reason("<html>Bad Request</html>"), None);
+    }
+
+    const PATCH_PATH: &str = r"^/calendars/primary/events/master-1";
+
+    /// The save met an expired access token, and the token endpoint refused
+    /// the refresh (a revoked grant answers 400 `invalid_grant`): a sign-in
+    /// failure, as the error the user can act on — not the calendar server
+    /// refusing the change.
+    #[tokio::test]
+    async fn a_refused_token_refresh_during_an_update_is_a_sign_in_failure() {
+        let mut server = Server::new_async().await;
+        let _write = server
+            .mock("PATCH", Matcher::Regex(PATCH_PATH.into()))
+            .with_status(401)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        match err {
+            CoreError::Authentication(msg) => assert!(msg.contains("invalid_grant"), "{msg}"),
+            other => panic!("expected a sign-in failure, got {other:?}"),
+        }
+    }
+
+    /// A server error says nothing about what was written: unsure, as before.
+    #[tokio::test]
+    async fn an_update_that_failed_in_the_server_is_not_a_refusal() {
+        let mut server = Server::new_async().await;
+        let _patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+            )
+            .with_status(503)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Protocol(_)), "{err:?}");
+    }
 
     /// Build an adapter whose API + token endpoints point at the mock
     /// server. The access token is valid for an hour so no refresh fires.

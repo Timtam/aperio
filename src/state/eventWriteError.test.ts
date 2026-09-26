@@ -158,3 +158,24 @@ describe('eventWriteFailureReason', () => {
     expect(eventWriteFailureReason(err, t)).toBe(eventWriteErrorMessage(err, t));
   });
 });
+
+describe('a write Aperio will not risk', () => {
+  it('reads as its own refusal, on either surface, and as nothing written', () => {
+    // A CalDAV resource whose blocks name different organizers is not
+    // written: the adapter says so with a token of its own.
+    const err = command('forbidden', 'unsafe-to-write: mixed-organizers');
+    expect(eventWriteRefusal(err)?.refusal).toBe('unsafe-to-write');
+    expect(eventWriteErrorMessage(err, t)).toMatch(/nicht sicher ändern/);
+    expect(eventWriteErrorMessage(err, t)).not.toMatch(/mixed-organizers/);
+    expect(eventWriteFailureReason(err, t)).not.toMatch(/nichts geändert/);
+    expect(writeNeverLanded(err)).toBe(true);
+  });
+
+  it('counts a server that turned the write down as nothing written', () => {
+    // 400, 429 and their kin, from every adapter's update (decision 147).
+    expect(writeNeverLanded(command('forbidden', 'server-refused: HTTP 429'))).toBe(true);
+    expect(eventWriteErrorMessage(command('forbidden', 'server-refused: HTTP 429'), t)).toMatch(
+      /abgelehnt \(HTTP 429\)/,
+    );
+  });
+});

@@ -240,7 +240,7 @@ impl ApiState {
             .await
             .map_err(|err| {
                 warn!(?err, "refresh-token grant failed");
-                err
+                refresh_refused(err)
             })?;
         let mut guard = self.tokens.lock().await;
         guard.access_token = fresh.access_token;
@@ -249,6 +249,24 @@ impl ApiState {
         }
         guard.expires_at = fresh.expires_at;
         Ok(())
+    }
+}
+
+/// A token endpoint that answered the refresh with 400 or 401 — a revoked or
+/// expired grant (`invalid_grant`), a client it does not know — refused the
+/// sign-in, not the request that needed it: said as a 401, the write that was
+/// waiting for the token reads as a sign-in failure. As its own status, an
+/// update read it as the calendar server refusing the change (decision 147).
+/// Anything else keeps its error.
+fn refresh_refused(err: GraphError) -> GraphError {
+    match err {
+        GraphError::Http { status, message } if status == 400 || status == 401 => {
+            GraphError::Http {
+                status: 401,
+                message: format!("token refresh refused (HTTP {status}): {message}"),
+            }
+        }
+        other => other,
     }
 }
 
@@ -527,11 +545,13 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
 }
 
 /// `POST /me/events/{id}/cancel` — the ORGANIZER cancels a meeting: Graph
-/// emails a cancellation to every attendee and marks the event cancelled
-/// server-side (it stays on the organizer's calendar as `isCancelled` until
-/// deleted). Organizer-only; Graph rejects it for a non-organizer or a
-/// non-meeting. The caller (`delete_event` with `send_cancellations`) pairs it
-/// with a follow-up DELETE to actually remove the row.
+/// emails a cancellation to every attendee and marks the event cancelled.
+/// Microsoft documents that the action moves the event to Deleted Items, and a
+/// move gives an Outlook item a new id unless immutable ids are asked for
+/// (this adapter does not), so the id may be gone afterwards. Organizer-only;
+/// Graph rejects it for a non-organizer or a non-meeting. The caller
+/// (`delete_event` with `send_cancellations`) pairs it with a follow-up DELETE
+/// to remove the row wherever it still is, and takes a 404 there as done.
 pub async fn cancel_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(event_id);
     let path = format!("/me/events/{id_enc}/cancel");
