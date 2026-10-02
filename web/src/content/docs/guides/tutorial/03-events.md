@@ -174,7 +174,15 @@ one was already ended, for example after a lost connection, both stay: your
 change counts as saved, and the editor stays open with a note naming the day
 from which the series may show twice, until you close it. If deleting the new
 one fails as well, Aperio says so too, and asks you to check the calendar before
-saving again.
+saving again. Aperio leaves the occurrences you deleted out of the new series,
+and ones changed in another calendar app stay in it, at their usual time and
+with the new series' content. Not every calendar keeps those deletions yet:
+CalDAV calendars do for a series with a time of day, but on Exchange, on
+Google, and in an all-day series on CalDAV, a deleted occurrence can still come
+back for now. On Google, Aperio also knows deleted occurrences only about a year
+ahead, so one deleted further out comes back in the new series. And in an
+all-day series on Google or CalDAV, an occurrence changed in another app also
+stays in the old series for now, so that day shows twice.
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
 occurrence, and a new date moves the start of the series. The editor's title

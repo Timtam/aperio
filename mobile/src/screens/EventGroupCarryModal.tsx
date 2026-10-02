@@ -265,9 +265,16 @@ export default function EventGroupCarryModal({
           // it is cut at. Usually that is the cutoff itself; a copy patterned
           // differently is cut at ITS next one, which is what "and all
           // following" means over there.
+          // The copy's own provider-kept occurrences, read first and once: they
+          // decide where it is cut as much as how. An occurrence changed
+          // elsewhere is there, one deleted as a cancelled row is not
+          // (decisions 125, 141). A copy without a rule has none and is not
+          // read. Mirrors the desktop.
+          const rows = (await readSeriesRows(current, occurrence, getSeriesRows)).rows;
           const anchorIso = firstOccurrenceFrom(
             current as CalendarEvent & CarryableFields,
             occurrence,
+            rows,
           );
           if (anchorIso == null) {
             // Nothing left in this copy at or after the cutoff. Reported, not
@@ -294,13 +301,13 @@ export default function EventGroupCarryModal({
             failed.push(target);
             continue;
           }
-          // With the copy's own provider-kept occurrences: one changed
-          // elsewhere is still there before the cut, though its master
-          // lists it among the exceptions (decision 125).
+          // With the same rows: one changed elsewhere is still there before
+          // the cut, though its master lists it among the exceptions
+          // (decision 125), and the new part leaves out what they delete.
           const splitPlan = planSeriesSplit(
             current as CalendarEvent & CarryableFields,
             anchorIso,
-            (await readSeriesRows(current, anchorIso, getSeriesRows)).rows,
+            rows,
           );
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {
