@@ -2866,6 +2866,29 @@ Code nach JS (`eventCoded` in `CalFfiModule.swift`/`.kt`). Andere Fehler (502,
 nativen Code, mit den Codes des Desktops; das lässt sich nur in einem
 Handy-Build prüfen.
 
+### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]`
+
+✅ Doppeltippen auf „Protokolle“, den letzten Eintrag der Einstellungen, öffnete
+den Tab „Kalender“. Die Leiste liegt über der Szene; die Tab-Seiten polsterten nur
+ihren Scroll-INHALT, die Scroll-Ansicht selbst lief weiter unter die Leiste.
+VoiceOver hielt eine Zeile dort für sichtbar, scrollte sie nicht hoch und tippte
+ihre Mitte an, also die Leiste. Seit dem zwölften Eintrag (Signaturen) lag
+„Protokolle“ genau dort; latent galt es für jede Tab-Seite (Aufgaben mit der
+Gruppe „Erledigt“, Tag, Woche, Monat, Agenda, Jahr, Kontakte). Jetzt endet die
+Szene jeder Tab-Seite über der Leiste (`useStackScreenOptions` in `App.tsx`,
+nur iOS; Android legt die Leiste unter die Szene). Sehende sehen den Inhalt nicht
+mehr hinter der Glas-Leiste, und beim Öffnen und Schließen einer Unterseite
+zeigt die Tab-Seite während der Animation unten einen leeren Streifen ohne
+Leiste (die Leiste verschwindet beim Öffnen sofort und kommt beim Schließen erst
+danach). Bewusst so: das Polster an der Sichtbarkeit der Leiste festzumachen,
+hieße die Stapel bei jedem Wechsel neu zu rendern, und das setzt den
+VoiceOver-Cursor zurück. ↻ im Test (Handy ohne Testläufer).
+
+🚩 **Offen:** Auf dem iPad ab iPadOS 18 sitzt die Leiste in normaler Breite
+oben. Das untere Polster kostet dort jetzt auf jeder Tab-Seite einen festen
+leeren Streifen von 56 bis 76 pt; das alte war nur Leerraum am Listenende.
+Braucht die Lage der Leiste (oben oder unten), die die Bibliothek nicht meldet.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)

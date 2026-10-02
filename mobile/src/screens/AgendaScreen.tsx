@@ -53,7 +53,6 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useDeferredLoading } from '../hooks/useDeferredLoading';
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
@@ -104,7 +103,6 @@ export default function AgendaScreen({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { hidden } = useCalendarVisibility();
-  const tabBarInset = useTabBarInset();
 
   // Window anchor (local midnight); seeded from the switcher's `anchor` param so
   // switching Day⇄Agenda keeps the selected date, else today.
@@ -584,7 +582,7 @@ export default function AgendaScreen({
           // flex:1 so the list fills the pager's fixed-size page and keeps its
           // own vertical scrolling (the CalendarDayList precedent).
           style={styles.scroll}
-          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
           {(() => {

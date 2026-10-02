@@ -7,7 +7,7 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -28,6 +28,7 @@ import DayStartReviewModal from './components/DayStartReviewModal';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
 import { SyncStatusButton } from './components/SyncStatusButton';
+import { useTabBarInset } from './hooks/useTabBarInset';
 import { useCacheUpdates } from './state/cacheObserver';
 import { armStartupGate } from './state/startupGate';
 import { SyncStatusContext } from './state/syncStatusContext';
@@ -152,6 +153,38 @@ const stackScreenOptions = {
   headerTitleStyle: { fontSize: 15, fontWeight: '600' as const },
 };
 
+/**
+ * A tab's stack options: on iOS its tab roots end at the top of the native
+ * tab bar.
+ *
+ * The bar floats over the scene, and padding a root's scroll CONTENT (what
+ * every root did) only made its last rows scrollable clear of it. The scroll
+ * view itself still ran under the bar, so VoiceOver counted a row behind the
+ * bar as on screen, did not scroll it up, and its double tap — a touch at the
+ * row's centre — landed on the bar: the last setting opened the calendar tab.
+ * Padding the scene keeps every row of every root, present or future, inside
+ * the visible part, so VoiceOver scrolls a row up before it activates it.
+ *
+ * Keyed on {@link TAB_ROOT_ROUTES}, the set that decides where the bar is
+ * shown at all, so the two cannot disagree. Android lays its bar out below
+ * the scene, so nothing is needed there. Called inside each stack: the bar's
+ * measured height is only known within the tab view.
+ */
+function useStackScreenOptions() {
+  const inset = useTabBarInset();
+  const rootOptions = useMemo(
+    () => ({ ...stackScreenOptions, contentStyle: { paddingBottom: inset } }),
+    [inset],
+  );
+  return useCallback(
+    ({ route }: { route: { name: string } }) =>
+      Platform.OS === 'ios' && TAB_ROOT_ROUTES.has(route.name)
+        ? rootOptions
+        : stackScreenOptions,
+    [rootOptions],
+  );
+}
+
 /** Name of the deepest focused route across the nested navigators. */
 function deepestRouteName(
   state: NavigationState | PartialState<NavigationState> | undefined,
@@ -188,8 +221,9 @@ function seedAnchorsToToday(
 
 function TasksStackNav() {
   const { t } = useTranslation();
+  const screenOptions = useStackScreenOptions();
   return (
-    <TasksStack.Navigator initialRouteName="Tasks" screenOptions={stackScreenOptions}>
+    <TasksStack.Navigator initialRouteName="Tasks" screenOptions={screenOptions}>
       <TasksStack.Screen
         name="Tasks"
         component={TasksScreen}
@@ -250,8 +284,9 @@ function TasksStackNav() {
 
 function CalendarStackNav() {
   const { t } = useTranslation();
+  const screenOptions = useStackScreenOptions();
   return (
-    <CalendarStack.Navigator initialRouteName="Events" screenOptions={stackScreenOptions}>
+    <CalendarStack.Navigator initialRouteName="Events" screenOptions={screenOptions}>
       <CalendarStack.Screen
         name="Events"
         component={EventsScreen}
@@ -343,8 +378,9 @@ function CalendarStackNav() {
 
 function ContactsStackNav() {
   const { t } = useTranslation();
+  const screenOptions = useStackScreenOptions();
   return (
-    <ContactsStack.Navigator initialRouteName="Contacts" screenOptions={stackScreenOptions}>
+    <ContactsStack.Navigator initialRouteName="Contacts" screenOptions={screenOptions}>
       <ContactsStack.Screen
         name="Contacts"
         component={ContactsScreen}
@@ -366,8 +402,9 @@ function ContactsStackNav() {
 
 function SettingsStackNav() {
   const { t } = useTranslation();
+  const screenOptions = useStackScreenOptions();
   return (
-    <SettingsStack.Navigator initialRouteName="Settings" screenOptions={stackScreenOptions}>
+    <SettingsStack.Navigator initialRouteName="Settings" screenOptions={screenOptions}>
       <SettingsStack.Screen
         name="Settings"
         component={SettingsScreen}

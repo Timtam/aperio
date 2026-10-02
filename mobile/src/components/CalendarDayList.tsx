@@ -98,7 +98,6 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 import { useDeferredLoading } from '../hooks/useDeferredLoading';
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
@@ -391,7 +390,6 @@ export function CalendarDayList({
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const tabBarInset = useTabBarInset();
   const screenReader = useScreenReaderEnabled();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
 
@@ -2089,7 +2087,7 @@ export function CalendarDayList({
           accessibilityRole="list"
           accessibilityLabel={gridLabel}
           style={styles.scroll}
-          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

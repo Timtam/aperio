@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -20,11 +19,10 @@ export default function SettingsScreen({
 }: RootStackScreenProps<'Settings'>) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const tabBarInset = useTabBarInset();
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingBottom: tabBarInset }]}
+      contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.links}>
