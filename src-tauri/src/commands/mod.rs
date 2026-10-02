@@ -85,6 +85,11 @@ impl From<cal_core::Error> for CommandError {
             InvalidInput(m) => ("invalid_input", m),
             Unsupported(m) => ("unsupported", m),
             Internal(m) => ("internal", m),
+            // The desktop has no device store; carried like the phone's.
+            AccessNotGranted(m) => (
+                "forbidden",
+                cal_core::WriteRefusal::AccessNotGranted.message(&m),
+            ),
         };
         Self { code, message }
     }

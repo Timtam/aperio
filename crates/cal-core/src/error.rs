@@ -36,6 +36,13 @@ pub enum Error {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    /// The operating system has not granted the app this data: the device's
+    /// own calendars or reminders without full access. Not a login problem —
+    /// no password helps — and not a store that is still loading: the user
+    /// grants it in the system settings (decisions 166 and 171).
+    #[error("access not granted by the operating system: {0}")]
+    AccessNotGranted(String),
 }
 
 impl Error {
@@ -53,6 +60,10 @@ impl Error {
 
     pub fn invalid_input(msg: impl Into<String>) -> Self {
         Self::InvalidInput(msg.into())
+    }
+
+    pub fn access_not_granted(msg: impl Into<String>) -> Self {
+        Self::AccessNotGranted(msg.into())
     }
 
     pub fn unsupported(msg: impl Into<String>) -> Self {

@@ -664,6 +664,11 @@ fn map_store_err(e: cal_core::Error) -> StoreError {
         E::Protocol(detail) => StoreError::Protocol { detail },
         E::Unsupported(detail) => StoreError::Unsupported { detail },
         E::Internal(detail) => StoreError::Storage { detail },
+        // Forbidden is the error the phone carries with its code intact
+        // (eventCoded); the token in front says which refusal it is.
+        E::AccessNotGranted(detail) => StoreError::Forbidden {
+            detail: cal_core::WriteRefusal::AccessNotGranted.message(&detail),
+        },
     }
 }
 

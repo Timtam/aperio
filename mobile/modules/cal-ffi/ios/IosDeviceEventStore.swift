@@ -127,7 +127,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// errored and keeps serving the cached rows) rather than as an empty
   /// collection. A genuinely removed calendar keeps erroring until the next
   /// listing refresh drops it from the catalog — after which nothing reads
-  /// it anymore.
+  /// it anymore. Access is not the question here: without full access the
+  /// Rust adapter refuses before any call reaches this bridge.
   private func resolveCalendar(_ identifier: String, in store: EKEventStore) -> EKCalendar? {
     if let calendar = store.calendar(withIdentifier: identifier) {
       return calendar
@@ -147,7 +148,9 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// an ERROR: the host marks the listing errored and KEEPS the cached
   /// catalog, and the next refresh retries. On the rare device with truly
   /// zero lists the retry just keeps an already-empty cache empty (plus a
-  /// log line per pass) — the safe side of the trade.
+  /// log line per pass) — the safe side of the trade. Without full access
+  /// the catalog is empty too, which is why the Rust adapter asks first and
+  /// never gets here then.
   private func loadedCalendars(
     for type: EKEntityType, in store: EKEventStore
   ) throws -> [EKCalendar] {
@@ -158,12 +161,11 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     store.refreshSourcesIfNecessary()
     let retried = store.calendars(for: type)
     if retried.isEmpty {
-      // The access state rides along: an empty catalog without full access
-      // is not a store still loading, and the log should say which.
+      // Only full access reaches here (the Rust adapter refuses every other
+      // state first), so an empty catalog is EventKit's own answer. The
+      // state still rides along, read now, in case it changed meanwhile.
       throw DeviceCalError.Backend(
-        detail:
-          "EventKit catalog empty (authorization: \(Self.accessToken(type)); store may still be loading)"
-      )
+        detail: "EventKit returned no calendars (authorization: \(Self.accessToken(type)))")
     }
     return retried
   }
@@ -193,7 +195,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       // host keeps its cached snapshot instead of replacing it with empty
       // (see resolveCalendar).
       throw DeviceCalError.Backend(
-        detail: "calendar \(calendarId) not resolvable (store may still be loading)")
+        detail: "calendar \(calendarId) not found in EventKit")
     }
     guard let startDate = Self.parseDate(start),
       let endDate = Self.parseDate(end)
@@ -233,7 +235,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       // See getEvents: an unresolvable identifier must not read as an
       // empty list — that would clobber the cached snapshot.
       throw DeviceCalError.Backend(
-        detail: "reminder list \(listId) not resolvable (store may still be loading)")
+        detail: "reminder list \(listId) not found in EventKit")
     }
     // fetchReminders is completion-based — block on a semaphore across the sync
     // FFI boundary (as for the permission request).

@@ -497,6 +497,10 @@ fn plugin_cal_error_to_command(err: cal_core::Error) -> CommandError {
         InvalidInput(m) => ("invalid_input", m),
         Unsupported(m) => ("unsupported", m),
         Internal(m) => ("internal", m),
+        AccessNotGranted(m) => (
+            "forbidden",
+            cal_core::WriteRefusal::AccessNotGranted.message(&m),
+        ),
     };
     CommandError { code, message }
 }

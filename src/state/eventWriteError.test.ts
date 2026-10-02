@@ -179,3 +179,21 @@ describe('a write Aperio will not risk', () => {
     );
   });
 });
+
+describe('a device store the OS has not opened', () => {
+  it('reads as its own refusal, behind the wrapper too, and as nothing written', () => {
+    // The device adapter refuses every call without full access (decision
+    // 171): a delete reported as done while nothing changed was the bug.
+    const desktop = command('forbidden', 'access-not-granted: calendars: Denied');
+    const phone = new Error(
+      "Calling the 'deleteEventById' function has failed\n\u2192 Caused by: access-not-granted: calendars: Denied",
+    );
+    for (const err of [desktop, phone]) {
+      expect(eventWriteRefusal(err)?.refusal).toBe('access-not-granted');
+      expect(eventWriteErrorMessage(err, t)).toMatch(/keinen Zugriff auf die Kalender/);
+      expect(eventWriteErrorMessage(err, t)).not.toMatch(/Denied/);
+    }
+    expect(eventWriteFailureReason(desktop, t)).toMatch(/keinen Zugriff/);
+    expect(writeNeverLanded(desktop)).toBe(true);
+  });
+});
