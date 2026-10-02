@@ -963,7 +963,7 @@ impl OnboardingService {
                             .is_some_and(|seen| now - seen < LAST_SEEN_REFRESH)
                 })
         };
-        if round_meta.is_some_and(&is_current) {
+        if round_meta.is_some_and(is_current) {
             debug!("heartbeat_meta: device record already current; skipping push");
             return Ok(());
         }
