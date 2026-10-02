@@ -2369,6 +2369,11 @@ Siehe DESIGN §4.2.
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
       nicht (140), Google verwirft UTC-EXDATEs auf Serien mit Zone (137).
+      Ganztägige Serien schreiben CalDAV (`apply_common`) und Google
+      (`recurrence_to_lines`) beim Anlegen als UTC-Zeitpunkt, der bei einem
+      Datums-Beginn nichts ausschließt; nur das Löschen eines Vorkommens
+      schreibt bei CalDAV schon `VALUE=DATE` (`exdate_line`). Dafür sind PR 5
+      (CalDAV) und 137 (Google, nach Live-Test) da.
     - ✅ Das Mitziehen schnitt eine Exchange-Kopie ein Vorkommen zu spät, wenn
       ihr Vorkommen am Schnitttag in Outlook geändert wurde, und eine
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
