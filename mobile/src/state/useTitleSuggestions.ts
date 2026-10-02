@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@aperio/shared';
 import {
   joinSuggestionPasses,
+  offerKey,
   rankTitleSuggestions,
   UNFINISHED_TASK_STATUSES,
 } from '@aperio/shared';
@@ -71,7 +72,9 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
               search(trimmed, { kind }),
             ]).then(
               ([live, history]) =>
-                joinSuggestionPasses(live.tasks, history.tasks) as Item[],
+                joinSuggestionPasses(live.tasks, history.tasks, (t) =>
+                  offerKey(t.list_id, t.id),
+                ) as Item[],
             );
       void lookup
         .then((items) => {
@@ -89,20 +92,33 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
   return matches;
 }
 
-/** Offers from earlier appointments, ordered by when the appointment WAS. */
-export function rankEventSuggestions(events: readonly CalendarEvent[], query: string) {
+/**
+ * Offers from earlier appointments, ordered by when the appointment WAS.
+ *
+ * A copy in a calendar that takes new appointments (`usable`) is offered
+ * before a newer copy in one that does not (decision 161), as on the desktop.
+ */
+export function rankEventSuggestions(
+  events: readonly CalendarEvent[],
+  query: string,
+  usable: (calendarId: string) => boolean = () => true,
+) {
   return rankTitleSuggestions(
     events,
     query,
     (e) => e.start,
     undefined,
     // A cancelled appointment is a poor template for the same reason.
-    (e) => (e.cancelled ? 1 : 0),
+    (e) => (usable(e.calendar_id) ? 0 : 2) + (e.cancelled ? 1 : 0),
   );
 }
 
 /** The task twin — ordered by when the task was last touched. */
-export function rankTaskSuggestions(tasks: readonly Task[], query: string) {
+export function rankTaskSuggestions(
+  tasks: readonly Task[],
+  query: string,
+  usable: (listId: string) => boolean = () => true,
+) {
   return rankTitleSuggestions(
     tasks,
     query,
@@ -111,7 +127,10 @@ export function rankTaskSuggestions(tasks: readonly Task[], query: string) {
     // A finished task is a worse template than a living one — and for a
     // REPEATING task it is the wrong one outright: the completion record left
     // behind on every tick carries no repetition and no reminders by design,
-    // and being the newest row of its name it used to win every time.
-    (t) => (t.status === 'completed' || t.status === 'cancelled' ? 1 : 0),
+    // and being the newest row of its name it used to win every time. A list
+    // that takes no new tasks ranks below both, as for appointments.
+    (t) =>
+      (usable(t.list_id) ? 0 : 2) +
+      (t.status === 'completed' || t.status === 'cancelled' ? 1 : 0),
   );
 }

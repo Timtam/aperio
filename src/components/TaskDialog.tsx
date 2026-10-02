@@ -32,6 +32,10 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import {
   selectableTaskLists,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  prefillTarget,
   assigneeField,
   assigneePoolErrorMessage,
   clampAssignees,
@@ -131,8 +135,8 @@ export interface TaskDialogProps {
    *  `taskPrefillFrom`. Create only. */
   prefillFrom?: Task | null;
   /** The caller chose `defaultListId` deliberately, so `prefillFrom` must
-   *  leave it alone. The quick-add sets it only when its own picker was moved
-   *  off the default. */
+   *  leave it alone. The quick-add sets it only when its picker was left on
+   *  something other than the default it showed (decision 160). */
   targetPinned?: boolean;
 }
 
@@ -319,6 +323,11 @@ export function TaskDialog({
   );
 
   const [form, setForm] = useState<FormState>(initialState);
+  const formRef = useRef(form);
+  formRef.current = form;
+  /** Said under the list picker when an accepted offer's list could not be
+   *  used — the task twin of the event editor's calendar note. */
+  const [prefillListNote, setPrefillListNote] = useState<string | null>(null);
   /**
    * Earlier tasks with this name, offered while a NEW one is typed.
    *
@@ -328,12 +337,13 @@ export function TaskDialog({
   const titleMatches = useTitleSuggestions(form.title, 'tasks', !isEdit && isOpen);
   const titleOptions = useMemo(
     () =>
-      rankTaskSuggestions(titleMatches, form.title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: taskLists.find((l) => l.id === item.list_id)?.name,
-      })),
-    [titleMatches, form.title, taskLists],
+      offerOptions(
+        rankTaskSuggestions(titleMatches, form.title, offerUsable(taskLists)),
+        (task) => task.list_id,
+        taskLists,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, form.title, taskLists, t],
   );
   /**
    * Fill the editor from an earlier task.
@@ -343,8 +353,16 @@ export function TaskDialog({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyTaskPrefill = useCallback(
-    (source: Task, opts: { keepList?: boolean } = {}) => {
+    (source: Task, opts: { keepList?: boolean } = {}): string | null => {
       const fill = taskPrefillFrom(source);
+      // Where it goes: the offer's list, unless it is a subtask (glued to its
+      // parent's list), the caller pinned one, or that list takes no new
+      // tasks — which is then SAID, as for appointments (decision 161).
+      const target = prefillTarget(
+        fill.list_id,
+        taskLists,
+        isSubtask || opts.keepList === true,
+      );
       setForm((prev) => ({
         ...prev,
         title: fill.title,
@@ -363,19 +381,33 @@ export function TaskDialog({
         // …unless it is a subtask, glued to its parent's list, or the caller
         // pinned one: the quick-add does that when the user picked a list
         // there instead of leaving its default.
-        listId:
-          isSubtask || opts.keepList
-            ? prev.listId
-            : (fill.list_id ?? prev.listId),
+        listId: target.kind === 'offer' ? target.id : prev.listId,
       }));
+      const kept = taskLists.find((l) => l.id === formRef.current.listId)?.name;
+      const note =
+        target.kind === 'readOnly'
+          ? kept
+            ? t('dialogs.task.prefillListReadOnlyInto', {
+                list: target.name,
+                target: kept,
+              })
+            : t('dialogs.task.prefillListReadOnly', { list: target.name })
+          : target.kind === 'unknown'
+            ? kept
+              ? t('dialogs.task.prefillListUnknownInto', { target: kept })
+              : t('dialogs.task.prefillListUnknown')
+            : null;
+      setPrefillListNote(note);
+      return note;
     },
-    [isSubtask],
+    [isSubtask, taskLists, t],
   );
 
   const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((task) => task.id === id);
-      if (source) applyTaskPrefill(source);
+    (key: string) => {
+      // By list AND id: two task servers count from the same 1.
+      const source = findOffer(titleMatches, key, (task) => task.list_id);
+      return source ? applyTaskPrefill(source) : null;
     },
     [titleMatches, applyTaskPrefill],
   );
@@ -424,11 +456,12 @@ export function TaskDialog({
   // Live mirrors for the pristine check below — refs, so the reset effect
   // reads the CURRENT values without needing them as deps (which would
   // re-run it on every keystroke).
-  const formRef = useRef(form);
-  formRef.current = form;
   /** See the twin in EventDialog: cleared by the reset effect, which is the
    *  only thing that can undo a prefill. */
   const prefillApplied = useRef<string | null>(null);
+  /** Which prefill's refusal has been said in this opening; the reset does
+   *  not clear it (see the twin in EventDialog). */
+  const prefillAnnounced = useRef<string | null>(null);
   const draftSubtasksRef = useRef(draftSubtasks);
   draftSubtasksRef.current = draftSubtasks;
   const newSubtaskTitleRef = useRef(newSubtaskTitle);
@@ -450,8 +483,9 @@ export function TaskDialog({
     // applied, no staged subtasks, nothing typed in the subtask box). Once
     // the user touched anything, their form wins until the dialog closes.
     const baseline = appliedInitialRef.current;
+    const firstHydrate = baseline === null;
     const pristine =
-      baseline === null ||
+      firstHydrate ||
       ((formRef.current === baseline ||
         JSON.stringify(formRef.current) === JSON.stringify(baseline)) &&
         draftSubtasksRef.current.length === 0 &&
@@ -479,6 +513,10 @@ export function TaskDialog({
       prefillApplied.current = null;
     statusTouched.current = false;
     setError(null);
+    // Only on the first hydrate, as in EventDialog: a later pristine reset
+    // re-derives the same form, and a refusal that left it unchanged would
+    // otherwise lose its note with nothing to bring it back.
+    if (firstHydrate) setPrefillListNote(null);
     setDraftSubtasks([]);
     setNewSubtaskTitle('');
   }, [isOpen, initialState]);
@@ -496,13 +534,34 @@ export function TaskDialog({
    */
   useEffect(() => {
     if (!isOpen || isEdit || !prefillFrom) {
-      if (!isOpen) prefillApplied.current = null;
+      if (!isOpen) {
+        prefillApplied.current = null;
+        prefillAnnounced.current = null;
+      }
       return;
     }
+    // No catalog yet: every list would read as unknown, and the latch would
+    // keep that refusal (see the twin in EventDialog).
+    if (taskLists.length === 0) return;
     if (prefillApplied.current === prefillFrom.id) return;
     prefillApplied.current = prefillFrom.id;
-    applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
-  }, [isOpen, isEdit, prefillFrom, targetPinned, applyTaskPrefill]);
+    const note = applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
+    // The fill and the refusal as one sentence, once per opening — see the
+    // twin in EventDialog.
+    if (note && prefillAnnounced.current !== prefillFrom.id) {
+      prefillAnnounced.current = prefillFrom.id;
+      announce(`${t('suggestions.applied', { title: prefillFrom.title })} ${note}`);
+    }
+  }, [
+    isOpen,
+    isEdit,
+    prefillFrom,
+    targetPinned,
+    taskLists.length,
+    applyTaskPrefill,
+    announce,
+    t,
+  ]);
 
   // Mirror a subtask-cascade-updated status into the Status field while the
   // editor is open — the DISPLAY half of the fix (the persistence half is in
@@ -1451,7 +1510,11 @@ export function TaskDialog({
           <span className="form__label">{t('dialogs.task.fields.list')}</span>
           <select
             value={form.listId}
-            onChange={(e) => update('listId', e.target.value)}
+            onChange={(e) => {
+              // The user has answered the question the note asked.
+              setPrefillListNote(null);
+              update('listId', e.target.value);
+            }}
             required
             // Subtasks must live in the same list as their parent
             // — moving a subtask alone would split a logical
@@ -1489,6 +1552,9 @@ export function TaskDialog({
               </option>
             ))}
           </select>
+          {prefillListNote && (
+            <span className="form__hint">{prefillListNote}</span>
+          )}
           {isSubtask && (
             <p id={subtaskHintId} className="form__hint">
               {t('dialogs.task.subtaskListLocked')}

@@ -1630,6 +1630,8 @@
       },
       "prefillCalendarReadOnly": "Der frühere Termin liegt in „{{calendar}}\", und dorthin lassen sich keine neuen Termine schreiben. Der Kalender unten bleibt, wie er ist.",
       "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist.",
+      "prefillCalendarReadOnlyInto": "„{{calendar}}“ nimmt keine neuen Termine an. Der Termin kommt in „{{target}}“.",
+      "prefillCalendarUnknownInto": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Termin kommt in „{{target}}“.",
       "invitation": {
         "hint": "Diese Besprechung organisiert jemand anderes, deshalb kann nur der Organisator ihre Angaben ändern. Was du für dich selbst festlegst, bleibt deins.",
         "allDayValue": "{{date}}, ganztägig",
@@ -1662,6 +1664,10 @@
       "listRequired": "Bitte wähle eine Liste.",
       "pickList": "Liste wählen …",
       "subtaskListLocked": "Unteraufgaben leben in derselben Liste wie ihre Elternaufgabe. Verschiebe die Elternaufgabe, um die ganze Familie umzuziehen.",
+      "prefillListReadOnly": "Die frühere Aufgabe liegt in „{{list}}“, und dorthin lassen sich keine neuen Aufgaben schreiben. Die Liste unten bleibt, wie sie ist.",
+      "prefillListReadOnlyInto": "„{{list}}“ nimmt keine neuen Aufgaben an. Die Aufgabe kommt in „{{target}}“.",
+      "prefillListUnknown": "Die Liste der früheren Aufgabe steht hier nicht zur Verfügung. Die Liste unten bleibt, wie sie ist.",
+      "prefillListUnknownInto": "Die Liste der früheren Aufgabe steht hier nicht zur Verfügung. Die Aufgabe kommt in „{{target}}“.",
       "listMoveLocked": "Diese Quelle kann Aufgaben nicht zwischen Listen verschieben. Lege stattdessen über Verschieben / Kopieren eine Kopie in einer anderen Liste an.",
       "noSection": "Kein Abschnitt",
       "section": {
@@ -2420,7 +2426,8 @@
     "count_one": "Ein früherer Eintrag, mit den Pfeiltasten erreichbar.",
     "count_other": "{{count}} frühere Einträge, mit den Pfeiltasten erreichbar.",
     "applied": "Aus „{{title}}\" übernommen. Der Tag bleibt, wie er war.",
-    "acceptHint": "Übernimmt alles außer dem Tag"
+    "acceptHint": "Übernimmt alles außer dem Tag",
+    "hintReadOnly": "{{name}}, nur lesbar"
   },
   "recurrenceSummary": {
     "sentence": {

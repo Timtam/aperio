@@ -10,7 +10,13 @@ import {
   View,
 } from 'react-native';
 
-import { selectableTaskLists } from '@aperio/shared';
+import {
+  findOffer,
+  offerOptions,
+  offerUsable,
+  pickedOverOffer,
+  selectableTaskLists,
+} from '@aperio/shared';
 
 import { createTask } from '../api/client';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
@@ -88,15 +94,18 @@ export default function QuickAddTaskModal({
   const titleMatches = useTitleSuggestions(title, 'tasks', true);
   const titleOptions = useMemo(
     () =>
-      rankTaskSuggestions(titleMatches, title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-      })),
-    [titleMatches, title],
+      offerOptions(
+        rankTaskSuggestions(titleMatches, title, offerUsable(taskLists)),
+        (task) => task.list_id,
+        taskLists,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, title, taskLists, t],
   );
   const acceptSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((task) => task.id === id);
+    (key: string) => {
+      // By list AND id: two task servers count from the same 1.
+      const source = findOffer(titleMatches, key, (task) => task.list_id);
       if (!source) return;
       // `replace`, not push: the quick-add must not linger behind the editor.
       navigation.replace('TaskEditor', {
@@ -105,10 +114,14 @@ export default function QuickAddTaskModal({
         initialTitle: source.title,
         initialScheduledDate: date.trim() || undefined,
         prefillFrom: source,
-        // A list the user actually moved this picker to outranks the one the
-        // earlier task lived on; an untouched default does not. `userPicked`
-        // already tracks exactly that, for the late last-used adoption above.
-        targetPinned: userPicked.current,
+        // A list the user moved this picker to, and left on something other
+        // than the default it showed, outranks the one the earlier task lived
+        // on (decision 160). Picking the shown one again is no choice.
+        targetPinned: pickedOverOffer(
+          userPicked.current,
+          listId,
+          shownDefaultRef.current,
+        ),
       });
     },
     [titleMatches, navigation, listId, date],
@@ -117,6 +130,8 @@ export default function QuickAddTaskModal({
   const titleRef = useRef<TextInput | null>(null);
   // Don't let the async last-used read clobber a list the user already picked.
   const userPicked = useRef(false);
+  /** The list the picker showed when the user first touched it. */
+  const shownDefaultRef = useRef<string | null>(null);
 
   // Default to the last-used list (if still selectable). Async read, so it
   // lands a tick after first paint — guarded against a manual pick.
@@ -146,10 +161,14 @@ export default function QuickAddTaskModal({
   // Any dismissal refetches the list (the desktop DialogState.close behaviour).
   useEffect(() => () => invalidateData(), [invalidateData]);
 
-  const pickList = useCallback((id: string) => {
-    userPicked.current = true;
-    setListId(id);
-  }, []);
+  const pickList = useCallback(
+    (id: string) => {
+      if (!userPicked.current) shownDefaultRef.current = listId;
+      userPicked.current = true;
+      setListId(id);
+    },
+    [listId],
+  );
 
   // The current pick is kept via `currentId` so a pre-seeded (or degenerate-
   // fallback) list never vanishes from its own picker.

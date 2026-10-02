@@ -2889,6 +2889,31 @@ oben. Das untere Polster kostet dort jetzt auf jeder Tab-Seite einen festen
 leeren Streifen von 56 bis 76 pt; das alte war nur Leerraum am Listenende.
 Braucht die Lage der Leiste (oben oder unten), die die Bibliothek nicht meldet.
 
+### B11 · Titel-Vorschlag: der Kalender, den er nennt (160, 161) `[~]`
+
+✅ Im Schnell-Hinzufügen nannte der Vorschlag „Arbeit“, und der Editor landete
+auf dem obersten Kalender. Zwei Wege, beide nachgestellt: Das Übernehmen suchte
+nur nach der Kennung, und dieselbe Kennung kann in zwei Kalendern liegen
+(Google behält sie über Kalender hinweg, eine Kopie behält ihre UID) — jetzt
+per Behälter und Kennung (`offerKey`, `findOffer`), auch bei Aufgaben, wo zwei
+Server von derselben 1 zählen. Und seit ba58411e galt jede Pfeiltaste in der
+Kalenderauswahl als Wahl; jetzt zählt nur, was beim Übernehmen vom gezeigten
+Standard abweicht (`pickedOverOffer`, 160). Dazu (161): eine beschreibbare
+Kopie desselben Titels kommt vor einer neueren in einem nur lesbaren Kalender,
+ein nur lesbarer Vorschlag sagt „nur lesbar“, und nimmt der Editor einen
+anderen Kalender oder eine andere Liste, sagt er beide an — beim Übernehmen im
+Editor mit der Ansage der Übernahme, nach dem Schnell-Hinzufügen beim Öffnen.
+Die Vorschläge öffnen sich nur noch nach Tippen, nicht nach einer Übernahme.
+Desktop, Handy, Termine und Aufgaben. ↻ im Test (Handy ohne Testläufer).
+
+Auf eine noch leere Kalender- oder Listenauswahl warten beide Editoren jetzt,
+statt jeden Behälter als unbekannt abzulehnen; ein Testaufbau mit derselben
+Dauer wie die Grundform hatte das verdeckt.
+
+🚩 **Offen:** Fehlt der Behälter des Vorschlags nur in einer noch
+unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
+`prefillApplied`). Bei Toni nicht der Fall.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)

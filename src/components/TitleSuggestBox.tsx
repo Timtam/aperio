@@ -27,7 +27,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
  *     presses to get out of a popup.
  */
 export interface TitleSuggestOption {
-  /** Stable id of the earlier item. */
+  /** Which earlier item this is (`offerKey`: its container and its id). */
   id: string;
   /** Its title, as it was written. */
   title: string;
@@ -41,8 +41,13 @@ export interface TitleSuggestBoxProps {
   onChange: (value: string) => void;
   /** Offers for what is typed. Empty ⇒ a plain text field, no popup. */
   options: readonly TitleSuggestOption[];
-  /** Fill the rest of the editor from this earlier item. */
-  onAccept: (id: string) => void;
+  /**
+   * Fill the rest of the editor from this earlier item. What it returns is
+   * said right after "filled in": a note on what did NOT come along, such as
+   * the calendar. It rides the same announcement because a second one in the
+   * same frame would replace it.
+   */
+  onAccept: (id: string) => string | null | void;
   inputRef?: React.RefObject<HTMLInputElement>;
   required?: boolean;
 }
@@ -67,11 +72,18 @@ export function TitleSuggestBox({
   const showPopup = open && options.length > 0;
   const optionId = (i: number) => `${optionIdBase}-${i}`;
 
+  // Whether the title was last changed by typing in THIS field. Offers pop up
+  // for what someone types; a title that arrived otherwise — an accepted
+  // offer, one handed over from the quick-add — gets them only on Arrow Down.
+  // Opening by itself there re-offered the very entry just taken, and its
+  // count announcement cut off the sentence saying what the editor did with it.
+  const typed = useRef(false);
+
   // A fresh list is a fresh choice: an index left over from the previous one
   // would point at whatever now happens to sit there.
   useEffect(() => {
     setHighlighted(-1);
-    if (options.length > 0) setOpen(true);
+    if (options.length > 0 && typed.current) setOpen(true);
   }, [options]);
 
   // How many there are, once they arrive. A popup that opens silently is a
@@ -93,8 +105,10 @@ export function TitleSuggestBox({
       if (!option) return;
       setOpen(false);
       setHighlighted(-1);
-      onAccept(option.id);
-      announce(t('suggestions.applied', { title: option.title }));
+      typed.current = false;
+      const note = onAccept(option.id);
+      const applied = t('suggestions.applied', { title: option.title });
+      announce(note ? `${applied} ${note}` : applied);
       ref.current?.focus();
     },
     [options, onAccept, announce, t, ref],
@@ -141,7 +155,10 @@ export function TitleSuggestBox({
           ref={ref}
           type="text"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            typed.current = true;
+            onChange(e.target.value);
+          }}
           onKeyDown={onKeyDown}
           onBlur={() => setOpen(false)}
           required={required}

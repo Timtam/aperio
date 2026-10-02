@@ -8,7 +8,13 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { selectableTaskLists } from '@aperio/shared';
+import {
+  findOffer,
+  offerOptions,
+  offerUsable,
+  pickedOverOffer,
+  selectableTaskLists,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createTask as apiCreateTask, isCommandError } from '../api/client';
@@ -66,12 +72,13 @@ export function QuickAddTaskDialog({
   const titleMatches = useTitleSuggestions(title, 'tasks', isOpen);
   const titleOptions = useMemo(
     () =>
-      rankTaskSuggestions(titleMatches, title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: taskLists.find((l) => l.id === item.list_id)?.name,
-      })),
-    [titleMatches, title, taskLists],
+      offerOptions(
+        rankTaskSuggestions(titleMatches, title, offerUsable(taskLists)),
+        (task) => task.list_id,
+        taskLists,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, title, taskLists, t],
   );
   const [date, setDate] = useState(initial.date);
   const [listId, setListId] = useState(initial.listId);
@@ -224,8 +231,9 @@ export function QuickAddTaskDialog({
           value={title}
           onChange={setTitle}
           options={titleOptions}
-          onAccept={(id) => {
-            const source = titleMatches.find((task) => task.id === id);
+          onAccept={(key) => {
+            // By list AND id: two task servers count from the same 1.
+            const source = findOffer(titleMatches, key, (task) => task.list_id);
             if (!source) return;
             // `replace`, like "weitere Details": the editor inherits this
             // dialog's frame, so closing it returns focus where the quick-add
@@ -235,12 +243,16 @@ export function QuickAddTaskDialog({
               defaultDate: date || undefined,
               defaultTitle: source.title,
               prefillFrom: source,
-              // A list the user actually moved this dialog's picker to
-              // outranks the one the earlier task lived on; an untouched
-              // default does not. Recorded when it happens — the default it
-              // would otherwise be compared against moves by itself (see
-              // `listPickedRef`).
-              targetPinned: listPickedRef.current,
+              // A list the user moved this dialog's picker to, and left on
+              // something other than the default it showed, outranks the one
+              // the earlier task lived on (decision 160). Compared with the
+              // default AS SHOWN: once picked, the baseline stops following
+              // the late defaults (see `listPickedRef`).
+              targetPinned: pickedOverOffer(
+                listPickedRef.current,
+                listId,
+                appliedInitialRef.current?.listId,
+              ),
               replace: true,
             });
           }}
