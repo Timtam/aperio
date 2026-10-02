@@ -20,7 +20,13 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
    in der er lag. **Der Tag bleibt, wie er war:** Das ist es ja, was den neuen
    Eintrag ausmacht. Und wenn du im Schnell-Dialog vorher selbst eine Liste
    oder einen Kalender gewählt hast, **bleibt deine Wahl stehen** — ein alter
-   Eintrag überstimmt keine Entscheidung, die du gerade getroffen hast.
+   Eintrag überstimmt keine Entscheidung, die du gerade getroffen hast. Als
+   Wahl zählt, was beim Übernehmen dort steht und vom Vorschlag des Dialogs
+   abweicht; bloßes Durchblättern der Liste zählt nicht. Gibt es denselben
+   Namen in einer Liste oder einem Kalender, in den du schreiben kannst, wird
+   dieser Eintrag zuerst angeboten. Kommt ein Vorschlag nur aus einem nur
+   lesbaren Kalender oder einer nur lesbaren Liste, sagt er „nur lesbar“, und
+   der Editor sagt beim Übernehmen, wohin der neue Eintrag stattdessen kommt.
    Optional:
    - **Aufgabenliste**, in der sie gespeichert wird,
    - **Fälligkeitsdatum** (und optional Uhrzeit),

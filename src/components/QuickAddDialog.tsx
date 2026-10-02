@@ -17,6 +17,10 @@ import { timeInputStep } from '../state/timeStep';
 import {
   dateInput,
   defaultNewEventTimes,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  pickedOverOffer,
   selectableEventCalendars,
   timeInput,
   toIso,
@@ -81,12 +85,13 @@ export function QuickAddDialog({
   const titleMatches = useTitleSuggestions(title, 'events', isOpen);
   const titleOptions = useMemo(
     () =>
-      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
-      })),
-    [titleMatches, title, calendars],
+      offerOptions(
+        rankEventSuggestions(titleMatches, title, offerUsable(calendars)),
+        (e) => e.calendar_id,
+        calendars,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, title, calendars, t],
   );
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
@@ -244,24 +249,32 @@ export function QuickAddDialog({
           value={title}
           onChange={setTitle}
           options={titleOptions}
-          onAccept={(id) => {
-            const source = titleMatches.find((e) => e.id === id);
+          onAccept={(key) => {
+            // By calendar AND id: the same id can sit in two calendars, and
+            // the offer named one of them.
+            const source = findOffer(titleMatches, key, (e) => e.calendar_id);
             if (!source) return;
             // `replace`, like "weitere Details": the editor inherits this
             // dialog's frame, so closing it returns focus where the quick-add
             // was opened from rather than to a dialog that is already gone.
             openEventDialog(null, {
-              calendarId,
+              // An empty picker hands over nothing, not '' — the editor would
+              // take '' for a choice and open on its placeholder.
+              calendarId: calendarId || undefined,
               defaultDate: date,
               defaultTime: time,
               defaultTitle: source.title,
               prefillFrom: source,
-              // A calendar the user actually moved this dialog's picker to
-              // outranks the one the earlier appointment lived on; an
-              // untouched default does not. Recorded when it happens — the
-              // default it would otherwise be compared against moves by
-              // itself (see `calendarPickedRef`).
-              targetPinned: calendarPickedRef.current,
+              // A calendar the user moved this dialog's picker to, and left on
+              // something other than the default it showed, outranks the one
+              // the earlier appointment lived on (decision 160). Compared with
+              // the default AS SHOWN: once picked, the baseline stops following
+              // the late defaults (see `calendarPickedRef`).
+              targetPinned: pickedOverOffer(
+                calendarPickedRef.current,
+                calendarId,
+                appliedInitialRef.current?.calendarId,
+              ),
               replace: true,
             });
           }}

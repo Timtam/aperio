@@ -22,6 +22,7 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 const ANNOUNCE_IDLE_MS = 800;
 
 export interface TitleSuggestionOption {
+  /** Which earlier item this is (`offerKey`: its container and its id). */
   id: string;
   title: string;
   /** Where it comes from — the calendar or the list. */
@@ -34,7 +35,12 @@ export function TitleSuggestions({
   editable = true,
 }: {
   options: readonly TitleSuggestionOption[];
-  onAccept: (id: string) => void;
+  /**
+   * Fill the rest of the editor from this earlier item. What it returns is
+   * said right after "filled in": a note on what did NOT come along, such as
+   * the calendar (decision 161).
+   */
+  onAccept: (id: string) => string | null | void;
   editable?: boolean;
 }) {
   const { t } = useTranslation();
@@ -59,8 +65,11 @@ export function TitleSuggestions({
     const timer = setTimeout(() => {
       spoken.current = options.length;
       if (Platform.OS === 'ios') {
-        AccessibilityInfo.announceForAccessibility(
+        // Queued: right after an accept the list changes too, and cutting
+        // off what the accept said is worse than hearing the count late.
+        AccessibilityInfo.announceForAccessibilityWithOptions(
           t('suggestions.count', { count: options.length }),
+          { queue: true },
         );
       }
     }, ANNOUNCE_IDLE_MS);
@@ -87,7 +96,16 @@ export function TitleSuggestions({
           accessibilityHint={t('suggestions.acceptHint')}
           accessibilityState={{ disabled: !editable }}
           disabled={!editable}
-          onPress={() => onAccept(option.id)}
+          onPress={() => {
+            const note = onAccept(option.id);
+            // What the desktop says on accepting, and the note with it: a
+            // second announcement would cut the first off on iOS.
+            const applied = t('suggestions.applied', { title: option.title });
+            AccessibilityInfo.announceForAccessibilityWithOptions(
+              note ? `${applied} ${note}` : applied,
+              { queue: true },
+            );
+          }}
           style={({ pressed }) => [styles.option, pressed && styles.pressed]}
         >
           <Text style={styles.optionTitle}>{option.title}</Text>

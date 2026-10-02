@@ -63,6 +63,10 @@ import {
 import {
   describeRecurrence,
   eventPrefillFrom,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  prefillTarget,
   eventWriteErrorMessage,
   eventWriteFailureReason,
   invitationLocked,
@@ -517,6 +521,8 @@ export function EventDialog({
 
 
   const [form, setForm] = useState<FormState>(initialState);
+  const formRef = useRef(form);
+  formRef.current = form;
   // The defaults of the calendar a NEW appointment is heading for. A second
   // read, because the one above is keyed to the OPENED event and has to exist
   // before `initialState` does — while this one follows the calendar picker.
@@ -544,12 +550,13 @@ export function EventDialog({
   const titleMatches = useTitleSuggestions(form.title, 'events', !isEdit && isOpen);
   const titleOptions = useMemo(
     () =>
-      rankEventSuggestions(titleMatches, form.title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
-      })),
-    [titleMatches, form.title, calendars],
+      offerOptions(
+        rankEventSuggestions(titleMatches, form.title, offerUsable(calendars)),
+        (e) => e.calendar_id,
+        calendars,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, form.title, calendars, t],
   );
   /**
    * Fill the editor from an earlier appointment.
@@ -559,14 +566,16 @@ export function EventDialog({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyEventPrefill = useCallback(
-    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}) => {
+    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}): string | null => {
       const fill = eventPrefillFrom(source);
-      // Whether the calendar the offer came from can actually take a new
-      // appointment. Decided ONCE, out here, because the answer also has to be
-      // said out loud — see below.
-      const known = calendars.find((c) => c.id === fill.calendar_id);
-      const usable = known != null && !known.read_only;
-      const travels = !opts.keepCalendar && usable;
+      // Where it goes: the offer's calendar, unless the caller pinned one or
+      // that calendar cannot take a new appointment. Decided ONCE, out here,
+      // because the answer also has to be said out loud — see below.
+      const target = prefillTarget(
+        fill.calendar_id,
+        calendars,
+        opts.keepCalendar === true,
+      );
       setForm((prev) => {
         // The DAY stays exactly as it was — it is what makes this a new
         // appointment, and it came from wherever the user opened the editor.
@@ -590,25 +599,32 @@ export function EventDialog({
           // never pins, so there the old calendar travels; the quick-add pins
           // only when the user actually picked something there instead of
           // leaving its default.
-          calendarId: travels ? fill.calendar_id : prev.calendarId,
+          calendarId: target.kind === 'offer' ? target.id : prev.calendarId,
         };
       });
       // The offer named a calendar and the editor is not going to use it.
       //
-      // This was SILENT, and silence is the actual bug: the quick-add's hint
-      // looks a calendar up by id with no writability check, so it can offer
-      // "Arbeit" for a calendar this refuses a moment later. The editor then
-      // opened on the previous one — usually the first in the list — with
-      // nothing anywhere explaining why it disagreed with what it had just
-      // shown. Refusing is right (a read-only calendar rejects the write);
-      // refusing quietly is not.
-      setPrefillCalendarNote(
-        opts.keepCalendar || usable || !fill.calendar_id
-          ? null
-          : known
-            ? t('dialogs.event.prefillCalendarReadOnly', { calendar: known.name })
-            : t('dialogs.event.prefillCalendarUnknown'),
-      );
+      // Refusing is right (a read-only calendar rejects the write); refusing
+      // quietly is not. The editor then opened on the calendar it already had
+      // — usually the first in the list — with nothing explaining why it
+      // disagreed with the offer. So the note names both calendars, sits
+      // under the picker, and is RETURNED: the caller says it with the
+      // announcement of the fill itself (decision 161).
+      const kept = calendars.find((c) => c.id === formRef.current.calendarId)?.name;
+      const note =
+        target.kind === 'readOnly'
+          ? kept
+            ? t('dialogs.event.prefillCalendarReadOnlyInto', {
+                calendar: target.name,
+                target: kept,
+              })
+            : t('dialogs.event.prefillCalendarReadOnly', { calendar: target.name })
+          : target.kind === 'unknown'
+            ? kept
+              ? t('dialogs.event.prefillCalendarUnknownInto', { target: kept })
+              : t('dialogs.event.prefillCalendarUnknown')
+            : null;
+      setPrefillCalendarNote(note);
       // Attendees came along, so the invitation toggle goes OFF. Filling a
       // form from something you wrote once is not the same as deciding to
       // email eight people about it, and that decision has to stay the user's
@@ -618,14 +634,16 @@ export function EventDialog({
       // own and must be written as such — not treated as the calendar default
       // the editor would otherwise send as an empty list.
       setKeepRemindersAsDefault(false);
+      return note;
     },
     [calendars, t],
   );
 
   const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((e) => e.id === id);
-      if (source) applyEventPrefill(source);
+    (key: string) => {
+      // By container AND id: the same id can sit in two calendars.
+      const source = findOffer(titleMatches, key, (e) => e.calendar_id);
+      return source ? applyEventPrefill(source) : null;
     },
     [titleMatches, applyEventPrefill],
   );
@@ -718,8 +736,6 @@ export function EventDialog({
     ? signatureForCalendar(form.calendarId)
     : null;
 
-  const formRef = useRef(form);
-  formRef.current = form;
   /** Which offer this opening has already applied, so a re-render does not
    *  re-fill a form the user has since edited. Cleared by the reset effect
    *  below, which is the only thing that can undo a prefill. */
@@ -841,8 +857,14 @@ export function EventDialog({
     }
     if (prefillApplied.current === prefillFrom.id) return;
     prefillApplied.current = prefillFrom.id;
-    applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
-  }, [isOpen, isEdit, prefillFrom, targetPinned, applyEventPrefill]);
+    const note = applyEventPrefill(prefillFrom, {
+      keepCalendar: targetPinned === true,
+    });
+    // The offer was accepted over in the quick-add, which has already said
+    // "filled in"; the editor opening on another calendar is news from here,
+    // said once it has opened (decision 161).
+    if (note) announce(note);
+  }, [isOpen, isEdit, prefillFrom, targetPinned, applyEventPrefill, announce]);
 
   /**
    * The calendar's own signature, put on a NEW appointment by itself.

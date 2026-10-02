@@ -2,12 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   eventPrefillFrom,
+  findOffer,
   joinSuggestionPasses,
+  offerKey,
+  offerOptions,
+  offerUsable,
+  pickedOverOffer,
+  prefillTarget,
   rankTitleSuggestions,
   taskPrefillFrom,
   type PrefillableEvent,
   type PrefillableTask,
 } from '@aperio/shared';
+import type { CalendarEvent } from '../api/types';
+import { rankEventSuggestions } from '../state/useTitleSuggestions';
 
 const item = (id: string, title: string, at: string) => ({ id, title, at });
 const recency = (i: { at: string }) => i.at;
@@ -295,5 +303,83 @@ describe('joining the two passes the task offers run', () => {
     const out = joinSuggestionPasses([row('live', 'Handtücher wechseln')], history);
     expect(out[0].id).toBe('live');
     expect(out).toHaveLength(201);
+  });
+});
+
+describe('which offer was accepted (decisions 160 and 161)', () => {
+  const CONTAINERS = [
+    { id: 'cal-local', name: 'Kalender', read_only: false },
+    { id: 'cal-work', name: 'Arbeit', read_only: false },
+    { id: 'cal-feed', name: 'Abo', read_only: true },
+  ];
+  const ev = (id: string, calendar_id: string, start: string, cancelled = false) =>
+    ({ id, calendar_id, title: 'Thomas Meeting', start, cancelled }) as unknown as CalendarEvent;
+
+  it('names an offer by its container and its id', () => {
+    expect(offerKey('cal-work', 'ev-1')).not.toBe(offerKey('cal-local', 'ev-1'));
+    // No two spellings collide, whatever the parts contain.
+    expect(offerKey('a', 'b c')).not.toBe(offerKey('a b', 'c'));
+  });
+
+  it('finds the copy the offer named, not the first with that id', () => {
+    const rows = [
+      ev('ev-1', 'cal-local', '2026-05-15T09:00:00Z'),
+      ev('ev-1', 'cal-work', '2026-06-15T09:00:00Z'),
+    ];
+    const found = findOffer(rows, offerKey('cal-work', 'ev-1'), (e) => e.calendar_id);
+    expect(found?.calendar_id).toBe('cal-work');
+  });
+
+  it('hints a container that takes nothing new as read-only', () => {
+    const ranked = [{ item: ev('ev-1', 'cal-feed', '2026-06-15T09:00:00Z'), title: 'Thomas Meeting' }];
+    const [option] = offerOptions(ranked, (e) => e.calendar_id, CONTAINERS, (n) => `${n}, nur lesbar`);
+    expect(option).toEqual({
+      id: offerKey('cal-feed', 'ev-1'),
+      title: 'Thomas Meeting',
+      hint: 'Abo, nur lesbar',
+    });
+  });
+
+  it('offers a writable copy before a newer one in a read-only calendar', () => {
+    const rows = [
+      ev('feed', 'cal-feed', '2026-06-15T09:00:00Z'),
+      ev('own', 'cal-work', '2026-05-15T09:00:00Z'),
+    ];
+    const [best] = rankEventSuggestions(rows, 'thomas', offerUsable(CONTAINERS));
+    expect(best.item.id).toBe('own');
+  });
+
+  it('still offers the read-only copy when it is the only one', () => {
+    const rows = [ev('feed', 'cal-feed', '2026-06-15T09:00:00Z')];
+    const [best] = rankEventSuggestions(rows, 'thomas', offerUsable(CONTAINERS));
+    expect(best.item.id).toBe('feed');
+  });
+
+  it('counts an unknown calendar as one that takes nothing new', () => {
+    expect(offerUsable(CONTAINERS)('cal-gone')).toBe(false);
+    expect(offerUsable(CONTAINERS)('cal-work')).toBe(true);
+  });
+
+  it('decides where a filled-in item goes', () => {
+    expect(prefillTarget('cal-work', CONTAINERS, false)).toEqual({ kind: 'offer', id: 'cal-work' });
+    expect(prefillTarget('cal-work', CONTAINERS, true)).toEqual({ kind: 'pinned' });
+    expect(prefillTarget('cal-feed', CONTAINERS, false)).toEqual({ kind: 'readOnly', name: 'Abo' });
+    expect(prefillTarget('cal-gone', CONTAINERS, false)).toEqual({ kind: 'unknown' });
+    expect(prefillTarget('', CONTAINERS, false)).toEqual({ kind: 'none' });
+  });
+
+  it('counts a picker as chosen only when it was left off its default', () => {
+    expect(pickedOverOffer(false, 'cal-work', 'cal-local')).toBe(false);
+    // Arrowed through and back: moved, but not chosen.
+    expect(pickedOverOffer(true, 'cal-local', 'cal-local')).toBe(false);
+    expect(pickedOverOffer(true, 'cal-work', 'cal-local')).toBe(true);
+    expect(pickedOverOffer(true, 'cal-work', null)).toBe(true);
+  });
+
+  it('keeps two tasks with one id from two servers apart when joining', () => {
+    const a = { id: '1', list_id: 'vikunja-a', title: 'Einkaufen' };
+    const b = { id: '1', list_id: 'vikunja-b', title: 'Einkaufen' };
+    const out = joinSuggestionPasses([a], [b], (t) => offerKey(t.list_id, t.id));
+    expect(out).toEqual([a, b]);
   });
 });

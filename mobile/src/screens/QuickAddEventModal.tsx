@@ -13,6 +13,10 @@ import {
 import {
   dateInput,
   defaultNewEventTimes,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  pickedOverOffer,
   selectableEventCalendars,
   timeInput,
   toIso,
@@ -81,16 +85,19 @@ export default function QuickAddEventModal({
   const titleMatches = useTitleSuggestions(title, 'events', true);
   const titleOptions = useMemo(
     () =>
-      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
-      })),
-    [titleMatches, title, calendars],
+      offerOptions(
+        rankEventSuggestions(titleMatches, title, offerUsable(calendars)),
+        (e) => e.calendar_id,
+        calendars,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, title, calendars, t],
   );
   const acceptSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((e) => e.id === id);
+    (key: string) => {
+      // By calendar AND id: the same id can sit in two calendars, and the
+      // offer named one of them.
+      const source = findOffer(titleMatches, key, (e) => e.calendar_id);
       if (!source) return;
       // `replace`, not push: the quick-add must not linger behind the editor.
       navigation.replace('EventEditor', {
@@ -100,11 +107,15 @@ export default function QuickAddEventModal({
         initialTitle: source.title,
         initialTime: time.trim() || undefined,
         prefillFrom: source,
-        // A calendar the user actually moved this picker to outranks the one
-        // the earlier appointment lived on; an untouched default does not.
-        // `calIdTouchedRef` already tracks exactly that, for the late
-        // last-used adoption below.
-        targetPinned: calIdTouchedRef.current,
+        // A calendar the user moved this picker to, and left on something
+        // other than the default it showed, outranks the one the earlier
+        // appointment lived on (decision 160). Picking the shown one again
+        // is no choice.
+        targetPinned: pickedOverOffer(
+          calIdTouchedRef.current,
+          calId,
+          shownDefaultRef.current,
+        ),
       });
     },
     [titleMatches, navigation, calId, date, time],
@@ -119,6 +130,8 @@ export default function QuickAddEventModal({
   const includeHiddenRef = useRef(includeHidden);
   includeHiddenRef.current = includeHidden;
   const calIdTouchedRef = useRef(false);
+  /** The calendar the picker showed when the user first touched it. */
+  const shownDefaultRef = useRef<string | null>(null);
 
   // Cancel button in the header (first element) so the user can back out fast.
   useCancelHeader(navigation);
@@ -325,6 +338,7 @@ export default function QuickAddEventModal({
           options={calendarOptions}
           onChange={(next) => {
             // Their pick wins over a late-landing last-used adoption.
+            if (!calIdTouchedRef.current) shownDefaultRef.current = calId;
             calIdTouchedRef.current = true;
             setCalId(next);
           }}

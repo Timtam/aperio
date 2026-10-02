@@ -1630,6 +1630,8 @@
       },
       "prefillCalendarReadOnly": "The earlier appointment is in \"{{calendar}}\", which cannot take new appointments. The calendar below stays as it is.",
       "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is.",
+      "prefillCalendarReadOnlyInto": "\"{{calendar}}\" takes no new appointments. This one goes into \"{{target}}\".",
+      "prefillCalendarUnknownInto": "The calendar the earlier appointment is in is not available here. This one goes into \"{{target}}\".",
       "invitation": {
         "hint": "Someone else organizes this meeting, so only the organizer can change its details. What you set for yourself stays yours.",
         "allDayValue": "{{date}}, all day",
@@ -1662,6 +1664,10 @@
       "listRequired": "Please pick a list.",
       "pickList": "Pick a list …",
       "subtaskListLocked": "Subtasks live in the same list as their parent. Move the parent task to relocate the whole family.",
+      "prefillListReadOnly": "The earlier task is in \"{{list}}\", which cannot take new tasks. The list below stays as it is.",
+      "prefillListReadOnlyInto": "\"{{list}}\" takes no new tasks. This one goes into \"{{target}}\".",
+      "prefillListUnknown": "The list the earlier task is in is not available here. The list below stays as it is.",
+      "prefillListUnknownInto": "The list the earlier task is in is not available here. This one goes into \"{{target}}\".",
       "listMoveLocked": "This source can't move tasks between lists. Use Move / Copy to put a copy in another list instead.",
       "noSection": "No section",
       "section": {
@@ -2420,7 +2426,8 @@
     "count_one": "One earlier entry, reachable with the arrow keys.",
     "count_other": "{{count}} earlier entries, reachable with the arrow keys.",
     "applied": "Filled in from \"{{title}}\". The day stays as it was.",
-    "acceptHint": "Fills in everything but the day"
+    "acceptHint": "Fills in everything but the day",
+    "hintReadOnly": "{{name}}, read-only"
   },
   "recurrenceSummary": {
     "sentence": {

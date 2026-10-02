@@ -2866,6 +2866,27 @@ Code nach JS (`eventCoded` in `CalFfiModule.swift`/`.kt`). Andere Fehler (502,
 nativen Code, mit den Codes des Desktops; das lässt sich nur in einem
 Handy-Build prüfen.
 
+### B11 · Titel-Vorschlag: der Kalender, den er nennt (160, 161) `[~]`
+
+✅ Im Schnell-Hinzufügen nannte der Vorschlag „Arbeit“, und der Editor landete
+auf dem obersten Kalender. Zwei Wege, beide nachgestellt: Das Übernehmen suchte
+nur nach der Kennung, und dieselbe Kennung kann in zwei Kalendern liegen
+(Google behält sie über Kalender hinweg, eine Kopie behält ihre UID) — jetzt
+per Behälter und Kennung (`offerKey`, `findOffer`), auch bei Aufgaben, wo zwei
+Server von derselben 1 zählen. Und seit ba58411e galt jede Pfeiltaste in der
+Kalenderauswahl als Wahl; jetzt zählt nur, was beim Übernehmen vom gezeigten
+Standard abweicht (`pickedOverOffer`, 160). Dazu (161): eine beschreibbare
+Kopie desselben Titels kommt vor einer neueren in einem nur lesbaren Kalender,
+ein nur lesbarer Vorschlag sagt „nur lesbar“, und nimmt der Editor einen
+anderen Kalender oder eine andere Liste, sagt er beide an — beim Übernehmen im
+Editor mit der Ansage der Übernahme, nach dem Schnell-Hinzufügen beim Öffnen.
+Die Vorschläge öffnen sich nur noch nach Tippen, nicht nach einer Übernahme.
+Desktop, Handy, Termine und Aufgaben. ↻ im Test (Handy ohne Testläufer).
+
+🚩 **Offen:** Kommt die Kalenderliste erst nach dem Vorschlag an, bleibt die
+erste Ablehnung stehen (der Riegel `prefillApplied`); ein Testaufbau mit
+derselben Dauer wie die Grundform verdeckte das. Bei Toni nicht der Fall.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)

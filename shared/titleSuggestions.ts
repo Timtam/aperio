@@ -66,7 +66,7 @@ export const UNFINISHED_TASK_STATUSES = ['open', 'in_progress'] as const;
 
 /**
  * Join the two passes the task suggestions run, keeping the first sighting of
- * each id.
+ * each row.
  *
  * One pass would do if the index answered fairly, and it does not: it returns
  * the best 200 matches by relevance, and for a repeating task on a provider
@@ -83,12 +83,16 @@ export const UNFINISHED_TASK_STATUSES = ['open', 'in_progress'] as const;
 export function joinSuggestionPasses<T extends { id: string }>(
   first: readonly T[],
   second: readonly T[],
+  // What makes two rows the same row. The id alone does not: two task
+  // servers count from the same 1 (see `offerKey`).
+  keyOf: (item: T) => string = (item) => item.id,
 ): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
   for (const item of [...first, ...second]) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
+    const key = keyOf(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(item);
   }
   return out;
@@ -277,4 +281,128 @@ export function taskPrefillFrom(source: PrefillableTask): TaskPrefill {
     recurrence: source.recurrence,
     deadline_reminder_days: source.deadline_reminder_days,
   };
+}
+
+/**
+ * Which offer a suggestion stands for: the container it lives in AND its id.
+ *
+ * The id alone does not name one row. Google keeps an event's id across every
+ * calendar it sits in, a copy keeps its UID, and two task servers count from
+ * the same 1. Accepting by bare id therefore filled the editor from whichever
+ * copy the search happened to return first, not the one the offer named: the
+ * hint said "Arbeit", and the editor took the copy on the top calendar.
+ */
+export function offerKey(container: string | null | undefined, id: string): string {
+  return JSON.stringify([container ?? '', id]);
+}
+
+/** A container an offer can be filled into, as far as these rules care. */
+export interface OfferContainer {
+  id: string;
+  name: string;
+  read_only: boolean;
+}
+
+/** One offer, ready for either platform's suggestion list. */
+export interface OfferOption {
+  /** {@link offerKey} of the item — what accepting it hands back. */
+  id: string;
+  title: string;
+  /** Where it comes from, saying so when that container takes nothing new. */
+  hint?: string;
+}
+
+/**
+ * The ranked offers as options: each keyed by {@link offerKey} and hinted with
+ * its container's name. A container that cannot take a new item says so in
+ * the hint (`readOnlyHint`) — the offer still fills everything else, but not
+ * there, and the list is where the user decides.
+ */
+export function offerOptions<T extends SuggestibleItem>(
+  ranked: readonly TitleSuggestion<T>[],
+  containerOf: (item: T) => string | null | undefined,
+  containers: readonly OfferContainer[],
+  readOnlyHint: (name: string) => string,
+): OfferOption[] {
+  return ranked.map(({ item }) => {
+    const container = containers.find((c) => c.id === containerOf(item));
+    return {
+      id: offerKey(containerOf(item), item.id),
+      title: item.title,
+      hint: container
+        ? container.read_only
+          ? readOnlyHint(container.name)
+          : container.name
+        : undefined,
+    };
+  });
+}
+
+/** The item an accepted option stands for — by {@link offerKey}, never by id. */
+export function findOffer<T extends { id: string }>(
+  items: readonly T[],
+  key: string,
+  containerOf: (item: T) => string | null | undefined,
+): T | undefined {
+  return items.find((item) => offerKey(containerOf(item), item.id) === key);
+}
+
+/**
+ * Whether an offer's container can take a new item at all. A container the
+ * catalog does not know cannot: the editor would have nothing to show for it.
+ */
+export function offerUsable(
+  containers: readonly OfferContainer[],
+): (container: string | null | undefined) => boolean {
+  return (container) =>
+    containers.some((c) => c.id === container && !c.read_only);
+}
+
+/**
+ * Where a filled-in NEW item goes.
+ *
+ * - `offer`: the offer's own container. It is known and takes new items.
+ * - `pinned`: the caller keeps its own, because the user chose it.
+ * - `readOnly`, `unknown`: the offer's container cannot take it. The editor
+ *   keeps its own container and has to SAY so (decision 161): the offer named
+ *   one container, and quietly using another is what made the editor look as
+ *   if it had picked the top entry at random.
+ * - `none`: the offer names no container; there is nothing to say.
+ */
+export type PrefillTarget =
+  | { kind: 'offer'; id: string }
+  | { kind: 'pinned' }
+  | { kind: 'readOnly'; name: string }
+  | { kind: 'unknown' }
+  | { kind: 'none' };
+
+export function prefillTarget(
+  offerContainer: string | null | undefined,
+  containers: readonly OfferContainer[],
+  pinned: boolean,
+): PrefillTarget {
+  if (pinned) return { kind: 'pinned' };
+  if (!offerContainer) return { kind: 'none' };
+  const known = containers.find((c) => c.id === offerContainer);
+  if (!known) return { kind: 'unknown' };
+  if (known.read_only) return { kind: 'readOnly', name: known.name };
+  return { kind: 'offer', id: known.id };
+}
+
+/**
+ * Whether a quick-add's container picker outranks the offer's container
+ * (decision 160): the user moved it AND left it on something other than the
+ * default it showed.
+ *
+ * Moving alone is not a choice. A closed select fires a change on every arrow
+ * key, so a screen-reader user who only listened through the calendars and
+ * came back to the top had "chosen" the top calendar, and an accepted offer
+ * then landed there instead of where the offer said.
+ */
+export function pickedOverOffer(
+  moved: boolean,
+  value: string,
+  shownDefault: string | null | undefined,
+): boolean {
+  return moved && value !== (shownDefault ?? '');
 }

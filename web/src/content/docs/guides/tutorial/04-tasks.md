@@ -19,7 +19,12 @@ your day or week, and work through them.
    **The day stays as it was:** that is what makes this a new entry. And if you
    picked a list or calendar yourself in the quick-add before accepting the
    offer, **your pick stays** — an older entry does not overrule a choice you
-   just made.
+   just made. What counts as a pick is what the picker shows when you accept
+   the offer, if it differs from what the dialog suggested; just moving
+   through the list does not count. If the same name exists in a list or
+   calendar you can write to, that entry is offered first. An offer that only
+   comes from a read-only calendar or list says "read-only", and on accepting
+   it the editor says where the new entry goes instead.
    Optionally:
    - the **task list** it is stored in,
    - a **due date** (and optionally a time), each removable on its own:
