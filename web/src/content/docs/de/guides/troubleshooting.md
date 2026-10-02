@@ -67,6 +67,24 @@ Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
 manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar. Die Warnung
 verschwindet von selbst, sobald eine Aktualisierung wieder gelingt.
 
+## „Dieses Gerät“ aktualisiert sich nach dem Umzug auf ein neues Telefon nicht mehr
+
+Beim Umzug auf ein neues iPhone kommen Aperios Daten mit, auch das Konto
+**Dieses Gerät**, aber nicht die Erlaubnis, die Kalender und Erinnerungen des
+Telefons zu lesen: Danach fragt iOS auf jedem Telefon neu. Bis sie erteilt ist,
+zeigt Aperio weiter, was es zuletzt gelesen hat, und das Konto aktualisiert
+sich nicht.
+
+Gibt es das Konto und hat iOS auf diesem Telefon noch nie gefragt, fragt
+Aperio beim Start, sobald die App entsperrt ist und der erste Bildschirm
+geladen hat. Erlaube den vollen Zugriff auf die Kalender und auf die
+Erinnerungen; Aperio aktualisiert das Konto dann sofort und sagt es an.
+
+Hast du abgelehnt, fragt iOS nicht noch einmal. Öffne die App „Einstellungen“,
+dann **Datenschutz & Sicherheit**, dann **Kalender** und **Erinnerungen**, und
+gib Aperio dort jeweils vollen Zugriff. „Nur Termine hinzufügen“ reicht nicht:
+Aperio muss deine Kalender lesen können.
+
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 
 Aufgaben mit einer **Uhrzeit** auf einem **CalDAV**-Konto (iCloud Erinnerungen,

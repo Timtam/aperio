@@ -40,10 +40,11 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use adapter_device_calendar::{DeviceAdapter, DeviceCalendarProvider};
+use adapter_device_calendar::{device_access, DeviceAdapter, DeviceCalendarProvider};
 use adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use cal_core::os_access::{ask_on_start, OsAccess, OsAccessReport};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
     NewEvent, TaskList, TasksFeature,
@@ -682,8 +683,8 @@ pub struct Host {
     /// the "last synced" footer. A no-op until the JS layer registers its bridge
     /// via [`Host::set_contact_sync_observer`]; passes run regardless.
     contact_sync_observer: Arc<BridgeContactSyncObserver>,
-    /// The native device calendar/reminder provider (iOS EventKit; Android has
-    /// none yet). `None` until the native module installs it via
+    /// The native device calendar/reminder provider (iOS EventKit, Android
+    /// `CalendarContract`). `None` until the native module installs it via
     /// [`Host::set_device_event_store`] right after open. The device-calendar
     /// adapter can't be added or registered without it, so adding such an
     /// account fails cleanly on a platform that never sets it.
@@ -823,8 +824,9 @@ pub enum DeviceCalError {
 }
 
 /// Foreign-side bridge to the native device calendar + reminders store (iOS
-/// EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
-/// mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+/// EventKit `EKEvent`/`EKReminder`; Android `CalendarContract`, events only).
+/// The mobile native modules implement it (Swift `IosDeviceEventStore`, Kotlin
+/// `AndroidDeviceCalendar`) and install
 /// it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
 /// the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
 /// `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
@@ -866,6 +868,11 @@ pub trait DeviceEventStoreBridge: Send + Sync {
     /// `task_json` is a `Task`; returns the updated `Task` JSON.
     fn update_reminder(&self, task_json: String) -> Result<String, DeviceCalError>;
     fn delete_reminder(&self, task_id: String) -> Result<(), DeviceCalError>;
+    /// The OS's access state right now, asking nobody: JSON
+    /// `{"events": token, "reminders": token | null}`. iOS tokens:
+    /// `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
+    /// Android: `granted`, `not_granted`. Anything else reads as undetermined.
+    fn access_status(&self) -> String;
 }
 
 /// Adapts a foreign [`DeviceEventStoreBridge`] to the engine-side
@@ -896,6 +903,10 @@ impl DeviceCalendarProvider for BridgeDeviceProvider {
 
     fn supports_reminders(&self) -> bool {
         self.bridge.supports_reminders()
+    }
+
+    fn access_status(&self) -> String {
+        self.bridge.access_status()
     }
 
     fn list_calendars(&self) -> cal_core::Result<String> {
@@ -1928,6 +1939,29 @@ impl Host {
     /// Snapshot the installed device provider, if any.
     fn device_provider(&self) -> Option<Arc<dyn DeviceCalendarProvider>> {
         self.device_provider.read().ok().and_then(|g| g.clone())
+    }
+
+    /// The persisted device-calendar accounts, as (id, name).
+    fn device_accounts(&self) -> Vec<(String, String)> {
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        repo.list()
+            .map(|accounts| {
+                accounts
+                    .into_iter()
+                    .filter(|a| {
+                        a.adapter_kind == host_core::builtin_adapters::device_calendar_kind()
+                    })
+                    .map(|a| (a.id, a.display_name))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// What the OS allows right now, for the log line both access paths write.
+    fn device_access_words(provider: &dyn DeviceCalendarProvider) -> String {
+        let (calendar, tasks) = device_access(provider);
+        format!("calendar={calendar:?} tasks={tasks:?}")
     }
 
     /// Build the device adapter over `provider` and insert it into the registry
@@ -6127,7 +6161,11 @@ impl Host {
             // surface any failure at once (forced; see warm_all). The
             // automatic on-foreground warm uses warm_cache_on_foreground,
             // which runs UN-forced.
-            refresher.warm_all(true).await;
+            //
+            // Queued, not dropped: the phone has no worker whose wake keeps a
+            // request, so one that arrived during the launch pass — a manual
+            // refresh, an account reset, a fresh OS grant — was simply lost.
+            refresher.warm_all_queued(true).await;
         });
     }
 
@@ -6223,8 +6261,8 @@ impl Host {
     // appears on the user's other devices, and the cross-device applier never
     // sees a kind it can't construct.
 
-    /// Install the native device calendar/reminder bridge (iOS today; Android
-    /// has none yet). Stores it and registers any already-persisted
+    /// Install the native device calendar/reminder bridge (iOS EventKit,
+    /// Android `CalendarContract`). Stores it and registers any already-persisted
     /// device-calendar account so it's routable without an app restart (bootstrap
     /// at `open` skipped it — no bridge yet). The native module calls this once,
     /// right after [`Host::open`].
@@ -6233,21 +6271,56 @@ impl Host {
         if let Ok(mut guard) = self.device_provider.write() {
             *guard = Some(Arc::clone(&provider));
         }
-        let shared = self.db.shared();
-        let repo = AccountsRepo::new(&shared);
-        if let Ok(accounts) = repo.list() {
-            for account in accounts {
-                if account.adapter_kind == host_core::builtin_adapters::device_calendar_kind() {
-                    self.register_device_adapter(&account.id, Arc::clone(&provider));
+        for (account_id, _) in self.device_accounts() {
+            self.register_device_adapter(&account_id, Arc::clone(&provider));
+        }
+    }
+
+    /// What the OS allows for the device calendars and reminders, and whether
+    /// to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+    ///
+    /// The rule is `cal_core::os_access::ask_on_start`; this only gathers its
+    /// inputs. Read at start and asks the OS nothing. Without a native bridge
+    /// (a platform that never installed one) everything is undetermined and
+    /// nothing is asked. Logs one line, which after a phone move is the first
+    /// answer to "did the grant come along?".
+    pub fn device_calendar_access_json(&self) -> Result<String, StoreError> {
+        let accounts = self.device_accounts();
+        let report = match self.device_provider() {
+            None => OsAccessReport {
+                account_names: Vec::new(),
+                calendar: OsAccess::Undetermined,
+                tasks: None,
+                ask_now: None,
+            },
+            Some(provider) => {
+                let (calendar, tasks) = device_access(provider.as_ref());
+                OsAccessReport {
+                    account_names: accounts.iter().map(|(_, name)| name.clone()).collect(),
+                    calendar,
+                    tasks,
+                    ask_now: ask_on_start(calendar, tasks, !accounts.is_empty()),
                 }
             }
-        }
+        };
+        tracing::info!(
+            target: "aperio::device",
+            calendar = ?report.calendar,
+            tasks = ?report.tasks,
+            accounts = accounts.len(),
+            ask = ?report.ask_now,
+            "device calendar access"
+        );
+        serde_json::to_string(&report).map_err(|e| StoreError::Storage {
+            detail: e.to_string(),
+        })
     }
 
     /// Run the OS permission prompt for the device calendar / reminders. Drives
     /// the add-account "grant access" step: the UI calls this, and on `true`
-    /// proceeds to `create_account` for the `device_calendar` kind. An
-    /// `InvalidField` means no native bridge is installed (e.g. Android).
+    /// proceeds to `create_account` for the `device_calendar` kind; at start,
+    /// the UI also calls it when [`Host::device_calendar_access_json`] says
+    /// to ask. An `InvalidField` means no native bridge is installed.
     pub fn request_device_calendar_access(
         &self,
         events: bool,
@@ -6259,11 +6332,26 @@ impl Host {
                 field: "adapter_kind".to_string(),
                 detail: "device calendar is not available on this platform".to_string(),
             })?;
-        provider
+        let before = Self::device_access_words(provider.as_ref());
+        let granted = provider
             .request_access(events, reminders)
             .map_err(|e| StoreError::Storage {
                 detail: e.to_string(),
-            })
+            });
+        // Before and after in one line: the log then says what the prompt
+        // changed, not just what the user tapped.
+        tracing::info!(
+            target: "aperio::device",
+            events,
+            reminders,
+            granted = ?granted.as_ref().ok(),
+            "device calendar access requested: before {before}, after {}",
+            Self::device_access_words(provider.as_ref())
+        );
+        // Spawns nothing: the caller refreshes (`refresh_external_cache`),
+        // as adding the account does. A command unit tests call must not
+        // leave a task running into the runtime's teardown.
+        granted
     }
 
     // ─── Contact sync (§10.5) ────────────────────────────────────────────────────
@@ -13013,5 +13101,139 @@ mod tests {
                 .all(|c| c["id"] != serde_json::json!(contact_id)),
             "the contact should be gone after delete; got: {after}",
         );
+    }
+
+    // ─── Device calendar access at start (decision 166) ─────────────────────
+
+    /// A device store that only answers the access question.
+    struct AccessBridge(&'static str);
+
+    impl DeviceEventStoreBridge for AccessBridge {
+        fn request_access(&self, _: bool, _: bool) -> Result<bool, DeviceCalError> {
+            unreachable!("reading the access asks nobody")
+        }
+        fn supports_reminders(&self) -> bool {
+            true
+        }
+        fn list_calendars(&self) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn get_events(&self, _: String, _: String, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn create_event(&self, _: String, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn update_event(&self, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn delete_event(&self, _: String) -> Result<(), DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn list_reminder_lists(&self) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn get_reminders(&self, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn create_reminder(&self, _: String, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn update_reminder(&self, _: String) -> Result<String, DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn delete_reminder(&self, _: String) -> Result<(), DeviceCalError> {
+            Err(DeviceCalError::Unavailable)
+        }
+        fn access_status(&self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    fn access_report(host: &Host) -> OsAccessReport {
+        serde_json::from_str(&host.device_calendar_access_json().unwrap()).unwrap()
+    }
+
+    fn with_device_account(host: &Host) {
+        AccountsRepo::new(&host.db.shared())
+            .create(
+                host_core::builtin_adapters::device_calendar_kind().into(),
+                "Dieses Gerät",
+                "{}",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn without_a_device_store_nothing_is_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "no-store");
+        with_device_account(&host);
+        let report = access_report(&host);
+        assert_eq!(report.calendar, OsAccess::Undetermined);
+        assert_eq!(report.ask_now, None);
+    }
+
+    #[test]
+    fn without_a_device_account_nothing_is_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "no-account");
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"not_determined","reminders":"not_determined"}"#,
+        )));
+        let report = access_report(&host);
+        assert_eq!(report.calendar, OsAccess::NotAsked);
+        assert_eq!(report.ask_now, None);
+    }
+
+    #[test]
+    fn a_device_account_the_os_never_asked_about_is_asked_for() {
+        // Toni's phone after the move: the account came along, the grant not.
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "moved");
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"not_determined","reminders":"not_determined"}"#,
+        )));
+        with_device_account(&host);
+        let report = access_report(&host);
+        assert_eq!(report.account_names, vec!["Dieses Gerät".to_string()]);
+        assert_eq!(
+            report.ask_now,
+            Some(cal_core::os_access::AskFor {
+                events: true,
+                reminders: true
+            })
+        );
+    }
+
+    #[test]
+    fn only_the_entity_never_asked_about_is_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "half");
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"not_determined"}"#,
+        )));
+        with_device_account(&host);
+        assert_eq!(
+            access_report(&host).ask_now,
+            Some(cal_core::os_access::AskFor {
+                events: false,
+                reminders: true
+            })
+        );
+    }
+
+    #[test]
+    fn an_answer_is_never_asked_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "denied");
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"denied","reminders":"write_only"}"#,
+        )));
+        with_device_account(&host);
+        let report = access_report(&host);
+        assert_eq!(report.calendar, OsAccess::Denied);
+        assert_eq!(report.tasks, Some(OsAccess::WriteOnly));
+        assert_eq!(report.ask_now, None);
     }
 }

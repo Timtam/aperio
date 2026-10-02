@@ -1,5 +1,10 @@
 {
   "mobile": {
+    "deviceAccess": {
+      "granted": "Access granted. Updating {{name}}.",
+      "calendarsOnly": "Access to the calendars granted; updating {{name}}. Reminders stay without access; you can change that for Aperio in the Settings app.",
+      "remindersOnly": "Access to the reminders granted; updating {{name}}. Calendars stay without access; you can change that for Aperio in the Settings app."
+    },
     "appLock": {
       "settingHeading": "App lock",
       "settingLabel": "Require Face ID, Touch ID or device code on start",

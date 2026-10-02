@@ -28,7 +28,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Section, Task, TaskList};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::db::{DbError, DbHandle, DbResult};
 
@@ -1720,13 +1720,27 @@ impl CacheStore {
         self.db.with_tx(|tx| {
             let unchanged = rows_match(tx, &sel, params![account], &incoming)?;
             if !unchanged {
-                let dropped: Vec<String> = {
+                let old: Vec<String> = {
                     let mut stmt = tx.prepare(&sel_ids)?;
                     let rows = stmt.query_map(params![account], |r| r.get::<_, String>(0))?;
-                    rows.filter_map(|r| r.ok())
-                        .filter(|id| !incoming.contains_key(id.as_str()))
-                        .collect()
+                    rows.filter_map(|r| r.ok()).collect()
                 };
+                let delta = listing_delta(&old, incoming.keys().copied());
+                // Counts and ids, never names. After a phone move this line
+                // is what tells whether the OS kept its container ids: none
+                // dropped means every per-container setting still applies.
+                info!(
+                    target: "aperio::cache",
+                    table,
+                    account,
+                    kept = delta.kept,
+                    dropped = delta.dropped.len(),
+                    added = delta.added.len(),
+                    dropped_ids = ?delta.dropped,
+                    added_ids = ?delta.added,
+                    "container listing changed"
+                );
+                let dropped = delta.dropped;
                 tx.execute(&del, params![account])?;
                 for item in items {
                     let json = to_json(item, table)?;
@@ -2014,6 +2028,31 @@ fn has_freshness(tx: &Connection, account: &str, scope: &str, container: &str) -
         )
         .optional()?;
     Ok(matches!(stamp, Some(Some(_))))
+}
+
+/// How a container listing changed: how many ids stayed, and which went and
+/// came. Sorted, so the same change always logs the same way.
+#[derive(Debug, PartialEq, Eq)]
+struct ListingDelta {
+    kept: usize,
+    dropped: Vec<String>,
+    added: Vec<String>,
+}
+
+fn listing_delta<'a>(old: &[String], incoming: impl Iterator<Item = &'a str>) -> ListingDelta {
+    let incoming: std::collections::BTreeSet<&str> = incoming.collect();
+    let old_set: std::collections::BTreeSet<&str> = old.iter().map(String::as_str).collect();
+    ListingDelta {
+        kept: old_set.intersection(&incoming).count(),
+        dropped: old_set
+            .difference(&incoming)
+            .map(|s| s.to_string())
+            .collect(),
+        added: incoming
+            .difference(&old_set)
+            .map(|s| s.to_string())
+            .collect(),
+    }
 }
 
 /// Whether a container's cached rows are exactly the incoming

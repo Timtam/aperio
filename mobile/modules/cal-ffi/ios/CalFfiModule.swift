@@ -43,6 +43,12 @@ public class CalFfiModule: Module {
   // so both queues may safely call into it concurrently.)
   private let slowQueue = DispatchQueue(label: "expo.modules.calffi.slow", qos: .userInitiated)
 
+  // The OS calendar/reminders prompt blocks its call until the user answers.
+  // On the default queue that froze every read behind it — the screen under
+  // the alert sat on "Loading…" — and on `slowQueue` the prompt would wait for
+  // a sync round to finish. It gets a queue of its own.
+  private let accessQueue = DispatchQueue(label: "expo.modules.calffi.access", qos: .userInitiated)
+
   // The full on-device engine: accounts + the statically-embedded adapter
   // registry, opened at the app-sandbox database path. Credentials route
   // through IosKeychain (Security-framework Keychain). Mirrors the Android
@@ -91,8 +97,8 @@ public class CalFfiModule: Module {
     // Forward contact-sync pass-finished callbacks to JS. Mirrors the Android module.
     opened.setContactSyncObserver(observer: JsContactSyncObserver(module: self))
     // Install the device calendar/reminders bridge (EventKit). The Host registers
-    // any persisted device-calendar account against it now; Android sets none, so
-    // the device kind is iOS-only. Mirrors the keychain/observer injection above.
+    // any persisted device-calendar account against it now. Android installs its
+    // own (events only). Mirrors the keychain/observer injection above.
     opened.setDeviceEventStore(bridge: IosDeviceEventStore())
     return opened
   }
@@ -519,12 +525,18 @@ public class CalFfiModule: Module {
       try self.host.renameAccountJson(id: id, newName: newName)
     }
 
-    // Run the OS calendar/reminders permission prompt for the device-calendar
-    // adapter's add-account "grant access" step. `true` ⇒ proceed to
-    // createAccountJson for the `device_calendar` kind. iOS-backed (EventKit);
-    // on Android the Host has no bridge and this rejects "not available".
+    // Run the OS calendar/reminders permission prompt: the add-account "grant
+    // access" step, and at start when deviceCalendarAccessJson says to ask.
+    // `true` ⇒ every requested entity was granted. On its own queue (see
+    // accessQueue): it blocks until the user answers.
     AsyncFunction("requestDeviceCalendarAccess") { (events: Bool, reminders: Bool) -> Bool in
       try self.host.requestDeviceCalendarAccess(events: events, reminders: reminders)
+    }.runOnQueue(accessQueue)
+
+    // What the OS allows for the device calendars and reminders, and whether to
+    // ask now (decision 166). Asks nobody.
+    AsyncFunction("deviceCalendarAccessJson") { () -> String in
+      try self.host.deviceCalendarAccessJson()
     }
 
     // Force a full cold re-sync of one external account (clears its delta tokens

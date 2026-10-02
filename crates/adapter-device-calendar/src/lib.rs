@@ -30,6 +30,7 @@ pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use cal_core::os_access::OsAccess;
 use cal_core::{
     rrule_to_task_recurrence, Adapter, AdapterSource, AuthToken, Calendar, CalendarFeature,
     Capability, ContainerColor, Credentials, DateRange, Error, Event, FreeBusy, NewEvent, NewTask,
@@ -61,6 +62,11 @@ pub trait DeviceCalendarProvider: Send + Sync {
     /// Whether this platform exposes a reminders/tasks store (iOS yes, Android
     /// no). Gates the [`Capability::Tasks`] declaration.
     fn supports_reminders(&self) -> bool;
+    /// The OS's access state right now, without asking anyone: JSON
+    /// `{"events": token, "reminders": token | null}` in the platform's own
+    /// words. [`device_access`] reads it; the rule about what to do with it is
+    /// `cal_core::os_access`, not the platform's.
+    fn access_status(&self) -> String;
 
     /// JSON `Vec<Calendar>`.
     fn list_calendars(&self) -> Result<String>;
@@ -114,6 +120,56 @@ impl DeviceAdapter {
     pub fn request_access(&self, events: bool, reminders: bool) -> Result<bool> {
         self.provider.request_access(events, reminders)
     }
+}
+
+/// The platform's own words for an access state, in the core's.
+///
+/// iOS: EventKit's `EKAuthorizationStatus` (`full_access` also stands for the
+/// pre-17 `authorized`). Android: the runtime permission, which cannot tell
+/// "never asked" from "refused" — both read as not granted, which is
+/// [`OsAccess::Undetermined`]. Anything else, a state a newer OS invents, is
+/// undetermined too: never a reason to ask.
+pub fn map_access_token(token: &str) -> OsAccess {
+    match token {
+        "full_access" | "granted" => OsAccess::Full,
+        "write_only" => OsAccess::WriteOnly,
+        "not_determined" => OsAccess::NotAsked,
+        "denied" => OsAccess::Denied,
+        "restricted" => OsAccess::Restricted,
+        _ => OsAccess::Undetermined,
+    }
+}
+
+#[derive(Deserialize)]
+struct AccessStatusWire {
+    events: String,
+    #[serde(default)]
+    reminders: Option<String>,
+}
+
+/// The calendars' and the reminders' access, as the core reads it. Reminders
+/// are `None` where the platform has no store for them; a status the native
+/// side could not put into words reads as undetermined.
+pub fn device_access(provider: &dyn DeviceCalendarProvider) -> (OsAccess, Option<OsAccess>) {
+    let raw = provider.access_status();
+    let Ok(wire) = serde_json::from_str::<AccessStatusWire>(&raw) else {
+        return (
+            OsAccess::Undetermined,
+            provider
+                .supports_reminders()
+                .then_some(OsAccess::Undetermined),
+        );
+    };
+    let reminders = if provider.supports_reminders() {
+        Some(
+            wire.reminders
+                .as_deref()
+                .map_or(OsAccess::Undetermined, map_access_token),
+        )
+    } else {
+        None
+    };
+    (map_access_token(&wire.events), reminders)
 }
 
 fn parse<T: serde::de::DeserializeOwned>(json: &str) -> Result<T> {
@@ -590,6 +646,96 @@ impl TasksFeature for DeviceAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider that only answers the access question.
+    struct AccessOnly {
+        status: &'static str,
+        reminders: bool,
+    }
+
+    impl DeviceCalendarProvider for AccessOnly {
+        fn request_access(&self, _: bool, _: bool) -> Result<bool> {
+            unreachable!()
+        }
+        fn supports_reminders(&self) -> bool {
+            self.reminders
+        }
+        fn access_status(&self) -> String {
+            self.status.to_string()
+        }
+        fn list_calendars(&self) -> Result<String> {
+            unreachable!()
+        }
+        fn get_events(&self, _: &str, _: &str, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn create_event(&self, _: &str, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn update_event(&self, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn delete_event(&self, _: &str) -> Result<()> {
+            unreachable!()
+        }
+        fn list_reminder_lists(&self) -> Result<String> {
+            unreachable!()
+        }
+        fn get_reminders(&self, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn create_reminder(&self, _: &str, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn update_reminder(&self, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn delete_reminder(&self, _: &str) -> Result<()> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn maps_access_tokens() {
+        assert_eq!(map_access_token("full_access"), OsAccess::Full);
+        assert_eq!(map_access_token("granted"), OsAccess::Full);
+        assert_eq!(map_access_token("write_only"), OsAccess::WriteOnly);
+        assert_eq!(map_access_token("not_determined"), OsAccess::NotAsked);
+        assert_eq!(map_access_token("denied"), OsAccess::Denied);
+        assert_eq!(map_access_token("restricted"), OsAccess::Restricted);
+        // Android cannot tell "never asked" from "refused".
+        assert_eq!(map_access_token("not_granted"), OsAccess::Undetermined);
+        // A state a newer OS invents is never a reason to ask.
+        assert_eq!(map_access_token("unknown_9"), OsAccess::Undetermined);
+    }
+
+    #[test]
+    fn reads_the_access_of_both_stores() {
+        let ios = AccessOnly {
+            status: r#"{"events":"not_determined","reminders":"full_access"}"#,
+            reminders: true,
+        };
+        assert_eq!(
+            device_access(&ios),
+            (OsAccess::NotAsked, Some(OsAccess::Full))
+        );
+        // No reminders store: whatever the native side says about them is not
+        // a state of anything.
+        let android = AccessOnly {
+            status: r#"{"events":"granted","reminders":null}"#,
+            reminders: false,
+        };
+        assert_eq!(device_access(&android), (OsAccess::Full, None));
+        // Unreadable: undetermined, never "not asked".
+        let garbled = AccessOnly {
+            status: "?",
+            reminders: true,
+        };
+        assert_eq!(
+            device_access(&garbled),
+            (OsAccess::Undetermined, Some(OsAccess::Undetermined))
+        );
+    }
 
     #[test]
     fn maps_calendar_with_colour() {

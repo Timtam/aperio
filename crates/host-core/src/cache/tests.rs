@@ -1,6 +1,8 @@
 //! Unit tests for the external-adapter snapshot cache (CACHE-0).
 
-use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
+use super::{
+    listing_delta, CacheStore, Delta, ListingDelta, RefreshCoordinator, SyncScope, SyncState,
+};
 use crate::db::DbHandle;
 use cal_core::event_diff::EventField;
 use cal_core::{
@@ -2640,4 +2642,26 @@ fn auth_shaped_heuristic() {
     ));
     assert!(!super::is_auth_shaped("connection reset by peer"));
     assert!(!super::is_auth_shaped("timeout after 30s"));
+}
+
+#[test]
+fn a_listing_change_names_what_stayed_went_and_came() {
+    // After a phone move this is how the log tells whether the OS kept its
+    // container ids: a new id for an old calendar is one dropped, one added.
+    let old = vec![
+        "cal-a".to_string(),
+        "cal-b".to_string(),
+        "cal-c".to_string(),
+    ];
+    let delta = listing_delta(&old, ["cal-c", "cal-d", "cal-a"].into_iter());
+    assert_eq!(
+        delta,
+        ListingDelta {
+            kept: 2,
+            dropped: vec!["cal-b".to_string()],
+            added: vec!["cal-d".to_string()],
+        }
+    );
+    let same = listing_delta(&old, old.iter().map(String::as_str));
+    assert_eq!((same.kept, same.dropped.len(), same.added.len()), (3, 0, 0));
 }

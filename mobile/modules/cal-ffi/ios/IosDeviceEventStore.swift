@@ -13,11 +13,63 @@ import Foundation
 /// `true`. Reads (P1/P2) emit the intermediate calendar/event/reminder shape;
 /// writes (P3) decode the intermediate write shape, apply it to EventKit, and
 /// return the resulting item (which round-trips through the tested Rust read
-/// mapping). Marked `@unchecked Sendable` because it holds a long-lived
-/// `EKEventStore` (not `Sendable`); the store is internally thread-safe for the
-/// single-call use here.
+/// mapping). Marked `@unchecked Sendable` because it holds an `EKEventStore`
+/// (not `Sendable`); the store is internally thread-safe for the single-call
+/// use here, and replacing it is guarded by `lock`.
 final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
-  private let store = EKEventStore()
+  /// The EventKit store — replaced when access arrives after it was made.
+  ///
+  /// A store created before the user granted access keeps seeing nothing.
+  /// On a phone Aperio was moved to, the store opened at launch, before the
+  /// start prompt granted access, and every read then failed until the app
+  /// was killed. So each call takes ONE snapshot (`snapshotStore`) and uses
+  /// only that: the snapshot is new whenever an entity has turned full since
+  /// the store was made — after the prompt, or after a grant in the iOS
+  /// Settings while the app kept running — and no EventKit object from one
+  /// store is ever handed to another.
+  private let lock = NSLock()
+  private var store = EKEventStore()
+  private var fullAtCreation = IosDeviceEventStore.fullAccessNow()
+
+  private func snapshotStore() -> EKEventStore {
+    lock.lock()
+    defer { lock.unlock() }
+    let now = Self.fullAccessNow()
+    if (now.events && !fullAtCreation.events) || (now.reminders && !fullAtCreation.reminders) {
+      store = EKEventStore()
+      fullAtCreation = now
+    }
+    return store
+  }
+
+  private static func fullAccessNow() -> (events: Bool, reminders: Bool) {
+    (accessToken(.event) == "full_access", accessToken(.reminder) == "full_access")
+  }
+
+  /// The OS's access state in the words the Rust side maps
+  /// (`adapter_device_calendar::map_access_token`). By raw value, so one
+  /// switch covers iOS 17 (`fullAccess`, `writeOnly`) and before (3 was
+  /// `authorized`, full access in all but name).
+  private static func accessToken(_ type: EKEntityType) -> String {
+    let raw = EKEventStore.authorizationStatus(for: type).rawValue
+    switch raw {
+    case 0: return "not_determined"
+    case 1: return "restricted"
+    case 2: return "denied"
+    case 3: return "full_access"
+    case 4: return "write_only"
+    default: return "unknown_\(raw)"
+    }
+  }
+
+  /// What the OS allows right now, asking nobody.
+  func accessStatus() -> String {
+    let payload: [String: Any] = [
+      "events": Self.accessToken(.event),
+      "reminders": Self.accessToken(.reminder),
+    ]
+    return (try? Self.encode(payload)) ?? "{}"
+  }
 
   /// The UniFFI boundary is synchronous, but EventKit's permission API is
   /// completion-based — block on a semaphore until it answers (the documented
@@ -35,9 +87,13 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   private func requestEntity(_ type: EKEntityType) -> Bool {
+    let store = snapshotStore()
     let semaphore = DispatchSemaphore(value: 0)
     var result = false
-    let handler: EKEventStoreRequestAccessCompletionHandler = { ok, _ in
+    let handler: EKEventStoreRequestAccessCompletionHandler = { ok, error in
+      if let error {
+        NSLog("Aperio: EventKit access request failed: \(error.localizedDescription)")
+      }
       result = ok
       semaphore.signal()
     }
@@ -72,7 +128,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// collection. A genuinely removed calendar keeps erroring until the next
   /// listing refresh drops it from the catalog — after which nothing reads
   /// it anymore.
-  private func resolveCalendar(_ identifier: String) -> EKCalendar? {
+  private func resolveCalendar(_ identifier: String, in store: EKEventStore) -> EKCalendar? {
     if let calendar = store.calendar(withIdentifier: identifier) {
       return calendar
     }
@@ -92,7 +148,9 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// catalog, and the next refresh retries. On the rare device with truly
   /// zero lists the retry just keeps an already-empty cache empty (plus a
   /// log line per pass) — the safe side of the trade.
-  private func loadedCalendars(for type: EKEntityType) throws -> [EKCalendar] {
+  private func loadedCalendars(
+    for type: EKEntityType, in store: EKEventStore
+  ) throws -> [EKCalendar] {
     let calendars = store.calendars(for: type)
     if !calendars.isEmpty {
       return calendars
@@ -100,8 +158,12 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     store.refreshSourcesIfNecessary()
     let retried = store.calendars(for: type)
     if retried.isEmpty {
+      // The access state rides along: an empty catalog without full access
+      // is not a store still loading, and the log should say which.
       throw DeviceCalError.Backend(
-        detail: "EventKit catalog empty (store may still be loading)")
+        detail:
+          "EventKit catalog empty (authorization: \(Self.accessToken(type)); store may still be loading)"
+      )
     }
     return retried
   }
@@ -109,7 +171,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Calendar reads (P1) ──
 
   func listCalendars() throws -> String {
-    let payload: [[String: Any]] = try loadedCalendars(for: .event).map { cal in
+    let store = snapshotStore()
+    let payload: [[String: Any]] = try loadedCalendars(for: .event, in: store).map { cal in
       var dict: [String: Any] = [
         "id": cal.calendarIdentifier,
         "name": cal.title,
@@ -124,7 +187,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func getEvents(calendarId: String, start: String, end: String) throws -> String {
-    guard let calendar = resolveCalendar(calendarId) else {
+    let store = snapshotStore()
+    guard let calendar = resolveCalendar(calendarId, in: store) else {
       // NOT "no events": an unresolvable identifier is an error, so the
       // host keeps its cached snapshot instead of replacing it with empty
       // (see resolveCalendar).
@@ -148,7 +212,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Reminders reads (P2) ──
 
   func listReminderLists() throws -> String {
-    let payload: [[String: Any]] = try loadedCalendars(for: .reminder).map { list in
+    let store = snapshotStore()
+    let payload: [[String: Any]] = try loadedCalendars(for: .reminder, in: store).map { list in
       var dict: [String: Any] = [
         "id": list.calendarIdentifier,
         "name": list.title,
@@ -163,7 +228,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func getReminders(listId: String) throws -> String {
-    guard let list = resolveCalendar(listId) else {
+    let store = snapshotStore()
+    guard let list = resolveCalendar(listId, in: store) else {
       // See getEvents: an unresolvable identifier must not read as an
       // empty list — that would clobber the cached snapshot.
       throw DeviceCalError.Backend(
@@ -186,6 +252,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Calendar writes (P3) ──
 
   func createEvent(calendarId: String, eventJson: String) throws -> String {
+    let store = snapshotStore()
     let write = try Self.decode(EventWrite.self, eventJson)
     guard let calendar = store.calendar(withIdentifier: write.calendarId) else {
       throw DeviceCalError.Backend(detail: "unknown calendar \(write.calendarId)")
@@ -202,6 +269,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func updateEvent(eventJson: String) throws -> String {
+    let store = snapshotStore()
     let write = try Self.decode(EventWrite.self, eventJson)
     guard let id = write.id,
       let event = store.event(withIdentifier: Self.baseEventId(id))
@@ -219,6 +287,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func deleteEvent(eventId: String) throws {
+    let store = snapshotStore()
     guard let event = store.event(withIdentifier: Self.baseEventId(eventId)) else {
       // Already gone — delete is idempotent.
       return
@@ -233,6 +302,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Reminder writes (P3) ──
 
   func createReminder(listId: String, taskJson: String) throws -> String {
+    let store = snapshotStore()
     let write = try Self.decode(ReminderWrite.self, taskJson)
     guard let list = store.calendar(withIdentifier: write.listId) else {
       throw DeviceCalError.Backend(detail: "unknown reminder list \(write.listId)")
@@ -249,6 +319,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func updateReminder(taskJson: String) throws -> String {
+    let store = snapshotStore()
     let write = try Self.decode(ReminderWrite.self, taskJson)
     guard let id = write.id,
       let reminder = store.calendarItem(withIdentifier: id) as? EKReminder
@@ -266,6 +337,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func deleteReminder(taskId: String) throws {
+    let store = snapshotStore()
     guard let reminder = store.calendarItem(withIdentifier: taskId) as? EKReminder else {
       return  // Already gone — idempotent.
     }

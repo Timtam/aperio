@@ -95,6 +95,11 @@ pub struct CacheRefresher {
     /// Single-flight makes this stable for a pass's duration; the
     /// concurrent per-read SWR path never touches it.
     pass_forced: Arc<AtomicBool>,
+    /// A pass asked for through [`Self::warm_all_queued`] while another ran:
+    /// `Some(forced)` runs once more when the running pass ends. Bounded to
+    /// one: any number of requests during a pass collapse into a single
+    /// follow-up, forced if any of them was.
+    follow_up: Arc<Mutex<Option<bool>>>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
@@ -159,6 +164,7 @@ impl CacheRefresher {
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forced: Arc::new(AtomicBool::new(false)),
+            follow_up: Arc::new(Mutex::new(None)),
             // Unset until a user `trigger` latches it.
             next_trigger_forced: Arc::new(AtomicBool::new(false)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
@@ -279,6 +285,71 @@ impl CacheRefresher {
             }
             *guard = true;
         }
+        self.run_passes(forced).await;
+    }
+
+    /// [`Self::warm_all`] for a request that must not be lost.
+    ///
+    /// `warm_all` drops a request that arrives while a pass runs, which is
+    /// right for a periodic tick and wrong for "the data just changed": that
+    /// request is about data the running pass may already have read past. On
+    /// the desktop the worker's `Notify` keeps such a wake; the phone has no
+    /// worker, so a manual refresh, an account reset or a fresh OS grant
+    /// that landed during the launch pass simply never happened. Here the
+    /// request waits, and the running pass runs once more when it ends.
+    pub async fn warm_all_queued(self: &Arc<Self>, forced: bool) {
+        {
+            let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
+            if *guard {
+                let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
+                *follow_up = Some(follow_up.unwrap_or(false) || forced);
+                return;
+            }
+            *guard = true;
+        }
+        self.run_passes(forced).await;
+    }
+
+    /// Run passes while one is queued behind the current one. `in_flight`
+    /// stays set across them, and the indicator hears "finished" once.
+    async fn run_passes(self: &Arc<Self>, mut forced: bool) {
+        loop {
+            let (completed, total) = self.pass(forced).await;
+            // Under the same lock that queues a follow-up, so a request is
+            // either taken here or finds the flag cleared and runs itself.
+            let next = {
+                let mut in_flight = self.in_flight.lock().expect("cache refresher poisoned");
+                let next = self
+                    .follow_up
+                    .lock()
+                    .expect("cache refresher poisoned")
+                    .take();
+                if next.is_none() {
+                    *in_flight = false;
+                }
+                next
+            };
+            match next {
+                Some(queued) => {
+                    debug!(target: "aperio::cache", forced = queued, "a queued cache warm pass follows");
+                    forced = queued;
+                }
+                None => {
+                    self.emit_status(
+                        false,
+                        Some(completed.to_rfc3339()),
+                        Some(total),
+                        Some(total),
+                    );
+                    debug!(target: "aperio::cache", "cache warm pass complete");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// One pass; the caller holds `in_flight`.
+    async fn pass(self: &Arc<Self>, forced: bool) -> (DateTime<Utc>, u32) {
         // Record the pass's forced-ness for the failure paths. Safe under
         // single-flight: only this pass writes it, and the concurrent SWR
         // path passes its own (false) flag to mark_error directly.
@@ -341,14 +412,7 @@ impl CacheRefresher {
             .expect("cache refresher poisoned") = Some(completed);
         let repo = UserPrefsRepo::new(&self.db);
         let _ = repo.set(PREF_CACHE_LAST_REFRESHED_AT, &completed.to_rfc3339());
-        *self.in_flight.lock().expect("cache refresher poisoned") = false;
-        self.emit_status(
-            false,
-            Some(completed.to_rfc3339()),
-            Some(total),
-            Some(total),
-        );
-        debug!(target: "aperio::cache", "cache warm pass complete");
+        (completed, total)
     }
 
     async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
@@ -641,5 +705,161 @@ impl CacheRefresher {
             total_targets,
             fetched_targets,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::CacheUpdatedPayload;
+    use crate::db::DbHandle;
+    use async_trait::async_trait;
+    use cal_core::{
+        Adapter, AuthToken, Calendar, Capability, Credentials, Event, FreeBusy, NewEvent,
+    };
+
+    /// A calendar account whose FIRST listing waits until the test lets it
+    /// go, so a second request can arrive while a pass is running.
+    struct Gated {
+        listings: AtomicU32,
+        entered: Notify,
+        release: Notify,
+    }
+
+    #[async_trait]
+    impl Adapter for Gated {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for Gated {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            if self.listings.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            Ok(Vec::new())
+        }
+        async fn get_events(&self, _: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            Ok(Vec::new())
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    /// Every `refreshing` value the indicator was told, in order.
+    #[derive(Default)]
+    struct Statuses(Mutex<Vec<bool>>);
+
+    impl CacheObserver for Statuses {
+        fn cache_updated(&self, _: &CacheUpdatedPayload) {}
+        fn refresh_status(&self, status: &CacheRefreshStatus) {
+            self.0.lock().unwrap().push(status.refreshing);
+        }
+    }
+
+    fn refresher() -> (Arc<CacheRefresher>, Arc<Gated>, Arc<Statuses>) {
+        let db = DbHandle::open_in_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+        let registry = Arc::new(AdapterRegistry::new(
+            Arc::new(plugin_core::PluginManager::new("0.1.0")),
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        ));
+        let gated = Arc::new(Gated {
+            listings: AtomicU32::new(0),
+            entered: Notify::new(),
+            release: Notify::new(),
+        });
+        registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&gated) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        let statuses = Arc::new(Statuses::default());
+        let refresher = CacheRefresher::new(
+            registry,
+            Arc::new(CacheStore::new(db.clone())),
+            Arc::new(RefreshCoordinator::new()),
+            db.shared(),
+            Arc::clone(&statuses) as Arc<dyn CacheObserver>,
+        );
+        (refresher, gated, statuses)
+    }
+
+    #[tokio::test]
+    async fn a_queued_request_runs_after_the_running_pass() {
+        let (refresher, gated, statuses) = refresher();
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&refresher);
+            async move { refresher.warm_all(false).await }
+        });
+        gated.entered.notified().await;
+
+        // Two requests while the pass runs: one follow-up, forced if either was.
+        refresher.warm_all_queued(true).await;
+        refresher.warm_all_queued(false).await;
+        gated.release.notify_one();
+        running.await.unwrap();
+
+        assert_eq!(
+            gated.listings.load(Ordering::SeqCst),
+            2,
+            "the follow-up listed again"
+        );
+        assert!(
+            refresher.pass_forced.load(Ordering::Relaxed),
+            "the follow-up ran forced"
+        );
+        let finished = statuses.0.lock().unwrap().iter().filter(|r| !**r).count();
+        assert_eq!(finished, 1, "the indicator heard 'finished' once");
+        assert!(!refresher.status().refreshing);
+    }
+
+    #[tokio::test]
+    async fn a_plain_request_during_a_pass_is_still_dropped() {
+        let (refresher, gated, _) = refresher();
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&refresher);
+            async move { refresher.warm_all(false).await }
+        });
+        gated.entered.notified().await;
+        refresher.warm_all(true).await;
+        gated.release.notify_one();
+        running.await.unwrap();
+        assert_eq!(gated.listings.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_queued_request_with_nothing_running_runs_at_once() {
+        let (refresher, gated, _) = refresher();
+        gated.release.notify_one();
+        refresher.warm_all_queued(false).await;
+        assert_eq!(gated.listings.load(Ordering::SeqCst), 1);
+        assert!(!refresher.status().refreshing);
     }
 }

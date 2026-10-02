@@ -622,12 +622,18 @@ class CalFfiModule : Module() {
       host.renameAccountJson(id, newName)
     }
 
-    // Uniform JS surface with iOS. Android installs no device-calendar bridge
-    // (no system reminders app; the calendar adapter is iOS-first), so the Host
-    // rejects "not available on this platform" — the UI gates the device picker
-    // entry to iOS, so this is only ever reached defensively.
+    // Uniform JS surface with iOS. Android's bridge only REPORTS whether the
+    // runtime permission is granted; the RN layer runs the system dialog
+    // (PermissionsAndroid) before calling this.
     AsyncFunction("requestDeviceCalendarAccess") { events: Boolean, reminders: Boolean ->
       host.requestDeviceCalendarAccess(events, reminders)
+    }
+
+    // What the OS allows for the device calendars, and whether to ask now
+    // (decision 166). Asks nobody. On Android the state is never "not asked"
+    // (the platform cannot tell), so nothing is asked from here.
+    AsyncFunction("deviceCalendarAccessJson") {
+      host.deviceCalendarAccessJson()
     }
 
     // Force a full cold re-sync of one external account (clears its delta tokens
