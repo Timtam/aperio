@@ -275,8 +275,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Run the OS calendar/reminders permission prompt: the add-account "grant
    *  access" step, and at start when `deviceCalendarAccessJson` says to ask.
    *  Resolves `true` iff every requested entity was granted. On iOS it blocks
-   *  until the user answers, on a queue of its own; on Android it only reports
-   *  the runtime permission, which the RN layer requests first. */
+   *  until the user answers, on a queue of its own. Android does not use it
+   *  (the RN layer requests the runtime permission itself); there it would
+   *  only report whether READ_CALENDAR is granted. */
   requestDeviceCalendarAccess(
     events: boolean,
     reminders: boolean,

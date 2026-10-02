@@ -2016,9 +2016,13 @@ impl Host {
         // AUTOMATIC, so it runs UN-forced (like warm_cache_on_foreground) —
         // a cold-start network blip must be confirmed by a second attempt
         // before it surfaces as a per-account error.
+        //
+        // Queued: the launch pass may already have taken its snapshot of
+        // the registry, and a plain warm_all would bail while it runs and
+        // never warm these accounts (the desktop's worker keeps that wake).
         let refresher = Arc::clone(&self.cache_refresher);
         self.runtime.handle().spawn(async move {
-            refresher.warm_all(false).await;
+            refresher.warm_all_queued(false).await;
         });
         // …and tell the UI to re-read its catalogs NOW instead of waiting out
         // the pass. The listing scopes are the channel the app already uses

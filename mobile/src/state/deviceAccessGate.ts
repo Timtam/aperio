@@ -1,4 +1,4 @@
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, Platform } from 'react-native';
 
 import { askOutcome, type AskOutcome } from '@aperio/shared';
 
@@ -6,6 +6,7 @@ import i18n from '../../i18n';
 import { deviceCalendarAccess, requestDeviceCalendarAccess } from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
 import { whileOsSheetOpen } from './appLock';
+import { settleExternalCaches } from './cacheSettle';
 
 /**
  * At start, ask the OS for the device's own calendars and reminders when it
@@ -22,13 +23,16 @@ import { whileOsSheetOpen } from './appLock';
  * theirs, and iOS would not show the prompt again anyway.
  */
 
-/** How long the day-start review waits for the prompt at most. Long enough to
- *  read and answer an alert; a check that never settles must not cost the
- *  morning review. */
+/** How long the day-start review waits for the check at most. Long enough to
+ *  answer an alert, reload and hear the sentence; a check that never settles
+ *  must not cost the morning review. */
 const SETTLE_CAP_MS = 120_000;
 /** After an OS alert the system's own screen-change speech comes first, and a
  *  sentence spoken at once is cut off (the AppLockGate pattern). */
 const ANNOUNCE_DELAY_MS = 400;
+/** The longest of the sentences takes a few seconds to say; past this, stop
+ *  waiting for VoiceOver to report it finished. */
+const SPEAK_CAP_MS = 15_000;
 
 let started = false;
 let settle: () => void = () => {};
@@ -36,10 +40,11 @@ const settled = new Promise<void>((resolve) => {
   settle = resolve;
 });
 
-/** Resolves once the start check has finished — asked and answered, or found
- *  nothing to ask — or after a cap, whichever comes first. The day-start review
- *  waits for it, so it neither opens under the alert nor judges the frozen
- *  cache the grant is about to replace. */
+/** Resolves once the start check has finished — asked, reloaded and said, or
+ *  found nothing to ask — or after a cap, whichever comes first. The day-start
+ *  review waits for it, so it neither opens under the alert, nor judges the
+ *  frozen cache a grant is about to replace, nor cuts the sentence off with
+ *  its own "checking". */
 export function whenDeviceAccessSettled(): Promise<void> {
   return Promise.race([
     settled,
@@ -60,6 +65,38 @@ function sentence(outcome: AskOutcome, name: string): string {
   }
 }
 
+/**
+ * Say `message` and resolve once VoiceOver has finished it (iOS reports that),
+ * at once without a screen reader, or after a cap. Queued, so it follows
+ * whatever is being said rather than cutting it off.
+ */
+async function sayAndWait(message: string): Promise<void> {
+  const screenReader = await AccessibilityInfo.isScreenReaderEnabled().catch(() => false);
+  await new Promise((resolve) => setTimeout(resolve, ANNOUNCE_DELAY_MS));
+  if (!screenReader) {
+    AccessibilityInfo.announceForAccessibility(message);
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(cap);
+      subscription?.remove();
+      resolve();
+    };
+    const subscription =
+      Platform.OS === 'ios'
+        ? AccessibilityInfo.addEventListener('announcementFinished', (event) => {
+            if (event.announcement === message) finish();
+          })
+        : null;
+    const cap = setTimeout(finish, SPEAK_CAP_MS);
+    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+  });
+}
+
 /** Run the start check once. Later calls wait for the first. */
 export async function runDeviceAccessStartCheck(): Promise<void> {
   if (started) return settled;
@@ -68,18 +105,18 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
     const before = await deviceCalendarAccess();
     const ask = before.ask_now;
     if (ask == null) return;
-    // The alert flips the app inactive; the lock must not cover or re-lock
-    // the app under it.
+    // The alert flips the app inactive; the lock must not cover the app or
+    // start its own prompt over it.
     await whileOsSheetOpen(() =>
       requestDeviceCalendarAccess(ask.events, ask.reminders),
     ).catch(() => false);
     const after = await deviceCalendarAccess();
     const outcome = askOutcome(ask, after);
-    // Reload first, so its "updating" cue is not what cuts the sentence off.
-    if (outcome !== 'denied') await refreshExternalCache().catch(() => {});
+    // Reload, and wait for the pass to end: its "updated" cue then comes
+    // before the sentence instead of cutting it off.
+    if (outcome !== 'denied') await settleExternalCaches(refreshExternalCache);
     const name = after.account_names[0] ?? before.account_names[0] ?? '';
-    const message = sentence(outcome, name);
-    setTimeout(() => AccessibilityInfo.announceForAccessibility(message), ANNOUNCE_DELAY_MS);
+    await sayAndWait(sentence(outcome, name));
   } catch {
     // Nothing was decided; the next start asks again.
   } finally {

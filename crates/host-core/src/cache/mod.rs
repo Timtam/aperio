@@ -1719,6 +1719,31 @@ impl CacheStore {
         }
         self.db.with_tx(|tx| {
             let unchanged = rows_match(tx, &sel, params![account], &incoming)?;
+            if unchanged {
+                // A listing that failed before and now lists exactly what
+                // the cache held is the answer after a phone move when the OS
+                // kept its ids — said once, on the recovery, not every pass.
+                let failed_before: bool = tx
+                    .query_row(
+                        "SELECT last_error IS NOT NULL FROM cache_sync_state
+                         WHERE account_id = ?1 AND scope = ?2 AND container_id = ''",
+                        params![account, scope.as_str()],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(false);
+                if failed_before {
+                    info!(
+                        target: "aperio::cache",
+                        table,
+                        account,
+                        kept = incoming.len(),
+                        dropped = 0,
+                        added = 0,
+                        "container listing recovered unchanged"
+                    );
+                }
+            }
             if !unchanged {
                 let old: Vec<String> = {
                     let mut stmt = tx.prepare(&sel_ids)?;
@@ -1726,9 +1751,10 @@ impl CacheStore {
                     rows.filter_map(|r| r.ok()).collect()
                 };
                 let delta = listing_delta(&old, incoming.keys().copied());
-                // Counts and ids, never names. After a phone move this line
-                // is what tells whether the OS kept its container ids: none
-                // dropped means every per-container setting still applies.
+                // Counts and ids, never names. After a phone move this line,
+                // or the "recovered unchanged" one above, tells whether the OS
+                // kept its container ids: none dropped means every
+                // per-container setting still applies.
                 info!(
                     target: "aperio::cache",
                     table,

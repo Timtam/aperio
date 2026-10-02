@@ -2901,7 +2901,9 @@ der Freigabe nimmt die Brücke einen frischen `EKEventStore`, das Konto lädt ne
 (`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
 verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
 Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
-weggefallen, neu) — daran sieht man, ob iOS die Kennungen behalten hat.
+weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
+sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
+ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
 ↻ im Test (Handy ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**

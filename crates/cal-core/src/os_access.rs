@@ -10,10 +10,12 @@
 //!
 //! So the rule lives here, once, for every frontend (decision 166): when a
 //! device account exists and the OS has never asked about an entity, Aperio
-//! asks at start, for exactly the entities the OS has never asked about. Every
-//! other state is the user's answer or a restriction, and asking again cannot
-//! change it — those get a way into the system settings instead, never a
-//! prompt by surprise.
+//! asks at start, for exactly the entities the OS has never asked about.
+//! Denied, write-only and restricted are the user's answer or a policy, and
+//! asking cannot change them; undetermined means the platform cannot say
+//! (Android), and is not asked about here either. A way into the system
+//! settings for those states, and Android's own start prompt, are later
+//! steps of this arc.
 
 use serde::{Deserialize, Serialize};
 

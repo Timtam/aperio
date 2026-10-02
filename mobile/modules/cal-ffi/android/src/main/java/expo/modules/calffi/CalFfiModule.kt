@@ -622,9 +622,9 @@ class CalFfiModule : Module() {
       host.renameAccountJson(id, newName)
     }
 
-    // Uniform JS surface with iOS. Android's bridge only REPORTS whether the
-    // runtime permission is granted; the RN layer runs the system dialog
-    // (PermissionsAndroid) before calling this.
+    // Uniform JS surface with iOS. Nothing on Android calls it: the RN layer
+    // requests the runtime permission with PermissionsAndroid itself. If called,
+    // the bridge only reports whether READ_CALENDAR is granted.
     AsyncFunction("requestDeviceCalendarAccess") { events: Boolean, reminders: Boolean ->
       host.requestDeviceCalendarAccess(events, reminders)
     }

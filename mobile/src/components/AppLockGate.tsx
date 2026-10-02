@@ -17,6 +17,7 @@ import {
   deviceEnrollment,
   disableAfterLostEnrollment,
   isAuthenticating,
+  isOsSheetOpen,
   readAppLockEnabled,
   setAppLockCoverVisible,
   subscribeAppLockEnabled,
@@ -201,7 +202,8 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         // Cover on inactive too (the iOS switcher snapshot is taken here) —
         // but not while the OS auth sheet is up: it flips the app inactive
         // itself, and covering under it would flash for nothing.
-        if (!isAuthenticating()) setCovered(true);
+        // Nor under a permission alert at start (whileOsSheetOpen).
+        if (!isAuthenticating() && !isOsSheetOpen()) setCovered(true);
         return;
       }
       // active
@@ -219,7 +221,14 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       // foreground — a cancelled sheet also ends in 'active', and prompting
       // again there would loop the sheet forever (the Unlock button exists
       // for exactly that parked state).
-      if (lockedRef.current && !promptedThisLock.current && !isAuthenticating()) {
+      // Not over a permission alert either: it ends in another 'active',
+      // and the prompt comes then.
+      if (
+        lockedRef.current &&
+        !promptedThisLock.current &&
+        !isAuthenticating() &&
+        !isOsSheetOpen()
+      ) {
         void runUnlock();
       }
     });

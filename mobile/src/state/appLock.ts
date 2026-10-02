@@ -31,18 +31,30 @@ export function isAuthenticating(): boolean {
   return authBusy > 0;
 }
 
+/** How many OS sheets that are not the lock's own are up — the calendar
+ *  and reminders permission alert. A counter for the same reason as
+ *  `authBusy`. */
+let osSheetBusy = 0;
+
+export function isOsSheetOpen(): boolean {
+  return osSheetBusy > 0;
+}
+
 /**
- * Run `show` while an OS sheet that is not the lock's own is up — the
- * calendar/reminders permission alert at start. It flips the app inactive
- * just as the authentication sheet does, and covering or re-locking the app
- * under it would bury the answer; so it counts as one for that time.
+ * Run `show` while such a sheet is up. It flips the app inactive, and a cover
+ * over the app under it would flash for nothing, so the gate leaves the
+ * inactive cover off and does not start the unlock prompt over it.
+ *
+ * Unlike the lock's own sheet, it does NOT stop the re-lock clock: an iOS
+ * permission alert never backgrounds the app, so a 'background' while it is
+ * up is the user really leaving, and the lock must hold on their return.
  */
 export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
-  authBusy += 1;
+  osSheetBusy += 1;
   try {
     return await show();
   } finally {
-    authBusy -= 1;
+    osSheetBusy -= 1;
   }
 }
 

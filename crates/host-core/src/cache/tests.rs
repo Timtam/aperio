@@ -2665,3 +2665,64 @@ fn a_listing_change_names_what_stayed_went_and_came() {
     let same = listing_delta(&old, old.iter().map(String::as_str));
     assert_eq!((same.kept, same.dropped.len(), same.added.len()), (3, 0, 0));
 }
+
+/// Everything `run` logged at info level or above, as text.
+fn logged(run: impl FnOnce()) -> String {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+    impl Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let sink = Sink::default();
+    let writer = sink.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, run);
+    let bytes = sink.0.lock().unwrap().clone();
+    String::from_utf8(bytes).unwrap()
+}
+
+#[test]
+fn a_listing_that_recovers_unchanged_says_so_once() {
+    // After a phone move the cache still holds the old phone's listing, and
+    // when the OS kept its ids the first success lists exactly that. Without
+    // a line for it, "ids kept" read the same as "never succeeded".
+    let store = setup();
+    let cals = vec![calendar("cal-a"), calendar("cal-b")];
+    store.replace_calendars(ACC, &cals).unwrap();
+    store
+        .mark_error(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            "EventKit catalog empty",
+            true,
+        )
+        .unwrap();
+
+    let recovered = logged(|| {
+        store.replace_calendars(ACC, &cals).unwrap();
+    });
+    assert!(
+        recovered.contains("container listing recovered unchanged") && recovered.contains("kept=2"),
+        "{recovered}"
+    );
+
+    let again = logged(|| {
+        store.replace_calendars(ACC, &cals).unwrap();
+    });
+    assert!(!again.contains("container listing"), "{again}");
+}

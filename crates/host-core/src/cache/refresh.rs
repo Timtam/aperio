@@ -79,7 +79,9 @@ pub struct CacheRefresher {
     observer: Arc<dyn CacheObserver>,
     /// Wakes the periodic loop for a manual / settings-driven pass.
     notify: Arc<Notify>,
-    /// `true` while a pass runs; concurrent triggers no-op.
+    /// `true` while a pass runs, and across the queued follow-ups after it.
+    /// A plain [`Self::warm_all`] while it is set does nothing; a
+    /// [`Self::warm_all_queued`] records one follow-up instead.
     in_flight: Arc<Mutex<bool>>,
     /// Sticky "a USER asked for the next pass" latch. `Notify` holds at
     /// most ONE permit, so a user `trigger` and an automatic
@@ -90,7 +92,8 @@ pub struct CacheRefresher {
     /// can never leak into a later, unrelated wake.
     next_trigger_forced: Arc<AtomicBool>,
     /// Whether the CURRENT pass was user-forced (manual refresh). Set at
-    /// the top of `warm_all`; read by the enumerate/refresh failure paths
+    /// the start of every pass, a queued follow-up included; read by the
+    /// enumerate/refresh failure paths
     /// so a forced failure surfaces at once (see `CacheStore::mark_error`).
     /// Single-flight makes this stable for a pass's duration; the
     /// concurrent per-read SWR path never touches it.

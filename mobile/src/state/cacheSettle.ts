@@ -47,9 +47,13 @@ const CACHE_SETTLE_POLL_MS = 500;
  * seconds late, and a push that fired while JS was suspended leaves the
  * mirror stale in either direction. The bridge read asks the Host directly.
  */
-export async function settleExternalCaches(): Promise<'confirmed' | 'capped'> {
+export async function settleExternalCaches(
+  // What starts the pass: the unforced warm by default; the start check
+  // after a grant kicks the (queued) manual refresh instead.
+  kick: () => Promise<void> = warmCacheOnForeground,
+): Promise<'confirmed' | 'capped'> {
   try {
-    await warmCacheOnForeground();
+    await kick();
   } catch {
     // The kick itself failed — no pass will ever report back.
     return 'capped';
