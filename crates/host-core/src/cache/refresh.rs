@@ -443,13 +443,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let _ = self.cache.mark_error(
-                        &account,
-                        SyncScope::Calendars,
-                        "",
-                        &err.to_string(),
-                        self.pass_forced.load(Ordering::Relaxed),
-                    );
+                    self.failed(&account, SyncScope::Calendars, "", &err);
                 }
             }
         }
@@ -486,13 +480,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let _ = self.cache.mark_error(
-                        &account,
-                        SyncScope::TaskLists,
-                        "",
-                        &err.to_string(),
-                        self.pass_forced.load(Ordering::Relaxed),
-                    );
+                    self.failed(&account, SyncScope::TaskLists, "", &err);
                 }
             }
         }
@@ -521,13 +509,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let _ = self.cache.mark_error(
-                        &account,
-                        SyncScope::ContactLists,
-                        "",
-                        &err.to_string(),
-                        self.pass_forced.load(Ordering::Relaxed),
-                    );
+                    self.failed(&account, SyncScope::ContactLists, "", &err);
                 }
             }
         }
@@ -563,13 +545,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Events,
-                            &cal_id,
-                            &err.to_string(),
-                            self.pass_forced.load(Ordering::Relaxed),
-                        );
+                        self.failed(&account, SyncScope::Events, &cal_id, &err);
                     }
                 }
                 self.coord.release(&key);
@@ -595,13 +571,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Tasks,
-                            &list_id,
-                            &err.to_string(),
-                            self.pass_forced.load(Ordering::Relaxed),
-                        );
+                        self.failed(&account, SyncScope::Tasks, &list_id, &err);
                     }
                 }
                 self.coord.release(&key);
@@ -628,13 +598,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Sections,
-                            &list_id,
-                            &err.to_string(),
-                            self.pass_forced.load(Ordering::Relaxed),
-                        );
+                        self.failed(&account, SyncScope::Sections, &list_id, &err);
                     }
                 }
                 self.coord.release(&key);
@@ -673,17 +637,32 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Contacts,
-                            &list_id,
-                            &err.to_string(),
-                            self.pass_forced.load(Ordering::Relaxed),
-                        );
+                        self.failed(&account, SyncScope::Contacts, &list_id, &err);
                     }
                 }
                 self.coord.release(&key);
             }
+        }
+    }
+
+    /// Record a failed attempt of this pass, and log it when it is news:
+    /// the container was not failing, or fails differently now. An account
+    /// that keeps failing the same way says so once, not on every pass.
+    fn failed(&self, account: &str, scope: SyncScope, container: &str, err: &cal_core::Error) {
+        let forced = self.pass_forced.load(Ordering::Relaxed);
+        let news = self
+            .cache
+            .mark_failure(account, scope, container, err, forced)
+            .unwrap_or(true);
+        if news {
+            tracing::warn!(
+                target: "aperio::cache",
+                scope = scope.as_str(),
+                account,
+                container,
+                %err,
+                "refresh failed",
+            );
         }
     }
 
@@ -812,6 +791,78 @@ mod tests {
             Arc::clone(&statuses) as Arc<dyn CacheObserver>,
         );
         (refresher, gated, statuses)
+    }
+
+    /// A calendar account the OS withholds until `granted` is set.
+    struct Withheld {
+        listings: AtomicU32,
+        granted: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl Adapter for Withheld {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for Withheld {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            self.listings.fetch_add(1, Ordering::SeqCst);
+            if self.granted.load(Ordering::SeqCst) {
+                Ok(Vec::new())
+            } else {
+                Err(cal_core::Error::AccessNotGranted(
+                    "calendars: Denied".into(),
+                ))
+            }
+        }
+        async fn get_events(&self, _: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            Ok(Vec::new())
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn the_warm_pass_still_asks_a_withheld_account_and_a_grant_lifts_the_block() {
+        let (refresher, _gated, _) = refresher();
+        let withheld = Arc::new(Withheld {
+            listings: AtomicU32::new(0),
+            granted: std::sync::atomic::AtomicBool::new(false),
+        });
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&withheld) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.warm_all(false).await;
+        assert!(refresher.cache.access_withheld("acc-1", SyncScope::Events));
+        withheld.granted.store(true, Ordering::SeqCst);
+        refresher.warm_all(false).await;
+        assert_eq!(
+            withheld.listings.load(Ordering::SeqCst),
+            2,
+            "the pass asked again"
+        );
+        assert!(!refresher.cache.access_withheld("acc-1", SyncScope::Events));
     }
 
     #[tokio::test]

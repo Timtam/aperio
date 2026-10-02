@@ -266,7 +266,37 @@ pub struct ContainerRefreshError {
 pub struct AccountRefreshErrors {
     pub account_id: String,
     pub auth_suspected: bool,
+    /// The operating system has not granted this account's data (the
+    /// device's calendars or reminders): no password helps, the system
+    /// settings do. Its blocked families each appear once, as their listing.
+    pub no_access: bool,
+    /// What the surface leads with: "access", then "auth", then "other".
+    pub cause: &'static str,
     pub errors: Vec<ContainerRefreshError>,
+}
+
+/// What a failed refresh was, as recorded in `cache_sync_state.failure_kind`.
+/// Decided from the error itself; the text heuristic ([`is_auth_shaped`])
+/// remains only for errors that arrive as text (plugins, older rows).
+pub fn failure_kind(err: &cal_core::Error) -> Option<&'static str> {
+    match err {
+        cal_core::Error::AccessNotGranted(_) => Some(FAILURE_ACCESS),
+        cal_core::Error::Authentication(_) => Some(FAILURE_AUTH),
+        _ => None,
+    }
+}
+
+const FAILURE_ACCESS: &str = "access";
+const FAILURE_AUTH: &str = "auth";
+
+/// The listing a container scope belongs to: an access failure blocks the
+/// whole family, and the family's listing row is where that is recorded.
+fn listing_of(scope: SyncScope) -> SyncScope {
+    match scope {
+        SyncScope::Calendars | SyncScope::Events => SyncScope::Calendars,
+        SyncScope::TaskLists | SyncScope::Tasks | SyncScope::Sections => SyncScope::TaskLists,
+        SyncScope::ContactLists | SyncScope::Contacts => SyncScope::ContactLists,
+    }
 }
 
 /// Consecutive failed refresh attempts a NON-auth (network) error must
@@ -586,11 +616,13 @@ impl CacheStore {
             error: String,
             last_success: Option<String>,
             failures: i64,
+            kind: Option<String>,
         }
         let rows: Vec<Row> = self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT account_id, scope, container_id, last_error, last_refreshed_at,
-                        consecutive_failures
+                "SELECT account_id, scope, container_id, last_error,
+                        COALESCE(last_refreshed_at, last_success_at),
+                        consecutive_failures, failure_kind
                  FROM cache_sync_state
                  WHERE last_error IS NOT NULL
                  ORDER BY account_id, scope, container_id",
@@ -603,6 +635,7 @@ impl CacheStore {
                     error: r.get(3)?,
                     last_success: r.get(4)?,
                     failures: r.get(5)?,
+                    kind: r.get(6)?,
                 })
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()
@@ -615,9 +648,29 @@ impl CacheStore {
         // of the count. A user-forced pass floors the count at the
         // threshold (see `mark_error`), so a manual refresh's result shows
         // immediately.
+        let auth = |r: &Row| match r.kind.as_deref() {
+            Some(FAILURE_AUTH) => true,
+            Some(_) => false,
+            None => is_auth_shaped(&r.error),
+        };
+        let access = |r: &Row| r.kind.as_deref() == Some(FAILURE_ACCESS);
+        // A family the OS withheld is one fact, said once: as its listing.
+        // Its containers failed for the same reason, and listing each by
+        // its id (the device's calendars and lists, 13 rows on Toni's
+        // phone) said nothing more.
+        let blocked: std::collections::HashSet<(String, String)> = rows
+            .iter()
+            .filter(|r| access(r) && r.container.is_empty())
+            .map(|r| (r.account.clone(), r.scope.clone()))
+            .collect();
         let rows: Vec<Row> = rows
             .into_iter()
-            .filter(|r| r.failures >= CONFIRM_THRESHOLD || is_auth_shaped(&r.error))
+            .filter(|r| r.failures >= CONFIRM_THRESHOLD || auth(r) || access(r))
+            .filter(|r| {
+                r.container.is_empty()
+                    || !access(r)
+                    || !blocked.contains(&(r.account.clone(), listing_of_str(&r.scope).to_string()))
+            })
             .collect();
 
         // Resolve container identity from the cached listings. `None`
@@ -708,6 +761,8 @@ impl CacheStore {
             let Some(container_name) = resolve(&row.scope, &row.account, &row.container) else {
                 continue;
             };
+            let row_auth = auth(&row);
+            let row_access = access(&row);
             let entry = ContainerRefreshError {
                 container_name,
                 scope: row.scope,
@@ -717,15 +772,27 @@ impl CacheStore {
             };
             match out.last_mut() {
                 Some(acc) if acc.account_id == row.account => {
-                    acc.auth_suspected |= is_auth_shaped(&entry.error);
+                    acc.auth_suspected |= row_auth;
+                    acc.no_access |= row_access;
                     acc.errors.push(entry);
                 }
                 _ => out.push(AccountRefreshErrors {
                     account_id: row.account,
-                    auth_suspected: is_auth_shaped(&entry.error),
+                    auth_suspected: row_auth,
+                    no_access: row_access,
+                    cause: "other",
                     errors: vec![entry],
                 }),
             }
+        }
+        for acc in &mut out {
+            acc.cause = if acc.no_access {
+                FAILURE_ACCESS
+            } else if acc.auth_suspected {
+                FAILURE_AUTH
+            } else {
+                "other"
+            };
         }
         Ok(out)
     }
@@ -1484,7 +1551,9 @@ impl CacheStore {
         self.db.with_conn(|c| {
             c.execute(
                 "UPDATE cache_sync_state
-                    SET window_start = NULL, window_end = NULL, last_refreshed_at = NULL
+                    SET window_start = NULL, window_end = NULL,
+                        last_success_at = COALESCE(last_refreshed_at, last_success_at),
+                        last_refreshed_at = NULL
                   WHERE account_id = ?1 AND scope = ?2 AND container_id = ?3",
                 params![account, scope.as_str(), container],
             )?;
@@ -1550,6 +1619,7 @@ impl CacheStore {
             let n = c.execute(
                 "UPDATE cache_sync_state
                     SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_success_at = COALESCE(last_refreshed_at, last_success_at),
                         last_refreshed_at = NULL
                   WHERE account_id = ?1 AND scope = 'events'",
                 params![account],
@@ -1597,6 +1667,7 @@ impl CacheStore {
             let n = c.execute(
                 "UPDATE cache_sync_state
                     SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_success_at = COALESCE(last_refreshed_at, last_success_at),
                         last_refreshed_at = NULL
                   WHERE account_id = ?1",
                 params![account],
@@ -1623,22 +1694,69 @@ impl CacheStore {
         message: &str,
         forced: bool,
     ) -> DbResult<()> {
-        // Floor the counter for a forced failure so it crosses the confirm
-        // threshold on the first try; automatic failures just increment.
-        let floor: i64 = if forced { CONFIRM_THRESHOLD } else { 0 };
-        let initial: i64 = floor.max(1);
-        self.db.with_conn(|c| {
-            c.execute(
-                "INSERT INTO cache_sync_state
-                   (account_id, scope, container_id, last_error, consecutive_failures)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
-                   last_error = excluded.last_error,
-                   consecutive_failures = max(consecutive_failures + 1, ?6)",
-                params![account, scope.as_str(), container, message, initial, floor],
+        self.db
+            .with_conn(|c| record_failure(c, account, scope, container, message, None, forced))
+            .map(|_| ())
+    }
+
+    /// [`Self::mark_error`] from the error itself, recording its kind
+    /// ([`failure_kind`]). Returns whether this is news — the container was
+    /// not failing, or failed differently — so the caller logs a change
+    /// once instead of every identical retry.
+    ///
+    /// An access failure is the account's, not the container's: it also
+    /// marks the family's listing row, which stops the per-read refreshes
+    /// for the whole family ([`Self::access_withheld`]) until a warm pass
+    /// lists it again. It is confirmed at once, like a forced failure: it
+    /// never heals by retrying.
+    pub fn mark_failure(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        err: &cal_core::Error,
+        forced: bool,
+    ) -> DbResult<bool> {
+        let message = err.to_string();
+        let kind = failure_kind(err);
+        let access = kind == Some(FAILURE_ACCESS);
+        self.db.with_tx(|tx| {
+            let news = record_failure(
+                tx,
+                account,
+                scope,
+                container,
+                &message,
+                kind,
+                forced || access,
             )?;
-            Ok(())
+            let listing = listing_of(scope);
+            if access && (listing != scope || !container.is_empty()) {
+                record_failure(tx, account, listing, "", &message, kind, true)?;
+            }
+            Ok(news)
         })
+    }
+
+    /// Whether the operating system has withheld this scope's family from
+    /// `account` as of its last attempt. The per-read refreshes do not ask
+    /// while it has: every one would fail the same way, at once, in bursts.
+    /// The warm pass still lists the family, so a grant is noticed.
+    pub fn access_withheld(&self, account: &str, scope: SyncScope) -> bool {
+        self.db
+            .with_read_conn(|c| {
+                c.query_row(
+                    "SELECT 1 FROM cache_sync_state
+                     WHERE account_id = ?1 AND scope = ?2 AND container_id = ''
+                       AND last_error IS NOT NULL AND failure_kind = 'access'",
+                    params![account, listing_of(scope).as_str()],
+                    |_| Ok(()),
+                )
+                .optional()
+            })
+            .ok()
+            .flatten()
+            .is_some()
     }
 
     // ── Pruning ──────────────────────────────────────────────────────
@@ -2109,6 +2227,63 @@ fn rows_match(
 
 /// Stamp last_refreshed + clear last_error for a listing/by-list scope
 /// inside an existing transaction. Leaves token/window untouched.
+/// The listing a scope's wire string belongs to (see [`listing_of`]).
+fn listing_of_str(scope: &str) -> &'static str {
+    match scope {
+        "calendars" | "events" => "calendars",
+        "task_lists" | "tasks" | "sections" => "task_lists",
+        "contact_lists" | "contacts" => "contact_lists",
+        _ => "",
+    }
+}
+
+/// Record one failed attempt; see [`CacheStore::mark_error`]. Returns whether
+/// the row's error or kind changed (it was not failing, or failed otherwise).
+fn record_failure(
+    c: &Connection,
+    account: &str,
+    scope: SyncScope,
+    container: &str,
+    message: &str,
+    kind: Option<&str>,
+    forced: bool,
+) -> DbResult<bool> {
+    // Floor the counter for a forced failure so it crosses the confirm
+    // threshold on the first try; automatic failures just increment.
+    let floor: i64 = if forced { CONFIRM_THRESHOLD } else { 0 };
+    let initial: i64 = floor.max(1);
+    let before: Option<(Option<String>, Option<String>)> = c
+        .query_row(
+            "SELECT last_error, failure_kind FROM cache_sync_state
+             WHERE account_id = ?1 AND scope = ?2 AND container_id = ?3",
+            params![account, scope.as_str(), container],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    c.execute(
+        "INSERT INTO cache_sync_state
+           (account_id, scope, container_id, last_error, consecutive_failures, failure_kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?7)
+         ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
+           last_error = excluded.last_error,
+           failure_kind = excluded.failure_kind,
+           consecutive_failures = max(consecutive_failures + 1, ?6)",
+        params![
+            account,
+            scope.as_str(),
+            container,
+            message,
+            initial,
+            floor,
+            kind
+        ],
+    )?;
+    Ok(match before {
+        Some((Some(prev), prev_kind)) => prev != message || prev_kind.as_deref() != kind,
+        _ => true,
+    })
+}
+
 fn mark_refreshed(
     tx: &Connection,
     account: &str,

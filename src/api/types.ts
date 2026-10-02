@@ -540,5 +540,10 @@ export interface ContainerRefreshError {
 export interface AccountRefreshErrors {
   account_id: string;
   auth_suspected: boolean;
+  /** The OS has not granted this account's data (the device's calendars or
+   *  reminders); each blocked family appears once, as its listing. */
+  no_access: boolean;
+  /** What to lead with: access, then auth, then anything else. */
+  cause: 'access' | 'auth' | 'other';
   errors: ContainerRefreshError[];
 }

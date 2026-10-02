@@ -2726,3 +2726,123 @@ fn a_listing_that_recovers_unchanged_says_so_once() {
     });
     assert!(!again.contains("container listing"), "{again}");
 }
+
+fn withheld(detail: &str) -> cal_core::Error {
+    cal_core::Error::AccessNotGranted(detail.to_string())
+}
+
+#[test]
+fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
+    // Toni's phone after the move: every calendar and every list failed
+    // with the same withheld grant, and the surface listed 13 ids. The text
+    // here even carries "403", which the old heuristic read as a login.
+    let store = setup();
+    for cal in ["cal-a", "cal-b"] {
+        store
+            .mark_failure(
+                ACC,
+                SyncScope::Events,
+                cal,
+                &withheld("calendars 1403ABCD: Denied"),
+                false,
+            )
+            .unwrap();
+    }
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Tasks,
+            LIST,
+            &withheld("reminders: Denied"),
+            false,
+        )
+        .unwrap();
+
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 1);
+    let acc = &errors[0];
+    assert!(acc.no_access);
+    assert!(!acc.auth_suspected, "a withheld grant is no login problem");
+    assert_eq!(acc.cause, "access");
+    let shown: Vec<(&str, &str)> = acc
+        .errors
+        .iter()
+        .map(|e| (e.scope.as_str(), e.container_id.as_str()))
+        .collect();
+    assert_eq!(shown, vec![("calendars", ""), ("task_lists", "")]);
+}
+
+#[test]
+fn a_withheld_family_blocks_its_reads_until_the_listing_succeeds() {
+    let store = setup();
+    assert!(!store.access_withheld(ACC, SyncScope::Events));
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &withheld("calendars: Denied"),
+            false,
+        )
+        .unwrap();
+    assert!(store.access_withheld(ACC, SyncScope::Events));
+    assert!(store.access_withheld(ACC, SyncScope::Calendars));
+    assert!(
+        !store.access_withheld(ACC, SyncScope::Tasks),
+        "each family on its own"
+    );
+    // A grant: the warm pass lists the calendars again.
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    assert!(!store.access_withheld(ACC, SyncScope::Events));
+}
+
+#[test]
+fn another_failure_does_not_block_the_reads() {
+    let store = setup();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &cal_core::Error::Network("down".into()),
+            true,
+        )
+        .unwrap();
+    assert!(!store.access_withheld(ACC, SyncScope::Events));
+}
+
+#[test]
+fn a_failure_is_news_once() {
+    let store = setup();
+    let err = withheld("calendars: Denied");
+    assert!(store
+        .mark_failure(ACC, SyncScope::Events, CAL, &err, false)
+        .unwrap());
+    assert!(!store
+        .mark_failure(ACC, SyncScope::Events, CAL, &err, false)
+        .unwrap());
+    let other = cal_core::Error::Network("down".into());
+    assert!(store
+        .mark_failure(ACC, SyncScope::Events, CAL, &other, false)
+        .unwrap());
+}
+
+#[test]
+fn a_full_resync_keeps_the_last_success() {
+    // "Re-sync" on a failing account used to make the surface say it had
+    // never been updated successfully.
+    let store = setup();
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store.reset_account_sync(ACC).unwrap();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &withheld("calendars: Denied"),
+            true,
+        )
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    assert!(errors[0].errors[0].last_success_at.is_some());
+}

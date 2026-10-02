@@ -2940,9 +2940,16 @@ Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
 Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
 Termin-Editor. ↻ im Test (Handy ohne Testläufer).
 
+✅ **PR-C:** Der Cache merkt sich die Fehlerart (`failure_kind`: access, auth,
+sonst nichts; Migration 46) statt sie aus Wörtern zu raten. Fehlt der Zugriff,
+sperrt das die ganze Familie (Kalender oder Listen) für das Nachladen beim
+Lesen (`access_withheld`); der Warm-Durchlauf fragt weiter, eine Freigabe hebt
+die Sperre. Die Fehlerliste nennt eine gesperrte Familie einmal statt jede
+Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
+im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
+die letzte erfolgreiche Aktualisierung (`last_success_at`). ↻ im Test.
+
 🚩 **Offen, in dieser Reihenfolge:**
-- PR-C: Der Cache merkt sich die Fehlerart und versucht bei fehlendem Zugriff
-  nicht bei jedem Lesen neu; die letzte erfolgreiche Aktualisierung bleibt.
 - PR-D: Abzeichen „Kein Zugriff“ und „Zugriff erlauben…“ (iOS- und
   Android-Einstellungen), eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher
   Satz am Ende eines Durchlaufs.
