@@ -39,6 +39,7 @@ import {
   reconnectOAuthAccount,
 } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
+import { whileOsSheetOpen } from '../state/appLock';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
   collectValues,
@@ -598,7 +599,7 @@ export default function AccountsScreen() {
       const granted =
         Platform.OS === 'android'
           ? await requestAndroidCalendarPermission()
-          : await requestDeviceCalendarAccess(true, true);
+          : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');
         setError(message);

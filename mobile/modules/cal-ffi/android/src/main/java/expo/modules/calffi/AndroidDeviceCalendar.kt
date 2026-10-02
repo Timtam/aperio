@@ -37,6 +37,15 @@ class AndroidDeviceCalendar(private val context: Context) : DeviceEventStoreBrid
   // Android has no system reminders app — the adapter stays calendar-only.
   override fun supportsReminders(): Boolean = false
 
+  // What the OS allows right now. Android cannot tell "never asked" from
+  // "refused": both are not granted, which the Rust side reads as undetermined.
+  // Calendars count as granted only when reading AND writing are.
+  override fun accessStatus(): String =
+    JSONObject()
+      .put("events", if (hasReadPermission() && hasWritePermission()) "granted" else "not_granted")
+      .put("reminders", JSONObject.NULL)
+      .toString()
+
   // ── Calendar reads ──
 
   override fun listCalendars(): String {

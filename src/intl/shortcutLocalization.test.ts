@@ -153,3 +153,28 @@ describe('the spoken and displayed wording has German translations', () => {
     }
   });
 });
+
+describe('the permission prompts have German text', () => {
+  // iOS reads the reason it shows in its calendar and reminders prompt from
+  // Info.plist; app.json is the English source, and InfoPlist.strings the
+  // German (decision 173). After a move to a new phone that prompt is the
+  // first thing the new build says.
+  const english = (
+    JSON.parse(readFileSync(resolve(process.cwd(), 'mobile/app.json'), 'utf8')) as {
+      expo: { ios: { infoPlist: Record<string, unknown> } };
+    }
+  ).expo.ios.infoPlist;
+  const reasons = Object.keys(english).filter((key) => key.endsWith('UsageDescription'));
+  const german = strings('de.lproj/InfoPlist.strings');
+
+  it('found the reasons at all', () => {
+    expect(reasons.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('translates every reason, and nothing else', () => {
+    expect([...german.keys()].sort()).toEqual([...reasons].sort());
+    for (const key of reasons) {
+      expect(german.get(key), key).not.toBe(english[key]);
+    }
+  });
+});

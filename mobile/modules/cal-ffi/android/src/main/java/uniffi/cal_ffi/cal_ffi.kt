@@ -658,6 +658,9 @@ internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10 : com.s
 internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`taskId`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod12 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceKeychainBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`slot`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -711,7 +714,7 @@ internal open class UniffiVTableCallbackInterfaceContactSyncObserverBridge(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "requestAccess", "supportsReminders", "listCalendars", "getEvents", "createEvent", "updateEvent", "deleteEvent", "listReminderLists", "getReminders", "createReminder", "updateReminder", "deleteReminder")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "requestAccess", "supportsReminders", "listCalendars", "getEvents", "createEvent", "updateEvent", "deleteEvent", "listReminderLists", "getReminders", "createReminder", "updateReminder", "deleteReminder", "accessStatus")
 internal open class UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
@@ -727,6 +730,7 @@ internal open class UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
     @JvmField internal var `createReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9? = null,
     @JvmField internal var `updateReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10? = null,
     @JvmField internal var `deleteReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11? = null,
+    @JvmField internal var `accessStatus`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod12? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -743,7 +747,8 @@ internal open class UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
         `createReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9? = null,
         `updateReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10? = null,
         `deleteReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11? = null,
-    ): UniffiVTableCallbackInterfaceDeviceEventStoreBridge(`uniffiFree`,`uniffiClone`,`requestAccess`,`supportsReminders`,`listCalendars`,`getEvents`,`createEvent`,`updateEvent`,`deleteEvent`,`listReminderLists`,`getReminders`,`createReminder`,`updateReminder`,`deleteReminder`,), Structure.ByValue
+        `accessStatus`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod12? = null,
+    ): UniffiVTableCallbackInterfaceDeviceEventStoreBridge(`uniffiFree`,`uniffiClone`,`requestAccess`,`supportsReminders`,`listCalendars`,`getEvents`,`createEvent`,`updateEvent`,`deleteEvent`,`listReminderLists`,`getReminders`,`createReminder`,`updateReminder`,`deleteReminder`,`accessStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceDeviceEventStoreBridge) {
         `uniffiFree` = other.`uniffiFree`
@@ -760,6 +765,7 @@ internal open class UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
         `createReminder` = other.`createReminder`
         `updateReminder` = other.`updateReminder`
         `deleteReminder` = other.`deleteReminder`
+        `accessStatus` = other.`accessStatus`
     }
 
 }
@@ -936,6 +942,8 @@ external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_remind
 ): Short
 external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_access_status(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_values_json(
@@ -1043,6 +1051,8 @@ external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
 external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_detach_meeting_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_device_calendar_access_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
 ): Short
@@ -1330,6 +1340,8 @@ external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_reminder(`pt
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_reminder(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_access_status(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_clone_host(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_cal_ffi_fn_free_host(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1443,6 +1455,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: Ru
 external fun uniffi_cal_ffi_fn_method_host_delete_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_detach_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_device_calendar_access_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2058,6 +2072,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder() != 59949.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_access_status() != 24966.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2220,6 +2237,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_detach_meeting_json() != 31724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_device_calendar_access_json() != 42276.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2370,7 +2390,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list() != 29027.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 8719.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_reset_account_sync() != 49159.toShort()) {
@@ -2424,7 +2444,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_set_day_log_json() != 55253.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_set_device_event_store() != 41986.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_device_event_store() != 13079.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971.toShort()) {
@@ -3670,8 +3690,9 @@ public object FfiConverterTypeContactSyncObserverBridge: FfiConverter<ContactSyn
 
 /**
  * Foreign-side bridge to the native device calendar + reminders store (iOS
- * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
- * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarContract`, events only).
+ * The mobile native modules implement it (Swift `IosDeviceEventStore`, Kotlin
+ * `AndroidDeviceCalendar`) and install
  * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
  * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
  * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
@@ -3736,13 +3757,22 @@ public interface DeviceEventStoreBridge {
     
     fun `deleteReminder`(`taskId`: kotlin.String)
     
+    /**
+     * The OS's access state right now, asking nobody: JSON
+     * `{"events": token, "reminders": token | null}`. iOS tokens:
+     * `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
+     * Android: `granted`, `not_granted`. Anything else reads as undetermined.
+     */
+    fun `accessStatus`(): kotlin.String
+    
     companion object
 }
 
 /**
  * Foreign-side bridge to the native device calendar + reminders store (iOS
- * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
- * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarContract`, events only).
+ * The mobile native modules implement it (Swift `IosDeviceEventStore`, Kotlin
+ * `AndroidDeviceCalendar`) and install
  * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
  * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
  * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
@@ -4043,6 +4073,25 @@ open class DeviceEventStoreBridgeImpl: Disposable, AutoCloseable, DeviceEventSto
     
 
     
+    /**
+     * The OS's access state right now, asking nobody: JSON
+     * `{"events": token, "reminders": token | null}`. iOS tokens:
+     * `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
+     * Android: `granted`, `not_granted`. Anything else reads as undetermined.
+     */override fun `accessStatus`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_access_status(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
 
     
 
@@ -4261,6 +4310,17 @@ internal object uniffiCallbackInterfaceDeviceEventStoreBridge {
             )
         }
     }
+    internal object `accessStatus`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod12 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`accessStatus`(
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
 
     internal object uniffiFree: UniffiCallbackInterfaceFree {
         override fun callback(handle: Long) {
@@ -4289,6 +4349,7 @@ internal object uniffiCallbackInterfaceDeviceEventStoreBridge {
         `createReminder`,
         `updateReminder`,
         `deleteReminder`,
+        `accessStatus`,
     )
 
     // Registers the foreign callback with the Rust side.
@@ -4937,6 +4998,18 @@ public interface HostInterface {
     fun `detachMeetingJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * What the OS allows for the device calendars and reminders, and whether
+     * to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+     *
+     * The rule is `cal_core::os_access::ask_on_start`; this only gathers its
+     * inputs. Read at start and asks the OS nothing. Without a native bridge
+     * (a platform that never installed one) everything is undetermined and
+     * nothing is asked. Logs one line, which after a phone move is the first
+     * answer to "did the grant come along?".
+     */
+    fun `deviceCalendarAccessJson`(): kotlin.String
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -5406,8 +5479,9 @@ public interface HostInterface {
     /**
      * Run the OS permission prompt for the device calendar / reminders. Drives
      * the add-account "grant access" step: the UI calls this, and on `true`
-     * proceeds to `create_account` for the `device_calendar` kind. An
-     * `InvalidField` means no native bridge is installed (e.g. Android).
+     * proceeds to `create_account` for the `device_calendar` kind; at start,
+     * the UI also calls it when [`Host::device_calendar_access_json`] says
+     * to ask. An `InvalidField` means no native bridge is installed.
      */
     fun `requestDeviceCalendarAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean
     
@@ -5584,8 +5658,8 @@ public interface HostInterface {
     fun `setDayLogJson`(`logJson`: kotlin.String): kotlin.String
     
     /**
-     * Install the native device calendar/reminder bridge (iOS today; Android
-     * has none yet). Stores it and registers any already-persisted
+     * Install the native device calendar/reminder bridge (iOS EventKit,
+     * Android `CalendarContract`). Stores it and registers any already-persisted
      * device-calendar account so it's routable without an app restart (bootstrap
      * at `open` skipped it — no bridge yet). The native module calls this once,
      * right after [`Host::open`].
@@ -7144,6 +7218,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * What the OS allows for the device calendars and reminders, and whether
+     * to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+     *
+     * The rule is `cal_core::os_access::ask_on_start`; this only gathers its
+     * inputs. Read at start and asks the OS nothing. Without a native bridge
+     * (a platform that never installed one) everything is undetermined and
+     * nothing is asked. Logs one line, which after a phone move is the first
+     * answer to "did the grant come along?".
+     */
+    @Throws(StoreException::class)override fun `deviceCalendarAccessJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_device_calendar_access_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -8201,8 +8299,9 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Run the OS permission prompt for the device calendar / reminders. Drives
      * the add-account "grant access" step: the UI calls this, and on `true`
-     * proceeds to `create_account` for the `device_calendar` kind. An
-     * `InvalidField` means no native bridge is installed (e.g. Android).
+     * proceeds to `create_account` for the `device_calendar` kind; at start,
+     * the UI also calls it when [`Host::device_calendar_access_json`] says
+     * to ask. An `InvalidField` means no native bridge is installed.
      */
     @Throws(StoreException::class)override fun `requestDeviceCalendarAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -8583,8 +8682,8 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Install the native device calendar/reminder bridge (iOS today; Android
-     * has none yet). Stores it and registers any already-persisted
+     * Install the native device calendar/reminder bridge (iOS EventKit,
+     * Android `CalendarContract`). Stores it and registers any already-persisted
      * device-calendar account so it's routable without an app restart (bootstrap
      * at `open` skipped it — no bridge yet). The native module calls this once,
      * right after [`Host::open`].

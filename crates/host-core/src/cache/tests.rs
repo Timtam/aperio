@@ -1,6 +1,8 @@
 //! Unit tests for the external-adapter snapshot cache (CACHE-0).
 
-use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
+use super::{
+    listing_delta, CacheStore, Delta, ListingDelta, RefreshCoordinator, SyncScope, SyncState,
+};
 use crate::db::DbHandle;
 use cal_core::event_diff::EventField;
 use cal_core::{
@@ -2640,4 +2642,87 @@ fn auth_shaped_heuristic() {
     ));
     assert!(!super::is_auth_shaped("connection reset by peer"));
     assert!(!super::is_auth_shaped("timeout after 30s"));
+}
+
+#[test]
+fn a_listing_change_names_what_stayed_went_and_came() {
+    // After a phone move this is how the log tells whether the OS kept its
+    // container ids: a new id for an old calendar is one dropped, one added.
+    let old = vec![
+        "cal-a".to_string(),
+        "cal-b".to_string(),
+        "cal-c".to_string(),
+    ];
+    let delta = listing_delta(&old, ["cal-c", "cal-d", "cal-a"].into_iter());
+    assert_eq!(
+        delta,
+        ListingDelta {
+            kept: 2,
+            dropped: vec!["cal-b".to_string()],
+            added: vec!["cal-d".to_string()],
+        }
+    );
+    let same = listing_delta(&old, old.iter().map(String::as_str));
+    assert_eq!((same.kept, same.dropped.len(), same.added.len()), (3, 0, 0));
+}
+
+/// Everything `run` logged at info level or above, as text.
+fn logged(run: impl FnOnce()) -> String {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+    impl Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let sink = Sink::default();
+    let writer = sink.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, run);
+    let bytes = sink.0.lock().unwrap().clone();
+    String::from_utf8(bytes).unwrap()
+}
+
+#[test]
+fn a_listing_that_recovers_unchanged_says_so_once() {
+    // After a phone move the cache still holds the old phone's listing, and
+    // when the OS kept its ids the first success lists exactly that. Without
+    // a line for it, "ids kept" read the same as "never succeeded".
+    let store = setup();
+    let cals = vec![calendar("cal-a"), calendar("cal-b")];
+    store.replace_calendars(ACC, &cals).unwrap();
+    store
+        .mark_error(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            "EventKit catalog empty",
+            true,
+        )
+        .unwrap();
+
+    let recovered = logged(|| {
+        store.replace_calendars(ACC, &cals).unwrap();
+    });
+    assert!(
+        recovered.contains("container listing recovered unchanged") && recovered.contains("kept=2"),
+        "{recovered}"
+    );
+
+    let again = logged(|| {
+        store.replace_calendars(ACC, &cals).unwrap();
+    });
+    assert!(!again.contains("container listing"), "{again}");
 }

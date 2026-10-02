@@ -8,7 +8,7 @@
 // here (not yet in @aperio/shared) to keep this increment off the desktop;
 // it hoists to the shared package when the desktop account UI is ported.
 
-import type { AccountFormSpec } from '@aperio/shared';
+import type { AccountFormSpec, OsAccessReport } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 
@@ -89,14 +89,18 @@ export const testAccount = async (request: CreateAccountRequest): Promise<void> 
   await CalFfi.testAccountJson(JSON.stringify(request));
 };
 
-/** Run the OS calendar/reminders permission prompt for the device-calendar
- *  adapter — the add-account "grant access" step. Resolves `true` iff access was
- *  granted (then create the `device_calendar` account). iOS-only: rejects "not
- *  available on this platform" on Android (no device bridge). */
+/** Run the OS calendar/reminders permission prompt — the add-account "grant
+ *  access" step, and the start check's question. Resolves `true` iff every
+ *  requested entity was granted. */
 export const requestDeviceCalendarAccess = async (
   events: boolean,
   reminders: boolean,
 ): Promise<boolean> => CalFfi.requestDeviceCalendarAccess(events, reminders);
+
+/** What the OS allows for the device calendars and reminders, and whether to
+ *  ask now (decision 166). Asks nobody. */
+export const deviceCalendarAccess = async (): Promise<OsAccessReport> =>
+  JSON.parse(await CalFfi.deviceCalendarAccessJson()) as OsAccessReport;
 
 /** Force a FULL cold re-sync of one external account: clear its delta tokens +
  *  cached window, then kick a warm pass so each container re-bootstraps from the

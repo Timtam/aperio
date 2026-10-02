@@ -26,6 +26,7 @@ import { useSyncTriggers } from './api/syncTriggers';
 import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
+import { DeviceAccessGate } from './components/DeviceAccessGate';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
 import { SyncStatusButton } from './components/SyncStatusButton';
 import { useTabBarInset } from './hooks/useTabBarInset';
@@ -725,6 +726,9 @@ function AppContent() {
               account / no sync / empty store) it opens the wizard once;
               otherwise it's a no-op. */}
           <FirstLaunchWizardGate />
+          {/* Asks iOS for the device calendars when it never asked on this
+              phone and a "this device" account exists (decision 166). */}
+          <DeviceAccessGate />
           {/* App-icon badge: today's open tasks + upcoming events. */}
           <AppBadge />
           <WidgetSnapshot />

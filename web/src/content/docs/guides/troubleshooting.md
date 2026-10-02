@@ -61,6 +61,23 @@ itself — shows straight away, and a manual refresh always reports its
 result at once. The warning clears by itself as soon as an update
 succeeds again.
 
+## This device stops updating after a move to a new phone
+
+Moving to a new iPhone brings Aperio's data along, the **This device**
+account included, but not the permission to read the phone's own calendars
+and reminders: iOS asks for that on each phone anew. Until it is given,
+Aperio keeps showing what it last read, and the account does not update.
+
+When the account exists and iOS has never asked on this phone, Aperio asks at
+start, once the app is unlocked and the first screen has loaded. Allow full
+access to the calendars and to the reminders; Aperio then updates the account
+straight away and says so.
+
+If you declined, iOS does not ask again. Open the Settings app, then
+**Privacy & Security**, then **Calendars** and **Reminders**, and give Aperio
+full access in each. "Add events only" is not enough: Aperio has to read your
+calendars.
+
 ## A task's time shifted, once
 
 Tasks with a **time of day** on a **CalDAV** account (iCloud Reminders,

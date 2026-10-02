@@ -17,6 +17,9 @@ import {
   deviceEnrollment,
   disableAfterLostEnrollment,
   isAuthenticating,
+  isOsSheetOpen,
+  setAppLockEngaged,
+  subscribeOsSheetClosed,
   readAppLockEnabled,
   setAppLockCoverVisible,
   subscribeAppLockEnabled,
@@ -97,6 +100,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
 
   const engageLock = useCallback(() => {
     lockedRef.current = true;
+    setAppLockEngaged(true);
     promptedThisLock.current = false;
     setLocked(true);
     setLockEpoch((epoch) => epoch + 1);
@@ -119,12 +123,14 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     if ((await deviceEnrollment()) === 'none') {
       await disableAfterLostEnrollment();
       lockedRef.current = false;
+      setAppLockEngaged(false);
       setLocked(false);
       announceSoon(i18n.t('mobile.appLock.disabledLostEnrollment'));
       return;
     }
     if ((await authenticate()) === 'success') {
       lockedRef.current = false;
+      setAppLockEngaged(false);
       backgroundAt.current = null;
       setLocked(false);
       return;
@@ -148,9 +154,12 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       enabledRef.current = on;
       setEnabled(on);
       if (on) {
+        // The cold-start lock is engaged from here on, like any other.
+        setAppLockEngaged(true);
         if (AppState.currentState === 'active') void runUnlock();
       } else {
         lockedRef.current = false;
+        setAppLockEngaged(false);
         setLocked(false);
       }
     });
@@ -171,6 +180,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         setEnabled(on);
         if (!on) {
           lockedRef.current = false;
+          setAppLockEngaged(false);
           setLocked(false);
         }
       }),
@@ -201,7 +211,8 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         // Cover on inactive too (the iOS switcher snapshot is taken here) —
         // but not while the OS auth sheet is up: it flips the app inactive
         // itself, and covering under it would flash for nothing.
-        if (!isAuthenticating()) setCovered(true);
+        // Nor under a permission alert at start (whileOsSheetOpen).
+        if (!isAuthenticating() && !isOsSheetOpen()) setCovered(true);
         return;
       }
       // active
@@ -219,12 +230,37 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       // foreground — a cancelled sheet also ends in 'active', and prompting
       // again there would loop the sheet forever (the Unlock button exists
       // for exactly that parked state).
-      if (lockedRef.current && !promptedThisLock.current && !isAuthenticating()) {
+      // Not over a permission alert either: it ends in another 'active',
+      // and the prompt comes then.
+      if (
+        lockedRef.current &&
+        !promptedThisLock.current &&
+        !isAuthenticating() &&
+        !isOsSheetOpen()
+      ) {
         void runUnlock();
       }
     });
     return () => sub.remove();
   }, [engageLock, runUnlock]);
+
+  // The deferred prompt: an 'active' while a permission alert was still
+  // counted as open skipped it, and no further 'active' may come once the
+  // alert's promise settles. Prompt then, under the same conditions.
+  useEffect(
+    () =>
+      subscribeOsSheetClosed(() => {
+        if (
+          AppState.currentState === 'active' &&
+          lockedRef.current &&
+          !promptedThisLock.current &&
+          !isAuthenticating()
+        ) {
+          void runUnlock();
+        }
+      }),
+    [runUnlock],
+  );
 
   const contextLocked = enabled !== false && locked;
   const coverShown = enabled !== false && (locked || covered);

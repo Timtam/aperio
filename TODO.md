@@ -2914,6 +2914,38 @@ Dauer wie die Grundform hatte das verdeckt.
 unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
 `prefillApplied`). Bei Toni nicht der Fall.
 
+### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
+
+✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
+Daten mit, die iOS-Freigabe für Kalender und Erinnerungen nicht; Aperio fragte
+nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
+für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
+und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
+nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
+der Freigabe nimmt die Brücke einen frischen `EKEventStore`, das Konto lädt neu
+(`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
+verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
+Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
+weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
+sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
+ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
+↻ im Test (Handy ohne Testläufer).
+
+🚩 **Offen, in dieser Reihenfolge:**
+- PR-B: Ohne vollen Zugriff verweigert der Adapter jedes Lesen und Schreiben
+  (`AccessNotGranted`); heute meldet Löschen Erfolg, ohne etwas zu tun, und
+  „nur hinzufügen“ (171: zählt als kein Zugriff) verdrängt mit seinem einen
+  virtuellen Kalender die echten aus dem Zwischenspeicher.
+- PR-C: Der Cache merkt sich die Fehlerart und versucht bei fehlendem Zugriff
+  nicht bei jedem Lesen neu; die letzte erfolgreiche Aktualisierung bleibt.
+- PR-D: Abzeichen „Kein Zugriff“ und „Zugriff erlauben…“ (iOS- und
+  Android-Einstellungen), eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher
+  Satz am Ende eines Durchlaufs.
+- PR-E: Android fragt beim Start einmal selbst (172), mit einem Merker, der
+  nicht ins Backup geht.
+- PR-F: nur wenn iOS neue Kennungen vergeben hat — Einstellungen alter
+  Kalender auf neue übernehmen, Paare von Toni gewählt, nie nach Namen.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)

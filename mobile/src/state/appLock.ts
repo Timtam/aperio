@@ -31,6 +31,59 @@ export function isAuthenticating(): boolean {
   return authBusy > 0;
 }
 
+/** How many OS sheets that are not the lock's own are up — the calendar
+ *  and reminders permission alert. A counter for the same reason as
+ *  `authBusy`. */
+let osSheetBusy = 0;
+
+export function isOsSheetOpen(): boolean {
+  return osSheetBusy > 0;
+}
+
+const sheetClosedListeners = new Set<() => void>();
+
+/** Called when the last such sheet has closed. The lock gate defers its own
+ *  prompt while one is up, and the 'active' that ends the sheet can arrive
+ *  before the sheet's promise settles; this is the moment it may prompt. */
+export function subscribeOsSheetClosed(cb: () => void): () => void {
+  sheetClosedListeners.add(cb);
+  return () => {
+    sheetClosedListeners.delete(cb);
+  };
+}
+
+/** Whether the lock is engaged right now, mirrored by AppLockGate in the same
+ *  call that engages or releases it — not after a render, so a flow that runs
+ *  in the same AppState event as a re-lock can see it. */
+let lockEngaged = false;
+
+export function setAppLockEngaged(engaged: boolean): void {
+  lockEngaged = engaged;
+}
+
+export function isAppLockEngaged(): boolean {
+  return lockEngaged;
+}
+
+/**
+ * Run `show` while such a sheet is up. It flips the app inactive, and a cover
+ * over the app under it would flash for nothing, so the gate leaves the
+ * inactive cover off and does not start the unlock prompt over it.
+ *
+ * Unlike the lock's own sheet, it does NOT stop the re-lock clock: an iOS
+ * permission alert never backgrounds the app, so a 'background' while it is
+ * up is the user really leaving, and the lock must hold on their return.
+ */
+export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
+  osSheetBusy += 1;
+  try {
+    return await show();
+  } finally {
+    osSheetBusy -= 1;
+    if (osSheetBusy === 0) sheetClosedListeners.forEach((cb) => cb());
+  }
+}
+
 /** Whether the lock COVER is on screen right now — mirrored here by
  *  AppLockGate so non-React layers (the window-level VoiceOver gesture host)
  *  can refuse to act on the content behind it. */

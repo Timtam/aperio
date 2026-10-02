@@ -11,9 +11,9 @@
 // not once per calendar.
 
 import { useEffect, useRef } from 'react';
-import { AccessibilityInfo } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
+import { announceAround } from '../a11y/speechHold';
 import type { CacheRefreshStatus } from '../api/sync';
 import { setCacheRefreshProgress } from './cacheRefreshProgress';
 import { hapticLoadBegin, hapticLoadEnd, loadHapticsPref } from './haptics';
@@ -205,9 +205,8 @@ export function useCacheUpdates(): void {
         if (flushTimer != null) clearTimeout(flushTimer);
         flushPending();
       }
-      AccessibilityInfo.announceForAccessibility(
-        tRef.current(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
-      );
+      // Behind a held sentence (the start check's), not through it.
+      announceAround(tRef.current(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'));
       // Route through the shared loading coordinator so a refresh pass that
       // overlaps a view load (the common case: an external delete reloads the
       // view AND kicks this pass) is felt as one cue, not two.

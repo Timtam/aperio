@@ -26,6 +26,7 @@ pub mod group_suggestion;
 pub mod invitation;
 pub mod meeting_events;
 pub mod meeting_link_grouping;
+pub mod os_access;
 pub mod recurrence;
 pub mod recurrence_summary;
 pub mod reminder;

@@ -272,14 +272,19 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  until replaced; credentials are untouched. The recovery action for a "stuck"
    *  external cache (a bootstrap that cached an incomplete set as complete). */
   resetAccountSync(accountId: string): Promise<void>;
-  /** Run the OS calendar/reminders permission prompt for the device-calendar
-   *  adapter's add-account "grant access" step. Resolves `true` iff access was
-   *  granted (then create the `device_calendar` account). iOS-backed (EventKit);
-   *  rejects "not available on this platform" on Android (no device bridge). */
+  /** Run the OS calendar/reminders permission prompt: the add-account "grant
+   *  access" step, and at start when `deviceCalendarAccessJson` says to ask.
+   *  Resolves `true` iff every requested entity was granted. On iOS it blocks
+   *  until the user answers, on a queue of its own. Android does not use it
+   *  (the RN layer requests the runtime permission itself); there it would
+   *  only report whether READ_CALENDAR is granted. */
   requestDeviceCalendarAccess(
     events: boolean,
     reminders: boolean,
   ): Promise<boolean>;
+  /** What the OS allows for the device calendars and reminders, and whether
+   *  to ask now (decision 166): a JSON `OsAccessReport`. Asks nobody. */
+  deviceCalendarAccessJson(): Promise<string>;
   /** External accounts whose required keychain secret is absent (the
    *  credential-repair banner data), as a JSON `Account[]`. */
   listAccountsMissingCredentialsJson(lang: string | null): Promise<string>;

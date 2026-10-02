@@ -25,6 +25,9 @@
  *   bindings ↔ Kotlin — the Android bridge calls a shape that does not exist.
  *   Rust  ↔ Swift     — ditto for iOS, where nothing local ever compiles it.
  *
+ * Then the interfaces Rust calls INTO (`with_foreign` traits): every method
+ * implemented, with the same arity, by a class on each platform.
+ *
  * And one more, from the other side: every function `CalFfiModule.ts` declares
  * has to be registered in BOTH native modules, as the same kind of function and
  * with the same number of parameters (see `declaredFunctions`).
@@ -35,7 +38,7 @@
  * Run: node mobile/scripts/check-ffi-bridges.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -610,6 +613,106 @@ for (const [name, [platform]] of ONLY_ON) {
   }
 }
 
+/**
+ * The callback interfaces Rust calls INTO, `#[uniffi::export(with_foreign)]`
+ * traits, by name → camelCase method → argument count (`self` does not count).
+ *
+ * The other direction from everything above, and until this was added an
+ * unwatched one. A method added to such a trait has to be implemented by a
+ * class on each platform, and nothing local compiles either: Kotlin first
+ * fails minutes into an EAS build, Swift only in the XCFramework workflow. The
+ * device calendar bridge gained `accessStatus` this way.
+ */
+function foreignTraits(rust) {
+  const out = new Map();
+  for (const m of rust.matchAll(
+    /#\[uniffi::export\(with_foreign\)\]\s*\n\s*pub trait\s+([A-Za-z][A-Za-z0-9_]*)[^{]*\{/g,
+  )) {
+    const body = braced(rust, m.index + m[0].length - 1);
+    if (body === null) continue;
+    const methods = new Map();
+    for (const f of body.matchAll(/\bfn\s+([a-z][a-z0-9_]*)\s*\(/g)) {
+      const args = balanced(body, f.index + f[0].length - 1);
+      if (!args) continue;
+      const params = splitTop(args.inner).filter(
+        (p) => !/^(?:&(?:mut )?)?self$/.test(p.replace(/^&\s*/, '&')),
+      );
+      methods.set(camel(f[1]), params.length);
+    }
+    out.set(m[1], methods);
+  }
+  return out;
+}
+
+/**
+ * Every class in `sources` that declares conformance to `trait`, by class name
+ * → camelCase method → argument count. Kotlin methods are the `override fun`s;
+ * Swift ones every `func` in the class body.
+ */
+function implementations(sources, trait, language) {
+  const out = new Map();
+  const conformance =
+    language === 'kotlin'
+      ? /\bclass\s+([A-Za-z_]\w*)\s*(?:\([^{]*?\))?\s*:\s*([^{]*)\{/g
+      : /\bclass\s+([A-Za-z_]\w*)\s*:\s*([^{]*)\{/g;
+  const method =
+    language === 'kotlin'
+      ? /\boverride\s+fun\s+`?([A-Za-z_]\w*)`?\s*\(/g
+      : /\bfunc\s+([A-Za-z_]\w*)\s*\(/g;
+  for (const source of sources) {
+    const code = withoutComments(source, { nested: true });
+    for (const m of code.matchAll(conformance)) {
+      if (!new RegExp(String.raw`(?:^|[\s,.])${trait}\b`).test(m[2])) continue;
+      const body = braced(code, m.index + m[0].length - 1);
+      if (body === null) continue;
+      const methods = new Map();
+      for (const f of body.matchAll(method)) {
+        const args = balanced(body, f.index + f[0].length - 1);
+        if (args) methods.set(f[1], splitTop(args.inner).length);
+      }
+      out.set(m[1], methods);
+    }
+  }
+  return out;
+}
+
+const NATIVE_DIR = {
+  kotlin: join(root, 'mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi'),
+  swift: join(root, 'mobile/modules/cal-ffi/ios'),
+};
+const nativeSources = (language) =>
+  readdirSync(NATIVE_DIR[language])
+    .filter((f) => f.endsWith(language === 'kotlin' ? '.kt' : '.swift'))
+    .map((f) => readFileSync(join(NATIVE_DIR[language], f), 'utf8'));
+
+const traits = foreignTraits(readFileSync(RUST, 'utf8'));
+const traitSources = { kotlin: nativeSources('kotlin'), swift: nativeSources('swift') };
+for (const [trait, methods] of traits) {
+  for (const [language, label] of [
+    ['kotlin', 'Android'],
+    ['swift', 'iOS'],
+  ]) {
+    const classes = implementations(traitSources[language], trait, language);
+    if (classes.size === 0) {
+      problems.push(`no ${label} class implements ${trait}, which Rust calls into`);
+      continue;
+    }
+    for (const [cls, implemented] of classes) {
+      for (const [name, count] of methods) {
+        if (!implemented.has(name)) {
+          problems.push(`the ${label} class ${cls} does not implement ${trait}.${name}()`);
+        } else if (implemented.get(name) !== count) {
+          problems.push(
+            `the ${label} class ${cls} implements ${trait}.${name}() with ` +
+              `${implemented.get(name)} argument(s), but crates/cal-ffi declares ${count}`,
+          );
+        }
+      }
+    }
+  }
+}
+const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
+
 // A parse that matched nothing would report no problems and mean nothing.
 const floors = [
   ['exported Rust methods', rust.size, 100],
@@ -622,6 +725,8 @@ const floors = [
   ['functions CalFfiModule.ts declares', declaredSurface.members.size, 100],
   ['Android module registrations', nativeModules.get('android').size, 100],
   ['iOS module registrations', nativeModules.get('ios').size, 100],
+  ['foreign traits Rust calls into', traits.size, 4],
+  ['methods of those traits', traitMethods, 15],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -681,5 +786,7 @@ console.log(
     `${kotlin.size} Android and ${swift.size} iOS calls agree ` +
     `with the committed bindings and with crates/cal-ffi, and its ` +
     `${rustFree.size} exported free functions ` +
-    `(${[...rustFree.keys()].sort().join(', ')}) are all declared there.`,
+    `(${[...rustFree.keys()].sort().join(', ')}) are all declared there; ` +
+    `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +
+    'implemented on both platforms with the same argument counts.',
 );

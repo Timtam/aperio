@@ -1,5 +1,10 @@
 {
   "mobile": {
+    "deviceAccess": {
+      "granted": "Zugriff erteilt. {{name}} wird aktualisiert.",
+      "calendarsOnly": "Zugriff auf die Kalender erteilt, {{name}} wird aktualisiert. Die Erinnerungen bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
+      "remindersOnly": "Zugriff auf die Erinnerungen erteilt, {{name}} wird aktualisiert. Die Kalender bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern."
+    },
     "appLock": {
       "settingHeading": "App-Sperre",
       "settingLabel": "Beim Start Face ID, Touch ID oder Gerätecode verlangen",

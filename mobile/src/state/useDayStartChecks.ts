@@ -20,6 +20,7 @@ import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
+import { whenDeviceAccessSettled } from './deviceAccessGate';
 import { whenStartupSettled } from './startupGate';
 import { effectiveForList, readTaskBehaviour } from './taskBehaviour';
 import { useTaskStore } from './taskStoreContext';
@@ -391,6 +392,10 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
           // full warm pass on every foreground-resume for nothing.
           !(await isDayStartReviewSnoozed());
         if (!pinDue && !reviewDue) return;
+        // The start check may be asking the OS for the device calendars right
+        // now: the review must not open under that alert, nor judge the frozen
+        // cache a grant is about to replace (decision 166).
+        await whenDeviceAccessSettled();
         // The settle below takes a couple of seconds at best and a slow-network
         // morning at worst — say so, politely, or the review modal's focus grab
         // lands mid-task for a screen-reader user with no warning that anything
