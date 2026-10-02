@@ -35,6 +35,9 @@ export function DeviceAccessGate() {
     const runInFront = () => {
       if (cancelled) return;
       if (AppState.currentState === 'active') {
+        // A timer that fires late can land in the same 'active' as a
+        // re-lock, before React has rendered it (see below).
+        if (isAppLockEngaged()) return;
         void runDeviceAccessStartCheck();
         return;
       }

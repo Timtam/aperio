@@ -154,6 +154,8 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       enabledRef.current = on;
       setEnabled(on);
       if (on) {
+        // The cold-start lock is engaged from here on, like any other.
+        setAppLockEngaged(true);
         if (AppState.currentState === 'active') void runUnlock();
       } else {
         lockedRef.current = false;
