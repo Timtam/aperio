@@ -2,10 +2,12 @@ import { useContext } from 'react';
 import { BottomTabBarHeightContext } from 'react-native-bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Bottom padding a tab-root screen's scroll content needs so its last rows
-// clear the floating native bottom tab bar (the bar overlays the scene, so
-// without this the final row — e.g. the collapsible "Done" group — sits under
-// the bar and can't be tapped).
+// Height of the floating native bottom tab bar, which overlays the scene.
+// App.tsx pads each iOS tab root's SCENE by it (`useStackScreenOptions`), so
+// the last rows — e.g. the collapsible "Done" group — end above the bar.
+// Padding only the scroll content was not enough: the scroll view still ran
+// under the bar, VoiceOver counted a row there as visible, and its double tap
+// at the row's centre hit the bar instead.
 //
 // The native bar reports its measured height into BottomTabBarHeightContext via
 // onTabBarMeasured. We read the context directly rather than through
