@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -48,9 +49,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // scope as segmented controls, the target as a labelled radio list with the
 // current container marked.
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function MoveCopyModal({
   route,
@@ -110,7 +108,7 @@ export default function MoveCopyModal({
           if (!cancelled) setCalendars(cals);
         }
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setError(writeErrorMessage(err, t));
       }
     })();
     return () => {
@@ -180,7 +178,7 @@ export default function MoveCopyModal({
         t('dialogs.task.section.created', { name: created.name }),
       );
     } catch (err) {
-      setError(errorMessage(err));
+      setError(writeErrorMessage(err, t));
     }
   }, [sectionDraft, targetContainerId, t]);
 
@@ -280,7 +278,7 @@ export default function MoveCopyModal({
       const message =
         err instanceof SeriesNotLoadedError
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
-          : errorMessage(err);
+          : writeErrorMessage(err, t);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {

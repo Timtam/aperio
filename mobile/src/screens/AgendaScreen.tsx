@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -92,9 +93,6 @@ function addMonths(date: Date, months: number): Date {
   return next;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function AgendaScreen({
   route,
@@ -274,7 +272,7 @@ export default function AgendaScreen({
       hasLoadedRef.current = true;
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {

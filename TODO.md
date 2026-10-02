@@ -2936,7 +2936,9 @@ Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
 getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
 (und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
 hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
-Kalender die echten aus dem Zwischenspeicher verdrängt.
+Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
+Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
+Termin-Editor. ↻ im Test (Handy ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**
 - PR-C: Der Cache merkt sich die Fehlerart und versucht bei fehlendem Zugriff

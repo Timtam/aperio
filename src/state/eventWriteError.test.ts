@@ -197,3 +197,17 @@ describe('a device store the OS has not opened', () => {
     expect(writeNeverLanded(desktop)).toBe(true);
   });
 });
+
+describe('any write on the phone, not only the event editor', () => {
+  it('says a refusal as its sentence and anything else as before', async () => {
+    const { writeErrorMessage } = await import('@aperio/shared');
+    // A reminder ticked off without access: the task screens said this raw.
+    const refused = new Error(
+      "Calling the 'updateTaskJson' function has failed\n\u2192 Caused by: access-not-granted: reminders: Denied",
+    );
+    expect(writeErrorMessage(refused, t)).toMatch(/keinen Zugriff auf die Kalender und Erinnerungen/);
+    const other = new Error('network down');
+    expect(writeErrorMessage(other, t)).toBe('network down');
+    expect(writeErrorMessage('plain', t)).toBe('plain');
+  });
+});

@@ -23,12 +23,12 @@ import {
   DONE_GROUP_ID,
   effortSizeModifier,
   effortSuffix,
-  errorMessage,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgressSuffix,
   type TaskGroupBy,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import {
@@ -339,7 +339,7 @@ export default function TasksScreen({
         invalidateData();
         announce(t('chipMenu.broughtToBacklog', { title: task.title }));
       } catch (err) {
-        announce(t('mobile.error', { message: errorMessage(err) }));
+        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
     [announce, invalidateData, t],
@@ -389,7 +389,7 @@ export default function TasksScreen({
         announce(statusAnnounce(t, next, task.title));
       } catch (err) {
         pendingFocusId.current = null;
-        announce(t('mobile.error', { message: errorMessage(err) }));
+        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
     [announce, entries, invalidateData, t, tasks, taskListById],
@@ -422,7 +422,7 @@ export default function TasksScreen({
         } catch (err) {
           pendingFocusId.current = null;
           pendingEmptyFocus.current = false;
-          announce(t('mobile.error', { message: errorMessage(err) }));
+          announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
         }
       };
       // Confirm the irreversible delete — matches the desktop ConfirmDialog.
@@ -482,7 +482,7 @@ export default function TasksScreen({
         announce(t('actions.duplicated', { title: task.title }));
       } catch (err) {
         pendingFocusId.current = null;
-        announce(t('mobile.error', { message: errorMessage(err) }));
+        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
     [announce, invalidateData, t],

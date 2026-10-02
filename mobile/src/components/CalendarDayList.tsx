@@ -1,4 +1,5 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { writeErrorMessage } from '@aperio/shared';
 import {
   useCallback,
   useEffect,
@@ -59,7 +60,6 @@ import {
   daysCoveredKeys,
   effortSizeModifier,
   effortSuffix,
-  errorMessage,
   eventBlockFactor,
   eventSpanForDay,
   expandAll,
@@ -861,7 +861,7 @@ export function CalendarDayList({
       });
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -1254,7 +1254,7 @@ export function CalendarDayList({
         announce(statusAnnounce(t, next, task.title));
         await load();
       } catch (err) {
-        announce(t('mobile.error', { message: errorMessage(err) }));
+        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
     [announce, listsById, load, t, tasks],
@@ -1278,7 +1278,7 @@ export function CalendarDayList({
                     announce(t('mobile.deleted', { title: task.title }));
                     await load();
                   } catch (err) {
-                    announce(t('mobile.error', { message: errorMessage(err) }));
+                    announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
                   }
                 })();
               },
