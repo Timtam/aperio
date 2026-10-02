@@ -26,7 +26,6 @@ import {
 import { primaryChannelValue } from '@aperio/shared';
 
 import { expandedA11y } from '../a11y/roles';
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
@@ -60,7 +59,6 @@ export default function ContactsScreen({
 }: RootStackScreenProps<'Contacts'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const tabBarInset = useTabBarInset();
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -480,7 +478,7 @@ export default function ContactsScreen({
           accessibilityRole="list"
           sections={sections}
           keyExtractor={(c) => c.id}
-          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

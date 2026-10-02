@@ -41,7 +41,6 @@ import { deleteTask, duplicateTask } from '../api/client';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
 import { usePullRefresh } from '../state/usePullRefresh';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useCacheReload } from '../state/cacheObserver';
@@ -78,7 +77,6 @@ export default function TasksScreen({
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const tabBarInset = useTabBarInset();
   const { tasks, loading, taskListById } = useTasks();
   const {
     selectedTaskListIds,
@@ -846,7 +844,7 @@ export default function TasksScreen({
           renderItem={({ item }) =>
             item.group ? renderHeader(item) : renderTask(item)
           }
-          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

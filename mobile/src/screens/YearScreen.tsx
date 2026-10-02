@@ -18,7 +18,6 @@ import { CalendarPager } from '../components/CalendarPager';
 import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
-import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -43,7 +42,6 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { hidden } = useCalendarVisibility();
-  const tabBarInset = useTabBarInset();
 
   const [year, setYear] = useState(() => {
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
@@ -216,7 +214,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
           // flex:1 so the list fills the pager's fixed-size page and keeps its
           // own vertical scrolling (the CalendarDayList precedent).
           style={styles.scroll}
-          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
           {months.map((mo) => (
