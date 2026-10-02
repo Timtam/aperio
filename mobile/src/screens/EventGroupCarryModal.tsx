@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -56,9 +57,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // read-only and skipping it quietly is how a group ends up meaning two
 // different times.
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** One copy the carry may write, as `planCarry` describes it. */
 type CarryTarget = ReturnType<typeof planCarry>['targets'][number];
@@ -455,7 +453,7 @@ export default function EventGroupCarryModal({
           continue;
         }
         failed.push(target);
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         if (!alive.current) return;
         setError(message);
         // Said with the outcome, by the outcome line: announced here as well,

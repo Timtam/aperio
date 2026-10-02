@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -357,7 +358,7 @@ export default function TaskEditorModal({
         setLoaded(task);
         setForm(buildInitialState(task, listId));
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setError(writeErrorMessage(err, t));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1054,7 +1055,7 @@ export default function TaskEditorModal({
       }
       navigation.goBack();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
@@ -1677,9 +1678,6 @@ function DateTimeField({
   );
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({

@@ -2931,11 +2931,16 @@ sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
 ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
 ↻ im Test (Handy ohne Testläufer).
 
+✅ **PR-B:** Ohne vollen Zugriff verweigert der Adapter jedes Lesen und
+Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
+getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
+(und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
+hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
+Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
+Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
+Termin-Editor. ↻ im Test (Handy ohne Testläufer).
+
 🚩 **Offen, in dieser Reihenfolge:**
-- PR-B: Ohne vollen Zugriff verweigert der Adapter jedes Lesen und Schreiben
-  (`AccessNotGranted`); heute meldet Löschen Erfolg, ohne etwas zu tun, und
-  „nur hinzufügen“ (171: zählt als kein Zugriff) verdrängt mit seinem einen
-  virtuellen Kalender die echten aus dem Zwischenspeicher.
 - PR-C: Der Cache merkt sich die Fehlerart und versucht bei fehlendem Zugriff
   nicht bei jedem Lesen neu; die letzte erfolgreiche Aktualisierung bleibt.
 - PR-D: Abzeichen „Kein Zugriff“ und „Zugriff erlauben…“ (iOS- und

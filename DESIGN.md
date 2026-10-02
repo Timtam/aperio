@@ -1405,9 +1405,12 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     Organisator ändern darf.
   - Eine Ablehnung reist als Marke (`cal_core::WriteRefusal`:
     `reply-only-invitation:`, `server-refused:`, `identity-unknown:`,
-    `occurrence-not-writable:`, `unsafe-to-write:`), und beide Oberflächen
-    sagen daraus einen Satz in der Sprache des Nutzers
-    (`shared/eventWriteError.ts`). Eine Marke heißt auch: Es wurde sicher
+    `occurrence-not-writable:`, `unsafe-to-write:`, `access-not-granted:`),
+    und beide Oberflächen sagen daraus einen Satz in der Sprache des Nutzers
+    (`shared/eventWriteError.ts`, am Handy bei jedem Schreiben über
+    `writeErrorMessage`). `access-not-granted` kommt vom Gerätekonto ohne
+    vollen Zugriff (`cal_core::Error::AccessNotGranted`) und reist als
+    `forbidden`. Eine Marke heißt auch: Es wurde sicher
     nichts geschrieben (`writeNeverLanded`); beim Ändern eines Termins melden
     alle Adapter eine Ablehnung des Servers so (147). `CACHE_GENERATION` 4, damit eine
     gespeicherte Kalenderliste ohne das neue Merkmal neu gelesen wird.

@@ -120,6 +120,34 @@ impl DeviceAdapter {
     pub fn request_access(&self, events: bool, reminders: bool) -> Result<bool> {
         self.provider.request_access(events, reminders)
     }
+
+    /// Refuse unless the OS grants full access to `store` right now.
+    ///
+    /// Asked before every call, because without it the native store does not
+    /// fail, it shows nothing: an empty catalog that read as "still loading",
+    /// a delete of an event it cannot see that reported success, and under
+    /// "add events only" one virtual calendar that would have replaced the
+    /// real ones in the cache. Only full access passes (decision 171); every
+    /// other state is the same refusal, naming the store and the state.
+    fn require(&self, store: Store) -> Result<()> {
+        let (calendar, tasks) = device_access(self.provider.as_ref());
+        let (state, name) = match store {
+            Store::Calendars => (calendar, "calendars"),
+            Store::Reminders => (tasks.unwrap_or(OsAccess::Undetermined), "reminders"),
+        };
+        if state == OsAccess::Full {
+            Ok(())
+        } else {
+            Err(Error::access_not_granted(format!("{name}: {state:?}")))
+        }
+    }
+}
+
+/// Which of the device's stores a call reads or writes.
+#[derive(Clone, Copy)]
+enum Store {
+    Calendars,
+    Reminders,
 }
 
 /// The platform's own words for an access state, in the core's.
@@ -570,11 +598,13 @@ impl Adapter for DeviceAdapter {
 #[async_trait]
 impl CalendarFeature for DeviceAdapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>> {
+        self.require(Store::Calendars)?;
         let devices: Vec<DeviceCalendar> = parse(&self.provider.list_calendars()?)?;
         Ok(devices.into_iter().map(map_calendar).collect())
     }
 
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>> {
+        self.require(Store::Calendars)?;
         let json = self.provider.get_events(
             calendar_id,
             &range.start.to_rfc3339(),
@@ -585,18 +615,21 @@ impl CalendarFeature for DeviceAdapter {
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event> {
+        self.require(Store::Calendars)?;
         let write = event_write_create(calendar_id, &event);
         let json = self.provider.create_event(calendar_id, &to_json(&write)?)?;
         map_event(parse(&json)?)
     }
 
     async fn update_event(&self, event: Event) -> Result<Event> {
+        self.require(Store::Calendars)?;
         let write = event_write_update(&event);
         let json = self.provider.update_event(&to_json(&write)?)?;
         map_event(parse(&json)?)
     }
 
     async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> Result<()> {
+        self.require(Store::Calendars)?;
         // No server-side scheduling on a device calendar — the flag is ignored.
         self.provider.delete_event(event_id)
     }
@@ -617,28 +650,33 @@ impl CalendarFeature for DeviceAdapter {
 #[async_trait]
 impl TasksFeature for DeviceAdapter {
     async fn list_task_lists(&self) -> Result<Vec<TaskList>> {
+        self.require(Store::Reminders)?;
         let devices: Vec<DeviceReminderList> = parse(&self.provider.list_reminder_lists()?)?;
         Ok(devices.into_iter().map(map_reminder_list).collect())
     }
 
     async fn get_tasks(&self, list_id: &str) -> Result<Vec<Task>> {
+        self.require(Store::Reminders)?;
         let devices: Vec<DeviceReminder> = parse(&self.provider.get_reminders(list_id)?)?;
         devices.into_iter().map(map_reminder).collect()
     }
 
     async fn create_task(&self, list_id: &str, task: NewTask) -> Result<Task> {
+        self.require(Store::Reminders)?;
         let write = reminder_write_create(list_id, &task);
         let json = self.provider.create_reminder(list_id, &to_json(&write)?)?;
         map_reminder(parse(&json)?)
     }
 
     async fn update_task(&self, task: Task) -> Result<Task> {
+        self.require(Store::Reminders)?;
         let write = reminder_write_update(&task);
         let json = self.provider.update_reminder(&to_json(&write)?)?;
         map_reminder(parse(&json)?)
     }
 
     async fn delete_task(&self, task_id: &str) -> Result<()> {
+        self.require(Store::Reminders)?;
         self.provider.delete_reminder(task_id)
     }
 }
@@ -694,6 +732,89 @@ mod tests {
             unreachable!()
         }
     }
+
+    /// The device adapter's futures never wait: the provider is synchronous.
+    fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match future.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(value) => value,
+            std::task::Poll::Pending => panic!("the device adapter never waits"),
+        }
+    }
+
+    fn refused<T: std::fmt::Debug>(result: Result<T>, what: &str) {
+        match result {
+            Err(Error::AccessNotGranted(_)) => {}
+            other => panic!("{what}: expected AccessNotGranted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refuses_every_call_without_full_access() {
+        // AccessOnly's data methods are unreachable: a call that got past the
+        // gate would panic, so a refusal here is also "the store was never
+        // touched" — no catalog read as empty, no delete reported as done.
+        let range = DateRange::new(epoch(), epoch());
+        for state in [
+            "not_determined",
+            "denied",
+            "restricted",
+            "write_only",
+            "unknown_9",
+        ] {
+            let status: &'static str = Box::leak(
+                format!(r#"{{"events":"{state}","reminders":"{state}"}}"#).into_boxed_str(),
+            );
+            let adapter = DeviceAdapter::new(Arc::new(AccessOnly {
+                status,
+                reminders: true,
+            }));
+            refused(ready(adapter.list_calendars()), state);
+            refused(ready(adapter.get_events("cal", range)), state);
+            refused(
+                ready(adapter.create_event("cal", serde_json::from_str(NEW_EVENT).unwrap())),
+                state,
+            );
+            refused(
+                ready(adapter.update_event(serde_json::from_str(EVENT).unwrap())),
+                state,
+            );
+            refused(ready(adapter.delete_event("ev", false)), state);
+            refused(ready(adapter.list_task_lists()), state);
+            refused(ready(adapter.get_tasks("list")), state);
+            refused(
+                ready(adapter.create_task("list", serde_json::from_str(NEW_TASK).unwrap())),
+                state,
+            );
+            refused(
+                ready(adapter.update_task(serde_json::from_str(TASK).unwrap())),
+                state,
+            );
+            refused(ready(adapter.delete_task("task")), state);
+        }
+    }
+
+    #[test]
+    fn each_store_is_judged_on_its_own() {
+        // Calendars granted, reminders not: the calendars pass the gate (and
+        // reach the store, which here panics on purpose), the reminders do not.
+        let adapter = DeviceAdapter::new(Arc::new(AccessOnly {
+            status: r#"{"events":"full_access","reminders":"denied"}"#,
+            reminders: true,
+        }));
+        refused(ready(adapter.list_task_lists()), "reminders denied");
+        let reached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ready(adapter.list_calendars());
+        }));
+        assert!(reached.is_err(), "full access lets the calendars through");
+    }
+
+    /// Minimal wire shapes for the write calls, never sent anywhere.
+    const NEW_EVENT: &str = r#"{"title":"t","start":"2026-01-01T09:00:00Z","end":"2026-01-01T10:00:00Z","all_day":false,"reminders":[],"attendees":[]}"#;
+    const EVENT: &str = r#"{"id":"ev","calendar_id":"cal","title":"t","start":"2026-01-01T09:00:00Z","end":"2026-01-01T10:00:00Z","all_day":false,"reminders":[],"attendees":[],"keep_fields":[],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
+    const NEW_TASK: &str = r#"{"title":"t","status":"open","priority":"medium","reminders":[]}"#;
+    const TASK: &str = r#"{"id":"task","list_id":"list","title":"t","status":"open","priority":"medium","reminders":[],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
 
     #[test]
     fn maps_access_tokens() {

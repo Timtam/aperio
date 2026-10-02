@@ -1,3 +1,5 @@
+import { eventWriteRefusal } from './eventWriteError';
+
 /**
  * The message to put in front of a person when something failed.
  *
@@ -11,4 +13,21 @@
  */
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+type Translate = (key: string, values?: Record<string, unknown>) => string;
+
+/**
+ * {@link errorMessage} for a failed write: a refusal reads as its sentence.
+ *
+ * A refusal crosses the native module as a token at the start of the message
+ * (`cal_core::WriteRefusal`), and only the event editor and deletes looked it
+ * up; every other write said it raw, in English, with Expo's wrapper in
+ * front — "Calling the 'updateTaskJson' function has failed → Caused by:
+ * access-not-granted: reminders: Denied". Anything that is not a refusal
+ * comes out exactly as before.
+ */
+export function writeErrorMessage(err: unknown, t: Translate): string {
+  const refusal = eventWriteRefusal(err);
+  return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
 }

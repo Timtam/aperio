@@ -18,6 +18,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'identity-unknown': 'dialogs.event.writeError.identityUnknown',
   'occurrence-not-writable': 'dialogs.event.writeError.occurrenceNotWritable',
   'unsafe-to-write': 'dialogs.event.writeError.unsafeToWrite',
+  'access-not-granted': 'dialogs.event.writeError.accessNotGranted',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -30,6 +31,7 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'identity-unknown': 'dialogs.event.writeError.reason.identityUnknown',
   'occurrence-not-writable': 'dialogs.event.writeError.reason.occurrenceNotWritable',
   'unsafe-to-write': 'dialogs.event.writeError.reason.unsafeToWrite',
+  'access-not-granted': 'dialogs.event.writeError.reason.accessNotGranted',
 };
 
 /** An error as the hosts hand it over: a code and a message. */

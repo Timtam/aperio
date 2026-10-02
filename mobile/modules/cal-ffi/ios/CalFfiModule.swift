@@ -152,6 +152,17 @@ public class CalFfiModule: Module {
     }
   }
 
+  /// Re-throw a refused task write with its code — only a refusal: unlike an
+  /// event write, a task write's conflict or network failure has no sentence
+  /// of its own on the task screens, and keeps today's message.
+  private func refusalCoded<T>(_ block: () throws -> T) throws -> T {
+    do {
+      return try block()
+    } catch let StoreError.Forbidden(detail) {
+      throw EventCodedError(code: "forbidden", detail: detail)
+    }
+  }
+
   /// Re-throw the ONE refusal a grouping request can meet with a code.
   ///
   /// `Conflict` is generic across the store, but at THIS call site it can only
@@ -465,15 +476,19 @@ public class CalFfiModule: Module {
     }
 
     AsyncFunction("createTaskJson") { (listId: String, newTaskJson: String) -> String in
-      try self.host.createTaskJson(listId: listId, newTaskJson: newTaskJson)
+      try self.refusalCoded {
+        try self.host.createTaskJson(listId: listId, newTaskJson: newTaskJson)
+      }
     }
 
     AsyncFunction("updateTaskJson") { (taskJson: String, previousListId: String?) -> String in
-      try self.host.updateTaskJson(taskJson: taskJson, previousListId: previousListId)
+      try self.refusalCoded {
+        try self.host.updateTaskJson(taskJson: taskJson, previousListId: previousListId)
+      }
     }
 
     AsyncFunction("deleteTask") { (taskId: String, listId: String?) in
-      try self.host.deleteTask(id: taskId, listId: listId)
+      try self.refusalCoded { try self.host.deleteTask(id: taskId, listId: listId) }
     }
 
     AsyncFunction("sectionsJson") { (listId: String) -> String in

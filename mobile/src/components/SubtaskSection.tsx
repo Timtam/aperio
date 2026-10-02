@@ -25,6 +25,7 @@ import {
   prioritySuffix,
   statusI18nKey,
   statusMarker,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { createTask, deleteTask, getTasks, updateTask } from '../api/client';
@@ -113,6 +114,7 @@ export function SubtaskSection({
       const freshParent = snap.find((tk) => tk.id === parentTask.id);
       if (freshParent) onParentSync?.(freshParent);
     } catch (err) {
+      // A read: nothing here was refused.
       setError(errorMessage(err));
     }
   }, [parentTask.list_id, parentTask.id, onParentSync]);
@@ -158,8 +160,8 @@ export function SubtaskSection({
       onChanged();
       announce(t('dialogs.task.subtasks.added', { title }));
     } catch (err) {
-      setError(errorMessage(err));
-      announce(errorMessage(err));
+      setError(writeErrorMessage(err, t));
+      announce(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
@@ -173,7 +175,7 @@ export function SubtaskSection({
         onChanged();
         if (next) announce(statusAnnounce(t, next, sub.title));
       } catch (err) {
-        announce(errorMessage(err));
+        announce(writeErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],
@@ -192,7 +194,7 @@ export function SubtaskSection({
           }),
         );
       } catch (err) {
-        announce(errorMessage(err));
+        announce(writeErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],
@@ -226,7 +228,7 @@ export function SubtaskSection({
               }),
         );
       } catch (err) {
-        announce(errorMessage(err));
+        announce(writeErrorMessage(err, t));
       }
     },
     [reload, onChanged, t, priorityScale],
@@ -244,7 +246,7 @@ export function SubtaskSection({
         onChanged();
         announce(t('dialogs.task.deleted', { title: sub.title }));
       } catch (err) {
-        announce(errorMessage(err));
+        announce(writeErrorMessage(err, t));
       }
     },
     [parentTask.id, parentTask.list_id, onRemove, reload, onChanged, t],

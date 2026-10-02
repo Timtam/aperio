@@ -221,6 +221,14 @@ class CalFfiModule : Module() {
       throw CodedException("network", e.detail, e)
     }
 
+  // A refused task write keeps its code — only a refusal (see the Swift twin).
+  private inline fun <T> refusalCoded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Forbidden) {
+      throw CodedException("forbidden", e.detail, e)
+    }
+
   private inline fun <T> groupCoded(block: () -> T): T =
     try {
       block()
@@ -558,15 +566,15 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("createTaskJson") { listId: String, newTaskJson: String ->
-      host.createTaskJson(listId, newTaskJson)
+      refusalCoded { host.createTaskJson(listId, newTaskJson) }
     }
 
     AsyncFunction("updateTaskJson") { taskJson: String, previousListId: String? ->
-      host.updateTaskJson(taskJson, previousListId)
+      refusalCoded { host.updateTaskJson(taskJson, previousListId) }
     }
 
     AsyncFunction("deleteTask") { taskId: String, listId: String? ->
-      host.deleteTask(taskId, listId)
+      refusalCoded { host.deleteTask(taskId, listId) }
     }
 
     AsyncFunction("sectionsJson") { listId: String ->

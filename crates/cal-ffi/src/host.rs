@@ -884,8 +884,10 @@ struct BridgeDeviceProvider {
 
 fn to_core_dev_err(e: DeviceCalError) -> cal_core::Error {
     match e {
+        // Not "unsupported": that reads as "no delta" in the cache and as
+        // "read-only" elsewhere. The OS withheld the data.
         DeviceCalError::PermissionDenied => {
-            cal_core::Error::Unsupported("device calendar permission denied".into())
+            cal_core::Error::access_not_granted("device calendar permission denied")
         }
         DeviceCalError::Unavailable => {
             cal_core::Error::Unsupported("device calendar/reminders unavailable".into())
@@ -13158,14 +13160,46 @@ mod tests {
         serde_json::from_str(&host.device_calendar_access_json().unwrap()).unwrap()
     }
 
-    fn with_device_account(host: &Host) {
+    fn with_device_account(host: &Host) -> String {
         AccountsRepo::new(&host.db.shared())
             .create(
                 host_core::builtin_adapters::device_calendar_kind().into(),
                 "Dieses Gerät",
                 "{}",
             )
-            .unwrap();
+            .unwrap()
+            .id
+    }
+
+    #[test]
+    fn a_withheld_permission_is_an_access_refusal() {
+        // Not "unsupported", which reads as "no delta" in the cache and as
+        // "read-only" elsewhere.
+        assert!(matches!(
+            to_core_dev_err(DeviceCalError::PermissionDenied),
+            cal_core::Error::AccessNotGranted(_)
+        ));
+    }
+
+    #[test]
+    fn a_device_delete_without_access_is_refused_not_reported_done() {
+        // Without access EventKit cannot see the event, and the bridge used to
+        // call an unseen event "already gone": the delete reported success,
+        // and its grouping and private reminders were forgotten on every
+        // device. Now the adapter refuses before the store is asked.
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "denied-delete");
+        let account = with_device_account(&host);
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"denied","reminders":"denied"}"#,
+        )));
+        host.registry.note_calendar_route("device-cal", &account);
+        match host.delete_event("ev-1".into(), Some("device-cal".into()), None) {
+            Err(StoreError::Forbidden { detail }) => {
+                assert!(detail.starts_with("access-not-granted"), "{detail}")
+            }
+            other => panic!("expected the access refusal, got {other:?}"),
+        }
     }
 
     #[test]

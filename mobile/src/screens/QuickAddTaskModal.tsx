@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -230,7 +231,7 @@ export default function QuickAddTaskModal({
       AccessibilityInfo.announceForAccessibility(t('dialogs.task.created', { title: trimmed }));
       navigation.goBack();
     } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
+      fail(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }

@@ -1648,6 +1648,7 @@
         "identityUnknown": "Aperio konnte die eigenen Adressen dieses Kontos auf dem Kalenderserver nicht lesen und kann dort deshalb keine Besprechung ändern. Es wurde nichts geändert.",
         "occurrenceNotWritable": "Dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern. Es wurde nichts geändert.",
         "unsafeToWrite": "Aperio kann diesen Termin nicht sicher ändern: Was auf dem Server noch mit ihm gespeichert ist, stünde auf dem Spiel. Es wurde nichts geändert.",
+        "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio. Es wurde nichts geändert.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "reason": {
@@ -1656,6 +1657,7 @@
           "identityUnknown": "Aperio konnte die eigenen Adressen dieses Kontos auf dem Kalenderserver nicht lesen",
           "occurrenceNotWritable": "dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern",
           "unsafeToWrite": "Aperio kann ihn auf dem Server nicht sicher ändern",
+          "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast"
         }

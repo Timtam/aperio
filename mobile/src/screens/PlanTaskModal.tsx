@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -138,7 +139,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
         );
         navigation.goBack();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {

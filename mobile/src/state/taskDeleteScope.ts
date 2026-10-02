@@ -1,4 +1,5 @@
 import type { Task, TaskList } from '@aperio/shared';
+import { writeErrorMessage } from '@aperio/shared';
 import { fromBackend, nextTaskOccurrence } from '@aperio/shared';
 
 import { listAccounts } from '../api/accounts';
@@ -93,7 +94,7 @@ export function confirmDeleteTask(
           await fn();
           onSuccess(message, outcome);
         } catch (err) {
-          onError(err instanceof Error ? err.message : String(err));
+          onError(writeErrorMessage(err, t));
         }
       })();
     };

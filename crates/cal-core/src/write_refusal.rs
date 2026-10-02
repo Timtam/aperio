@@ -47,6 +47,11 @@ pub enum WriteRefusal {
     /// different organizers. The detail is a machine token for the log, as
     /// for [`Self::OccurrenceNotWritable`].
     UnsafeToWrite,
+    /// The operating system has not granted the device's own calendars or
+    /// reminders ([`crate::Error::AccessNotGranted`]). Reads carry it too: it
+    /// is the same sentence whichever way the account was touched. The
+    /// detail names the store and its state for the log.
+    AccessNotGranted,
 }
 
 impl WriteRefusal {
@@ -58,6 +63,7 @@ impl WriteRefusal {
             Self::IdentityUnknown => "identity-unknown",
             Self::OccurrenceNotWritable => "occurrence-not-writable",
             Self::UnsafeToWrite => "unsafe-to-write",
+            Self::AccessNotGranted => "access-not-granted",
         }
     }
 
@@ -99,6 +105,7 @@ impl WriteRefusal {
             Self::IdentityUnknown,
             Self::OccurrenceNotWritable,
             Self::UnsafeToWrite,
+            Self::AccessNotGranted,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -119,6 +126,16 @@ impl WriteRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_access_refusal_comes_back_from_its_message() {
+        let msg = WriteRefusal::AccessNotGranted.message("calendars: Denied");
+        assert_eq!(msg, "access-not-granted: calendars: Denied");
+        assert_eq!(
+            WriteRefusal::parse(&msg),
+            Some((WriteRefusal::AccessNotGranted, "calendars: Denied"))
+        );
+    }
 
     #[test]
     fn a_message_carries_its_token_and_comes_back() {

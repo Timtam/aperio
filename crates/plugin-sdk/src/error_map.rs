@@ -40,6 +40,13 @@ pub fn cal_error_to_response(err: CalError) -> PluginCallResult {
         CalError::InvalidInput(m) => (PLUGIN_CALL_ERR_INVALID, m),
         CalError::Unsupported(m) => (PLUGIN_CALL_ERR_UNSUPPORTED, m),
         CalError::Internal(m) => (PLUGIN_CALL_ERR_INTERNAL, m),
+        // No plugin holds an OS permission today; if one ever does, it
+        // crosses as a refusal the host already reads (the token in front),
+        // so the plugin ABI needs no new status.
+        CalError::AccessNotGranted(m) => (
+            PLUGIN_CALL_ERR_FORBIDDEN,
+            cal_core::WriteRefusal::AccessNotGranted.message(&m),
+        ),
     };
     error_response(status, &msg)
 }
