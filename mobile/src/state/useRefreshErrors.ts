@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo } from 'react-native';
 
+import { announceAround } from '../a11y/speechHold';
 import i18n from '../../i18n';
 import { refreshErrors, type AccountRefreshErrors } from '../api/sync';
 import {
@@ -102,7 +102,8 @@ function publishSettled(): void {
         // language is live, so the one deduped announcement comes out in
         // the user's language.
         void languageSettled.then(() => {
-          AccessibilityInfo.announceForAccessibility(
+          // Behind a held sentence (the start check's), not through it.
+          announceAround(
             i18n.t(
               auth ? 'refreshErrors.announceAuth' : 'refreshErrors.announce',
             ),

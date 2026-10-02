@@ -18,6 +18,8 @@ import {
   disableAfterLostEnrollment,
   isAuthenticating,
   isOsSheetOpen,
+  setAppLockEngaged,
+  subscribeOsSheetClosed,
   readAppLockEnabled,
   setAppLockCoverVisible,
   subscribeAppLockEnabled,
@@ -98,6 +100,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
 
   const engageLock = useCallback(() => {
     lockedRef.current = true;
+    setAppLockEngaged(true);
     promptedThisLock.current = false;
     setLocked(true);
     setLockEpoch((epoch) => epoch + 1);
@@ -120,12 +123,14 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     if ((await deviceEnrollment()) === 'none') {
       await disableAfterLostEnrollment();
       lockedRef.current = false;
+      setAppLockEngaged(false);
       setLocked(false);
       announceSoon(i18n.t('mobile.appLock.disabledLostEnrollment'));
       return;
     }
     if ((await authenticate()) === 'success') {
       lockedRef.current = false;
+      setAppLockEngaged(false);
       backgroundAt.current = null;
       setLocked(false);
       return;
@@ -152,6 +157,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         if (AppState.currentState === 'active') void runUnlock();
       } else {
         lockedRef.current = false;
+        setAppLockEngaged(false);
         setLocked(false);
       }
     });
@@ -172,6 +178,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         setEnabled(on);
         if (!on) {
           lockedRef.current = false;
+          setAppLockEngaged(false);
           setLocked(false);
         }
       }),
@@ -234,6 +241,24 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     });
     return () => sub.remove();
   }, [engageLock, runUnlock]);
+
+  // The deferred prompt: an 'active' while a permission alert was still
+  // counted as open skipped it, and no further 'active' may come once the
+  // alert's promise settles. Prompt then, under the same conditions.
+  useEffect(
+    () =>
+      subscribeOsSheetClosed(() => {
+        if (
+          AppState.currentState === 'active' &&
+          lockedRef.current &&
+          !promptedThisLock.current &&
+          !isAuthenticating()
+        ) {
+          void runUnlock();
+        }
+      }),
+    [runUnlock],
+  );
 
   const contextLocked = enabled !== false && locked;
   const coverShown = enabled !== false && (locked || covered);

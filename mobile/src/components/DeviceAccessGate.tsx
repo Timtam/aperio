@@ -1,12 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { AppState, InteractionManager, type NativeEventSubscription } from 'react-native';
+import { AppState, type NativeEventSubscription } from 'react-native';
 
+import { isAppLockEngaged } from '../state/appLock';
 import { useAppLockLocked } from '../state/appLockContext';
 import { runDeviceAccessStartCheck } from '../state/deviceAccessGate';
 import { whenStartupSettled } from '../state/startupGate';
 
 /** After an unlock, how long the revealed screen gets to be read before the
- *  prompt — the startup gate's own settle, which has long passed by then. */
+ *  prompt: a flat wait, the length of the startup gate's own settle (which
+ *  has long passed by then). Nothing observable says when VoiceOver is done
+ *  with a screen. */
 const AFTER_UNLOCK_MS = 1500;
 
 /**
@@ -39,6 +42,10 @@ export function DeviceAccessGate() {
         if (state !== 'active' || cancelled) return;
         subscription?.remove();
         subscription = null;
+        // The same 'active' may re-lock the app (AppLockGate engages it in
+        // this event); the alert must not race Face ID. A re-lock then runs
+        // this effect again once the app is unlocked.
+        if (isAppLockEngaged()) return;
         void runDeviceAccessStartCheck();
       });
     };
@@ -49,9 +56,7 @@ export function DeviceAccessGate() {
         return;
       }
       // Just unlocked: VoiceOver is reading the screen the cover revealed.
-      InteractionManager.runAfterInteractions(() => {
-        timer = setTimeout(runInFront, AFTER_UNLOCK_MS);
-      });
+      timer = setTimeout(runInFront, AFTER_UNLOCK_MS);
     });
     return () => {
       cancelled = true;

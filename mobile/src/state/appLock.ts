@@ -40,6 +40,31 @@ export function isOsSheetOpen(): boolean {
   return osSheetBusy > 0;
 }
 
+const sheetClosedListeners = new Set<() => void>();
+
+/** Called when the last such sheet has closed. The lock gate defers its own
+ *  prompt while one is up, and the 'active' that ends the sheet can arrive
+ *  before the sheet's promise settles; this is the moment it may prompt. */
+export function subscribeOsSheetClosed(cb: () => void): () => void {
+  sheetClosedListeners.add(cb);
+  return () => {
+    sheetClosedListeners.delete(cb);
+  };
+}
+
+/** Whether the lock is engaged right now, mirrored by AppLockGate in the same
+ *  call that engages or releases it — not after a render, so a flow that runs
+ *  in the same AppState event as a re-lock can see it. */
+let lockEngaged = false;
+
+export function setAppLockEngaged(engaged: boolean): void {
+  lockEngaged = engaged;
+}
+
+export function isAppLockEngaged(): boolean {
+  return lockEngaged;
+}
+
 /**
  * Run `show` while such a sheet is up. It flips the app inactive, and a cover
  * over the app under it would flash for nothing, so the gate leaves the
@@ -55,6 +80,7 @@ export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
     return await show();
   } finally {
     osSheetBusy -= 1;
+    if (osSheetBusy === 0) sheetClosedListeners.forEach((cb) => cb());
   }
 }
 

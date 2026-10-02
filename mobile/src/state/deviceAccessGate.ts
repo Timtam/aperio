@@ -5,6 +5,7 @@ import { askOutcome, type AskOutcome } from '@aperio/shared';
 import i18n from '../../i18n';
 import { deviceCalendarAccess, requestDeviceCalendarAccess } from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
+import { holdingSpeech } from '../a11y/speechHold';
 import { whileOsSheetOpen } from './appLock';
 import { settleExternalCaches } from './cacheSettle';
 
@@ -112,11 +113,14 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
     ).catch(() => false);
     const after = await deviceCalendarAccess();
     const outcome = askOutcome(ask, after);
-    // Reload, and wait for the pass to end: its "updated" cue then comes
-    // before the sentence instead of cutting it off.
-    if (outcome !== 'denied') await settleExternalCaches(refreshExternalCache);
+    const reload = outcome !== 'denied';
+    // Kick the reload first, so "… wird aktualisiert" is true while it is
+    // said; the refresh cues queue behind the sentence instead of cutting it.
+    if (reload) await refreshExternalCache().catch(() => {});
     const name = after.account_names[0] ?? before.account_names[0] ?? '';
-    await sayAndWait(sentence(outcome, name));
+    await holdingSpeech(() => sayAndWait(sentence(outcome, name)));
+    // The day-start review reads the account next: wait for that reload.
+    if (reload) await settleExternalCaches(async () => {});
   } catch {
     // Nothing was decided; the next start asks again.
   } finally {
