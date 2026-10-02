@@ -30,11 +30,14 @@ const SOURCE = 'AperioShortcuts.swift';
  *  deliberately absent — an `en.lproj` would only be a second place for the
  *  same words to drift apart in. */
 const LOCALIZATIONS = ['de'];
-/** Both are read by name. `AppShortcuts.strings` is the ONLY file consulted for
+/** All are read by name. `AppShortcuts.strings` is the ONLY file consulted for
  *  spoken phrases; everything else about an intent — titles, descriptions,
  *  parameter labels, the questions Siri asks — comes from `Localizable.strings`.
- *  Putting a phrase in the second one compiles and then does nothing. */
-const STRINGS = ['AppShortcuts.strings', 'Localizable.strings'];
+ *  Putting a phrase in the second one compiles and then does nothing.
+ *  `InfoPlist.strings` translates the Info.plist texts, here the reason iOS
+ *  reads out in its calendar and reminders prompt (decision 173); app.json
+ *  stays the English source. */
+const STRINGS = ['AppShortcuts.strings', 'Localizable.strings', 'InfoPlist.strings'];
 
 /** Everything this plugin installs, as paths relative to the app target's
  *  folder. One list, so the copying mod and the registering mod cannot drift. */

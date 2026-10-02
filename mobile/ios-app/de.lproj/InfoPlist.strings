@@ -1,0 +1,8 @@
+/* The text iOS shows in its prompt for the device calendars and reminders.
+   The English source is app.json (expo.ios.infoPlist); these are read from the
+   app bundle when the phone is set to German. */
+
+"NSCalendarsUsageDescription" = "Aperio zeigt und bearbeitet die Termine deiner Gerätekalender neben deinen anderen Konten.";
+"NSCalendarsFullAccessUsageDescription" = "Aperio zeigt und bearbeitet die Termine deiner Gerätekalender neben deinen anderen Konten.";
+"NSRemindersUsageDescription" = "Aperio zeigt und bearbeitet deine Erinnerungslisten als Aufgaben neben deinen anderen Konten.";
+"NSRemindersFullAccessUsageDescription" = "Aperio zeigt und bearbeitet deine Erinnerungslisten als Aufgaben neben deinen anderen Konten.";
