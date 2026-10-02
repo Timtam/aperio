@@ -39,6 +39,10 @@ import {
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  prefillTarget,
   toBackend,
   type AssigneePool,
 } from '@aperio/shared';
@@ -519,13 +523,17 @@ export default function TaskEditorModal({
   const titleMatches = useTitleSuggestions(form.title, 'tasks', taskId == null);
   const titleOptions = useMemo(
     () =>
-      rankTaskSuggestions(titleMatches, form.title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: taskLists.find((l) => l.id === item.list_id)?.name,
-      })),
-    [titleMatches, form.title, taskLists],
+      offerOptions(
+        rankTaskSuggestions(titleMatches, form.title, offerUsable(taskLists)),
+        (task) => task.list_id,
+        taskLists,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, form.title, taskLists, t],
   );
+  /** Said under the list picker when an accepted offer's list could not be
+   *  used — the same note the desktop shows (decision 161). */
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
   /**
    * Fill the editor from an earlier task.
    *
@@ -534,8 +542,16 @@ export default function TaskEditorModal({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyTaskPrefill = useCallback(
-    (source: Task, opts: { keepList?: boolean } = {}) => {
+    (source: Task, opts: { keepList?: boolean } = {}): string | null => {
       const fill = taskPrefillFrom(source);
+      // Where it goes: the offer's list, unless it is a subtask (glued to its
+      // parent's list), the caller pinned one, or that list takes no new
+      // tasks — which is then said, as for appointments (decision 161).
+      const target = prefillTarget(
+        fill.list_id,
+        taskLists,
+        parentId != null || opts.keepList === true,
+      );
       setForm((prev) => ({
         ...prev,
         title: fill.title,
@@ -551,20 +567,36 @@ export default function TaskEditorModal({
         // The list travels, though — a task called this belongs where the last
         // one did, unless it is a subtask glued to its parent's list.
         // …unless it is a subtask, glued to its parent's list, or the caller
-        // pinned one: the quick-add does that when its picker was moved.
-        listId:
-          parentId != null || opts.keepList
-            ? prev.listId
-            : fill.list_id || prev.listId,
+        // pinned one: the quick-add does that when its picker was left on
+        // something other than the default it showed (decision 160). A list
+        // that takes no new tasks stays behind too, and that is said.
+        listId: target.kind === 'offer' ? target.id : prev.listId,
       }));
+      const kept = taskLists.find((l) => l.id === form.listId)?.name;
+      const note =
+        target.kind === 'readOnly'
+          ? kept
+            ? t('dialogs.task.prefillListReadOnlyInto', {
+                list: target.name,
+                target: kept,
+              })
+            : t('dialogs.task.prefillListReadOnly', { list: target.name })
+          : target.kind === 'unknown'
+            ? kept
+              ? t('dialogs.task.prefillListUnknownInto', { target: kept })
+              : t('dialogs.task.prefillListUnknown')
+            : null;
+      setPrefillNote(note);
+      return note;
     },
-    [parentId],
+    [parentId, taskLists, form.listId, t],
   );
 
   const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((task) => task.id === id);
-      if (source) applyTaskPrefill(source);
+    (key: string) => {
+      // By list AND id: two task servers count from the same 1.
+      const source = findOffer(titleMatches, key, (task) => task.list_id);
+      return source ? applyTaskPrefill(source) : null;
     },
     [titleMatches, applyTaskPrefill],
   );
@@ -575,9 +607,17 @@ export default function TaskEditorModal({
   const prefillApplied = useRef(false);
   useEffect(() => {
     if (taskId != null || !prefillFrom || prefillApplied.current || loading) return;
+    // No catalog yet: every list would read as unknown, and the latch would
+    // keep that refusal. `applyTaskPrefill` changes with the lists.
+    if (taskLists.length === 0) return;
     prefillApplied.current = true;
-    applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
-  }, [taskId, prefillFrom, loading, targetPinned, applyTaskPrefill]);
+    const note = applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
+    // Queued behind the title field VoiceOver has just been moved to, and
+    // behind the quick-add's "filled in", which the phone queues too.
+    if (note) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(note, { queue: true });
+    }
+  }, [taskId, prefillFrom, loading, taskLists.length, targetPinned, applyTaskPrefill]);
 
   const sectionOptions = useMemo(
     () => [
@@ -1072,12 +1112,21 @@ export default function TaskEditorModal({
         label={t('dialogs.task.fields.list')}
         value={form.listId}
         options={listOptions}
-        onChange={changeList}
+        onChange={(next) => {
+          // The user has answered the question the note asked.
+          setPrefillNote(null);
+          changeList(next);
+        }}
         disabled={listLocked}
       />
       {listLocked && (
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.task.subtaskListLocked')}
+        </Text>
+      )}
+      {!listLocked && prefillNote != null && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {prefillNote}
         </Text>
       )}
 

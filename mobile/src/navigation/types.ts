@@ -40,7 +40,8 @@ export type RootStackParamList = {
     // `taskPrefillFrom`. Create only.
     prefillFrom?: Task;
     // The caller chose `listId` deliberately, so `prefillFrom` must leave it
-    // alone. The quick-add sets it only when its own picker was moved.
+    // alone. The quick-add sets it only when its picker was left on something
+    // other than the default it showed (decision 160).
     targetPinned?: boolean;
   };
   // One-tap task capture (title + optional day + list); "More details …" hands
@@ -129,7 +130,8 @@ export type RootStackParamList = {
     // see `eventPrefillFrom`. Create only.
     prefillFrom?: CalendarEvent;
     // The caller chose `calendarId` deliberately, so `prefillFrom` must leave
-    // it alone. The quick-add sets it only when its own picker was moved.
+    // it alone. The quick-add sets it only when its picker was left on
+    // something other than the default it showed (decision 160).
     targetPinned?: boolean;
   };
   Calendars: undefined;

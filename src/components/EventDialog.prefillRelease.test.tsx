@@ -158,4 +158,41 @@ describe('EventDialog prefill → calendar, without StrictMode', () => {
       STORE.calendars = previous;
     }
   });
+
+  it('waits for the catalog also when the refused fill would differ from the default', async () => {
+    // The test above passes for a reason of its own: its offer is an empty
+    // hour, so the refused fill is the editor's own baseline, and the reset
+    // re-arms the prefill when the catalog lands. An offer with anything in
+    // it leaves the form "touched", and the first, wrong refusal stayed.
+    const RICH = {
+      ...SOURCE,
+      description: 'Agenda',
+      end: '2026-06-15T09:45:00.000Z',
+    } as CalendarEvent;
+    const previous = STORE.calendars;
+    STORE.calendars = [];
+    try {
+      const { EventDialog } = await import('./EventDialog');
+      const dialog = (
+        <EventDialog
+          isOpen
+          onClose={() => {}}
+          event={null}
+          defaultCalendarId="cal-local"
+          defaultTitle={RICH.title}
+          prefillFrom={RICH}
+          targetPinned={false}
+        />
+      );
+      const { rerender } = render(dialog);
+      STORE.calendars = previous;
+      rerender(dialog);
+      const select = screen.getByRole('combobox', {
+        name: /kalender/i,
+      }) as HTMLSelectElement;
+      await waitFor(() => expect(select.value).toBe('cal-work'));
+    } finally {
+      STORE.calendars = previous;
+    }
+  });
 });

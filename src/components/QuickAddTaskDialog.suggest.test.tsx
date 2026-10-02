@@ -53,12 +53,14 @@ vi.mock('../state/useTitleSuggestions', async () => {
   const actual = await vi.importActual<
     typeof import('../state/useTitleSuggestions')
   >('../state/useTitleSuggestions');
-  return { ...actual, useTitleSuggestions: () => [SOURCE] };
+  return { ...actual, useTitleSuggestions: () => MATCHES.rows };
 });
+const MATCHES: { rows: Task[] } = { rows: [SOURCE] };
 
 afterEach(() => {
   document.body.innerHTML = '';
   openTaskDialog.mockClear();
+  MATCHES.rows = [SOURCE];
   STORE.taskLists = LISTS;
   STORE.selectedTaskListIds = new Set(['list-inbox', 'list-work']);
 });
@@ -122,5 +124,33 @@ describe('QuickAddTaskDialog → accepting a title offer', () => {
     await waitFor(() => expect(openTaskDialog).toHaveBeenCalled());
     const opts = openTaskDialog.mock.calls[0][1] as { targetPinned?: boolean };
     expect(opts.targetPinned).toBe(false);
+  });
+
+  it('does not count arrowing through the picker and back as a pick (160)', async () => {
+    const { QuickAddTaskDialog } = await import('./QuickAddTaskDialog');
+    render(<QuickAddTaskDialog isOpen onClose={() => {}} />);
+    const picker = screen.getByRole('combobox', { name: /liste/i });
+    // A closed select fires a change per arrow key.
+    fireEvent.change(picker, { target: { value: 'list-work' } });
+    fireEvent.change(picker, { target: { value: 'list-inbox' } });
+    acceptTheOffer();
+    await waitFor(() => expect(openTaskDialog).toHaveBeenCalled());
+    const opts = openTaskDialog.mock.calls[0][1] as { targetPinned?: boolean };
+    expect(opts.targetPinned).toBe(false);
+  });
+
+  it('hands over the copy the offer named when one id sits in two lists', async () => {
+    // Two task servers count from the same 1: the older copy, listed first,
+    // must not stand in for the one the offer named.
+    MATCHES.rows = [
+      { ...SOURCE, list_id: 'list-inbox', updated_at: '2026-05-01T09:00:00Z' },
+      { ...SOURCE, list_id: 'list-work', updated_at: '2026-06-01T09:00:00Z' },
+    ] as Task[];
+    const { QuickAddTaskDialog } = await import('./QuickAddTaskDialog');
+    render(<QuickAddTaskDialog isOpen onClose={() => {}} />);
+    acceptTheOffer();
+    await waitFor(() => expect(openTaskDialog).toHaveBeenCalled());
+    const opts = openTaskDialog.mock.calls[0][1] as { prefillFrom?: Task };
+    expect(opts.prefillFrom?.list_id).toBe('list-work');
   });
 });

@@ -29,6 +29,10 @@ import {
   organizerOf,
   signatureIn,
   eventPrefillFrom,
+  findOffer,
+  offerOptions,
+  offerUsable,
+  prefillTarget,
   allDayWireEnd,
   describeRecurrence,
   eventWriteErrorMessage,
@@ -320,13 +324,17 @@ export default function EventEditorModal({
   const titleMatches = useTitleSuggestions(title, 'events', !editing);
   const titleOptions = useMemo(
     () =>
-      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
-        id: item.id,
-        title: item.title,
-        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
-      })),
-    [titleMatches, title, calendars],
+      offerOptions(
+        rankEventSuggestions(titleMatches, title, offerUsable(calendars)),
+        (e) => e.calendar_id,
+        calendars,
+        (name) => t('suggestions.hintReadOnly', { name }),
+      ),
+    [titleMatches, title, calendars, t],
   );
+  /** Said under the calendar picker when an accepted offer's calendar could
+   *  not be used — the same note the desktop shows (decision 161). */
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
   /**
    * Fill the editor from an earlier appointment.
    *
@@ -335,7 +343,7 @@ export default function EventEditorModal({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyEventPrefill = useCallback(
-    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}) => {
+    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}): string | null => {
       const fill = eventPrefillFrom(source);
       setTitle(fill.title);
       setDescription(fill.description ?? '');
@@ -351,14 +359,15 @@ export default function EventEditorModal({
       // The reminders are the user's own now, not the calendar's default.
       setKeepRemindersAsDefault(false);
       // The calendar the earlier appointment lived on — unless the caller
-      // pinned one. Accepting an offer in this screen's own title field never
-      // pins; the quick-add pins only when its picker was actually moved.
-      if (
-        !opts.keepCalendar &&
-        calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
-      ) {
-        setCalId(fill.calendar_id);
-      }
+      // pinned one, or it takes no new appointments. Accepting an offer in
+      // this screen's own title field never pins; the quick-add pins only
+      // when its picker was left on something other than its default.
+      const target = prefillTarget(
+        fill.calendar_id,
+        calendars,
+        opts.keepCalendar === true,
+      );
+      if (target.kind === 'offer') setCalId(target.id);
       // The DAY stays exactly as it is — only the LENGTH travels, laid onto
       // whatever day the editor was opened on.
       setTimes((prev) => {
@@ -373,14 +382,33 @@ export default function EventEditorModal({
           endTime: timeInput(end),
         };
       });
+      // Refused: the offer named one calendar and this one stays — said, and
+      // shown under the picker, naming both (as on the desktop).
+      const kept = calendars.find((c) => c.id === calId)?.name;
+      const note =
+        target.kind === 'readOnly'
+          ? kept
+            ? t('dialogs.event.prefillCalendarReadOnlyInto', {
+                calendar: target.name,
+                target: kept,
+              })
+            : t('dialogs.event.prefillCalendarReadOnly', { calendar: target.name })
+          : target.kind === 'unknown'
+            ? kept
+              ? t('dialogs.event.prefillCalendarUnknownInto', { target: kept })
+              : t('dialogs.event.prefillCalendarUnknown')
+            : null;
+      setPrefillNote(note);
+      return note;
     },
-    [calendars],
+    [calendars, calId, t],
   );
 
   const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((e) => e.id === id);
-      if (source) applyEventPrefill(source);
+    (key: string) => {
+      // By calendar AND id: the same id can sit in two calendars.
+      const source = findOffer(titleMatches, key, (e) => e.calendar_id);
+      return source ? applyEventPrefill(source) : null;
     },
     [titleMatches, applyEventPrefill],
   );
@@ -392,7 +420,14 @@ export default function EventEditorModal({
   useEffect(() => {
     if (editing || !prefillFrom || prefillApplied.current || loading) return;
     prefillApplied.current = true;
-    applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
+    const note = applyEventPrefill(prefillFrom, {
+      keepCalendar: targetPinned === true,
+    });
+    // Queued behind what VoiceOver reads as the screen opens, and behind the
+    // quick-add's "filled in", which the phone queues too.
+    if (note) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(note, { queue: true });
+    }
   }, [editing, prefillFrom, loading, targetPinned, applyEventPrefill]);
   const [description, setDescription] = useState('');
 
@@ -1543,6 +1578,8 @@ export default function EventEditorModal({
     return !saysASentence(notice) && saysASentence(after.notice) ? after.sentence : null;
   };
   const chooseCalendar = (next: string) => {
+    // The user has answered the question the note asked.
+    setPrefillNote(null);
     setCalId(next);
     const after = noticeFor(next, attendees);
     if (
@@ -1672,6 +1709,11 @@ export default function EventEditorModal({
           onChange={chooseCalendar}
         />
       )
+      )}
+      {!locked && prefillNote != null && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {prefillNote}
+        </Text>
       )}
 
       {locked ? (
