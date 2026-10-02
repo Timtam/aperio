@@ -423,7 +423,8 @@ export default function EventEditorModal({
     const note = applyEventPrefill(prefillFrom, {
       keepCalendar: targetPinned === true,
     });
-    // Queued behind the title field VoiceOver has just been moved to.
+    // Queued behind what VoiceOver reads as the screen opens, and behind the
+    // quick-add's "filled in", which the phone queues too.
     if (note) {
       AccessibilityInfo.announceForAccessibilityWithOptions(note, { queue: true });
     }

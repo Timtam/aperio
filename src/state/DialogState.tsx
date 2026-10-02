@@ -72,7 +72,8 @@ export type DialogMode =
       prefillFrom?: CalendarEvent | null;
       /** The caller chose this calendar deliberately, so a `prefillFrom`
        *  must not replace it with the older appointment's. The quick-add
-       *  sets it only when its own picker was moved off the default. */
+       *  sets it only when its picker was left on something other than the
+       *  default it showed (decision 160). */
       targetPinned?: boolean;
     }
   | {

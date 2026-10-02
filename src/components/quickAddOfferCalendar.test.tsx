@@ -101,13 +101,15 @@ async function mount(open: 'quickAdd' | 'editor') {
     );
   }
 
-  render(
+  const tree = () => (
     <DialogStateProvider>
       <Opener />
       <DialogHost />
-    </DialogStateProvider>,
+    </DialogStateProvider>
   );
+  const view = render(tree());
   fireEvent.click(screen.getByRole('button', { name: 'open' }));
+  return () => view.rerender(tree());
 }
 
 /** Type, take the first offer, and return what it said and where the
@@ -192,9 +194,33 @@ describe('quick-add → accept an offer → the editor', () => {
     const { offered, picker } = await acceptFirstOffer();
     expect(offered).toContain('Abo, nur lesbar');
     expect(picker.value).toBe('cal-local');
-    expect(spoken()).toContain(
-      '„Abo“ nimmt keine neuen Termine an. Der Termin kommt in „Kalender“.',
+    // The editor says the fill and the refusal as one sentence: the
+    // quick-add's own "filled in" comes in the same frame and is replaced.
+    expect(spoken().at(-1)).toBe(
+      'Aus „Thomas Meeting" übernommen. Der Tag bleibt, wie er war. ' +
+        '„Abo“ nimmt keine neuen Termine an. Der Termin kommt in „Kalender“.',
     );
+  }, 15_000);
+
+  it('says the refusal once, however often the catalog refreshes', async () => {
+    // A bare hour with nothing else: filled from it, the editor's form equals
+    // its own baseline, so a catalog refresh resets it as untouched and the
+    // prefill lands again.
+    STATE.calendars = [LOCAL, WORK, HOME, FEED];
+    const bare = {
+      ...ev('feed-1', 'cal-feed', '2026-06-15T09:00:00.000Z'),
+      description: null,
+      end: '2026-06-15T10:00:00.000Z',
+    } as CalendarEvent;
+    STATE.matches = [bare];
+    const rerender = await mount('quickAdd');
+    await acceptFirstOffer();
+    const refusals = () => spoken().filter((s) => s.includes('nimmt keine')).length;
+    expect(refusals()).toBe(1);
+    STATE.calendars = [...STATE.calendars];
+    rerender();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(refusals()).toBe(1);
   }, 15_000);
 });
 

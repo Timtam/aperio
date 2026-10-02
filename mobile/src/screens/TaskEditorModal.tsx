@@ -567,7 +567,9 @@ export default function TaskEditorModal({
         // The list travels, though — a task called this belongs where the last
         // one did, unless it is a subtask glued to its parent's list.
         // …unless it is a subtask, glued to its parent's list, or the caller
-        // pinned one: the quick-add does that when its picker was moved.
+        // pinned one: the quick-add does that when its picker was left on
+        // something other than the default it showed (decision 160). A list
+        // that takes no new tasks stays behind too, and that is said.
         listId: target.kind === 'offer' ? target.id : prev.listId,
       }));
       const kept = taskLists.find((l) => l.id === form.listId)?.name;
@@ -605,13 +607,17 @@ export default function TaskEditorModal({
   const prefillApplied = useRef(false);
   useEffect(() => {
     if (taskId != null || !prefillFrom || prefillApplied.current || loading) return;
+    // No catalog yet: every list would read as unknown, and the latch would
+    // keep that refusal. `applyTaskPrefill` changes with the lists.
+    if (taskLists.length === 0) return;
     prefillApplied.current = true;
     const note = applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
-    // Queued behind the title field VoiceOver has just been moved to.
+    // Queued behind the title field VoiceOver has just been moved to, and
+    // behind the quick-add's "filled in", which the phone queues too.
     if (note) {
       AccessibilityInfo.announceForAccessibilityWithOptions(note, { queue: true });
     }
-  }, [taskId, prefillFrom, loading, targetPinned, applyTaskPrefill]);
+  }, [taskId, prefillFrom, loading, taskLists.length, targetPinned, applyTaskPrefill]);
 
   const sectionOptions = useMemo(
     () => [

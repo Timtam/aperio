@@ -200,8 +200,8 @@ export interface EventDialogProps {
    *  see `eventPrefillFrom`. Create only. */
   prefillFrom?: CalendarEvent | null;
   /** The caller chose `defaultCalendarId` deliberately, so `prefillFrom` must
-   *  leave it alone. The quick-add sets it only when its own picker was moved
-   *  off the default. */
+   *  leave it alone. The quick-add sets it only when its picker was left on
+   *  something other than the default it showed (decision 160). */
   targetPinned?: boolean;
 }
 
@@ -740,6 +740,9 @@ export function EventDialog({
    *  re-fill a form the user has since edited. Cleared by the reset effect
    *  below, which is the only thing that can undo a prefill. */
   const prefillApplied = useRef<string | null>(null);
+  /** Which prefill's refusal has been said in this opening. Unlike
+   *  `prefillApplied`, the reset does not clear it: saying it is once. */
+  const prefillAnnounced = useRef<string | null>(null);
   /** The signature body this editor last put in by itself, so a calendar
    *  change can SWAP it — and so anything the user wrote or deleted is left
    *  alone. */
@@ -851,20 +854,39 @@ export function EventDialog({
     if (!isOpen || isEdit || !prefillFrom) {
       if (!isOpen) {
         prefillApplied.current = null;
+        prefillAnnounced.current = null;
         autoReminders.current = [];
       }
       return;
     }
+    // No catalog yet, nothing to decide against: every calendar would read as
+    // unknown, and the latch below would keep that refusal after the catalog
+    // arrived. `applyEventPrefill` changes with the catalog, so this runs again.
+    if (calendars.length === 0) return;
     if (prefillApplied.current === prefillFrom.id) return;
     prefillApplied.current = prefillFrom.id;
     const note = applyEventPrefill(prefillFrom, {
       keepCalendar: targetPinned === true,
     });
-    // The offer was accepted over in the quick-add, which has already said
-    // "filled in"; the editor opening on another calendar is news from here,
-    // said once it has opened (decision 161).
-    if (note) announce(note);
-  }, [isOpen, isEdit, prefillFrom, targetPinned, applyEventPrefill, announce]);
+    // The fill and the refusal as ONE sentence (decision 161). The quick-add
+    // said "filled in" in this same task, and of two announcements in one
+    // frame only the last reaches the screen reader, so this one carries
+    // both. Once per opening: a pristine reset re-applies the prefill, and
+    // repeating the sentence then would come out of nowhere.
+    if (note && prefillAnnounced.current !== prefillFrom.id) {
+      prefillAnnounced.current = prefillFrom.id;
+      announce(`${t('suggestions.applied', { title: prefillFrom.title })} ${note}`);
+    }
+  }, [
+    isOpen,
+    isEdit,
+    prefillFrom,
+    targetPinned,
+    calendars.length,
+    applyEventPrefill,
+    announce,
+    t,
+  ]);
 
   /**
    * The calendar's own signature, put on a NEW appointment by itself.

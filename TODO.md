@@ -2883,9 +2883,13 @@ Editor mit der Ansage der Übernahme, nach dem Schnell-Hinzufügen beim Öffnen.
 Die Vorschläge öffnen sich nur noch nach Tippen, nicht nach einer Übernahme.
 Desktop, Handy, Termine und Aufgaben. ↻ im Test (Handy ohne Testläufer).
 
-🚩 **Offen:** Kommt die Kalenderliste erst nach dem Vorschlag an, bleibt die
-erste Ablehnung stehen (der Riegel `prefillApplied`); ein Testaufbau mit
-derselben Dauer wie die Grundform verdeckte das. Bei Toni nicht der Fall.
+Auf eine noch leere Kalender- oder Listenauswahl warten beide Editoren jetzt,
+statt jeden Behälter als unbekannt abzulehnen; ein Testaufbau mit derselben
+Dauer wie die Grundform hatte das verdeckt.
+
+🚩 **Offen:** Fehlt der Behälter des Vorschlags nur in einer noch
+unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
+`prefillApplied`). Bei Toni nicht der Fall.
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
