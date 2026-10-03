@@ -657,7 +657,11 @@ impl CacheStore {
         // A family the OS withheld is one fact, said once: as its listing.
         // Its containers failed for the same reason, and listing each by
         // its id (the device's calendars and lists, 13 rows on Toni's
-        // phone) said nothing more.
+        // phone) said nothing more. Every container row of the family goes,
+        // whatever its kind: one recorded before the block (before
+        // migration 46, or another error before the grant was lost) is
+        // never written again while the block holds, since nothing reads
+        // the family, and would stay listed until access came back.
         let blocked: std::collections::HashSet<(String, String)> = rows
             .iter()
             .filter(|r| access(r) && r.container.is_empty())
@@ -668,7 +672,6 @@ impl CacheStore {
             .filter(|r| r.failures >= CONFIRM_THRESHOLD || auth(r) || access(r))
             .filter(|r| {
                 r.container.is_empty()
-                    || !access(r)
                     || !blocked.contains(&(r.account.clone(), listing_of_str(&r.scope).to_string()))
             })
             .collect();
@@ -1643,6 +1646,7 @@ impl CacheStore {
             let n = c.execute(
                 "UPDATE cache_sync_state
                     SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_success_at = COALESCE(last_refreshed_at, last_success_at),
                         last_refreshed_at = NULL
                   WHERE account_id = ?1 AND scope = 'contacts'",
                 params![account],
@@ -1676,9 +1680,10 @@ impl CacheStore {
         })
     }
 
-    /// Record a failed refresh: stamp `last_error`, leave the rest
-    /// (including the still-valid cached data + window) intact.
-    /// Record a failed refresh of one container. Bumps the
+    /// Record a failed refresh of one container from its text alone, with
+    /// no kind: only tests call it now, and the refreshers use
+    /// [`Self::mark_failure`]. Stamps `last_error` and leaves the rest
+    /// (including the still-valid cached data + window) intact. Bumps the
     /// consecutive-failure counter (reset to 0 by any success), which the
     /// error surface uses to CONFIRM a non-auth failure before showing it
     /// — a one-off blip's next attempt succeeds and resets the count, so
@@ -2225,8 +2230,6 @@ fn rows_match(
     Ok(matched == incoming.len())
 }
 
-/// Stamp last_refreshed + clear last_error for a listing/by-list scope
-/// inside an existing transaction. Leaves token/window untouched.
 /// The listing a scope's wire string belongs to (see [`listing_of`]).
 fn listing_of_str(scope: &str) -> &'static str {
     match scope {
@@ -2284,6 +2287,8 @@ fn record_failure(
     })
 }
 
+/// Stamp last_refreshed + clear last_error for a listing/by-list scope
+/// inside an existing transaction. Leaves token/window untouched.
 fn mark_refreshed(
     tx: &Connection,
     account: &str,
