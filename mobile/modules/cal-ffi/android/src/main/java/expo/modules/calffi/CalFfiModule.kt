@@ -631,17 +631,26 @@ class CalFfiModule : Module() {
     }
 
     // Uniform JS surface with iOS. Nothing on Android calls it: the RN layer
-    // requests the runtime permission with PermissionsAndroid itself. If called,
-    // the bridge only reports whether READ_CALENDAR is granted.
+    // requests the runtime permission with PermissionsAndroid itself, and notes
+    // each request through `noteDeviceCalendarAsked`. If called, the bridge only
+    // reports whether READ_CALENDAR is granted.
     AsyncFunction("requestDeviceCalendarAccess") { events: Boolean, reminders: Boolean ->
       host.requestDeviceCalendarAccess(events, reminders)
     }
 
     // What the OS allows for the device calendars, and whether to ask now
-    // (decision 166). Asks nobody. On Android the state is never "not asked"
-    // (the platform cannot tell), so nothing is asked from here.
+    // (decisions 166, 172). Asks nobody. "Not asked" on Android is Aperio's own
+    // record (see `noteDeviceCalendarAsked`): the start check asks once per
+    // device.
     AsyncFunction("deviceCalendarAccessJson") {
       host.deviceCalendarAccessJson()
+    }
+
+    // Aperio asked for the calendar permission on this device (decision 172).
+    // The record lives outside Auto Backup, so a new phone is asked again.
+    Function("noteDeviceCalendarAsked") {
+      appContext.reactContext?.applicationContext?.let { AndroidDeviceCalendar.noteAsked(it) }
+      Unit
     }
 
     // Force a full cold re-sync of one external account (clears its delta tokens

@@ -285,6 +285,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** What the OS allows for the device calendars and reminders, and whether
    *  to ask now (decision 166): a JSON `OsAccessReport`. Asks nobody. */
   deviceCalendarAccessJson(): Promise<string>;
+  /** Android: note that Aperio asked for the calendar permission on this
+   *  device (decision 172), in a record Auto Backup does not carry, so the
+   *  start check asks once per device. A no-op on iOS, which knows itself
+   *  whether it asked. */
+  noteDeviceCalendarAsked(): void;
   /** External accounts whose required keychain secret is absent (the
    *  credential-repair banner data), as a JSON `Account[]`. */
   listAccountsMissingCredentialsJson(lang: string | null): Promise<string>;

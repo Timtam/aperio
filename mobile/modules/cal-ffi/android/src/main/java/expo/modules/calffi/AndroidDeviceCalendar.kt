@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
 import androidx.core.content.ContextCompat
+import java.io.File
 import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,9 +27,11 @@ import uniffi.cal_ffi.DeviceEventStoreBridge
  * cross as RFC-3339 (UTC `Instant`s); CalendarProvider stores epoch millis.
  *
  * The runtime permission REQUEST happens in the RN layer (`PermissionsAndroid`)
- * before the account is added — [requestAccess] only reports whether access is
- * already granted, and the data methods throw [DeviceCalException.PermissionDenied]
- * if it was revoked.
+ * — when the account is added, at start (once per device, decision 172) and on
+ * the account's "Allow access…" — and every such request is noted here
+ * ([noteAsked]). [requestAccess] only reports whether access is already
+ * granted, and the data methods throw [DeviceCalException.PermissionDenied] if
+ * it was revoked.
  */
 class AndroidDeviceCalendar(private val context: Context) : DeviceEventStoreBridge {
 
@@ -37,14 +40,41 @@ class AndroidDeviceCalendar(private val context: Context) : DeviceEventStoreBrid
   // Android has no system reminders app — the adapter stays calendar-only.
   override fun supportsReminders(): Boolean = false
 
-  // What the OS allows right now. Android cannot tell "never asked" from
-  // "refused": both are not granted, which the Rust side reads as undetermined.
-  // Calendars count as granted only when reading AND writing are.
+  // What the OS allows right now. Calendars count as granted only when reading
+  // AND writing are. Android itself cannot tell "never asked" from "refused";
+  // Aperio's own record of having asked on this device does ([askedBefore]):
+  // without it the core reads "not asked" and the start check asks once
+  // (decision 172). After asking, "not_granted" reads as undetermined — the
+  // user's answer, or a dialog Android will not show again — which the
+  // account's "Allow access…" finds out by asking.
   override fun accessStatus(): String =
     JSONObject()
-      .put("events", if (hasReadPermission() && hasWritePermission()) "granted" else "not_granted")
+      .put(
+        "events",
+        when {
+          hasReadPermission() && hasWritePermission() -> "granted"
+          !askedBefore(context) -> "not_determined"
+          else -> "not_granted"
+        },
+      )
       .put("reminders", JSONObject.NULL)
       .toString()
+
+  companion object {
+    /** Aperio's record that it asked for the calendar permission on THIS device.
+     *  In noBackupFilesDir on purpose: Auto Backup and a move to a new phone must
+     *  not carry it, because the grant does not travel either. */
+    private const val ASKED_RECORD = "device_calendar_asked"
+
+    fun askedBefore(context: Context): Boolean =
+      File(context.noBackupFilesDir, ASKED_RECORD).exists()
+
+    /** Note that Aperio asked — whatever the answer, and also when Android
+     *  answered without showing its dialog. */
+    fun noteAsked(context: Context) {
+      runCatching { File(context.noBackupFilesDir, ASKED_RECORD).createNewFile() }
+    }
+  }
 
   // ── Calendar reads ──
 

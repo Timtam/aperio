@@ -847,6 +847,22 @@ mod tests {
             reminders: false,
         };
         assert_eq!(device_access(&android), (OsAccess::Full, None));
+        // Android never asked on this device (no record of Aperio's): not
+        // asked, so the start check asks once (decision 172). After asking:
+        // undetermined, so "Allow access…" asks and finds out.
+        let android_new = AccessOnly {
+            status: r#"{"events":"not_determined","reminders":null}"#,
+            reminders: false,
+        };
+        assert_eq!(device_access(&android_new), (OsAccess::NotAsked, None));
+        let android_asked = AccessOnly {
+            status: r#"{"events":"not_granted","reminders":null}"#,
+            reminders: false,
+        };
+        assert_eq!(
+            device_access(&android_asked),
+            (OsAccess::Undetermined, None)
+        );
         // Unreadable: undetermined, never "not asked".
         let garbled = AccessOnly {
             status: "?",

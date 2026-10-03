@@ -16,7 +16,11 @@ import {
 } from '@aperio/shared';
 
 import i18n from '../../i18n';
-import { deviceCalendarAccess, requestDeviceCalendarAccess } from '../api/accounts';
+import {
+  deviceCalendarAccess,
+  noteDeviceCalendarAsked,
+  requestDeviceCalendarAccess,
+} from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
 import { holdingSpeech } from '../a11y/speechHold';
 import { isAppLockEngaged, isOsSheetOpen, whileOsSheetOpen } from './appLock';
@@ -34,6 +38,10 @@ import { settleExternalCaches } from './cacheSettle';
  * core's rule (`device_calendar_access_json` carries its answer); this runs the
  * prompt, reads the answer back, reloads the account when something was
  * granted, and says one sentence about it.
+ *
+ * Android cannot say whether it ever asked; Aperio notes every request it
+ * makes on the device, outside Auto Backup, so the start check asks there
+ * once per device, and again on a new phone (decision 172).
  *
  * The start check runs once per process. An answer the user already gave is
  * theirs, and iOS would not show the prompt again anyway: after that, only the
@@ -278,10 +286,14 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       return;
     }
     // The alert flips the app inactive; the lock must not cover the app or
-    // start its own prompt over it.
-    await whileOsSheetOpen(() =>
-      requestDeviceCalendarAccess(ask.events, ask.reminders),
-    ).catch(() => false);
+    // start its own prompt over it. Android asks through its runtime
+    // permission dialog, once per device (decision 172).
+    // What the prompt answered is read back from the OS below, not from here.
+    await whileOsSheetOpen<unknown>(() =>
+      Platform.OS === 'android'
+        ? requestAndroidCalendarPermission()
+        : requestDeviceCalendarAccess(ask.events, ask.reminders),
+    ).catch(() => undefined);
     const after = await readDeviceAccess();
     await reloadAndSay(
       answerOutcome(ask, after),
@@ -378,9 +390,10 @@ export function markDeviceAccessCheckPending(): void {
 /** Android's answer to the calendar permissions: `blocked` when it reports
  *  that it will not show its dialog again ("don't ask again", a second
  *  refusal), so the screen offers its settings. Android reports a dialog
- *  closed without an answer the same way; the settings text therefore does
- *  not claim that Android will not ask, and the next "Allow access…" still
- *  asks first. PR-E's own record of a refusal can tell the two apart. */
+ *  closed without an answer the same way, and nothing tells the two apart;
+ *  the settings text therefore does not claim that Android will not ask, and
+ *  the next "Allow access…" still asks first. Every request is noted on the
+ *  device, so the start check asks only once (decision 172). */
 export async function requestAndroidCalendarPermission(): Promise<
   'granted' | 'denied' | 'blocked'
 > {
@@ -388,6 +401,9 @@ export async function requestAndroidCalendarPermission(): Promise<
     PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
     PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
   ]);
+  // Asked on this device, whatever came of it: the start check does not ask
+  // again (decision 172).
+  noteDeviceCalendarAsked();
   const answers = [
     result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR],
     result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR],

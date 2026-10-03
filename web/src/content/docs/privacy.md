@@ -46,8 +46,10 @@ when you use that feature:
   Calendar and Reminders access on iOS): only if you enable the built-in
   *device calendar* — to read and write the calendars and reminders already on
   your device. If you don't use it, no calendar permission is requested. On a
-  phone where iOS has never asked yet (after moving to a new one), Aperio asks
-  at start, and only while such an account exists.
+  phone where the system has never asked yet (after moving to a new one),
+  Aperio asks at start, and only while such an account exists. Android cannot
+  say whether it ever asked, so Aperio keeps a note on the phone that it did;
+  the note is left out of backups, so a new phone is asked again.
 - **Photos**: only the single image you explicitly pick (e.g. a contact photo);
   the app has no bulk access to your photo library and the image is processed
   locally.

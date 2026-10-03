@@ -84,9 +84,10 @@ calendars. When you come back to Aperio, it updates the account and says so,
 or says what access is still missing. If a restriction such as Screen Time
 forbids access, Aperio says that too; only that restriction can change it.
 
-On Android the same holds for the calendars: the action asks while Android
-still asks, and otherwise leads to Aperio's permissions in the Android
-settings.
+On Android the same holds for the calendars. When the account exists and
+Aperio has never asked on this phone — a new phone included — it asks once at
+start. After that the action asks while Android still asks, and otherwise
+leads to Aperio's permissions in the Android settings.
 
 ## A task's time shifted, once
 

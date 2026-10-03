@@ -2961,14 +2961,20 @@ Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
 iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
 sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
 wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
-geschlossener Dialog dasselbe wie „nicht mehr fragen“; der Dialog behauptet
-deshalb nichts darüber, PR-E kann beides trennen. ↻ im Test (Handy ohne Testläufer).
+geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
+der Dialog behauptet deshalb nichts darüber. ↻ im Test (Handy ohne Testläufer).
+
+✅ **PR-E:** Android fragt beim Start einmal selbst (172). Weil Android nicht
+sagen kann, ob es je gefragt hat, merkt sich Aperio jede Anfrage auf dem Gerät
+(`noBackupFilesDir`, nicht im Backup, also auf einem neuen Telefon wieder
+leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
+(`ask_on_start`) fragt wie unter iOS. Danach liest sie „unbestimmt“, und
+„Zugriff erlauben…“ fragt bzw. führt in die Einstellungen. ↻ im Test (Handy
+ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**
 - PR-D2: eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher Satz am Ende
   eines Durchlaufs, nur ein Gerätekonto je Gerät, Wortlaut am Desktop.
-- PR-E: Android fragt beim Start einmal selbst (172), mit einem Merker, der
-  nicht ins Backup geht.
 - PR-F: nur wenn iOS neue Kennungen vergeben hat — Einstellungen alter
   Kalender auf neue übernehmen, Paare von Toni gewählt, nie nach Namen.
 

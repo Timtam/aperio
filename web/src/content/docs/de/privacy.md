@@ -47,9 +47,12 @@ benötigt, und nur, wenn du die Funktion nutzt:
   Kalender- und Erinnerungszugriff unter iOS): nur, wenn du den integrierten
   *Gerätekalender* aktivierst — um die bereits auf deinem Gerät vorhandenen
   Kalender und Erinnerungen zu lesen und zu schreiben. Nutzt du ihn nicht, wird
-  keine Kalenderberechtigung angefordert. Auf einem Telefon, auf dem iOS noch nie
-  gefragt hat (nach dem Umzug auf ein neues), fragt Aperio beim Start, und nur,
-  solange es ein solches Konto gibt.
+  keine Kalenderberechtigung angefordert. Auf einem Telefon, auf dem das System
+  noch nie gefragt hat (nach dem Umzug auf ein neues), fragt Aperio beim Start,
+  und nur, solange es ein solches Konto gibt. Android kann nicht sagen, ob es je
+  gefragt hat; Aperio merkt sich deshalb auf dem Telefon, dass es gefragt hat.
+  Der Vermerk geht nicht ins Backup, ein neues Telefon wird also wieder
+  gefragt.
 - **Fotos**: nur das einzelne Bild, das du ausdrücklich auswählst (z. B. ein
   Kontaktfoto); die App hat keinen pauschalen Zugriff auf deine Fotomediathek,
   und das Bild wird lokal verarbeitet.

@@ -92,9 +92,10 @@ aktualisiert es das Konto und sagt es an, oder es sagt, wofür der Zugriff noch
 fehlt. Verbietet eine Einschränkung wie Bildschirmzeit den Zugriff, sagt Aperio
 auch das; ändern lässt er sich dann nur bei dieser Einschränkung.
 
-Unter Android gilt dasselbe für die Kalender: Die Aktion fragt, solange
-Android fragt, und führt sonst zu Aperios Berechtigungen in den
-Android-Einstellungen.
+Unter Android gilt dasselbe für die Kalender. Gibt es das Konto und hat
+Aperio auf diesem Telefon noch nie gefragt — auch auf einem neuen —, fragt es
+beim Start einmal. Danach fragt die Aktion, solange Android fragt, und führt
+sonst zu Aperios Berechtigungen in den Android-Einstellungen.
 
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 
