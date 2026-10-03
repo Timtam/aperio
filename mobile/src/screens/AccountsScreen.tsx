@@ -39,7 +39,7 @@ import {
   reconnectOAuthAccount,
 } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
-import { whileOsSheetOpen } from '../state/appLock';
+import { whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import {
   openDeviceAccessSettings,
   refreshDeviceAccessReport,
@@ -648,6 +648,9 @@ export default function AccountsScreen() {
         Platform.OS === 'android'
           ? (await whileOsSheetOpen(requestAndroidCalendarPermission)) === 'granted'
           : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
+      // A slow answer may have re-locked the app: what follows is said and
+      // shown after the unlock, not under its prompt.
+      await whenAppLockReleased();
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');
         setError(message);

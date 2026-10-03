@@ -463,7 +463,12 @@ export async function repairDeviceAccess(): Promise<RepairResult> {
     }
     if (Platform.OS === 'android') {
       const answer = await whileOsSheetOpen(requestAndroidCalendarPermission);
-      if (answer === 'blocked') return { step: 'settings', report: before };
+      if (answer === 'blocked') {
+        // The settings dialog opens after the unlock a slow answer may
+        // have brought, not above the lock's cover.
+        await whenAppLockReleased();
+        return { step: 'settings', report: before };
+      }
       const after = await readDeviceAccess();
       await reloadAndSay(grantedOutcome(after), after, name, false);
       return { step: 'done', report: after };

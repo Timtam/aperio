@@ -92,8 +92,9 @@ export function whenAppLockReleased(): Promise<void> {
  * Android's permission dialog is an activity of its own and does background
  * the app; that counts as leaving too, because nothing tells the dialog from
  * Home or an app switch while it is up: a slow answer re-locks the app, and
- * the cover shows behind the dialog. What follows the answer waits for the
- * unlock (`whenAppLockReleased`).
+ * the cover shows behind the dialog. What follows the answer — a sentence,
+ * the account being added, the settings dialog — waits for the unlock
+ * (`whenAppLockReleased`).
  */
 export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
   osSheetBusy += 1;
