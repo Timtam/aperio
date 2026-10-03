@@ -899,7 +899,7 @@ mod tests {
         const CONTRACT: &str = include_str!("../../../shared/contracts/deviceAccessStatus.json");
         let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
         let samples = contract["samples"].as_array().unwrap();
-        assert!(samples.len() >= 11, "the contract lost its samples");
+        assert!(samples.len() >= 12, "the contract lost its samples");
         for sample in samples {
             let name = sample["name"].as_str().unwrap();
             let platform = sample["platform"].as_str();

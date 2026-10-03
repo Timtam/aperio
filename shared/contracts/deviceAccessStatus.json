@@ -1,5 +1,5 @@
 {
-  "what": "The wire contract for the device's access status: the JSON the native bridges write (accessStatus) and Rust reads (adapter_device_calendar::read_device_access). Rust's test reads these samples, and mobile/scripts/check-ffi-bridges.mjs holds the keys each bridge's accessStatus() writes to the keys its platform's samples use, both ways. So a key renamed in a writer, in the reader or here fails a check instead of going silent.",
+  "what": "The wire contract for the device's access status: the JSON the native bridges write (accessStatus) and Rust reads (adapter_device_calendar::read_device_access). Rust's test reads these samples, each key's effect shown by at least one of them, and mobile/scripts/check-ffi-bridges.mjs holds the key paths each bridge's accessStatus() writes to the key paths its platform's samples use, both ways. So a key renamed in a writer, in the reader or here fails a check instead of going silent.",
   "why": "Nothing compiles Swift outside the iOS release workflow, and the field case behind granted_this_run only shows on a phone: iOS stated 'never asked' for the reminders a second after granting them, until Aperio was started anew (decision 187). A key Rust does not read is ignored without a word, so a misspelled granted_this_run would bring back exactly that case.",
   "writtenBy": [
     "mobile/modules/cal-ffi/ios/IosDeviceEventStore.swift (accessStatus)",
@@ -44,6 +44,19 @@
       "calendar": "full",
       "tasks": "full",
       "settledByGrant": ["reminders"]
+    },
+    {
+      "name": "ios-the-calendars-stated-as-never-asked-after-a-grant",
+      "platform": "ios",
+      "note": "The field case on the other entity: nothing says iOS keeps it to the reminders.",
+      "status": {
+        "events": "not_determined",
+        "reminders": "full_access",
+        "granted_this_run": { "events": true, "reminders": true }
+      },
+      "calendar": "full",
+      "tasks": "full",
+      "settledByGrant": ["calendars"]
     },
     {
       "name": "ios-only-the-granted-entity-is-settled",

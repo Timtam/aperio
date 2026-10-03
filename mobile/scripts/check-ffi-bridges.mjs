@@ -855,7 +855,8 @@ for (const { name, line } of kotlinGroups.nested) {
 /**
  * The access status each bridge's `accessStatus()` writes, held to the keys of
  * its platform's samples in `shared/contracts/deviceAccessStatus.json`, both
- * ways.
+ * ways, by path: the flags inside `granted_this_run` are named like the
+ * top-level keys, so `granted_this_run.events` missing would not show by name.
  *
  * Rust's test reads the same samples, so this closes the other end: nothing
  * here compiles Swift or runs either writer. A key spelled differently in a
@@ -870,27 +871,98 @@ const ACCESS_WRITERS = {
     label: 'iOS',
     file: join(NATIVE_DIR.swift, 'IosDeviceEventStore.swift'),
     header: /\bfunc\s+accessStatus\s*\(\s*\)\s*->\s*String\s*\{/,
-    // A dictionary literal's keys: `"events": …`.
-    keys: /"([A-Za-z_]\w*)"\s*:/g,
+    paths: swiftKeyPaths,
   },
   android: {
     label: 'Android',
     file: join(NATIVE_DIR.kotlin, 'AndroidDeviceCalendar.kt'),
     header: /\bfun\s+accessStatus\s*\(\s*\)\s*:\s*String\s*\{/,
-    // `JSONObject().put("events", …)`.
-    keys: /\.put\(\s*"([A-Za-z_]\w*)"/g,
+    paths: kotlinKeyPaths,
   },
 };
 
-/** Every key of a JSON object, nested ones included. */
-function jsonKeys(value, into = new Set()) {
+/** Every key path of a JSON object: `events`, `granted_this_run.events`. */
+function jsonKeyPaths(value, into = new Set(), prefix = '') {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [key, inner] of Object.entries(value)) {
-      into.add(key);
-      jsonKeys(inner, into);
+      const path = prefix ? `${prefix}.${key}` : key;
+      into.add(path);
+      jsonKeyPaths(inner, into, path);
     }
   }
   return into;
+}
+
+/** The index just past the string literal opening at `open`. */
+function pastString(text, open) {
+  let i = open + 1;
+  while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+  return i + 1;
+}
+
+/** The innermost key path an open bracket belongs to, if any. */
+const contextOf = (stack) => [...stack].reverse().find(Boolean) ?? '';
+const joined = (context, key) => (context ? `${context}.${key}` : key);
+
+/**
+ * The key paths a Swift dictionary literal writes: `"events": …` at the top,
+ * `"granted_this_run": ["events": …]` one level down. A key's value that opens
+ * a literal (`[`) makes the key the context of what that literal holds.
+ */
+function swiftKeyPaths(body) {
+  const paths = new Set();
+  const stack = [];
+  let pending = null;
+  for (let i = 0; i < body.length; ) {
+    if (body[i] === '"') {
+      const key = /^"([A-Za-z_]\w*)"\s*:/.exec(body.slice(i));
+      if (key) {
+        const path = joined(contextOf(stack), key[1]);
+        paths.add(path);
+        pending = /^\s*\[/.test(body.slice(i + key[0].length)) ? path : null;
+        i += key[0].length;
+      } else {
+        i = pastString(body, i);
+      }
+      continue;
+    }
+    if (body[i] === '[') {
+      stack.push(pending);
+      pending = null;
+    } else if (body[i] === ']') {
+      stack.pop();
+    }
+    i += 1;
+  }
+  return paths;
+}
+
+/**
+ * The key paths a Kotlin `JSONObject().put("events", …)` chain writes. A
+ * `.put` whose value is another `JSONObject().put(…)` chain makes its key the
+ * context of what that chain puts.
+ */
+function kotlinKeyPaths(body) {
+  const paths = new Set();
+  const stack = [];
+  for (let i = 0; i < body.length; ) {
+    if (body[i] === '"') {
+      i = pastString(body, i);
+      continue;
+    }
+    const put = /^\.put\(\s*"([A-Za-z_]\w*)"/.exec(body.slice(i));
+    if (put) {
+      const path = joined(contextOf(stack), put[1]);
+      paths.add(path);
+      stack.push(path);
+      i += put[0].length;
+      continue;
+    }
+    if (body[i] === '(') stack.push(null);
+    else if (body[i] === ')') stack.pop();
+    i += 1;
+  }
+  return paths;
 }
 
 function accessStatusKeys() {
@@ -907,7 +979,7 @@ function accessStatusKeys() {
   for (const [platform, writer] of Object.entries(ACCESS_WRITERS)) {
     const expected = new Set();
     for (const sample of samples.filter((x) => x.platform === platform)) {
-      jsonKeys(sample.status, expected);
+      jsonKeyPaths(sample.status, expected);
     }
     const code = withoutComments(readFileSync(writer.file, 'utf8'), { nested: true });
     const head = writer.header.exec(code);
@@ -920,7 +992,7 @@ function accessStatusKeys() {
       );
       continue;
     }
-    const written = new Set([...body.matchAll(writer.keys)].map((m) => m[1]));
+    const written = writer.paths(body);
     for (const key of expected) {
       if (!written.has(key)) {
         out.push(
@@ -1068,5 +1140,5 @@ console.log(
     `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
     `registrations (the largest of its ${kotlinGroups.methods.length}: ` +
     `${Math.max(...kotlinGroups.methods.map((x) => x.count))}); both bridges write ` +
-    'the access status keys shared/contracts/deviceAccessStatus.json names.',
+    'the access status key paths shared/contracts/deviceAccessStatus.json names.',
 );
