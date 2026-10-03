@@ -32,6 +32,10 @@
  * has to be registered in BOTH native modules, as the same kind of function and
  * with the same number of parameters (see `declaredFunctions`).
  *
+ * And the Android module's size: no method of it may hold so many
+ * registrations that the JVM refuses to compile it (see
+ * `MAX_REGISTRATIONS_PER_METHOD`).
+ *
  * Only methods a bridge actually calls are checked, so a Rust method no phone
  * uses is nobody's problem here.
  *
@@ -338,21 +342,27 @@ for (const [name, count] of declared) {
 }
 
 /**
- * A source with its comments blanked out and its strings kept. Block comments
- * nest in Kotlin and Swift, not in TypeScript.
+ * A source with its comments blanked out and its strings kept, or with the
+ * contents of its strings blanked too (`strings: 'blank'`). Block comments nest
+ * in Kotlin and Swift, not in TypeScript. Blanking keeps every line and column
+ * where it was, so an index into one form is an index into the other.
  *
  * A registration that was commented out still compiles on both platforms, and
  * a name inside a comment is nothing JavaScript can call.
  */
-function withoutComments(text, { nested }) {
+function withoutComments(text, { nested, strings = 'keep' }) {
   const blank = (s) => s.replace(/[^\n]/g, ' ');
+  const literal = (s, open, close) =>
+    strings === 'blank'
+      ? s.slice(0, open) + blank(s.slice(open, s.length - close)) + s.slice(s.length - close)
+      : s;
   let out = '';
   let i = 0;
   while (i < text.length) {
     if (text.startsWith('"""', i)) {
       const end = text.indexOf('"""', i + 3);
       const stop = end < 0 ? text.length : end + 3;
-      out += text.slice(i, stop);
+      out += literal(text.slice(i, stop), 3, end < 0 ? 0 : 3);
       i = stop;
     } else if (text[i] === '"' || text[i] === "'" || text[i] === '`') {
       const quote = text[i];
@@ -360,7 +370,7 @@ function withoutComments(text, { nested }) {
       while (j < text.length && text[j] !== quote && (text[j] !== '\n' || quote === '`')) {
         j += text[j] === '\\' ? 2 : 1;
       }
-      out += text.slice(i, j + 1);
+      out += literal(text.slice(i, j + 1), 1, j < text.length ? 1 : 0);
       i = j + 1;
     } else if (text.startsWith('//', i)) {
       const end = text.indexOf('\n', i);
@@ -516,7 +526,10 @@ function closureParams(after, language) {
  * JavaScript (`null`: unreadable).
  *
  * Registrations are expected in the module file itself. Moving some into a
- * helper file reports them as missing, loudly, rather than passing.
+ * helper file reports them as missing, loudly, rather than passing. One
+ * written any other way (a name of other characters, a template, type
+ * arguments, the closure inside the parentheses) is not read here;
+ * `unreadableRegistrations` names it instead.
  */
 function registeredFunctions(source, language) {
   const code = withoutComments(source, { nested: true });
@@ -526,6 +539,32 @@ function registeredFunctions(source, language) {
     out.set(m[2], [...(out.get(m[2]) ?? []), { async: Boolean(m[1]), params }]);
   }
   return out;
+}
+
+/**
+ * A registration as either module writes it, whatever its name looks like:
+ * `Function(` or `AsyncFunction(`, with or without type arguments, in code. It
+ * is looked for with comments and string contents blanked (`codeOnly`), so a
+ * message that mentions one is not one, and `return@AsyncFunction` is a label.
+ * A call with a receiver, `b.Function(` or `this.AsyncFunction(`, still is one.
+ * `registeredFunctions` reads only the plain form, `READABLE_REGISTRATION`.
+ */
+const REGISTRATION = /(?<![\w@])(?:Async)?Function\s*(?:<[^(){};]*>)?\s*\(/g;
+const READABLE_REGISTRATION = /^(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/;
+const codeOnly = (source) => withoutComments(source, { nested: true, strings: 'blank' });
+const lineAt = (code, index) => code.slice(0, index).split('\n').length;
+
+/**
+ * The lines of registrations `registeredFunctions` cannot read. Each would be a
+ * function JavaScript can call that no declaration is held to, so it is named
+ * rather than skipped.
+ */
+function unreadableRegistrations(source) {
+  const code = withoutComments(source, { nested: true });
+  const bare = codeOnly(source);
+  return [...bare.matchAll(REGISTRATION)]
+    .filter((m) => !READABLE_REGISTRATION.test(code.slice(m.index)))
+    .map((m) => lineAt(bare, m.index));
 }
 
 const declaredSurface = declaredFunctions(readFileSync(TS_MODULE, 'utf8'));
@@ -557,6 +596,20 @@ for (const { text } of declaredSurface.unreadable) {
     `CalFfiModule.ts has a member this check cannot read, so it cannot hold the ` +
       `native modules to it: "${text.length > 80 ? `${text.slice(0, 77)}...` : text}"`,
   );
+}
+for (const [platform, file] of [
+  ['android', KOTLIN],
+  ['ios', SWIFT],
+]) {
+  for (const line of unreadableRegistrations(readFileSync(file, 'utf8'))) {
+    surface.push(
+      `the ${MODULE[platform]} module registers a function on line ${line} that this ` +
+        'check cannot read, so it cannot hold it to CalFfiModule.ts: write it as ' +
+        'Function("name") { ... } or AsyncFunction("name") { ... }, with a name of ' +
+        'letters, digits and underscores, no type arguments, and the closure after ' +
+        'the parentheses',
+    );
+  }
 }
 for (const [platform, registered] of nativeModules) {
   const where = `the ${MODULE[platform]} module`;
@@ -619,8 +672,8 @@ for (const [name, [platform]] of ONLY_ON) {
  *
  * The other direction from everything above, and until this was added an
  * unwatched one. A method added to such a trait has to be implemented by a
- * class on each platform, and nothing local compiles either: Kotlin first
- * fails minutes into an EAS build, Swift only in the XCFramework workflow. The
+ * class on each platform, and CI compiles neither: Kotlin first fails
+ * minutes into an EAS build, Swift only in the XCFramework workflow. The
  * device calendar bridge gained `accessStatus` this way.
  */
 function foreignTraits(rust) {
@@ -713,6 +766,88 @@ for (const [trait, methods] of traits) {
 }
 const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
 
+/**
+ * How many registrations each method of the Android module holds:
+ * `definition()` and every `ModuleDefinitionBuilder` extension declared in it.
+ *
+ * The JVM caps one method's bytecode at 64 KB, and expo inlines each
+ * `Function`/`AsyncFunction` registration into the method it sits in. CI
+ * compiles no Kotlin, so a method that outgrew the cap was found at
+ * `:cal-ffi:compileReleaseKotlin`, minutes into an EAS build ("Method too
+ * large: CalFfiModule.definition"): with 140 registrations once, and with 130
+ * after the first split, because new registrations kept landing in
+ * definition() itself while the groups lifted out barely changed. 127 built.
+ * Registrations are not all the same size, so the count is a proxy, kept
+ * well under the smallest one that failed.
+ */
+const MAX_REGISTRATIONS_PER_METHOD = 70;
+
+/**
+ * `methods`: each method by name and line, with the registrations whose
+ * innermost method it is. `outside`: the lines of registrations in none of
+ * them. `nested`: methods declared inside another one.
+ *
+ * By position, not by comparing totals: a group counted twice and another
+ * counted not at all would cancel out in a sum. And by line, not by name: two
+ * classes in the file may each have a method of the same name.
+ */
+function registrationGroups(source) {
+  const code = codeOnly(source);
+  const methods = [];
+  for (const m of code.matchAll(
+    /\b(?:override\s+fun\s+(definition)\s*\(\s*\)\s*=\s*ModuleDefinition|fun\s+ModuleDefinitionBuilder\.([A-Za-z_]\w*)\s*\(\s*\))\s*\{/g,
+  )) {
+    const open = m.index + m[0].length - 1;
+    const body = braced(code, open);
+    if (body === null) continue;
+    methods.push({
+      name: m[1] ?? m[2],
+      line: lineAt(code, m.index),
+      open,
+      close: open + body.length + 1,
+      count: 0,
+    });
+  }
+  const outside = [];
+  for (const r of code.matchAll(REGISTRATION)) {
+    const around = methods.filter((x) => x.open < r.index && r.index < x.close);
+    if (around.length === 0) outside.push(lineAt(code, r.index));
+    else around.reduce((a, b) => (b.open > a.open ? b : a)).count += 1;
+  }
+  const nested = methods.filter((x) =>
+    methods.some((y) => y !== x && y.open < x.open && x.close <= y.close),
+  );
+  return { methods, outside, nested };
+}
+
+const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
+/** A method of the Android module too large to compile, kept apart from
+ *  `problems` and `surface`: neither regenerating nor declaring fixes it. */
+const methodSize = [];
+/** Registrations whose method this check cannot tell, so it cannot size it. */
+const methodLayout = [];
+for (const { name, line, count } of kotlinGroups.methods) {
+  if (count > MAX_REGISTRATIONS_PER_METHOD) {
+    methodSize.push(
+      `${name}() on line ${line} of the Android module holds ${count} registrations, ` +
+        `more than the ${MAX_REGISTRATIONS_PER_METHOD} one method may hold`,
+    );
+  }
+}
+if (kotlinGroups.outside.length > 0) {
+  methodLayout.push(
+    `the Android module registers functions on line(s) ${kotlinGroups.outside.join(', ')}, ` +
+      'outside definition() and every ModuleDefinitionBuilder extension this check can ' +
+      'read, so it cannot tell how large the method holding them is',
+  );
+}
+for (const { name, line } of kotlinGroups.nested) {
+  methodLayout.push(
+    `${name}() on line ${line} is declared inside another method of the Android ` +
+      'module, so this check cannot tell which method its registrations weigh on',
+  );
+}
+
 // A parse that matched nothing would report no problems and mean nothing.
 const floors = [
   ['exported Rust methods', rust.size, 100],
@@ -727,6 +862,10 @@ const floors = [
   ['iOS module registrations', nativeModules.get('ios').size, 100],
   ['foreign traits Rust calls into', traits.size, 4],
   ['methods of those traits', traitMethods, 15],
+  // definition() at least. Fewer means the pattern no longer matches how the
+  // module is written; an unsplit module still finds definition() and is
+  // reported by its size, not here.
+  ['methods of the Android module that register functions', kotlinGroups.methods.length, 1],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -769,7 +908,33 @@ if (surface.length > 0) {
   );
 }
 
-if (problems.length > 0 || surface.length > 0) process.exit(1);
+const methodIssues = methodSize.length + methodLayout.length;
+if (methodIssues > 0) {
+  console.error(
+    `${problems.length > 0 || surface.length > 0 ? '\n' : ''}The Android module's ` +
+      `methods and the JVM's 64 KB cap per method disagree in ${methodIssues} place(s):\n`,
+  );
+  for (const p of [...methodSize, ...methodLayout]) console.error(`  ${p}`);
+  if (methodSize.length > 0) {
+    console.error(
+      '\nMove registrations from the method named above into the group they belong\n' +
+        'to, or lift some into a group of their own,\n' +
+        '`private fun ModuleDefinitionBuilder.someFunctions() { ... }`, called from\n' +
+        'definition(), as CalFfiModule.kt does. Each extension compiles to its own\n' +
+        'method, so the cap applies per group.',
+    );
+  }
+  if (methodLayout.length > 0) {
+    console.error(
+      '\nWrite each group as a member of CalFfiModule,\n' +
+        '`private fun ModuleDefinitionBuilder.someFunctions() { ... }`, called from\n' +
+        'definition() and declared inside no other method, so this check can tell\n' +
+        'how large each method is.',
+    );
+  }
+}
+
+if (problems.length > 0 || surface.length > 0 || methodIssues > 0) process.exit(1);
 
 const onlyOn = Object.entries(MODULE)
   .map(([platform, label]) => {
@@ -788,5 +953,8 @@ console.log(
     `${rustFree.size} exported free functions ` +
     `(${[...rustFree.keys()].sort().join(', ')}) are all declared there; ` +
     `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +
-    'implemented on both platforms with the same argument counts.',
+    'implemented on both platforms with the same argument counts, and no method ' +
+    `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
+    `registrations (the largest of its ${kotlinGroups.methods.length}: ` +
+    `${Math.max(...kotlinGroups.methods.map((x) => x.count))}).`,
 );

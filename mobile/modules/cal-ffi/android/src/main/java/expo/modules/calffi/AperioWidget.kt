@@ -155,7 +155,7 @@ private fun inProgressSuffix(item: JSONObject, strings: JSONObject?): List<Strin
 
 /** "When", in the order it reads — the twin of the Swift `whenParts`. */
 private fun whenParts(item: JSONObject, strings: JSONObject?, locale: Locale): List<String> {
-  val at = WidgetStore.parseInstant(item.optString("at", null)) ?: return emptyList()
+  val at = WidgetStore.instantAt(item, "at") ?: return emptyList()
   val untimed = item.optBoolean("untimed", false)
   val isEvent = item.optString("kind") == "event"
   val parts = mutableListOf<String>()
@@ -217,7 +217,7 @@ private fun visibleItems(snapshot: JSONObject, ticked: Set<String>, now: Date): 
 }
 
 private fun isExhausted(snapshot: JSONObject, now: Date): Boolean {
-  val horizon = WidgetStore.parseInstant(snapshot.optString("horizonEnd", null)) ?: return true
+  val horizon = WidgetStore.instantAt(snapshot, "horizonEnd") ?: return true
   return !now.before(horizon)
 }
 

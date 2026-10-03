@@ -189,12 +189,22 @@ It also checks what JavaScript can call. Every function
 `CalFfiModule.kt` and `CalFfiModule.swift`, with `AsyncFunction` when it returns
 a Promise and `Function` otherwise, and with one closure parameter per declared
 parameter (expo's trailing `Promise` parameter does not count). A commented-out
-registration does not count, and a declaration the check cannot read is named,
-not skipped. TypeScript trusts the declaration, so without this a missing
+registration does not count, and a declaration or a registration the check
+cannot read is named, not skipped. TypeScript trusts the declaration, so without this a missing
 registration shows only on the phone, as "CalFfi.x is not a function", and the
 wrong kind as a Promise where a value was expected. A function one platform
 lacks on purpose (the iOS background wake-up, the Siri pickers) is listed in
 `ONLY_ON` in the script, with its reason.
+
+And it watches the Android module's size. The JVM caps one method's bytecode at
+64 KB, and expo inlines every registration into the method it sits in, so
+`CalFfiModule.kt` splits its registrations across `ModuleDefinitionBuilder`
+extensions. The check fails when `definition()` or one extension holds more than
+70 registrations, or when a registration sits where it cannot tell which method
+holds it. Without it, the cap showed up as "Method too large" at
+`:cal-ffi:compileReleaseKotlin`, minutes into an EAS build: at 140
+registrations, and at 130 after the first split, because new ones kept landing
+in `definition()`.
 
 So a new free function in `crates/cal-ffi` takes four steps: export it,
 regenerate the Kotlin bindings, declare it in `CalFfiModule.ts`, and register it
