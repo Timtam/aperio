@@ -10,7 +10,7 @@
 
 use serde::Serialize;
 
-use super::CacheUpdatedPayload;
+use super::{CacheUpdatedPayload, RefreshCause};
 
 /// Host-supplied sink for cache-refresh notifications.
 ///
@@ -26,8 +26,10 @@ pub trait CacheObserver: Send + Sync {
     fn refresh_status(&self, status: &CacheRefreshStatus);
 }
 
-/// Status snapshot consumed by the toolbar indicator.
+/// A warm pass's state, for the indicators and for the sentence that ends a
+/// pass.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct CacheRefreshStatus {
     /// True while a warm pass is running.
     pub refreshing: bool,
@@ -38,4 +40,39 @@ pub struct CacheRefreshStatus {
     pub total_targets: Option<u32>,
     /// Containers refreshed so far in the running pass (`None` outside a pass).
     pub fetched_targets: Option<u32>,
+    /// What the passes that just ended left undone: set only on the status
+    /// that ends them (`refreshing` false), `None` on every other status and
+    /// in a point-in-time query. `None` there too when it could not be read;
+    /// a surface then says that the refresh ended, claiming neither that
+    /// everything was updated nor that something failed.
+    pub outcome: Option<PassOutcome>,
+}
+
+/// The accounts a pass could not update, for the sentence that ends it
+/// ("updated, except: …", decision 180).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct PassOutcome {
+    /// The same set the error surface shows (`CacheStore::refresh_errors`):
+    /// confirmed failures only, so what is said is what is shown. Includes
+    /// an account the pass could not try (its plugin is missing) whose
+    /// error is still recorded: its data is not current either.
+    pub failing: Vec<FailingAccount>,
+    /// The pass tried at least one account and read nothing at all — no
+    /// listing, no container: nothing was updated, and "updated, except: …"
+    /// would not be true. One failing container among readable ones is not
+    /// this.
+    pub all_failed: bool,
+}
+
+/// One account a pass could not update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct FailingAccount {
+    pub account_id: String,
+    /// Its display name, as every surface shows it.
+    pub name: String,
+    pub cause: RefreshCause,
+    /// `cause`'s severity, for comparing (see `AccountRefreshErrors::rank`).
+    pub rank: u8,
 }

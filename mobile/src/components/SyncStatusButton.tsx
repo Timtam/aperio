@@ -11,6 +11,7 @@ import { isSyncing, subscribeSyncActivity } from '../state/syncActivity';
 import { useSyncStatusInfo } from '../state/syncStatusContext';
 import {
   getRefreshErrorsSnapshot,
+  refreshBannerKey,
   subscribeRefreshErrors,
 } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -63,13 +64,9 @@ export function SyncStatusButton() {
     : (externalLabel ?? (showSyncing ? t('syncStatus.uploading') : info.label));
   // Refresh errors ride along as a label suffix (they describe a persistent
   // state, so they must not displace the live progress/engine label).
-  const label = refreshErrorAttention
-    ? `${baseLabel}. ${t(
-        refreshErrs.some((r) => r.auth_suspected)
-          ? 'refreshErrors.bannerAuth'
-          : 'refreshErrors.banner',
-      )}`
-    : baseLabel;
+  const bannerKey = refreshBannerKey(refreshErrs);
+  const label =
+    refreshErrorAttention && bannerKey != null ? `${baseLabel}. ${t(bannerKey)}` : baseLabel;
 
   const onPress = () => {
     AccessibilityInfo.announceForAccessibility(t('cacheRefresh.refreshing'));

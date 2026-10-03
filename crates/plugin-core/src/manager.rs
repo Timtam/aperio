@@ -1272,6 +1272,10 @@ impl PluginManager {
                     .map(|(kind, offered)| {
                         let (name, short_name) =
                             resolve_kind_name(&p.manifest, &strings, &kind, lang);
+                        // The limit is on the plugin's own kind; an adopted
+                        // one cannot be created anyway.
+                        let single_instance = p.manifest.single_instance
+                            && p.manifest.adapter_kind.as_deref() == Some(kind.as_str());
                         AdapterKindInfo {
                             kind,
                             offered,
@@ -1279,6 +1283,7 @@ impl PluginManager {
                             // many. Only the host provides one that is simply
                             // there.
                             implicit: false,
+                            single_instance,
                             name,
                             short_name,
                             plugin_id: p.manifest.id.clone(),
@@ -2053,6 +2058,7 @@ mod tests {
             tasks: Default::default(),
             account: None,
             adapter_kind: None,
+            single_instance: false,
             adopts_adapter_kinds: Vec::new(),
             kind_names: Default::default(),
             strings: Default::default(),

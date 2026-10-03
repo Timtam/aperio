@@ -1843,6 +1843,10 @@ impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String> {
         open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.to_string())
     }
+
+    fn single_instance(&self, adapter_kind: &str) -> bool {
+        host_core::builtin_adapters::single_instance(self.0, adapter_kind)
+    }
 }
 
 /// Restore what this device syncs through, for [`Host::open`] on app start —
@@ -2430,13 +2434,16 @@ impl Host {
 
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
-        let created = repo
-            .create(
-                req.adapter_kind.clone(),
-                req.display_name.trim(),
-                &req.config_json,
-            )
-            .map_err(acc_err)?;
+        // A second "This device" is refused here (decision 183): the account
+        // screen leads to the existing one before it gets this far.
+        let created = host_core::accounts::create_account(
+            &self.plugin_manager,
+            &repo,
+            req.adapter_kind.clone(),
+            req.display_name.trim(),
+            &req.config_json,
+        )
+        .map_err(acc_err)?;
 
         // Persist the secret right after the row so the keychain and DB stay
         // aligned. Which slot is the adapter's own statement — the same one the
@@ -8818,6 +8825,20 @@ impl Host {
 
         let (plugin_id, schema) = self.schema_for(&req.adapter_kind)?;
         let kind = AdapterKind::new(req.adapter_kind.clone());
+        // Before the sign-in: a kind that allows one account must not run a
+        // provider consent only to be refused at the insert.
+        if host_core::accounts::kind_taken(
+            &self.plugin_manager,
+            &AccountsRepo::new(&self.db.shared()),
+            kind.as_str(),
+        )
+        .map_err(acc_err)?
+        .is_some()
+        {
+            return Err(StoreError::Conflict {
+                detail: format!("an account of kind '{}' already exists", kind.as_str()),
+            });
+        }
 
         // 1. Exchange FIRST, so a failed sign-in never leaves an orphaned row.
         let mut choice = None;
@@ -8913,9 +8934,14 @@ impl Host {
         //    failure so a retry starts clean.
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
-        let created = repo
-            .create(kind, name, &plan.config_json)
-            .map_err(acc_err)?;
+        let created = host_core::accounts::create_account(
+            &self.plugin_manager,
+            &repo,
+            kind,
+            name,
+            &plan.config_json,
+        )
+        .map_err(acc_err)?;
         // This device's half, keyed by the id the row just got. A failure here
         // unwinds the row, the same way a failed secret write does below.
         if !plan.device_local.is_empty() {
@@ -9589,6 +9615,11 @@ fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
             detail: "the local account cannot be deleted".to_string(),
         },
         AccountsError::Sqlite(e) => StoreError::Storage {
+            detail: e.to_string(),
+        },
+        // The account screen leads to the existing account before it gets
+        // here; this is the backstop, and a retry would not change it.
+        e @ AccountsError::KindTaken { .. } => StoreError::Conflict {
             detail: e.to_string(),
         },
     }
@@ -13337,5 +13368,28 @@ mod tests {
             r#"{"events":"full_access","reminders":"full_access"}"#,
         )));
         assert!(!access_report(&host).restorable);
+    }
+
+    #[test]
+    fn a_second_device_account_is_refused() {
+        // Two "This device" accounts showed every device calendar twice, and
+        // a write landed in whichever account last claimed the calendar
+        // (decision 183). The screen leads to the existing one; the core
+        // refuses regardless.
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "one-device");
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"full_access"}"#,
+        )));
+        let request = r#"{"adapter_kind":"device_calendar","display_name":"Dieses Gerät"}"#;
+        host.create_account_json(request.into())
+            .expect("the first one");
+        match host.create_account_json(request.into()) {
+            Err(StoreError::Conflict { detail }) => {
+                assert!(detail.contains("device_calendar"), "{detail}")
+            }
+            other => panic!("expected the refusal, got {other:?}"),
+        }
+        assert_eq!(host.device_accounts().len(), 1);
     }
 }

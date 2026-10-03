@@ -19,7 +19,7 @@ import { listAccounts } from '../api/accounts';
 import { createTaskList } from '../api/client';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
-import { useRefreshErrors } from '../state/useRefreshErrors';
+import { refreshBannerKey, useRefreshErrors } from '../state/useRefreshErrors';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
@@ -36,6 +36,7 @@ export default function ListsScreen() {
   const { t } = useTranslation();
   // Per-account refresh-error surface (silent-staleness warning banner).
   const { errorsByAccount } = useRefreshErrors();
+  const bannerKey = refreshBannerKey([...errorsByAccount.values()]);
   const navigation = useNavigation();
   // The stack draws a back chevron, but it isn't reachable by swiping with
   // VoiceOver — so the way out of the catalogue is a real element too.
@@ -146,13 +147,9 @@ export default function ListsScreen() {
         </Pressable>
       </View>
 
-      {errorsByAccount.size > 0 && (
+      {bannerKey != null && (
         <Text style={styles.refreshWarning} accessibilityRole="text">
-          {t(
-            [...errorsByAccount.values()].some((a) => a.auth_suspected)
-              ? 'refreshErrors.bannerAuth'
-              : 'refreshErrors.banner',
-          )}
+          {t(bannerKey)}
         </Text>
       )}
       {error != null && (

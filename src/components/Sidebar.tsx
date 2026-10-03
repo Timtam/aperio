@@ -66,6 +66,7 @@ import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/viewStateContext';
 import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
+import { refreshErrorRowKey } from '../intl/refreshErrorKeys';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import type { AccountRefreshErrors } from '../api/types';
 
@@ -1727,12 +1728,7 @@ function AccountSubtree({
           (needsConnect
             ? ' ' + t('sidebar.tree.needsConnect')
             : refreshError
-              ? ' ' +
-                t(
-                  refreshError.auth_suspected
-                    ? 'sidebar.tree.refreshErrorAuth'
-                    : 'sidebar.tree.refreshError',
-                )
+              ? ' ' + t(refreshErrorRowKey(refreshError.cause))
               : '')
         }
         className="sidebar__row sidebar__row--account"
@@ -1762,11 +1758,7 @@ function AccountSubtree({
                 title={
                   needsConnect
                     ? t('sidebar.tree.needsConnect')
-                    : t(
-                        refreshError?.auth_suspected
-                          ? 'sidebar.tree.refreshErrorAuth'
-                          : 'sidebar.tree.refreshError',
-                      )
+                    : t(refreshErrorRowKey(refreshError?.cause ?? 'other'))
                 }
               >
                 ⚠️

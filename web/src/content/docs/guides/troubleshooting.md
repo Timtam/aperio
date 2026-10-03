@@ -54,12 +54,29 @@ last data it has and warns you instead of failing silently:
   screen, and the affected account on the accounts screen gets a
   **Reconnect** button to re-enter the password or redo the provider sign-in.
 
+The sentence that ends a refresh names what it could not update: "External
+data updated, except: Work and Home." (on the phone after every refresh, on
+the desktop after one you started). If the refresh could not read anything at
+all, it says that nothing could be updated, and the warning with its cause
+follows; a first network hiccup that is not confirmed yet only says that the
+refresh ended. The accounts it names are not announced a second time, unless their
+cause grows more severe, and their warnings appear together with the
+sentence.
+
+When the operating system withholds an account's data — the phone's own
+calendars without access — the account shows one line instead of one row per
+calendar ("Aperio may not read the calendars"), and on the phone a button that
+opens the accounts, where **Allow access…** is. A withheld grant comes before
+a login problem, and a login problem before anything else, wherever Aperio
+names only one of them. An account that is already failing is announced again
+only when its cause grows more severe.
+
 A brief, one-off connection hiccup does not raise the warning: a network
 failure is only shown once it recurs, so a cold start on a not-yet-ready
 network never flashes a false alarm. A login problem — which never fixes
 itself — shows straight away, and a manual refresh always reports its
-result at once. The warning clears by itself as soon as an update
-succeeds again.
+result at once, also in the first seconds after the app starts. The warning
+clears by itself as soon as an update succeeds again.
 
 ## This device stops updating after a move to a new phone
 
@@ -88,6 +105,13 @@ On Android the same holds for the calendars. When the account exists and
 Aperio has never asked on this phone — a new phone included — it asks once at
 start. After that the action asks while Android still asks, and otherwise
 leads to Aperio's permissions in the Android settings.
+
+There is one **This device** account per phone. Choosing **This device**
+again under Add account does not add a second one: while access is missing it
+leads to the same **Allow access…**, and otherwise it says the account is
+already added and moves to it. If **This device** shows twice (added twice by
+an older version), every device calendar appears twice; delete one of the
+two.
 
 ## A task's time shifted, once
 

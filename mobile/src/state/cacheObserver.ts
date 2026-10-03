@@ -13,9 +13,12 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { passEndSentence } from '@aperio/shared';
+
 import { announceAround } from '../a11y/speechHold';
 import type { CacheRefreshStatus } from '../api/sync';
 import { setCacheRefreshProgress } from './cacheRefreshProgress';
+import { notePassEndSpoken } from './useRefreshErrors';
 import { hapticLoadBegin, hapticLoadEnd, loadHapticsPref } from './haptics';
 import CalFfi from '../../modules/cal-ffi';
 
@@ -205,8 +208,15 @@ export function useCacheUpdates(): void {
         if (flushTimer != null) clearTimeout(flushTimer);
         flushPending();
       }
-      // Behind a held sentence (the start check's), not through it.
-      announceAround(tRef.current(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'));
+      // Behind a held sentence (the start check's), not through it. The end
+      // names the accounts left not current (decision 180). Without an
+      // outcome (it could not be read) it only says the refresh ended, and
+      // the warnings follow after the settle window as before.
+      const outcome = status.outcome ?? null;
+      announceAround(
+        next ? tRef.current('cacheRefresh.refreshing') : passEndSentence(outcome, tRef.current),
+      );
+      if (!next && outcome != null) notePassEndSpoken(outcome);
       // Route through the shared loading coordinator so a refresh pass that
       // overlaps a view load (the common case: an external delete reloads the
       // view AND kicks this pass) is felt as one cue, not two.

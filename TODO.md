@@ -2964,6 +2964,24 @@ wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
 geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
 der Dialog behauptet deshalb nichts darüber. ↻ im Test (Handy ohne Testläufer).
 
+✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
+wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
+aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
+bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
+Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
+Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
+Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
+(`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
+lesen ihn ab, eine schwerere Ursache wird erneut angesagt (185). Fehlt einem
+Konto der Zugriff, steht im Synchronisieren-Bereich eine Zeile mit Knopf „Zu
+den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldeproblem
+und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
+`single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
+Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
+Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
+Fehler sofort. Die Typen dafür sind erzeugt
+statt von Hand gespiegelt. ↻ im Test (Handy ohne Testläufer).
+
 ✅ **PR-E:** Android fragt beim Start einmal selbst (172). Weil Android nicht
 sagen kann, ob es je gefragt hat, merkt sich Aperio jede Anfrage auf dem Gerät
 (`noBackupFilesDir`, nicht im Backup, also auf einem neuen Telefon wieder
@@ -2973,8 +2991,6 @@ leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
 ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**
-- PR-D2: eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher Satz am Ende
-  eines Durchlaufs, nur ein Gerätekonto je Gerät, Wortlaut am Desktop.
 - PR-F: nur wenn iOS neue Kennungen vergeben hat — Einstellungen alter
   Kalender auf neue übernehmen, Paare von Toni gewählt, nie nach Namen.
 

@@ -110,6 +110,8 @@ pub fn device_adapter_kind_info(lang: &str) -> AdapterKindInfo {
         // Not implicit: unlike the built-in store there is no such account
         // until the user grants access, and on a desktop there can be none.
         implicit: false,
+        // One per phone: a second would show every calendar twice.
+        single_instance: m.single_instance,
         owns_containers: m.has_data_family(),
         // Its account carries no fields at all: the "connect form" is an OS
         // permission prompt. So there is no schema to drive one from.
@@ -152,6 +154,8 @@ pub fn builtin_adapter_kinds(lang: &str) -> Vec<AdapterKindInfo> {
             kind,
             offered,
             implicit,
+            // Never created at all: the built-in store simply exists.
+            single_instance: false,
             name,
             short_name,
             plugin_id: m.id.clone(),
@@ -257,6 +261,28 @@ fn open_sync_inner(
     Ok(std::sync::Arc::new(adapter_local::LocalFsSyncAdapter::new(
         cfg.remote_root.trim(),
     )))
+}
+
+/// Whether at most one account of `adapter_kind` may exist in this database
+/// ([`PluginManifest::single_instance`]), asked of whatever declares the kind
+/// as its OWN.
+///
+/// The walk of [`kind_name_for`]: the built-in manifests first, then any
+/// plugin that declares the kind, a disabled one included. Whether a kind
+/// allows one account is a fact about the adapter, not about whether it is
+/// switched on today. An adopted kind answers `false`: it cannot be created
+/// at all, which is a different refusal.
+pub fn single_instance(manager: &plugin_core::PluginManager, adapter_kind: &str) -> bool {
+    for manifest in builtin_manifests() {
+        if manifest.adapter_kind.as_deref() == Some(adapter_kind) {
+            return manifest.single_instance;
+        }
+    }
+    manager
+        .any_plugin_for_adapter_kind(adapter_kind)
+        .is_some_and(|p| {
+            p.manifest.single_instance && p.manifest.adapter_kind.as_deref() == Some(adapter_kind)
+        })
 }
 
 /// What to call the adapter behind one `adapter_kind`, resolved in `lang`:
@@ -422,6 +448,24 @@ mod tests {
              platform-conditional and permission-gated, and the mobile accounts \
              screen offers it on its own terms",
         );
+    }
+
+    /// One "This device" per phone: a second account would show every
+    /// device calendar twice (decision 183). Read off the manifest, asked
+    /// the way every door that creates accounts asks it.
+    #[test]
+    fn the_device_adapter_allows_one_account_per_database() {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        assert!(device_adapter_kind_info("en").single_instance);
+        assert!(single_instance(&manager, device_calendar_kind()));
+        assert!(!single_instance(&manager, AdapterKind::LOCAL));
+        assert!(
+            !single_instance(&manager, "caldav"),
+            "a kind nobody limits allows many accounts"
+        );
+        assert!(builtin_adapter_kinds("en")
+            .iter()
+            .all(|k| !k.single_instance));
     }
 
     /// The declaration says what the built-in store actually is, read off the

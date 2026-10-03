@@ -429,16 +429,20 @@ pub fn connect(
                     )
                     .map_err(accounts_err)?
             }
-            None => accounts
-                .create(
-                    AdapterKind::new(account_kind),
-                    &name_from(
-                        kind,
-                        name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
-                    ),
-                    &plan.config_json,
-                )
-                .map_err(accounts_err)?,
+            None => {
+                let name = name_from(
+                    kind,
+                    name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
+                );
+                // The rule every door that creates accounts follows
+                // (`accounts::create_account`), asked through the host.
+                if plugins.single_instance(account_kind) {
+                    accounts.create_sole(AdapterKind::new(account_kind), &name, &plan.config_json)
+                } else {
+                    accounts.create(AdapterKind::new(account_kind), &name, &plan.config_json)
+                }
+                .map_err(accounts_err)?
+            }
         },
     };
 

@@ -757,6 +757,10 @@ export interface AdapterKindInfo {
    *  one storage backend needing no account created first — would drop out of
    *  the sync form, and "a folder on this device" would stop being an answer. */
   implicit: boolean;
+  /** At most one account of this kind may exist (decision 183): a second
+   *  one is refused by the host. Today only the phone's "This device" entry
+   *  acts on it in a picker and leads to the existing account. */
+  single_instance: boolean;
   /** What to call this kind, resolved in the language asked for.
    *
    *  From the owning adapter's manifest — it names every kind it claims — and
@@ -1460,18 +1464,12 @@ export const setContactsSyncInterval = (minutes: number) =>
 
 // ── External snapshot cache (CACHE-3) ─────────────────────────────────
 
-/** Status of the background external-cache refresher. `refreshing`
- *  is true while a warm pass runs; `last_refreshed_at` is RFC 3339
- *  (or null before the first pass) and survives restarts. */
-export interface CacheRefreshStatus {
-  refreshing: boolean;
-  last_refreshed_at: string | null;
-  /** Containers the running pass will refresh (null outside a pass / before
-   *  enumeration) — drives "fetched X of N" external-refresh progress. */
-  total_targets: number | null;
-  /** Containers refreshed so far in the running pass (null outside a pass). */
-  fetched_targets: number | null;
-}
+/** Status of the background external-cache refresher, generated from
+ *  host-core (`cache::CacheRefreshStatus`). `outcome` rides only the status
+ *  that ends a run of passes: the accounts left not current, for the
+ *  sentence that ends it. */
+export type { CacheRefreshStatus } from '@aperio/shared';
+import type { CacheRefreshStatus } from '@aperio/shared';
 
 /** Payload of the `cache-refresh-status` Tauri event, emitted at the
  *  start and end of every warm pass. Same shape as the status query. */

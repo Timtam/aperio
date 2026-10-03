@@ -130,6 +130,10 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar'
  *  cover (the device-access sentences wait as long). */
 const AFTER_UNLOCK_SPEECH_MS = 400;
 
+/** How long Android's dialog window takes to fade out before the list is the
+ *  window TalkBack reads again (the AppDialog fade). */
+const ANDROID_PICKER_FADE_MS = 400;
+
 /** The device-local calendar adapter ships on both phone platforms — iOS
  *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars
  *  only; no system reminders app). Gates the extra "This device" picker entry,
@@ -243,6 +247,17 @@ export default function AccountsScreen() {
    *  that announced itself as "device_calendar" would be worse than one the
    *  screen honestly does not offer yet. */
   const deviceKind = namedKinds.find((k) => k.kind === 'device_calendar');
+  // The existing account of a kind that allows one (decision 183): the
+  // picker's entry leads to it instead of creating a second. Unknown while
+  // the list is loading, when the entry still adds (the core refuses a
+  // second one regardless).
+  const existingDevice =
+    deviceKind?.single_instance === true && !loading
+      ? accounts.find((a) => a.adapter_kind === deviceKind.kind)
+      : undefined;
+  /** What the picker does once it has closed (iOS: after its dismissal,
+   *  since another modal cannot open while one is dismissing). */
+  const afterPicker = useRef<(() => void) | null>(null);
   // Data-account kinds whose plugin is loaded: only those get the Edit
   // action (sync-only backends are edited on the Sync screen, and a
   // missing plugin has no schema to render).
@@ -720,6 +735,66 @@ export default function AccountsScreen() {
     }
   }, [announce, t]);
 
+  // The picker's "This device" while one exists: its missing access is
+  // repaired, otherwise the existing row is where it leads (decision 182).
+  const deviceNeedsAccess =
+    existingDevice != null && deviceAccess != null && deviceAccess.repair !== 'none';
+  const deviceEntryLabel =
+    deviceKind == null
+      ? ''
+      : existingDevice == null
+        ? deviceKind.name
+        : deviceNeedsAccess && deviceAccess != null
+          ? `${deviceKind.name}, ${deviceAccessBadge(deviceAccess, t)}, ${t('mobile.deviceAccess.allow')}`
+          : t('mobile.deviceAccess.alreadyAdded', { name: deviceKind.name });
+
+  const runAfterPicker = useCallback(() => {
+    const next = afterPicker.current;
+    afterPicker.current = null;
+    next?.();
+  }, []);
+
+  const pickDevice = useCallback(() => {
+    if (existingDevice == null || deviceKind == null) {
+      onPickProvider('device_calendar');
+      return;
+    }
+    const target = existingDevice;
+    const name = deviceKind.name;
+    afterPicker.current = deviceNeedsAccess
+      ? () => void allowAccess()
+      : () => {
+          // Focus first, then the sentence queued behind the row's own
+          // read-out, so neither cuts the other off.
+          const tag = rowTags.current[target.id];
+          if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+          AccessibilityInfo.announceForAccessibilityWithOptions(
+            t('mobile.deviceAccess.alreadyAddedSaid', { name }),
+            { queue: true },
+          );
+        };
+    // iOS runs it from the picker's onDismiss; elsewhere the effect below,
+    // once the list (and the row to focus) is back on screen.
+    setMode('list');
+  }, [
+    allowAccess,
+    deviceKind,
+    deviceNeedsAccess,
+    existingDevice,
+    onPickProvider,
+    t,
+  ]);
+
+  // Android has no dismissal callback: run the picker's follow-up after the
+  // list has rendered again (the row's focus target exists only then) and
+  // the dialog's window has faded, so TalkBack's window change does not cut
+  // the sentence off.
+  useEffect(() => {
+    if (Platform.OS === 'ios' || mode !== 'list' || afterPicker.current == null) return;
+    const timer = setTimeout(runAfterPicker, ANDROID_PICKER_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [mode, runAfterPicker]);
+
   const confirmAccessSettings = useCallback(() => {
     setAccessDialogOpen(false);
     // iOS will not open another app while the dialog is still dismissing.
@@ -960,8 +1035,16 @@ export default function AccountsScreen() {
             // A present-but-WRONG credential (revoked app password, expired
             // OAuth grant) never lands in `missing` — the refresh-error
             // surface flags it, and the same Reconnect affordance is the fix.
+            //
+            // Only when the core leads with a login problem (decision 181:
+            // a withheld grant comes first, and no password fixes that), and
+            // only for a kind that has a credential to re-enter at all: the
+            // device's own store has none, and its repair is the OS's grant.
+            const kindInfo = namedKinds.find((k) => k.kind === account.adapter_kind);
+            const credentialed =
+              kindInfo == null || kindInfo.declares_account_schema || kindInfo.declares_oauth;
             const authSuspected =
-              errorsByAccount.get(account.id)?.auth_suspected === true;
+              errorsByAccount.get(account.id)?.cause === 'auth' && credentialed;
             const needsReconnect = missing || authSuspected;
             // The OS withholds the device's own calendars: the repair is the
             // OS's grant, not a credential.
@@ -974,12 +1057,14 @@ export default function AccountsScreen() {
             // Fold the credential state into the row's single SR label; a
             // "Reconnect" affordance follows for both kinds (OAuth re-runs the
             // provider sign-in; others reveal the inline secret field).
+            // The same order as everywhere else: what only the system can
+            // grant comes before a login problem.
             const rowLabel = missing
               ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
-              : authSuspected
-                ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.refreshErrors.badge')}`
-                : noAccess
-                  ? `${account.display_name}, ${kindName}, ${accessBadge}`
+              : noAccess
+                ? `${account.display_name}, ${kindName}, ${accessBadge}`
+                : authSuspected
+                  ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.refreshErrors.badge')}`
                   : `${account.display_name}, ${kindName}`;
             if (repairId === account.id) {
               return (
@@ -1101,13 +1186,13 @@ export default function AccountsScreen() {
                     <Text style={styles.badge} importantForAccessibility="no">
                       {t('dialogs.accounts.missingBadge')}
                     </Text>
-                  ) : authSuspected ? (
-                    <Text style={styles.badge} importantForAccessibility="no">
-                      {t('dialogs.accounts.refreshErrors.badge')}
-                    </Text>
                   ) : noAccess ? (
                     <Text style={styles.badge} importantForAccessibility="no">
                       {accessBadge}
+                    </Text>
+                  ) : authSuspected ? (
+                    <Text style={styles.badge} importantForAccessibility="no">
+                      {t('dialogs.accounts.refreshErrors.badge')}
                     </Text>
                   ) : null}
                 </View>
@@ -1242,6 +1327,7 @@ export default function AccountsScreen() {
         title={t('dialogs.accounts.addHeading')}
         cancelLabel={t('mobile.cancel')}
         onCancel={cancelAdd}
+        onDismiss={Platform.OS === 'ios' ? runAfterPicker : undefined}
       >
         {/* Whatever the host reported, minus the kinds no plugin can create
             an account for any more. A bundled adapter gets its translated
@@ -1269,14 +1355,14 @@ export default function AccountsScreen() {
         {DEVICE_KIND_AVAILABLE && deviceKind && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={deviceKind.name}
-            onPress={() => onPickProvider('device_calendar')}
+            accessibilityLabel={deviceEntryLabel}
+            onPress={pickDevice}
             style={({ pressed }) => [
               styles.secondaryButton,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.secondaryButtonText}>{deviceKind.name}</Text>
+            <Text style={styles.secondaryButtonText}>{deviceEntryLabel}</Text>
           </Pressable>
         )}
       </AppDialog>

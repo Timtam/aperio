@@ -67,6 +67,14 @@ pub trait SyncPlugins {
 
     /// Open an instance of `plugin_id` against `config_json`.
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String>;
+
+    /// Whether at most one account of `adapter_kind` may exist
+    /// (`builtin_adapters::single_instance`), so connecting a sync target
+    /// asks what every other door that creates accounts asks. `false` unless
+    /// a host says otherwise: no sync kind declares the limit today.
+    fn single_instance(&self, _adapter_kind: &str) -> bool {
+        false
+    }
 }
 
 /// Read the chosen account id, with a read that FAILED kept apart from a device

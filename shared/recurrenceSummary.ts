@@ -8,6 +8,7 @@
 // rule of its own — a second rule here would be the rule the core exists to
 // replace.
 
+import { joinNames } from './listWords';
 import { formatLongDay, monthName, weekdayName } from './intlNames';
 import type { Phrase } from './generated/Phrase';
 import type { RecurrenceSummary } from './generated/RecurrenceSummary';
@@ -60,14 +61,6 @@ export interface SummaryRenderContext {
 
 const KEY = 'recurrenceSummary';
 
-/** A list as the language writes one: "a, b and c" / „a, b und c". */
-function joinNames(names: string[], { t }: SummaryRenderContext): string {
-  if (names.length === 0) return '';
-  if (names.length === 1) return names[0];
-  const separator = t(`${KEY}.list.separator`);
-  const rest = names.slice(0, -1).join(separator);
-  return t(`${KEY}.list.and`, { rest, last: names[names.length - 1] });
-}
 
 function ordinalWord(ordinal: number, { t }: SummaryRenderContext): string {
   return ordinal === -1
@@ -83,14 +76,14 @@ function renderPhrase(phrase: Phrase, context: SummaryRenderContext): string {
   if (phrase.weekdays !== undefined && phrase.weekdays.length > 0) {
     values.weekdays = joinNames(
       phrase.weekdays.map((day) => weekdayName(language, day)),
-      context,
+      t,
     );
   }
   if (phrase.weekday !== undefined) values.weekday = weekdayName(language, phrase.weekday);
   if (phrase.ordinal !== undefined) values.ordinal = ordinalWord(phrase.ordinal, context);
   if (phrase.month_days !== undefined && phrase.month_days.length > 0) {
     const days = phrase.month_days.map((day) => t(`${KEY}.day.number`, { day }));
-    values.days = joinNames(days, context);
+    values.days = joinNames(days, t);
     // A date in the year names one day, not a list.
     values.day = days[0];
   }
