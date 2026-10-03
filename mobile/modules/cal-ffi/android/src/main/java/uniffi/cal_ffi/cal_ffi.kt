@@ -2237,7 +2237,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_detach_meeting_json() != 31724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_device_calendar_access_json() != 42276.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_device_calendar_access_json() != 19292.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
@@ -4998,14 +4998,17 @@ public interface HostInterface {
     fun `detachMeetingJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
-     * What the OS allows for the device calendars and reminders, and whether
-     * to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+     * What the OS allows for the device calendars and reminders, whether to
+     * ask now (decision 166), what "Allow access…" does, and whether a grant
+     * needs a reload: a JSON `cal_core::os_access::OsAccessReport`.
      *
-     * The rule is `cal_core::os_access::ask_on_start`; this only gathers its
-     * inputs. Read at start and asks the OS nothing. Without a native bridge
-     * (a platform that never installed one) everything is undetermined and
-     * nothing is asked. Logs one line, which after a phone move is the first
-     * answer to "did the grant come along?".
+     * The rules are `cal_core::os_access::ask_on_start` and `repair_for`;
+     * this gathers their inputs and adds `restorable` from the cache (full
+     * access for a store whose family the cache still withholds). Asks the
+     * OS nothing. Without a native bridge (a platform that never installed
+     * one) everything is undetermined, nothing is asked and nothing needs
+     * repair. Logs one line, which after a phone move is the first answer to
+     * "did the grant come along?".
      */
     fun `deviceCalendarAccessJson`(): kotlin.String
     
@@ -7218,14 +7221,17 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * What the OS allows for the device calendars and reminders, and whether
-     * to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+     * What the OS allows for the device calendars and reminders, whether to
+     * ask now (decision 166), what "Allow access…" does, and whether a grant
+     * needs a reload: a JSON `cal_core::os_access::OsAccessReport`.
      *
-     * The rule is `cal_core::os_access::ask_on_start`; this only gathers its
-     * inputs. Read at start and asks the OS nothing. Without a native bridge
-     * (a platform that never installed one) everything is undetermined and
-     * nothing is asked. Logs one line, which after a phone move is the first
-     * answer to "did the grant come along?".
+     * The rules are `cal_core::os_access::ask_on_start` and `repair_for`;
+     * this gathers their inputs and adds `restorable` from the cache (full
+     * access for a store whose family the cache still withholds). Asks the
+     * OS nothing. Without a native bridge (a platform that never installed
+     * one) everything is undetermined, nothing is asked and nothing needs
+     * repair. Logs one line, which after a phone move is the first answer to
+     * "did the grant come along?".
      */
     @Throws(StoreException::class)override fun `deviceCalendarAccessJson`(): kotlin.String {
             return FfiConverterString.lift(

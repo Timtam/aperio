@@ -8,14 +8,17 @@
 //! grant, and nothing ever asked again: the account failed on every read, its
 //! cache froze, and nothing said why.
 //!
-//! So the rule lives here, once, for every frontend (decision 166): when a
-//! device account exists and the OS has never asked about an entity, Aperio
-//! asks at start, for exactly the entities the OS has never asked about.
-//! Denied, write-only and restricted are the user's answer or a policy, and
-//! asking cannot change them; undetermined means the platform cannot say
-//! (Android), and is not asked about here either. A way into the system
-//! settings for those states, and Android's own start prompt, are later
-//! steps of this arc.
+//! So the rules live here, once, for every frontend.
+//!
+//! - At start ([`ask_on_start`], decision 166): when a device account exists
+//!   and the OS has never asked about an entity, Aperio asks, for exactly the
+//!   entities the OS has never asked about. Denied, write-only and restricted
+//!   are the user's answer or a policy; undetermined means the platform cannot
+//!   say (Android). None of them is asked about unprompted.
+//! - On the account's "Allow access…" ([`repair_for`]): the user asked for
+//!   it, so undetermined is asked about too (Android shows its dialog or says
+//!   at once that it will not); the user's answers lead to the OS settings,
+//!   and a policy is only explained.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,8 +52,32 @@ pub struct AskFor {
     pub reminders: bool,
 }
 
-/// What a frontend reads at start: the access per entity, the device accounts
-/// it concerns, and whether to ask now.
+/// What the user can do about missing access, as the account's
+/// "Allow access…" action does it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum AccessRepair {
+    /// Nothing is missing.
+    None,
+    /// Ask the OS: it has never asked, or the platform cannot tell whether
+    /// it has (Android, where asking either shows the dialog or reports at
+    /// once that it will not).
+    Ask,
+    /// The user said no, or allowed only adding events: the way is the OS
+    /// settings for Aperio. After a no the OS does not ask again; whether
+    /// iOS would ask again from add-only is undocumented, and the settings
+    /// work either way.
+    OpenSettings,
+    /// A policy (Screen Time, a device profile) forbids it; only that
+    /// policy's settings can change it.
+    Restricted,
+}
+
+/// What a frontend reads about the device's own stores: the access per
+/// entity, the device accounts it concerns, whether to ask now (at start),
+/// what "Allow access…" does, and whether a grant needs a reload. Read at
+/// start, on the accounts screen and when Aperio comes back to the front.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct OsAccessReport {
@@ -62,6 +89,12 @@ pub struct OsAccessReport {
     pub tasks: Option<OsAccess>,
     /// `Some` exactly when Aperio should ask now ([`ask_on_start`]).
     pub ask_now: Option<AskFor>,
+    /// What "Allow access…" does now ([`repair_for`]).
+    pub repair: AccessRepair,
+    /// Access is full now for a store whose refreshes were withheld: the OS
+    /// granted it elsewhere (its settings, while Aperio waited), and the
+    /// account should be read again at once.
+    pub restorable: bool,
 }
 
 /// Whether to ask the OS at start, and about what.
@@ -83,6 +116,27 @@ pub fn ask_on_start(
         reminders: tasks == Some(OsAccess::NotAsked),
     };
     (ask.events || ask.reminders).then_some(ask)
+}
+
+/// What "Allow access…" does for these states.
+///
+/// Asking comes first, because it is the one step that may need no detour:
+/// one store never asked about is asked about even if the other was refused.
+/// Then the settings, for an answer the OS will not ask about again; a policy
+/// last, because no answer of the user's changes it. Full access everywhere
+/// needs nothing.
+pub fn repair_for(calendar: OsAccess, tasks: Option<OsAccess>) -> AccessRepair {
+    let states = [Some(calendar), tasks];
+    let any = |wanted: &[OsAccess]| states.iter().flatten().any(|s| wanted.contains(s));
+    if any(&[OsAccess::NotAsked, OsAccess::Undetermined]) {
+        AccessRepair::Ask
+    } else if any(&[OsAccess::Denied, OsAccess::WriteOnly]) {
+        AccessRepair::OpenSettings
+    } else if any(&[OsAccess::Restricted]) {
+        AccessRepair::Restricted
+    } else {
+        AccessRepair::None
+    }
 }
 
 #[cfg(test)]
@@ -141,16 +195,40 @@ mod tests {
     }
 
     #[test]
+    fn repairs_by_what_can_still_change() {
+        assert_eq!(repair_for(Full, Some(Full)), AccessRepair::None);
+        assert_eq!(repair_for(Full, None), AccessRepair::None);
+        assert_eq!(repair_for(NotAsked, Some(Full)), AccessRepair::Ask);
+        // Android: the platform cannot tell, so asking is the first step.
+        assert_eq!(repair_for(Undetermined, None), AccessRepair::Ask);
+        // Asking first, even where the other store was refused.
+        assert_eq!(repair_for(Denied, Some(NotAsked)), AccessRepair::Ask);
+        assert_eq!(repair_for(Full, Some(Denied)), AccessRepair::OpenSettings);
+        assert_eq!(
+            repair_for(WriteOnly, Some(Full)),
+            AccessRepair::OpenSettings
+        );
+        assert_eq!(
+            repair_for(Restricted, Some(Denied)),
+            AccessRepair::OpenSettings
+        );
+        assert_eq!(repair_for(Restricted, Some(Full)), AccessRepair::Restricted);
+    }
+
+    #[test]
     fn speaks_snake_case_on_the_wire() {
         let report = OsAccessReport {
             account_names: vec!["Dieses Gerät".into()],
             calendar: NotAsked,
             tasks: Some(WriteOnly),
             ask_now: Some(EVENTS),
+            repair: AccessRepair::OpenSettings,
+            restorable: false,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains(r#""calendar":"not_asked""#), "{json}");
         assert!(json.contains(r#""tasks":"write_only""#), "{json}");
+        assert!(json.contains(r#""repair":"open_settings""#), "{json}");
         assert_eq!(
             serde_json::from_str::<OsAccessReport>(&json).unwrap(),
             report

@@ -44,7 +44,7 @@ use adapter_device_calendar::{device_access, DeviceAdapter, DeviceCalendarProvid
 use adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use cal_core::os_access::{ask_on_start, OsAccess, OsAccessReport};
+use cal_core::os_access::{ask_on_start, repair_for, AccessRepair, OsAccess, OsAccessReport};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
     NewEvent, TaskList, TasksFeature,
@@ -6282,14 +6282,17 @@ impl Host {
         }
     }
 
-    /// What the OS allows for the device calendars and reminders, and whether
-    /// to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+    /// What the OS allows for the device calendars and reminders, whether to
+    /// ask now (decision 166), what "Allow access…" does, and whether a grant
+    /// needs a reload: a JSON `cal_core::os_access::OsAccessReport`.
     ///
-    /// The rule is `cal_core::os_access::ask_on_start`; this only gathers its
-    /// inputs. Read at start and asks the OS nothing. Without a native bridge
-    /// (a platform that never installed one) everything is undetermined and
-    /// nothing is asked. Logs one line, which after a phone move is the first
-    /// answer to "did the grant come along?".
+    /// The rules are `cal_core::os_access::ask_on_start` and `repair_for`;
+    /// this gathers their inputs and adds `restorable` from the cache (full
+    /// access for a store whose family the cache still withholds). Asks the
+    /// OS nothing. Without a native bridge (a platform that never installed
+    /// one) everything is undetermined, nothing is asked and nothing needs
+    /// repair. Logs one line, which after a phone move is the first answer to
+    /// "did the grant come along?".
     pub fn device_calendar_access_json(&self) -> Result<String, StoreError> {
         let accounts = self.device_accounts();
         let report = match self.device_provider() {
@@ -6298,14 +6301,32 @@ impl Host {
                 calendar: OsAccess::Undetermined,
                 tasks: None,
                 ask_now: None,
+                repair: AccessRepair::None,
+                restorable: false,
             },
             Some(provider) => {
                 let (calendar, tasks) = device_access(provider.as_ref());
+                // Full now, but the cache still holds a store back as
+                // withheld: the grant came from the OS settings while Aperio
+                // waited, and nothing else would read the account again
+                // before the next warm pass.
+                let restorable = accounts.iter().any(|(id, _)| {
+                    (calendar == OsAccess::Full
+                        && self.cache.access_withheld(id, SyncScope::Calendars))
+                        || (tasks == Some(OsAccess::Full)
+                            && self.cache.access_withheld(id, SyncScope::TaskLists))
+                });
                 OsAccessReport {
                     account_names: accounts.iter().map(|(_, name)| name.clone()).collect(),
                     calendar,
                     tasks,
                     ask_now: ask_on_start(calendar, tasks, !accounts.is_empty()),
+                    repair: if accounts.is_empty() {
+                        AccessRepair::None
+                    } else {
+                        repair_for(calendar, tasks)
+                    },
+                    restorable,
                 }
             }
         };
@@ -6315,6 +6336,8 @@ impl Host {
             tasks = ?report.tasks,
             accounts = accounts.len(),
             ask = ?report.ask_now,
+            repair = ?report.repair,
+            restorable = report.restorable,
             "device calendar access"
         );
         serde_json::to_string(&report).map_err(|e| StoreError::Storage {
@@ -13222,6 +13245,7 @@ mod tests {
         let report = access_report(&host);
         assert_eq!(report.calendar, OsAccess::NotAsked);
         assert_eq!(report.ask_now, None);
+        assert_eq!(report.repair, AccessRepair::None, "nothing to repair");
     }
 
     #[test]
@@ -13242,6 +13266,7 @@ mod tests {
                 reminders: true
             })
         );
+        assert_eq!(report.repair, AccessRepair::Ask);
     }
 
     #[test]
@@ -13273,5 +13298,43 @@ mod tests {
         assert_eq!(report.calendar, OsAccess::Denied);
         assert_eq!(report.tasks, Some(OsAccess::WriteOnly));
         assert_eq!(report.ask_now, None);
+        assert_eq!(report.repair, AccessRepair::OpenSettings);
+    }
+
+    #[test]
+    fn a_grant_from_the_settings_restores_a_withheld_store() {
+        // The user allowed access in the iOS settings and came back: the
+        // cache still withholds the calendars, and only this says to read
+        // the account again now.
+        let withheld = cal_core::Error::AccessNotGranted("calendars: Denied".into());
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "restored");
+        let account = with_device_account(&host);
+        host.cache
+            .mark_failure(&account, SyncScope::Events, "device-cal", &withheld, false)
+            .unwrap();
+
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"denied","reminders":"full_access"}"#,
+        )));
+        assert!(!access_report(&host).restorable, "still denied");
+
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"full_access"}"#,
+        )));
+        let report = access_report(&host);
+        assert!(report.restorable);
+        assert_eq!(report.repair, AccessRepair::None);
+    }
+
+    #[test]
+    fn full_access_without_a_withheld_store_restores_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "healthy");
+        with_device_account(&host);
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"full_access"}"#,
+        )));
+        assert!(!access_report(&host).restorable);
     }
 }

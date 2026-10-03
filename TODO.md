@@ -2949,10 +2949,24 @@ Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
 im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
 die letzte erfolgreiche Aktualisierung (`last_success_at`). ↻ im Test.
 
+✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
+fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
+„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
+(`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
+Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
+den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
+Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
+Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
+Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
+iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
+sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
+wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
+geschlossener Dialog dasselbe wie „nicht mehr fragen“; der Dialog behauptet
+deshalb nichts darüber, PR-E kann beides trennen. ↻ im Test (Handy ohne Testläufer).
+
 🚩 **Offen, in dieser Reihenfolge:**
-- PR-D: Abzeichen „Kein Zugriff“ und „Zugriff erlauben…“ (iOS- und
-  Android-Einstellungen), eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher
-  Satz am Ende eines Durchlaufs.
+- PR-D2: eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher Satz am Ende
+  eines Durchlaufs, nur ein Gerätekonto je Gerät, Wortlaut am Desktop.
 - PR-E: Android fragt beim Start einmal selbst (172), mit einem Merker, der
   nicht ins Backup geht.
 - PR-F: nur wenn iOS neue Kennungen vergeben hat — Einstellungen alter
