@@ -199,13 +199,19 @@ function askedAndMissing(asked: AskFor, report: OsAccessReport): DeviceStores {
 
 /**
  * Say `message` and resolve once VoiceOver has finished it (iOS reports that),
- * at once without a screen reader, or after a cap. Queued, so it follows
- * whatever is being said rather than cutting it off.
+ * or after a cap. Queued, so it follows whatever is being said rather than
+ * cutting it off.
+ *
+ * Without a screen reader, and on Android, it resolves once the sentence is
+ * handed over: only iOS reports a finished announcement, and TalkBack queues
+ * announcements itself. Waiting there for a report that never comes only
+ * held the flow busy for the whole cap, and with it the "Allow access…" the
+ * sentence had just suggested pressing again.
  */
 async function sayAndWait(message: string): Promise<void> {
   const screenReader = await AccessibilityInfo.isScreenReaderEnabled().catch(() => false);
   await new Promise((resolve) => setTimeout(resolve, ANNOUNCE_DELAY_MS));
-  if (!screenReader) {
+  if (!screenReader || Platform.OS !== 'ios') {
     AccessibilityInfo.announceForAccessibility(message);
     return;
   }
@@ -218,12 +224,9 @@ async function sayAndWait(message: string): Promise<void> {
       subscription?.remove();
       resolve();
     };
-    const subscription =
-      Platform.OS === 'ios'
-        ? AccessibilityInfo.addEventListener('announcementFinished', (event) => {
-            if (event.announcement === message) finish();
-          })
-        : null;
+    const subscription = AccessibilityInfo.addEventListener('announcementFinished', (event) => {
+      if (event.announcement === message) finish();
+    });
     const cap = setTimeout(finish, SPEAK_CAP_MS);
     AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
   });
