@@ -225,6 +225,54 @@ pub enum AccountsError {
     NotFound(String),
     #[error("cannot delete the implicit local account")]
     DeleteLocalForbidden,
+    /// A second account of a kind that allows one
+    /// (`PluginManifest::single_instance`); `existing` is the one there is.
+    #[error("an account of kind '{kind}' already exists ({existing})")]
+    KindTaken { kind: String, existing: String },
+}
+
+/// Create an account, refusing a second one of a kind that allows one
+/// ([`crate::builtin_adapters::single_instance`], decision 183).
+///
+/// The one door every host's create paths go through, so the rule is said
+/// once and no host asks about a kind by name. For a limited kind the insert
+/// is conditional in SQL ([`AccountsRepo::create_sole`]): a double tap or two
+/// callers racing cannot both pass a check and then both insert.
+///
+/// Not for the one-shot sync-target migration, which must never be refused
+/// (a refusal would leave the target unmigrated): it creates with
+/// [`AccountsRepo::create`] directly, and no sync kind declares the limit.
+pub fn create_account(
+    manager: &plugin_core::PluginManager,
+    repo: &AccountsRepo<'_>,
+    adapter_kind: AdapterKind,
+    display_name: &str,
+    config_json: &str,
+) -> Result<Account, AccountsError> {
+    if crate::builtin_adapters::single_instance(manager, adapter_kind.as_str()) {
+        repo.create_sole(adapter_kind, display_name, config_json)
+    } else {
+        repo.create(adapter_kind, display_name, config_json)
+    }
+}
+
+/// Whether [`create_account`] would refuse `adapter_kind` now: the id of the
+/// account that is already there. For the paths that must ask BEFORE they
+/// start something irreversible, such as a provider sign-in; the create
+/// itself still decides.
+pub fn kind_taken(
+    manager: &plugin_core::PluginManager,
+    repo: &AccountsRepo<'_>,
+    adapter_kind: &str,
+) -> Result<Option<String>, AccountsError> {
+    if !crate::builtin_adapters::single_instance(manager, adapter_kind) {
+        return Ok(None);
+    }
+    Ok(repo
+        .list()?
+        .into_iter()
+        .find(|a| a.adapter_kind.as_str() == adapter_kind)
+        .map(|a| a.id))
 }
 
 /// Read-side access to the `accounts` table. Stateless — every
@@ -299,6 +347,46 @@ impl<'a> AccountsRepo<'a> {
                 now
             ],
         )?;
+        Ok(Account {
+            id,
+            adapter_kind,
+            display_name: display_name.to_string(),
+            config_json: config_json.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    /// [`Self::create`] for a kind that allows one account: the insert happens
+    /// only while no account of `adapter_kind` exists, decided by SQLite
+    /// under the writer lock. [`AccountsError::KindTaken`] otherwise.
+    pub fn create_sole(
+        &self,
+        adapter_kind: AdapterKind,
+        display_name: &str,
+        config_json: &str,
+    ) -> Result<Account, AccountsError> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let inserted = conn.execute(
+            "INSERT INTO accounts (id, adapter_kind, display_name,
+                                   config_json, created_at, updated_at)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?5
+              WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE adapter_kind = ?2)",
+            params![id, adapter_kind.as_str(), display_name, config_json, now],
+        )?;
+        if inserted == 0 {
+            let existing: String = conn.query_row(
+                "SELECT id FROM accounts WHERE adapter_kind = ?1 ORDER BY created_at LIMIT 1",
+                params![adapter_kind.as_str()],
+                |r| r.get(0),
+            )?;
+            return Err(AccountsError::KindTaken {
+                kind: adapter_kind.as_str().to_string(),
+                existing,
+            });
+        }
         Ok(Account {
             id,
             adapter_kind,
@@ -412,6 +500,46 @@ mod tests {
         let local = local.expect("local account should be seeded");
         assert_eq!(local.adapter_kind, AdapterKind::new("local"));
         assert_eq!(local.display_name, "Local");
+    }
+
+    #[test]
+    fn a_kind_that_allows_one_account_refuses_a_second() {
+        // "This device" twice showed every device calendar twice (decision
+        // 183). The refusal names the account that is there.
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let device = || AdapterKind::new(AdapterKind::DEVICE_CALENDAR);
+
+        assert_eq!(
+            kind_taken(&manager, &repo, device().as_str()).unwrap(),
+            None
+        );
+        let first = create_account(&manager, &repo, device(), "Dieses Gerät", "{}").unwrap();
+        assert_eq!(
+            kind_taken(&manager, &repo, device().as_str()).unwrap(),
+            Some(first.id.clone())
+        );
+        match create_account(&manager, &repo, device(), "Dieses Gerät", "{}") {
+            Err(AccountsError::KindTaken { kind, existing }) => {
+                assert_eq!(kind, AdapterKind::DEVICE_CALENDAR);
+                assert_eq!(existing, first.id);
+            }
+            other => panic!("expected the refusal, got {other:?}"),
+        }
+        let devices = repo
+            .list()
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.adapter_kind == device())
+            .count();
+        assert_eq!(devices, 1);
+
+        // A kind nobody limits takes as many as the user makes.
+        create_account(&manager, &repo, AdapterKind::new("caldav"), "A", "{}").unwrap();
+        create_account(&manager, &repo, AdapterKind::new("caldav"), "B", "{}").unwrap();
+        assert_eq!(kind_taken(&manager, &repo, "caldav").unwrap(), None);
     }
 
     #[test]

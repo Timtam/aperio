@@ -119,7 +119,7 @@ pub fn reconcile_cache_generation(
     Ok(reset)
 }
 
-pub use observer::{CacheObserver, CacheRefreshStatus};
+pub use observer::{CacheObserver, CacheRefreshStatus, FailingAccount, PassOutcome};
 pub use refresh::{
     CacheRefresher, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
 };
@@ -244,6 +244,7 @@ pub struct SyncState {
 /// `mark_error` on every failed refresh and cleared by every successful
 /// write, so presence == "the latest attempt failed".
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ContainerRefreshError {
     /// The [`SyncScope`] wire string ("events", "tasks", "calendars", …).
     pub scope: String,
@@ -258,11 +259,16 @@ pub struct ContainerRefreshError {
     /// Last SUCCESSFUL refresh (RFC 3339) — how stale the data the user
     /// currently sees is. `None`: never refreshed successfully.
     pub last_success_at: Option<String>,
+    /// Why this container failed: a withheld grant (its family's listing
+    /// row, since a withheld family appears once), a login problem, or
+    /// anything else.
+    pub cause: RefreshCause,
 }
 
 /// Every failing container of one account, plus whether any error looks
 /// authentication-shaped (drives the "re-enter password" hint).
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct AccountRefreshErrors {
     pub account_id: String,
     pub auth_suspected: bool,
@@ -270,9 +276,34 @@ pub struct AccountRefreshErrors {
     /// device's calendars or reminders): no password helps, the system
     /// settings do. Its blocked families each appear once, as their listing.
     pub no_access: bool,
-    /// What the surface leads with: "access", then "auth", then "other".
-    pub cause: &'static str,
+    /// What the surface leads with: the most severe of its rows' causes.
+    pub cause: RefreshCause,
+    /// `cause`'s severity ([`RefreshCause::rank`]). A surface that has to
+    /// pick among accounts (one banner for all of them), or notice that an
+    /// account's failure grew worse, compares these: the order is the
+    /// core's, said once (decision 181).
+    pub rank: u8,
     pub errors: Vec<ContainerRefreshError>,
+}
+
+/// Why a refresh fails, in the order the surfaces lead with it: a withheld
+/// grant (only the system settings help), then a login problem (only the
+/// user's credentials help), then everything else, which may heal by
+/// itself. Declared from least to most severe, so `Ord` is the severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum RefreshCause {
+    Other,
+    Auth,
+    Access,
+}
+
+impl RefreshCause {
+    /// The severity as a number for the wire: 0 (other) to 2 (access).
+    pub fn rank(self) -> u8 {
+        self as u8
+    }
 }
 
 /// What a failed refresh was, as recorded in `cache_sync_state.failure_kind`.
@@ -766,38 +797,53 @@ impl CacheStore {
             };
             let row_auth = auth(&row);
             let row_access = access(&row);
+            let cause = if row_access {
+                RefreshCause::Access
+            } else if row_auth {
+                RefreshCause::Auth
+            } else {
+                RefreshCause::Other
+            };
             let entry = ContainerRefreshError {
                 container_name,
                 scope: row.scope,
                 container_id: row.container,
                 error: row.error,
                 last_success_at: row.last_success,
+                cause,
             };
             match out.last_mut() {
                 Some(acc) if acc.account_id == row.account => {
                     acc.auth_suspected |= row_auth;
                     acc.no_access |= row_access;
+                    acc.cause = acc.cause.max(cause);
+                    acc.rank = acc.cause.rank();
                     acc.errors.push(entry);
                 }
                 _ => out.push(AccountRefreshErrors {
                     account_id: row.account,
                     auth_suspected: row_auth,
                     no_access: row_access,
-                    cause: "other",
+                    cause,
+                    rank: cause.rank(),
                     errors: vec![entry],
                 }),
             }
         }
-        for acc in &mut out {
-            acc.cause = if acc.no_access {
-                FAILURE_ACCESS
-            } else if acc.auth_suspected {
-                FAILURE_AUTH
-            } else {
-                "other"
-            };
-        }
         Ok(out)
+    }
+
+    /// Every account's display name by id, from the read pool: the pass-end
+    /// status names the accounts it could not update, and must not wait
+    /// behind the writer to do so.
+    pub fn account_names(&self) -> DbResult<HashMap<String, String>> {
+        let names = self.db.with_read_conn(|c| {
+            let mut stmt = c.prepare("SELECT id, display_name FROM accounts")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect::<rusqlite::Result<HashMap<_, _>>>()
+        })?;
+        Ok(names)
     }
 
     /// Full-refresh write: replace the entire cached set for `calendar`

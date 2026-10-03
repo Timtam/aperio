@@ -315,6 +315,24 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
 /// The two host-internal names are checked in the same breath: they have no
 /// manifest and never will, so a plugin claiming one is not a duplicate the
 /// loader could ever notice.
+/// "This device" allows one account per database (decision 183), and every
+/// manifest that limits its accounts says which kind it limits.
+#[test]
+fn the_device_adapter_allows_one_account_per_database() {
+    let limited: Vec<String> = declared_manifests()
+        .into_iter()
+        .filter(|(_, m)| m.single_instance)
+        .map(|(name, m)| {
+            assert!(
+                m.adapter_kind.is_some(),
+                "{name} limits accounts of no kind"
+            );
+            m.adapter_kind.unwrap()
+        })
+        .collect();
+    assert_eq!(limited, vec!["device_calendar".to_string()]);
+}
+
 #[test]
 fn no_two_adapters_share_a_kind() {
     let mut by_kind: std::collections::BTreeMap<String, Vec<String>> = Default::default();

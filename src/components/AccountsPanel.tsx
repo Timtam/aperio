@@ -10,7 +10,12 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { collectValues, firstMissingField } from '@aperio/shared';
+import {
+  collectValues,
+  firstMissingField,
+  withheldPhrase,
+  withheldSince,
+} from '@aperio/shared';
 import type { AccountFormAction } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -34,6 +39,7 @@ import {
 } from '../api/client';
 import type { AccountFormSpec, AdapterKindInfo } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
+import { refreshErrorRowKey } from '../intl/refreshErrorKeys';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import {
@@ -96,6 +102,16 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar'
 
 export function AccountsPanel() {
   const { t, i18n } = useTranslation();
+  // "Last successful update: …", or that there never was one.
+  const lastSuccessWords = (at: string | null): string =>
+    at
+      ? t('dialogs.accounts.refreshErrors.lastSuccess', {
+          time: new Date(at).toLocaleString(i18n.language, {
+            dateStyle: 'long',
+            timeStyle: 'short',
+          }),
+        })
+      : t('dialogs.accounts.refreshErrors.neverSucceeded');
   const announce = useAnnouncer();
   // Per-account refresh-error surface: failing containers per account
   // (silent-staleness warning + the re-enter-password hint).
@@ -931,9 +947,9 @@ export function AccountsPanel() {
                       (errorsByAccount.has(acc.id)
                         ? ' ' +
                           t(
-                            errorsByAccount.get(acc.id)?.auth_suspected
-                              ? 'sidebar.tree.refreshErrorAuth'
-                              : 'sidebar.tree.refreshError',
+                            refreshErrorRowKey(
+                              errorsByAccount.get(acc.id)?.cause ?? 'other',
+                            ),
                           )
                         : '')
                     }
@@ -1042,8 +1058,8 @@ export function AccountsPanel() {
                     name: accounts[focusIndex].display_name,
                   })}
                 </h4>
-                {errorsByAccount.get(accounts[focusIndex].id)
-                  ?.auth_suspected && (
+                {errorsByAccount.get(accounts[focusIndex].id)?.cause ===
+                  'auth' && (
                   <FocusableNote className="accounts-refresh-errors__auth-hint">
                     {t(
                       signsInWithProvider(accounts[focusIndex].adapter_kind)
@@ -1052,10 +1068,30 @@ export function AccountsPanel() {
                     )}
                   </FocusableNote>
                 )}
+                {/* A withheld grant is one fact for the whole account, said
+                    once; the account's other failures (if any) follow as
+                    rows. No "allow access" to point at: the desktop has
+                    none. */}
+                {errorsByAccount.get(accounts[focusIndex].id)?.cause ===
+                  'access' && (
+                  <FocusableNote className="accounts-refresh-errors__access">
+                    {`${t('dialogs.accounts.refreshErrors.accessLine', {
+                      what: withheldPhrase(
+                        errorsByAccount.get(accounts[focusIndex].id)?.errors ?? [],
+                        t,
+                      ),
+                    })} ${lastSuccessWords(
+                      withheldSince(
+                        errorsByAccount.get(accounts[focusIndex].id)?.errors ?? [],
+                      ),
+                    )}`}
+                  </FocusableNote>
+                )}
                 <ul>
                   {errorsByAccount
                     .get(accounts[focusIndex].id)
-                    ?.errors.map((err) => {
+                    ?.errors.filter((err) => err.cause !== 'access')
+                    .map((err) => {
                       const line = `${t(
                         'dialogs.accounts.refreshErrors.entry',
                         {
@@ -1067,18 +1103,7 @@ export function AccountsPanel() {
                             ),
                           error: clampErrorText(err.error),
                         },
-                      )} ${
-                        err.last_success_at
-                          ? t('dialogs.accounts.refreshErrors.lastSuccess', {
-                              time: new Date(
-                                err.last_success_at,
-                              ).toLocaleString(i18n.language, {
-                                dateStyle: 'long',
-                                timeStyle: 'short',
-                              }),
-                            })
-                          : t('dialogs.accounts.refreshErrors.neverSucceeded')
-                      }`;
+                      )} ${lastSuccessWords(err.last_success_at)}`;
                       return (
                         <li
                           key={`${err.scope}:${err.container_id}`}
@@ -1090,8 +1115,8 @@ export function AccountsPanel() {
                       );
                     })}
                 </ul>
-                {errorsByAccount.get(accounts[focusIndex].id)
-                  ?.auth_suspected && (
+                {errorsByAccount.get(accounts[focusIndex].id)?.cause ===
+                  'auth' && (
                   <button
                     type="button"
                     className="form__action accounts-refresh-errors__reconnect"

@@ -68,12 +68,13 @@ export function useCacheRefresh() {
     // backend's status event overwrites this a beat later.
     setStatus((prev) =>
       prev
-        ? { ...prev, refreshing: true }
+        ? { ...prev, refreshing: true, outcome: null }
         : {
             refreshing: true,
             last_refreshed_at: null,
             total_targets: null,
             fetched_targets: null,
+            outcome: null,
           },
     );
     try {
@@ -93,6 +94,9 @@ export function useCacheRefresh() {
     fetchedTargets: status?.fetched_targets ?? null,
     /** Total containers the running pass will refresh, or null. */
     totalTargets: status?.total_targets ?? null,
+    /** What the passes that just ended left undone; only on the status that
+     *  ended them, null otherwise. */
+    outcome: status?.outcome ?? null,
     refreshNow,
   };
 }

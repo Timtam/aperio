@@ -1,7 +1,8 @@
 //! Unit tests for the external-adapter snapshot cache (CACHE-0).
 
 use super::{
-    listing_delta, CacheStore, Delta, ListingDelta, RefreshCoordinator, SyncScope, SyncState,
+    listing_delta, CacheStore, Delta, ListingDelta, RefreshCause, RefreshCoordinator, SyncScope,
+    SyncState,
 };
 use crate::db::DbHandle;
 use cal_core::event_diff::EventField;
@@ -2763,13 +2764,56 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
     let acc = &errors[0];
     assert!(acc.no_access);
     assert!(!acc.auth_suspected, "a withheld grant is no login problem");
-    assert_eq!(acc.cause, "access");
+    assert_eq!(acc.cause, RefreshCause::Access);
+    assert_eq!(acc.rank, 2);
     let shown: Vec<(&str, &str)> = acc
         .errors
         .iter()
         .map(|e| (e.scope.as_str(), e.container_id.as_str()))
         .collect();
     assert_eq!(shown, vec![("calendars", ""), ("task_lists", "")]);
+}
+
+#[test]
+fn an_account_leads_with_its_most_severe_row() {
+    // A withheld calendar listing and a network failure on an address book:
+    // the account leads with the grant (decision 181), and each row keeps
+    // its own cause for the lines that list them.
+    let store = setup();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &withheld("calendars: Denied"),
+            false,
+        )
+        .unwrap();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Contacts,
+            LIST,
+            &cal_core::Error::Network("down".into()),
+            true,
+        )
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    let acc = &errors[0];
+    assert_eq!(acc.cause, RefreshCause::Access);
+    assert_eq!(acc.rank, RefreshCause::Access.rank());
+    let causes: Vec<(&str, RefreshCause)> = acc
+        .errors
+        .iter()
+        .map(|e| (e.scope.as_str(), e.cause))
+        .collect();
+    assert_eq!(
+        causes,
+        vec![
+            ("calendars", RefreshCause::Access),
+            ("contacts", RefreshCause::Other)
+        ]
+    );
 }
 
 #[test]

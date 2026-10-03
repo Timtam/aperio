@@ -48,6 +48,7 @@ reads it to discover the plugin before loading any code.
 | `description` | string | ✅ | One-line description shown in plugin settings. |
 | `signed` | boolean | ✅ | Whether the plugin is signed (bundled plugins are `false`). |
 | `adapter_kind` | string | — | The value accounts of this adapter carry in the `adapter_kind` column, e.g. `"caldav"`, `"webex"`. Set it if your plugin has accounts; the host builds its kind→plugin map from these. See below. |
+| `single_instance` | boolean | — | At most one account of your `adapter_kind` in a database. The host refuses a second one wherever accounts are created, and an Add-account picker leads to the existing one. See below. |
 | `adopts_adapter_kinds` | string[] | — | Kinds written by an adapter this plugin has absorbed, so the rows keep resolving here. Resolution only — never offered as its own entry. See below. |
 | `kind_names` | object | — | What to call each kind you claim or adopt, keyed by the kind. Without it your accounts are labelled with your plugin's `name` — which is wrong the moment you serve more than one kind. See below. |
 | `account` | object | — | What the plugin needs in order to have an account: the fields to ask for, which are secrets, and whether it signs in via OAuth. See below. |
@@ -141,6 +142,30 @@ name dot acme", once per account, with nothing on screen looking wrong.
 If you leave `kind_names` out, your accounts fall back to the plugin's own
 `name`. That is survivable for a plugin serving one kind and wrong for one
 serving two — both rows get the same label.
+
+## `single_instance` — one account per database
+
+For an adapter whose account stands for something there is only one of where
+Aperio runs. The in-tree user is the phone's own calendars and reminders: a
+second account of them showed every calendar twice.
+
+```json
+"adapter_kind": "device_calendar",
+"single_instance": true
+```
+
+- **Creation only.** The host refuses to create a second account of your
+  `adapter_kind`, at every door that creates accounts (both hosts' connect
+  paths and the sync-target form), before any provider sign-in starts. Rows
+  that already exist, or that arrive from another device by sync, are neither
+  merged nor refused.
+- **Your own kind.** It limits `adapter_kind`, never an adopted kind (those
+  cannot be created anyway). A manifest that sets it without an
+  `adapter_kind` is refused at load time.
+- **Pickers.** `AdapterKindInfo.single_instance` tells an Add-account picker to
+  lead to the existing account instead of offering a new one.
+- **Older hosts** ignore the key. If your plugin relies on it, raise
+  `min_app_version`. It is ABI-transparent.
 
 ## `adopts_adapter_kinds` — taking over another adapter's rows
 

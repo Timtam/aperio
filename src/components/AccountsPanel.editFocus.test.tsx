@@ -59,9 +59,15 @@ const invokeMock = vi.hoisted(() =>
           {
             kind: 'caldav',
             offered: true,
-            singleton_existing: false,
+            implicit: false,
+            single_instance: false,
+            name: 'CalDAV',
+            short_name: 'CalDAV',
+            plugin_id: 'com.aperio.cal-adapter-caldav',
             owns_containers: true,
+            declares_account_schema: true,
             declares_oauth: false,
+            holds_data: true,
             can_sync: false,
           },
         ]);

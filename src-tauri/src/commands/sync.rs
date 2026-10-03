@@ -660,6 +660,10 @@ impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String> {
         open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.message)
     }
+
+    fn single_instance(&self, adapter_kind: &str) -> bool {
+        host_core::builtin_adapters::single_instance(self.0, adapter_kind)
+    }
 }
 
 fn connect_err(err: host_core::sync_target::ConnectError) -> CommandError {

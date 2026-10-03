@@ -786,6 +786,10 @@ impl From<AccountsError> for CommandError {
                 code: "internal",
                 message: err.to_string(),
             },
+            err @ AccountsError::KindTaken { .. } => CommandError {
+                code: "conflict",
+                message: err.to_string(),
+            },
         }
     }
 }
@@ -858,7 +862,13 @@ pub async fn connect_google_account(
     .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(AdapterKind::new("google"), name, &config_json)?;
+    let created = host_core::accounts::create_account(
+        &plugin_manager,
+        &repo,
+        AdapterKind::new("google"),
+        name,
+        &config_json,
+    )?;
 
     // 3) Persist tokens to the keychain. If either write fails
     //    we delete the row and surface an error so the user can
@@ -980,7 +990,13 @@ pub async fn connect_microsoft_account(
     .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(AdapterKind::new("microsoft_graph"), name, &config_json)?;
+    let created = host_core::accounts::create_account(
+        &plugin_manager,
+        &repo,
+        AdapterKind::new("microsoft_graph"),
+        name,
+        &config_json,
+    )?;
 
     let access = tokens
         .get("access_token")
@@ -1321,6 +1337,24 @@ pub async fn connect_account(
         message: "this adapter declares no account schema".into(),
     })?;
 
+    // A kind that allows one account must not run a provider consent only to
+    // be refused at the insert (decision 183).
+    if host_core::accounts::kind_taken(
+        &plugin_manager,
+        &AccountsRepo::new(&db.shared()),
+        request.adapter_kind.as_str(),
+    )?
+    .is_some()
+    {
+        return Err(CommandError {
+            code: "conflict",
+            message: format!(
+                "an account of kind '{}' already exists",
+                request.adapter_kind.as_str()
+            ),
+        });
+    }
+
     // 1) The OAuth sign-in, if the schema has one — before anything persistent
     //    is touched, so a denied or abandoned consent leaves nothing behind.
     let mut oauth_choice = None;
@@ -1388,7 +1422,13 @@ pub async fn connect_account(
     //    any failure.
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(request.adapter_kind.clone(), name, &plan.config_json)?;
+    let created = host_core::accounts::create_account(
+        &plugin_manager,
+        &repo,
+        request.adapter_kind.clone(),
+        name,
+        &plan.config_json,
+    )?;
     // This device's half, keyed by the id the row just got. Written before the
     // secrets so the same unwinding below covers it: a failure after this point
     // deletes the account, and `forget` runs from the delete path.

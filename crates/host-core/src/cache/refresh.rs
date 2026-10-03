@@ -32,13 +32,13 @@ use std::time::Duration as StdDuration;
 use chrono::{DateTime, Duration, Timelike, Utc};
 use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinSet;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
 use super::{
-    swr, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload, RefreshCoordinator,
-    SyncScope,
+    swr, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload, FailingAccount,
+    PassOutcome, RefreshCoordinator, SyncScope,
 };
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
@@ -190,13 +190,18 @@ impl CacheRefresher {
                 _ = worker.notify.notified() => {}
             }
             info!(target: "aperio::cache", "running app-start cache warm pass");
-            // App-start pass is NOT forced: it is the one most prone to a
-            // network-not-ready blip, so its failures must be confirmed by
-            // a second attempt before they surface. Clear the latch too —
-            // a `trigger` that short-circuited the delay above is served by
-            // THIS pass, so leaving it set would force an unrelated later one.
-            worker.next_trigger_forced.store(false, Ordering::Relaxed);
-            worker.warm_all(false).await;
+            // The app-start pass is NOT forced on its own: it is the one most
+            // prone to a network-not-ready blip, so its failures must be
+            // confirmed by a second attempt before they surface. Unless a
+            // USER `trigger` cut the delay short (a click on "refresh now" in
+            // the first seconds): THIS pass then serves it, and runs forced,
+            // so the sentence that ends it names a failure at once, as a
+            // manual refresh promises. CONSUME the latch either way, so it
+            // cannot force an unrelated later pass. Automatic wakes
+            // (`trigger_background`, the cache-generation reset at launch)
+            // never set it.
+            let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
+            worker.warm_all(forced).await;
 
             loop {
                 let minutes = worker.read_interval_minutes();
@@ -253,9 +258,11 @@ impl CacheRefresher {
                 .expect("cache refresher poisoned")
                 .map(|d| d.to_rfc3339()),
             // Live progress rides the refresh_status STREAM during a pass; a
-            // point-in-time query carries no target counts.
+            // point-in-time query carries no target counts, and no outcome
+            // (the error surface is the lasting record of what failed).
             total_targets: None,
             fetched_targets: None,
+            outcome: None,
         }
     }
 
@@ -318,6 +325,9 @@ impl CacheRefresher {
     async fn run_passes(self: &Arc<Self>, mut forced: bool) {
         loop {
             let (completed, total) = self.pass(forced).await;
+            // Before the lock below: a read here must not widen the gap
+            // between clearing `in_flight` and saying "finished".
+            let outcome = self.pass_outcome();
             // Under the same lock that queues a follow-up, so a request is
             // either taken here or finds the flag cleared and runs itself.
             let next = {
@@ -343,6 +353,7 @@ impl CacheRefresher {
                         Some(completed.to_rfc3339()),
                         Some(total),
                         Some(total),
+                        outcome,
                     );
                     debug!(target: "aperio::cache", "cache warm pass complete");
                     return;
@@ -360,7 +371,7 @@ impl CacheRefresher {
         let last = self.status().last_refreshed_at;
         // Spinner on immediately; the target total isn't known until the cheap
         // enumeration below completes.
-        self.emit_status(true, last.clone(), None, None);
+        self.emit_status(true, last.clone(), None, None, None);
 
         // Whole-second endpoints: the window crosses the mobile FFI as
         // RFC-3339 strings and the iOS EventKit bridge's ISO-8601 parser
@@ -380,7 +391,7 @@ impl CacheRefresher {
         self.enumerate_task_lists(&mut targets).await;
         self.enumerate_contact_lists(&mut targets).await;
         let total = targets.len() as u32;
-        self.emit_status(true, last.clone(), Some(total), Some(0));
+        self.emit_status(true, last.clone(), Some(total), Some(0), None);
 
         // Phase 2 — refresh each target's items with bounded concurrency, so a
         // slow account overlaps the others instead of serialising the whole pass.
@@ -401,7 +412,7 @@ impl CacheRefresher {
                 };
                 me.refresh_one(target, window).await;
                 let done = fetched.fetch_add(1, Ordering::Relaxed) + 1;
-                me.emit_status(true, last, Some(total), Some(done));
+                me.emit_status(true, last, Some(total), Some(done), None);
             });
         }
         while set.join_next().await.is_some() {}
@@ -680,13 +691,72 @@ impl CacheRefresher {
         last_refreshed_at: Option<String>,
         total_targets: Option<u32>,
         fetched_targets: Option<u32>,
+        outcome: Option<PassOutcome>,
     ) {
         self.observer.refresh_status(&CacheRefreshStatus {
             refreshing,
             last_refreshed_at,
             total_targets,
             fetched_targets,
+            outcome,
         });
+    }
+
+    /// What the pass left undone, named for the sentence that ends it: the
+    /// accounts the error surface shows ([`CacheStore::refresh_errors`],
+    /// so a first network blip of an unforced pass is not named before it
+    /// is confirmed), and whether every account the pass tried failed.
+    /// `None` when either could not be read; the surfaces then say their
+    /// plain sentence.
+    fn pass_outcome(&self) -> Option<PassOutcome> {
+        let errors = self
+            .cache
+            .refresh_errors()
+            .map_err(|e| warn!(target: "aperio::cache", error = %e, "pass outcome: refresh errors unreadable"))
+            .ok()?;
+        let names = self
+            .cache
+            .account_names()
+            .map_err(|e| warn!(target: "aperio::cache", error = %e, "pass outcome: account names unreadable"))
+            .ok()?;
+        // Dropped: an account deleted while the pass ran.
+        let failing: Vec<FailingAccount> = errors
+            .iter()
+            .filter_map(|acc| {
+                names.get(&acc.account_id).map(|name| FailingAccount {
+                    account_id: acc.account_id.clone(),
+                    name: name.clone(),
+                    cause: acc.cause,
+                    rank: acc.rank,
+                })
+            })
+            .collect();
+        let attempted: std::collections::HashSet<String> = self
+            .registry
+            .snapshot_calendar_adapters()
+            .into_iter()
+            .map(|(account, _)| account)
+            .chain(
+                self.registry
+                    .snapshot_task_adapters()
+                    .into_iter()
+                    .map(|(a, _)| a),
+            )
+            .chain(
+                self.registry
+                    .snapshot_contact_adapters()
+                    .into_iter()
+                    .map(|(a, _)| a),
+            )
+            .collect();
+        let all_failed = !attempted.is_empty()
+            && attempted
+                .iter()
+                .all(|id| failing.iter().any(|f| &f.account_id == id));
+        Some(PassOutcome {
+            failing,
+            all_failed,
+        })
     }
 }
 
@@ -747,14 +817,24 @@ mod tests {
         }
     }
 
-    /// Every `refreshing` value the indicator was told, in order.
+    /// Every status the indicator was told, in order.
     #[derive(Default)]
-    struct Statuses(Mutex<Vec<bool>>);
+    struct Statuses(Mutex<Vec<CacheRefreshStatus>>);
 
     impl CacheObserver for Statuses {
         fn cache_updated(&self, _: &CacheUpdatedPayload) {}
         fn refresh_status(&self, status: &CacheRefreshStatus) {
-            self.0.lock().unwrap().push(status.refreshing);
+            self.0.lock().unwrap().push(status.clone());
+        }
+    }
+
+    impl Statuses {
+        /// The outcome on the status that ended the last passes.
+        fn last_outcome(&self) -> PassOutcome {
+            let all = self.0.lock().unwrap();
+            let last = all.last().expect("a status was emitted");
+            assert!(!last.refreshing, "the passes ended");
+            last.outcome.clone().expect("the end carries an outcome")
         }
     }
 
@@ -865,6 +945,191 @@ mod tests {
         assert!(!refresher.cache.access_withheld("acc-1", SyncScope::Events));
     }
 
+    /// A calendar account whose listing always fails with a network error.
+    struct Down;
+
+    #[async_trait]
+    impl Adapter for Down {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for Down {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            Err(cal_core::Error::Network("offline".into()))
+        }
+        async fn get_events(&self, _: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            unreachable!()
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    fn withheld(granted: bool) -> Arc<Withheld> {
+        Arc::new(Withheld {
+            listings: AtomicU32::new(0),
+            granted: std::sync::atomic::AtomicBool::new(granted),
+        })
+    }
+
+    #[tokio::test]
+    async fn the_end_of_a_pass_names_the_accounts_it_could_not_update() {
+        // "Externe Daten aktualisiert, außer: Work." (decision 180).
+        let (refresher, _gated, statuses) = refresher();
+        let work = withheld(false);
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&work) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.warm_all(false).await;
+        assert_eq!(
+            statuses.last_outcome(),
+            PassOutcome {
+                failing: vec![FailingAccount {
+                    account_id: "acc-1".into(),
+                    name: "Work".into(),
+                    cause: super::super::RefreshCause::Access,
+                    rank: 2,
+                }],
+                // Work was the only account the pass tried.
+                all_failed: true,
+            }
+        );
+        // Only the end carries it.
+        assert!(statuses
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.refreshing)
+            .all(|s| s.outcome.is_none()));
+
+        work.granted.store(true, Ordering::SeqCst);
+        refresher.warm_all(false).await;
+        assert_eq!(
+            statuses.last_outcome(),
+            PassOutcome {
+                failing: Vec::new(),
+                all_failed: false
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn one_failing_account_among_others_is_not_all_failed() {
+        let (refresher, _gated, statuses) = refresher();
+        refresher
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-2', 'caldav', 'Home', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(withheld(false) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.registry.register_host_adapter(
+            "acc-2",
+            Some(withheld(true) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.warm_all(false).await;
+        let outcome = statuses.last_outcome();
+        assert_eq!(
+            outcome
+                .failing
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Work"]
+        );
+        assert!(!outcome.all_failed, "Home was updated");
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_blip_is_not_named_but_a_forced_failure_is() {
+        // The sentence names what the error surface shows: an unforced
+        // pass's first network failure is not confirmed yet.
+        let (refresher, _gated, statuses) = refresher();
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::new(Down) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.warm_all(false).await;
+        assert!(statuses.last_outcome().failing.is_empty());
+        refresher.warm_all(true).await;
+        let outcome = statuses.last_outcome();
+        assert_eq!(outcome.failing.len(), 1);
+        assert_eq!(outcome.failing[0].cause, super::super::RefreshCause::Other);
+        assert!(outcome.all_failed);
+    }
+
+    /// The first pass of the desktop worker, woken by `wake` before the
+    /// start delay ran out, against an account whose listing is down.
+    async fn first_pass_woken_by(wake: fn(&CacheRefresher)) -> PassOutcome {
+        let (refresher, _gated, statuses) = refresher();
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::new(Down) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.start_periodic(&tokio::runtime::Handle::current());
+        wake(&refresher);
+        loop {
+            if statuses.0.lock().unwrap().iter().any(|s| !s.refreshing) {
+                break;
+            }
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+        statuses.last_outcome()
+    }
+
+    #[tokio::test]
+    async fn a_click_in_the_first_seconds_runs_the_first_pass_forced() {
+        // The user's "refresh now" cut the start delay short: the pass that
+        // serves it says its failure at once, as a manual refresh promises.
+        let outcome = first_pass_woken_by(CacheRefresher::trigger).await;
+        assert_eq!(outcome.failing.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_automatic_wake_in_the_first_seconds_stays_unforced() {
+        // The cache-generation reset at launch: a blip is confirmed first.
+        let outcome = first_pass_woken_by(CacheRefresher::trigger_background).await;
+        assert!(outcome.failing.is_empty());
+    }
+
+    #[test]
+    fn a_point_in_time_status_has_no_outcome() {
+        let (refresher, _gated, _) = refresher();
+        assert!(refresher.status().outcome.is_none());
+    }
+
     #[tokio::test]
     async fn a_queued_request_runs_after_the_running_pass() {
         let (refresher, gated, statuses) = refresher();
@@ -889,7 +1154,13 @@ mod tests {
             refresher.pass_forced.load(Ordering::Relaxed),
             "the follow-up ran forced"
         );
-        let finished = statuses.0.lock().unwrap().iter().filter(|r| !**r).count();
+        let finished = statuses
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| !s.refreshing)
+            .count();
         assert_eq!(finished, 1, "the indicator heard 'finished' once");
         assert!(!refresher.status().refreshing);
     }
