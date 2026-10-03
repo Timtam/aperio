@@ -158,6 +158,7 @@ function sentence(
   report: OsAccessReport,
   name: string,
   asked?: AskFor,
+  atStart = false,
 ): string {
   switch (outcome) {
     case 'granted':
@@ -169,7 +170,12 @@ function sentence(
     case 'denied': {
       // Android asks again on the next "Allow access…", and has no
       // reminders to name.
-      if (Platform.OS === 'android') return i18n.t('mobile.deviceAccess.deniedAndroid');
+      // At start the user never chose "Allow access…": say where it is.
+      if (Platform.OS === 'android') {
+        return atStart
+          ? i18n.t('mobile.deviceAccess.deniedAndroidStart', { name })
+          : i18n.t('mobile.deviceAccess.deniedAndroid');
+      }
       const refused = asked != null ? askedAndMissing(asked, report) : 'none';
       const what = refused !== 'none' ? refused : missingStores(report);
       return i18n.t('mobile.deviceAccess.denied', { what: storesPhrase(what) });
@@ -251,6 +257,7 @@ async function reloadAndSay(
   name: string,
   settle: boolean,
   asked?: AskFor,
+  atStart = false,
 ): Promise<void> {
   const reload = outcome !== 'denied';
   // Kick the reload first, so "… wird aktualisiert" is true while it is
@@ -259,7 +266,7 @@ async function reloadAndSay(
     restoreKicked = true;
     await refreshExternalCache().catch(() => {});
   }
-  await holdingSpeech(() => sayAndWait(sentence(outcome, report, name, asked)));
+  await holdingSpeech(() => sayAndWait(sentence(outcome, report, name, asked, atStart)));
   if (reload && settle) await settleExternalCaches(async () => {});
 }
 
@@ -301,9 +308,12 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       after.account_names[0] ?? name,
       true,
       ask,
+      true,
     );
   } catch {
-    // Nothing was decided; the next start asks again.
+    // Nothing was said. The next start asks again, unless the request was
+    // already noted (Android, decision 172); the account's "Allow access…"
+    // is the way then.
   } finally {
     flowBusy -= 1;
     startSettled = true;

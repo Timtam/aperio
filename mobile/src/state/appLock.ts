@@ -70,9 +70,12 @@ export function isAppLockEngaged(): boolean {
  * over the app under it would flash for nothing, so the gate leaves the
  * inactive cover off and does not start the unlock prompt over it.
  *
- * Unlike the lock's own sheet, it does NOT stop the re-lock clock: an iOS
- * permission alert never backgrounds the app, so a 'background' while it is
- * up is the user really leaving, and the lock must hold on their return.
+ * On iOS it does NOT stop the re-lock clock: a permission alert never
+ * backgrounds the app, so a 'background' while it is up is the user really
+ * leaving, and the lock must hold on their return. Android's permission
+ * dialog is an activity of its own and does background the app; there the
+ * gate starts neither the clock nor the cover under it, and starts both when
+ * it closes with the app not in front.
  */
 export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
   osSheetBusy += 1;

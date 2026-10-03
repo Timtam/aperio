@@ -646,7 +646,7 @@ export default function AccountsScreen() {
       // reminders); Android requests the CalendarProvider runtime permissions.
       const granted =
         Platform.OS === 'android'
-          ? (await requestAndroidCalendarPermission()) === 'granted'
+          ? (await whileOsSheetOpen(requestAndroidCalendarPermission)) === 'granted'
           : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');

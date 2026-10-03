@@ -871,7 +871,8 @@ pub trait DeviceEventStoreBridge: Send + Sync {
     /// The OS's access state right now, asking nobody: JSON
     /// `{"events": token, "reminders": token | null}`. iOS tokens:
     /// `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
-    /// Android: `granted`, `not_granted`. Anything else reads as undetermined.
+    /// Android: `granted`, `not_determined` (Aperio never asked on this
+    /// device), `not_granted`. Anything else reads as undetermined.
     fn access_status(&self) -> String;
 }
 

@@ -153,10 +153,12 @@ enum Store {
 /// The platform's own words for an access state, in the core's.
 ///
 /// iOS: EventKit's `EKAuthorizationStatus` (`full_access` also stands for the
-/// pre-17 `authorized`). Android: the runtime permission, which cannot tell
-/// "never asked" from "refused" — both read as not granted, which is
-/// [`OsAccess::Undetermined`]. Anything else, a state a newer OS invents, is
-/// undetermined too: never a reason to ask.
+/// pre-17 `authorized`). Android: the runtime permission plus Aperio's own
+/// record of having asked on the device (decision 172) — `not_determined`
+/// without the record is [`OsAccess::NotAsked`], `not_granted` after asking
+/// is [`OsAccess::Undetermined`] (a refusal, or a dialog Android will not
+/// show again). Anything else, a state a newer OS invents, is undetermined
+/// too: never a reason to ask.
 pub fn map_access_token(token: &str) -> OsAccess {
     match token {
         "full_access" | "granted" => OsAccess::Full,
@@ -824,7 +826,7 @@ mod tests {
         assert_eq!(map_access_token("not_determined"), OsAccess::NotAsked);
         assert_eq!(map_access_token("denied"), OsAccess::Denied);
         assert_eq!(map_access_token("restricted"), OsAccess::Restricted);
-        // Android cannot tell "never asked" from "refused".
+        // Android after asking: a refusal, or a dialog it will not show again.
         assert_eq!(map_access_token("not_granted"), OsAccess::Undetermined);
         // A state a newer OS invents is never a reason to ask.
         assert_eq!(map_access_token("unknown_9"), OsAccess::Undetermined);

@@ -4,6 +4,7 @@ import {
   AppState,
   Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -195,7 +196,12 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
         // fallback is a separate activity) backgrounds the app. Covering is
         // right either way, but the re-lock clock must not start under the
         // sheet — a slow PIN entry would re-lock the app the moment the
-        // successful unlock returns.
+        // successful unlock returns. Aperio's own permission dialog
+        // (whileOsSheetOpen) does the same on Android: no clock under it, and
+        // no cover behind it. Leaving while it is up starts both once it
+        // closes (see subscribeOsSheetClosed below).
+        const permissionDialog = Platform.OS === 'android' && isOsSheetOpen();
+        if (permissionDialog) return;
         if (!isAuthenticating()) {
           backgroundAt.current ??= Date.now();
           // A genuine departure while parked on the cover re-arms the
@@ -250,6 +256,14 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
   useEffect(
     () =>
       subscribeOsSheetClosed(() => {
+        // Android: the dialog closed while the app is not in front — the user
+        // left during it. From now on it is a departure like any other.
+        if (AppState.currentState !== 'active' && enabledRef.current === true) {
+          backgroundAt.current ??= Date.now();
+          if (lockedRef.current) promptedThisLock.current = false;
+          setCovered(true);
+          return;
+        }
         if (
           AppState.currentState === 'active' &&
           lockedRef.current &&

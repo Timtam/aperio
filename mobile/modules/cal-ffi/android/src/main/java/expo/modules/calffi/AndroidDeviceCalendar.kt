@@ -47,18 +47,25 @@ class AndroidDeviceCalendar(private val context: Context) : DeviceEventStoreBrid
   // (decision 172). After asking, "not_granted" reads as undetermined — the
   // user's answer, or a dialog Android will not show again — which the
   // account's "Allow access…" finds out by asking.
-  override fun accessStatus(): String =
-    JSONObject()
-      .put(
-        "events",
-        when {
-          hasReadPermission() && hasWritePermission() -> "granted"
-          !askedBefore(context) -> "not_determined"
-          else -> "not_granted"
-        },
-      )
+  //
+  // A grant seen here settles the question on this device, so it is noted:
+  // an install from before the record existed was asked when its account was
+  // added, and a later revocation in the settings must not be asked about
+  // unprompted at the next start.
+  override fun accessStatus(): String {
+    val events = when {
+      hasReadPermission() && hasWritePermission() -> {
+        if (!askedBefore(context)) noteAsked(context)
+        "granted"
+      }
+      !askedBefore(context) -> "not_determined"
+      else -> "not_granted"
+    }
+    return JSONObject()
+      .put("events", events)
       .put("reminders", JSONObject.NULL)
       .toString()
+  }
 
   companion object {
     /** Aperio's record that it asked for the calendar permission on THIS device.

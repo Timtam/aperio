@@ -64,9 +64,9 @@ pub struct AskFor {
 pub enum AccessRepair {
     /// Nothing is missing.
     None,
-    /// Ask the OS: it has never asked, or the platform cannot tell whether
-    /// it has (Android, where asking either shows the dialog or reports at
-    /// once that it will not).
+    /// Ask the OS: it has never asked, or it cannot tell whether it would ask
+    /// again (Android after a first answer, where asking either shows the
+    /// dialog or reports at once that it will not).
     Ask,
     /// The user said no, or allowed only adding events: the way is the OS
     /// settings for Aperio. After a no the OS does not ask again; whether
