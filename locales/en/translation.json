@@ -2041,6 +2041,7 @@
       "deviceGrantBodyAndroid": "Aperio will ask for permission to your device's calendars. They stay on this device only — this account is never synced to your other devices.",
       "deviceGrantButton": "Grant access",
       "deviceAccessDenied": "Access was not granted. You can enable calendar and reminders access for Aperio later in the Settings app.",
+      "deviceAccessDeniedAndroid": "Access to the calendars was not granted. You can choose \"{{button}}\" again, or allow it later for Aperio under \"Permissions\" in the Android settings.",
       "clientSecretNeeded": "This device does not hold this account's OAuth client secret. Enter it, then sign in again.",
       "clientSecretLabel": "OAuth client secret"
     },

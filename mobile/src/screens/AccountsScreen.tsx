@@ -659,7 +659,14 @@ export default function AccountsScreen() {
         await new Promise((resolve) => setTimeout(resolve, AFTER_UNLOCK_SPEECH_MS));
       }
       if (!granted) {
-        const message = t('dialogs.accounts.deviceAccessDenied');
+        // Android asks for the calendars only, and asks again on the next
+        // press; iOS sends to its settings for both stores.
+        const message =
+          Platform.OS === 'android'
+            ? t('dialogs.accounts.deviceAccessDeniedAndroid', {
+                button: t('dialogs.accounts.deviceGrantButton'),
+              })
+            : t('dialogs.accounts.deviceAccessDenied');
         setError(message);
         announce(message);
         return;
