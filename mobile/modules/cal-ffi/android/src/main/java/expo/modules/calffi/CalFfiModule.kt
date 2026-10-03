@@ -237,10 +237,13 @@ class CalFfiModule : Module() {
     }
 
   // Split across several `ModuleDefinitionBuilder` extensions rather than one
-  // lambda. The JVM caps a single method's bytecode at 64 KB, and 139 function
-  // registrations went past it: "Method too large:
-  // CalFfiModule.definition()". Each extension compiles to its own method, so
-  // the ceiling applies per group instead of to the module as a whole.
+  // lambda. The JVM caps a single method's bytecode at 64 KB, and every
+  // registration is inlined into the method it sits in: 139 went past it once
+  // ("Method too large: CalFfiModule.definition()"), and 130 did again after
+  // the groups that were lifted then had grown back. Each extension compiles
+  // to its own method, so the ceiling applies per group; the FFI bridge check
+  // (mobile/scripts/check-ffi-bridges.mjs) fails a group that grows past its
+  // share before a release build finds out.
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
 
@@ -288,6 +291,51 @@ class CalFfiModule : Module() {
       )
     }
 
+    coreRuleFunctions()
+
+    taskFunctions()
+
+    accountFunctions()
+
+    calendarFunctions()
+
+    syncFunctions()
+
+    // ─── Reminders ────────────────────────────────────────────────────────────
+    // Upcoming reminder triggers (local + external) within a horizon, for the JS
+    // layer to schedule as expo-notifications. `horizonMinutes` arrives as a JS
+    // Number → widen the Int to the Rust u32.
+
+    AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
+      host.upcomingRemindersJson(horizonMinutes.toUInt())
+    }
+
+    soundFunctions()
+
+    preferenceFunctions()
+
+    contactFunctions()
+
+    collaborationFunctions()
+
+    // ─── Schema-driven accounts ──────────────────────────────────────────────
+    // The generic connect path: the adapter declares its form in its
+    // plugin.json and the host executes the declaration, so adding an adapter
+    // adds no code here either.
+
+    meetingFunctions()
+
+    oauthFunctions()
+
+    onboardingFunctions()
+
+    sftpFunctions()
+
+    widgetFunctions()
+  }
+
+  /** Lifted out of `definition()` — see the note there. The rules the core decides synchronously: text ordering, task priority, conference detection, groups, recurrence words. */
+  private fun ModuleDefinitionBuilder.coreRuleFunctions() {
     // ─── Text ordering (synchronous, and that is the point) ───
     // The tiebreaker every list in this app ends in, from `cal_core::collation`
     // via the Kotlin bindings. `Function`, not `AsyncFunction`: the callers are
@@ -531,7 +579,10 @@ class CalFfiModule : Module() {
     Function("recurrenceSummary") { inputJson: String ->
       uniffiRecurrenceSummary(inputJson)
     }
+  }
 
+  /** Lifted out of `definition()` — see the note there. Tasks, lists and sections. */
+  private fun ModuleDefinitionBuilder.taskFunctions() {
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ─────────────────
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so
@@ -595,7 +646,10 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteSection") { id: String, listId: String? ->
       host.deleteSection(id, listId)
     }
+  }
 
+  /** Lifted out of `definition()` — see the note there. Accounts: the full engine, external adapters and secrets. */
+  private fun ModuleDefinitionBuilder.accountFunctions() {
     // ─── Accounts (the full engine: external adapters + secrets) ─────────────
     // JSON passthrough in the cal_core/desktop wire shape, same convention as
     // the task bridge. create_account_json persists the row, stores the secret
@@ -667,7 +721,10 @@ class CalFfiModule : Module() {
     AsyncFunction("setAccountSecret") { accountId: String, secret: String ->
       host.setAccountSecret(accountId, secret)
     }
+  }
 
+  /** Lifted out of `definition()` — see the note there. Calendars and events. */
+  private fun ModuleDefinitionBuilder.calendarFunctions() {
     // ─── Calendars + events (the on-device adapters, local + external) ───────
     // JSON passthrough in the cal_core/desktop wire shape. Routing (local vs
     // external account) happens Rust-side in the Host; a thrown StoreException
@@ -713,20 +770,10 @@ class CalFfiModule : Module() {
     AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String?, sendCancellations: Boolean ->
       eventCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
     }
+  }
 
-    syncFunctions()
-
-    // ─── Reminders ────────────────────────────────────────────────────────────
-    // Upcoming reminder triggers (local + external) within a horizon, for the JS
-    // layer to schedule as expo-notifications. `horizonMinutes` arrives as a JS
-    // Number → widen the Int to the Rust u32.
-
-    AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
-      host.upcomingRemindersJson(horizonMinutes.toUInt())
-    }
-
-    soundFunctions()
-
+  /** Lifted out of `definition()` — see the note there. User preferences, colour labels, day markers, search and what sits with them. */
+  private fun ModuleDefinitionBuilder.preferenceFunctions() {
     // ─── User preferences (generic key/value; synced-key whitelist) ───────────
     // Opaque string values; a whitelisted key change appends a SettingsUpdated
     // sync event Rust-side so it propagates across devices.
@@ -861,9 +908,10 @@ class CalFfiModule : Module() {
     AsyncFunction("searchContactsJson") { query: String ->
       host.searchContactsJson(query)
     }
+  }
 
-    contactFunctions()
-
+  /** Lifted out of `definition()` — see the note there. Collaboration: RSVP and task-list members and sharing. */
+  private fun ModuleDefinitionBuilder.collaborationFunctions() {
     // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
     // Routed Rust-side to the owning external adapter; reads degrade to empty /
     // null for local + unroutable accounts (the UI hides the affordance), writes
@@ -907,14 +955,10 @@ class CalFfiModule : Module() {
     AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
       host.taskSetMemberRight(listId, memberRef, right)
     }
+  }
 
-    // ─── Schema-driven accounts ──────────────────────────────────────────────
-    // The generic connect path: the adapter declares its form in its
-    // plugin.json and the host executes the declaration, so adding an adapter
-    // adds no code here either.
-
-    meetingFunctions()
-
+  /** Lifted out of `definition()` — see the note there. OAuth, discovery, sync-target OAuth and end-to-end encryption. */
+  private fun ModuleDefinitionBuilder.oauthFunctions() {
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
     // beginOauthJson runs the pure authorize phase (no network) → returns
     // {authorize_url, pkce_verifier, state}. complete (network exchange + account
@@ -970,12 +1014,6 @@ class CalFfiModule : Module() {
     AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
       coded { host.adoptRemoteEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
-
-    onboardingFunctions()
-
-    sftpFunctions()
-
-    widgetFunctions()
   }
 
   /** Lifted out of `definition()` — see the note there. */
