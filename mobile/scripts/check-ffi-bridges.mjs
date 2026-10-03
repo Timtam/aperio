@@ -342,21 +342,27 @@ for (const [name, count] of declared) {
 }
 
 /**
- * A source with its comments blanked out and its strings kept. Block comments
- * nest in Kotlin and Swift, not in TypeScript.
+ * A source with its comments blanked out and its strings kept, or with the
+ * contents of its strings blanked too (`strings: 'blank'`). Block comments nest
+ * in Kotlin and Swift, not in TypeScript. Blanking keeps every line and column
+ * where it was, so an index into one form is an index into the other.
  *
  * A registration that was commented out still compiles on both platforms, and
  * a name inside a comment is nothing JavaScript can call.
  */
-function withoutComments(text, { nested }) {
+function withoutComments(text, { nested, strings = 'keep' }) {
   const blank = (s) => s.replace(/[^\n]/g, ' ');
+  const literal = (s, open, close) =>
+    strings === 'blank'
+      ? s.slice(0, open) + blank(s.slice(open, s.length - close)) + s.slice(s.length - close)
+      : s;
   let out = '';
   let i = 0;
   while (i < text.length) {
     if (text.startsWith('"""', i)) {
       const end = text.indexOf('"""', i + 3);
       const stop = end < 0 ? text.length : end + 3;
-      out += text.slice(i, stop);
+      out += literal(text.slice(i, stop), 3, end < 0 ? 0 : 3);
       i = stop;
     } else if (text[i] === '"' || text[i] === "'" || text[i] === '`') {
       const quote = text[i];
@@ -364,7 +370,7 @@ function withoutComments(text, { nested }) {
       while (j < text.length && text[j] !== quote && (text[j] !== '\n' || quote === '`')) {
         j += text[j] === '\\' ? 2 : 1;
       }
-      out += text.slice(i, j + 1);
+      out += literal(text.slice(i, j + 1), 1, j < text.length ? 1 : 0);
       i = j + 1;
     } else if (text.startsWith('//', i)) {
       const end = text.indexOf('\n', i);
@@ -520,9 +526,10 @@ function closureParams(after, language) {
  * JavaScript (`null`: unreadable).
  *
  * Registrations are expected in the module file itself. Moving some into a
- * helper file reports them as missing, loudly, rather than passing. One whose
- * name is not a plain string literal is not read here; `unreadableRegistrations`
- * names it instead.
+ * helper file reports them as missing, loudly, rather than passing. One
+ * written any other way (a name of other characters, a template, type
+ * arguments, the closure inside the parentheses) is not read here;
+ * `unreadableRegistrations` names it instead.
  */
 function registeredFunctions(source, language) {
   const code = withoutComments(source, { nested: true });
@@ -535,25 +542,28 @@ function registeredFunctions(source, language) {
 }
 
 /**
- * Every registration as either module can write it, whatever its name looks
- * like: `Function(` or `AsyncFunction(`. `registeredFunctions` reads only the
- * ones named by a plain string literal.
+ * A registration as either module writes it, whatever its name looks like:
+ * `Function(` or `AsyncFunction(`, with or without type arguments, in code. It
+ * is looked for with comments and string contents blanked (`codeOnly`), so a
+ * message that mentions one is not one, and `return@AsyncFunction` is a label.
+ * `registeredFunctions` reads only the plain form, `READABLE_REGISTRATION`.
  */
-const REGISTRATION = /\b(?:Async)?Function\s*\(/g;
-const READABLE_REGISTRATION = /^\b(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/;
+const REGISTRATION = /(?<![\w@.])(?:Async)?Function\s*(?:<[^(){};]*>)?\s*\(/g;
+const READABLE_REGISTRATION = /^(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/;
+const codeOnly = (source) => withoutComments(source, { nested: true, strings: 'blank' });
 const lineAt = (code, index) => code.slice(0, index).split('\n').length;
 
 /**
- * The lines of registrations `registeredFunctions` cannot read: a name with a
- * dash or a dot, a template, a concatenation, a variable. Each would be a
- * function JavaScript can call that no declaration is held to, and a weight on
- * its method that nothing counted, so it is named rather than skipped.
+ * The lines of registrations `registeredFunctions` cannot read. Each would be a
+ * function JavaScript can call that no declaration is held to, so it is named
+ * rather than skipped.
  */
 function unreadableRegistrations(source) {
   const code = withoutComments(source, { nested: true });
-  return [...code.matchAll(REGISTRATION)]
+  const bare = codeOnly(source);
+  return [...bare.matchAll(REGISTRATION)]
     .filter((m) => !READABLE_REGISTRATION.test(code.slice(m.index)))
-    .map((m) => lineAt(code, m.index));
+    .map((m) => lineAt(bare, m.index));
 }
 
 const declaredSurface = declaredFunctions(readFileSync(TS_MODULE, 'utf8'));
@@ -592,9 +602,11 @@ for (const [platform, file] of [
 ]) {
   for (const line of unreadableRegistrations(readFileSync(file, 'utf8'))) {
     surface.push(
-      `the ${MODULE[platform]} module registers a function on line ${line} whose name ` +
-        'this check cannot read, so it cannot hold it to CalFfiModule.ts: name it ' +
-        'with a plain string literal',
+      `the ${MODULE[platform]} module registers a function on line ${line} that this ` +
+        'check cannot read, so it cannot hold it to CalFfiModule.ts: write it as ' +
+        'Function("name") { ... } or AsyncFunction("name") { ... }, with a name of ' +
+        'letters, digits and underscores, no type arguments, and the closure after ' +
+        'the parentheses',
     );
   }
 }
@@ -770,15 +782,16 @@ const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
 const MAX_REGISTRATIONS_PER_METHOD = 70;
 
 /**
- * `counts`: method name → the registrations whose innermost method it is.
- * `outside`: the lines of registrations in none of those methods. `nested`:
- * methods declared inside another one.
+ * `methods`: each method by name and line, with the registrations whose
+ * innermost method it is. `outside`: the lines of registrations in none of
+ * them. `nested`: methods declared inside another one.
  *
  * By position, not by comparing totals: a group counted twice and another
- * counted not at all would cancel out in a sum.
+ * counted not at all would cancel out in a sum. And by line, not by name: two
+ * classes in the file may each have a method of the same name.
  */
 function registrationGroups(source) {
-  const code = withoutComments(source, { nested: true });
+  const code = codeOnly(source);
   const methods = [];
   for (const m of code.matchAll(
     /\b(?:override\s+fun\s+(definition)\s*\(\s*\)\s*=\s*ModuleDefinition|fun\s+ModuleDefinitionBuilder\.([A-Za-z_]\w*)\s*\(\s*\))\s*\{/g,
@@ -786,7 +799,13 @@ function registrationGroups(source) {
     const open = m.index + m[0].length - 1;
     const body = braced(code, open);
     if (body === null) continue;
-    methods.push({ name: m[1] ?? m[2], open, close: open + body.length + 1, count: 0 });
+    methods.push({
+      name: m[1] ?? m[2],
+      line: lineAt(code, m.index),
+      open,
+      close: open + body.length + 1,
+      count: 0,
+    });
   }
   const outside = [];
   for (const r of code.matchAll(REGISTRATION)) {
@@ -794,10 +813,10 @@ function registrationGroups(source) {
     if (around.length === 0) outside.push(lineAt(code, r.index));
     else around.reduce((a, b) => (b.open > a.open ? b : a)).count += 1;
   }
-  const nested = methods
-    .filter((x) => methods.some((y) => y !== x && y.open < x.open && x.close <= y.close))
-    .map((x) => x.name);
-  return { counts: new Map(methods.map((x) => [x.name, x.count])), outside, nested };
+  const nested = methods.filter((x) =>
+    methods.some((y) => y !== x && y.open < x.open && x.close <= y.close),
+  );
+  return { methods, outside, nested };
 }
 
 const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
@@ -806,10 +825,10 @@ const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
 const methodSize = [];
 /** Registrations whose method this check cannot tell, so it cannot size it. */
 const methodLayout = [];
-for (const [group, count] of kotlinGroups.counts) {
+for (const { name, line, count } of kotlinGroups.methods) {
   if (count > MAX_REGISTRATIONS_PER_METHOD) {
     methodSize.push(
-      `${group}() in the Android module holds ${count} registrations, ` +
+      `${name}() on line ${line} of the Android module holds ${count} registrations, ` +
         `more than the ${MAX_REGISTRATIONS_PER_METHOD} one method may hold`,
     );
   }
@@ -821,10 +840,10 @@ if (kotlinGroups.outside.length > 0) {
       'read, so it cannot tell how large the method holding them is',
   );
 }
-for (const name of kotlinGroups.nested) {
+for (const { name, line } of kotlinGroups.nested) {
   methodLayout.push(
-    `${name}() is declared inside another method of the Android module, so this ` +
-      'check cannot tell which method its registrations weigh on',
+    `${name}() on line ${line} is declared inside another method of the Android ` +
+      'module, so this check cannot tell which method its registrations weigh on',
   );
 }
 
@@ -845,7 +864,7 @@ const floors = [
   // definition() at least. Fewer means the pattern no longer matches how the
   // module is written; an unsplit module still finds definition() and is
   // reported by its size, not here.
-  ['methods of the Android module that register functions', kotlinGroups.counts.size, 1],
+  ['methods of the Android module that register functions', kotlinGroups.methods.length, 1],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -935,6 +954,6 @@ console.log(
     `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +
     'implemented on both platforms with the same argument counts, and no method ' +
     `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
-    `registrations (the largest of its ${kotlinGroups.counts.size}: ` +
-    `${Math.max(...kotlinGroups.counts.values())}).`,
+    `registrations (the largest of its ${kotlinGroups.methods.length}: ` +
+    `${Math.max(...kotlinGroups.methods.map((x) => x.count))}).`,
 );
