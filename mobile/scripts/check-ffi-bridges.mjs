@@ -32,6 +32,10 @@
  * has to be registered in BOTH native modules, as the same kind of function and
  * with the same number of parameters (see `declaredFunctions`).
  *
+ * And the Android module's size: no method of it may hold so many
+ * registrations that the JVM refuses to compile it (see
+ * `MAX_REGISTRATIONS_PER_METHOD`).
+ *
  * Only methods a bridge actually calls are checked, so a Rust method no phone
  * uses is nobody's problem here.
  *
@@ -713,6 +717,59 @@ for (const [trait, methods] of traits) {
 }
 const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
 
+/**
+ * How many registrations each method of the Android module holds:
+ * `definition()` and every `ModuleDefinitionBuilder` extension it calls.
+ *
+ * The JVM caps one method's bytecode at 64 KB, and expo inlines each
+ * `Function`/`AsyncFunction` registration into the method it sits in. Nothing
+ * local compiles Kotlin, so a group that outgrew the cap failed only at
+ * `:cal-ffi:compileReleaseKotlin`, minutes into an EAS build ("Method too
+ * large: CalFfiModule.definition"): with 140 registrations once, with 130
+ * again after the groups lifted out the first time had grown back. 85 built.
+ * Registrations are not all the same size, so the count is a proxy, kept
+ * well under the smallest one that failed.
+ */
+const MAX_REGISTRATIONS_PER_METHOD = 70;
+
+function registrationGroups(source) {
+  const code = withoutComments(source, { nested: true });
+  const groups = new Map();
+  for (const m of code.matchAll(
+    /\b(?:override\s+fun\s+(definition)\s*\(\s*\)\s*=\s*ModuleDefinition|fun\s+ModuleDefinitionBuilder\.([A-Za-z_]\w*)\s*\(\s*\))\s*\{/g,
+  )) {
+    const body = braced(code, m.index + m[0].length - 1);
+    if (body === null) continue;
+    groups.set(m[1] ?? m[2], [...body.matchAll(/\b(?:Async)?Function\s*\(\s*"/g)].length);
+  }
+  return groups;
+}
+
+const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
+/** One method of the Android module too large to compile, kept apart from
+ *  `problems` and `surface`: neither regenerating nor declaring fixes it. */
+const methodSize = [];
+for (const [group, count] of kotlinGroups) {
+  if (count > MAX_REGISTRATIONS_PER_METHOD) {
+    methodSize.push(
+      `${group}() in the Android module holds ${count} registrations, ` +
+        `more than the ${MAX_REGISTRATIONS_PER_METHOD} one method may hold`,
+    );
+  }
+}
+const grouped = [...kotlinGroups.values()].reduce((n, c) => n + c, 0);
+const androidRegistrations = [...nativeModules.get('android').values()].reduce(
+  (n, found) => n + found.length,
+  0,
+);
+if (grouped !== androidRegistrations) {
+  methodSize.push(
+    `the Android module has ${androidRegistrations} registrations, but only ${grouped} ` +
+      'sit in definition() or a ModuleDefinitionBuilder extension this check can read, ' +
+      'so it cannot tell how large the method holding the rest is',
+  );
+}
+
 // A parse that matched nothing would report no problems and mean nothing.
 const floors = [
   ['exported Rust methods', rust.size, 100],
@@ -727,6 +784,9 @@ const floors = [
   ['iOS module registrations', nativeModules.get('ios').size, 100],
   ['foreign traits Rust calls into', traits.size, 4],
   ['methods of those traits', traitMethods, 15],
+  // definition() and at least one extension: a split this check cannot see
+  // would leave every registration unattributed instead.
+  ['methods of the Android module that register functions', kotlinGroups.size, 2],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -769,7 +829,21 @@ if (surface.length > 0) {
   );
 }
 
-if (problems.length > 0 || surface.length > 0) process.exit(1);
+if (methodSize.length > 0) {
+  console.error(
+    `${problems.length > 0 || surface.length > 0 ? '\n' : ''}The Android module ` +
+      `risks a method too large for the JVM in ${methodSize.length} place(s):\n`,
+  );
+  for (const p of methodSize) console.error(`  ${p}`);
+  console.error(
+    '\nLift a group of registrations out into its own\n' +
+      '`private fun ModuleDefinitionBuilder.someFunctions() { ... }` and call it\n' +
+      'from definition(), as the existing groups in CalFfiModule.kt do. Each\n' +
+      'extension compiles to its own method, so the 64 KB cap applies per group.',
+  );
+}
+
+if (problems.length > 0 || surface.length > 0 || methodSize.length > 0) process.exit(1);
 
 const onlyOn = Object.entries(MODULE)
   .map(([platform, label]) => {
@@ -788,5 +862,8 @@ console.log(
     `${rustFree.size} exported free functions ` +
     `(${[...rustFree.keys()].sort().join(', ')}) are all declared there; ` +
     `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +
-    'implemented on both platforms with the same argument counts.',
+    'implemented on both platforms with the same argument counts, and no method ' +
+    `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
+    `registrations (the largest of its ${kotlinGroups.size}: ` +
+    `${Math.max(...kotlinGroups.values())}).`,
 );
