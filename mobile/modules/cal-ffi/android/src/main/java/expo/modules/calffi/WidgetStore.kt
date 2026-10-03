@@ -6,6 +6,7 @@ import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
+import java.util.IllformedLocaleException
 import java.util.Locale
 import java.util.TimeZone
 import org.json.JSONArray
@@ -140,6 +141,21 @@ object WidgetStore {
   private fun isoNow(): String =
     utcFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(Date())
 
+  /**
+   * The text at [name], or null when [json] has no such key or holds JSON null
+   * there.
+   *
+   * Not `optString(name, null)`: the platform declares that fallback non-null,
+   * and a JSON null comes back from it as the four letters "null", which
+   * [isRunning] would take for an end. The snapshot leaves a missing value out
+   * rather than writing null, so this changes nothing a widget shows today.
+   */
+  fun textOrNull(json: JSONObject, name: String): String? =
+    if (json.isNull(name)) null else json.optString(name)
+
+  /** The instant at [name] — see [textOrNull] and [parseInstant]. */
+  fun instantAt(json: JSONObject, name: String): Date? = parseInstant(textOrNull(json, name))
+
   /** Parse an instant the app wrote. The millisecond form is what
    *  `toISOString()` produces; the second-precision one is the fallback. */
   fun parseInstant(raw: String?): Date? {
@@ -160,12 +176,17 @@ object WidgetStore {
    * The same split iOS makes, for the same reason: German or English is the
    * app's own setting, which the user may have chosen against their device,
    * while a 24-hour clock and day-before-month are the device's and no app
-   * should override them.
+   * should override them. A language no locale can be built from leaves the
+   * device's locale as it is.
    */
   fun localeFor(tag: String?): Locale {
     val language = (tag ?: "").replace('_', '-').substringBefore('-')
     if (language.isEmpty()) return Locale.getDefault()
-    return Locale(language, Locale.getDefault().country)
+    return try {
+      Locale.Builder().setLanguage(language).setRegion(Locale.getDefault().country).build()
+    } catch (_: IllformedLocaleException) {
+      Locale.getDefault()
+    }
   }
 
   /** A time in the given locale's format. */
@@ -194,8 +215,8 @@ object WidgetStore {
    * widget drew itself.
    */
   fun expiresAt(item: JSONObject): Date? {
-    parseInstant(item.optString("end", null))?.let { return it }
-    val at = parseInstant(item.optString("at", null)) ?: return null
+    instantAt(item, "end")?.let { return it }
+    val at = instantAt(item, "at") ?: return null
     if (!item.optBoolean("untimed", false)) return at
     val cal = Calendar.getInstance().apply { time = at }
     cal.set(Calendar.HOUR_OF_DAY, 0)
@@ -213,8 +234,8 @@ object WidgetStore {
    */
   fun isRunning(item: JSONObject, now: Date): Boolean {
     if (item.optBoolean("untimed", false)) return false
-    if (item.optString("end", null) == null) return false
-    val start = parseInstant(item.optString("at", null)) ?: return false
+    if (textOrNull(item, "end") == null) return false
+    val start = instantAt(item, "at") ?: return false
     return !start.after(now)
   }
 
@@ -236,7 +257,7 @@ object WidgetStore {
     if (item.optBoolean("untimed", false) || isRunning(item, now)) {
       expiresAt(item)
     } else {
-      parseInstant(item.optString("at", null))
+      instantAt(item, "at")
     }
 
   /**
