@@ -23,7 +23,12 @@ import {
 } from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
 import { holdingSpeech } from '../a11y/speechHold';
-import { isAppLockEngaged, isOsSheetOpen, whileOsSheetOpen } from './appLock';
+import {
+  isAppLockEngaged,
+  isOsSheetOpen,
+  whenAppLockReleased,
+  whileOsSheetOpen,
+} from './appLock';
 import { settleExternalCaches } from './cacheSettle';
 
 /**
@@ -223,6 +228,9 @@ function askedAndMissing(asked: AskFor, report: OsAccessReport): DeviceStores {
  * sentence had just suggested pressing again.
  */
 async function sayAndWait(message: string): Promise<void> {
+  // Not under the unlock prompt: a slow answer to Android's permission
+  // dialog may have re-locked the app meanwhile.
+  await whenAppLockReleased();
   const screenReader = await AccessibilityInfo.isScreenReaderEnabled().catch(() => false);
   await new Promise((resolve) => setTimeout(resolve, ANNOUNCE_DELAY_MS));
   if (!screenReader || Platform.OS !== 'ios') {
@@ -407,13 +415,16 @@ export function markDeviceAccessCheckPending(): void {
 export async function requestAndroidCalendarPermission(): Promise<
   'granted' | 'denied' | 'blocked'
 > {
+  // Asked on this device, whatever comes of it: the start check does not ask
+  // again (decision 172). Noted BEFORE the dialog, so a process ended while it
+  // is up (the user left and Android reclaimed the memory) does not ask again
+  // at the next start; a request that then shows nothing is harmless, since
+  // "Allow access…" asks.
+  noteDeviceCalendarAsked();
   const result = await PermissionsAndroid.requestMultiple([
     PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
     PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
   ]);
-  // Asked on this device, whatever came of it: the start check does not ask
-  // again (decision 172).
-  noteDeviceCalendarAsked();
   const answers = [
     result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR],
     result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR],
