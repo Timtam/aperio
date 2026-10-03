@@ -4,12 +4,13 @@ import { AccessibilityInfo } from 'react-native';
  * A sentence that has to be heard whole, and the background cues that would
  * otherwise cut it off.
  *
- * An iOS announcement interrupts whatever VoiceOver is saying. The start
- * check's sentence after the calendar prompt (decision 166) ends, on a partial
- * grant, with the way into Settings — and the refresh cues ("Externe Daten
- * werden aktualisiert …", "… aktualisiert.") and the refresh-errors warning
- * arrive on their own clock, often in the middle of it. While a sentence is
- * held, those cues queue behind it instead.
+ * An iOS announcement interrupts whatever VoiceOver is saying. The sentence
+ * about the device calendars (after the start prompt, decision 166, the
+ * account's "Allow access…", or a grant given in the settings) ends, on a
+ * partial grant, with what holds the other store back — and the refresh cues
+ * ("Externe Daten werden aktualisiert …", "… aktualisiert.") and the
+ * refresh-errors warning arrive on their own clock, often in the middle of
+ * it. While a sentence is held, those cues queue behind it instead.
  */
 let held = 0;
 

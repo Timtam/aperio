@@ -8,6 +8,8 @@
       "leftSettingsReminders": "Reminders stay without access; you can change that for Aperio in the Settings app.",
       "leftAskCalendars": "Calendars stay without access; \"Allow access…\" asks for them.",
       "leftAskReminders": "Reminders stay without access; \"Allow access…\" asks for them.",
+      "leftRestrictedCalendars": "A restriction such as Screen Time blocks the calendars.",
+      "leftRestrictedReminders": "A restriction such as Screen Time blocks the reminders.",
       "denied": "Access to {{what}} was not granted. You can allow it later for Aperio in the Settings app.",
       "deniedAndroid": "Access to the calendars was not granted. You can choose \"Allow access…\" again.",
       "badge": "No access",

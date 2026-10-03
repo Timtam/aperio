@@ -8,6 +8,8 @@
       "leftSettingsReminders": "Die Erinnerungen bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
       "leftAskCalendars": "Die Kalender bleiben ohne Zugriff; „Zugriff erlauben…“ fragt danach.",
       "leftAskReminders": "Die Erinnerungen bleiben ohne Zugriff; „Zugriff erlauben…“ fragt danach.",
+      "leftRestrictedCalendars": "Die Kalender sperrt eine Einschränkung wie Bildschirmzeit.",
+      "leftRestrictedReminders": "Die Erinnerungen sperrt eine Einschränkung wie Bildschirmzeit.",
       "denied": "Der Zugriff auf {{what}} wurde nicht erteilt. Du kannst ihn später in der App „Einstellungen“ bei Aperio erlauben.",
       "deniedAndroid": "Der Zugriff auf die Kalender wurde nicht erteilt. Du kannst „Zugriff erlauben…“ noch einmal wählen.",
       "badge": "Kein Zugriff",

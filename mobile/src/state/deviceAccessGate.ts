@@ -47,9 +47,11 @@ const SETTLE_CAP_MS = 120_000;
 /** After an OS alert the system's own screen-change speech comes first, and a
  *  sentence spoken at once is cut off (the AppLockGate pattern). */
 const ANNOUNCE_DELAY_MS = 400;
-/** The longest of the sentences takes a few seconds to say; past this, stop
- *  waiting for VoiceOver to report it finished. */
-const SPEAK_CAP_MS = 15_000;
+/** Past this, stop waiting for VoiceOver to report the sentence finished. The
+ *  longest (a partial grant with the other store's way back) takes a few
+ *  seconds, but the clock also runs while speech queued ahead of it is said,
+ *  such as the focus read-out after an OS alert. */
+const SPEAK_CAP_MS = 20_000;
 
 let started = false;
 let startSettled = false;
@@ -167,10 +169,13 @@ function sentence(
   }
 }
 
-/** What holds back the store a partial grant left out. */
+/** What holds back the store a partial grant left out, in one clause: the
+ *  dialog explains a restriction at length, a spoken sentence only names it. */
 function leftSentence(store: 'calendars' | 'reminders', access: OsAccess | null): string {
   if (access === 'restricted') {
-    return i18n.t('mobile.deviceAccess.restricted', { what: storesPhrase(store) });
+    return store === 'calendars'
+      ? i18n.t('mobile.deviceAccess.leftRestrictedCalendars')
+      : i18n.t('mobile.deviceAccess.leftRestrictedReminders');
   }
   if (access === 'not_asked') {
     return store === 'calendars'
