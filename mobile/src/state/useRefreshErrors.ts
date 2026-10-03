@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AccessibilityInfo } from 'react-native';
 
-import { announceAround } from '../a11y/speechHold';
+import {
+  afterAnnouncing,
+  leadingCause,
+  namedByPassEnd,
+  toAnnounce,
+  withSpoken,
+  type AnnouncedFailures,
+  type PassOutcome,
+  type RefreshCause,
+} from '@aperio/shared';
+
 import i18n from '../../i18n';
 import { refreshErrors, type AccountRefreshErrors } from '../api/sync';
 import {
@@ -43,7 +54,12 @@ import {
  *
  * Screen-reader-first: ONE polite app-wide announcement per newly failing
  * account — not per fetch, not per mounted screen, and never on clearing
- * (silence is the healthy state and must stay silent).
+ * (silence is the healthy state and must stay silent). Worded by the core's
+ * cause (decision 181), and said again only when an account's cause grows
+ * more severe (decision 185). The sentence that ends a pass already names
+ * the accounts it could not update; those are not named a second time, and
+ * the warnings show with that sentence instead of after the settle window
+ * (decision 180, `notePassEndSpoken`).
  */
 
 /** How long `refreshing` must stay false before the (already
@@ -53,10 +69,9 @@ const SETTLE_MS = 5_000;
 const POLL_MS = 60_000;
 
 let current: AccountRefreshErrors[] = [];
-/** Accounts whose failure has already been announced this session.
- *  Shrinks when an account clears, so a re-appearing failure announces
- *  again. */
-let knownAffectedAccounts = new Set<string>();
+/** Per failing account, the rank it was last announced with. An account
+ *  drops out when it clears, so failing again is news again. */
+let announced: AnnouncedFailures = new Map();
 /** Resolves once the stored language choice has been applied — the
  *  announcement must not race it and come out in the device language
  *  when the user chose another (it is deduped, so it would never repeat
@@ -89,32 +104,72 @@ function publishSettled(): void {
       current = rows;
       listeners.forEach((l) => l(current));
 
-      // Announce once when the affected-account set grows. The set is
-      // already blip-filtered by the backend, so any new account is a
-      // real, confirmed (or auth-shaped) failure — no timing needed here.
-      // Wording comes from the NEWLY failing accounts only, so a
-      // long-known auth failure never colours an unrelated outage.
-      const nowAffected = new Set(rows.map((r) => r.account_id));
-      const newly = rows.filter((r) => !knownAffectedAccounts.has(r.account_id));
-      if (newly.length > 0) {
-        const auth = newly.some((r) => r.auth_suspected);
+      // Announce the accounts that started failing or fail worse than was
+      // said. The set is already blip-filtered by the backend, so each is a
+      // real, confirmed failure — no timing needed here. Wording comes from
+      // those accounts only, so a long-known login problem never colours
+      // an unrelated outage.
+      const lead = leadingCause(toAnnounce(rows, announced));
+      announced = afterAnnouncing(rows, announced);
+      if (lead != null) {
         // Defer the utterance (not the decision) until the stored
         // language is live, so the one deduped announcement comes out in
         // the user's language.
         void languageSettled.then(() => {
-          // Behind a held sentence (the start check's), not through it.
-          announceAround(
-            i18n.t(
-              auth ? 'refreshErrors.announceAuth' : 'refreshErrors.announce',
-            ),
-          );
+          // Queued, never interrupting: behind a held sentence (the start
+          // check's) and behind the sentence that ends a pass, which this
+          // can follow at once (`notePassEndSpoken`).
+          AccessibilityInfo.announceForAccessibilityWithOptions(i18n.t(announceKey(lead)), {
+            queue: true,
+          });
         });
       }
-      knownAffectedAccounts = nowAffected;
     })
     .catch((err) => {
       console.warn('refreshErrors failed', err);
     });
+}
+
+function announceKey(cause: RefreshCause): string {
+  switch (cause) {
+    case 'access':
+      return 'refreshErrors.announceAccess';
+    case 'auth':
+      return 'refreshErrors.announceAuth';
+    case 'other':
+      return 'refreshErrors.announce';
+  }
+}
+
+/** What a banner standing for every account says: worded by the leading
+ *  cause among them (decision 181). `null` when nothing fails. */
+export function refreshBannerKey(rows: readonly AccountRefreshErrors[]): string | null {
+  switch (leadingCause(rows)) {
+    case 'access':
+      return 'refreshErrors.bannerAccess';
+    case 'auth':
+      return 'refreshErrors.bannerAuth';
+    case 'other':
+      return 'refreshErrors.banner';
+    case null:
+      return null;
+  }
+}
+
+/**
+ * The sentence that ends a pass has just named the accounts it could not
+ * update (`passEndSentence`): note them as said, and show the warnings now,
+ * with the sentence, instead of after the settle window (decision 180).
+ */
+export function notePassEndSpoken(outcome: PassOutcome): void {
+  // Only what the sentence named: "nothing could be updated" names nobody,
+  // and the warning with its cause still follows.
+  announced = withSpoken(announced, namedByPassEnd(outcome));
+  if (settleTimer != null) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+  publishSettled();
 }
 
 /** (Re)arm the settle timer — publish once refreshing has been quiet for

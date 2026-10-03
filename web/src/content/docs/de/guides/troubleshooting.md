@@ -60,12 +60,30 @@ weiter die zuletzt bekannten Daten und warnt dich, statt still zu scheitern:
   Konten-Bildschirm eine Schaltfläche **Neu verbinden**, um das Passwort neu
   einzugeben bzw. die Anbieter-Anmeldung zu wiederholen.
 
+Der Satz am Ende einer Aktualisierung nennt, was nicht aktualisiert werden
+konnte: „Externe Daten aktualisiert, außer: Arbeit und Zuhause.“ (am Handy
+nach jeder Aktualisierung, am Desktop nach einer, die du gestartet hast).
+Konnte die Aktualisierung gar nichts lesen, sagt er, dass nichts aktualisiert
+werden konnte, und die Warnung mit ihrer Ursache folgt; ein erster, noch
+unbestätigter Netzaussetzer sagt nur, dass die Aktualisierung beendet ist. Die genannten Konten
+werden nicht ein zweites Mal angesagt, außer ihre Ursache wird schwerer, und
+ihre Warnungen erscheinen zusammen mit dem Satz.
+
+Gibt das Betriebssystem die Daten eines Kontos nicht frei — die Kalender des
+Telefons ohne Zugriff —, steht beim Konto eine Zeile statt einer pro Kalender
+(„Aperio darf die Kalender nicht lesen“), am Handy mit einer Schaltfläche, die
+die Konten öffnet, wo **Zugriff erlauben…** steht. Wo Aperio nur eines nennt,
+geht fehlender Zugriff einem Anmeldeproblem vor und ein Anmeldeproblem allem
+anderen. Ein Konto, das schon ausfällt, wird nur dann noch einmal angesagt,
+wenn seine Ursache schwerer wird.
+
 Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus:
 Ein Netzwerkfehler wird erst gezeigt, wenn er erneut auftritt — ein
 Kaltstart mit noch nicht bereitem Netz erzeugt so keinen Fehlalarm. Ein
 Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
-manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar. Die Warnung
-verschwindet von selbst, sobald eine Aktualisierung wieder gelingt.
+manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar, auch in den
+ersten Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald
+eine Aktualisierung wieder gelingt.
 
 ## „Dieses Gerät“ aktualisiert sich nach dem Umzug auf ein neues Telefon nicht mehr
 
@@ -95,6 +113,13 @@ auch das; ändern lässt er sich dann nur bei dieser Einschränkung.
 Unter Android gilt dasselbe für die Kalender: Die Aktion fragt, solange
 Android fragt, und führt sonst zu Aperios Berechtigungen in den
 Android-Einstellungen.
+
+Es gibt ein Konto **Dieses Gerät** pro Telefon. Wählst du unter Konto
+hinzufügen noch einmal **Dieses Gerät**, entsteht kein zweites: Fehlt der
+Zugriff, führt es zum selben **Zugriff erlauben…**, sonst sagt es, dass das
+Konto schon hinzugefügt ist, und springt zu ihm. Steht **Dieses Gerät** zweimal
+da (von einer älteren Version zweimal hinzugefügt), erscheint jeder
+Gerätekalender doppelt; lösche eines der beiden.
 
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 

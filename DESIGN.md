@@ -4180,6 +4180,26 @@ nicht — was die Kontenverwaltung ohnehin schon als „Plugin fehlt" anzeigt. D
 ist die Sync-Verträglichkeit: ein Gerät mit älterem Stand verliert die Konten
 eines neueren nicht mehr aus der Anzeige.
 
+**`single_instance`.** Ein Adapter, dessen Konto für etwas steht, das es dort,
+wo Aperio läuft, nur einmal gibt, erlaubt höchstens ein Konto seiner Art pro
+Datenbank (Entscheidung 183). Der einzige Nutzer im Baum ist `device_calendar`:
+zwei Konten „Dieses Gerät“ zeigten jeden Gerätekalender doppelt, und ein
+Schreiben landete in dem Konto, das den Kalender zuletzt beansprucht hatte. Die
+Regel steht einmal im Kern (`builtin_adapters::single_instance`, gefragt über
+`accounts::create_account` bzw. `accounts::kind_taken`); jede Tür, die Konten
+anlegt, fragt sie — `create_account_json` und `connect_account_json` am Handy,
+`connect_account` und die älteren Google-/Microsoft-Befehle am Desktop, das
+Sync-Ziel-Formular über `SyncPlugins::single_instance` —, und das Einfügen ist in
+SQL bedingt (`AccountsRepo::create_sole`), sodass zwei gleichzeitige Versuche
+nicht beide durchkommen. Die generischen Verbinden-Wege fragen schon vor einer
+Anbieter-Anmeldung (`kind_taken`); die OAuth-Anmeldung am Handy und die älteren
+Google-/Microsoft-Befehle werden erst beim Einfügen abgewiesen — keine Art mit
+Anbieter-Anmeldung setzt das Feld. Sie gilt nur fürs Anlegen: vorhandene oder per Sync
+ankommende Zeilen werden weder zusammengeführt noch abgewiesen, und die
+einmalige Sync-Ziel-Migration legt ohne die Prüfung an. Die Kontenauswahl am
+Handy führt bei vorhandenem Gerätekonto zu dessen Reparatur bzw. zur Zeile
+(Entscheidung 182).
+
 **Felder.** `key` ist zugleich der Schlüssel, unter dem der Wert in der
 Init-Config des Plugins auftaucht — ein Nicht-Geheimnis wird unter demselben
 Namen in `config_json` abgelegt, die Rückreise braucht also keine Zuordnungs-

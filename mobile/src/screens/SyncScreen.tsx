@@ -41,6 +41,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { SyncDevicesPanel } from '../components/sync/SyncDevicesPanel';
 import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
 import { formatLongDateTime } from '../intl/dateFormat';
+import { withheldPhrase, withheldSince } from '@aperio/shared';
 import { clampErrorText, useRefreshErrors } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
@@ -76,6 +77,13 @@ export default function SyncScreen() {
   const errorMessage = useSyncErrorMessage();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
+  // "Last successful update: …", or that there never was one.
+  const lastSuccessWords = (at: string | null): string =>
+    at
+      ? t('refreshErrors.lastSuccess', {
+          time: formatLongDateTime(new Date(at), i18n.language),
+        })
+      : t('refreshErrors.neverSucceeded');
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
@@ -883,12 +891,33 @@ export default function SyncScreen() {
                   name: accountNameById.get(acc.account_id) ?? acc.account_id,
                 })}
               </Text>
-              {acc.auth_suspected && (
+              {acc.cause === 'auth' && (
                 <Text style={styles.refreshErrorAuth} accessibilityRole="text">
                   {t('refreshErrors.authHint')}
                 </Text>
               )}
-              {acc.errors.map((err) => (
+              {/* A withheld grant is one fact for the account, said once
+                  with the way to it (decision 184); its other failures, if
+                  any, follow as rows. Worded without promising "Allow
+                  access…": while the system already grants it again, the
+                  account shows no such action until the next pass. */}
+              {acc.cause === 'access' && (
+                <>
+                  <Text style={styles.refreshErrorEntry} accessibilityRole="text">
+                    {t('refreshErrors.accessLine', { what: withheldPhrase(acc.errors, t) })}{' '}
+                    {lastSuccessWords(withheldSince(acc.errors))}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('refreshErrors.openAccounts')}
+                    onPress={() => navigation.navigate('Accounts')}
+                    style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.ghostButtonText}>{t('refreshErrors.openAccounts')}</Text>
+                  </Pressable>
+                </>
+              )}
+              {acc.errors.filter((err) => err.cause !== 'access').map((err) => (
                 <Text
                   key={`${err.scope}:${err.container_id}`}
                   style={styles.refreshErrorEntry}
@@ -902,14 +931,7 @@ export default function SyncScreen() {
                       }),
                     error: clampErrorText(err.error),
                   })}{' '}
-                  {err.last_success_at
-                    ? t('refreshErrors.lastSuccess', {
-                        time: formatLongDateTime(
-                          new Date(err.last_success_at),
-                          i18n.language,
-                        ),
-                      })
-                    : t('refreshErrors.neverSucceeded')}
+                  {lastSuccessWords(err.last_success_at)}
                 </Text>
               ))}
             </View>

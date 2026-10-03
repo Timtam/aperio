@@ -996,9 +996,10 @@ pub fn run() {
             if cache_generation_reset {
                 // The cache-generation reconcile above cleared external sync
                 // state; kick the warm pass NOW (not "shortly after boot") so the
-                // re-fetch + re-map starts immediately — what the manual
-                // "Re-sync from scratch" does (reset + trigger).
-                cache_refresher.trigger();
+                // re-fetch + re-map starts immediately. Not a user action, so
+                // the pass stays unforced: a launch's network blip must still
+                // be confirmed before it is shown or said.
+                cache_refresher.trigger_background();
             }
             // The sync scheduler warms the cache after it registers adapters
             // for accounts that arrived through sync, so it needs its own

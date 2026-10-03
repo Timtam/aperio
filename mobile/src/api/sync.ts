@@ -311,18 +311,11 @@ export const compactNow = async (): Promise<CompactionReport> =>
 // cold/stale read; these are the explicit controls (the desktop's cache surface):
 // a manual "refresh now", a "last updated" status, and an on-foreground warm.
 
-/** The external-cache warm-pass status (the desktop `CacheRefreshStatus`). */
-export interface CacheRefreshStatus {
-  /** True while a warm pass is running. */
-  refreshing: boolean;
-  /** RFC3339 of the last completed pass, or null. */
-  last_refreshed_at: string | null;
-  /** Containers the running pass will refresh (null outside a pass / before
-   *  enumeration) — drives "fetched X of N" external-refresh progress. */
-  total_targets: number | null;
-  /** Containers refreshed so far in the running pass (null outside a pass). */
-  fetched_targets: number | null;
-}
+/** The external-cache warm-pass status, generated from host-core
+ *  (`cache::CacheRefreshStatus`). `outcome` rides only the status that ends a
+ *  run of passes. */
+export type { CacheRefreshStatus } from '@aperio/shared';
+import type { CacheRefreshStatus, AccountRefreshErrors } from '@aperio/shared';
 
 /** Kick an immediate warm pass over every external account's containers (the
  *  manual "refresh now"). Fire-and-forget — poll {@link cacheRefreshStatus} for
@@ -335,29 +328,9 @@ export const refreshExternalCache = (): Promise<void> =>
 export const cacheRefreshStatus = async (): Promise<CacheRefreshStatus> =>
   JSON.parse(await CalFfi.getCacheRefreshStatusJson()) as CacheRefreshStatus;
 
-/** One container whose most recent background refresh FAILED — the raw
- *  material of the per-account error surface (silent staleness, e.g. a
- *  revoked iCloud app password). Mirrors the desktop wire shape. */
-export interface ContainerRefreshError {
-  scope: string;
-  container_id: string;
-  container_name: string | null;
-  error: string;
-  last_success_at: string | null;
-}
-
-/** Every failing container of one account + the auth heuristic that
- *  drives the "re-enter password" hint. */
-export interface AccountRefreshErrors {
-  account_id: string;
-  auth_suspected: boolean;
-  /** The OS has not granted this account's data (the device's calendars or
-   *  reminders); each blocked family appears once, as its listing. */
-  no_access: boolean;
-  /** What to lead with: access, then auth, then anything else. */
-  cause: 'access' | 'auth' | 'other';
-  errors: ContainerRefreshError[];
-}
+/** The per-account refresh-error surface, generated from host-core
+ *  (`cache::AccountRefreshErrors`). */
+export type { AccountRefreshErrors, ContainerRefreshError } from '@aperio/shared';
 
 /** Every account's currently-failing containers. Empty = all healthy. */
 export const refreshErrors = async (): Promise<AccountRefreshErrors[]> =>

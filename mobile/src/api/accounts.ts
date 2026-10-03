@@ -215,6 +215,10 @@ export interface AdapterKindInfo {
    *  one storage backend needing no account created first — would drop out of
    *  the sync form, and "a folder on this device" would stop being an answer. */
   implicit: boolean;
+  /** At most one account of this kind may exist (decision 183): a second
+   *  one is refused by the host. Today only the phone's "This device" entry
+   *  acts on it in a picker and leads to the existing account. */
+  single_instance: boolean;
   /** What to call this kind, resolved in the language asked for.
    *
    *  From the owning adapter's manifest — it names every kind it claims — and

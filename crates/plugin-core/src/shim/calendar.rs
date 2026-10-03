@@ -597,6 +597,7 @@ mod tests {
                 tasks: Default::default(),
                 account: None,
                 adapter_kind: None,
+                single_instance: false,
                 adopts_adapter_kinds: Vec::new(),
                 kind_names: Default::default(),
                 strings: Default::default(),

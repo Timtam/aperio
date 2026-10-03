@@ -450,6 +450,16 @@ pub struct AdapterKindInfo {
     /// So a surface that creates filters on `offered`; a surface that offers a
     /// CHOICE among things that can already exist accepts `offered || implicit`.
     pub implicit: bool,
+    /// Whether at most one account of this kind may exist
+    /// ([`PluginManifest::single_instance`]).
+    ///
+    /// Unlike [`Self::implicit`], such an account does not exist until it is
+    /// created, and it can be deleted. The host refuses a second one
+    /// regardless of the surface; a picker may combine this with the accounts
+    /// it already lists and lead to the existing one, as the phone's "This
+    /// device" entry does (the only one today).
+    #[serde(default)]
+    pub single_instance: bool,
     /// What to call this kind, resolved in the language the caller asked for.
     ///
     /// From the owning manifest's [`PluginManifest::kind_names`] when it names
@@ -590,6 +600,24 @@ pub struct PluginManifest {
     /// accounts at all).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter_kind: Option<String>,
+
+    /// At most one account of [`Self::adapter_kind`] in a database.
+    ///
+    /// For an adapter whose account stands for something there is only one
+    /// of where Aperio runs: the phone's own calendars and reminders. A
+    /// second account of it shows every calendar twice, and a write lands in
+    /// whichever account last claimed the calendar. The host refuses to
+    /// CREATE a second one, at every door that creates accounts
+    /// (`host_core::accounts::create_account`); a picker can lead to the
+    /// existing one instead, as the phone's "This device" entry does.
+    ///
+    /// A rule about creation only: rows that already exist, or that arrive
+    /// by sync, are neither merged nor refused (a refused peer row would
+    /// drop a real account). It covers the plugin's own kind; an adopted
+    /// kind cannot be created anyway. Older hosts ignore it, so a plugin that
+    /// relies on it raises `min_app_version`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub single_instance: bool,
 
     /// Further kinds this plugin ADOPTS — rows written under another adapter's
     /// kind that this plugin now serves.
@@ -744,6 +772,12 @@ impl PluginManifest {
                 )));
             }
         }
+        // A limit on accounts of no kind limits nothing.
+        if self.single_instance && self.adapter_kind.is_none() {
+            return Err(PluginError::Manifest(
+                "single_instance needs an adapter_kind to limit".into(),
+            ));
+        }
         // Adopting without serving anything of its own would leave the plugin
         // with no kind for the accounts a user creates NEXT.
         if !self.adopts_adapter_kinds.is_empty() && self.adapter_kind.is_none() {
@@ -853,6 +887,37 @@ mod tests {
                 "description": "Bundled SQLite-backed local adapter."
             }}"#
         )
+    }
+
+    /// One account per database: read from the manifest, absent from the
+    /// serialised form when off, and refused without a kind to limit.
+    #[test]
+    fn single_instance_needs_a_kind_and_round_trips() {
+        let json = |kind: &str| {
+            format!(
+                r#"{{
+                    "id": "com.example.one",
+                    "name": "One",
+                    "version": "0.1.0",
+                    "plugin_type": "adapter",
+                    "capabilities": ["calendar"],
+                    "abi_version": {ABI_VERSION},
+                    "min_app_version": "0.1.0",
+                    {kind}
+                    "single_instance": true
+                }}"#
+            )
+        };
+        let m = PluginManifest::from_bytes(json(r#""adapter_kind": "one","#).as_bytes())
+            .expect("parses");
+        assert!(m.single_instance);
+        let err = PluginManifest::from_bytes(json("").as_bytes()).expect_err("no kind to limit");
+        assert!(err.to_string().contains("single_instance"), "{err}");
+
+        let plain = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
+        assert!(!plain.single_instance);
+        let round = serde_json::to_string(&plain).expect("serialises");
+        assert!(!round.contains("single_instance"), "{round}");
     }
 
     /// A manifest that adopts another adapter's kind, and the two questions

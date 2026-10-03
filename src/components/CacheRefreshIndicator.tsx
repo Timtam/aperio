@@ -1,8 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { passEndSentence } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
+import { refreshErrorAnnounceKey } from '../intl/refreshErrorKeys';
 import { useCacheRefresh } from '../state/useCacheRefresh';
+import { notePassEndSpoken } from '../state/useRefreshErrors';
 
 /**
  * Compact toolbar control for the external-adapter snapshot cache
@@ -17,7 +21,7 @@ import { useCacheRefresh } from '../state/useCacheRefresh';
 export function CacheRefreshIndicator() {
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
-  const { refreshing, lastRefreshedAt, fetchedTargets, totalTargets, refreshNow } =
+  const { refreshing, lastRefreshedAt, fetchedTargets, totalTargets, outcome, refreshNow } =
     useCacheRefresh();
 
   // Whether the running pass is one the USER started. Background warm passes
@@ -29,9 +33,19 @@ export function CacheRefreshIndicator() {
     mineRef.current = false;
     // Focus stayed on the button (see below), but a changed accessible name
     // under a focused element is not re-read — so without this the pass ends
-    // in silence and the user has no way to know it is done.
-    announce(t('cacheRefresh.done'));
-  }, [refreshing, announce, t]);
+    // in silence and the user has no way to know it is done. The sentence
+    // names the accounts left not current (decision 180); the outcome rides
+    // the same status that turned `refreshing` off. A warning still owed
+    // rides in the same announcement, so neither replaces the other.
+    const sentence = passEndSentence(outcome, t);
+    if (outcome == null) {
+      announce(sentence);
+      return;
+    }
+    void notePassEndSpoken(outcome).then((cause) => {
+      announce(cause == null ? sentence : `${sentence} ${t(refreshErrorAnnounceKey(cause))}`);
+    });
+  }, [refreshing, outcome, announce, t]);
 
   const lastLabel = lastRefreshedAt
     ? t('cacheRefresh.lastUpdated', {
