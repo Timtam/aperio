@@ -40,7 +40,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use adapter_device_calendar::{device_access, DeviceAdapter, DeviceCalendarProvider};
+use adapter_device_calendar::{read_device_access, DeviceAdapter, DeviceCalendarProvider};
 use adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -872,7 +872,10 @@ pub trait DeviceEventStoreBridge: Send + Sync {
     /// `{"events": token, "reminders": token | null}`. iOS tokens:
     /// `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
     /// Android: `granted`, `not_determined` (Aperio never asked on this
-    /// device), `not_granted`. Anything else reads as undetermined.
+    /// device), `not_granted`. Anything else reads as undetermined. iOS adds
+    /// `"granted_this_run": {"events": bool, "reminders": bool}`, the
+    /// entities a request answered "granted" in this run (decision 187). The
+    /// shapes are pinned in `shared/contracts/deviceAccessStatus.json`.
     fn access_status(&self) -> String;
 }
 
@@ -1966,9 +1969,23 @@ impl Host {
     }
 
     /// What the OS allows right now, for the log line both access paths write.
+    /// Names an entity a grant in this run settled: the OS stated "never
+    /// asked" for it (decision 187).
     fn device_access_words(provider: &dyn DeviceCalendarProvider) -> String {
-        let (calendar, tasks) = device_access(provider);
-        format!("calendar={calendar:?} tasks={tasks:?}")
+        let access = read_device_access(provider);
+        let settled = access.settled_by_grant();
+        let by_grant = if settled.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (stated never asked, granted this run: {})",
+                settled.join(", ")
+            )
+        };
+        format!(
+            "calendar={:?} tasks={:?}{by_grant}",
+            access.calendar, access.tasks
+        )
     }
 
     /// Build the device adapter over `provider` and insert it into the registry
@@ -6303,6 +6320,7 @@ impl Host {
     /// "did the grant come along?".
     pub fn device_calendar_access_json(&self) -> Result<String, StoreError> {
         let accounts = self.device_accounts();
+        let mut settled_by_grant = Vec::new();
         let report = match self.device_provider() {
             None => OsAccessReport {
                 account_names: Vec::new(),
@@ -6313,7 +6331,9 @@ impl Host {
                 restorable: false,
             },
             Some(provider) => {
-                let (calendar, tasks) = device_access(provider.as_ref());
+                let access = read_device_access(provider.as_ref());
+                settled_by_grant = access.settled_by_grant();
+                let (calendar, tasks) = (access.calendar, access.tasks);
                 // Full now, but the cache still holds a store back as
                 // withheld: the grant came from the OS settings while Aperio
                 // waited, and nothing else would read the account again
@@ -6346,6 +6366,7 @@ impl Host {
             ask = ?report.ask_now,
             repair = ?report.repair,
             restorable = report.restorable,
+            settled_by_grant = ?settled_by_grant,
             "device calendar access"
         );
         serde_json::to_string(&report).map_err(|e| StoreError::Storage {
@@ -13357,6 +13378,39 @@ mod tests {
         let report = access_report(&host);
         assert!(report.restorable);
         assert_eq!(report.repair, AccessRepair::None);
+    }
+
+    #[test]
+    fn a_grant_this_run_settles_reminders_stated_as_never_asked() {
+        // The field case (decision 187): both granted at the start prompt,
+        // then iOS stated "never asked" for the reminders for the rest of the
+        // run. The reminders were withheld on the strength of that status;
+        // the grant makes them full, nothing is asked or repaired, and the
+        // withheld family is read again.
+        let withheld = cal_core::Error::AccessNotGranted("reminders: NotAsked".into());
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "settled");
+        let account = with_device_account(&host);
+        host.cache
+            .mark_failure(&account, SyncScope::TaskLists, "", &withheld, false)
+            .unwrap();
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"not_determined","granted_this_run":{"events":true,"reminders":true}}"#,
+        )));
+        let report = access_report(&host);
+        assert_eq!(report.tasks, Some(OsAccess::Full));
+        assert_eq!(report.ask_now, None);
+        assert_eq!(report.repair, AccessRepair::None);
+        assert!(report.restorable);
+
+        // Without the grant the same status is asked about, as before.
+        host.set_device_event_store(Arc::new(AccessBridge(
+            r#"{"events":"full_access","reminders":"not_determined"}"#,
+        )));
+        let report = access_report(&host);
+        assert_eq!(report.tasks, Some(OsAccess::NotAsked));
+        assert_eq!(report.repair, AccessRepair::Ask);
+        assert!(!report.restorable);
     }
 
     #[test]

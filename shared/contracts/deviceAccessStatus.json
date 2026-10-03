@@ -1,0 +1,106 @@
+{
+  "what": "The wire contract for the device's access status: the JSON the native bridges write (accessStatus) and Rust reads (adapter_device_calendar::read_device_access). The Rust suite reads THIS file, so a renamed key on either side fails a test instead of going silent.",
+  "why": "Nothing compiles Swift outside the iOS release workflow, and the field case behind granted_this_run only shows on a phone: iOS stated 'never asked' for the reminders a second after granting them, until Aperio was started anew (decision 187). A key Rust does not read is ignored without a word, so a misspelled granted_this_run would bring back exactly that case.",
+  "writtenBy": [
+    "mobile/modules/cal-ffi/ios/IosDeviceEventStore.swift (accessStatus)",
+    "mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi/AndroidDeviceCalendar.kt (accessStatus)"
+  ],
+  "readBy": ["crates/adapter-device-calendar/src/lib.rs (read_device_access)"],
+
+  "samples": [
+    {
+      "name": "ios-before-any-prompt",
+      "platform": "ios",
+      "status": {
+        "events": "not_determined",
+        "reminders": "not_determined",
+        "granted_this_run": { "events": false, "reminders": false }
+      },
+      "calendar": "not_asked",
+      "tasks": "not_asked",
+      "settledByGrant": []
+    },
+    {
+      "name": "ios-granted-and-stated",
+      "platform": "ios",
+      "status": {
+        "events": "full_access",
+        "reminders": "full_access",
+        "granted_this_run": { "events": true, "reminders": true }
+      },
+      "calendar": "full",
+      "tasks": "full",
+      "settledByGrant": []
+    },
+    {
+      "name": "ios-field-case-never-asked-after-a-grant",
+      "platform": "ios",
+      "note": "2026-10-03, iPhone: both granted at the start prompt, then the reminders read not_determined for the rest of the run while every request answered granted.",
+      "status": {
+        "events": "full_access",
+        "reminders": "not_determined",
+        "granted_this_run": { "events": true, "reminders": true }
+      },
+      "calendar": "full",
+      "tasks": "full",
+      "settledByGrant": ["reminders"]
+    },
+    {
+      "name": "ios-a-refusal-or-a-policy-stated-now-wins",
+      "platform": "ios",
+      "status": {
+        "events": "denied",
+        "reminders": "restricted",
+        "granted_this_run": { "events": true, "reminders": true }
+      },
+      "calendar": "denied",
+      "tasks": "restricted",
+      "settledByGrant": []
+    },
+    {
+      "name": "ios-add-only-is-never-full",
+      "platform": "ios",
+      "status": {
+        "events": "write_only",
+        "reminders": "full_access",
+        "granted_this_run": { "events": true, "reminders": false }
+      },
+      "calendar": "write_only",
+      "tasks": "full",
+      "settledByGrant": []
+    },
+    {
+      "name": "ios-a-build-before-granted-this-run",
+      "platform": "ios",
+      "note": "Without the key nothing was granted this run: the status stands as stated.",
+      "status": { "events": "full_access", "reminders": "not_determined" },
+      "calendar": "full",
+      "tasks": "not_asked",
+      "settledByGrant": []
+    },
+    {
+      "name": "android-granted",
+      "platform": "android",
+      "status": { "events": "granted", "reminders": null },
+      "calendar": "full",
+      "tasks": null,
+      "settledByGrant": []
+    },
+    {
+      "name": "android-never-asked-on-this-device",
+      "platform": "android",
+      "status": { "events": "not_determined", "reminders": null },
+      "calendar": "not_asked",
+      "tasks": null,
+      "settledByGrant": []
+    },
+    {
+      "name": "android-asked-and-not-granted",
+      "platform": "android",
+      "status": { "events": "not_granted", "reminders": null },
+      "calendar": "undetermined",
+      "tasks": null,
+      "settledByGrant": []
+    }
+  ]
+}

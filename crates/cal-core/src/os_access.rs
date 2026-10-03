@@ -22,6 +22,9 @@
 //!   it, so undetermined is asked about too (Android shows its dialog or says
 //!   at once that it will not); the user's answers lead to the OS settings,
 //!   and a policy is only explained.
+//! - What the OS stated, against what it answered ([`settled_by_grant`],
+//!   decision 187): a "granted" in this run of the app settles a later
+//!   "never asked".
 
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +146,26 @@ pub fn repair_for(calendar: OsAccess, tasks: Option<OsAccess>) -> AccessRepair {
     }
 }
 
+/// The access to go by for one entity, from what the OS states now and
+/// whether it answered "granted" to a request in this run of the app
+/// (decision 187).
+///
+/// iOS has been seen stating "never asked" for the reminders a second after
+/// granting them, and answering every later request with "granted", without
+/// a prompt, until Aperio was started anew. The answer to the request is the
+/// OS's own word as much as the status (Apple calls it the result of the
+/// request), and a grant cannot be taken back while the app runs: taking it
+/// back in the settings ends the app. So a grant in this run settles "never
+/// asked", and nothing else: a refusal, a policy or add-only, stated now,
+/// always wins, and nothing is kept beyond the run.
+pub fn settled_by_grant(stated: OsAccess, granted_this_run: bool) -> OsAccess {
+    if granted_this_run && stated == OsAccess::NotAsked {
+        OsAccess::Full
+    } else {
+        stated
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +241,22 @@ mod tests {
             AccessRepair::OpenSettings
         );
         assert_eq!(repair_for(Restricted, Some(Full)), AccessRepair::Restricted);
+    }
+
+    #[test]
+    fn a_grant_this_run_settles_only_never_asked() {
+        // The field case: granted, then stated as never asked.
+        assert_eq!(settled_by_grant(NotAsked, true), Full);
+        assert_eq!(settled_by_grant(Full, true), Full);
+        // What the OS states now about a refusal, a policy or add-only wins
+        // over any earlier answer; so does a state this build cannot read.
+        for stated in [WriteOnly, Denied, Restricted, Undetermined] {
+            assert_eq!(settled_by_grant(stated, true), stated, "{stated:?}");
+        }
+        // Without a grant in this run the status stands as stated.
+        for stated in [Full, WriteOnly, NotAsked, Denied, Restricted, Undetermined] {
+            assert_eq!(settled_by_grant(stated, false), stated, "{stated:?}");
+        }
     }
 
     #[test]
