@@ -765,7 +765,6 @@ export default function AccountsScreen() {
     deviceNeedsAccess,
     existingDevice,
     onPickProvider,
-    runAfterPicker,
     t,
   ]);
 

@@ -3,8 +3,10 @@ import type { ContainerRefreshError } from "./ContainerRefreshError";
 import type { RefreshCause } from "./RefreshCause";
 
 /**
- * Every failing container of one account, plus whether any error looks
- * authentication-shaped (drives the "re-enter password" hint).
+ * Every failing container of one account, and why it fails. Surfaces word
+ * it by `cause` (the "re-enter password" hint only for `Auth`);
+ * `auth_suspected` says whether any row looks like a login problem at all,
+ * even where a withheld grant leads.
  */
 export type AccountRefreshErrors = { account_id: string, auth_suspected: boolean, 
 /**

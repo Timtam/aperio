@@ -131,9 +131,10 @@ const WITHHELD_FAMILIES = ['calendars', 'task_lists', 'contact_lists'] as const;
 
 /**
  * What an account may not read, for the one line that stands for its withheld
- * families ("the calendars and the task lists"): each family appears once, as
- * its listing row, with cause `access`. The account's data in general when no
- * family can be told.
+ * families ("the calendars and the reminders"): each family appears once, as
+ * its listing row, with cause `access`. Only the device account is ever
+ * withheld, so its task lists are named as the phone's reminders. The
+ * account's data in general when no family can be told.
  */
 export function withheldPhrase(
   errors: readonly ContainerRefreshError[],
