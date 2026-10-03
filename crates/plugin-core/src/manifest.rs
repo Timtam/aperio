@@ -454,10 +454,10 @@ pub struct AdapterKindInfo {
     /// ([`PluginManifest::single_instance`]).
     ///
     /// Unlike [`Self::implicit`], such an account does not exist until it is
-    /// created, and it can be deleted. A picker combines this with the
-    /// accounts it already lists: while one exists, the entry leads to that
-    /// account instead of creating another, and the host refuses a second
-    /// one regardless.
+    /// created, and it can be deleted. The host refuses a second one
+    /// regardless of the surface; a picker may combine this with the accounts
+    /// it already lists and lead to the existing one, as the phone's "This
+    /// device" entry does (the only one today).
     #[serde(default)]
     pub single_instance: bool,
     /// What to call this kind, resolved in the language the caller asked for.

@@ -113,37 +113,45 @@ export function clampErrorText(raw: string): string {
   return `${[...collapsed].slice(0, 159).join('')}…`;
 }
 
-function publishSettled(): void {
-  getRefreshErrors()
+/** Re-read the aggregate and publish it. Resolves with the cause the
+ *  announcer would say; with `callerSpeaks` the subscribers are handed none,
+ *  because the caller says it in its own sentence. */
+function publishSettled(callerSpeaks = false): Promise<RefreshCause | null> {
+  return getRefreshErrors()
     .then((rows) => {
       current = rows;
       const fresh = toAnnounce(rows, announced);
       announced = afterAnnouncing(rows, announced);
+      const lead = leadingCause(fresh);
       const publish: Publish = {
         errors: current,
-        announce: leadingCause(fresh),
+        announce: callerSpeaks ? null : lead,
       };
       subscribers.forEach((cb) => cb(publish));
+      return lead;
     })
     .catch((err) => {
       console.warn('get_refresh_errors failed', err);
+      return null;
     });
 }
 
 /**
- * A manual refresh's closing sentence has just named the accounts it could
- * not update (`passEndSentence`): note them as said, and show the warnings
- * now, with the sentence, instead of after the settle window (decision 180).
+ * A manual refresh is about to say its closing sentence (`passEndSentence`):
+ * note the accounts it names as said, show the warnings now, with the
+ * sentence, instead of after the settle window (decision 180), and resolve
+ * with the warning's cause still to be said — for an account the sentence
+ * did not name ("nothing could be updated" names nobody), or one that fails
+ * worse (decision 185). The caller says both in ONE announcement: the live
+ * region keeps only the last of two written in the same moment.
  */
-export function notePassEndSpoken(outcome: PassOutcome): void {
-  // Only what the sentence named: "nothing could be updated" names nobody,
-  // and the warning with its cause still follows (polite, so after it).
+export function notePassEndSpoken(outcome: PassOutcome): Promise<RefreshCause | null> {
   announced = withSpoken(announced, namedByPassEnd(outcome));
   if (settleTimer != null) {
     window.clearTimeout(settleTimer);
     settleTimer = null;
   }
-  publishSettled();
+  return publishSettled(true);
 }
 
 function armSettle(): void {

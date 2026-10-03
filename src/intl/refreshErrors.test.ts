@@ -111,6 +111,13 @@ describe('the sentence that ends a warm pass', () => {
       'Externe Daten konnten nicht aktualisiert werden.',
     );
   });
+
+  it('only ends the refresh when nothing was read and nothing is confirmed yet', () => {
+    // A cold-start blip: no warning follows, and nothing shows it.
+    expect(passEndSentence({ failing: [], all_failed: true }, de)).toBe(
+      'Aktualisierung externer Daten beendet.',
+    );
+  });
 });
 
 describe('the one line for a withheld account', () => {

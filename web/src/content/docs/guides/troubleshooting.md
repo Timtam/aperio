@@ -58,7 +58,8 @@ The sentence that ends a refresh names what it could not update: "External
 data updated, except: Work and Home." (on the phone after every refresh, on
 the desktop after one you started). If the refresh could not read anything at
 all, it says that nothing could be updated, and the warning with its cause
-follows. The accounts it names are not announced a second time, unless their
+follows; a first network hiccup that is not confirmed yet only says that the
+refresh ended. The accounts it names are not announced a second time, unless their
 cause grows more severe, and their warnings appear together with the
 sentence.
 

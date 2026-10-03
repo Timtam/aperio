@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { passEndSentence } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { refreshErrorAnnounceKey } from '../intl/refreshErrorKeys';
 import { useCacheRefresh } from '../state/useCacheRefresh';
 import { notePassEndSpoken } from '../state/useRefreshErrors';
 
@@ -34,9 +35,16 @@ export function CacheRefreshIndicator() {
     // under a focused element is not re-read — so without this the pass ends
     // in silence and the user has no way to know it is done. The sentence
     // names the accounts left not current (decision 180); the outcome rides
-    // the same status that turned `refreshing` off.
-    announce(passEndSentence(outcome, t));
-    if (outcome != null) notePassEndSpoken(outcome);
+    // the same status that turned `refreshing` off. A warning still owed
+    // rides in the same announcement, so neither replaces the other.
+    const sentence = passEndSentence(outcome, t);
+    if (outcome == null) {
+      announce(sentence);
+      return;
+    }
+    void notePassEndSpoken(outcome).then((cause) => {
+      announce(cause == null ? sentence : `${sentence} ${t(refreshErrorAnnounceKey(cause))}`);
+    });
   }, [refreshing, outcome, announce, t]);
 
   const lastLabel = lastRefreshedAt

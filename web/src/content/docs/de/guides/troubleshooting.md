@@ -64,7 +64,8 @@ Der Satz am Ende einer Aktualisierung nennt, was nicht aktualisiert werden
 konnte: „Externe Daten aktualisiert, außer: Arbeit und Zuhause.“ (am Handy
 nach jeder Aktualisierung, am Desktop nach einer, die du gestartet hast).
 Konnte die Aktualisierung gar nichts lesen, sagt er, dass nichts aktualisiert
-werden konnte, und die Warnung mit ihrer Ursache folgt. Die genannten Konten
+werden konnte, und die Warnung mit ihrer Ursache folgt; ein erster, noch
+unbestätigter Netzaussetzer sagt nur, dass die Aktualisierung beendet ist. Die genannten Konten
 werden nicht ein zweites Mal angesagt, außer ihre Ursache wird schwerer, und
 ihre Warnungen erscheinen zusammen mit dem Satz.
 

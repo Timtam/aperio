@@ -104,16 +104,22 @@ export function namedByPassEnd(outcome: PassOutcome | null | undefined): Failing
  * The sentence that ends a warm pass: "External data updated." when nothing
  * is left undone, "… updated, except: A and B." naming the accounts that are
  * not current, in name order, and "… could not be updated." when the pass
- * read nothing at all. Without an outcome (one that could not be read, or a
- * status from an older core) a sentence that only says the refresh ended,
- * claiming neither.
+ * read nothing at all and the failure is confirmed. Without an outcome (one
+ * that could not be read, or a status from an older core), and for a pass
+ * that read nothing but has no confirmed failure yet, a sentence that only
+ * says the refresh ended, claiming neither.
  */
 export function passEndSentence(
   outcome: PassOutcome | null | undefined,
   t: Translate,
 ): string {
   if (outcome == null) return t('cacheRefresh.ended');
-  if (outcome.all_failed) return t('cacheRefresh.failed');
+  // Nothing read: "could not be updated" once a failure is confirmed (the
+  // warning names its cause). A first network blip of an unforced pass is
+  // not confirmed yet and shows nowhere, so it only ends the refresh.
+  if (outcome.all_failed) {
+    return outcome.failing.length > 0 ? t('cacheRefresh.failed') : t('cacheRefresh.ended');
+  }
   if (outcome.failing.length === 0) return t('cacheRefresh.done');
   const names = outcome.failing.map((account) => account.name).sort(compareNames);
   return t('cacheRefresh.doneExcept', { names: joinNames(names, t) });

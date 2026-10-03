@@ -1176,7 +1176,11 @@ mod tests {
             None,
         );
         refresher.warm_all(false).await;
-        assert!(statuses.last_outcome().failing.is_empty());
+        let blip = statuses.last_outcome();
+        assert!(blip.failing.is_empty());
+        // Nothing was read; the surfaces only say that the refresh ended,
+        // since no failure is confirmed.
+        assert!(blip.all_failed);
         refresher.warm_all(true).await;
         let outcome = statuses.last_outcome();
         assert_eq!(outcome.failing.len(), 1);
