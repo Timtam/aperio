@@ -907,10 +907,12 @@ const joined = (context, key) => (context ? `${context}.${key}` : key);
 /**
  * The key paths a Swift dictionary literal writes: `"events": …` at the top,
  * `"granted_this_run": ["events": …]` one level down. A key's value that opens
- * a literal (`[`) makes the key the context of what that literal holds.
+ * a literal (`[`) makes the key the context of what that literal holds; any
+ * other value is `opaque`: a variable holding a dictionary is not followed.
  */
 function swiftKeyPaths(body) {
   const paths = new Set();
+  const opaque = new Set();
   const stack = [];
   let pending = null;
   for (let i = 0; i < body.length; ) {
@@ -920,6 +922,7 @@ function swiftKeyPaths(body) {
         const path = joined(contextOf(stack), key[1]);
         paths.add(path);
         pending = /^\s*\[/.test(body.slice(i + key[0].length)) ? path : null;
+        if (pending === null) opaque.add(path);
         i += key[0].length;
       } else {
         i = pastString(body, i);
@@ -934,16 +937,18 @@ function swiftKeyPaths(body) {
     }
     i += 1;
   }
-  return paths;
+  return { paths, opaque };
 }
 
 /**
  * The key paths a Kotlin `JSONObject().put("events", …)` chain writes. A
  * `.put` whose value is another `JSONObject().put(…)` chain makes its key the
- * context of what that chain puts.
+ * context of what that chain puts; any other value is `opaque`, as in
+ * `swiftKeyPaths`.
  */
 function kotlinKeyPaths(body) {
   const paths = new Set();
+  const opaque = new Set();
   const stack = [];
   for (let i = 0; i < body.length; ) {
     if (body[i] === '"') {
@@ -954,6 +959,7 @@ function kotlinKeyPaths(body) {
     if (put) {
       const path = joined(contextOf(stack), put[1]);
       paths.add(path);
+      if (!/^\s*,\s*JSONObject\s*\(\s*\)/.test(body.slice(i + put[0].length))) opaque.add(path);
       stack.push(path);
       i += put[0].length;
       continue;
@@ -962,7 +968,7 @@ function kotlinKeyPaths(body) {
     else if (body[i] === ')') stack.pop();
     i += 1;
   }
-  return paths;
+  return { paths, opaque };
 }
 
 function accessStatusKeys() {
@@ -992,9 +998,21 @@ function accessStatusKeys() {
       );
       continue;
     }
-    const written = writer.paths(body);
+    const { paths: written, opaque } = writer.paths(body);
+    // A key the contract nests under, written from a value this check does
+    // not follow: say so, instead of calling what is under it missing.
+    const unread = [...opaque].filter(
+      (path) => expected.has(path) && [...expected].some((e) => e.startsWith(`${path}.`)),
+    );
+    for (const path of unread) {
+      out.push(
+        `this check cannot read what the ${writer.label} bridge's accessStatus() writes ` +
+          `under "${path}", which shared/contracts/deviceAccessStatus.json nests keys in: ` +
+          'write it there as a literal',
+      );
+    }
     for (const key of expected) {
-      if (!written.has(key)) {
+      if (!written.has(key) && !unread.some((path) => key.startsWith(`${path}.`))) {
         out.push(
           `the ${writer.label} bridge's accessStatus() does not write "${key}", which ` +
             'shared/contracts/deviceAccessStatus.json says it writes and Rust reads',
