@@ -608,8 +608,8 @@ pub struct PluginManifest {
     /// second account of it shows every calendar twice, and a write lands in
     /// whichever account last claimed the calendar. The host refuses to
     /// CREATE a second one, at every door that creates accounts
-    /// (`host_core::accounts::create_account`), and an Add-account picker
-    /// leads to the existing one instead.
+    /// (`host_core::accounts::create_account`); a picker can lead to the
+    /// existing one instead, as the phone's "This device" entry does.
     ///
     /// A rule about creation only: rows that already exist, or that arrive
     /// by sync, are neither merged nor refused (a refused peer row would

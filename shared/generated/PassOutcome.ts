@@ -14,7 +14,9 @@ export type PassOutcome = {
  */
 failing: Array<FailingAccount>, 
 /**
- * Every account the pass tried failed: nothing was updated, and "updated,
- * except: everyone" would not be true.
+ * The pass tried at least one account and read nothing at all — no
+ * listing, no container: nothing was updated, and "updated, except: …"
+ * would not be true. One failing container among readable ones is not
+ * this.
  */
 all_failed: boolean, };

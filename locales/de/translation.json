@@ -343,6 +343,7 @@
     "progress": "Externe Daten: {{fetched}} von {{total}} aktualisiert …",
     "done": "Externe Daten aktualisiert.",
     "doneExcept": "Externe Daten aktualisiert, außer: {{names}}.",
+    "ended": "Aktualisierung externer Daten beendet.",
     "failed": "Externe Daten konnten nicht aktualisiert werden.",
     "lastUpdated": "Externe Daten aktualisiert: {{time}}",
     "never": "Externe Daten noch nicht aktualisiert",

@@ -126,6 +126,10 @@ function deviceAccessMessage(
  *  carries `offered: false`, so it drops out for a reason the host stated. */
 const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar']);
 
+/** How long Android's dialog window takes to fade out before the list is the
+ *  window TalkBack reads again (the AppDialog fade). */
+const ANDROID_PICKER_FADE_MS = 400;
+
 /** The device-local calendar adapter ships on both phone platforms — iOS
  *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars
  *  only; no system reminders app). Gates the extra "This device" picker entry,
@@ -752,8 +756,9 @@ export default function AccountsScreen() {
             { queue: true },
           );
         };
+    // iOS runs it from the picker's onDismiss; elsewhere the effect below,
+    // once the list (and the row to focus) is back on screen.
     setMode('list');
-    if (Platform.OS !== 'ios') runAfterPicker();
   }, [
     allowAccess,
     deviceKind,
@@ -763,6 +768,16 @@ export default function AccountsScreen() {
     runAfterPicker,
     t,
   ]);
+
+  // Android has no dismissal callback: run the picker's follow-up after the
+  // list has rendered again (the row's focus target exists only then) and
+  // the dialog's window has faded, so TalkBack's window change does not cut
+  // the sentence off.
+  useEffect(() => {
+    if (Platform.OS === 'ios' || mode !== 'list' || afterPicker.current == null) return;
+    const timer = setTimeout(runAfterPicker, ANDROID_PICKER_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [mode, runAfterPicker]);
 
   const confirmAccessSettings = useCallback(() => {
     setAccessDialogOpen(false);

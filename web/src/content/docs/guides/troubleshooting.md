@@ -56,9 +56,11 @@ last data it has and warns you instead of failing silently:
 
 The sentence that ends a refresh names what it could not update: "External
 data updated, except: Work and Home." (on the phone after every refresh, on
-the desktop after one you started). If every account failed, it says that
-nothing could be updated. The accounts it names are not announced a second
-time, and their warnings appear together with the sentence.
+the desktop after one you started). If the refresh could not read anything at
+all, it says that nothing could be updated, and the warning with its cause
+follows. The accounts it names are not announced a second time, unless their
+cause grows more severe, and their warnings appear together with the
+sentence.
 
 When the operating system withholds an account's data — the phone's own
 calendars without access — the account shows one line instead of one row per
@@ -105,7 +107,9 @@ settings.
 There is one **This device** account per phone. Choosing **This device**
 again under Add account does not add a second one: while access is missing it
 leads to the same **Allow access…**, and otherwise it says the account is
-already added and moves to it.
+already added and moves to it. If **This device** shows twice (added twice by
+an older version), every device calendar appears twice; delete one of the
+two.
 
 ## A task's time shifted, once
 

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
   afterAnnouncing,
   leadingCause,
+  namedByPassEnd,
   toAnnounce,
   withSpoken,
   type AnnouncedFailures,
@@ -135,7 +136,9 @@ function publishSettled(): void {
  * now, with the sentence, instead of after the settle window (decision 180).
  */
 export function notePassEndSpoken(outcome: PassOutcome): void {
-  announced = withSpoken(announced, outcome.failing);
+  // Only what the sentence named: "nothing could be updated" names nobody,
+  // and the warning with its cause still follows (polite, so after it).
+  announced = withSpoken(announced, namedByPassEnd(outcome));
   if (settleTimer != null) {
     window.clearTimeout(settleTimer);
     settleTimer = null;

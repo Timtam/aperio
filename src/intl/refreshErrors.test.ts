@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   afterAnnouncing,
   leadingCause,
+  namedByPassEnd,
   passEndSentence,
   toAnnounce,
   withheldPhrase,
@@ -63,6 +64,22 @@ describe('what a growth announcement still has to name', () => {
     const said = withSpoken(new Map(), [failing('Work', 'access')]);
     expect(toAnnounce([row('work', 'access')], said)).toEqual([]);
   });
+
+  it('still says a cause that grew worse, which the closing sentence does not name', () => {
+    // "except: Work" names the account, not that its password failed now.
+    const before = new Map([['work', RANK.other]]);
+    const said = withSpoken(before, [failing('Work', 'auth')]);
+    expect(toAnnounce([row('work', 'auth')], said).map((r) => r.account_id)).toEqual(['work']);
+  });
+
+  it('counts as named only what the sentence named', () => {
+    const all = [failing('Arbeit', 'auth')];
+    expect(namedByPassEnd({ failing: all, all_failed: false })).toEqual(all);
+    // "Nothing could be updated" names nobody: the warning with its cause
+    // still follows.
+    expect(namedByPassEnd({ failing: all, all_failed: true })).toEqual([]);
+    expect(namedByPassEnd(null)).toEqual([]);
+  });
 });
 
 describe('the sentence that ends a warm pass', () => {
@@ -79,12 +96,14 @@ describe('the sentence that ends a warm pass', () => {
     );
   });
 
-  it('says plainly when nothing is left undone, or nothing was read', () => {
+  it('says plainly when nothing is left undone', () => {
     expect(passEndSentence({ failing: [], all_failed: false }, de)).toBe(
       'Externe Daten aktualisiert.',
     );
-    // An older core, or an outcome that could not be read.
-    expect(passEndSentence(null, de)).toBe('Externe Daten aktualisiert.');
+  });
+
+  it('claims nothing when the outcome could not be read', () => {
+    expect(passEndSentence(null, de)).toBe('Aktualisierung externer Daten beendet.');
   });
 
   it('does not claim an update when every account failed', () => {
@@ -126,5 +145,12 @@ describe('the one line for a withheld account', () => {
     ];
     expect(withheldSince(errors)).toBe('2026-09-18T08:00:00Z');
     expect(withheldSince([error('calendars', 'access', null)])).toBeNull();
+    // Reminders never read: the line must not date them by the calendars.
+    expect(
+      withheldSince([
+        error('calendars', 'access', '2026-09-18T08:00:00Z'),
+        error('task_lists', 'access', null),
+      ]),
+    ).toBeNull();
   });
 });

@@ -263,6 +263,28 @@ fn open_sync_inner(
     )))
 }
 
+/// Whether at most one account of `adapter_kind` may exist in this database
+/// ([`PluginManifest::single_instance`]), asked of whatever declares the kind
+/// as its OWN.
+///
+/// The walk of [`kind_name_for`]: the built-in manifests first, then any
+/// plugin that declares the kind, a disabled one included. Whether a kind
+/// allows one account is a fact about the adapter, not about whether it is
+/// switched on today. An adopted kind answers `false`: it cannot be created
+/// at all, which is a different refusal.
+pub fn single_instance(manager: &plugin_core::PluginManager, adapter_kind: &str) -> bool {
+    for manifest in builtin_manifests() {
+        if manifest.adapter_kind.as_deref() == Some(adapter_kind) {
+            return manifest.single_instance;
+        }
+    }
+    manager
+        .any_plugin_for_adapter_kind(adapter_kind)
+        .is_some_and(|p| {
+            p.manifest.single_instance && p.manifest.adapter_kind.as_deref() == Some(adapter_kind)
+        })
+}
+
 /// What to call the adapter behind one `adapter_kind`, resolved in `lang`:
 /// the descriptive name and the compact one.
 ///
@@ -289,28 +311,6 @@ fn open_sync_inner(
 /// The last stop is the kind itself. It is reached when the plugin is genuinely
 /// gone — uninstalled, its manifest with it — and then nothing anywhere knows
 /// what that adapter called itself. The row says so in its own words.
-/// Whether at most one account of `adapter_kind` may exist in this database
-/// ([`PluginManifest::single_instance`]), asked of whatever declares the kind
-/// as its OWN.
-///
-/// The walk of [`kind_name_for`]: the built-in manifests first, then any
-/// plugin that declares the kind, a disabled one included. Whether a kind
-/// allows one account is a fact about the adapter, not about whether it is
-/// switched on today. An adopted kind answers `false`: it cannot be created
-/// at all, which is a different refusal.
-pub fn single_instance(manager: &plugin_core::PluginManager, adapter_kind: &str) -> bool {
-    for manifest in builtin_manifests() {
-        if manifest.adapter_kind.as_deref() == Some(adapter_kind) {
-            return manifest.single_instance;
-        }
-    }
-    manager
-        .any_plugin_for_adapter_kind(adapter_kind)
-        .is_some_and(|p| {
-            p.manifest.single_instance && p.manifest.adapter_kind.as_deref() == Some(adapter_kind)
-        })
-}
-
 pub fn kind_name_for(
     manager: &plugin_core::PluginManager,
     adapter_kind: &str,

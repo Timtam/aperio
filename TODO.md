@@ -2965,8 +2965,8 @@ geschlossener Dialog dasselbe wie „nicht mehr fragen“; der Dialog behauptet
 deshalb nichts darüber, PR-E kann beides trennen. ↻ im Test (Handy ohne Testläufer).
 
 ✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
-wurde („Externe Daten aktualisiert, außer: …“; alle gescheitert: „konnten nicht
-aktualisiert werden“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
+wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
+aktualisiert werden“, dann die Warnung mit Ursache), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
 Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
 Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
 (`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen

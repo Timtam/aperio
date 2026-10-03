@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AccessibilityInfo } from 'react-native';
 
 import {
   afterAnnouncing,
   leadingCause,
+  namedByPassEnd,
   toAnnounce,
   withSpoken,
   type AnnouncedFailures,
@@ -10,7 +12,6 @@ import {
   type RefreshCause,
 } from '@aperio/shared';
 
-import { announceAround } from '../a11y/speechHold';
 import i18n from '../../i18n';
 import { refreshErrors, type AccountRefreshErrors } from '../api/sync';
 import {
@@ -115,8 +116,12 @@ function publishSettled(): void {
         // language is live, so the one deduped announcement comes out in
         // the user's language.
         void languageSettled.then(() => {
-          // Behind a held sentence (the start check's), not through it.
-          announceAround(i18n.t(announceKey(lead)));
+          // Queued, never interrupting: behind a held sentence (the start
+          // check's) and behind the sentence that ends a pass, which this
+          // can follow at once (`notePassEndSpoken`).
+          AccessibilityInfo.announceForAccessibilityWithOptions(i18n.t(announceKey(lead)), {
+            queue: true,
+          });
         });
       }
     })
@@ -157,7 +162,9 @@ export function refreshBannerKey(rows: readonly AccountRefreshErrors[]): string 
  * with the sentence, instead of after the settle window (decision 180).
  */
 export function notePassEndSpoken(outcome: PassOutcome): void {
-  announced = withSpoken(announced, outcome.failing);
+  // Only what the sentence named: "nothing could be updated" names nobody,
+  // and the warning with its cause still follows.
+  announced = withSpoken(announced, namedByPassEnd(outcome));
   if (settleTimer != null) {
     clearTimeout(settleTimer);
     settleTimer = null;

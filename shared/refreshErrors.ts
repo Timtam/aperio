@@ -74,6 +74,11 @@ export function afterAnnouncing(
  * `announced` with the accounts a sentence has just named (the pass-end
  * "except: …"), so the growth announcement after it does not name them a
  * second time (decision 180).
+ *
+ * Only accounts that were not failing before: the sentence names an account,
+ * not its cause, so one that was already announced and now fails worse keeps
+ * the rank it was announced with, and its worse cause is still said
+ * (decision 185).
  */
 export function withSpoken(
   announced: AnnouncedFailures,
@@ -81,23 +86,33 @@ export function withSpoken(
 ): Map<string, number> {
   const next = new Map(announced);
   for (const account of spoken) {
-    next.set(account.account_id, Math.max(account.rank, next.get(account.account_id) ?? -1));
+    if (!next.has(account.account_id)) next.set(account.account_id, account.rank);
   }
   return next;
 }
 
 /**
+ * The accounts [`passEndSentence`] names for `outcome`: none when it says
+ * that nothing could be updated, or when there is no outcome.
+ */
+export function namedByPassEnd(outcome: PassOutcome | null | undefined): FailingAccount[] {
+  if (outcome == null || outcome.all_failed) return [];
+  return [...outcome.failing];
+}
+
+/**
  * The sentence that ends a warm pass: "External data updated." when nothing
  * is left undone, "… updated, except: A and B." naming the accounts that are
- * not current, in name order, and "… could not be updated." when every
- * account the pass tried failed. Without an outcome (a status from an older
- * core, or one that could not be read) the plain sentence, as before.
+ * not current, in name order, and "… could not be updated." when the pass
+ * read nothing at all. Without an outcome (one that could not be read, or a
+ * status from an older core) a sentence that only says the refresh ended,
+ * claiming neither.
  */
 export function passEndSentence(
   outcome: PassOutcome | null | undefined,
   t: Translate,
 ): string {
-  if (outcome == null) return t('cacheRefresh.done');
+  if (outcome == null) return t('cacheRefresh.ended');
   if (outcome.all_failed) return t('cacheRefresh.failed');
   if (outcome.failing.length === 0) return t('cacheRefresh.done');
   const names = outcome.failing.map((account) => account.name).sort(compareNames);
@@ -129,11 +144,13 @@ export function withheldPhrase(
 }
 
 /** How stale a withheld account's data is: the earliest last success among
- *  its withheld rows, `null` when none ever succeeded. */
+ *  its withheld rows, `null` when one of them never succeeded — a family
+ *  never read is the oldest data there is. */
 export function withheldSince(errors: readonly ContainerRefreshError[]): string | null {
   let earliest: string | null = null;
   for (const row of errors) {
-    if (row.cause !== 'access' || row.last_success_at == null) continue;
+    if (row.cause !== 'access') continue;
+    if (row.last_success_at == null) return null;
     if (earliest == null || Date.parse(row.last_success_at) < Date.parse(earliest)) {
       earliest = row.last_success_at;
     }

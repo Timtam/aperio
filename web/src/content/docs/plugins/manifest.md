@@ -48,7 +48,7 @@ reads it to discover the plugin before loading any code.
 | `description` | string | ✅ | One-line description shown in plugin settings. |
 | `signed` | boolean | ✅ | Whether the plugin is signed (bundled plugins are `false`). |
 | `adapter_kind` | string | — | The value accounts of this adapter carry in the `adapter_kind` column, e.g. `"caldav"`, `"webex"`. Set it if your plugin has accounts; the host builds its kind→plugin map from these. See below. |
-| `single_instance` | boolean | — | At most one account of your `adapter_kind` in a database. The host refuses a second one wherever accounts are created, and an Add-account picker leads to the existing one. See below. |
+| `single_instance` | boolean | — | At most one account of your `adapter_kind` in a database. The host refuses a second one wherever accounts are created. See below. |
 | `adopts_adapter_kinds` | string[] | — | Kinds written by an adapter this plugin has absorbed, so the rows keep resolving here. Resolution only — never offered as its own entry. See below. |
 | `kind_names` | object | — | What to call each kind you claim or adopt, keyed by the kind. Without it your accounts are labelled with your plugin's `name` — which is wrong the moment you serve more than one kind. See below. |
 | `account` | object | — | What the plugin needs in order to have an account: the fields to ask for, which are secrets, and whether it signs in via OAuth. See below. |
@@ -156,14 +156,18 @@ second account of them showed every calendar twice.
 
 - **Creation only.** The host refuses to create a second account of your
   `adapter_kind`, at every door that creates accounts (both hosts' connect
-  paths and the sync-target form), before any provider sign-in starts. Rows
-  that already exist, or that arrive from another device by sync, are neither
+  paths and the sync-target form). The generic connect paths ask before a
+  provider sign-in starts; the phone's OAuth sign-in and the desktop's older
+  Google and Microsoft commands are refused at the insert, after it. Rows that
+  already exist, or that arrive from another device by sync, are neither
   merged nor refused.
 - **Your own kind.** It limits `adapter_kind`, never an adopted kind (those
   cannot be created anyway). A manifest that sets it without an
   `adapter_kind` is refused at load time.
-- **Pickers.** `AdapterKindInfo.single_instance` tells an Add-account picker to
-  lead to the existing account instead of offering a new one.
+- **Pickers.** `AdapterKindInfo.single_instance` tells an Add-account picker
+  that a second account is not possible. Today only the phone's "This device"
+  entry acts on it and leads to the existing account; other pickers still
+  offer the kind, and a second attempt is refused with `conflict`.
 - **Older hosts** ignore the key. If your plugin relies on it, raise
   `min_app_version`. It is ABI-transparent.
 

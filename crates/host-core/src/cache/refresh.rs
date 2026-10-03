@@ -98,6 +98,11 @@ pub struct CacheRefresher {
     /// Single-flight makes this stable for a pass's duration; the
     /// concurrent per-read SWR path never touches it.
     pass_forced: Arc<AtomicBool>,
+    /// Whether the running pass read anything successfully: a listing, or a
+    /// container. Reset at the start of every pass; "nothing could be
+    /// updated" is said only when it stayed false, not because every account
+    /// has SOME failing container.
+    pass_succeeded: Arc<AtomicBool>,
     /// A pass asked for through [`Self::warm_all_queued`] while another ran:
     /// `Some(forced)` runs once more when the running pass ends. Bounded to
     /// one: any number of requests during a pass collapse into a single
@@ -167,6 +172,7 @@ impl CacheRefresher {
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forced: Arc::new(AtomicBool::new(false)),
+            pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
             // Unset until a user `trigger` latches it.
             next_trigger_forced: Arc::new(AtomicBool::new(false)),
@@ -368,6 +374,7 @@ impl CacheRefresher {
         // single-flight: only this pass writes it, and the concurrent SWR
         // path passes its own (false) flag to mark_error directly.
         self.pass_forced.store(forced, Ordering::Relaxed);
+        self.pass_succeeded.store(false, Ordering::Relaxed);
         let last = self.status().last_refreshed_at;
         // Spinner on immediately; the target total isn't known until the cheap
         // enumeration below completes.
@@ -433,6 +440,7 @@ impl CacheRefresher {
         for (account, adapter) in self.registry.snapshot_calendar_adapters() {
             match adapter.list_calendars().await {
                 Ok(cals) => {
+                    self.pass_succeeded.store(true, Ordering::Relaxed);
                     for c in &cals {
                         self.registry.note_calendar_route(&c.id, &account);
                     }
@@ -464,6 +472,7 @@ impl CacheRefresher {
         for (account, adapter) in self.registry.snapshot_task_adapters() {
             match adapter.list_task_lists().await {
                 Ok(lists) => {
+                    self.pass_succeeded.store(true, Ordering::Relaxed);
                     for l in &lists {
                         self.registry.note_task_list_route(&l.id, &account);
                     }
@@ -501,6 +510,7 @@ impl CacheRefresher {
         for (account, adapter) in self.registry.snapshot_contact_adapters() {
             match adapter.list_contact_lists().await {
                 Ok(lists) => {
+                    self.pass_succeeded.store(true, Ordering::Relaxed);
                     for l in &lists {
                         self.registry.note_contact_list_route(&l.id, &account);
                     }
@@ -551,6 +561,7 @@ impl CacheRefresher {
                     // `false` = content identical — skip the notification so a
                     // no-op warm pass stays UI-silent.
                     Ok(changed) => {
+                        self.pass_succeeded.store(true, Ordering::Relaxed);
                         if changed {
                             self.emit_updated(SyncScope::Events, &account, &cal_id);
                         }
@@ -577,6 +588,7 @@ impl CacheRefresher {
                 }
                 match swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list_id).await {
                     Ok(changed) => {
+                        self.pass_succeeded.store(true, Ordering::Relaxed);
                         if changed {
                             self.emit_updated(SyncScope::Tasks, &account, &list_id);
                         }
@@ -604,6 +616,7 @@ impl CacheRefresher {
                 match swr::refresh_sections(&self.cache, adapter.as_ref(), &account, &list_id).await
                 {
                     Ok(changed) => {
+                        self.pass_succeeded.store(true, Ordering::Relaxed);
                         if changed {
                             self.emit_updated(SyncScope::Sections, &account, &list_id);
                         }
@@ -631,6 +644,7 @@ impl CacheRefresher {
                 match swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list_id).await
                 {
                     Ok(changed) => {
+                        self.pass_succeeded.store(true, Ordering::Relaxed);
                         if changed {
                             self.emit_updated(SyncScope::Contacts, &account, &list_id);
                             // A contacts change can also change the CALENDAR
@@ -705,9 +719,9 @@ impl CacheRefresher {
     /// What the pass left undone, named for the sentence that ends it: the
     /// accounts the error surface shows ([`CacheStore::refresh_errors`],
     /// so a first network blip of an unforced pass is not named before it
-    /// is confirmed), and whether every account the pass tried failed.
-    /// `None` when either could not be read; the surfaces then say their
-    /// plain sentence.
+    /// is confirmed), and whether the pass, trying at least one account,
+    /// read nothing at all. `None` when either could not be read; the
+    /// surfaces then say a sentence that claims neither.
     fn pass_outcome(&self) -> Option<PassOutcome> {
         let errors = self
             .cache
@@ -749,10 +763,10 @@ impl CacheRefresher {
                     .map(|(a, _)| a),
             )
             .collect();
-        let all_failed = !attempted.is_empty()
-            && attempted
-                .iter()
-                .all(|id| failing.iter().any(|f| &f.account_id == id));
+        // Not "every account has a failure": one failing calendar of six, or
+        // a withheld calendar next to readable reminders, still updated
+        // something, and "except: …" says what it did not.
+        let all_failed = !attempted.is_empty() && !self.pass_succeeded.load(Ordering::Relaxed);
         Some(PassOutcome {
             failing,
             all_failed,
@@ -981,6 +995,87 @@ mod tests {
         fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
             None
         }
+    }
+
+    /// A calendar account with two calendars, one of which always fails.
+    struct HalfDown;
+
+    #[async_trait]
+    impl Adapter for HalfDown {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for HalfDown {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            Ok(["cal-ok", "cal-down"]
+                .into_iter()
+                .map(|id| Calendar {
+                    color_label: None,
+                    supports_scheduling: false,
+                    supports_event_color: false,
+                    always_notifies_attendees: false,
+                    invitations_reply_only: false,
+                    stores_occurrence_exceptions: false,
+                    notifier_name: None,
+                    id: id.into(),
+                    name: id.into(),
+                    color: None,
+                    read_only: false,
+                    default_sound: None,
+                })
+                .collect())
+        }
+        async fn get_events(&self, calendar: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            if calendar == "cal-down" {
+                Err(cal_core::Error::Network("calendar unreachable".into()))
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn one_failing_calendar_is_named_not_all_failed() {
+        // Five of six calendars updated: "updated, except: Work", never
+        // "nothing could be updated".
+        let (refresher, _gated, statuses) = refresher();
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::new(HalfDown) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        refresher.warm_all(true).await;
+        let outcome = statuses.last_outcome();
+        assert_eq!(
+            outcome
+                .failing
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Work"]
+        );
+        assert!(!outcome.all_failed, "one calendar was read");
     }
 
     fn withheld(granted: bool) -> Arc<Withheld> {

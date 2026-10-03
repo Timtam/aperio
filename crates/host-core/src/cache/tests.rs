@@ -2776,26 +2776,27 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
 
 #[test]
 fn an_account_leads_with_its_most_severe_row() {
-    // A withheld calendar listing and a network failure on an address book:
-    // the account leads with the grant (decision 181), and each row keeps
-    // its own cause for the lines that list them.
+    // A network failure on the calendar listing, listed FIRST, and a withheld
+    // task-list listing after it: the account leads with the grant (decision
+    // 181), whatever order the rows come in, and each row keeps its own
+    // cause for the lines that list them.
     let store = setup();
     store
         .mark_failure(
             ACC,
             SyncScope::Calendars,
             "",
-            &withheld("calendars: Denied"),
-            false,
+            &cal_core::Error::Network("down".into()),
+            true,
         )
         .unwrap();
     store
         .mark_failure(
             ACC,
-            SyncScope::Contacts,
+            SyncScope::Tasks,
             LIST,
-            &cal_core::Error::Network("down".into()),
-            true,
+            &withheld("reminders: Denied"),
+            false,
         )
         .unwrap();
     let errors = store.refresh_errors().unwrap();
@@ -2810,8 +2811,8 @@ fn an_account_leads_with_its_most_severe_row() {
     assert_eq!(
         causes,
         vec![
-            ("calendars", RefreshCause::Access),
-            ("contacts", RefreshCause::Other)
+            ("calendars", RefreshCause::Other),
+            ("task_lists", RefreshCause::Access)
         ]
     );
 }

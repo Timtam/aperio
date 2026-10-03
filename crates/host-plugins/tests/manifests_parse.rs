@@ -303,18 +303,6 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
     );
 }
 
-/// One kind, one adapter — across everything this build declares.
-///
-/// The host resolves kind → plugin by asking the loaded plugins for the first
-/// match (`PluginManager::plugin_for_kind`), and account rows carry nothing but
-/// the kind. Two adapters answering to one name means an account silently binds
-/// to whichever registered first, which differs between the desktop's dlopen
-/// order and the mobile static registry — the same row, two adapters, two
-/// machines.
-///
-/// The two host-internal names are checked in the same breath: they have no
-/// manifest and never will, so a plugin claiming one is not a duplicate the
-/// loader could ever notice.
 /// "This device" allows one account per database (decision 183), and every
 /// manifest that limits its accounts says which kind it limits.
 #[test]
@@ -333,6 +321,18 @@ fn the_device_adapter_allows_one_account_per_database() {
     assert_eq!(limited, vec!["device_calendar".to_string()]);
 }
 
+/// One kind, one adapter — across everything this build declares.
+///
+/// The host resolves kind → plugin by asking the loaded plugins for the first
+/// match (`PluginManager::plugin_for_kind`), and account rows carry nothing but
+/// the kind. Two adapters answering to one name means an account silently binds
+/// to whichever registered first, which differs between the desktop's dlopen
+/// order and the mobile static registry — the same row, two adapters, two
+/// machines.
+///
+/// The two host-internal names are checked in the same breath: they have no
+/// manifest and never will, so a plugin claiming one is not a duplicate the
+/// loader could ever notice.
 #[test]
 fn no_two_adapters_share_a_kind() {
     let mut by_kind: std::collections::BTreeMap<String, Vec<String>> = Default::default();

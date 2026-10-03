@@ -63,9 +63,10 @@ weiter die zuletzt bekannten Daten und warnt dich, statt still zu scheitern:
 Der Satz am Ende einer Aktualisierung nennt, was nicht aktualisiert werden
 konnte: „Externe Daten aktualisiert, außer: Arbeit und Zuhause.“ (am Handy
 nach jeder Aktualisierung, am Desktop nach einer, die du gestartet hast).
-Scheitern alle Konten, sagt er, dass nichts aktualisiert werden konnte. Die
-genannten Konten werden nicht ein zweites Mal angesagt, und ihre Warnungen
-erscheinen zusammen mit dem Satz.
+Konnte die Aktualisierung gar nichts lesen, sagt er, dass nichts aktualisiert
+werden konnte, und die Warnung mit ihrer Ursache folgt. Die genannten Konten
+werden nicht ein zweites Mal angesagt, außer ihre Ursache wird schwerer, und
+ihre Warnungen erscheinen zusammen mit dem Satz.
 
 Gibt das Betriebssystem die Daten eines Kontos nicht frei — die Kalender des
 Telefons ohne Zugriff —, steht beim Konto eine Zeile statt einer pro Kalender
@@ -115,7 +116,9 @@ Android-Einstellungen.
 Es gibt ein Konto **Dieses Gerät** pro Telefon. Wählst du unter Konto
 hinzufügen noch einmal **Dieses Gerät**, entsteht kein zweites: Fehlt der
 Zugriff, führt es zum selben **Zugriff erlauben…**, sonst sagt es, dass das
-Konto schon hinzugefügt ist, und springt zu ihm.
+Konto schon hinzugefügt ist, und springt zu ihm. Steht **Dieses Gerät** zweimal
+da (von einer älteren Version zweimal hinzugefügt), erscheint jeder
+Gerätekalender doppelt; lösche eines der beiden.
 
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 

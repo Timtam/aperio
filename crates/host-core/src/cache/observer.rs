@@ -42,9 +42,9 @@ pub struct CacheRefreshStatus {
     pub fetched_targets: Option<u32>,
     /// What the passes that just ended left undone: set only on the status
     /// that ends them (`refreshing` false), `None` on every other status and
-    /// in a point-in-time query. `None` there too when it could not be read,
-    /// so a surface falls back to its plain sentence instead of claiming
-    /// that everything was updated.
+    /// in a point-in-time query. `None` there too when it could not be read;
+    /// a surface then says that the refresh ended, claiming neither that
+    /// everything was updated nor that something failed.
     pub outcome: Option<PassOutcome>,
 }
 
@@ -58,8 +58,10 @@ pub struct PassOutcome {
     /// an account the pass could not try (its plugin is missing) whose
     /// error is still recorded: its data is not current either.
     pub failing: Vec<FailingAccount>,
-    /// Every account the pass tried failed: nothing was updated, and "updated,
-    /// except: everyone" would not be true.
+    /// The pass tried at least one account and read nothing at all — no
+    /// listing, no container: nothing was updated, and "updated, except: …"
+    /// would not be true. One failing container among readable ones is not
+    /// this.
     pub all_failed: bool,
 }
 

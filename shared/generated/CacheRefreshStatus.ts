@@ -26,8 +26,8 @@ fetched_targets: number | null,
 /**
  * What the passes that just ended left undone: set only on the status
  * that ends them (`refreshing` false), `None` on every other status and
- * in a point-in-time query. `None` there too when it could not be read,
- * so a surface falls back to its plain sentence instead of claiming
- * that everything was updated.
+ * in a point-in-time query. `None` there too when it could not be read;
+ * a surface then says that the refresh ended, claiming neither that
+ * everything was updated nor that something failed.
  */
 outcome: PassOutcome | null, };

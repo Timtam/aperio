@@ -4191,7 +4191,10 @@ anlegt, fragt sie — `create_account_json` und `connect_account_json` am Handy,
 `connect_account` und die älteren Google-/Microsoft-Befehle am Desktop, das
 Sync-Ziel-Formular über `SyncPlugins::single_instance` —, und das Einfügen ist in
 SQL bedingt (`AccountsRepo::create_sole`), sodass zwei gleichzeitige Versuche
-nicht beide durchkommen. Sie gilt nur fürs Anlegen: vorhandene oder per Sync
+nicht beide durchkommen. Die generischen Verbinden-Wege fragen schon vor einer
+Anbieter-Anmeldung (`kind_taken`); die OAuth-Anmeldung am Handy und die älteren
+Google-/Microsoft-Befehle werden erst beim Einfügen abgewiesen — keine Art mit
+Anbieter-Anmeldung setzt das Feld. Sie gilt nur fürs Anlegen: vorhandene oder per Sync
 ankommende Zeilen werden weder zusammengeführt noch abgewiesen, und die
 einmalige Sync-Ziel-Migration legt ohne die Prüfung an. Die Kontenauswahl am
 Handy führt bei vorhandenem Gerätekonto zu dessen Reparatur bzw. zur Zeile
