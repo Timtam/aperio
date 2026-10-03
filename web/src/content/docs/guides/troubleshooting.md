@@ -77,7 +77,8 @@ While access is missing, **This device** under Settings → Accounts carries
 the badge **No access** and the action **Allow access…**. If iOS has not
 asked yet, it asks now. If you declined, iOS does not ask again: the action
 then says what is missing and opens Aperio's page in the Settings app. Set
-**Calendars** and **Reminders** to **Full Access** there. "Add events only" is
+**Calendars** and **Reminders** to **Full Access** there (up to iOS 16: turn
+them on). "Add events only" is
 not enough: Aperio has to read your calendars. When you come back to Aperio, it
 updates the account and says so, or says that access is still missing. If a
 restriction such as Screen Time forbids access, Aperio says that too; only

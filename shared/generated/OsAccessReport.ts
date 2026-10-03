@@ -4,8 +4,10 @@ import type { AskFor } from "./AskFor";
 import type { OsAccess } from "./OsAccess";
 
 /**
- * What a frontend reads at start: the access per entity, the device accounts
- * it concerns, and whether to ask now.
+ * What a frontend reads about the device's own stores: the access per
+ * entity, the device accounts it concerns, whether to ask now (at start),
+ * what "Allow access…" does, and whether a grant needs a reload. Read at
+ * start, on the accounts screen and when Aperio comes back to the front.
  */
 export type OsAccessReport = { 
 /**

@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   askOutcome,
+  gainedAccess,
   grantedOutcome,
   missingStores,
+  restrictedStores,
+  settingsStores,
   type OsAccessReport,
 } from '@aperio/shared';
 
@@ -56,7 +59,7 @@ describe('a grant made in the OS settings', () => {
   });
 });
 
-describe('what the settings still have to change', () => {
+describe('which stores a sentence names', () => {
   it('names the stores Aperio may not read', () => {
     expect(missingStores(after('full', 'full'))).toBe('none');
     expect(missingStores(after('denied', 'full'))).toBe('calendars');
@@ -65,5 +68,26 @@ describe('what the settings still have to change', () => {
     expect(missingStores(after('full', 'denied'))).toBe('reminders');
     expect(missingStores(after('denied', 'restricted'))).toBe('both');
     expect(missingStores(after('denied', null))).toBe('calendars');
+  });
+
+  it('sends to the settings only what they can change', () => {
+    // A policy's store is not Aperio's settings to change, and a store the
+    // OS still asks about is asked about first.
+    expect(settingsStores(after('restricted', 'denied'))).toBe('reminders');
+    expect(restrictedStores(after('restricted', 'denied'))).toBe('calendars');
+    expect(settingsStores(after('write_only', 'not_asked'))).toBe('calendars');
+    expect(settingsStores(after('denied', 'write_only'))).toBe('both');
+    expect(restrictedStores(after('denied', 'write_only'))).toBe('none');
+    // Android: the platform cannot say, and only the settings can grant
+    // after "don't ask again".
+    expect(settingsStores(after('undetermined', null))).toBe('calendars');
+  });
+
+  it('tells a store that became readable', () => {
+    expect(gainedAccess(after('denied', 'full'), after('full', 'full'))).toBe(true);
+    expect(gainedAccess(after('full', 'denied'), after('full', 'full'))).toBe(true);
+    expect(gainedAccess(after('full', 'denied'), after('full', 'denied'))).toBe(false);
+    // A loss is no gain.
+    expect(gainedAccess(after('full', 'full'), after('denied', 'full'))).toBe(false);
   });
 });

@@ -2954,10 +2954,14 @@ Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
 (`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
 Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
 den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
-Erklärung. Kommt Aperio wieder nach vorn oder startet neu und der Zugriff ist
-da, während der Cache das Konto noch sperrt (`restorable`), lädt es sofort neu
-und sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt
-es „hat noch keinen Zugriff“. ↻ im Test (Handy ohne Testläufer).
+Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
+Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
+Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
+iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
+sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
+wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
+geschlossener Dialog dasselbe wie „nicht mehr fragen“; der Dialog behauptet
+deshalb nichts darüber, PR-E kann beides trennen. ↻ im Test (Handy ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**
 - PR-D2: eine Zeile pro Konto im Synchronisieren-Tab, ehrlicher Satz am Ende

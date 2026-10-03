@@ -4,6 +4,7 @@ import { AppState, type NativeEventSubscription } from 'react-native';
 import { isAppLockEngaged } from '../state/appLock';
 import { useAppLockLocked } from '../state/appLockContext';
 import {
+  markDeviceAccessCheckPending,
   runDeviceAccessForegroundCheck,
   runDeviceAccessStartCheck,
   runPendingDeviceAccessCheck,
@@ -87,11 +88,20 @@ export function DeviceAccessGate() {
       // After every listener of this 'active' has run: AppLockGate may
       // engage the lock in it, and the check has to see that.
       if (tick != null) clearTimeout(tick);
-      tick = setTimeout(() => void runDeviceAccessForegroundCheck(), 0);
+      tick = setTimeout(() => {
+        tick = null;
+        void runDeviceAccessForegroundCheck();
+      }, 0);
     });
     return () => {
       clearTimeout(pending);
-      if (tick != null) clearTimeout(tick);
+      // The lock engaged in that same 'active' and re-rendered this gate
+      // before the tick ran (React's commit comes before the next frame's
+      // timers): the check is owed, after the unlock.
+      if (tick != null) {
+        clearTimeout(tick);
+        markDeviceAccessCheckPending();
+      }
       subscription.remove();
     };
   }, [locked]);

@@ -6282,14 +6282,17 @@ impl Host {
         }
     }
 
-    /// What the OS allows for the device calendars and reminders, and whether
-    /// to ask now (decision 166): a JSON `cal_core::os_access::OsAccessReport`.
+    /// What the OS allows for the device calendars and reminders, whether to
+    /// ask now (decision 166), what "Allow access…" does, and whether a grant
+    /// needs a reload: a JSON `cal_core::os_access::OsAccessReport`.
     ///
-    /// The rule is `cal_core::os_access::ask_on_start`; this only gathers its
-    /// inputs. Read at start and asks the OS nothing. Without a native bridge
-    /// (a platform that never installed one) everything is undetermined and
-    /// nothing is asked. Logs one line, which after a phone move is the first
-    /// answer to "did the grant come along?".
+    /// The rules are `cal_core::os_access::ask_on_start` and `repair_for`;
+    /// this gathers their inputs and adds `restorable` from the cache (full
+    /// access for a store whose family the cache still withholds). Asks the
+    /// OS nothing. Without a native bridge (a platform that never installed
+    /// one) everything is undetermined, nothing is asked and nothing needs
+    /// repair. Logs one line, which after a phone move is the first answer to
+    /// "did the grant come along?".
     pub fn device_calendar_access_json(&self) -> Result<String, StoreError> {
         let accounts = self.device_accounts();
         let report = match self.device_provider() {

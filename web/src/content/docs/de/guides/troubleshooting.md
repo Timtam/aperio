@@ -85,7 +85,7 @@ Abzeichen **Kein Zugriff** und die Aktion **Zugriff erlauben…**. Hat iOS noch
 nicht gefragt, fragt es jetzt. Hast du abgelehnt, fragt iOS nicht noch einmal:
 Die Aktion sagt dann, was fehlt, und öffnet Aperios Seite in der App
 „Einstellungen“. Stelle dort **Kalender** und **Erinnerungen** jeweils auf
-**Voller Zugriff**. „Nur Termine hinzufügen“ reicht nicht: Aperio muss deine
+**Voller Zugriff** (bis iOS 16: einschalten). „Nur Termine hinzufügen“ reicht nicht: Aperio muss deine
 Kalender lesen können. Kommst du zurück zu Aperio, aktualisiert es das Konto
 und sagt es an, oder es sagt, dass der Zugriff noch fehlt. Verbietet eine
 Einschränkung wie Bildschirmzeit den Zugriff, sagt Aperio auch das; ändern

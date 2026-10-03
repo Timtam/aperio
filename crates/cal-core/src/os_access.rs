@@ -8,14 +8,17 @@
 //! grant, and nothing ever asked again: the account failed on every read, its
 //! cache froze, and nothing said why.
 //!
-//! So the rule lives here, once, for every frontend (decision 166): when a
-//! device account exists and the OS has never asked about an entity, Aperio
-//! asks at start, for exactly the entities the OS has never asked about.
-//! Denied, write-only and restricted are the user's answer or a policy, and
-//! asking cannot change them; undetermined means the platform cannot say
-//! (Android), and is not asked about here either. A way into the system
-//! settings for those states, and Android's own start prompt, are later
-//! steps of this arc.
+//! So the rules live here, once, for every frontend.
+//!
+//! - At start ([`ask_on_start`], decision 166): when a device account exists
+//!   and the OS has never asked about an entity, Aperio asks, for exactly the
+//!   entities the OS has never asked about. Denied, write-only and restricted
+//!   are the user's answer or a policy; undetermined means the platform cannot
+//!   say (Android). None of them is asked about unprompted.
+//! - On the account's "Allow access…" ([`repair_for`]): the user asked for
+//!   it, so undetermined is asked about too (Android shows its dialog or says
+//!   at once that it will not); the user's answers lead to the OS settings,
+//!   and a policy is only explained.
 
 use serde::{Deserialize, Serialize};
 
@@ -69,8 +72,10 @@ pub enum AccessRepair {
     Restricted,
 }
 
-/// What a frontend reads at start: the access per entity, the device accounts
-/// it concerns, and whether to ask now.
+/// What a frontend reads about the device's own stores: the access per
+/// entity, the device accounts it concerns, whether to ask now (at start),
+/// what "Allow access…" does, and whether a grant needs a reload. Read at
+/// start, on the accounts screen and when Aperio comes back to the front.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct OsAccessReport {
