@@ -362,7 +362,7 @@
     "openAccounts": "Open accounts",
     "accessWhat": {
       "calendars": "the calendars",
-      "task_lists": "the task lists",
+      "task_lists": "the reminders",
       "contact_lists": "the address books",
       "data": "this account's data"
     },

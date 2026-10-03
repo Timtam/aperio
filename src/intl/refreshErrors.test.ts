@@ -140,7 +140,9 @@ describe('the one line for a withheld account', () => {
       error('calendars', 'access', null),
       error('contacts', 'other', null),
     ];
-    expect(withheldPhrase(errors, de)).toBe('die Kalender und die Aufgabenlisten');
+    // Only the device account is ever withheld; its task lists are the
+    // phone's reminders, named as every other device-access text names them.
+    expect(withheldPhrase(errors, de)).toBe('die Kalender und die Erinnerungen');
     expect(withheldPhrase([error('events', 'other', null)], de)).toBe('die Daten dieses Kontos');
   });
 

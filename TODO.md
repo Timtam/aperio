@@ -2978,7 +2978,8 @@ den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldep
 und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
 `single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
 Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
-Sekunden am Desktop läuft als eigener Durchlauf. Die Typen dafür sind erzeugt
+Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
+Fehler sofort. Die Typen dafür sind erzeugt
 statt von Hand gespiegelt. ↻ im Test (Handy ohne Testläufer).
 
 🚩 **Offen, in dieser Reihenfolge:**
