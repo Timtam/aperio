@@ -126,6 +126,10 @@ function deviceAccessMessage(
  *  carries `offered: false`, so it drops out for a reason the host stated. */
 const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar']);
 
+/** After an unlock, how long a sentence waits for the closing prompt and
+ *  cover (the device-access sentences wait as long). */
+const AFTER_UNLOCK_SPEECH_MS = 400;
+
 /** The device-local calendar adapter ships on both phone platforms — iOS
  *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars
  *  only; no system reminders app). Gates the extra "This device" picker entry,
@@ -649,8 +653,11 @@ export default function AccountsScreen() {
           ? (await whileOsSheetOpen(requestAndroidCalendarPermission)) === 'granted'
           : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
       // A slow answer may have re-locked the app: what follows is said and
-      // shown after the unlock, not under its prompt.
-      await whenAppLockReleased();
+      // shown after the unlock, not under its prompt, and a moment after it,
+      // so the closing prompt and cover do not cut the sentence off.
+      if (await whenAppLockReleased()) {
+        await new Promise((resolve) => setTimeout(resolve, AFTER_UNLOCK_SPEECH_MS));
+      }
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');
         setError(message);
@@ -1382,6 +1389,9 @@ export default function AccountsScreen() {
               : 'dialogs.accounts.deviceGrantBody',
           )}
         </Text>
+        {/* A refusal said while a prompt or cover was closing can be cut
+            off; here it can be found again. */}
+        {error != null && <Text style={styles.error}>{error}</Text>}
       </AppDialog>
 
       <AppDialog

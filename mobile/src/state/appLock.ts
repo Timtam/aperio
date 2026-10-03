@@ -63,7 +63,7 @@ export function setAppLockEngaged(engaged: boolean): void {
   if (!engaged) {
     const waiters = [...releaseWaiters];
     releaseWaiters.clear();
-    waiters.forEach((resolve) => resolve());
+    waiters.forEach((release) => release());
   }
 }
 
@@ -71,13 +71,15 @@ export function isAppLockEngaged(): boolean {
   return lockEngaged;
 }
 
-/** Resolves once the lock is not engaged: at once when it is not, otherwise
- *  on the unlock. A sentence about the app's content waits for this rather
- *  than being spoken under the unlock prompt. */
-export function whenAppLockReleased(): Promise<void> {
-  if (!lockEngaged) return Promise.resolve();
+/** Resolves once the lock is not engaged: at once (`false`) when it is not,
+ *  otherwise on the unlock (`true`). A sentence about the app's content waits
+ *  for this rather than being spoken under the unlock prompt — and, after an
+ *  unlock, a moment longer, since the closing prompt and cover would cut it
+ *  off (see `AppLockGate`). */
+export function whenAppLockReleased(): Promise<boolean> {
+  if (!lockEngaged) return Promise.resolve(false);
   return new Promise((resolve) => {
-    releaseWaiters.add(resolve);
+    releaseWaiters.add(() => resolve(true));
   });
 }
 
