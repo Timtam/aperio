@@ -2966,7 +2966,9 @@ deshalb nichts darüber, PR-E kann beides trennen. ↻ im Test (Handy ohne Testl
 
 ✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
 wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
-aktualisiert werden“, dann die Warnung mit Ursache), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
+aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
+bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
+Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
 Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
 Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
 (`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
