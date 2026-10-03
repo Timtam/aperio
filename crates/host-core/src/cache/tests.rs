@@ -2773,6 +2773,50 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
 }
 
 #[test]
+fn a_withheld_family_hides_its_older_container_errors_too() {
+    // The upgrade: Toni's phone carries container rows from before
+    // migration 46, with no kind and the old text ("permission denied"
+    // reads as a login problem to the text heuristic). Once the listing is
+    // withheld nothing writes them again, so the family has to hide them.
+    let store = setup();
+    for cal in ["cal-a", "cal-b"] {
+        store
+            .mark_error(
+                ACC,
+                SyncScope::Events,
+                cal,
+                "device calendar permission denied",
+                true,
+            )
+            .unwrap();
+    }
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &withheld("calendars: Denied"),
+            false,
+        )
+        .unwrap();
+
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 1);
+    let acc = &errors[0];
+    assert!(acc.no_access);
+    assert!(
+        !acc.auth_suspected,
+        "the hidden rows' text says nothing now"
+    );
+    let shown: Vec<(&str, &str)> = acc
+        .errors
+        .iter()
+        .map(|e| (e.scope.as_str(), e.container_id.as_str()))
+        .collect();
+    assert_eq!(shown, vec![("calendars", "")]);
+}
+
+#[test]
 fn a_withheld_family_blocks_its_reads_until_the_listing_succeeds() {
     let store = setup();
     assert!(!store.access_withheld(ACC, SyncScope::Events));
@@ -2825,6 +2869,26 @@ fn a_failure_is_news_once() {
     assert!(store
         .mark_failure(ACC, SyncScope::Events, CAL, &other, false)
         .unwrap());
+}
+
+#[test]
+fn a_contacts_resync_keeps_the_last_success() {
+    let store = setup();
+    store
+        .replace_list_contacts(ACC, LIST, &[contact("c1")])
+        .unwrap();
+    store.reset_contacts_sync(ACC).unwrap();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Contacts,
+            LIST,
+            &cal_core::Error::Network("down".into()),
+            true,
+        )
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    assert!(errors[0].errors[0].last_success_at.is_some());
 }
 
 #[test]

@@ -695,8 +695,10 @@ mod tests {
         observer.scopes()
     }
 
-    /// How many times `spawn_refresh` actually fetched for an Events read.
-    async fn fetches_with(failure: cal_core::Error) -> usize {
+    /// How many times a per-read refresh actually fetched for an Events read
+    /// of a container that failed with `failure`: through `spawn_refresh`
+    /// (lists) or `spawn_item_refresh` (the day views' event reads).
+    async fn fetches_with(failure: cal_core::Error, item: bool) -> usize {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let db = DbHandle::open_in_memory().unwrap();
         db.with_conn(|c| {
@@ -713,20 +715,37 @@ mod tests {
             .unwrap();
         let fetched = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&fetched);
-        spawn_refresh::<cal_core::Event, _, _, _>(
-            &tokio::runtime::Handle::current(),
-            Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>,
-            cache,
-            Arc::new(RefreshCoordinator::new()),
-            SyncScope::Events,
-            "acc-1".to_string(),
-            "cal-1".to_string(),
-            move || {
-                counter.fetch_add(1, Ordering::SeqCst);
-                async { Ok(Vec::new()) }
-            },
-            |_, _| Ok(false),
-        );
+        let observer = Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>;
+        if item {
+            spawn_item_refresh(
+                &tokio::runtime::Handle::current(),
+                observer,
+                cache,
+                Arc::new(RefreshCoordinator::new()),
+                SyncScope::Events,
+                "acc-1".to_string(),
+                "cal-1".to_string(),
+                move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(false) }
+                },
+            );
+        } else {
+            spawn_refresh::<cal_core::Event, _, _, _>(
+                &tokio::runtime::Handle::current(),
+                observer,
+                cache,
+                Arc::new(RefreshCoordinator::new()),
+                SyncScope::Events,
+                "acc-1".to_string(),
+                "cal-1".to_string(),
+                move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(Vec::new()) }
+                },
+                |_, _| Ok(false),
+            );
+        }
         tokio::task::yield_now().await;
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         fetched.load(Ordering::SeqCst)
@@ -736,13 +755,14 @@ mod tests {
     async fn a_withheld_os_grant_stops_the_per_read_refreshes() {
         // After a phone move every read of the device account retried at
         // once and failed the same way, dozens a second.
-        let withheld = cal_core::Error::AccessNotGranted("calendars: Denied".into());
-        assert_eq!(fetches_with(withheld).await, 0);
-        // Any other failure still retries on the next read.
-        assert_eq!(
-            fetches_with(cal_core::Error::Network("down".into())).await,
-            1
-        );
+        // Both paths: the lists' and the day views' event reads.
+        for item in [false, true] {
+            let withheld = cal_core::Error::AccessNotGranted("calendars: Denied".into());
+            assert_eq!(fetches_with(withheld, item).await, 0, "item: {item}");
+            // Any other failure still retries on the next read.
+            let down = cal_core::Error::Network("down".into());
+            assert_eq!(fetches_with(down, item).await, 1, "item: {item}");
+        }
     }
 
     #[tokio::test]
