@@ -189,8 +189,8 @@ It also checks what JavaScript can call. Every function
 `CalFfiModule.kt` and `CalFfiModule.swift`, with `AsyncFunction` when it returns
 a Promise and `Function` otherwise, and with one closure parameter per declared
 parameter (expo's trailing `Promise` parameter does not count). A commented-out
-registration does not count, and a declaration the check cannot read is named,
-not skipped. TypeScript trusts the declaration, so without this a missing
+registration does not count, and a declaration or a registration the check
+cannot read is named, not skipped. TypeScript trusts the declaration, so without this a missing
 registration shows only on the phone, as "CalFfi.x is not a function", and the
 wrong kind as a Promise where a value was expected. A function one platform
 lacks on purpose (the iOS background wake-up, the Siri pickers) is listed in

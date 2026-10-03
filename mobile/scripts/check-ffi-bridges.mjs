@@ -520,7 +520,9 @@ function closureParams(after, language) {
  * JavaScript (`null`: unreadable).
  *
  * Registrations are expected in the module file itself. Moving some into a
- * helper file reports them as missing, loudly, rather than passing.
+ * helper file reports them as missing, loudly, rather than passing. One whose
+ * name is not a plain string literal is not read here; `unreadableRegistrations`
+ * names it instead.
  */
 function registeredFunctions(source, language) {
   const code = withoutComments(source, { nested: true });
@@ -530,6 +532,28 @@ function registeredFunctions(source, language) {
     out.set(m[2], [...(out.get(m[2]) ?? []), { async: Boolean(m[1]), params }]);
   }
   return out;
+}
+
+/**
+ * Every registration as either module can write it, whatever its name looks
+ * like: `Function(` or `AsyncFunction(`. `registeredFunctions` reads only the
+ * ones named by a plain string literal.
+ */
+const REGISTRATION = /\b(?:Async)?Function\s*\(/g;
+const READABLE_REGISTRATION = /^\b(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/;
+const lineAt = (code, index) => code.slice(0, index).split('\n').length;
+
+/**
+ * The lines of registrations `registeredFunctions` cannot read: a name with a
+ * dash or a dot, a template, a concatenation, a variable. Each would be a
+ * function JavaScript can call that no declaration is held to, and a weight on
+ * its method that nothing counted, so it is named rather than skipped.
+ */
+function unreadableRegistrations(source) {
+  const code = withoutComments(source, { nested: true });
+  return [...code.matchAll(REGISTRATION)]
+    .filter((m) => !READABLE_REGISTRATION.test(code.slice(m.index)))
+    .map((m) => lineAt(code, m.index));
 }
 
 const declaredSurface = declaredFunctions(readFileSync(TS_MODULE, 'utf8'));
@@ -561,6 +585,18 @@ for (const { text } of declaredSurface.unreadable) {
     `CalFfiModule.ts has a member this check cannot read, so it cannot hold the ` +
       `native modules to it: "${text.length > 80 ? `${text.slice(0, 77)}...` : text}"`,
   );
+}
+for (const [platform, file] of [
+  ['android', KOTLIN],
+  ['ios', SWIFT],
+]) {
+  for (const line of unreadableRegistrations(readFileSync(file, 'utf8'))) {
+    surface.push(
+      `the ${MODULE[platform]} module registers a function on line ${line} whose name ` +
+        'this check cannot read, so it cannot hold it to CalFfiModule.ts: name it ' +
+        'with a plain string literal',
+    );
+  }
 }
 for (const [platform, registered] of nativeModules) {
   const where = `the ${MODULE[platform]} module`;
@@ -623,8 +659,8 @@ for (const [name, [platform]] of ONLY_ON) {
  *
  * The other direction from everything above, and until this was added an
  * unwatched one. A method added to such a trait has to be implemented by a
- * class on each platform, and nothing local compiles either: Kotlin first
- * fails minutes into an EAS build, Swift only in the XCFramework workflow. The
+ * class on each platform, and CI compiles neither: Kotlin first fails
+ * minutes into an EAS build, Swift only in the XCFramework workflow. The
  * device calendar bridge gained `accessStatus` this way.
  */
 function foreignTraits(rust) {
@@ -733,21 +769,35 @@ const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
  */
 const MAX_REGISTRATIONS_PER_METHOD = 70;
 
+/**
+ * `counts`: method name → the registrations whose innermost method it is.
+ * `outside`: the lines of registrations in none of those methods. `nested`:
+ * methods declared inside another one.
+ *
+ * By position, not by comparing totals: a group counted twice and another
+ * counted not at all would cancel out in a sum.
+ */
 function registrationGroups(source) {
   const code = withoutComments(source, { nested: true });
-  const groups = new Map();
+  const methods = [];
   for (const m of code.matchAll(
     /\b(?:override\s+fun\s+(definition)\s*\(\s*\)\s*=\s*ModuleDefinition|fun\s+ModuleDefinitionBuilder\.([A-Za-z_]\w*)\s*\(\s*\))\s*\{/g,
   )) {
-    const body = braced(code, m.index + m[0].length - 1);
+    const open = m.index + m[0].length - 1;
+    const body = braced(code, open);
     if (body === null) continue;
-    // The same shape `registeredFunctions` counts, so the two totals compare.
-    groups.set(
-      m[1] ?? m[2],
-      [...body.matchAll(/\b(?:Async)?Function\s*\(\s*"[A-Za-z0-9_]+"\s*\)/g)].length,
-    );
+    methods.push({ name: m[1] ?? m[2], open, close: open + body.length + 1, count: 0 });
   }
-  return groups;
+  const outside = [];
+  for (const r of code.matchAll(REGISTRATION)) {
+    const around = methods.filter((x) => x.open < r.index && r.index < x.close);
+    if (around.length === 0) outside.push(lineAt(code, r.index));
+    else around.reduce((a, b) => (b.open > a.open ? b : a)).count += 1;
+  }
+  const nested = methods
+    .filter((x) => methods.some((y) => y !== x && y.open < x.open && x.close <= y.close))
+    .map((x) => x.name);
+  return { counts: new Map(methods.map((x) => [x.name, x.count])), outside, nested };
 }
 
 const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
@@ -756,7 +806,7 @@ const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
 const methodSize = [];
 /** Registrations whose method this check cannot tell, so it cannot size it. */
 const methodLayout = [];
-for (const [group, count] of kotlinGroups) {
+for (const [group, count] of kotlinGroups.counts) {
   if (count > MAX_REGISTRATIONS_PER_METHOD) {
     methodSize.push(
       `${group}() in the Android module holds ${count} registrations, ` +
@@ -764,22 +814,17 @@ for (const [group, count] of kotlinGroups) {
     );
   }
 }
-const grouped = [...kotlinGroups.values()].reduce((n, c) => n + c, 0);
-const androidRegistrations = [...nativeModules.get('android').values()].reduce(
-  (n, found) => n + found.length,
-  0,
-);
-if (grouped < androidRegistrations) {
+if (kotlinGroups.outside.length > 0) {
   methodLayout.push(
-    `the Android module has ${androidRegistrations} registrations, but only ${grouped} ` +
-      'sit in definition() or a ModuleDefinitionBuilder extension this check can read, ' +
-      'so it cannot tell how large the method holding the rest is',
+    `the Android module registers functions on line(s) ${kotlinGroups.outside.join(', ')}, ` +
+      'outside definition() and every ModuleDefinitionBuilder extension this check can ' +
+      'read, so it cannot tell how large the method holding them is',
   );
-} else if (grouped > androidRegistrations) {
+}
+for (const name of kotlinGroups.nested) {
   methodLayout.push(
-    `the methods of the Android module this check reads hold ${grouped} registrations ` +
-      `between them, but the module has only ${androidRegistrations}: one of them is ` +
-      'declared inside another, so it cannot tell how large either is',
+    `${name}() is declared inside another method of the Android module, so this ` +
+      'check cannot tell which method its registrations weigh on',
   );
 }
 
@@ -800,7 +845,7 @@ const floors = [
   // definition() at least. Fewer means the pattern no longer matches how the
   // module is written; an unsplit module still finds definition() and is
   // reported by its size, not here.
-  ['methods of the Android module that register functions', kotlinGroups.size, 1],
+  ['methods of the Android module that register functions', kotlinGroups.counts.size, 1],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -890,6 +935,6 @@ console.log(
     `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +
     'implemented on both platforms with the same argument counts, and no method ' +
     `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
-    `registrations (the largest of its ${kotlinGroups.size}: ` +
-    `${Math.max(...kotlinGroups.values())}).`,
+    `registrations (the largest of its ${kotlinGroups.counts.size}: ` +
+    `${Math.max(...kotlinGroups.counts.values())}).`,
 );
