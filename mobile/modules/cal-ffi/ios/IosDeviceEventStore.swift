@@ -14,8 +14,9 @@ import Foundation
 /// writes (P3) decode the intermediate write shape, apply it to EventKit, and
 /// return the resulting item (which round-trips through the tested Rust read
 /// mapping). Marked `@unchecked Sendable` because it holds an `EKEventStore`
-/// (not `Sendable`); every call holds `gate`'s read side while it uses the
-/// store, and a reset holds its write side.
+/// (not `Sendable`); every read and write holds `gate`'s read side while it
+/// uses the store, a reset holds its write side, and no reset runs while a
+/// permission request is pending.
 final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// The one EventKit store of this run (decision 186).
   ///
@@ -23,15 +24,17 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// access keeps seeing nothing, and on a phone Aperio was moved to the store
   /// opened at launch, before the start prompt. So the store used to be
   /// REPLACED whenever an entity had turned full since it was made. On the
-  /// phone that made three stores within a second of the start prompt and
-  /// dropped the one that had just received the reminders grant; from then on
+  /// phone that made two new stores within a second of the start prompt
+  /// (three in the run) and dropped the one that had just received the
+  /// reminders grant; from then on
   /// iOS stated "never asked" for the reminders, and answered every later
   /// request with "granted" without a prompt, until Aperio was started anew.
   /// Apple's own step for data after a grant is `reset()` on the same store,
   /// so that is what happens now: after a granted request, and in `openStore`
   /// whenever an entity has turned full since the store last loaded (a grant
   /// in the iOS settings while Aperio kept running) or a catalog came back
-  /// empty under full access (`reloadOwed`).
+  /// empty after that (`reloadOwed`). Never while a request is pending
+  /// (`requestsPending`): the store receiving a grant is not disturbed.
   private let store = EKEventStore()
   /// Every call holds the read side while it uses `store`; `reload` takes the
   /// write side, so a reset never lands in the middle of a call.
@@ -42,6 +45,10 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }()
   /// Serialises the decision to reset, so one arrival of access resets once.
   private let loadLock = NSLock()
+  /// Permission requests running on `store` now. Guarded by `loadLock`; while
+  /// one runs, `openStore` resets nothing and leaves an owed reset owed, and
+  /// the request resets the store itself once it is answered.
+  private var requestsPending = 0
   /// The entities that were full when the store last loaded. Only raised:
   /// a grant cannot be taken back while Aperio runs (taking it back in the
   /// settings ends the app), so a later lower reading is no reason to reset.
@@ -54,12 +61,15 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// beyond the run.
   private var grantedThisRun = (events: false, reminders: false)
   private let owedLock = NSLock()
-  /// A catalog came back empty under full access: the store did not load what
-  /// the OS allows (`reset()` after a grant has been reported not to be enough
-  /// every time), so the next call resets it again before it reads. Its own
-  /// lock, because a call sets it while holding `gate`'s read side, and
-  /// `loadLock` is held while waiting for that side to be free.
+  /// A catalog came back empty after access arrived: the store did not load
+  /// what the OS allows (`reset()` after a grant has been reported not to be
+  /// enough every time), so the next call resets it once more before it
+  /// reads. Once per arrival (`owedAllowed`): if a second reset does not help
+  /// either, more would not, and a device with truly no lists would reset on
+  /// every pass. Its own lock, because a call sets it while holding `gate`'s
+  /// read side, and `loadLock` is held while waiting for that side to be free.
   private var reloadOwed = false
+  private var owedAllowed = false
 
   deinit {
     pthread_rwlock_destroy(gate)
@@ -72,11 +82,18 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   private func openStore() -> EKEventStore {
     let now = Self.fullAccessNow()
     loadLock.lock()
-    let owed = takeReloadOwed()
-    if owed || (now.events && !fullAtLoad.events) || (now.reminders && !fullAtLoad.reminders) {
-      reload()
+    if requestsPending == 0 {
+      let arrived =
+        (now.events && !fullAtLoad.events) || (now.reminders && !fullAtLoad.reminders)
+      let owed = takeReloadOwed()
+      if arrived || owed {
+        reload()
+      }
+      if arrived {
+        allowOneOwedReload()
+      }
+      fullAtLoad = (fullAtLoad.events || now.events, fullAtLoad.reminders || now.reminders)
     }
-    fullAtLoad = (fullAtLoad.events || now.events, fullAtLoad.reminders || now.reminders)
     loadLock.unlock()
     pthread_rwlock_rdlock(gate)
     return store
@@ -88,7 +105,16 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
 
   private func noteReloadOwed() {
     owedLock.lock()
-    reloadOwed = true
+    if owedAllowed {
+      reloadOwed = true
+      owedAllowed = false
+    }
+    owedLock.unlock()
+  }
+
+  private func allowOneOwedReload() {
+    owedLock.lock()
+    owedAllowed = true
     owedLock.unlock()
   }
 
@@ -158,9 +184,13 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     return granted
   }
 
-  /// On the one store, outside `gate`: the prompt waits for the user, and a
-  /// reset must not wait for the prompt.
+  /// On the one store, outside `gate`: the prompt waits for the user, and
+  /// reads must not wait for the prompt. Counted in `requestsPending`, so no
+  /// reset lands on the store while it receives the answer.
   private func requestEntity(_ type: EKEntityType) -> Bool {
+    loadLock.lock()
+    requestsPending += 1
+    loadLock.unlock()
     let semaphore = DispatchSemaphore(value: 0)
     var result = false
     let handler: EKEventStoreRequestAccessCompletionHandler = { ok, error in
@@ -188,14 +218,18 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       if type == .event { grantedThisRun.events = true }
       if type == .reminder { grantedThisRun.reminders = true }
       grantLock.unlock()
+    }
+    loadLock.lock()
+    requestsPending -= 1
+    if result {
       // Apple's step for data after a grant, on the store that received it.
-      loadLock.lock()
       reload()
+      allowOneOwedReload()
       fullAtLoad = (
         fullAtLoad.events || type == .event, fullAtLoad.reminders || type == .reminder
       )
-      loadLock.unlock()
     }
+    loadLock.unlock()
     return result
   }
 
@@ -213,8 +247,9 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// errored and keeps serving the cached rows) rather than as an empty
   /// collection. A genuinely removed calendar keeps erroring until the next
   /// listing refresh drops it from the catalog — after which nothing reads
-  /// it anymore. Access is not the question here: without full access the
-  /// Rust adapter refuses before any call reaches this bridge.
+  /// it anymore. Access is not the question here: the Rust adapter refuses
+  /// before any call reaches this bridge unless the OS states full access, or
+  /// states never asked for an entity it granted in this run.
   private func resolveCalendar(_ identifier: String, in store: EKEventStore) -> EKCalendar? {
     if let calendar = store.calendar(withIdentifier: identifier) {
       return calendar
@@ -232,11 +267,13 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// ambiguous — and a granted-access device virtually always has at least
   /// one calendar / reminder list (iOS maintains defaults). Treat empty as
   /// an ERROR: the host marks the listing errored and KEEPS the cached
-  /// catalog, and the next refresh retries. On the rare device with truly
-  /// zero lists the retry just keeps an already-empty cache empty (plus a
-  /// log line per pass) — the safe side of the trade. Without full access
-  /// the catalog is empty too, which is why the Rust adapter asks first and
-  /// never gets here then.
+  /// catalog, and the next refresh retries; after access arrived, the first
+  /// empty catalog also resets the store before the next call
+  /// (`reloadOwed`). On the rare device with truly zero lists the retry just
+  /// keeps an already-empty cache empty (plus a log line per pass) — the safe
+  /// side of the trade. Without full access the catalog is empty too, which
+  /// is why the Rust adapter asks first and never gets here then (a grant in
+  /// this run counts as full, see `grantedThisRun`).
   private func loadedCalendars(
     for type: EKEntityType, in store: EKEventStore
   ) throws -> [EKCalendar] {
@@ -251,7 +288,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       // state first; a status stated as never asked after a grant in this
       // run counts as full), so an empty catalog is EventKit's own answer.
       // The state still rides along, read now, in case it changed meanwhile,
-      // and the next call resets the store first (`reloadOwed`).
+      // and after access arrived the next call resets the store first
+      // (`reloadOwed`).
       noteReloadOwed()
       throw DeviceCalError.Backend(
         detail: "EventKit returned no calendars (authorization: \(Self.accessToken(type)))")

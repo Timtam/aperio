@@ -3002,13 +3002,15 @@ Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
 in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
 `EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
 `reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
-Sekunde drei Stores erzeugt und gerade den mit der frischen Zustimmung
-verworfen. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
+Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
+Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
+kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
 nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
 „eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
 hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
-(Vertrag: `shared/contracts/deviceAccessStatus.json`), das Protokoll nennt,
-wann sie den Status entschieden hat. ↻ im Test (Handy ohne Testläufer).
+(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
+an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
+nennt, wann sie den Status entschieden hat. ↻ im Test (Handy ohne Testläufer).
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 

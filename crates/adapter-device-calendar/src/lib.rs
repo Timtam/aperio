@@ -893,18 +893,23 @@ mod tests {
 
     #[test]
     fn reads_the_access_status_contract() {
-        // The shapes both native bridges write. Nothing else reads them, so
-        // a key renamed on either side would otherwise be ignored without a
-        // word.
+        // The shapes both native bridges write; check-ffi-bridges.mjs holds
+        // the writers' keys to the same samples. A key Rust does not read is
+        // ignored without a word, so this is where a renamed one shows.
         const CONTRACT: &str = include_str!("../../../shared/contracts/deviceAccessStatus.json");
         let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
         let samples = contract["samples"].as_array().unwrap();
-        assert!(samples.len() >= 9, "the contract lost its samples");
+        assert!(samples.len() >= 11, "the contract lost its samples");
         for sample in samples {
             let name = sample["name"].as_str().unwrap();
+            let platform = sample["platform"].as_str();
+            assert!(
+                matches!(platform, Some("ios" | "android")),
+                "{name}: platform {platform:?}"
+            );
             let provider = AccessOnly {
                 status: Box::leak(sample["status"].to_string().into_boxed_str()),
-                reminders: sample["platform"] == "ios",
+                reminders: platform == Some("ios"),
             };
             let calendar: OsAccess = serde_json::from_value(sample["calendar"].clone()).unwrap();
             let tasks: Option<OsAccess> = serde_json::from_value(sample["tasks"].clone()).unwrap();

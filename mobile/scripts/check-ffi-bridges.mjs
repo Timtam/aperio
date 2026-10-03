@@ -36,6 +36,10 @@
  * registrations that the JVM refuses to compile it (see
  * `MAX_REGISTRATIONS_PER_METHOD`).
  *
+ * And the keys of the device's access status, which both bridges write and
+ * Rust reads, against `shared/contracts/deviceAccessStatus.json` (see
+ * `accessStatusKeys`).
+ *
  * Only methods a bridge actually calls are checked, so a Rust method no phone
  * uses is nobody's problem here.
  *
@@ -848,6 +852,97 @@ for (const { name, line } of kotlinGroups.nested) {
   );
 }
 
+/**
+ * The access status each bridge's `accessStatus()` writes, held to the keys of
+ * its platform's samples in `shared/contracts/deviceAccessStatus.json`, both
+ * ways.
+ *
+ * Rust's test reads the same samples, so this closes the other end: nothing
+ * here compiles Swift or runs either writer. A key spelled differently in a
+ * writer is ignored by Rust without a word, and its `#[serde(default)]` reads
+ * as "nothing granted this run" — the reminders iOS stated as never asked
+ * after granting them would be withheld again (decision 187). A key the
+ * contract does not know is one Rust does not read either.
+ */
+const ACCESS_CONTRACT = join(root, 'shared/contracts/deviceAccessStatus.json');
+const ACCESS_WRITERS = {
+  ios: {
+    label: 'iOS',
+    file: join(NATIVE_DIR.swift, 'IosDeviceEventStore.swift'),
+    header: /\bfunc\s+accessStatus\s*\(\s*\)\s*->\s*String\s*\{/,
+    // A dictionary literal's keys: `"events": …`.
+    keys: /"([A-Za-z_]\w*)"\s*:/g,
+  },
+  android: {
+    label: 'Android',
+    file: join(NATIVE_DIR.kotlin, 'AndroidDeviceCalendar.kt'),
+    header: /\bfun\s+accessStatus\s*\(\s*\)\s*:\s*String\s*\{/,
+    // `JSONObject().put("events", …)`.
+    keys: /\.put\(\s*"([A-Za-z_]\w*)"/g,
+  },
+};
+
+/** Every key of a JSON object, nested ones included. */
+function jsonKeys(value, into = new Set()) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [key, inner] of Object.entries(value)) {
+      into.add(key);
+      jsonKeys(inner, into);
+    }
+  }
+  return into;
+}
+
+function accessStatusKeys() {
+  const out = [];
+  const samples = JSON.parse(readFileSync(ACCESS_CONTRACT, 'utf8')).samples ?? [];
+  for (const sample of samples) {
+    if (!(sample.platform in ACCESS_WRITERS)) {
+      out.push(
+        `shared/contracts/deviceAccessStatus.json: the sample "${sample.name}" names ` +
+          `no platform this check knows (${JSON.stringify(sample.platform)}), so no writer is held to it`,
+      );
+    }
+  }
+  for (const [platform, writer] of Object.entries(ACCESS_WRITERS)) {
+    const expected = new Set();
+    for (const sample of samples.filter((x) => x.platform === platform)) {
+      jsonKeys(sample.status, expected);
+    }
+    const code = withoutComments(readFileSync(writer.file, 'utf8'), { nested: true });
+    const head = writer.header.exec(code);
+    const body = head && braced(code, head.index + head[0].length - 1);
+    if (expected.size === 0 || body === null) {
+      out.push(
+        expected.size === 0
+          ? `shared/contracts/deviceAccessStatus.json has no ${writer.label} sample`
+          : `this check cannot find accessStatus() in the ${writer.label} bridge`,
+      );
+      continue;
+    }
+    const written = new Set([...body.matchAll(writer.keys)].map((m) => m[1]));
+    for (const key of expected) {
+      if (!written.has(key)) {
+        out.push(
+          `the ${writer.label} bridge's accessStatus() does not write "${key}", which ` +
+            'shared/contracts/deviceAccessStatus.json says it writes and Rust reads',
+        );
+      }
+    }
+    for (const key of written) {
+      if (!expected.has(key)) {
+        out.push(
+          `the ${writer.label} bridge's accessStatus() writes "${key}", which ` +
+            'shared/contracts/deviceAccessStatus.json does not know, so Rust does not read it',
+        );
+      }
+    }
+  }
+  return out;
+}
+
+const accessStatus = accessStatusKeys();
+
 // A parse that matched nothing would report no problems and mean nothing.
 const floors = [
   ['exported Rust methods', rust.size, 100],
@@ -934,7 +1029,23 @@ if (methodIssues > 0) {
   }
 }
 
-if (problems.length > 0 || surface.length > 0 || methodIssues > 0) process.exit(1);
+if (accessStatus.length > 0) {
+  console.error(
+    `${problems.length > 0 || surface.length > 0 || methodIssues > 0 ? '\n' : ''}` +
+      `The access status the native bridges write and ` +
+      `shared/contracts/deviceAccessStatus.json disagree in ${accessStatus.length} place(s):\n`,
+  );
+  for (const p of accessStatus) console.error(`  ${p}`);
+  console.error(
+    '\nRust reads the keys the contract names and ignores any other without a word.\n' +
+      'Change the writer, the contract and AccessStatusWire in\n' +
+      'crates/adapter-device-calendar/src/lib.rs together.',
+  );
+}
+
+if (problems.length > 0 || surface.length > 0 || methodIssues > 0 || accessStatus.length > 0) {
+  process.exit(1);
+}
 
 const onlyOn = Object.entries(MODULE)
   .map(([platform, label]) => {
@@ -956,5 +1067,6 @@ console.log(
     'implemented on both platforms with the same argument counts, and no method ' +
     `of the Android module holds more than ${MAX_REGISTRATIONS_PER_METHOD} ` +
     `registrations (the largest of its ${kotlinGroups.methods.length}: ` +
-    `${Math.max(...kotlinGroups.methods.map((x) => x.count))}).`,
+    `${Math.max(...kotlinGroups.methods.map((x) => x.count))}); both bridges write ` +
+    'the access status keys shared/contracts/deviceAccessStatus.json names.',
 );

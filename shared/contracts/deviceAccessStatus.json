@@ -1,5 +1,5 @@
 {
-  "what": "The wire contract for the device's access status: the JSON the native bridges write (accessStatus) and Rust reads (adapter_device_calendar::read_device_access). The Rust suite reads THIS file, so a renamed key on either side fails a test instead of going silent.",
+  "what": "The wire contract for the device's access status: the JSON the native bridges write (accessStatus) and Rust reads (adapter_device_calendar::read_device_access). Rust's test reads these samples, and mobile/scripts/check-ffi-bridges.mjs holds the keys each bridge's accessStatus() writes to the keys its platform's samples use, both ways. So a key renamed in a writer, in the reader or here fails a check instead of going silent.",
   "why": "Nothing compiles Swift outside the iOS release workflow, and the field case behind granted_this_run only shows on a phone: iOS stated 'never asked' for the reminders a second after granting them, until Aperio was started anew (decision 187). A key Rust does not read is ignored without a word, so a misspelled granted_this_run would bring back exactly that case.",
   "writtenBy": [
     "mobile/modules/cal-ffi/ios/IosDeviceEventStore.swift (accessStatus)",
@@ -42,6 +42,31 @@
         "granted_this_run": { "events": true, "reminders": true }
       },
       "calendar": "full",
+      "tasks": "full",
+      "settledByGrant": ["reminders"]
+    },
+    {
+      "name": "ios-only-the-granted-entity-is-settled",
+      "platform": "ios",
+      "note": "Calendars granted this run, reminders never requested: the reminders stand as stated. Each entity goes by its own grant, never by the other's.",
+      "status": {
+        "events": "full_access",
+        "reminders": "not_determined",
+        "granted_this_run": { "events": true, "reminders": false }
+      },
+      "calendar": "full",
+      "tasks": "not_asked",
+      "settledByGrant": []
+    },
+    {
+      "name": "ios-only-the-granted-entity-is-settled-mirrored",
+      "platform": "ios",
+      "status": {
+        "events": "not_determined",
+        "reminders": "not_determined",
+        "granted_this_run": { "events": false, "reminders": true }
+      },
+      "calendar": "not_asked",
       "tasks": "full",
       "settledByGrant": ["reminders"]
     },
