@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   Alert,
   findNodeHandle,
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
@@ -40,10 +39,17 @@ import {
 } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
 import { whileOsSheetOpen } from '../state/appLock';
+import {
+  openDeviceAccessSettings,
+  repairDeviceAccess,
+  requestAndroidCalendarPermission,
+  useDeviceAccessReport,
+} from '../state/deviceAccessGate';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
   collectValues,
   firstMissingField,
+  missingStores,
   type AccountFormSpec,
 } from '@aperio/shared';
 
@@ -84,21 +90,6 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar'
 const DEVICE_KIND_AVAILABLE =
   Platform.OS === 'ios' || Platform.OS === 'android';
 
-/** Request Android's calendar read+write runtime permissions. iOS routes its
- *  grant through the native EventKit prompt instead (requestDeviceCalendarAccess). */
-async function requestAndroidCalendarPermission(): Promise<boolean> {
-  const result = await PermissionsAndroid.requestMultiple([
-    PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
-    PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
-  ]);
-  return (
-    result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR] ===
-      PermissionsAndroid.RESULTS.GRANTED &&
-    result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR] ===
-      PermissionsAndroid.RESULTS.GRANTED
-  );
-}
-
 /** Adapter kinds whose ContactsFeature pulls remote address-book data — the
  *  ones that trigger the one-shot privacy notice on first connect. Mirrors the
  *  desktop CONTACTS_CAPABLE_KINDS. */
@@ -123,6 +114,12 @@ export default function AccountsScreen() {
   // Reconnect affordance as a missing-credential one (a present-but-wrong
   // password is invisible to the keychain probe).
   const { errorsByAccount } = useRefreshErrors();
+  // What the OS allows the device account, for its "No access" badge and
+  // the "Allow access…" repair.
+  const deviceAccess = useDeviceAccessReport();
+  const [accessDialog, setAccessDialog] = useState<'settings' | 'restricted' | null>(null);
+  const accessBusy = useRef(false);
+  const settingsAfterDismiss = useRef(false);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   // Ids of external accounts whose required keychain secret is absent — the
@@ -598,7 +595,7 @@ export default function AccountsScreen() {
       // reminders); Android requests the CalendarProvider runtime permissions.
       const granted =
         Platform.OS === 'android'
-          ? await requestAndroidCalendarPermission()
+          ? (await requestAndroidCalendarPermission()) === 'granted'
           : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');
@@ -625,6 +622,49 @@ export default function AccountsScreen() {
       setSubmitting(false);
     }
   }, [announce, load, t]);
+
+  // "Allow access…" on the device account: asks where the OS still asks (and
+  // says what came of it), or offers the detour the core names.
+  const allowAccess = useCallback(async () => {
+    // A guard, not `disabled`: a disabled control strands VoiceOver's focus.
+    if (accessBusy.current) return;
+    accessBusy.current = true;
+    try {
+      const step = await repairDeviceAccess();
+      if (step !== 'done') setAccessDialog(step);
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      accessBusy.current = false;
+    }
+  }, [announce, t]);
+
+  const confirmAccessSettings = useCallback(() => {
+    setAccessDialog(null);
+    // iOS will not open another app while the dialog is still dismissing.
+    if (Platform.OS === 'ios') settingsAfterDismiss.current = true;
+    else void openDeviceAccessSettings();
+  }, []);
+
+  const afterAccessDialog = useCallback(() => {
+    if (!settingsAfterDismiss.current) return;
+    settingsAfterDismiss.current = false;
+    void openDeviceAccessSettings();
+  }, []);
+
+  const missingNow = deviceAccess != null ? missingStores(deviceAccess) : 'calendars';
+  const accessDialogMessage =
+    accessDialog === 'restricted'
+      ? t('mobile.deviceAccess.restricted')
+      : Platform.OS === 'android'
+        ? t('mobile.deviceAccess.settingsAndroid')
+        : missingNow === 'reminders'
+          ? t('mobile.deviceAccess.settingsReminders')
+          : missingNow === 'both'
+            ? t('mobile.deviceAccess.settingsBoth')
+            : t('mobile.deviceAccess.settingsCalendars');
 
   const remove = useCallback(
     (account: Account) => {
@@ -850,6 +890,12 @@ export default function AccountsScreen() {
             const authSuspected =
               errorsByAccount.get(account.id)?.auth_suspected === true;
             const needsReconnect = missing || authSuspected;
+            // The OS withholds the device's own calendars: the repair is the
+            // OS's grant, not a credential.
+            const noAccess =
+              account.adapter_kind === 'device_calendar' &&
+              deviceAccess != null &&
+              deviceAccess.repair !== 'none';
             // Fold the credential state into the row's single SR label; a
             // "Reconnect" affordance follows for both kinds (OAuth re-runs the
             // provider sign-in; others reveal the inline secret field).
@@ -857,7 +903,9 @@ export default function AccountsScreen() {
               ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
               : authSuspected
                 ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.refreshErrors.badge')}`
-                : `${account.display_name}, ${kindName}`;
+                : noAccess
+                  ? `${account.display_name}, ${kindName}, ${t('mobile.deviceAccess.badge')}`
+                  : `${account.display_name}, ${kindName}`;
             if (repairId === account.id) {
               return (
                 <View key={account.id} style={styles.row}>
@@ -938,6 +986,9 @@ export default function AccountsScreen() {
                   isLocal
                     ? undefined
                     : [
+                        ...(noAccess
+                          ? [{ name: 'allowAccess', label: t('mobile.deviceAccess.allow') }]
+                          : []),
                         ...(needsReconnect
                           ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
                           : []),
@@ -954,6 +1005,7 @@ export default function AccountsScreen() {
                   else if (e.nativeEvent.actionName === 'rename') startRename(account);
                   else if (e.nativeEvent.actionName === 'edit') startEdit(account);
                   else if (e.nativeEvent.actionName === 'resync') void resyncAccount(account);
+                  else if (e.nativeEvent.actionName === 'allowAccess') void allowAccess();
                   else if (e.nativeEvent.actionName === 'reconnect') {
                     // OAuth re-runs the provider sign-in; others reveal the
                     // inline credential field.
@@ -978,6 +1030,10 @@ export default function AccountsScreen() {
                     <Text style={styles.badge} importantForAccessibility="no">
                       {t('dialogs.accounts.refreshErrors.badge')}
                     </Text>
+                  ) : noAccess ? (
+                    <Text style={styles.badge} importantForAccessibility="no">
+                      {t('mobile.deviceAccess.badge')}
+                    </Text>
                   ) : null}
                 </View>
                 {!isLocal && (
@@ -998,6 +1054,20 @@ export default function AccountsScreen() {
                           void reconnectOauth(account, oauthSecret)
                         }
                       />
+                    )}
+                    {noAccess && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t('mobile.deviceAccess.allowFor', {
+                          name: account.display_name,
+                        })}
+                        onPress={() => void allowAccess()}
+                        style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.smallButtonText}>
+                          {t('mobile.deviceAccess.allow')}
+                        </Text>
+                      </Pressable>
                     )}
                     {needsReconnect && (
                       <Pressable
@@ -1252,6 +1322,23 @@ export default function AccountsScreen() {
           )}
         </Text>
       </AppDialog>
+
+      <AppDialog
+        visible={accessDialog != null}
+        title={t('mobile.deviceAccess.dialogTitle', {
+          name: deviceAccess?.account_names[0] ?? '',
+        })}
+        message={accessDialogMessage}
+        confirmLabel={
+          accessDialog === 'settings' ? t('mobile.deviceAccess.openSettings') : undefined
+        }
+        cancelLabel={
+          accessDialog === 'settings' ? t('mobile.cancel') : t('mobile.deviceAccess.close')
+        }
+        onConfirm={accessDialog === 'settings' ? confirmAccessSettings : undefined}
+        onCancel={() => setAccessDialog(null)}
+        onDismiss={Platform.OS === 'ios' ? afterAccessDialog : undefined}
+      />
     </FormScrollView>
     {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
     <ContactsPrivacyNoticeModal

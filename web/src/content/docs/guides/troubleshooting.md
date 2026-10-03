@@ -73,10 +73,19 @@ start, once the app is unlocked and the first screen has loaded. Allow full
 access to the calendars and to the reminders; Aperio then updates the account
 straight away and says so.
 
-If you declined, iOS does not ask again. Open the Settings app, then
-**Privacy & Security**, then **Calendars** and **Reminders**, and give Aperio
-full access in each. "Add events only" is not enough: Aperio has to read your
-calendars.
+While access is missing, **This device** under Settings → Accounts carries
+the badge **No access** and the action **Allow access…**. If iOS has not
+asked yet, it asks now. If you declined, iOS does not ask again: the action
+then says what is missing and opens Aperio's page in the Settings app. Set
+**Calendars** and **Reminders** to **Full Access** there. "Add events only" is
+not enough: Aperio has to read your calendars. When you come back to Aperio, it
+updates the account and says so, or says that access is still missing. If a
+restriction such as Screen Time forbids access, Aperio says that too; only
+that restriction can change it.
+
+On Android the same holds for the calendars: the action asks while Android
+still asks, and otherwise leads to Aperio's permissions in the Android
+settings.
 
 ## A task's time shifted, once
 

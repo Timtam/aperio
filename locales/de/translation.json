@@ -3,7 +3,19 @@
     "deviceAccess": {
       "granted": "Zugriff erteilt. {{name}} wird aktualisiert.",
       "calendarsOnly": "Zugriff auf die Kalender erteilt, {{name}} wird aktualisiert. Die Erinnerungen bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
-      "remindersOnly": "Zugriff auf die Erinnerungen erteilt, {{name}} wird aktualisiert. Die Kalender bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern."
+      "remindersOnly": "Zugriff auf die Erinnerungen erteilt, {{name}} wird aktualisiert. Die Kalender bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
+      "badge": "Kein Zugriff",
+      "allow": "Zugriff erlauben…",
+      "allowFor": "Zugriff für „{{name}}“ erlauben…",
+      "dialogTitle": "Zugriff für „{{name}}“",
+      "settingsCalendars": "Aperio darf die Kalender dieses Geräts nicht lesen, und iOS fragt nicht noch einmal. Öffne die Einstellungen und stelle bei Aperio „Kalender“ auf „Voller Zugriff“.",
+      "settingsReminders": "Aperio darf die Erinnerungen dieses Geräts nicht lesen, und iOS fragt nicht noch einmal. Öffne die Einstellungen und stelle bei Aperio „Erinnerungen“ auf „Voller Zugriff“.",
+      "settingsBoth": "Aperio darf die Kalender und Erinnerungen dieses Geräts nicht lesen, und iOS fragt nicht noch einmal. Öffne die Einstellungen und stelle bei Aperio „Kalender“ und „Erinnerungen“ jeweils auf „Voller Zugriff“.",
+      "settingsAndroid": "Aperio darf die Kalender dieses Geräts nicht lesen, und Android fragt nicht noch einmal. Öffne die Einstellungen und erlaube Aperio unter „Berechtigungen“ den „Kalender“.",
+      "openSettings": "Einstellungen öffnen",
+      "restricted": "Eine Einschränkung auf diesem Gerät, etwa Bildschirmzeit oder ein Geräteprofil, verbietet Aperio den Zugriff auf die Kalender und Erinnerungen. Ändern lässt sich das nur bei dieser Einschränkung.",
+      "close": "Schließen",
+      "stillMissing": "„{{name}}“ hat noch keinen Zugriff."
     },
     "appLock": {
       "settingHeading": "App-Sperre",

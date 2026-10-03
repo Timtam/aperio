@@ -3,7 +3,19 @@
     "deviceAccess": {
       "granted": "Access granted. Updating {{name}}.",
       "calendarsOnly": "Access to the calendars granted; updating {{name}}. Reminders stay without access; you can change that for Aperio in the Settings app.",
-      "remindersOnly": "Access to the reminders granted; updating {{name}}. Calendars stay without access; you can change that for Aperio in the Settings app."
+      "remindersOnly": "Access to the reminders granted; updating {{name}}. Calendars stay without access; you can change that for Aperio in the Settings app.",
+      "badge": "No access",
+      "allow": "Allow access…",
+      "allowFor": "Allow access for \"{{name}}\"…",
+      "dialogTitle": "Access for \"{{name}}\"",
+      "settingsCalendars": "Aperio may not read this device's calendars, and iOS will not ask again. Open Settings and set \"Calendars\" to \"Full Access\" for Aperio.",
+      "settingsReminders": "Aperio may not read this device's reminders, and iOS will not ask again. Open Settings and set \"Reminders\" to \"Full Access\" for Aperio.",
+      "settingsBoth": "Aperio may not read this device's calendars and reminders, and iOS will not ask again. Open Settings and set both \"Calendars\" and \"Reminders\" to \"Full Access\" for Aperio.",
+      "settingsAndroid": "Aperio may not read this device's calendars, and Android will not ask again. Open Settings and allow Aperio \"Calendar\" under \"Permissions\".",
+      "openSettings": "Open Settings",
+      "restricted": "A restriction on this device, such as Screen Time or a device profile, forbids Aperio access to the calendars and reminders. Only that restriction can change it.",
+      "close": "Close",
+      "stillMissing": "\"{{name}}\" still has no access."
     },
     "appLock": {
       "settingHeading": "App lock",

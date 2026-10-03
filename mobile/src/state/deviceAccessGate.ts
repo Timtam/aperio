@@ -1,27 +1,37 @@
-import { AccessibilityInfo, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AccessibilityInfo, Linking, PermissionsAndroid, Platform } from 'react-native';
 
-import { askOutcome, type AskOutcome } from '@aperio/shared';
+import {
+  askOutcome,
+  grantedOutcome,
+  type AskFor,
+  type AskOutcome,
+  type OsAccessReport,
+} from '@aperio/shared';
 
 import i18n from '../../i18n';
 import { deviceCalendarAccess, requestDeviceCalendarAccess } from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
 import { holdingSpeech } from '../a11y/speechHold';
-import { whileOsSheetOpen } from './appLock';
+import { isAppLockEngaged, isOsSheetOpen, whileOsSheetOpen } from './appLock';
 import { settleExternalCaches } from './cacheSettle';
 
 /**
- * At start, ask the OS for the device's own calendars and reminders when it
- * has never asked on this phone and a "this device" account exists
- * (decision 166).
+ * The device's own calendars and reminders: asking the OS at start, the
+ * account's "Allow access…" repair, and noticing a grant given in the OS
+ * settings.
  *
- * A phone Aperio was moved to brings the account and its cache along, but not
- * the grant: iOS never asked there, every read of the account failed, and its
- * cache froze. Whether to ask is the core's rule (`device_calendar_access_json`
- * carries its answer); this runs the prompt, reads the answer back, reloads the
- * account when something was granted, and says one sentence about it.
+ * At start, ask the OS when it has never asked on this phone and a "this
+ * device" account exists (decision 166). A phone Aperio was moved to brings
+ * the account and its cache along, but not the grant: iOS never asked there,
+ * every read of the account failed, and its cache froze. Whether to ask is the
+ * core's rule (`device_calendar_access_json` carries its answer); this runs the
+ * prompt, reads the answer back, reloads the account when something was
+ * granted, and says one sentence about it.
  *
- * Once per process. Nothing else asks: an answer the user already gave is
- * theirs, and iOS would not show the prompt again anyway.
+ * The start check runs once per process. An answer the user already gave is
+ * theirs, and iOS would not show the prompt again anyway: after that, only the
+ * user's own "Allow access…" asks, or leads to the OS settings.
  */
 
 /** How long the day-start review waits for the check at most. Long enough to
@@ -36,10 +46,46 @@ const ANNOUNCE_DELAY_MS = 400;
 const SPEAK_CAP_MS = 15_000;
 
 let started = false;
+let startSettled = false;
 let settle: () => void = () => {};
 const settled = new Promise<void>((resolve) => {
   settle = resolve;
 });
+
+/** Flows that ask, reload and speak: the start check and the account's
+ *  repair. The foreground check stays out of them, so one grant is not
+ *  reloaded and said twice. */
+let flowBusy = 0;
+/** The user left for the OS settings from the repair dialog; the return says
+ *  what came of it, even when nothing did. */
+let settingsTrip = false;
+/** The app came to the front under the lock; the check runs after unlock. */
+let foregroundPending = false;
+
+let lastReport: OsAccessReport | null = null;
+const reportListeners = new Set<(report: OsAccessReport) => void>();
+
+/** Read the OS's answer, and hand it to whoever shows it. */
+async function readDeviceAccess(): Promise<OsAccessReport> {
+  const report = await deviceCalendarAccess();
+  lastReport = report;
+  reportListeners.forEach((cb) => cb(report));
+  return report;
+}
+
+/** The latest access report, read again when a screen using it mounts and
+ *  whenever a flow here reads it. `null` until the first read. */
+export function useDeviceAccessReport(): OsAccessReport | null {
+  const [report, setReport] = useState(lastReport);
+  useEffect(() => {
+    reportListeners.add(setReport);
+    void readDeviceAccess().catch(() => {});
+    return () => {
+      reportListeners.delete(setReport);
+    };
+  }, []);
+  return report;
+}
 
 /** Resolves once the start check has finished — asked, reloaded and said, or
  *  found nothing to ask — or after a cap, whichever comes first. The day-start
@@ -98,32 +144,177 @@ async function sayAndWait(message: string): Promise<void> {
   });
 }
 
+/**
+ * Reload the device accounts when something became readable, and say what
+ * came of it. With `settle`, also wait for the reload: the day-start review
+ * reads the account next.
+ */
+async function reloadAndSay(outcome: AskOutcome, name: string, settle: boolean): Promise<void> {
+  const reload = outcome !== 'denied';
+  // Kick the reload first, so "… wird aktualisiert" is true while it is
+  // said; the refresh cues queue behind the sentence instead of cutting it.
+  if (reload) await refreshExternalCache().catch(() => {});
+  await holdingSpeech(() => sayAndWait(sentence(outcome, name)));
+  if (reload && settle) await settleExternalCaches(async () => {});
+}
+
 /** Run the start check once. Later calls wait for the first. */
 export async function runDeviceAccessStartCheck(): Promise<void> {
   if (started) return settled;
   started = true;
+  flowBusy += 1;
   try {
-    const before = await deviceCalendarAccess();
+    const before = await readDeviceAccess();
+    const name = before.account_names[0] ?? '';
     const ask = before.ask_now;
-    if (ask == null) return;
+    if (ask == null) {
+      // A grant given in the OS settings while Aperio was not running: iOS
+      // may end Aperio when its access changes there, so the next start is
+      // the first to see it, and the cache still withholds the account.
+      if (before.restorable) await reloadAndSay(grantedOutcome(before), name, true);
+      return;
+    }
     // The alert flips the app inactive; the lock must not cover the app or
     // start its own prompt over it.
     await whileOsSheetOpen(() =>
       requestDeviceCalendarAccess(ask.events, ask.reminders),
     ).catch(() => false);
-    const after = await deviceCalendarAccess();
-    const outcome = askOutcome(ask, after);
-    const reload = outcome !== 'denied';
-    // Kick the reload first, so "… wird aktualisiert" is true while it is
-    // said; the refresh cues queue behind the sentence instead of cutting it.
-    if (reload) await refreshExternalCache().catch(() => {});
-    const name = after.account_names[0] ?? before.account_names[0] ?? '';
-    await holdingSpeech(() => sayAndWait(sentence(outcome, name)));
-    // The day-start review reads the account next: wait for that reload.
-    if (reload) await settleExternalCaches(async () => {});
+    const after = await readDeviceAccess();
+    await reloadAndSay(askOutcome(ask, after), after.account_names[0] ?? name, true);
   } catch {
     // Nothing was decided; the next start asks again.
   } finally {
+    flowBusy -= 1;
+    startSettled = true;
     settle();
   }
+}
+
+/** What the store gained between two reports: a store that was not readable
+ *  before and is now. */
+function gainedAccess(before: OsAccessReport, after: OsAccessReport): boolean {
+  return (
+    (before.calendar !== 'full' && after.calendar === 'full') ||
+    (before.tasks !== 'full' && after.tasks === 'full')
+  );
+}
+
+/**
+ * When Aperio comes back to the front: access granted in the OS settings in
+ * between reloads the device account and is said; a trip to the settings from
+ * the repair dialog that changed nothing is said too, so the user is not left
+ * guessing.
+ *
+ * Only after the start check, outside the other flows, and only while there
+ * is something to notice: with full access at the last look and no trip,
+ * nothing is read (each read writes a log line). Under the lock it waits for
+ * the unlock ([`runPendingDeviceAccessCheck`]).
+ */
+export async function runDeviceAccessForegroundCheck(): Promise<void> {
+  if (!startSettled || flowBusy > 0 || isOsSheetOpen()) return;
+  const trip = settingsTrip;
+  const before = lastReport;
+  const missing =
+    before != null &&
+    before.account_names.length > 0 &&
+    (before.repair !== 'none' || before.restorable);
+  if (!trip && !missing) return;
+  if (isAppLockEngaged()) {
+    foregroundPending = true;
+    return;
+  }
+  foregroundPending = false;
+  settingsTrip = false;
+  flowBusy += 1;
+  try {
+    const after = await readDeviceAccess();
+    if (after.account_names.length === 0) return;
+    const name = after.account_names[0];
+    if (after.restorable || (before != null && gainedAccess(before, after))) {
+      await reloadAndSay(grantedOutcome(after), name, false);
+    } else if (trip) {
+      await holdingSpeech(() =>
+        sayAndWait(i18n.t('mobile.deviceAccess.stillMissing', { name })),
+      );
+    }
+  } catch {
+    // The next return to the front looks again.
+  } finally {
+    flowBusy -= 1;
+  }
+}
+
+/** Run a foreground check the lock held back. */
+export function runPendingDeviceAccessCheck(): void {
+  if (foregroundPending) void runDeviceAccessForegroundCheck();
+}
+
+/** Android's answer to the calendar permissions: `blocked` when it will not
+ *  show its dialog again ("don't ask again", or a second refusal), so only its
+ *  settings can grant them. */
+export async function requestAndroidCalendarPermission(): Promise<
+  'granted' | 'denied' | 'blocked'
+> {
+  const result = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
+    PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
+  ]);
+  const answers = [
+    result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR],
+    result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR],
+  ];
+  if (answers.every((a) => a === PermissionsAndroid.RESULTS.GRANTED)) return 'granted';
+  if (answers.some((a) => a === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN)) return 'blocked';
+  return 'denied';
+}
+
+/** Where the account's "Allow access…" ended: done (asked, and said what came
+ *  of it), or the detour the screen has to offer. */
+export type RepairStep = 'done' | 'settings' | 'restricted';
+
+/**
+ * The device account's "Allow access…". Asks where the OS still asks, reloads
+ * on a grant and says what came of it; otherwise answers which detour the
+ * screen offers: the OS settings, or only an explanation where a policy
+ * forbids it. Which one is the core's rule (`repair` in the report).
+ */
+export async function repairDeviceAccess(): Promise<RepairStep> {
+  flowBusy += 1;
+  try {
+    const before = await readDeviceAccess();
+    if (before.repair === 'open_settings') return 'settings';
+    if (before.repair === 'restricted') return 'restricted';
+    if (before.repair === 'none') return 'done';
+    const name = before.account_names[0] ?? '';
+    if (Platform.OS === 'android') {
+      const answer = await whileOsSheetOpen(requestAndroidCalendarPermission);
+      if (answer === 'blocked') return 'settings';
+      const after = await readDeviceAccess();
+      await reloadAndSay(grantedOutcome(after), name, false);
+      return 'done';
+    }
+    // Only what the OS would still ask about; a store already answered is
+    // not part of the question (and iOS would not show it again).
+    const ask: AskFor = before.ask_now ?? {
+      events: before.calendar !== 'full',
+      reminders: before.tasks != null && before.tasks !== 'full',
+    };
+    await whileOsSheetOpen(() =>
+      requestDeviceCalendarAccess(ask.events, ask.reminders),
+    ).catch(() => false);
+    const after = await readDeviceAccess();
+    await reloadAndSay(askOutcome(ask, after), name, false);
+    return 'done';
+  } finally {
+    flowBusy -= 1;
+  }
+}
+
+/** Open Aperio's page in the OS settings, and remember the trip, so the
+ *  return says what came of it. */
+export async function openDeviceAccessSettings(): Promise<void> {
+  settingsTrip = true;
+  await Linking.openSettings().catch(() => {
+    settingsTrip = false;
+  });
 }

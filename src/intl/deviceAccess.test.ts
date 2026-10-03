@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { askOutcome, type OsAccessReport } from '@aperio/shared';
+import {
+  askOutcome,
+  grantedOutcome,
+  missingStores,
+  type OsAccessReport,
+} from '@aperio/shared';
 
 /** The report read after the prompt. */
 const after = (calendar: string, tasks: string | null): OsAccessReport =>
@@ -34,5 +39,31 @@ describe('what came of asking for the device calendars at start', () => {
     expect(askOutcome({ events: false, reminders: true }, after('full', 'full'))).toBe(
       'granted',
     );
+  });
+});
+
+describe('a grant made in the OS settings', () => {
+  it('counts every store Aperio can read again', () => {
+    expect(grantedOutcome(after('full', 'full'))).toBe('granted');
+    expect(grantedOutcome(after('full', 'denied'))).toBe('calendarsOnly');
+    expect(grantedOutcome(after('write_only', 'full'))).toBe('remindersOnly');
+  });
+
+  it('is whole on a platform without reminders', () => {
+    // Android: the calendars are all there is.
+    expect(grantedOutcome(after('full', null))).toBe('granted');
+    expect(grantedOutcome(after('undetermined', null))).toBe('denied');
+  });
+});
+
+describe('what the settings still have to change', () => {
+  it('names the stores Aperio may not read', () => {
+    expect(missingStores(after('full', 'full'))).toBe('none');
+    expect(missingStores(after('denied', 'full'))).toBe('calendars');
+    // "Add events only" reads nothing (decision 171).
+    expect(missingStores(after('write_only', 'full'))).toBe('calendars');
+    expect(missingStores(after('full', 'denied'))).toBe('reminders');
+    expect(missingStores(after('denied', 'restricted'))).toBe('both');
+    expect(missingStores(after('denied', null))).toBe('calendars');
   });
 });
