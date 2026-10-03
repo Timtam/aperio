@@ -238,7 +238,7 @@ class CalFfiModule : Module() {
 
   // Split across several `ModuleDefinitionBuilder` extensions rather than one
   // lambda. The JVM caps a single method's bytecode at 64 KB, and every
-  // registration is inlined into the method it sits in: 139 went past it once
+  // registration is inlined into the method it sits in: 140 went past it once
   // ("Method too large: CalFfiModule.definition()"), and 130 did again after
   // the groups that were lifted then had grown back. Each extension compiles
   // to its own method, so the ceiling applies per group; the FFI bridge check
