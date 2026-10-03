@@ -100,6 +100,12 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     Fetch: FnOnce() -> Fut + Send + 'static,
     Write: FnOnce(&CacheStore, &[T]) -> crate::db::DbResult<bool> + Send + 'static,
 {
+    // Not while the OS withholds this family: the attempt would fail the same
+    // way at once, on every read (bursts of dozens a second after a phone
+    // move). The warm pass still asks, and a grant lifts this.
+    if cache.access_withheld(&account, scope) {
+        return;
+    }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
     // Claim against the CURRENT generation: a refresh already running for an
     // older one was started before the change and cannot answer for it.
@@ -121,15 +127,20 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
                 }
             },
             Err(err) => {
-                let _ = cache.mark_error(&account, scope, &container, &err.to_string(), false);
-                tracing::warn!(
-                    target: "aperio::cache",
-                    scope = scope.as_str(),
-                    account = %account,
-                    container = %container,
-                    ?err,
-                    "background refresh failed",
-                );
+                // Logged when it is news, not on every identical retry.
+                let news = cache
+                    .mark_failure(&account, scope, &container, &err, false)
+                    .unwrap_or(true);
+                if news {
+                    tracing::warn!(
+                        target: "aperio::cache",
+                        scope = scope.as_str(),
+                        account = %account,
+                        container = %container,
+                        ?err,
+                        "background refresh failed",
+                    );
+                }
             }
         }
         coord.release(&key);
@@ -154,6 +165,10 @@ pub fn spawn_item_refresh<F, Fut>(
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
 {
+    // See spawn_refresh: not while the OS withholds this family.
+    if cache.access_withheld(&account, scope) {
+        return;
+    }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
     let generation = cache.refresh_generation(&account, scope, &container);
     if !coord.try_claim(&key, generation) {
@@ -184,15 +199,20 @@ pub fn spawn_item_refresh<F, Fut>(
             }
             Ok(false) => {} // content identical — nothing for the UI to reload
             Err(err) => {
-                let _ = cache.mark_error(&account, scope, &container, &err.to_string(), false);
-                tracing::warn!(
-                    target: "aperio::cache",
-                    scope = scope.as_str(),
-                    account = %account,
-                    container = %container,
-                    ?err,
-                    "background item refresh failed",
-                );
+                // Logged when it is news, not on every identical retry.
+                let news = cache
+                    .mark_failure(&account, scope, &container, &err, false)
+                    .unwrap_or(true);
+                if news {
+                    tracing::warn!(
+                        target: "aperio::cache",
+                        scope = scope.as_str(),
+                        account = %account,
+                        container = %container,
+                        ?err,
+                        "background item refresh failed",
+                    );
+                }
             }
         }
         coord.release(&key);
@@ -673,6 +693,76 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         observer.scopes()
+    }
+
+    /// How many times a per-read refresh actually fetched for an Events read
+    /// of a container that failed with `failure`: through `spawn_refresh`
+    /// (lists) or `spawn_item_refresh` (the day views' event reads).
+    async fn fetches_with(failure: cal_core::Error, item: bool) -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let db = DbHandle::open_in_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'device_calendar', 'Dieses Gerät', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+        let cache = Arc::new(CacheStore::new(db));
+        cache
+            .mark_failure("acc-1", SyncScope::Events, "cal-1", &failure, false)
+            .unwrap();
+        let fetched = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&fetched);
+        let observer = Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>;
+        if item {
+            spawn_item_refresh(
+                &tokio::runtime::Handle::current(),
+                observer,
+                cache,
+                Arc::new(RefreshCoordinator::new()),
+                SyncScope::Events,
+                "acc-1".to_string(),
+                "cal-1".to_string(),
+                move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(false) }
+                },
+            );
+        } else {
+            spawn_refresh::<cal_core::Event, _, _, _>(
+                &tokio::runtime::Handle::current(),
+                observer,
+                cache,
+                Arc::new(RefreshCoordinator::new()),
+                SyncScope::Events,
+                "acc-1".to_string(),
+                "cal-1".to_string(),
+                move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(Vec::new()) }
+                },
+                |_, _| Ok(false),
+            );
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        fetched.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn a_withheld_os_grant_stops_the_per_read_refreshes() {
+        // After a phone move every read of the device account retried at
+        // once and failed the same way, dozens a second.
+        // Both paths: the lists' and the day views' event reads.
+        for item in [false, true] {
+            let withheld = cal_core::Error::AccessNotGranted("calendars: Denied".into());
+            assert_eq!(fetches_with(withheld, item).await, 0, "item: {item}");
+            // Any other failure still retries on the next read.
+            let down = cal_core::Error::Network("down".into());
+            assert_eq!(fetches_with(down, item).await, 1, "item: {item}");
+        }
     }
 
     #[tokio::test]
