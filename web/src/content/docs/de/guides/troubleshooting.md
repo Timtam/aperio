@@ -80,16 +80,17 @@ Aperio beim Start, sobald die App entsperrt ist und der erste Bildschirm
 geladen hat. Erlaube den vollen Zugriff auf die Kalender und auf die
 Erinnerungen; Aperio aktualisiert das Konto dann sofort und sagt es an.
 
-Fehlt der Zugriff, trägt **Dieses Gerät** unter Einstellungen → Konten das
-Abzeichen **Kein Zugriff** und die Aktion **Zugriff erlauben…**. Hat iOS noch
-nicht gefragt, fragt es jetzt. Hast du abgelehnt, fragt iOS nicht noch einmal:
-Die Aktion sagt dann, was fehlt, und öffnet Aperios Seite in der App
-„Einstellungen“. Stelle dort **Kalender** und **Erinnerungen** jeweils auf
-**Voller Zugriff** (bis iOS 16: einschalten). „Nur Termine hinzufügen“ reicht nicht: Aperio muss deine
-Kalender lesen können. Kommst du zurück zu Aperio, aktualisiert es das Konto
-und sagt es an, oder es sagt, dass der Zugriff noch fehlt. Verbietet eine
-Einschränkung wie Bildschirmzeit den Zugriff, sagt Aperio auch das; ändern
-lässt er sich dann nur bei dieser Einschränkung.
+Fehlt der Zugriff, trägt **Dieses Gerät** unter Einstellungen → Konten ein
+Abzeichen, das sagt, was fehlt (**Kein Zugriff**, **Kalender ohne Zugriff**
+oder **Erinnerungen ohne Zugriff**), und die Aktion **Zugriff erlauben…**. Hat
+iOS noch nicht gefragt, fragt es jetzt. Hast du abgelehnt, fragt iOS nicht
+noch einmal: Die Aktion sagt dann, was fehlt, und öffnet Aperios Seite in der
+App „Einstellungen“. Stelle dort **Kalender** und **Erinnerungen** jeweils auf
+**Voller Zugriff** (bis iOS 16: einschalten). „Nur Termine hinzufügen“ reicht
+nicht: Aperio muss deine Kalender lesen können. Kommst du zurück zu Aperio,
+aktualisiert es das Konto und sagt es an, oder es sagt, wofür der Zugriff noch
+fehlt. Verbietet eine Einschränkung wie Bildschirmzeit den Zugriff, sagt Aperio
+auch das; ändern lässt er sich dann nur bei dieser Einschränkung.
 
 Unter Android gilt dasselbe für die Kalender: Die Aktion fragt, solange
 Android fragt, und führt sonst zu Aperios Berechtigungen in den

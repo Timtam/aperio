@@ -2,8 +2,13 @@
   "mobile": {
     "deviceAccess": {
       "granted": "Access granted. Updating {{name}}.",
-      "calendarsOnly": "Access to the calendars granted; updating {{name}}. Reminders stay without access; you can change that for Aperio in the Settings app.",
-      "remindersOnly": "Access to the reminders granted; updating {{name}}. Calendars stay without access; you can change that for Aperio in the Settings app.",
+      "calendarsOnly": "Access to the calendars granted; updating {{name}}.",
+      "remindersOnly": "Access to the reminders granted; updating {{name}}.",
+      "leftSettingsCalendars": "Calendars stay without access; you can change that for Aperio in the Settings app.",
+      "leftSettingsReminders": "Reminders stay without access; you can change that for Aperio in the Settings app.",
+      "leftAskCalendars": "Calendars stay without access; \"Allow access…\" asks for them.",
+      "leftAskReminders": "Reminders stay without access; \"Allow access…\" asks for them.",
+      "denied": "Access to {{what}} was not granted. You can allow it later for Aperio in the Settings app.",
       "deniedAndroid": "Access to the calendars was not granted. You can choose \"Allow access…\" again.",
       "badge": "No access",
       "badgeCalendars": "Calendars without access",

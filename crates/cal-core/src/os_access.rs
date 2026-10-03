@@ -64,8 +64,10 @@ pub enum AccessRepair {
     /// it has (Android, where asking either shows the dialog or reports at
     /// once that it will not).
     Ask,
-    /// The user said no, or allowed only adding events: the OS will not ask
-    /// again, and the way is its settings for Aperio.
+    /// The user said no, or allowed only adding events: the way is the OS
+    /// settings for Aperio. After a no the OS does not ask again; whether
+    /// iOS would ask again from add-only is undocumented, and the settings
+    /// work either way.
     OpenSettings,
     /// A policy (Screen Time, a device profile) forbids it; only that
     /// policy's settings can change it.

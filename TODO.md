@@ -2949,8 +2949,9 @@ Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
 im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
 die letzte erfolgreiche Aktualisierung (`last_success_at`). ↻ im Test.
 
-✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile „Kein Zugriff“ und die
-Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
+✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
+fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
+„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
 (`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
 Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
 den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die

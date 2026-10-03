@@ -3,14 +3,15 @@ import { AccessibilityInfo, Linking, PermissionsAndroid, Platform } from 'react-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  askOutcome,
+  answerOutcome,
   gainedAccess,
   grantedOutcome,
-  type AskFor,
   missingStores,
+  type AskFor,
   type AskOutcome,
   type DeviceAccessPair,
   type DeviceStores,
+  type OsAccess,
   type OsAccessReport,
 } from '@aperio/shared';
 
@@ -135,21 +136,60 @@ export function whenDeviceAccessSettled(): Promise<void> {
   ]);
 }
 
-function sentence(outcome: AskOutcome, name: string): string {
+/**
+ * The one sentence about the device stores after `report`. A grant of one
+ * store goes on with what holds the other back, as the repair dialog would
+ * say it: Aperio's settings, a question still to come, or a policy. A
+ * refusal names the stores `asked` about that are still missing (without
+ * `asked`, every missing one).
+ */
+function sentence(
+  outcome: AskOutcome,
+  report: OsAccessReport,
+  name: string,
+  asked?: AskFor,
+): string {
   switch (outcome) {
     case 'granted':
       return i18n.t('mobile.deviceAccess.granted', { name });
     case 'calendarsOnly':
-      return i18n.t('mobile.deviceAccess.calendarsOnly', { name });
+      return `${i18n.t('mobile.deviceAccess.calendarsOnly', { name })} ${leftSentence('reminders', report.tasks)}`;
     case 'remindersOnly':
-      return i18n.t('mobile.deviceAccess.remindersOnly', { name });
-    case 'denied':
-      // Android asks again on the next "Allow access…"; iOS sends to its
-      // settings, and has no reminders to name.
-      return Platform.OS === 'android'
-        ? i18n.t('mobile.deviceAccess.deniedAndroid')
-        : i18n.t('dialogs.accounts.deviceAccessDenied');
+      return `${i18n.t('mobile.deviceAccess.remindersOnly', { name })} ${leftSentence('calendars', report.calendar)}`;
+    case 'denied': {
+      // Android asks again on the next "Allow access…", and has no
+      // reminders to name.
+      if (Platform.OS === 'android') return i18n.t('mobile.deviceAccess.deniedAndroid');
+      const refused = asked != null ? askedAndMissing(asked, report) : 'none';
+      const what = refused !== 'none' ? refused : missingStores(report);
+      return i18n.t('mobile.deviceAccess.denied', { what: storesPhrase(what) });
+    }
   }
+}
+
+/** What holds back the store a partial grant left out. */
+function leftSentence(store: 'calendars' | 'reminders', access: OsAccess | null): string {
+  if (access === 'restricted') {
+    return i18n.t('mobile.deviceAccess.restricted', { what: storesPhrase(store) });
+  }
+  if (access === 'not_asked') {
+    return store === 'calendars'
+      ? i18n.t('mobile.deviceAccess.leftAskCalendars')
+      : i18n.t('mobile.deviceAccess.leftAskReminders');
+  }
+  return store === 'calendars'
+    ? i18n.t('mobile.deviceAccess.leftSettingsCalendars')
+    : i18n.t('mobile.deviceAccess.leftSettingsReminders');
+}
+
+/** The stores a prompt asked about that are still not readable. */
+function askedAndMissing(asked: AskFor, report: OsAccessReport): DeviceStores {
+  const calendars = asked.events && report.calendar !== 'full';
+  const reminders = asked.reminders && report.tasks != null && report.tasks !== 'full';
+  if (calendars && reminders) return 'both';
+  if (calendars) return 'calendars';
+  if (reminders) return 'reminders';
+  return 'none';
 }
 
 /**
@@ -189,7 +229,13 @@ async function sayAndWait(message: string): Promise<void> {
  * came of it. With `settle`, also wait for the reload: the day-start review
  * reads the account next.
  */
-async function reloadAndSay(outcome: AskOutcome, name: string, settle: boolean): Promise<void> {
+async function reloadAndSay(
+  outcome: AskOutcome,
+  report: OsAccessReport,
+  name: string,
+  settle: boolean,
+  asked?: AskFor,
+): Promise<void> {
   const reload = outcome !== 'denied';
   // Kick the reload first, so "… wird aktualisiert" is true while it is
   // said; the refresh cues queue behind the sentence instead of cutting it.
@@ -197,7 +243,7 @@ async function reloadAndSay(outcome: AskOutcome, name: string, settle: boolean):
     restoreKicked = true;
     await refreshExternalCache().catch(() => {});
   }
-  await holdingSpeech(() => sayAndWait(sentence(outcome, name)));
+  await holdingSpeech(() => sayAndWait(sentence(outcome, report, name, asked)));
   if (reload && settle) await settleExternalCaches(async () => {});
 }
 
@@ -219,7 +265,7 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       const seen = await seenAtStart;
       const gained = seen != null && gainedAccess(seen, before);
       if (before.account_names.length > 0 && (before.restorable || gained)) {
-        await reloadAndSay(grantedOutcome(before), name, true);
+        await reloadAndSay(grantedOutcome(before), before, name, true);
       }
       return;
     }
@@ -229,7 +275,13 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       requestDeviceCalendarAccess(ask.events, ask.reminders),
     ).catch(() => false);
     const after = await readDeviceAccess();
-    await reloadAndSay(askOutcome(ask, after), after.account_names[0] ?? name, true);
+    await reloadAndSay(
+      answerOutcome(ask, after),
+      after,
+      after.account_names[0] ?? name,
+      true,
+      ask,
+    );
   } catch {
     // Nothing was decided; the next start asks again.
   } finally {
@@ -274,7 +326,7 @@ export async function runDeviceAccessForegroundCheck(): Promise<void> {
     // since the last look is.
     const restore = after.restorable && !restoreKicked;
     if (restore || (before != null && gainedAccess(before, after))) {
-      await reloadAndSay(grantedOutcome(after), name, false);
+      await reloadAndSay(grantedOutcome(after), after, name, false);
     } else if (trip) {
       await holdingSpeech(() => sayAndWait(stillMissingSentence(after)));
     }
@@ -361,14 +413,14 @@ export async function repairDeviceAccess(): Promise<RepairResult> {
     if (before.repair === 'none') {
       // The badge was older than the access: it came back meanwhile. Never
       // silent, and the account is read again now.
-      await reloadAndSay(grantedOutcome(before), name, false);
+      await reloadAndSay(grantedOutcome(before), before, name, false);
       return { step: 'done', report: before };
     }
     if (Platform.OS === 'android') {
       const answer = await whileOsSheetOpen(requestAndroidCalendarPermission);
       if (answer === 'blocked') return { step: 'settings', report: before };
       const after = await readDeviceAccess();
-      await reloadAndSay(grantedOutcome(after), name, false);
+      await reloadAndSay(grantedOutcome(after), after, name, false);
       return { step: 'done', report: after };
     }
     // Only what the OS would still ask about; a store already answered is
@@ -381,10 +433,7 @@ export async function repairDeviceAccess(): Promise<RepairResult> {
       requestDeviceCalendarAccess(ask.events, ask.reminders),
     ).catch(() => false);
     const after = await readDeviceAccess();
-    // Something granted: say what Aperio can read now, which names a store
-    // still missing (one refused earlier, not part of this question).
-    const outcome = askOutcome(ask, after) === 'denied' ? 'denied' : grantedOutcome(after);
-    await reloadAndSay(outcome, name, false);
+    await reloadAndSay(answerOutcome(ask, after), after, name, false, ask);
     return { step: 'done', report: after };
   } finally {
     flowBusy -= 1;

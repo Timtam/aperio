@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  answerOutcome,
   askOutcome,
   gainedAccess,
   grantedOutcome,
@@ -42,6 +43,18 @@ describe('what came of asking for the device calendars at start', () => {
     expect(askOutcome({ events: false, reminders: true }, after('full', 'full'))).toBe(
       'granted',
     );
+  });
+});
+
+describe('what is said after a prompt', () => {
+  it('names a store refused before the question as still missing', () => {
+    // Calendars refused earlier, reminders never asked: the prompt asks only
+    // the reminders, and "access granted" would hide the calendars.
+    const onlyReminders = { events: false, reminders: true };
+    expect(answerOutcome(onlyReminders, after('denied', 'full'))).toBe('remindersOnly');
+    expect(answerOutcome(onlyReminders, after('full', 'full'))).toBe('granted');
+    expect(answerOutcome(onlyReminders, after('full', 'denied'))).toBe('denied');
+    expect(answerOutcome(BOTH, after('full', 'denied'))).toBe('calendarsOnly');
   });
 });
 

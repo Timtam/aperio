@@ -2,8 +2,13 @@
   "mobile": {
     "deviceAccess": {
       "granted": "Zugriff erteilt. {{name}} wird aktualisiert.",
-      "calendarsOnly": "Zugriff auf die Kalender erteilt, {{name}} wird aktualisiert. Die Erinnerungen bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
-      "remindersOnly": "Zugriff auf die Erinnerungen erteilt, {{name}} wird aktualisiert. Die Kalender bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
+      "calendarsOnly": "Zugriff auf die Kalender erteilt, {{name}} wird aktualisiert.",
+      "remindersOnly": "Zugriff auf die Erinnerungen erteilt, {{name}} wird aktualisiert.",
+      "leftSettingsCalendars": "Die Kalender bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
+      "leftSettingsReminders": "Die Erinnerungen bleiben ohne Zugriff; das kannst du in der App „Einstellungen“ bei Aperio ändern.",
+      "leftAskCalendars": "Die Kalender bleiben ohne Zugriff; „Zugriff erlauben…“ fragt danach.",
+      "leftAskReminders": "Die Erinnerungen bleiben ohne Zugriff; „Zugriff erlauben…“ fragt danach.",
+      "denied": "Der Zugriff auf {{what}} wurde nicht erteilt. Du kannst ihn später in der App „Einstellungen“ bei Aperio erlauben.",
       "deniedAndroid": "Der Zugriff auf die Kalender wurde nicht erteilt. Du kannst „Zugriff erlauben…“ noch einmal wählen.",
       "badge": "Kein Zugriff",
       "badgeCalendars": "Kalender ohne Zugriff",

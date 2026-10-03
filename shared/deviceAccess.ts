@@ -54,6 +54,16 @@ export function grantedOutcome(report: OsAccessReport): AskOutcome {
   return askOutcome({ events: true, reminders: report.tasks != null }, report);
 }
 
+/**
+ * What a prompt came to, said as what Aperio can read now: `denied` when
+ * nothing asked about was granted, otherwise every store readable after it
+ * ([`grantedOutcome`]). A store refused earlier, not part of the question,
+ * is then still named as missing instead of "access granted".
+ */
+export function answerOutcome(asked: AskFor, after: OsAccessReport): AskOutcome {
+  return askOutcome(asked, after) === 'denied' ? 'denied' : grantedOutcome(after);
+}
+
 /** Which of the device's stores a sentence is about. */
 export type DeviceStores = 'none' | 'calendars' | 'reminders' | 'both';
 
