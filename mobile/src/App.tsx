@@ -726,9 +726,11 @@ function AppContent() {
               account / no sync / empty store) it opens the wizard once;
               otherwise it's a no-op. */}
           <FirstLaunchWizardGate />
-          {/* Asks iOS for the device calendars when it never asked on this
-              phone and a "this device" account exists (decision 166), and
-              notices a grant given in the OS settings on the return. */}
+          {/* Asks the OS for the device calendars when it never asked on
+              this phone and a "this device" account exists (decision 166;
+              on Android, Aperio's own record of having asked decides,
+              decision 172), and notices a grant given in the OS settings on
+              the return. */}
           <DeviceAccessGate />
           {/* App-icon badge: today's open tasks + upcoming events. */}
           <AppBadge />

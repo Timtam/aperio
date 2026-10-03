@@ -300,9 +300,11 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       }
       return;
     }
-    // The alert flips the app inactive; the lock must not cover the app or
-    // start its own prompt over it. Android asks through its runtime
-    // permission dialog, once per device (decision 172).
+    // iOS: the alert flips the app inactive, and the lock must not cover
+    // the app or start its own prompt over it. Android asks through its
+    // runtime permission dialog, once per device (decision 172); that dialog
+    // backgrounds the app, which the lock treats as leaving (see
+    // whileOsSheetOpen).
     // What the prompt answered is read back from the OS below, not from here.
     await whileOsSheetOpen<unknown>(() =>
       Platform.OS === 'android'
