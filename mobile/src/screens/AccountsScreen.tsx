@@ -39,7 +39,7 @@ import {
   reconnectOAuthAccount,
 } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
-import { whileOsSheetOpen } from '../state/appLock';
+import { whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import {
   openDeviceAccessSettings,
   refreshDeviceAccessReport,
@@ -125,6 +125,10 @@ function deviceAccessMessage(
  *  built-in store declares itself now (`host_core::builtin_adapters`) and
  *  carries `offered: false`, so it drops out for a reason the host stated. */
 const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar']);
+
+/** After an unlock, how long a sentence waits for the closing prompt and
+ *  cover (the device-access sentences wait as long). */
+const AFTER_UNLOCK_SPEECH_MS = 400;
 
 /** How long Android's dialog window takes to fade out before the list is the
  *  window TalkBack reads again (the AppDialog fade). */
@@ -661,10 +665,23 @@ export default function AccountsScreen() {
       // reminders); Android requests the CalendarProvider runtime permissions.
       const granted =
         Platform.OS === 'android'
-          ? (await requestAndroidCalendarPermission()) === 'granted'
+          ? (await whileOsSheetOpen(requestAndroidCalendarPermission)) === 'granted'
           : await whileOsSheetOpen(() => requestDeviceCalendarAccess(true, true));
+      // A slow answer may have re-locked the app: what follows is said and
+      // shown after the unlock, not under its prompt, and a moment after it,
+      // so the closing prompt and cover do not cut the sentence off.
+      if (await whenAppLockReleased()) {
+        await new Promise((resolve) => setTimeout(resolve, AFTER_UNLOCK_SPEECH_MS));
+      }
       if (!granted) {
-        const message = t('dialogs.accounts.deviceAccessDenied');
+        // Android asks for the calendars only, and asks again on the next
+        // press; iOS sends to its settings for both stores.
+        const message =
+          Platform.OS === 'android'
+            ? t('dialogs.accounts.deviceAccessDeniedAndroid', {
+                button: t('dialogs.accounts.deviceGrantButton'),
+              })
+            : t('dialogs.accounts.deviceAccessDenied');
         setError(message);
         announce(message);
         return;
@@ -1465,6 +1482,9 @@ export default function AccountsScreen() {
               : 'dialogs.accounts.deviceGrantBody',
           )}
         </Text>
+        {/* A refusal said while a prompt or cover was closing can be cut
+            off; here it can be found again. */}
+        {error != null && <Text style={styles.error}>{error}</Text>}
       </AppDialog>
 
       <AppDialog

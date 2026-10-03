@@ -10,11 +10,14 @@
 //!
 //! So the rules live here, once, for every frontend.
 //!
-//! - At start ([`ask_on_start`], decision 166): when a device account exists
-//!   and the OS has never asked about an entity, Aperio asks, for exactly the
-//!   entities the OS has never asked about. Denied, write-only and restricted
-//!   are the user's answer or a policy; undetermined means the platform cannot
-//!   say (Android). None of them is asked about unprompted.
+//! - At start ([`ask_on_start`], decisions 166 and 172): when a device
+//!   account exists and the OS has never asked about an entity, Aperio asks,
+//!   for exactly the entities the OS has never asked about. On Android, which
+//!   cannot say so itself, "never asked" is Aperio's own record of having
+//!   asked on this device, so it asks once per device. Denied, write-only and
+//!   restricted are the user's answer or a policy; undetermined means the
+//!   platform cannot say which (Android after asking). None of them is asked
+//!   about unprompted.
 //! - On the account's "Allow access…" ([`repair_for`]): the user asked for
 //!   it, so undetermined is asked about too (Android shows its dialog or says
 //!   at once that it will not); the user's answers lead to the OS settings,
@@ -39,8 +42,9 @@ pub enum OsAccess {
     /// A policy (Screen Time, a device profile) forbids it; the user cannot
     /// grant it from here.
     Restricted,
-    /// The platform cannot tell "never asked" from "refused" (Android), or
-    /// sent a state this build does not know.
+    /// The platform cannot tell a refusal from a dialog it will not show again
+    /// (Android, once Aperio has asked on this device), or sent a state this
+    /// build does not know.
     Undetermined,
 }
 
@@ -60,9 +64,9 @@ pub struct AskFor {
 pub enum AccessRepair {
     /// Nothing is missing.
     None,
-    /// Ask the OS: it has never asked, or the platform cannot tell whether
-    /// it has (Android, where asking either shows the dialog or reports at
-    /// once that it will not).
+    /// Ask the OS: it has never asked, or it cannot tell whether it would ask
+    /// again (Android after a first answer, where asking either shows the
+    /// dialog or reports at once that it will not).
     Ask,
     /// The user said no, or allowed only adding events: the way is the OS
     /// settings for Aperio. After a no the OS does not ask again; whether
@@ -163,6 +167,7 @@ mod tests {
         assert_eq!(ask_on_start(Full, Some(NotAsked), true), Some(REMINDERS));
         assert_eq!(ask_on_start(NotAsked, Some(Full), true), Some(EVENTS));
         // A platform without reminders (Android).
+        // Android: Aperio's own record says it never asked on this device.
         assert_eq!(ask_on_start(NotAsked, None, true), Some(EVENTS));
     }
 

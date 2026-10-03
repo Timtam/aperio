@@ -97,6 +97,16 @@ export const requestDeviceCalendarAccess = async (
   reminders: boolean,
 ): Promise<boolean> => CalFfi.requestDeviceCalendarAccess(events, reminders);
 
+/** Note that Aperio asked for Android's calendar permission on this device
+ *  (decision 172), so the start check asks once per device. A no-op on iOS. */
+export const noteDeviceCalendarAsked = (): void => {
+  try {
+    CalFfi.noteDeviceCalendarAsked();
+  } catch {
+    // A record that could not be written asks once more at the next start.
+  }
+};
+
 /** What the OS allows for the device calendars and reminders, and whether to
  *  ask now (decision 166). Asks nobody. */
 export const deviceCalendarAccess = async (): Promise<OsAccessReport> =>

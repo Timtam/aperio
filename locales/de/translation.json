@@ -12,6 +12,7 @@
       "leftRestrictedReminders": "Die Erinnerungen sperrt eine Einschränkung wie Bildschirmzeit.",
       "denied": "Der Zugriff auf {{what}} wurde nicht erteilt. Du kannst ihn später in der App „Einstellungen“ bei Aperio erlauben.",
       "deniedAndroid": "Der Zugriff auf die Kalender wurde nicht erteilt. Du kannst „Zugriff erlauben…“ noch einmal wählen.",
+      "deniedAndroidStart": "Der Zugriff auf die Kalender wurde nicht erteilt. Erlauben lässt er sich später mit „Zugriff erlauben…“ bei „{{name}}“ unter Einstellungen, Konten.",
       "badge": "Kein Zugriff",
       "badgeCalendars": "Kalender ohne Zugriff",
       "badgeReminders": "Erinnerungen ohne Zugriff",
@@ -2056,6 +2057,7 @@
       "deviceGrantBodyAndroid": "Aperio fragt die Berechtigung für die Kalender dieses Geräts an. Sie bleiben nur auf diesem Gerät — dieses Konto wird nie mit deinen anderen Geräten synchronisiert.",
       "deviceGrantButton": "Zugriff erlauben",
       "deviceAccessDenied": "Der Zugriff wurde nicht erteilt. Du kannst den Kalender- und Erinnerungszugriff für Aperio später in der App „Einstellungen“ aktivieren.",
+      "deviceAccessDeniedAndroid": "Der Zugriff auf die Kalender wurde nicht erteilt. Du kannst „{{button}}“ noch einmal wählen oder ihn später in den Android-Einstellungen bei Aperio unter „Berechtigungen“ erlauben.",
       "clientSecretNeeded": "Dieses Gerät kennt das OAuth-Client-Secret dieses Kontos nicht. Trage es ein und melde dich dann erneut an.",
       "clientSecretLabel": "OAuth-Client-Secret"
     },

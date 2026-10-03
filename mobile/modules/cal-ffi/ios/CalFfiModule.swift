@@ -554,6 +554,11 @@ public class CalFfiModule: Module {
       try self.host.deviceCalendarAccessJson()
     }
 
+    // Android's record of having asked (decision 172). iOS says "never asked"
+    // itself (authorizationStatus), so there is nothing to note.
+    Function("noteDeviceCalendarAsked") { () -> Void in
+    }
+
     // Force a full cold re-sync of one external account (clears its delta tokens
     // + cached window, then kicks a warm pass). The recovery action for a "stuck"
     // external cache; credentials are untouched.

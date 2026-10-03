@@ -16,10 +16,19 @@ import {
 } from '@aperio/shared';
 
 import i18n from '../../i18n';
-import { deviceCalendarAccess, requestDeviceCalendarAccess } from '../api/accounts';
+import {
+  deviceCalendarAccess,
+  noteDeviceCalendarAsked,
+  requestDeviceCalendarAccess,
+} from '../api/accounts';
 import { refreshExternalCache } from '../api/sync';
 import { holdingSpeech } from '../a11y/speechHold';
-import { isAppLockEngaged, isOsSheetOpen, whileOsSheetOpen } from './appLock';
+import {
+  isAppLockEngaged,
+  isOsSheetOpen,
+  whenAppLockReleased,
+  whileOsSheetOpen,
+} from './appLock';
 import { settleExternalCaches } from './cacheSettle';
 
 /**
@@ -34,6 +43,10 @@ import { settleExternalCaches } from './cacheSettle';
  * core's rule (`device_calendar_access_json` carries its answer); this runs the
  * prompt, reads the answer back, reloads the account when something was
  * granted, and says one sentence about it.
+ *
+ * Android cannot say whether it ever asked; Aperio notes every request it
+ * makes on the device, outside Auto Backup, so the start check asks there
+ * once per device, and again on a new phone (decision 172).
  *
  * The start check runs once per process. An answer the user already gave is
  * theirs, and iOS would not show the prompt again anyway: after that, only the
@@ -150,6 +163,7 @@ function sentence(
   report: OsAccessReport,
   name: string,
   asked?: AskFor,
+  atStart = false,
 ): string {
   switch (outcome) {
     case 'granted':
@@ -161,7 +175,12 @@ function sentence(
     case 'denied': {
       // Android asks again on the next "Allow access…", and has no
       // reminders to name.
-      if (Platform.OS === 'android') return i18n.t('mobile.deviceAccess.deniedAndroid');
+      // At start the user never chose "Allow access…": say where it is.
+      if (Platform.OS === 'android') {
+        return atStart
+          ? i18n.t('mobile.deviceAccess.deniedAndroidStart', { name })
+          : i18n.t('mobile.deviceAccess.deniedAndroid');
+      }
       const refused = asked != null ? askedAndMissing(asked, report) : 'none';
       const what = refused !== 'none' ? refused : missingStores(report);
       return i18n.t('mobile.deviceAccess.denied', { what: storesPhrase(what) });
@@ -209,6 +228,9 @@ function askedAndMissing(asked: AskFor, report: OsAccessReport): DeviceStores {
  * sentence had just suggested pressing again.
  */
 async function sayAndWait(message: string): Promise<void> {
+  // Not under the unlock prompt: a slow answer to Android's permission
+  // dialog may have re-locked the app meanwhile.
+  await whenAppLockReleased();
   const screenReader = await AccessibilityInfo.isScreenReaderEnabled().catch(() => false);
   await new Promise((resolve) => setTimeout(resolve, ANNOUNCE_DELAY_MS));
   if (!screenReader || Platform.OS !== 'ios') {
@@ -243,6 +265,7 @@ async function reloadAndSay(
   name: string,
   settle: boolean,
   asked?: AskFor,
+  atStart = false,
 ): Promise<void> {
   const reload = outcome !== 'denied';
   // Kick the reload first, so "… wird aktualisiert" is true while it is
@@ -251,7 +274,7 @@ async function reloadAndSay(
     restoreKicked = true;
     await refreshExternalCache().catch(() => {});
   }
-  await holdingSpeech(() => sayAndWait(sentence(outcome, report, name, asked)));
+  await holdingSpeech(() => sayAndWait(sentence(outcome, report, name, asked, atStart)));
   if (reload && settle) await settleExternalCaches(async () => {});
 }
 
@@ -277,11 +300,17 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       }
       return;
     }
-    // The alert flips the app inactive; the lock must not cover the app or
-    // start its own prompt over it.
-    await whileOsSheetOpen(() =>
-      requestDeviceCalendarAccess(ask.events, ask.reminders),
-    ).catch(() => false);
+    // iOS: the alert flips the app inactive, and the lock must not cover
+    // the app or start its own prompt over it. Android asks through its
+    // runtime permission dialog, once per device (decision 172); that dialog
+    // backgrounds the app, which the lock treats as leaving (see
+    // whileOsSheetOpen).
+    // What the prompt answered is read back from the OS below, not from here.
+    await whileOsSheetOpen<unknown>(() =>
+      Platform.OS === 'android'
+        ? requestAndroidCalendarPermission()
+        : requestDeviceCalendarAccess(ask.events, ask.reminders),
+    ).catch(() => undefined);
     const after = await readDeviceAccess();
     await reloadAndSay(
       answerOutcome(ask, after),
@@ -289,9 +318,12 @@ export async function runDeviceAccessStartCheck(): Promise<void> {
       after.account_names[0] ?? name,
       true,
       ask,
+      true,
     );
   } catch {
-    // Nothing was decided; the next start asks again.
+    // Nothing was said. The next start asks again, unless the request was
+    // already noted (Android, decision 172); the account's "Allow access…"
+    // is the way then.
   } finally {
     flowBusy -= 1;
     startSettled = true;
@@ -378,12 +410,19 @@ export function markDeviceAccessCheckPending(): void {
 /** Android's answer to the calendar permissions: `blocked` when it reports
  *  that it will not show its dialog again ("don't ask again", a second
  *  refusal), so the screen offers its settings. Android reports a dialog
- *  closed without an answer the same way; the settings text therefore does
- *  not claim that Android will not ask, and the next "Allow access…" still
- *  asks first. PR-E's own record of a refusal can tell the two apart. */
+ *  closed without an answer the same way, and nothing tells the two apart;
+ *  the settings text therefore does not claim that Android will not ask, and
+ *  the next "Allow access…" still asks first. Every request is noted on the
+ *  device, so the start check asks only once (decision 172). */
 export async function requestAndroidCalendarPermission(): Promise<
   'granted' | 'denied' | 'blocked'
 > {
+  // Asked on this device, whatever comes of it: the start check does not ask
+  // again (decision 172). Noted BEFORE the dialog, so a process ended while it
+  // is up (the user left and Android reclaimed the memory) does not ask again
+  // at the next start; a request that then shows nothing is harmless, since
+  // "Allow access…" asks.
+  noteDeviceCalendarAsked();
   const result = await PermissionsAndroid.requestMultiple([
     PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
     PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
@@ -426,7 +465,12 @@ export async function repairDeviceAccess(): Promise<RepairResult> {
     }
     if (Platform.OS === 'android') {
       const answer = await whileOsSheetOpen(requestAndroidCalendarPermission);
-      if (answer === 'blocked') return { step: 'settings', report: before };
+      if (answer === 'blocked') {
+        // The settings dialog opens after the unlock a slow answer may
+        // have brought, not above the lock's cover.
+        await whenAppLockReleased();
+        return { step: 'settings', report: before };
+      }
       const after = await readDeviceAccess();
       await reloadAndSay(grantedOutcome(after), after, name, false);
       return { step: 'done', report: after };

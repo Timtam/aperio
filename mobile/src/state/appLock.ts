@@ -56,13 +56,31 @@ export function subscribeOsSheetClosed(cb: () => void): () => void {
  *  call that engages or releases it — not after a render, so a flow that runs
  *  in the same AppState event as a re-lock can see it. */
 let lockEngaged = false;
+const releaseWaiters = new Set<() => void>();
 
 export function setAppLockEngaged(engaged: boolean): void {
   lockEngaged = engaged;
+  if (!engaged) {
+    const waiters = [...releaseWaiters];
+    releaseWaiters.clear();
+    waiters.forEach((release) => release());
+  }
 }
 
 export function isAppLockEngaged(): boolean {
   return lockEngaged;
+}
+
+/** Resolves once the lock is not engaged: at once (`false`) when it is not,
+ *  otherwise on the unlock (`true`). A sentence about the app's content waits
+ *  for this rather than being spoken under the unlock prompt — and, after an
+ *  unlock, a moment longer, since the closing prompt and cover would cut it
+ *  off (see `AppLockGate`). */
+export function whenAppLockReleased(): Promise<boolean> {
+  if (!lockEngaged) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    releaseWaiters.add(() => resolve(true));
+  });
 }
 
 /**
@@ -70,9 +88,15 @@ export function isAppLockEngaged(): boolean {
  * over the app under it would flash for nothing, so the gate leaves the
  * inactive cover off and does not start the unlock prompt over it.
  *
- * Unlike the lock's own sheet, it does NOT stop the re-lock clock: an iOS
+ * Unlike the lock's own sheet, it does NOT stop the re-lock clock. An iOS
  * permission alert never backgrounds the app, so a 'background' while it is
  * up is the user really leaving, and the lock must hold on their return.
+ * Android's permission dialog is an activity of its own and does background
+ * the app; that counts as leaving too, because nothing tells the dialog from
+ * Home or an app switch while it is up: a slow answer re-locks the app, and
+ * the cover shows behind the dialog. What follows the answer — a sentence,
+ * the account being added, the settings dialog — waits for the unlock
+ * (`whenAppLockReleased`).
  */
 export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
   osSheetBusy += 1;
