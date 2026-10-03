@@ -719,14 +719,15 @@ const traitMethods = [...traits.values()].reduce((n, m) => n + m.size, 0);
 
 /**
  * How many registrations each method of the Android module holds:
- * `definition()` and every `ModuleDefinitionBuilder` extension it calls.
+ * `definition()` and every `ModuleDefinitionBuilder` extension declared in it.
  *
  * The JVM caps one method's bytecode at 64 KB, and expo inlines each
- * `Function`/`AsyncFunction` registration into the method it sits in. Nothing
- * local compiles Kotlin, so a group that outgrew the cap failed only at
+ * `Function`/`AsyncFunction` registration into the method it sits in. CI
+ * compiles no Kotlin, so a method that outgrew the cap was found at
  * `:cal-ffi:compileReleaseKotlin`, minutes into an EAS build ("Method too
- * large: CalFfiModule.definition"): with 140 registrations once, with 130
- * again after the groups lifted out the first time had grown back. 85 built.
+ * large: CalFfiModule.definition"): with 140 registrations once, and with 130
+ * after the first split, because new registrations kept landing in
+ * definition() itself while the groups lifted out barely changed. 127 built.
  * Registrations are not all the same size, so the count is a proxy, kept
  * well under the smallest one that failed.
  */
@@ -740,15 +741,21 @@ function registrationGroups(source) {
   )) {
     const body = braced(code, m.index + m[0].length - 1);
     if (body === null) continue;
-    groups.set(m[1] ?? m[2], [...body.matchAll(/\b(?:Async)?Function\s*\(\s*"/g)].length);
+    // The same shape `registeredFunctions` counts, so the two totals compare.
+    groups.set(
+      m[1] ?? m[2],
+      [...body.matchAll(/\b(?:Async)?Function\s*\(\s*"[A-Za-z0-9_]+"\s*\)/g)].length,
+    );
   }
   return groups;
 }
 
 const kotlinGroups = registrationGroups(readFileSync(KOTLIN, 'utf8'));
-/** One method of the Android module too large to compile, kept apart from
+/** A method of the Android module too large to compile, kept apart from
  *  `problems` and `surface`: neither regenerating nor declaring fixes it. */
 const methodSize = [];
+/** Registrations whose method this check cannot tell, so it cannot size it. */
+const methodLayout = [];
 for (const [group, count] of kotlinGroups) {
   if (count > MAX_REGISTRATIONS_PER_METHOD) {
     methodSize.push(
@@ -762,11 +769,17 @@ const androidRegistrations = [...nativeModules.get('android').values()].reduce(
   (n, found) => n + found.length,
   0,
 );
-if (grouped !== androidRegistrations) {
-  methodSize.push(
+if (grouped < androidRegistrations) {
+  methodLayout.push(
     `the Android module has ${androidRegistrations} registrations, but only ${grouped} ` +
       'sit in definition() or a ModuleDefinitionBuilder extension this check can read, ' +
       'so it cannot tell how large the method holding the rest is',
+  );
+} else if (grouped > androidRegistrations) {
+  methodLayout.push(
+    `the methods of the Android module this check reads hold ${grouped} registrations ` +
+      `between them, but the module has only ${androidRegistrations}: one of them is ` +
+      'declared inside another, so it cannot tell how large either is',
   );
 }
 
@@ -784,9 +797,10 @@ const floors = [
   ['iOS module registrations', nativeModules.get('ios').size, 100],
   ['foreign traits Rust calls into', traits.size, 4],
   ['methods of those traits', traitMethods, 15],
-  // definition() and at least one extension: a split this check cannot see
-  // would leave every registration unattributed instead.
-  ['methods of the Android module that register functions', kotlinGroups.size, 2],
+  // definition() at least. Fewer means the pattern no longer matches how the
+  // module is written; an unsplit module still finds definition() and is
+  // reported by its size, not here.
+  ['methods of the Android module that register functions', kotlinGroups.size, 1],
 ];
 for (const [what, found, floor] of floors) {
   if (found < floor) {
@@ -829,21 +843,33 @@ if (surface.length > 0) {
   );
 }
 
-if (methodSize.length > 0) {
+const methodIssues = methodSize.length + methodLayout.length;
+if (methodIssues > 0) {
   console.error(
-    `${problems.length > 0 || surface.length > 0 ? '\n' : ''}The Android module ` +
-      `risks a method too large for the JVM in ${methodSize.length} place(s):\n`,
+    `${problems.length > 0 || surface.length > 0 ? '\n' : ''}The Android module's ` +
+      `methods and the JVM's 64 KB cap per method disagree in ${methodIssues} place(s):\n`,
   );
-  for (const p of methodSize) console.error(`  ${p}`);
-  console.error(
-    '\nLift a group of registrations out into its own\n' +
-      '`private fun ModuleDefinitionBuilder.someFunctions() { ... }` and call it\n' +
-      'from definition(), as the existing groups in CalFfiModule.kt do. Each\n' +
-      'extension compiles to its own method, so the 64 KB cap applies per group.',
-  );
+  for (const p of [...methodSize, ...methodLayout]) console.error(`  ${p}`);
+  if (methodSize.length > 0) {
+    console.error(
+      '\nMove registrations from the method named above into the group they belong\n' +
+        'to, or lift some into a group of their own,\n' +
+        '`private fun ModuleDefinitionBuilder.someFunctions() { ... }`, called from\n' +
+        'definition(), as CalFfiModule.kt does. Each extension compiles to its own\n' +
+        'method, so the cap applies per group.',
+    );
+  }
+  if (methodLayout.length > 0) {
+    console.error(
+      '\nWrite each group as a member of CalFfiModule,\n' +
+        '`private fun ModuleDefinitionBuilder.someFunctions() { ... }`, called from\n' +
+        'definition() and declared inside no other method, so this check can tell\n' +
+        'how large each method is.',
+    );
+  }
 }
 
-if (problems.length > 0 || surface.length > 0 || methodSize.length > 0) process.exit(1);
+if (problems.length > 0 || surface.length > 0 || methodIssues > 0) process.exit(1);
 
 const onlyOn = Object.entries(MODULE)
   .map(([platform, label]) => {

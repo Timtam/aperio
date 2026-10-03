@@ -239,11 +239,13 @@ class CalFfiModule : Module() {
   // Split across several `ModuleDefinitionBuilder` extensions rather than one
   // lambda. The JVM caps a single method's bytecode at 64 KB, and every
   // registration is inlined into the method it sits in: 140 went past it once
-  // ("Method too large: CalFfiModule.definition()"), and 130 did again after
-  // the groups that were lifted then had grown back. Each extension compiles
-  // to its own method, so the ceiling applies per group; the FFI bridge check
-  // (mobile/scripts/check-ffi-bridges.mjs) fails a group that grows past its
-  // share before a release build finds out.
+  // ("Method too large: CalFfiModule.definition()"). The first split left 66
+  // here, and new registrations kept landing here rather than in a group until
+  // 130 went past it again. So a new registration goes into the group it
+  // belongs to, not into definition(). Each extension compiles to its own
+  // method, so the ceiling applies per group; the FFI bridge check
+  // (mobile/scripts/check-ffi-bridges.mjs) fails a method holding more than 70
+  // before a release build finds out.
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
 
@@ -334,7 +336,14 @@ class CalFfiModule : Module() {
     widgetFunctions()
   }
 
-  /** Lifted out of `definition()` — see the note there. The rules the core decides synchronously: text ordering, task priority, conference detection, groups, recurrence words. */
+  /**
+   * Lifted out of `definition()` — see the note there. The core's exported free
+   * functions, the rules that need no Host: text ordering, priority, conference
+   * detection, event groups, zones, the carry, task grouping and task
+   * recurrence, the status cascade, assignment, signatures, the day start, task
+   * settings, series shifts and recurrence words. `parseAttendee`, the first of
+   * them, stays in `definition()`.
+   */
   private fun ModuleDefinitionBuilder.coreRuleFunctions() {
     // ─── Text ordering (synchronous, and that is the point) ───
     // The tiebreaker every list in this app ends in, from `cal_core::collation`
