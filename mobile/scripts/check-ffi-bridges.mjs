@@ -546,9 +546,10 @@ function registeredFunctions(source, language) {
  * `Function(` or `AsyncFunction(`, with or without type arguments, in code. It
  * is looked for with comments and string contents blanked (`codeOnly`), so a
  * message that mentions one is not one, and `return@AsyncFunction` is a label.
+ * A call with a receiver, `b.Function(` or `this.AsyncFunction(`, still is one.
  * `registeredFunctions` reads only the plain form, `READABLE_REGISTRATION`.
  */
-const REGISTRATION = /(?<![\w@.])(?:Async)?Function\s*(?:<[^(){};]*>)?\s*\(/g;
+const REGISTRATION = /(?<![\w@])(?:Async)?Function\s*(?:<[^(){};]*>)?\s*\(/g;
 const READABLE_REGISTRATION = /^(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/;
 const codeOnly = (source) => withoutComments(source, { nested: true, strings: 'blank' });
 const lineAt = (code, index) => code.slice(0, index).split('\n').length;
