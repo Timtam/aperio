@@ -2922,7 +2922,8 @@ nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
 für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
 und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
 nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
-der Freigabe nimmt die Brücke einen frischen `EKEventStore`, das Konto lädt neu
+der Freigabe frischt die Brücke ihren `EKEventStore` auf (seit PR-G mit `reset()`
+statt eines neuen Stores), das Konto lädt neu
 (`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
 verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
 Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
@@ -2990,9 +2991,26 @@ leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
 „Zugriff erlauben…“ fragt bzw. führt in die Einstellungen. ↻ im Test (Handy
 ohne Testläufer).
 
-🚩 **Offen, in dieser Reihenfolge:**
-- PR-F: nur wenn iOS neue Kennungen vergeben hat — Einstellungen alter
-  Kalender auf neue übernehmen, Paare von Toni gewählt, nie nach Namen.
+✅ **PR-F entfällt:** Gemessen am 2026-10-03 auf Tonis iPhone: Nach der Freigabe
+kamen alle 8 Kalender und alle 5 Erinnerungslisten mit ihren alten Kennungen
+zurück (nichts weggefallen, nichts neu). Es gibt nichts zu übernehmen.
+
+✅ **PR-G (186, 187):** Im selben Feldtest meldete iOS für die Erinnerungen eine
+Sekunde nach der Zustimmung wieder „noch nie gefragt“ und blieb dabei, bis
+Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
+„erteilt“, ohne Dialog, und Aperio sagte trotzdem „nicht erteilt“ und schickte
+in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
+`EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
+`reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
+Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
+Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
+kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
+nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
+„eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
+hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
+(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
+an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
+nennt, wann sie den Status entschieden hat. ↻ im Test (Handy ohne Testläufer).
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 

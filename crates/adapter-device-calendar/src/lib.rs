@@ -30,7 +30,7 @@ pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cal_core::os_access::OsAccess;
+use cal_core::os_access::{settled_by_grant, OsAccess};
 use cal_core::{
     rrule_to_task_recurrence, Adapter, AdapterSource, AuthToken, Calendar, CalendarFeature,
     Capability, ContainerColor, Credentials, DateRange, Error, Event, FreeBusy, NewEvent, NewTask,
@@ -64,7 +64,9 @@ pub trait DeviceCalendarProvider: Send + Sync {
     fn supports_reminders(&self) -> bool;
     /// The OS's access state right now, without asking anyone: JSON
     /// `{"events": token, "reminders": token | null}` in the platform's own
-    /// words. [`device_access`] reads it; the rule about what to do with it is
+    /// words, and on iOS `"granted_this_run": {"events": bool, "reminders":
+    /// bool}`, the entities a request answered "granted" in this run.
+    /// [`device_access`] reads it; the rule about what to do with it is
     /// `cal_core::os_access`, not the platform's.
     fn access_status(&self) -> String;
 
@@ -175,31 +177,87 @@ struct AccessStatusWire {
     events: String,
     #[serde(default)]
     reminders: Option<String>,
+    /// iOS only: Android's status is read fresh from the permission itself
+    /// and has no stale state to settle.
+    #[serde(default)]
+    granted_this_run: GrantedThisRun,
+}
+
+#[derive(Deserialize, Default)]
+struct GrantedThisRun {
+    #[serde(default)]
+    events: bool,
+    #[serde(default)]
+    reminders: bool,
+}
+
+/// The device's access as the core goes by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceAccess {
+    pub calendar: OsAccess,
+    /// `None` where the platform has no reminders store.
+    pub tasks: Option<OsAccess>,
+    /// The OS stated "never asked" for the calendars although it granted them
+    /// in this run, and the grant settled it (`os_access::settled_by_grant`).
+    pub calendar_by_grant: bool,
+    /// The same for the reminders.
+    pub tasks_by_grant: bool,
+}
+
+impl DeviceAccess {
+    /// The entities a grant settled, in the words a log line uses.
+    pub fn settled_by_grant(&self) -> Vec<&'static str> {
+        [
+            (self.calendar_by_grant, "calendars"),
+            (self.tasks_by_grant, "reminders"),
+        ]
+        .into_iter()
+        .filter_map(|(settled, name)| settled.then_some(name))
+        .collect()
+    }
 }
 
 /// The calendars' and the reminders' access, as the core reads it. Reminders
 /// are `None` where the platform has no store for them; a status the native
 /// side could not put into words reads as undetermined.
 pub fn device_access(provider: &dyn DeviceCalendarProvider) -> (OsAccess, Option<OsAccess>) {
+    let DeviceAccess {
+        calendar, tasks, ..
+    } = read_device_access(provider);
+    (calendar, tasks)
+}
+
+/// [`device_access`], with what a grant in this run settled.
+///
+/// One read of the native status for everything: two reads could straddle a
+/// change and disagree.
+pub fn read_device_access(provider: &dyn DeviceCalendarProvider) -> DeviceAccess {
     let raw = provider.access_status();
     let Ok(wire) = serde_json::from_str::<AccessStatusWire>(&raw) else {
-        return (
-            OsAccess::Undetermined,
-            provider
+        return DeviceAccess {
+            calendar: OsAccess::Undetermined,
+            tasks: provider
                 .supports_reminders()
                 .then_some(OsAccess::Undetermined),
-        );
+            calendar_by_grant: false,
+            tasks_by_grant: false,
+        };
     };
-    let reminders = if provider.supports_reminders() {
-        Some(
-            wire.reminders
-                .as_deref()
-                .map_or(OsAccess::Undetermined, map_access_token),
-        )
-    } else {
-        None
-    };
-    (map_access_token(&wire.events), reminders)
+    let stated_calendar = map_access_token(&wire.events);
+    let calendar = settled_by_grant(stated_calendar, wire.granted_this_run.events);
+    let stated_tasks = provider.supports_reminders().then(|| {
+        wire.reminders
+            .as_deref()
+            .map_or(OsAccess::Undetermined, map_access_token)
+    });
+    let tasks =
+        stated_tasks.map(|stated| settled_by_grant(stated, wire.granted_this_run.reminders));
+    DeviceAccess {
+        calendar,
+        tasks,
+        calendar_by_grant: calendar != stated_calendar,
+        tasks_by_grant: tasks != stated_tasks,
+    }
 }
 
 fn parse<T: serde::de::DeserializeOwned>(json: &str) -> Result<T> {
@@ -810,6 +868,27 @@ mod tests {
             let _ = ready(adapter.list_calendars());
         }));
         assert!(reached.is_err(), "full access lets the calendars through");
+    }
+
+    #[test]
+    fn a_grant_this_run_lets_a_store_stated_as_never_asked_through() {
+        // The field case (decision 187): iOS answered "granted" and then
+        // stated "never asked" for the reminders. The call reaches the store,
+        // which here panics on purpose.
+        let adapter = DeviceAdapter::new(Arc::new(AccessOnly {
+            status: r#"{"events":"full_access","reminders":"not_determined","granted_this_run":{"events":true,"reminders":true}}"#,
+            reminders: true,
+        }));
+        let reached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ready(adapter.list_task_lists());
+        }));
+        assert!(reached.is_err(), "the grant settles never asked");
+        // Without the grant the same status is refused.
+        let adapter = DeviceAdapter::new(Arc::new(AccessOnly {
+            status: r#"{"events":"full_access","reminders":"not_determined"}"#,
+            reminders: true,
+        }));
+        refused(ready(adapter.list_task_lists()), "reminders NotAsked");
     }
 
     /// Minimal wire shapes for the write calls, never sent anywhere.

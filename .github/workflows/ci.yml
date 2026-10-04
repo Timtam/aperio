@@ -100,6 +100,8 @@ jobs:
               - 'crates/cal-ffi/**'
               - 'mobile/modules/cal-ffi/**'
               - 'mobile/scripts/check-ffi-bridges.mjs'
+              # The access status both bridges write; the check holds them to it.
+              - 'shared/contracts/deviceAccessStatus.json'
               - '.github/workflows/ci.yml'
             frontend:
               - 'src/**'

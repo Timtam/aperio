@@ -2072,7 +2072,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder() != 59949.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_access_status() != 26752.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_access_status() != 18035.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
@@ -3762,7 +3762,10 @@ public interface DeviceEventStoreBridge {
      * `{"events": token, "reminders": token | null}`. iOS tokens:
      * `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
      * Android: `granted`, `not_determined` (Aperio never asked on this
-     * device), `not_granted`. Anything else reads as undetermined.
+     * device), `not_granted`. Anything else reads as undetermined. iOS adds
+     * `"granted_this_run": {"events": bool, "reminders": bool}`, the
+     * entities a request answered "granted" in this run (decision 187). The
+     * shapes are pinned in `shared/contracts/deviceAccessStatus.json`.
      */
     fun `accessStatus`(): kotlin.String
     
@@ -4079,7 +4082,10 @@ open class DeviceEventStoreBridgeImpl: Disposable, AutoCloseable, DeviceEventSto
      * `{"events": token, "reminders": token | null}`. iOS tokens:
      * `not_determined`, `restricted`, `denied`, `full_access`, `write_only`;
      * Android: `granted`, `not_determined` (Aperio never asked on this
-     * device), `not_granted`. Anything else reads as undetermined.
+     * device), `not_granted`. Anything else reads as undetermined. iOS adds
+     * `"granted_this_run": {"events": bool, "reminders": bool}`, the
+     * entities a request answered "granted" in this run (decision 187). The
+     * shapes are pinned in `shared/contracts/deviceAccessStatus.json`.
      */override fun `accessStatus`(): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {

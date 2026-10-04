@@ -355,11 +355,11 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All but two read `shared/contracts/`, the directory holding the contracts
+/// All but three read `shared/contracts/`, the directory holding the contracts
 /// that BOTH languages check themselves against. The exceptions are the phone's
-/// series-clock and zone-list doors, which read cal-core's own fixtures;
-/// cal-ffi never leaves this repository, so those reaches hold as long as
-/// cal-core stays beside it.
+/// series-clock, zone-list and repeat-summary doors, which read cal-core's own
+/// fixtures; cal-ffi never leaves this repository, so those reaches hold as
+/// long as cal-core stays beside it.
 /// All but the last are the app reading a file in its own checkout and are
 /// correct as they stand.
 ///
@@ -371,7 +371,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 9] = [
+const KNOWN_REACHES: [(&str, &str); 10] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -407,6 +407,14 @@ const KNOWN_REACHES: [(&str, &str); 9] = [
     (
         "crates/cal-ffi/src/host.rs",
         "shared/contracts/calendarDefaultReminders.json",
+    ),
+    // The device's access status, which the phone's two native bridges write
+    // and the device adapter reads (decision 187). Read here, through the
+    // provider the Host builds, and not in the adapter, which may leave this
+    // repository. Same crate, same reason as the hop above.
+    (
+        "crates/cal-ffi/src/host.rs",
+        "shared/contracts/deviceAccessStatus.json",
     ),
     // The phone's doors into the series-clock rule, driven by the core's own
     // table: each door writes "none" as "", which the core cannot get wrong and
