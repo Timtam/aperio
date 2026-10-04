@@ -509,9 +509,9 @@ const LONGEST_COUNT = 5_000;
  * keeps as many occurrences as the old series had from `from` is it. Neither
  * does when the occurrences move by other steps than the start: a monthly rule
  * that begins anew on another day of the month moves each by another number of
- * days. (A date bound of a series that gets a time of day comes as a third
- * candidate, that day at the new time: read at its midnight it ended the series
- * a day early — on the last occurrence, before it even started.) Then the bound is the new
+ * days. (A date bound of a series that gets a time of day is that day at the
+ * new time from the start: read at its midnight it ended the series a day
+ * early — on the last occurrence, before it even started.) Then the bound is the new
  * series' own occurrence in that place, written the way its kind needs: a date
  * for an all-day series, a UTC time otherwise. All that only when the new
  * series starts on its own rule — places line up then — and within
@@ -624,14 +624,18 @@ export function movedTailRule({ rrule, series, from, opened, tail }: TailRuleMov
     candidates.push(withUntil(moved, timedBound));
   }
   // A date bound on a series that gets a time of day: that day at the new
-  // time, as a UTC time, which a timed series needs. Read at its midnight it
-  // left out its own last day.
+  // time, as a UTC time, which a timed series needs (RFC 5545 has the bound
+  // take the start's kind). Read at its midnight it left out its own last day;
+  // that day at the new time keeps every occurrence the date did, so it stands
+  // in for it.
   const dateBound = /^(\d{4})(\d{2})(\d{2})$/.exec(untilOf(moved) ?? '');
   if (dateBound && allDay && !tail.all_day) {
     const boundDay = Date.UTC(Number(dateBound[1]), Number(dateBound[2]) - 1, Number(dateBound[3]));
     const startDay = Date.parse(seriesDayKey(tail.start, zone, false));
     const atTime = moveSeriesInstant(tail.start, zone, false, Math.round((boundDay - startDay) / DAY_MS));
-    candidates.push(
+    candidates.splice(
+      0,
+      candidates.length,
       withUntil(moved, new Date(atTime).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')),
     );
   }

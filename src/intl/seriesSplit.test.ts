@@ -1776,6 +1776,23 @@ describe('movedTailRule (189, 192-194)', () => {
     ).toEqual(shifted(`FREQ=DAILY;UNTIL=${utcOf(evening(2040, 12, 31))}`));
   });
 
+  it('writes a date bound as a time once the series gets a time of day, on a day without an occurrence too', () => {
+    // Mondays until Wednesday 30 December: that bound day holds no occurrence,
+    // and the series keeps its length either way; a timed series takes the
+    // bound as a time, as RFC 5545 has it.
+    const at = (day: number, hour = 0) => new Date(2026, 9, day, hour);
+    const utcOf = (when: Date) => when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    expect(
+      movedTailRule({
+        rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261230',
+        series: { tzid: null, all_day: true },
+        from: at(5).toISOString(),
+        opened: at(5).toISOString(),
+        tail: { start: at(5, 9).toISOString(), all_day: false },
+      }),
+    ).toEqual(shifted(`FREQ=WEEKLY;BYDAY=MO;UNTIL=${utcOf(new Date(2026, 11, 30, 9))}`));
+  });
+
   it('moves the end of a very long series by the days, without counting it', () => {
     expect(
       moved('FREQ=DAILY;UNTIL=20991231T235959Z', at('08-24'), at('08-24'), at('08-25')),
