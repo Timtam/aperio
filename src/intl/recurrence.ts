@@ -27,6 +27,8 @@ export {
   readSeriesRows,
   ruleFromCut,
   tailRecurrenceFor,
+  movedTailRule,
+  TailShiftRefusedError,
   occurrenceOfSeries,
   firstOccurrenceFrom,
   seriesTimesFromOccurrenceEdit,

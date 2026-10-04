@@ -14,7 +14,9 @@ import {
   readSeriesRows,
   ruleFromCut,
   localTimeZone,
+  movedTailRule,
   tailRecurrenceFor,
+  TailShiftRefusedError,
   seriesFromCut,
   seriesMaybeShownTwice,
   cutoffDay,
@@ -28,6 +30,7 @@ import {
   type SeriesCutPlan,
   type SeriesSplitPlan,
   type TailRecurrence,
+  type TailRuleMove,
   type WholeSeriesPlan,
 } from '@aperio/shared';
 
@@ -1296,10 +1299,26 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
       tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+      rule: { form: 'FREQ=WEEKLY;BYDAY=TU,FR', opened: 'FREQ=WEEKLY' },
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU,FR');
+    expect(tail?.exceptions).toEqual([]);
+  });
+
+  it('carries a deletion by its place when the rule set is the moved one (196)', () => {
+    // Weekly from Monday, "every Tuesday" set with the date on Tuesday: the
+    // same series as weekly from Tuesday, so the same deletions.
+    const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
+    const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
       rule: { form: 'FREQ=WEEKLY;BYDAY=TU', opened: 'FREQ=WEEKLY' },
     });
     expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
-    expect(tail?.exceptions).toEqual([]);
+    expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
   });
 
   it('keeps a deletion on a day the new rule still meets (188)', () => {
@@ -1532,6 +1551,232 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       });
       expect(tail?.tzid).toBe('Europe/Berlin');
     });
+  });
+});
+
+describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () => {
+  /** "Every Monday" at 08:00 on UTC from 03.08, the 24th deleted. */
+  const named = {
+    ...weekly,
+    recurrence: {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      exceptions: ['2026-08-24T08:00:00.000Z'],
+      tzid: null as string | null,
+    },
+  };
+
+  it('moves "every Monday" to Tuesday, and its deletions by their place', () => {
+    const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: named,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+      opened: '2026-08-10T08:00:00.000Z',
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
+  });
+
+  it('moves the end with the start, so the last occurrence stays (194)', () => {
+    const until = {
+      ...weekly,
+      recurrence: {
+        rrule: 'FREQ=DAILY;UNTIL=20260831T080000Z',
+        exceptions: [] as string[],
+        tzid: null as string | null,
+      },
+    };
+    const plan = planSeriesSplit(until, '2026-08-24T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: until,
+      cutoffIso: '2026-08-24T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-25T08:00:00.000Z', all_day: false },
+      opened: '2026-08-24T08:00:00.000Z',
+    });
+    expect(tail?.rrule).toBe('FREQ=DAILY;UNTIL=20260901T080000Z');
+  });
+
+  it('refuses a rule that cannot move by whole days, before anything is written (193)', () => {
+    const second = {
+      ...weekly,
+      start: '2026-08-11T08:00:00.000Z',
+      end: '2026-08-11T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;BYDAY=2TU',
+        exceptions: [] as string[],
+        tzid: null as string | null,
+      },
+    };
+    const plan = planSeriesSplit(second, '2026-09-08T08:00:00.000Z', []);
+    let thrown: unknown;
+    try {
+      tailRecurrenceFor({
+        master: second,
+        cutoffIso: '2026-09-08T08:00:00.000Z',
+        plan: cutOf(plan),
+        tail: { start: '2026-09-09T08:00:00.000Z', all_day: false },
+        opened: '2026-09-08T08:00:00.000Z',
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(TailShiftRefusedError);
+    expect((thrown as TailShiftRefusedError).reason).toBe('ordinal_weekday');
+  });
+
+  it('writes a rule the user set as it is, whatever the date did', () => {
+    const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: named,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+      opened: '2026-08-10T08:00:00.000Z',
+      // Set back to Monday by hand, with the date on Tuesday.
+      rule: { form: 'FREQ=WEEKLY;BYDAY=MO', opened: 'FREQ=WEEKLY;BYDAY=MO', touched: true },
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
+  });
+
+  it('moves nothing without the start the edit is read against', () => {
+    const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: named,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
+  });
+});
+
+describe('movedTailRule (189, 192-194)', () => {
+  /** An instant of 2026 on UTC, the clock of a series without a zone. */
+  const at = (day: string, time = '09:00') => `2026-${day}T${time}:00.000Z`;
+  const utc = { tzid: null, all_day: false };
+  const moved = (
+    rrule: string,
+    from: string,
+    opened: string,
+    start: string,
+    series: TailRuleMove['series'] = utc,
+  ) => movedTailRule({ rrule, series, from, opened, tail: { start, all_day: series.all_day } });
+  const shifted = (rrule: string) => ({ outcome: 'shifted', rrule });
+
+  it('moves the days a rule names with a new date', () => {
+    expect(moved('FREQ=WEEKLY;BYDAY=MO', at('08-24'), at('08-24'), at('08-25'))).toEqual(
+      shifted('FREQ=WEEKLY;BYDAY=TU'),
+    );
+    expect(
+      moved('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', at('08-24'), at('08-24'), at('08-25')),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=TU,WE,TH,FR,SA'));
+    expect(
+      moved('FREQ=MONTHLY;BYMONTHDAY=10;COUNT=4', at('09-10'), at('09-10'), at('09-11')),
+    ).toEqual(shifted('FREQ=MONTHLY;BYMONTHDAY=11;COUNT=4'));
+  });
+
+  it('refuses a rule whose meaning a move by days would change (193)', () => {
+    expect(moved('FREQ=MONTHLY;BYMONTHDAY=10', at('09-10'), at('09-10'), at('09-30'))).toEqual({
+      outcome: 'refused',
+      reason: 'month_end',
+    });
+    expect(moved('FREQ=MONTHLY;BYDAY=2TU', at('09-08'), at('09-08'), at('09-09'))).toEqual({
+      outcome: 'refused',
+      reason: 'ordinal_weekday',
+    });
+  });
+
+  it('takes the days of a rule that follows its start from the new start', () => {
+    // Monthly from the 25th moved to the 2nd of the next month: a drag refuses
+    // it, the new start says which day it is.
+    expect(moved('FREQ=MONTHLY;COUNT=5', at('08-25'), at('08-25'), at('09-02'))).toEqual(
+      shifted('FREQ=MONTHLY;COUNT=5'),
+    );
+  });
+
+  it('moves the end as far as the first occurrence moved (194)', () => {
+    expect(
+      moved('FREQ=DAILY;UNTIL=20260831T090000Z', at('08-24'), at('08-24'), at('08-25')),
+    ).toEqual(shifted('FREQ=DAILY;UNTIL=20260901T090000Z'));
+    // A later time on the same day: the last occurrence still falls within it.
+    expect(
+      moved('FREQ=DAILY;UNTIL=20260831T090000Z', at('08-24'), at('08-24'), at('08-24', '11:00')),
+    ).toEqual(shifted('FREQ=DAILY;UNTIL=20260831T110000Z'));
+    // An all-day series' date bound, by days.
+    const midnight = (day: number) => new Date(2026, 7, day).toISOString();
+    expect(
+      moved('FREQ=DAILY;UNTIL=20260831', midnight(24), midnight(24), midnight(25), {
+        tzid: null,
+        all_day: true,
+      }),
+    ).toEqual(shifted('FREQ=DAILY;UNTIL=20260901'));
+  });
+
+  it('moves the days only when this edit moved the date (192)', () => {
+    // Opened on the Wednesday its occurrence was moved to on its own, and
+    // saved with a new title only: Mondays stay Mondays, and the end follows
+    // the occurrence's own time, so the last one is not cut off.
+    expect(
+      moved('FREQ=WEEKLY;BYDAY=MO', at('08-24'), at('08-26', '10:00'), at('08-26', '10:00')),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=MO'));
+    expect(
+      moved(
+        'FREQ=WEEKLY;BYDAY=MO;UNTIL=20260907T090000Z',
+        at('08-24'),
+        at('08-26', '10:00'),
+        at('08-26', '10:00'),
+      ),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260907T100000Z'));
+    // Put on Thursday in this edit: counted from its place, the rule names
+    // the new start.
+    expect(
+      moved('FREQ=WEEKLY;BYDAY=MO', at('08-24'), at('08-26', '10:00'), at('08-27', '10:00')),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=TH'));
+  });
+
+  it('refuses a rule that names its times only when this edit changes the time', () => {
+    expect(moved('FREQ=DAILY;BYHOUR=9', at('08-24'), at('08-24'), at('08-24', '11:00'))).toEqual(
+      { outcome: 'refused', reason: 'time_of_day' },
+    );
+    expect(
+      moved('FREQ=DAILY;BYHOUR=9', at('08-24'), at('08-24', '10:00'), at('08-24', '10:00')),
+    ).toEqual(shifted('FREQ=DAILY;BYHOUR=9'));
+  });
+
+  it("reads the day on the series' own clock", () => {
+    // Monday 20:00 in New York is 00:00 UTC on Tuesday. Moved to 02:00 New
+    // York the next morning, the series' day is Tuesday; moved to 23:00 the
+    // same evening, it is still Monday.
+    const newYork = { tzid: 'America/New_York', all_day: false };
+    const mondayEvening = '2026-08-25T00:00:00.000Z';
+    expect(
+      moved('FREQ=WEEKLY;BYDAY=MO', mondayEvening, mondayEvening, '2026-08-25T06:00:00.000Z', newYork),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=TU'));
+    expect(
+      moved('FREQ=WEEKLY;BYDAY=MO', mondayEvening, mondayEvening, '2026-08-25T03:00:00.000Z', newYork),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=MO'));
+  });
+
+  it("counts the device's days when the series becomes all-day on its day", () => {
+    // Local midnight of the Monday may be Sunday on UTC; the date did not move.
+    const monday = new Date(2026, 7, 24, 9).toISOString();
+    expect(
+      movedTailRule({
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        series: utc,
+        from: monday,
+        opened: monday,
+        tail: { start: new Date(2026, 7, 24).toISOString(), all_day: true },
+      }),
+    ).toEqual(shifted('FREQ=WEEKLY;BYDAY=MO'));
+  });
+
+  it('gives back the rule as written when nothing moved', () => {
+    expect(moved('RRULE:FREQ=WEEKLY;BYDAY=MO;', at('08-24'), at('08-24'), at('08-24'))).toEqual(
+      shifted('RRULE:FREQ=WEEKLY;BYDAY=MO;'),
+    );
   });
 });
 

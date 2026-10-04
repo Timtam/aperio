@@ -19,6 +19,13 @@
 //! rule that recurs only in some months or years, a yearly rule whose shift
 //! touches the end of February (leap years), time-of-day parts when the time
 //! changes too, a part given twice, and any part this module does not know.
+//!
+//! "This and all following" moved to another day writes a series that begins
+//! anew at the moved start ([`begin_series_anew`], decision 189). A rule that
+//! names its days moves them as a drag does, and is refused where a drag is
+//! (decision 193). A rule that takes its days from its start keeps taking them
+//! from the new one: the start says which day of the month or of the year it
+//! repeats on, so only its `UNTIL` moves, and nothing about its days is refused.
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
@@ -92,6 +99,34 @@ pub struct SeriesShiftQuestion {
     /// or a floating `UNTIL` moves by days here, and this is ignored for it.
     #[serde(default)]
     pub until: Option<String>,
+    /// Whether the series begins anew at the moved start, as "this and all
+    /// following" writes it, rather than every occurrence of it moving, as a
+    /// drag does. See [`begin_series_anew`].
+    #[serde(default)]
+    pub begins_anew: bool,
+}
+
+/// The parts that name the days or the times a rule repeats on, instead of
+/// taking them from the start.
+const NAMING_PARTS: [&str; 9] = [
+    "BYDAY",
+    "BYMONTHDAY",
+    "BYYEARDAY",
+    "BYWEEKNO",
+    "BYSETPOS",
+    "BYMONTH",
+    "BYHOUR",
+    "BYMINUTE",
+    "BYSECOND",
+];
+
+/// Whether a rule takes its days and times from its start, so its occurrences
+/// move when the start does. Unreadable reads as no: by day is the side that
+/// cannot shift a deletion onto an occurrence the user never deleted, and a
+/// rule that cannot be read is not one to rewrite.
+pub(crate) fn days_follow_start(rrule: &str) -> bool {
+    parse_parts(rrule)
+        .is_ok_and(|(_, parts)| !parts.iter().any(|p| NAMING_PARTS.contains(&p.key.as_str())))
 }
 
 /// The rule for a series that starts on `start` and moves by `days`, with the
@@ -110,10 +145,64 @@ pub fn shift_series(
     }
 }
 
+/// The rule for a series that begins anew at a start moved by `days` from
+/// `start`, as "this and all following" writes it (decision 189).
+///
+/// A rule that names its days moves them as [`shift_series`] does, and is
+/// refused where that is (decision 193): "every Monday" moved to a Tuesday
+/// repeats on Tuesdays, and "the second Sunday" cannot be moved by a day. A
+/// rule that takes its days from its start keeps taking them from the new one,
+/// so only its `UNTIL` moves (decision 194) — `until` when the shell moved a
+/// UTC bound, by `days` otherwise — and nothing about its days is refused:
+/// "monthly" from the 25th moved to the 2nd of the next month repeats on the
+/// 2nd, where a drag, which keeps every occurrence's distance, has to refuse.
+pub fn begin_series_anew(
+    rrule: &str,
+    start: NaiveDate,
+    days: i32,
+    time_changes: bool,
+    until: Option<&str>,
+) -> SeriesShift {
+    let answer = if days_follow_start(rrule) {
+        moved_bound(rrule, days, until)
+    } else {
+        shift(rrule, start, days, time_changes, until)
+    };
+    match answer {
+        Ok(rrule) => SeriesShift::Shifted { rrule },
+        Err(reason) => SeriesShift::Refused { reason },
+    }
+}
+
+/// A rule whose days follow its start, with only its `UNTIL` moved: to `until`
+/// when the shell moved a UTC bound, otherwise by `days`. The rule comes back
+/// as it was written when it has no bound to move.
+fn moved_bound(rrule: &str, days: i32, until: Option<&str>) -> Result<String, ShiftRefusal> {
+    let trimmed = rrule.trim();
+    let (prefix, parts) = parse_parts(trimmed).map_err(|_| ShiftRefusal::Unreadable)?;
+    let freq = part(&parts, "FREQ").ok_or(ShiftRefusal::Unreadable)?;
+    if parse_freq(freq).is_none() {
+        return Err(ShiftRefusal::Unreadable);
+    }
+    let moved = match (part(&parts, "UNTIL"), until) {
+        (Some(value), Some(moved)) if is_utc_date_time(value) => checked_utc_until(moved)?,
+        (Some(value), _) if days != 0 => shift_until(value, days)?,
+        _ => return Ok(trimmed.to_string()),
+    };
+    Ok(write(prefix, &parts, &[("UNTIL", moved)]))
+}
+
 /// The door: a [`SeriesShiftQuestion`] as JSON in, a [`SeriesShift`] as JSON out.
 pub fn series_shift_json(input_json: &str) -> Result<String, serde_json::Error> {
     let question: SeriesShiftQuestion = serde_json::from_str(input_json)?;
     let answer = match NaiveDate::parse_from_str(&question.start, "%Y-%m-%d") {
+        Ok(start) if question.begins_anew => begin_series_anew(
+            &question.rrule,
+            start,
+            question.days,
+            question.time_changes,
+            question.until.as_deref(),
+        ),
         Ok(start) => shift_series(
             &question.rrule,
             start,
@@ -734,5 +823,176 @@ mod tests {
             series_shift_json(r#"{"rrule":"FREQ=DAILY","start":"May 4","days":1}"#).unwrap(),
             r#"{"outcome":"refused","reason":"unreadable"}"#
         );
+        // A series that begins anew takes the monthly day from its new start;
+        // a drag of the same rule refuses.
+        assert_eq!(
+            series_shift_json(
+                r#"{"rrule":"FREQ=MONTHLY","start":"2026-08-25","days":8,"begins_anew":true}"#
+            )
+            .unwrap(),
+            r#"{"outcome":"shifted","rrule":"FREQ=MONTHLY"}"#
+        );
+        assert_eq!(
+            series_shift_json(r#"{"rrule":"FREQ=MONTHLY","start":"2026-08-25","days":8}"#).unwrap(),
+            r#"{"outcome":"refused","reason":"month_end"}"#
+        );
+    }
+
+    fn anew(
+        rrule: &str,
+        start: &str,
+        days: i32,
+        time_changes: bool,
+        until: Option<&str>,
+    ) -> SeriesShift {
+        begin_series_anew(rrule, day(start), days, time_changes, until)
+    }
+
+    fn shifted_anew(rrule: &str, start: &str, days: i32, until: Option<&str>) -> String {
+        match anew(rrule, start, days, false, until) {
+            SeriesShift::Shifted { rrule } => rrule,
+            SeriesShift::Refused { reason } => panic!("{rrule} +{days} was refused: {reason:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rule_that_names_its_days_begins_anew_as_a_drag_moves_it() {
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;BYDAY=MO", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;BYDAY=TU,WE,TH,FR,SA"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY;BYMONTHDAY=10;COUNT=7", "2026-09-10", 1, None),
+            "FREQ=MONTHLY;BYMONTHDAY=11;COUNT=7"
+        );
+        // Refused where a drag is (decision 193).
+        for (rrule, start, days, reason) in [
+            (
+                "FREQ=MONTHLY;BYDAY=2TU",
+                "2026-09-08",
+                1,
+                ShiftRefusal::OrdinalWeekday,
+            ),
+            (
+                "FREQ=MONTHLY;BYMONTHDAY=10",
+                "2026-09-10",
+                20,
+                ShiftRefusal::MonthEnd,
+            ),
+            (
+                "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR",
+                "2026-09-25",
+                1,
+                ShiftRefusal::SetPosition,
+            ),
+            (
+                "FREQ=WEEKLY;BYDAY=MO;BYMONTH=9",
+                "2026-09-07",
+                1,
+                ShiftRefusal::LimitedMonths,
+            ),
+        ] {
+            assert_eq!(
+                anew(rrule, start, days, false, None),
+                SeriesShift::Refused { reason },
+                "{rrule}"
+            );
+        }
+        // Its times of day, when the time changes too.
+        assert_eq!(
+            anew("FREQ=DAILY;BYHOUR=9", "2026-09-07", 0, true, None),
+            SeriesShift::Refused {
+                reason: ShiftRefusal::TimeOfDay
+            }
+        );
+    }
+
+    #[test]
+    fn a_rule_that_follows_its_start_begins_anew_with_only_its_end_moved() {
+        // The new start says which day it repeats on: no day refused.
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY", "2026-08-25", 8, None),
+            "FREQ=MONTHLY"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY", "2026-08-30", 1, None),
+            "FREQ=MONTHLY"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=YEARLY", "2028-02-29", 1, None),
+            "FREQ=YEARLY"
+        );
+        // Every other month or week from the new start, as written.
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY;INTERVAL=2;COUNT=4", "2026-08-25", 8, None),
+            "FREQ=MONTHLY;INTERVAL=2;COUNT=4"
+        );
+        // Its bound moves: a date by days, a UTC one to what the shell moved.
+        assert_eq!(
+            shifted_anew("FREQ=DAILY;UNTIL=20260831", "2026-08-24", 1, None),
+            "FREQ=DAILY;UNTIL=20260901"
+        );
+        assert_eq!(
+            shifted_anew(
+                "FREQ=DAILY;UNTIL=20260831T070000Z",
+                "2026-08-24",
+                1,
+                Some("20260901T070000Z")
+            ),
+            "FREQ=DAILY;UNTIL=20260901T070000Z"
+        );
+        // A new time of day on the same day moves a UTC bound as well.
+        assert_eq!(
+            match anew(
+                "FREQ=DAILY;UNTIL=20260831T070000Z",
+                "2026-08-24",
+                0,
+                true,
+                Some("20260831T090000Z")
+            ) {
+                SeriesShift::Shifted { rrule } => rrule,
+                SeriesShift::Refused { reason } => panic!("refused: {reason:?}"),
+            },
+            "FREQ=DAILY;UNTIL=20260831T090000Z"
+        );
+        // Nothing to move leaves the rule as written.
+        assert_eq!(
+            shifted_anew("RRULE:FREQ=DAILY;COUNT=3;", "2026-08-24", 1, None),
+            "RRULE:FREQ=DAILY;COUNT=3;"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=DAILY;UNTIL=20260831", "2026-08-24", 0, None),
+            "FREQ=DAILY;UNTIL=20260831"
+        );
+        // Still read, not guessed at.
+        for rrule in ["COUNT=3", "FREQ=FORTNIGHTLY", "FREQ=DAILY;FREQ=DAILY"] {
+            assert_eq!(
+                anew(rrule, "2026-08-24", 1, false, None),
+                SeriesShift::Refused {
+                    reason: ShiftRefusal::Unreadable
+                },
+                "{rrule}"
+            );
+        }
+        assert_eq!(
+            anew("FREQ=DAILY;UNTIL=2026-08-31", "2026-08-24", 1, false, None),
+            SeriesShift::Refused {
+                reason: ShiftRefusal::Unreadable
+            }
+        );
+    }
+
+    #[test]
+    fn which_rules_take_their_days_from_the_start() {
+        assert!(days_follow_start("FREQ=MONTHLY"));
+        assert!(days_follow_start("FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231"));
+        assert!(!days_follow_start("FREQ=MONTHLY;BYMONTHDAY=10"));
+        assert!(!days_follow_start("FREQ=WEEKLY;BYDAY=MO"));
+        assert!(!days_follow_start("FREQ=DAILY;BYHOUR=9"));
+        assert!(!days_follow_start("not a rule"));
     }
 }

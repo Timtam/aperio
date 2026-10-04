@@ -164,6 +164,14 @@ the earlier occurrences stay untouched, and this one plus every later one are
 changed (on edit, a new series takes over from here) or removed (on delete).
 The new series repeats the way the repeat field says: change the rule there and
 the new series follows it, leave it alone and the pattern simply continues.
+Move the occurrence to another day and the repeat field moves with it right
+away: every Monday becomes every Tuesday, every 10th of the month becomes every
+11th, and an end date moves as far, so the last occurrence stays. Only a new
+date moves it: change just the title of an occurrence you moved on its own
+before, and the series keeps its days. Some rules cannot move by days without
+meaning something else, such as the second Tuesday of the month or every 30th:
+the field keeps the rule and says why, and saving says so too. Choose the
+repeat yourself then, or edit just this occurrence.
 When nothing comes before the chosen occurrence — you picked the first one, or
 every earlier one was deleted — there is nothing to keep: an edit changes the
 whole series, which stays the same entry, and a delete removes the series.
@@ -181,10 +189,8 @@ occurrence to another day and each deleted one moves with it by its place in
 the series, so a deleted third Monday becomes a deleted third Tuesday; switch
 between all-day and a time of day and it stays on the day you saw it on. Give
 the new series another repeat rule, and a deleted occurrence stays deleted only
-on a day the new rule still has; a new end alone is no new rule. A rule that
-names its days, such as every Monday, every weekday or every 10th of the month,
-keeps them when you move one occurrence to another day, and so do its
-deletions, for now. A monthly or yearly series that the new date makes skip
+on a day the new rule still has; a new end alone is no new rule, and neither is
+setting by hand the rule the new date gives anyway. A monthly or yearly series that the new date makes skip
 other months or years, such as one moved from the 31st to the 30th, moves its
 deletions by their place only as far as the two versions still line up; if a
 deletion lies beyond that, they all stay on their day, where a deleted

@@ -78,6 +78,8 @@ import {
   expandEvent,
   isExpandedOccurrence,
   localTimeZone,
+  movedSeriesUntil,
+  moveSeriesInstant,
   overrideRecurrenceIso,
   overrideSeriesId,
   ruleFromCut,
@@ -85,6 +87,7 @@ import {
   slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
+import { shiftSeriesRule, type SeriesShift, type ShiftRefusal } from './seriesShift';
 import { tailExceptions } from './tailExceptions';
 import type { TailSlot } from './types';
 
@@ -416,45 +419,152 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const LONGEST_REACH_MS = 15_000 * DAY_MS;
 
 /**
+ * The rule of "this and all following" cannot move with its new date: it names
+ * days a move by whole days would change the meaning of — the second Sunday,
+ * the 30th, a rule for some months only (decision 193). Thrown before anything
+ * is written; the surface says why, using `reason`, and the user chooses the
+ * repeat themselves or changes only the one occurrence.
+ */
+export class TailShiftRefusedError extends Error {
+  constructor(readonly reason: ShiftRefusal) {
+    super(`the repeat rule cannot move with the new date: ${reason}`);
+    this.name = 'TailShiftRefusedError';
+  }
+}
+
+/** A rule of "this and all following", and where its start went. */
+export interface TailRuleMove {
+  /** The rule as it stands. */
+  rrule: string;
+  /** The clock the series repeats on: its zone, and whether it is all-day. */
+  series: { tzid?: string | null; all_day: boolean };
+  /**
+   * The occurrence the rule names first: the cut, or the start the user set
+   * the rule at.
+   */
+  from: string;
+  /**
+   * The start the edit is read against: the occurrence the editor was filled
+   * from, or `from` itself.
+   */
+  opened: string;
+  /** The start and the kind being written. */
+  tail: { start: string; all_day: boolean };
+}
+
+/**
+ * The rule "this and all following" writes when its start moved (decisions
+ * 189, 192-194), through the core's `begin_series_anew`.
+ *
+ * - Its days move only when this edit moved the date, from `opened` to the new
+ *   start (192): an occurrence moved on its own earlier, edited from there on
+ *   in nothing but its title, keeps its series' rule. They move from `from`,
+ *   so the rule names the new start: "every Monday" from a Monday the user put
+ *   on Thursday is "every Thursday". Days are counted on the series' clock,
+ *   where its rule is read — or on the device's days when the series switches
+ *   between all-day and a time of day, as the core counts them then: an
+ *   all-day start is the device's midnight, which another clock may put on
+ *   the day before.
+ * - A rule that names its days moves them, or is refused (193): the answer is
+ *   `refused`, with the reason the surface says.
+ * - Its UNTIL moves as far as its first occurrence did (194), the new time of
+ *   day included, so the last occurrence still falls within it — also when the
+ *   occurrence the edit started from sat at another time than its slot.
+ *
+ * Nothing moved gives the rule back as it was written.
+ */
+export function movedTailRule({ rrule, series, from, opened, tail }: TailRuleMove): SeriesShift {
+  const tzid = series.tzid ?? null;
+  const allDay = series.all_day;
+  const sameKind = tail.all_day === allDay;
+  const dayNumber = (iso: string) =>
+    Date.parse(sameKind ? seriesDayKey(iso, tzid, allDay) : seriesDayKey(iso, null, true)) /
+    DAY_MS;
+  const days =
+    dayNumber(tail.start) === dayNumber(opened)
+      ? 0
+      : Math.round(dayNumber(tail.start) - dayNumber(from));
+  // A time of day only while the series stays timed; the switch to or from
+  // all-day is the zone's (`tailRecurrenceFor`).
+  const timed = !allDay && !tail.all_day;
+  const timeChanges =
+    timed &&
+    moveSeriesInstant(opened, tzid, false, 0, tail.start) !==
+      moveSeriesInstant(opened, tzid, false, 0);
+  const to = moveSeriesInstant(from, tzid, allDay, days, timed ? tail.start : undefined);
+  if (days === 0 && !timeChanges && Date.parse(to) === Date.parse(from)) {
+    return { outcome: 'shifted', rrule };
+  }
+  return shiftSeriesRule(
+    rrule,
+    seriesDayKey(from, tzid, allDay),
+    days,
+    timeChanges,
+    movedSeriesUntil(rrule, tzid, allDay, from, to),
+    { beginsAnew: true },
+  );
+}
+
+/**
  * The recurrence of the series written from the cutoff on: the new series of
  * a split, or the series itself when "this and all following" rewrites it
  * whole (`kind: 'whole'`).
  *
  * - The rule: the series' own from the cutoff on, or the one the user set in
- *   the repeat field (`rule.form`, when it differs from `rule.opened`, what the
- *   field was filled with), its COUNT counted from the series' first
- *   occurrence as the field showed it (decision 121). A cleared field gives no
- *   rule, and `null` comes back: the edit writes a single event.
+ *   the repeat field (`rule.form`, when `rule.touched` or it differs from
+ *   `rule.opened`, what the field was filled with), its COUNT counted from the
+ *   series' first occurrence as the field showed it (decision 121). A cleared
+ *   field gives no rule, and `null` comes back: the edit writes a single event.
+ *   The series' own rule moves with a new date and time read against
+ *   `opened` (`movedTailRule`, decisions 189, 192-194), and one that cannot
+ *   throws {@link TailShiftRefusedError}.
  * - The zone: kept as it is while the series stays timed or stays all-day (a
  *   continuation expands as its other half does); none once it becomes all-day;
  *   the device's once it gets a time of day, as a created series does
  *   (DESIGN-series-time-zone.md, "Ganztägig aus").
  * - The exceptions: the deleted occurrences (`plan.deleted`) go along with the
- *   edit — by their place when every occurrence moves with the date, by their
- *   day under a new rule or a rule that names its days — and the ones a row
+ *   edit — by their place when every occurrence moves with the date, the rule
+ *   moved along included, by their day under a new rule or a rule that names
+ *   its days and did not move — and the ones a row
  *   stands in for stay as spelled (`plan.standing`). Which goes where is the
  *   core's rule (`cal_core::tail_exceptions`); this expands both series for it,
  *   with each occurrence's day on its series' clock and on the device's,
  *   because the device's zone is this surface's to know.
  *
- * `tail` is the start and the kind of the row being written; `rule` only an
- * editor passes — a carry never changes the rule. Throws when the door into
- * the core is missing (a phone library older than it), before anything is
- * written.
+ * `tail` is the start and the kind of the row being written; `opened` the
+ * start the edit is read against — the occurrence an editor was filled from,
+ * the copy's own cutoff for a carry; `rule` only an editor passes — a carry
+ * never changes the rule. Throws when the door into the core is missing (a
+ * phone library older than it), before anything is written.
  */
 export function tailRecurrenceFor(input: {
   master: SplittableEvent;
   cutoffIso: string;
   plan: SeriesSplitPlan;
   tail: { start: string; all_day: boolean };
-  rule?: { form: string | null; opened: string | null };
+  opened?: string;
+  rule?: { form: string | null; opened: string | null; touched?: boolean };
 }): TailRecurrence | null {
-  const { master, cutoffIso, plan, tail, rule } = input;
-  const ruleChanged = rule !== undefined && rule.form !== rule.opened;
-  const rrule = ruleChanged
+  const { master, cutoffIso, plan, tail, opened, rule } = input;
+  const ruleChanged =
+    rule !== undefined && (rule.touched === true || rule.form !== rule.opened);
+  let rrule = ruleChanged
     ? rule.form && ruleFromCut(rule.form, plan.occurrencesBefore)
     : plan.tail.rrule;
   if (!rrule) return null;
+  if (!ruleChanged && opened !== undefined) {
+    const moved = movedTailRule({
+      rrule,
+      series: { tzid: master.recurrence?.tzid, all_day: master.all_day },
+      from: cutoffIso,
+      opened,
+      tail,
+    });
+    if (moved.outcome === 'refused') {
+      throw new TailShiftRefusedError(moved.reason);
+    }
+    rrule = moved.rrule;
+  }
   const tzid =
     tail.all_day === master.all_day
       ? plan.tail.tzid

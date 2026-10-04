@@ -2402,18 +2402,38 @@ Siehe DESIGN §4.2.
       „dieser und alle folgenden“ ohne Kopf, der die Serie ganz neu schreibt; die
       Zone wird ganztägig keine, aus ganztägig mit Uhrzeit die Gerätezone. Ein
       altes Handy-.so ohne die Tür scheitert, bevor etwas geschrieben wird.
-      ↻ im Test.
-    - 🚩 **PR 3c (189):** Eine Regel, die ihre Tage nennt („jeden Montag“,
-      „jeden 10.“), bleibt beim Verschieben von „dieser und alle folgenden“ auf
-      ihren Tagen, und ein verschobenes Vorkommen außerhalb davon erscheint gar
-      nicht; bis die Regel mitwandert wie beim Ziehen einer ganzen Serie
-      (`shiftSeriesRule`), bleiben ihre Löschungen auf ihrem Tag.
-    - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191):** derselbe
-      18-Uhr-Fehler beim Bearbeiten der ganzen Serie (`exceptionsAtSeriesTime`
-      lässt ganztägige Wechsel aus). Eigener kleiner PR.
-    - 🚩 Verschiebt „dieser und alle folgenden“ eine Serie mit UNTIL nach vorn,
-      fällt ihr letztes Vorkommen weg: `ruleFromCut` bewegt UNTIL nicht, das
-      Ziehen einer ganzen Serie schon (`movedSeriesUntil`).
+      ✓ im Einsatz (Build vom 2026-10-04, von Toni getestet).
+    - ✅ **Die Regel wandert mit dem Datum** (PR 3c, 189, 192-197): Verschiebt
+      „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
+      nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
+      jeden 10. → jeden 11.), und ihre Löschungen nach ihrem Platz; eine Regel,
+      die ihre Tage aus dem Beginn nimmt, nimmt sie aus dem neuen. UNTIL rückt so
+      weit wie das erste Vorkommen, auch bei neuer Uhrzeit; damit fällt das
+      letzte Vorkommen nicht mehr weg (früher: `ruleFromCut` bewegte UNTIL nicht).
+      Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage (192).
+      Eine Regel, die nicht um ganze Tage wandern kann, wird abgelehnt, bevor
+      etwas geschrieben wird (193). Das Feld zeigt die verschobene Regel sofort
+      (197). Eine selbst eingestellte Regel, die genau die verschobene ist, auch
+      anders geschrieben, trägt die Löschungen wie das Verschieben (196). Kern:
+      `series_shift::begin_series_anew` (Fragefeld `begins_anew`) und
+      `tail_exceptions` erkennt die verschobene Regel selbst; Shell
+      `movedTailRule`; beide Editoren, beide Mitzieh-Dialoge. ↻ im Test.
+    - 🚩 Ein früher einzeln verschobener Termin (Montagsserie, dieser liegt auf
+      Mittwoch), für „dieser und alle folgenden“ nur im Titel geändert: Die neue
+      Serie beginnt am Mittwoch mit der Montagsregel (192), und der Mittwoch
+      erscheint nicht, weil der Expander einen Beginn neben der Regel auslässt
+      (RFC 5545 zählt ihn mit). Entweder der Expander zählt DTSTART, oder die
+      neue Serie beginnt am Platz und trägt den Mittwoch als Ausnahme-Zeile.
+    - 🚩 Wechsel ganztägig/Uhrzeit bei einer Serie, deren Zone einen anderen Tag
+      zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
+      der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
+      neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
+      derselbe 18-Uhr-Fehler beim Bearbeiten der ganzen Serie
+      (`exceptionsAtSeriesTime` lässt ganztägige Wechsel aus), und ein neues
+      Datum verschiebt dort den Beginn, aber nicht die Tage einer Regel, die sie
+      nennt (beim Ziehen schon). Eigener kleiner PR, mit `movedTailRule` bzw.
+      `begin_series_anew`.
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des
@@ -3039,7 +3059,8 @@ nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
 hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
 (Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
 an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
-nennt, wann sie den Status entschieden hat. ↻ im Test (Handy ohne Testläufer).
+nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
+von Toni getestet).
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 

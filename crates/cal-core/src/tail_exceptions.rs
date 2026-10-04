@@ -23,21 +23,29 @@
 //!   A new end (`COUNT`, `UNTIL`) or another spelling of the same rule is no new
 //!   rule: the occurrences are the same.
 //!
-//! By place only when every occurrence moves with the start: the pattern is
-//! the same, the rule takes its days and times from the start rather than
-//! naming them, and every occurrence handed over moved by the same step in the
-//! rule's own unit — days for a daily or weekly rule, months for a monthly
-//! one, years for a yearly one. A rule that names its days — weekdays, days of the month, months, or
-//! its times of day — keeps them when one occurrence moves: "every Monday"
-//! moved to a Tuesday still repeats on Mondays, and "every weekday" moved from
-//! Monday to Tuesday still has its Wednesday and its Thursday where they were.
-//! And a monthly rule from the 31st skips the shorter months, so moved to the
-//! 30th it meets months the old one skipped: its places stop lining up after
-//! the first short month. Counting places there shifted a deletion onto an
-//! occurrence nobody deleted. Such a deletion stays on its day, at the new
-//! time of day if that changed, until the rule itself moves with the date
-//! (decision 189, a later change); where the new series has no occurrence that
-//! day it is dropped, which hides nothing.
+//! By place only when every occurrence moves with the start. Either the
+//! pattern is the same and the rule takes its days and times from the start
+//! rather than naming them, or the rule names its days and moved with the
+//! start the way "this and all following" moves it (decision 189,
+//! [`begin_series_anew`](crate::series_shift::begin_series_anew)): the old
+//! rule shifted by the days between the cut and the new start reads as the new
+//! one, "every Monday" become "every Tuesday". And every occurrence handed over
+//! moved by the same step: in the rule's own unit for a rule that follows its
+//! start — days for a daily or weekly rule, months for a monthly one, years
+//! for a yearly one — and in days for a moved rule, which moves each by as
+//! many days as the start.
+//!
+//! A rule that names its days — weekdays, days of the month, months, or its
+//! times of day — and did not move keeps them: "every Monday" whose Wednesday
+//! occurrence was moved there on its own earlier, now edited from there on,
+//! still repeats on Mondays (decision 192), and "every weekday" with a new rule
+//! that only adds Saturday still has its Wednesday where it was. And a monthly
+//! rule from the 31st skips the shorter months, so moved to the 30th it meets
+//! months the old one skipped: its places stop lining up after the first short
+//! month. Counting places there shifted a deletion onto an occurrence nobody
+//! deleted. Such a deletion stays on its day, at the new time of day if that
+//! changed; where the new series has no occurrence that day it is dropped,
+//! which hides nothing.
 //!
 //! A day is read on the clock both series repeat on. When they have none in
 //! common — one becomes all-day, or gets another zone — it is read on the
@@ -61,8 +69,9 @@ use chrono::{DateTime, Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 // The rule is read once, for every module that asks (`rrule_parts`).
-use crate::rrule_parts::{parse_freq, parse_parts, part, Freq};
+use crate::rrule_parts::{parse_freq, parse_parts, part, Freq, WEEKDAY_TOKENS};
 use crate::series_clock::{canonical_zone, expansion_clock, ExpansionClock};
+use crate::series_shift::{days_follow_start, shift_series, SeriesShift};
 
 /// Half a day: two instants this close name the same day of a series of days,
 /// and two that far apart never can (decision 95; the shell's `sameSlot`).
@@ -139,20 +148,6 @@ pub struct TailExceptions {
     pub dropped: Vec<String>,
 }
 
-/// The parts that name the days or the times a rule repeats on, instead of
-/// taking them from the start.
-const NAMING_PARTS: [&str; 9] = [
-    "BYDAY",
-    "BYMONTHDAY",
-    "BYYEARDAY",
-    "BYWEEKNO",
-    "BYSETPOS",
-    "BYMONTH",
-    "BYHOUR",
-    "BYMINUTE",
-    "BYSECOND",
-];
-
 /// What a rule repeats by, whatever it is spelled like and wherever it ends:
 /// its parts without `COUNT` and `UNTIL`, the defaults `INTERVAL=1` and
 /// `WKST=MO` left out, values uppercased and lists in order. `None` when it
@@ -179,47 +174,110 @@ fn pattern(rrule: &str) -> Option<Vec<(String, String)>> {
     Some(pattern)
 }
 
-/// Whether a rule takes its days and times from its start, so its occurrences
-/// move when the start does. Unreadable reads as no: by day is the side that
-/// cannot shift a deletion onto an occurrence the user never deleted.
-fn days_follow_start(rrule: &str) -> bool {
-    parse_parts(rrule)
-        .is_ok_and(|(_, parts)| !parts.iter().any(|p| NAMING_PARTS.contains(&p.key.as_str())))
+/// A rule's [`pattern`] with the days its start gives it written out: weekly
+/// from a Tuesday is weekly on Tuesday, monthly from the 11th is monthly on the
+/// 11th, yearly from 29 February is yearly on 29 February. Two spellings of one
+/// series read alike then — the same series keeps the same deletions, however
+/// the user got there (decision 196).
+fn pattern_from(rrule: &str, start: NaiveDate) -> Option<Vec<(String, String)>> {
+    let mut pattern = pattern(rrule)?;
+    let named = |key: &str| pattern.iter().any(|(k, _)| k == key);
+    let implied: Vec<(&str, String)> = match rule_freq(rrule)? {
+        Freq::Weekly if !named("BYDAY") => vec![(
+            "BYDAY",
+            WEEKDAY_TOKENS[start.weekday().num_days_from_monday() as usize].to_string(),
+        )],
+        Freq::Monthly if !named("BYDAY") && !named("BYMONTHDAY") => {
+            vec![("BYMONTHDAY", start.day().to_string())]
+        }
+        Freq::Yearly
+            if !["BYMONTH", "BYDAY", "BYMONTHDAY", "BYYEARDAY", "BYWEEKNO"]
+                .iter()
+                .any(|key| named(key)) =>
+        {
+            vec![
+                ("BYMONTH", start.month().to_string()),
+                ("BYMONTHDAY", start.day().to_string()),
+            ]
+        }
+        _ => Vec::new(),
+    };
+    pattern.extend(
+        implied
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value)),
+    );
+    pattern.sort();
+    Some(pattern)
+}
+
+/// How often a rule recurs, when it can be read.
+fn rule_freq(rule: &str) -> Option<Freq> {
+    parse_parts(rule)
+        .ok()
+        .and_then(|(_, parts)| part(&parts, "FREQ").and_then(parse_freq))
+}
+
+/// The day a slot falls on, read on the clock the caller chose.
+fn date_of(slot: &TailSlot, day_of: &impl Fn(&TailSlot) -> String) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(&day_of(slot), "%Y-%m-%d").ok()
+}
+
+/// Whether the new series' rule is the old one moved with the start, the way
+/// "this and all following" moves a rule that names its days (decision 189):
+/// the old rule shifted by the days from the cut (`cut`, the first old slot)
+/// to the new start (`start`, the new series' first occurrence) reads as the
+/// new rule, whoever wrote it and however it is spelled (decision 196). No
+/// days, no move: a rule that only got a new time of day, or none at all, is
+/// the same rule, and the same pattern already says so.
+fn moved_with_start(
+    old_rule: &str,
+    tail_rule: &str,
+    cut: &TailSlot,
+    start: &TailSlot,
+    day_of: &impl Fn(&TailSlot) -> String,
+) -> bool {
+    let (Some(from), Some(to)) = (date_of(cut, day_of), date_of(start, day_of)) else {
+        return false;
+    };
+    let Ok(days) = i32::try_from((to - from).num_days()) else {
+        return false;
+    };
+    if days == 0 {
+        return false;
+    }
+    match shift_series(old_rule, from, days, false, None) {
+        SeriesShift::Shifted { rrule } => {
+            let moved = pattern_from(&rrule, to);
+            moved.is_some() && moved == pattern_from(tail_rule, to)
+        }
+        SeriesShift::Refused { .. } => false,
+    }
 }
 
 /// Whether the new series' occurrences are the old series' occurrences moved
 /// by one and the same step, place for place, as far as both reach, counted in
-/// the rule's own unit: days for a daily or weekly rule (and finer), months
-/// for a monthly one, years for a yearly one. A rule that takes its days from
-/// the start still skips months or years by its day — from the 31st every
-/// month without one, from 29 February every year that is no leap year — so
-/// moved onto another day it can meet months the old one skipped. Counted in
-/// days instead, a monthly move from the 25th to the 2nd of the next month
-/// would look uneven only because the months differ in length.
+/// `unit`: days for a daily or weekly rule (and finer) and for a rule moved by
+/// days, months for a monthly one, years for a yearly one. A rule that takes
+/// its days from the start still skips months or years by its day — from the
+/// 31st every month without one, from 29 February every year that is no leap
+/// year — so moved onto another day it can meet months the old one skipped.
+/// Counted in days instead, a monthly move from the 25th to the 2nd of the next
+/// month would look uneven only because the months differ in length.
 fn moved_alike(
-    rule: &str,
+    unit: Freq,
     old: &[TailSlot],
     tail: &[TailSlot],
-    day_of: impl Fn(&TailSlot) -> String,
+    day_of: &impl Fn(&TailSlot) -> String,
 ) -> bool {
-    let freq = parse_parts(rule)
-        .ok()
-        .and_then(|(_, parts)| part(&parts, "FREQ").and_then(parse_freq));
-    let Some(freq) = freq else {
-        return false;
-    };
     let step = |date: NaiveDate| -> i64 {
-        match freq {
+        match unit {
             Freq::Monthly => i64::from(date.year()) * 12 + i64::from(date.month0()),
             Freq::Yearly => i64::from(date.year()),
             _ => i64::from(date.num_days_from_ce()),
         }
     };
-    let at = |slot: &TailSlot| {
-        NaiveDate::parse_from_str(&day_of(slot), "%Y-%m-%d")
-            .ok()
-            .map(step)
-    };
+    let at = |slot: &TailSlot| date_of(slot, day_of).map(step);
     let mut moved = None;
     for (before, after) in old.iter().zip(tail) {
         let (Some(before), Some(after)) = (at(before), at(after)) else {
@@ -273,8 +331,8 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
     let same_tail = same_slot(question.tail_all_day, question.tail_tzid.as_deref());
 
     // By place only when every occurrence moves with the start: the same
-    // pattern, days taken from the start, and the new series starting on an
-    // occurrence of its own rule.
+    // pattern with days taken from the start, or a rule moved with it, and the
+    // new series starting on an occurrence of its own rule.
     let tail_start = instant_ms(&question.tail_start);
     let aligned = match (question.tail.first(), tail_start) {
         (Some(first), Some(start)) => instant_ms(&first.at).is_some_and(|at| same_tail(at, start)),
@@ -299,18 +357,33 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
             slot.device_day.clone()
         }
     };
-    let carried_by = if same_pattern
-        && days_follow_start(&question.tail_rule)
-        && aligned
-        && moved_alike(
-            &question.tail_rule,
-            &question.old_slots,
-            &question.tail,
-            day_of,
-        ) {
-        TailCarry::Place
+    // The unit the occurrences are compared in: the rule's own for a rule
+    // that follows its start, days for one moved by days. Neither: by day.
+    let unit = if same_pattern && days_follow_start(&question.tail_rule) {
+        rule_freq(&question.tail_rule)
     } else {
-        TailCarry::Day
+        match (question.old_slots.first(), question.tail.first()) {
+            (Some(cut), Some(start))
+                if moved_with_start(
+                    &question.old_rule,
+                    &question.tail_rule,
+                    cut,
+                    start,
+                    &day_of,
+                ) =>
+            {
+                Some(Freq::Daily)
+            }
+            _ => None,
+        }
+    };
+    let carried_by = match unit {
+        Some(unit)
+            if aligned && moved_alike(unit, &question.old_slots, &question.tail, &day_of) =>
+        {
+            TailCarry::Place
+        }
+        _ => TailCarry::Day,
     };
 
     let old: Vec<Option<i64>> = question
@@ -681,10 +754,150 @@ mod tests {
             pattern("BYDAY=WE,MO;FREQ=WEEKLY;UNTIL=20261231T000000Z")
         );
         assert_ne!(pattern("FREQ=WEEKLY"), pattern("FREQ=WEEKLY;INTERVAL=2"));
-        assert!(days_follow_start("FREQ=MONTHLY"));
-        assert!(!days_follow_start("FREQ=MONTHLY;BYMONTHDAY=10"));
-        assert!(!days_follow_start("FREQ=WEEKLY;BYDAY=MO"));
-        assert!(!days_follow_start("not a rule"));
+    }
+
+    /// Mondays at 09:00 Berlin from 24 August, and the same moved by `days`.
+    fn mondays(days: i64) -> Vec<TailSlot> {
+        (0..3)
+            .map(|week| {
+                let date = NaiveDate::from_ymd_opt(2026, 8, 24).unwrap()
+                    + chrono::Duration::days(week * 7 + days);
+                slot(
+                    &format!("{}T07:00:00.000Z", date.format("%Y-%m-%d")),
+                    &date.format("%Y-%m-%d").to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_rule_moved_with_the_start_keeps_its_places() {
+        // "Every Monday" moved to Tuesday from 24 August on became "every
+        // Tuesday" (decision 189): the deleted third Monday is the deleted
+        // third Tuesday.
+        let mut q = question(mondays(0), mondays(1), &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-09-08T07:00:00.000Z"]);
+
+        // Every weekday, moved a day on, is Tuesday to Saturday: the deleted
+        // Thursday is the deleted Friday, though Thursday still occurs.
+        let old = vec![
+            slot("2026-08-24T07:00:00.000Z", "2026-08-24"),
+            slot("2026-08-25T07:00:00.000Z", "2026-08-25"),
+            slot("2026-08-26T07:00:00.000Z", "2026-08-26"),
+            slot("2026-08-27T07:00:00.000Z", "2026-08-27"),
+        ];
+        let tail = vec![
+            slot("2026-08-25T07:00:00.000Z", "2026-08-25"),
+            slot("2026-08-26T07:00:00.000Z", "2026-08-26"),
+            slot("2026-08-27T07:00:00.000Z", "2026-08-27"),
+            slot("2026-08-28T07:00:00.000Z", "2026-08-28"),
+        ];
+        let mut q = question(old, tail, &["2026-08-27T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU,WE,TH,FR,SA".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-08-28T07:00:00.000Z"]);
+
+        // The 10th of each month moved to the 11th, an end and all.
+        let old = vec![
+            slot("2026-09-10T07:00:00.000Z", "2026-09-10"),
+            slot("2026-10-10T07:00:00.000Z", "2026-10-10"),
+            slot("2026-11-10T08:00:00.000Z", "2026-11-10"),
+        ];
+        let tail = vec![
+            slot("2026-09-11T07:00:00.000Z", "2026-09-11"),
+            slot("2026-10-11T07:00:00.000Z", "2026-10-11"),
+            slot("2026-11-11T08:00:00.000Z", "2026-11-11"),
+        ];
+        let mut q = question(old, tail, &["2026-10-10T07:00:00.000Z"]);
+        q.old_rule = "FREQ=MONTHLY;BYMONTHDAY=10;UNTIL=20261231T000000Z".into();
+        q.tail_rule = "FREQ=MONTHLY;BYMONTHDAY=11;UNTIL=20270101T000000Z".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-10-11T07:00:00.000Z"]);
+    }
+
+    #[test]
+    fn another_spelling_of_the_moved_rule_is_that_move() {
+        // Weekly from Monday, moved to Tuesday and written "every Tuesday":
+        // the same series as weekly from Tuesday, so the same deletions (196).
+        let mut q = question(mondays(0), mondays(1), &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-09-08T07:00:00.000Z"]);
+
+        // And the other way: "every Monday" moved, written as plain weekly.
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY".into();
+        assert_eq!(tail_exceptions(&q).carried_by, TailCarry::Place);
+
+        let tuesday = NaiveDate::from_ymd_opt(2026, 8, 25).unwrap();
+        assert_eq!(
+            pattern_from("FREQ=WEEKLY", tuesday),
+            pattern_from("FREQ=WEEKLY;BYDAY=TU", tuesday)
+        );
+        assert_eq!(
+            pattern_from("FREQ=MONTHLY;COUNT=3", tuesday),
+            pattern_from("FREQ=MONTHLY;BYMONTHDAY=25", tuesday)
+        );
+        assert_eq!(
+            pattern_from("FREQ=YEARLY", tuesday),
+            pattern_from("FREQ=YEARLY;BYMONTH=8;BYMONTHDAY=25", tuesday)
+        );
+        assert_ne!(
+            pattern_from("FREQ=MONTHLY;BYDAY=4TU", tuesday),
+            pattern_from("FREQ=MONTHLY;BYMONTHDAY=25", tuesday)
+        );
+        assert_ne!(
+            pattern_from("FREQ=DAILY", tuesday),
+            pattern_from("FREQ=DAILY;BYDAY=TU", tuesday)
+        );
+    }
+
+    #[test]
+    fn a_rule_that_did_not_move_with_the_start_keeps_its_days() {
+        // A rule set anew on the moved day is no move of the old one: the
+        // deleted Monday names no day of "Tuesdays and Fridays".
+        let tail = vec![
+            slot("2026-08-25T07:00:00.000Z", "2026-08-25"),
+            slot("2026-08-28T07:00:00.000Z", "2026-08-28"),
+            slot("2026-09-01T07:00:00.000Z", "2026-09-01"),
+        ];
+        let mut q = question(mondays(0), tail, &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU,FR".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Day);
+        assert!(answer.exceptions.is_empty());
+
+        // Moved by two days, but the rule by one: the new series does not
+        // start on its own rule, so nothing lines up.
+        let mut q = question(mondays(0), mondays(1), &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        q.tail_start = "2026-08-26T07:00:00.000Z".into();
+        assert_eq!(tail_exceptions(&q).carried_by, TailCarry::Day);
+
+        // "The second Tuesday" cannot move by a day, so no rule is that move.
+        let old = vec![
+            slot("2026-09-08T07:00:00.000Z", "2026-09-08"),
+            slot("2026-10-13T07:00:00.000Z", "2026-10-13"),
+        ];
+        let tail = vec![
+            slot("2026-09-09T07:00:00.000Z", "2026-09-09"),
+            slot("2026-10-14T07:00:00.000Z", "2026-10-14"),
+        ];
+        let mut q = question(old, tail, &["2026-10-13T07:00:00.000Z"]);
+        q.old_rule = "FREQ=MONTHLY;BYDAY=2TU".into();
+        q.tail_rule = "FREQ=MONTHLY;BYDAY=2WE".into();
+        assert_eq!(tail_exceptions(&q).carried_by, TailCarry::Day);
     }
 
     #[test]

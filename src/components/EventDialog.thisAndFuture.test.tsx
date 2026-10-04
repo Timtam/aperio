@@ -140,11 +140,18 @@ vi.mock('../state/useTitleSuggestions', async () => {
   );
   return { ...actual, useTitleSuggestions: () => [] };
 });
-// The rule picker, reduced to two buttons: a plain weekly rule, and a
-// fortnightly one that ends after ten times.
+// The rule picker, reduced to the rule it shows and two buttons: a plain
+// weekly rule, and a fortnightly one that ends after ten times.
 vi.mock('./RecurrenceSelector', () => ({
-  RecurrenceSelector: ({ onChange }: { onChange: (rrule: string | null) => void }) => (
+  RecurrenceSelector: ({
+    value,
+    onChange,
+  }: {
+    value: string | null;
+    onChange: (rrule: string | null) => void;
+  }) => (
     <>
+      <output aria-label="rule shown">{value ?? ''}</output>
       <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
         weekly
       </button>
@@ -594,5 +601,95 @@ describe('EventDialog → deleted occurrences follow "this and all following" (1
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
     expect(tailRequest().recurrence?.rrule).toContain('INTERVAL=2');
     expect(tailRequest().recurrence?.exceptions).toEqual([]);
+  });
+});
+
+describe('EventDialog → the rule moves with "this and all following" (189, 192-197)', () => {
+  const tailRequest = () => (calls('create_event')[0][1] as { request: CalendarEvent }).request;
+  const ruleShown = () => screen.getByRole('status', { name: 'rule shown' }).textContent;
+  const setStartDate = (value: string) =>
+    fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
+      target: { value },
+    });
+
+  it('shows and writes "every Tuesday" when the date moves to a Tuesday, its deletion in its place', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    await open(JULY);
+    expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=MO');
+    setStartDate('2026-07-07');
+    // In the field before anything is saved (197).
+    expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    // The deleted 13 July is the deleted 14 July.
+    expect(tailRequest().recurrence?.exceptions).toEqual(['2026-07-14T07:00:00.000Z']);
+  });
+
+  it('says a rule that cannot move with the date, and writes nothing (193)', async () => {
+    deviceInBerlin();
+    // The first Monday of each month; 6 July is one.
+    const firstMonday = {
+      ...SERIES,
+      start: '2026-06-01T07:00:00.000Z',
+      end: '2026-06-01T08:00:00.000Z',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=1MO', exceptions: [], tzid: 'Europe/Berlin' },
+    } as unknown as CalendarEvent;
+    onFile.series = firstMonday;
+    await open({
+      ...firstMonday,
+      id: 'ev-series@2026-07-06T07:00:00.000Z',
+      series_id: 'ev-series',
+      occurrence_start: '2026-07-06T07:00:00.000Z',
+      start: '2026-07-06T07:00:00.000Z',
+      end: '2026-07-06T08:00:00.000Z',
+    } as unknown as CalendarEvent);
+    setStartDate('2026-07-07');
+    // The field keeps the rule, and says why on the way to it.
+    expect(ruleShown()).toBe('FREQ=MONTHLY;BYDAY=1MO');
+    expect(
+      screen.getByText(/kann nicht mit dem neuen Datum wandern|cannot move with the new date/),
+    ).toBeTruthy();
+    save();
+    expect(
+      await screen.findByText(
+        /lässt sich ab hier nicht auf das neue Datum verschieben|cannot move to the new date from here on/,
+      ),
+    ).toBeTruthy();
+    expect(calls('create_event')).toHaveLength(0);
+    expect(calls('update_event')).toHaveLength(0);
+  });
+
+  it('writes the rule the user set after moving the date as it is', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    await open(JULY);
+    setStartDate('2026-07-07');
+    fireEvent.click(screen.getByRole('button', { name: 'weekly' }));
+    expect(ruleShown()).toBe('FREQ=WEEKLY');
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().recurrence?.rrule).toBe('FREQ=WEEKLY');
+    // Weekly from a Tuesday is the moved series, so the same deletion (196).
+    expect(tailRequest().recurrence?.exceptions).toEqual(['2026-07-14T07:00:00.000Z']);
+  });
+
+  it('keeps the days of an occurrence moved on its own earlier when only the title changes (192)', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    // 6 July's occurrence sits on Wednesday the 8th.
+    await open({
+      ...JULY,
+      start: '2026-07-08T07:00:00.000Z',
+      end: '2026-07-08T08:00:00.000Z',
+    } as unknown as CalendarEvent);
+    fireEvent.change(screen.getByRole('combobox', { name: /titel|title/i }), {
+      target: { value: 'Teamrunde neu' },
+    });
+    expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=MO');
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
   });
 });
