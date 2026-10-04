@@ -166,9 +166,17 @@ pub fn begin_series_anew(
     let answer = if days_follow_start(rrule) {
         moved_bound(rrule, days, until)
     } else {
+        // With no days moved the rule stays as written: the new series may
+        // start off the cut's day (an occurrence moved there on its own), and a
+        // week start it spelled can matter from there.
         let new_start = start.checked_add_signed(Duration::days(i64::from(days)));
-        shift(rrule, start, days, time_changes, until)
-            .map(|moved| without_needless_week_start(moved, new_start))
+        shift(rrule, start, days, time_changes, until).map(|moved| {
+            if days == 0 {
+                moved
+            } else {
+                without_needless_week_start(moved, new_start)
+            }
+        })
     };
     match answer {
         Ok(rrule) => SeriesShift::Shifted { rrule },
@@ -200,6 +208,26 @@ pub(crate) fn week_start_matters(rrule: &str, start: NaiveDate) -> bool {
     if !weekly || interval < 2 {
         return false;
     }
+    // Only weekdays (or the start's) choose the days here; a day of the month
+    // or of the year would be read week by week too, and is not walked.
+    let only_weekdays = parts.iter().all(|p| {
+        matches!(
+            p.key.as_str(),
+            "FREQ"
+                | "INTERVAL"
+                | "BYDAY"
+                | "WKST"
+                | "COUNT"
+                | "UNTIL"
+                | "BYMONTH"
+                | "BYHOUR"
+                | "BYMINUTE"
+                | "BYSECOND"
+        )
+    });
+    if !only_weekdays {
+        return true;
+    }
     let index = |token: &str| {
         WEEKDAY_TOKENS
             .iter()
@@ -215,11 +243,19 @@ pub(crate) fn week_start_matters(rrule: &str, start: NaiveDate) -> bool {
     let Some(weekdays) = weekdays else {
         return true;
     };
+    // The "on" weeks are every `interval`-th from the start's: the days of the
+    // first, cut short by the start, and of the next, whole. Every later one is
+    // the next moved by a whole period, so these two weeks — a week either way
+    // of each, since week starts differ by under one — say it all, however
+    // large the interval.
     let period = 7 * i64::from(interval);
+    let offsets: Vec<i64> = (0..14).chain(period - 7..period + 14).collect();
     let days_with = |first_day: usize| -> Vec<i64> {
         let back =
             (i64::from(start.weekday().num_days_from_monday()) - first_day as i64).rem_euclid(7);
-        (0..2 * period)
+        offsets
+            .iter()
+            .copied()
             .filter(|offset| {
                 let weekday = (i64::from(start.weekday().num_days_from_monday()) + offset)
                     .rem_euclid(7) as usize;
@@ -953,9 +989,11 @@ mod tests {
             shifted_anew("FREQ=MONTHLY;BYMONTHDAY=10;COUNT=7", "2026-09-10", 1, None),
             "FREQ=MONTHLY;BYMONTHDAY=11;COUNT=7"
         );
-        // Every other week on the weekday the new start falls on needs no week
-        // start: its weeks count from that start. Two weekdays do, and so does
-        // a week start the rule had of its own.
+        // A week start is kept, or added, only where it moves a day of the
+        // series from its new start, whether the shift added it or the rule had
+        // it: every other Tuesday from a Tuesday needs none, nor do Tuesdays
+        // and Fridays, which share a week whether weeks begin on Monday or on
+        // Tuesday; Fridays and Mondays do.
         assert_eq!(
             shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-08-24", 1, None),
             "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
@@ -1135,6 +1173,38 @@ mod tests {
             "FREQ=WEEKLY;INTERVAL=2;BYDAY=2TU;WKST=SU",
             tuesday
         ));
+        // A day of the month picks the days week by week: not walked, kept.
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYMONTHDAY=16;WKST=FR",
+            day("2026-09-16")
+        ));
+        // However large the interval, two of its weeks are read.
+        assert!(!week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=4294967295;BYDAY=TU,FR;WKST=TU",
+            tuesday
+        ));
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=4294967295;BYDAY=FR,MO;WKST=FR",
+            friday
+        ));
+    }
+
+    #[test]
+    fn a_rule_begun_anew_on_its_day_keeps_its_week_start() {
+        // Only a new time: the new series may start off the cut's day, where a
+        // week start the rule spelled can matter.
+        assert_eq!(
+            anew(
+                "FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=MO",
+                "2026-08-24",
+                0,
+                true,
+                None
+            ),
+            SeriesShift::Shifted {
+                rrule: "FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=MO".into()
+            }
+        );
     }
 
     #[test]

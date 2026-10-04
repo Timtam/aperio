@@ -1761,6 +1761,21 @@ describe('movedTailRule (189, 192-194)', () => {
     );
   });
 
+  it('gives a very long all-day series that gets a time of day its last day at that time', () => {
+    // Past the count, the date bound is not read at its midnight either.
+    const evening = (year: number, month: number, day: number) => new Date(year, month - 1, day, 18);
+    const utcOf = (when: Date) => when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    expect(
+      movedTailRule({
+        rrule: 'FREQ=DAILY;UNTIL=20401231',
+        series: { tzid: null, all_day: true },
+        from: new Date(2026, 9, 5).toISOString(),
+        opened: new Date(2026, 9, 5).toISOString(),
+        tail: { start: evening(2026, 10, 5).toISOString(), all_day: false },
+      }),
+    ).toEqual(shifted(`FREQ=DAILY;UNTIL=${utcOf(evening(2040, 12, 31))}`));
+  });
+
   it('moves the end of a very long series by the days, without counting it', () => {
     expect(
       moved('FREQ=DAILY;UNTIL=20991231T235959Z', at('08-24'), at('08-24'), at('08-25')),
