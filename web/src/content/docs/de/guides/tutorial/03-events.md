@@ -195,11 +195,12 @@ neuen Serie weg, und in einer anderen Kalender-App geänderte bleiben darin, zur
 mit deiner Änderung mit: Verschiebst du den Termin auf einen anderen Tag, wandert
 jeder gelöschte nach seinem Platz in der Serie mit, aus einem gelöschten dritten
 Montag wird ein gelöschter dritter Dienstag; wechselst du zwischen ganztägig und
-mit Uhrzeit, bleibt er auf seinem Tag. Bekommt die neue Serie eine andere
-Wiederholung, bleibt ein gelöschter Termin nur an einem Tag gelöscht, den die
-neue Regel noch trifft. Eine Regel, die ihre Wochentage nennt, etwa jeden
-Montag, behält sie, wenn du einen Termin auf einen anderen Tag verschiebst, und
-ihre Löschungen vorerst auch. Noch behält nicht jeder
+mit Uhrzeit, bleibt er auf dem Tag, an dem du ihn gesehen hast. Bekommt die neue
+Serie eine andere Wiederholung, bleibt ein gelöschter Termin nur an einem Tag
+gelöscht, den die neue Regel noch trifft; ein neues Ende allein ist keine neue
+Regel. Eine Regel, die ihre Tage nennt, etwa jeden Montag, jeden Werktag oder
+jeden 10. des Monats, behält sie, wenn du einen Termin auf einen anderen Tag
+verschiebst, und ihre Löschungen vorerst auch. Noch behält nicht jeder
 Kalender diese Löschungen: CalDAV-Kalender tun es bei Serien mit Uhrzeit, bei
 Exchange, bei Google und bei ganztägigen CalDAV-Serien kann ein gelöschter
 Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem

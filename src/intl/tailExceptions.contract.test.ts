@@ -24,12 +24,14 @@ const rows = contract.rows as unknown as Row[];
 
 describe('the deleted occurrences a series keeps from a cut on', () => {
   it('covers the cases the decisions turn on', () => {
-    expect(rows.length).toBeGreaterThanOrEqual(17);
+    expect(rows.length).toBeGreaterThanOrEqual(23);
     for (const name of [
       'A1 an evening deletion stays on its day when the series becomes all-day',
       'B2 every second week keeps the deletion it still meets',
       'C a deleted third Monday becomes a deleted third Tuesday',
       'C4 "every Monday" moved to a Tuesday keeps its deletion on Monday',
+      '"every weekday" moved onto another of its days keeps its deletions',
+      'without a clock in common a day is the one the device shows',
     ]) {
       expect(rows.map((row) => row.name)).toContain(name);
     }

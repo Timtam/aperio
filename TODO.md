@@ -2380,13 +2380,17 @@ Siehe DESIGN §4.2.
       jetzt die Zeilen der Kopie und schneidet nach dem Platz in der Serie
       (141); beide Mitzieh-Dialoge lesen die Zeilen einmal, vor dem Anker.
     - ✅ **Tail-Regel bei Wechsel und neuer Regel** (PR 3b, 152, 186-191):
-      Gelöschte Termine gehen mit der Änderung mit. Bei gleicher Regel nach
-      ihrem Platz in der Serie (152): ein verschobenes Datum nimmt sie mit, aus
-      dem gelöschten dritten Montag wird der gelöschte dritte Dienstag, und ein
-      Wechsel zwischen ganztägig und mit Uhrzeit lässt eine Ausnahme um 18 Uhr
-      auf ihrem Tag statt auf dem folgenden. Bei neuer Regel nach ihrem Tag, nur
-      wo die neue Regel ihn noch trifft (188); die anderen fallen weg, statt dass
-      EWS beim Löschen abbricht. Die Regel lebt im Kern (190,
+      Gelöschte Termine gehen mit der Änderung mit. Nach ihrem Platz in der
+      Serie (152), wenn jedes Vorkommen mit dem Beginn wandert (gleiches Muster,
+      ein neues Ende zählt nicht; Tage aus dem Beginn): ein verschobenes Datum
+      nimmt sie mit, aus dem gelöschten dritten Montag wird der gelöschte dritte
+      Dienstag, und ein Wechsel zwischen ganztägig und mit Uhrzeit lässt eine
+      Ausnahme um 18 Uhr auf ihrem Tag statt auf dem folgenden. Sonst nach ihrem
+      Tag, auf der gemeinsamen Uhr beider Serien oder den Tagen des Geräts: bei
+      neuer Regel nur, wo sie ihn noch trifft (188), die anderen fallen weg,
+      statt dass EWS beim Löschen abbricht; bei einer Regel, die ihre Tage nennt
+      (jeden Werktag, jeden 10.), bleiben sie, weil die übrigen Vorkommen nicht
+      wandern (189). Nie auf dem ersten Vorkommen der neuen Serie. Die Regel lebt im Kern (190,
       `cal_core::tail_exceptions`, Fixture `tailExceptions.json`, Türen per
       WebAssembly und UniFFI), die Shell expandiert beide Serien
       (`tailRecurrenceFor`). Gilt für beide Editoren, beide Mitzieh-Dialoge und
@@ -2394,11 +2398,11 @@ Siehe DESIGN §4.2.
       Zone wird ganztägig keine, aus ganztägig mit Uhrzeit die Gerätezone. Ein
       altes Handy-.so ohne die Tür scheitert, bevor etwas geschrieben wird.
       ↻ im Test.
-    - 🚩 **PR 3c (189):** Eine Regel, die ihre Wochentage nennt („jeden
-      Montag“), bleibt beim Verschieben von „dieser und alle folgenden“ auf
-      ihren Tagen, und das verschobene Vorkommen erscheint gar nicht; bis die
-      Regel mitwandert wie beim Ziehen einer ganzen Serie (`shiftSeriesRule`),
-      bleiben ihre Löschungen auf ihrem Tag.
+    - 🚩 **PR 3c (189):** Eine Regel, die ihre Tage nennt („jeden Montag“,
+      „jeden 10.“), bleibt beim Verschieben von „dieser und alle folgenden“ auf
+      ihren Tagen, und ein verschobenes Vorkommen außerhalb davon erscheint gar
+      nicht; bis die Regel mitwandert wie beim Ziehen einer ganzen Serie
+      (`shiftSeriesRule`), bleiben ihre Löschungen auf ihrem Tag.
     - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191):** derselbe
       18-Uhr-Fehler beim Bearbeiten der ganzen Serie (`exceptionsAtSeriesTime`
       lässt ganztägige Wechsel aus). Eigener kleiner PR.

@@ -12,4 +12,8 @@ at: string,
  * The day it falls on, `YYYY-MM-DD`, on the clock its series repeats on:
  * its zone, the device's days for an all-day series, or UTC.
  */
-day: string, };
+day: string, 
+/**
+ * The day it falls on on the device's calendar: the day the user sees it.
+ */
+device_day: string, };

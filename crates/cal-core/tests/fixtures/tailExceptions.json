@@ -1,380 +1,460 @@
 {
   "what": "The deleted occurrences a series keeps when \"this and all following\" writes it from the cut on: cal_core::tail_exceptions, row by row. Read by the core's own test, by the phone's door test in cal-ffi, and by the TypeScript contract test through the WebAssembly door.",
-  "why": "Decisions 152 (a deletion keeps its place when the date moves), 188 (with a new rule it keeps its day, only where the new rule still meets it) and 189 (a rule that names its weekdays and is moved off them keeps its deletions on their day until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them.",
+  "why": "Decisions 152 (a deletion keeps its place when every occurrence moves with the start), 188 (with a new rule it keeps its day, only where the new rule still meets it; a new end or another spelling is no new rule) and 189 (a rule that names its days keeps them when one occurrence moves, and so do its deletions, until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them, on the series' own clock and on the device's.",
   "rows": [
     {
       "name": "A1 an evening deletion stays on its day when the series becomes all-day",
       "note": "Daily 18:00 Berlin, Thursday 27.08 deleted, cut Monday 24.08. 18:00 sits closer to Friday's midnight; by place it stays Thursday.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T16:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-25T16:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-26T16:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-27T16:00:00.000Z", "day": "2026-08-27" }
+          { "at": "2026-08-24T16:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T16:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T16:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T16:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY",
         "tail": [
-          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-26T22:00:00.000Z", "day": "2026-08-27" }
+          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-26T22:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
         ],
         "tail_start": "2026-08-23T22:00:00.000Z",
         "tail_all_day": true,
         "tail_tzid": null,
-        "rule_changed": false,
+        "tail_rule": "FREQ=DAILY",
         "deleted": ["2026-08-27T16:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-08-26T22:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-26T22:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "A1b a New York morning becomes the device's day",
       "note": "Weekly Monday 09:00 New York, 07.09 deleted, the new series all-day on a Berlin device.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T13:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T13:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T13:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T13:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T13:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T13:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": false,
         "old_tzid": "America/New_York",
+        "old_rule": "FREQ=WEEKLY",
         "tail": [
-          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-30T22:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-30T22:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "tail_start": "2026-08-23T22:00:00.000Z",
         "tail_all_day": true,
         "tail_tzid": null,
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY",
         "deleted": ["2026-09-07T13:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-09-06T22:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-09-06T22:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "A2 an all-day deletion takes the new time of day",
       "note": "All-day daily, 27.08 deleted, the new series at 09:00 Berlin.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-26T22:00:00.000Z", "day": "2026-08-27" }
+          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-26T22:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
         ],
         "old_all_day": true,
         "old_tzid": null,
+        "old_rule": "FREQ=DAILY",
         "tail": [
-          { "at": "2026-08-24T07:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-26T07:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-27T07:00:00.000Z", "day": "2026-08-27" }
+          { "at": "2026-08-24T07:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T07:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T07:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
         ],
         "tail_start": "2026-08-24T07:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=DAILY",
         "deleted": ["2026-08-26T22:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-08-27T07:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-27T07:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "an all-day deletion another writer spelled at midnight UTC still names its day",
       "note": "Decision 95: within half a day of the occurrence is the same day.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25" }
+          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" }
         ],
         "old_all_day": true,
         "old_tzid": null,
+        "old_rule": "FREQ=DAILY",
         "tail": [
-          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26" }
+          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-25T22:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" }
         ],
         "tail_start": "2026-08-24T22:00:00.000Z",
         "tail_all_day": true,
         "tail_tzid": null,
-        "rule_changed": false,
+        "tail_rule": "FREQ=DAILY",
         "deleted": ["2026-08-25T00:00:00Z"]
       },
-      "expected": { "exceptions": ["2026-08-25T22:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-25T22:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "B a new weekday drops a deletion the new rule never meets",
       "note": "Mondays to Tuesdays by a changed rule (decision 188): 07.09 is no Tuesday.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;BYDAY=MO",
         "tail": [
-          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01" },
-          { "at": "2026-09-08T08:00:00.000Z", "day": "2026-09-08" }
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" },
+          { "at": "2026-09-08T08:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
         ],
         "tail_start": "2026-08-25T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": true,
+        "tail_rule": "FREQ=WEEKLY;BYDAY=TU",
         "deleted": ["2026-09-07T08:00:00.000Z"]
       },
-      "expected": { "exceptions": [], "carried_by": "day", "dropped": ["2026-09-07T08:00:00.000Z"] }
+      "expected": {
+        "exceptions": [],
+        "carried_by": "day",
+        "dropped": ["2026-09-07T08:00:00.000Z"]
+      }
     },
     {
       "name": "B2 every second week keeps the deletion it still meets",
       "note": "Weekly to INTERVAL=2 (decision 188): 31.08 is gone with the new rule, 07.09 stays deleted.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY",
         "tail": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "tail_start": "2026-08-24T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": true,
+        "tail_rule": "FREQ=WEEKLY;INTERVAL=2",
         "deleted": ["2026-08-31T08:00:00.000Z", "2026-09-07T08:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-09-07T08:00:00.000Z"], "carried_by": "day", "dropped": ["2026-08-31T08:00:00.000Z"] }
+      "expected": {
+        "exceptions": ["2026-09-07T08:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": ["2026-08-31T08:00:00.000Z"]
+      }
     },
     {
       "name": "B3 a new rule with a new time keeps the deletion on its day at that time",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY",
         "tail": [
-          { "at": "2026-08-24T12:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-26T12:00:00.000Z", "day": "2026-08-26" }
+          { "at": "2026-08-24T12:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-26T12:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" }
         ],
         "tail_start": "2026-08-24T12:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": true,
+        "tail_rule": "FREQ=DAILY;INTERVAL=2",
         "deleted": ["2026-08-26T08:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-08-26T12:00:00.000Z"], "carried_by": "day", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-26T12:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
     },
     {
       "name": "C a deleted third Monday becomes a deleted third Tuesday",
       "note": "Decision 152: plain weekly, \"this and all following\" moved from Monday 24.08 to Tuesday 25.08.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY",
         "tail": [
-          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01" },
-          { "at": "2026-09-08T08:00:00.000Z", "day": "2026-09-08" }
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" },
+          { "at": "2026-09-08T08:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
         ],
         "tail_start": "2026-08-25T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY",
         "deleted": ["2026-09-07T08:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-09-08T08:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-09-08T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "C2 a daily series moved by a day takes its deletion along",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-27T08:00:00.000Z", "day": "2026-08-27" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T08:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY",
         "tail": [
-          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26" },
-          { "at": "2026-08-27T08:00:00.000Z", "day": "2026-08-27" },
-          { "at": "2026-08-28T08:00:00.000Z", "day": "2026-08-28" }
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T08:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" },
+          { "at": "2026-08-28T08:00:00.000Z", "day": "2026-08-28", "device_day": "2026-08-28" }
         ],
         "tail_start": "2026-08-25T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=DAILY",
         "deleted": ["2026-08-27T08:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-08-28T08:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-28T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "C3 an all-day weekly series moved to Tuesday",
       "question": {
         "old_slots": [
-          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-30T22:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-23T22:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-30T22:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": true,
         "old_tzid": null,
+        "old_rule": "FREQ=WEEKLY",
         "tail": [
-          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25" },
-          { "at": "2026-08-31T22:00:00.000Z", "day": "2026-09-01" },
-          { "at": "2026-09-07T22:00:00.000Z", "day": "2026-09-08" }
+          { "at": "2026-08-24T22:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-31T22:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" },
+          { "at": "2026-09-07T22:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
         ],
         "tail_start": "2026-08-24T22:00:00.000Z",
         "tail_all_day": true,
         "tail_tzid": null,
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY",
         "deleted": ["2026-09-06T22:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-09-07T22:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-09-07T22:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "C4 \"every Monday\" moved to a Tuesday keeps its deletion on Monday",
-      "note": "The rule names its weekday, so the new series still repeats on Mondays and starts off its own rule (decision 189). By place the deletion would land a week early.",
+      "note": "The rule names its weekday, so the new series still repeats on Mondays and starts off its own rule (decision 189). By place the deletion would land a week late.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;BYDAY=MO",
         "tail": [
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" },
-          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07" }
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
         ],
         "tail_start": "2026-08-25T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY;BYDAY=MO",
         "deleted": ["2026-09-07T08:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-09-07T08:00:00.000Z"], "carried_by": "day", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-09-07T08:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
     },
     {
       "name": "a deletion past the old series' COUNT names nothing",
       "note": "A stale exception the old rule never reached is not carried over.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;COUNT=10",
         "tail": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "tail_start": "2026-08-24T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY;COUNT=7",
         "deleted": ["2026-10-12T08:00:00.000Z"]
       },
-      "expected": { "exceptions": [], "carried_by": "place", "dropped": ["2026-10-12T08:00:00.000Z"] }
+      "expected": {
+        "exceptions": [],
+        "carried_by": "place",
+        "dropped": ["2026-10-12T08:00:00.000Z"]
+      }
     },
     {
       "name": "a deletion past the new series' end is dropped",
       "note": "Daily until 31.08, shifted a day forward: the new series has one occurrence less, and the deleted last place has nothing left to name.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-29T08:00:00.000Z", "day": "2026-08-29" },
-          { "at": "2026-08-30T08:00:00.000Z", "day": "2026-08-30" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-29T08:00:00.000Z", "day": "2026-08-29", "device_day": "2026-08-29" },
+          { "at": "2026-08-30T08:00:00.000Z", "day": "2026-08-30", "device_day": "2026-08-30" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY;UNTIL=20260831T080000Z",
         "tail": [
-          { "at": "2026-08-30T08:00:00.000Z", "day": "2026-08-30" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-30T08:00:00.000Z", "day": "2026-08-30", "device_day": "2026-08-30" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "tail_start": "2026-08-30T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=DAILY;UNTIL=20260831T080000Z",
         "deleted": ["2026-08-31T08:00:00.000Z"]
       },
-      "expected": { "exceptions": [], "carried_by": "place", "dropped": ["2026-08-31T08:00:00.000Z"] }
+      "expected": {
+        "exceptions": [],
+        "carried_by": "place",
+        "dropped": ["2026-08-31T08:00:00.000Z"]
+      }
     },
     {
       "name": "a series without a zone of its own matches exactly",
       "note": "+05:30 is no zone: the series repeats on UTC, and an instant half a day near is another occurrence.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T20:00:00.000Z", "day": "2026-08-24" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T20:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" }
         ],
         "old_all_day": false,
         "old_tzid": "+05:30",
+        "old_rule": "FREQ=HOURLY;INTERVAL=12",
         "tail": [
-          { "at": "2026-08-24T09:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T21:00:00.000Z", "day": "2026-08-24" }
+          { "at": "2026-08-24T09:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T21:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" }
         ],
         "tail_start": "2026-08-24T09:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "+05:30",
-        "rule_changed": false,
+        "tail_rule": "FREQ=HOURLY;INTERVAL=12",
         "deleted": ["2026-08-24T20:00:00.000Z"]
       },
-      "expected": { "exceptions": ["2026-08-24T21:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-24T21:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "two occurrences on one day keep neither by day",
       "note": "A new rule that repeats within a day: which of the two was meant cannot be told.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T20:00:00.000Z", "day": "2026-08-24" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T20:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" }
         ],
         "old_all_day": false,
         "old_tzid": null,
+        "old_rule": "FREQ=HOURLY;INTERVAL=12",
         "tail": [
-          { "at": "2026-08-24T09:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-24T21:00:00.000Z", "day": "2026-08-24" }
+          { "at": "2026-08-24T09:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T21:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" }
         ],
         "tail_start": "2026-08-24T09:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": null,
-        "rule_changed": true,
+        "tail_rule": "FREQ=DAILY;BYHOUR=9,21",
         "deleted": ["2026-08-24T20:00:00.000Z"]
       },
-      "expected": { "exceptions": [], "carried_by": "day", "dropped": ["2026-08-24T20:00:00.000Z"] }
+      "expected": {
+        "exceptions": [],
+        "carried_by": "day",
+        "dropped": ["2026-08-24T20:00:00.000Z"]
+      }
     },
     {
       "name": "a series rewritten in place keeps the exceptions its rows stand in for",
       "note": "Exchange lists an occurrence changed in Outlook among the exceptions; its row stays, so does the exception, as spelled. One instant in two spellings is written once.",
       "question": {
         "old_slots": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY",
         "tail": [
-          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24" },
-          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31" }
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" }
         ],
         "tail_start": "2026-08-24T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY",
         "deleted": ["2026-08-31T08:00:00.000Z"],
         "standing": ["2026-08-31T08:00:00Z", "2026-08-24T08:00:00Z"]
       },
-      "expected": { "exceptions": ["2026-08-24T08:00:00Z", "2026-08-31T08:00:00.000Z"], "carried_by": "place", "dropped": [] }
+      "expected": {
+        "exceptions": ["2026-08-24T08:00:00Z", "2026-08-31T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     },
     {
       "name": "nothing deleted writes nothing",
@@ -382,14 +462,188 @@
         "old_slots": [],
         "old_all_day": false,
         "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY",
         "tail": [],
         "tail_start": "2026-08-24T08:00:00.000Z",
         "tail_all_day": false,
         "tail_tzid": "Europe/Berlin",
-        "rule_changed": false,
+        "tail_rule": "FREQ=WEEKLY",
         "deleted": []
       },
-      "expected": { "exceptions": [], "carried_by": "day", "dropped": [] }
+      "expected": {
+        "exceptions": [],
+        "carried_by": "day",
+        "dropped": []
+      }
+    },
+    {
+      "name": "\"every weekday\" moved onto another of its days keeps its deletions",
+      "note": "Monday 24.08 moved to Tuesday: Wednesday and Thursday stay where they were, so the deleted Thursday stays deleted. By place it shifted onto Friday, a day nobody deleted.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T06:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T06:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T06:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T06:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "tail": [
+          { "at": "2026-08-25T06:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T06:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T06:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" },
+          { "at": "2026-08-28T06:00:00.000Z", "day": "2026-08-28", "device_day": "2026-08-28" }
+        ],
+        "tail_start": "2026-08-25T06:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "deleted": ["2026-08-27T06:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-08-27T06:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a monthly rule on a named day keeps its deletion on that day",
+      "note": "The shape Exchange and Microsoft 365 write: moved from the 10th to the 11th, the series still repeats on the 10th.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-10T06:00:00.000Z", "day": "2026-08-10", "device_day": "2026-08-10" },
+          { "at": "2026-09-10T06:00:00.000Z", "day": "2026-09-10", "device_day": "2026-09-10" },
+          { "at": "2026-10-10T06:00:00.000Z", "day": "2026-10-10", "device_day": "2026-10-10" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=MONTHLY;BYMONTHDAY=10",
+        "tail": [
+          { "at": "2026-09-10T06:00:00.000Z", "day": "2026-09-10", "device_day": "2026-09-10" },
+          { "at": "2026-10-10T06:00:00.000Z", "day": "2026-10-10", "device_day": "2026-10-10" }
+        ],
+        "tail_start": "2026-08-11T06:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=MONTHLY;BYMONTHDAY=10",
+        "deleted": ["2026-10-10T06:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-10-10T06:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a new end is no new rule",
+      "note": "Only the COUNT changed: the occurrences are the same, so the deletion still follows the date.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T08:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T08:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;COUNT=10",
+        "tail": [
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" },
+          { "at": "2026-09-08T08:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
+        ],
+        "tail_start": "2026-08-25T08:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=WEEKLY;COUNT=12",
+        "deleted": ["2026-09-07T08:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-09-08T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
+    },
+    {
+      "name": "another spelling of the same rule is no new rule",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY",
+        "tail": [
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-26T08:00:00.000Z", "day": "2026-08-26", "device_day": "2026-08-26" },
+          { "at": "2026-08-27T08:00:00.000Z", "day": "2026-08-27", "device_day": "2026-08-27" }
+        ],
+        "tail_start": "2026-08-25T08:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "RRULE:freq=daily;INTERVAL=1",
+        "deleted": ["2026-08-26T08:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-08-27T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a deletion never lands on the occurrence being saved",
+      "note": "Daily, the 25th deleted; moved to the 25th with a weekly rule. The new series starts there: the user just put it there.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY",
+        "tail": [
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-01T08:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" }
+        ],
+        "tail_start": "2026-08-25T08:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=WEEKLY",
+        "deleted": ["2026-08-25T08:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": [],
+        "carried_by": "day",
+        "dropped": ["2026-08-25T08:00:00.000Z"]
+      }
+    },
+    {
+      "name": "without a clock in common a day is the one the device shows",
+      "note": "Daily 19:00 New York is 01:00 the next day in Berlin. Switched to all-day under a new rule, the deleted Monday evening is the Tuesday the user saw it on.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-09-07T23:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-08" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "America/New_York",
+        "old_rule": "FREQ=DAILY",
+        "tail": [
+          { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" },
+          { "at": "2026-09-07T22:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
+        ],
+        "tail_start": "2026-08-24T22:00:00.000Z",
+        "tail_all_day": true,
+        "tail_tzid": null,
+        "tail_rule": "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR,SA,SU",
+        "deleted": ["2026-09-07T23:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-09-07T22:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
     }
   ]
 }

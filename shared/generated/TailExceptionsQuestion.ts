@@ -17,10 +17,18 @@ old_slots: Array<TailSlot>,
  */
 old_all_day: boolean, old_tzid: string | null, 
 /**
+ * The old series' rule, as stored.
+ */
+old_rule: string, 
+/**
  * The new series' occurrences from its start on, in order, as its rule
  * generates them with no exception.
  */
 tail: Array<TailSlot>, 
+/**
+ * The new series' rule.
+ */
+tail_rule: string, 
 /**
  * The instant the new series starts at.
  */
@@ -29,10 +37,6 @@ tail_start: string,
  * Whether the new series is all-day, and its zone.
  */
 tail_all_day: boolean, tail_tzid: string | null, 
-/**
- * Whether the user gave the new series another repeat rule.
- */
-rule_changed: boolean, 
 /**
  * The old series' occurrences from the cut on that the calendar shows
  * nothing for, as the shell's `deletedSlots` spelled them.

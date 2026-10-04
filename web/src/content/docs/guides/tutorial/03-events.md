@@ -179,11 +179,12 @@ and ones changed in another calendar app stay in it, at their usual time and
 with the new series' content. Deleted occurrences follow your change: move the
 occurrence to another day and each deleted one moves with it by its place in
 the series, so a deleted third Monday becomes a deleted third Tuesday; switch
-between all-day and a time of day and it stays on its day. Give the new series
-another repeat rule, and a deleted occurrence stays deleted only on a day the
-new rule still has. A rule that names its weekdays, such as every Monday, keeps
-them when you move one occurrence to another day, and so do its deletions, for
-now. Not every calendar keeps those deletions yet:
+between all-day and a time of day and it stays on the day you saw it on. Give
+the new series another repeat rule, and a deleted occurrence stays deleted only
+on a day the new rule still has; a new end alone is no new rule. A rule that
+names its days, such as every Monday, every weekday or every 10th of the month,
+keeps them when you move one occurrence to another day, and so do its
+deletions, for now. Not every calendar keeps those deletions yet:
 CalDAV calendars do for a series with a time of day, but on Exchange, on
 Google, and in an all-day series on CalDAV, a deleted occurrence can still come
 back for now. On Google, Aperio also knows deleted occurrences only about a year

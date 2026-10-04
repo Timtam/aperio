@@ -236,13 +236,20 @@ beim Öffnen, wie das Handy. Gelingt das nicht, sagt der Editor es mit der
 Meldung, die heute beim Speichern kommt, und fällt nicht still auf die
 Geräte-Uhr zurück.
 
-Die gelöschten Termine gehen mit (152, 188; `cal_core::tail_exceptions`): Bei
-gleicher Regel nach ihrem Platz in der Serie, auch wenn das Datum wandert oder
-die Serie zwischen ganztägig und mit Uhrzeit wechselt, und geschrieben als der
-Zeitpunkt des Vorkommens der neuen Serie; bei neuer Regel nach ihrem Tag, und
-nur, wo die neue Regel diesen Tag noch trifft. Für die Zone gilt beim Wechsel
-dasselbe wie unten: ganztägig ohne Zone, aus ganztägig mit Uhrzeit die
-Gerätezone.
+Die gelöschten Termine gehen mit (152, 188, 189; `cal_core::tail_exceptions`):
+Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —
+gleiches Muster (ein neues Ende oder eine andere Schreibweise ist keine neue
+Regel) und eine Regel, die ihre Tage aus dem Beginn nimmt —, auch wenn das Datum
+wandert oder die Serie zwischen ganztägig und mit Uhrzeit wechselt; geschrieben
+als der Zeitpunkt des Vorkommens der neuen Serie. Sonst nach ihrem Tag: bei neuer
+Regel nur, wo sie diesen Tag noch trifft, und bei einer Regel, die ihre Tage
+nennt (Wochentage, Monatstage, Monate), bleiben sie auf ihrem Tag, weil ihre
+übrigen Vorkommen nicht wandern. Ein Tag wird auf der Uhr gelesen, auf der beide
+Serien wiederholen, sonst auf den Tagen des Geräts — den Tagen, an denen der
+Nutzer die Termine gesehen hat. Das erste Vorkommen der neuen Serie wird nie
+ausgeschlossen: das ist der Termin, den der Nutzer gerade speichert. Für die Zone
+gilt beim Wechsel dasselbe wie unten: ganztägig ohne Zone, aus ganztägig mit
+Uhrzeit die Gerätezone.
 
 ### Beschriftung, Hinweis und was man hört
 

@@ -401,6 +401,15 @@ export function planSeriesSplit<E extends SplittableEvent>(
   };
 }
 
+/** An occurrence with its day on its series' clock and on the device's. */
+function slotOf(at: string, tzid: string | null | undefined, allDay: boolean): TailSlot {
+  return {
+    at,
+    day: seriesDayKey(at, tzid, allDay),
+    device_day: seriesDayKey(at, null, true),
+  };
+}
+
 const HALF_DAY_MS = 12 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Past any series a calendar sensibly holds, as `firstOccurrenceFrom` reaches. */
@@ -421,10 +430,12 @@ const LONGEST_REACH_MS = 15_000 * DAY_MS;
  *   the device's once it gets a time of day, as a created series does
  *   (DESIGN-series-time-zone.md, "Ganztägig aus").
  * - The exceptions: the deleted occurrences (`plan.deleted`) go along with the
- *   edit — by their place when the date moves, by their day under a new rule —
- *   and the ones a row stands in for stay as spelled (`plan.standing`). Which
- *   goes where is the core's rule (`cal_core::tail_exceptions`); this expands
- *   both series for it, because the device's zone is this surface's to know.
+ *   edit — by their place when every occurrence moves with the date, by their
+ *   day under a new rule or a rule that names its days — and the ones a row
+ *   stands in for stay as spelled (`plan.standing`). Which goes where is the
+ *   core's rule (`cal_core::tail_exceptions`); this expands both series for it,
+ *   with each occurrence's day on its series' clock and on the device's,
+ *   because the device's zone is this surface's to know.
  *
  * `tail` is the start and the kind of the row being written; `rule` only an
  * editor passes — a carry never changes the rule. Throws when the door into
@@ -464,10 +475,7 @@ export function tailRecurrenceFor(input: {
     oldSlots = expandEvent(
       { ...master, recurrence: { ...master.recurrence, exceptions: [] } },
       { start: new Date(cut - oldMargin), end: new Date(last + oldMargin) },
-    ).map((occ) => ({
-      at: occ.start,
-      day: seriesDayKey(occ.start, master.recurrence?.tzid, master.all_day),
-    }));
+    ).map((occ) => slotOf(occ.start, master.recurrence?.tzid, master.all_day));
     // The new series' occurrences, as many as the old slots and at least past
     // the last deleted day — the date may have moved either way. Widening, as
     // `firstOccurrenceFrom` does, until there are enough or the rule ends.
@@ -484,10 +492,7 @@ export function tailRecurrenceFor(input: {
     let found = -1;
     for (;;) {
       const expanded = expandEvent(series, { start: from, end: new Date(from.getTime() + span) });
-      tailSlots = expanded.map((occ) => ({
-        at: occ.start,
-        day: seriesDayKey(occ.start, tzid, tail.all_day),
-      }));
+      tailSlots = expanded.map((occ) => slotOf(occ.start, tzid, tail.all_day));
       if (
         tailSlots.length >= oldSlots.length ||
         tailSlots.length === found ||
@@ -503,11 +508,12 @@ export function tailRecurrenceFor(input: {
     old_slots: oldSlots,
     old_all_day: master.all_day,
     old_tzid: master.recurrence?.tzid ?? null,
+    old_rule: master.recurrence?.rrule ?? '',
     tail: tailSlots,
+    tail_rule: rrule,
     tail_start: tail.start,
     tail_all_day: tail.all_day,
     tail_tzid: tzid ?? null,
-    rule_changed: ruleChanged,
     deleted: plan.deleted,
     standing: plan.standing,
   });
