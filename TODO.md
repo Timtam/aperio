@@ -2382,9 +2382,10 @@ Siehe DESIGN §4.2.
     - ✅ **Tail-Regel bei Wechsel und neuer Regel** (PR 3b, 152, 186-191):
       Gelöschte Termine gehen mit der Änderung mit. Nach ihrem Platz in der
       Serie (152), wenn jedes Vorkommen mit dem Beginn wandert (gleiches Muster,
-      ein neues Ende zählt nicht; Tage und Uhrzeiten aus dem Beginn; jedes um
-      denselben Schritt in Tagen, Monaten oder Jahren, was eine Monatsregel vom
-      31. auf den 30. nicht tut):
+      ein neues Ende zählt nicht; Tage und Uhrzeiten aus dem Beginn; jedes bis
+      zur letzten Löschung um denselben Schritt in Tagen, Monaten oder Jahren,
+      was eine Monatsregel vom 31. auf den 30. ab dem nächsten kürzeren Monat
+      nicht mehr tut):
       ein verschobenes Datum
       nimmt sie mit, aus dem gelöschten dritten Montag wird der gelöschte dritte
       Dienstag, und ein Wechsel zwischen ganztägig und mit Uhrzeit lässt eine

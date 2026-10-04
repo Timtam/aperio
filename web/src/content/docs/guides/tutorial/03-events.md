@@ -184,9 +184,11 @@ the new series another repeat rule, and a deleted occurrence stays deleted only
 on a day the new rule still has; a new end alone is no new rule. A rule that
 names its days, such as every Monday, every weekday or every 10th of the month,
 keeps them when you move one occurrence to another day, and so do its
-deletions, for now. So does a monthly or yearly series that the new date makes
-skip other months or years, such as one moved from the 31st to the 30th. Not
-every calendar keeps those deletions yet:
+deletions, for now. A monthly or yearly series that the new date makes skip
+other months or years, such as one moved from the 31st to the 30th, moves its
+deletions by their place only as far as the two versions still line up; if a
+deletion lies beyond that, they all stay on their day, where a deleted
+occurrence can show again. Not every calendar keeps those deletions yet:
 CalDAV calendars do for a series with a time of day, but on Exchange, on
 Google, and in an all-day series on CalDAV, a deleted occurrence can still come
 back for now. On Google, Aperio also knows deleted occurrences only about a year
