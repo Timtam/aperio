@@ -1027,6 +1027,36 @@
         "carried_by": "place",
         "dropped": []
       }
+    },
+    {
+      "name": "a whole series that starts off its rule moves its deletions by place",
+      "note": "\"Every Monday\" from Wednesday 19.08, moved a day on as a whole: neither start is an occurrence of its rule, so the first Monday and the first Tuesday are the first places, and the deleted 07.09 is the deleted 08.09 (decision 198).",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T07:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-31T07:00:00.000Z", "day": "2026-08-31", "device_day": "2026-08-31" },
+          { "at": "2026-09-07T07:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;BYDAY=MO",
+        "tail": [
+          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-01T07:00:00.000Z", "day": "2026-09-01", "device_day": "2026-09-01" },
+          { "at": "2026-09-08T07:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
+        ],
+        "tail_start": "2026-08-20T07:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=WEEKLY;BYDAY=TU",
+        "deleted": ["2026-09-07T07:00:00.000Z"],
+        "old_start": "2026-08-19T07:00:00.000Z"
+      },
+      "expected": {
+        "exceptions": ["2026-09-08T07:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
     }
   ]
 }

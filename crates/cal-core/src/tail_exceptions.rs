@@ -121,6 +121,12 @@ pub struct TailExceptionsQuestion {
     /// series still stands in for, kept when the series is rewritten in place.
     #[serde(default)]
     pub standing: Vec<String>,
+    /// The instant the old series is read from, when that need not be one of
+    /// its occurrences: the start of a whole series (decision 198), which may
+    /// lie off its own rule. Absent, the first old slot is the cut.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub old_start: Option<String>,
 }
 
 /// How the deleted occurrences went over to the new series.
@@ -365,9 +371,25 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
     // pattern with days taken from the start, or a rule moved with it, and the
     // new series starting on an occurrence of its own rule.
     let tail_start = instant_ms(&question.tail_start);
-    let aligned = match (question.tail.first(), tail_start) {
-        (Some(first), Some(start)) => instant_ms(&first.at).is_some_and(|at| same_tail(at, start)),
-        _ => false,
+    // Both series start on their own rule, or — a whole series that began
+    // off it, moved as a whole (decision 198) — both start off it: then their
+    // first occurrences are the first places either way.
+    let on_rule =
+        |slot: Option<&TailSlot>, start: Option<i64>, same: &dyn Fn(i64, i64) -> bool| match (
+            slot.and_then(|s| instant_ms(&s.at)),
+            start,
+        ) {
+            (Some(at), Some(start)) => same(at, start),
+            _ => false,
+        };
+    let tail_on_rule = on_rule(question.tail.first(), tail_start, &same_tail);
+    let aligned = match question.old_start.as_deref() {
+        None => tail_on_rule,
+        Some(old_start) => {
+            !question.tail.is_empty()
+                && tail_on_rule
+                    == on_rule(question.old_slots.first(), instant_ms(old_start), &same_old)
+        }
     };
     // A day on the clock both series repeat on, or the device's when they have
     // none in common.
@@ -507,6 +529,7 @@ mod tests {
             tail_tzid: None,
             deleted: deleted.iter().map(|d| d.to_string()).collect(),
             standing: Vec::new(),
+            old_start: None,
         }
     }
 
@@ -960,6 +983,25 @@ mod tests {
         let answer = tail_exceptions(&q);
         assert_eq!(answer.carried_by, TailCarry::Place);
         assert_eq!(answer.exceptions, vec!["2026-09-22T07:00:00.000Z"]);
+    }
+
+    #[test]
+    fn a_whole_series_that_starts_off_its_rule_moves_by_place() {
+        // "Every Monday" from a Wednesday, moved a day on as a whole: neither
+        // start is an occurrence, the first Monday and the first Tuesday are
+        // the first places (decision 198).
+        let mut q = question(mondays(0), mondays(1), &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        q.old_start = Some("2026-08-19T07:00:00.000Z".into());
+        q.tail_start = "2026-08-20T07:00:00.000Z".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-09-08T07:00:00.000Z"]);
+
+        // One on its rule and one off it do not line up.
+        q.old_start = Some("2026-08-24T07:00:00.000Z".into());
+        assert_eq!(tail_exceptions(&q).carried_by, TailCarry::Day);
     }
 
     #[test]

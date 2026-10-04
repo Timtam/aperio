@@ -204,7 +204,14 @@ all-day series on Google or CalDAV, an occurrence changed in another app also
 stays in the old series for now, so that day shows twice.
 **The whole series** opens the series itself, with its own start and end, even
 when you opened it from a later occurrence. A new time applies to every
-occurrence, and a new date moves the start of the series. The editor's title
+occurrence. A new date moves the series the way **this and all following** from
+its first occurrence would: every Monday becomes every Tuesday, deleted
+occurrences move with it by their place, and an end date moves so the series
+stays as long as it was. The repeat field shows the moved rule right away, and
+a rule that cannot move says so there and when you save. Switching the whole
+series between all-day and a time of day keeps a deleted occurrence on the day
+you saw it on, and an all-day series that gets a time of day gets your
+device's time zone with it. The editor's title
 names your choice, such as **Edit this occurrence only**, and is read out when
 the editor opens. On the desktop the form repeats it as the read-only field
 **Apply to**, which `Tab` reaches like every other field.

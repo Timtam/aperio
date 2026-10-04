@@ -897,23 +897,28 @@ export default function EventEditorModal({
   } => {
     const unmoved = { rrule: recurrence, refused: null };
     const start = toIso(startDate, startTime, allDay);
+    // "This and all following", or the whole series, which moves the same way
+    // from its first occurrence (decision 198), shown at once (199): read
+    // against the occurrence the form was filled from, or the series' start.
+    const thisAndFuture = isOccurrence && occurrence != null && editScope === 'this_and_future';
+    const wholeSeries =
+      editing && !!original?.recurrence?.rrule && (!isOccurrence || editScope === 'series');
     if (
       !recurrence ||
       !original?.recurrence ||
-      occurrence == null ||
-      !isOccurrence ||
-      editScope !== 'this_and_future' ||
+      !(thisAndFuture || wholeSeries) ||
       !start ||
       Number.isNaN(Date.parse(start))
     ) {
       return unmoved;
     }
+    const filledFrom = isOccurrence && occurrence != null ? occurrence : original.start;
     try {
       const answer = movedTailRule({
         rrule: recurrence,
         series: { tzid: original.recurrence.tzid, all_day: original.all_day },
-        from: ruleSetAt ?? occurrence,
-        opened: ruleSetAt ?? occurrence,
+        from: ruleSetAt ?? filledFrom,
+        opened: ruleSetAt ?? filledFrom,
         tail: { start, all_day: allDay },
       });
       return answer.outcome === 'shifted'
@@ -931,6 +936,7 @@ export default function EventEditorModal({
     allDay,
     original,
     occurrence,
+    editing,
     isOccurrence,
     editScope,
     ruleSetAt,
@@ -1256,21 +1262,25 @@ export default function EventEditorModal({
       const tailRecurrenceForEdit = (
         args: Omit<Parameters<typeof tailRecurrenceFor>[0], 'opened' | 'rule'>,
         opened: string,
+        own: { from: string; refused: 'thisAndFuture' | 'series' },
       ) => {
         try {
           const openedRule = original?.recurrence?.rrule ?? null;
           let rule = recurrence;
-          const own = ruleSetAt !== null || rule !== openedRule;
-          if (own && rule) {
+          const set = ruleSetAt !== null || rule !== openedRule;
+          if (set && rule) {
+            // The user's rule names the days the field showed: it moves from
+            // the start it was set at to the form's, as the field showed it.
+            // Mirrors the desktop.
             const moved = movedTailRule({
               rrule: rule,
               series: {
                 tzid: args.master.recurrence?.tzid,
                 all_day: args.master.all_day,
               },
-              from: ruleSetAt ?? args.cutoffIso,
-              opened: ruleSetAt ?? opened,
-              tail: args.tail,
+              from: ruleSetAt ?? own.from,
+              opened: ruleSetAt ?? own.from,
+              tail: { start, all_day: allDay },
             });
             if (moved.outcome === 'refused') {
               throw new TailShiftRefusedError(moved.reason);
@@ -1280,15 +1290,20 @@ export default function EventEditorModal({
           return tailRecurrenceFor({
             ...args,
             opened,
-            rule: { form: rule, opened: openedRule, touched: own },
+            rule: { form: rule, opened: openedRule, touched: set },
           });
         } catch (err) {
           if (err instanceof TailShiftRefusedError) {
             throw new Error(
-              t('dialogs.event.thisAndFutureShiftRefused', {
-                title: original?.title ?? title,
-                reason: t(`dialogs.moveScope.refusal.${err.reason}`),
-              }),
+              t(
+                own.refused === 'series'
+                  ? 'dialogs.event.seriesShiftRefused'
+                  : 'dialogs.event.thisAndFutureShiftRefused',
+                {
+                  title: original?.title ?? title,
+                  reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+                },
+              ),
             );
           }
           throw err;
@@ -1339,6 +1354,7 @@ export default function EventEditorModal({
               tail: { start, all_day: allDay },
             },
             occurrence,
+            { from: occurrence, refused: 'thisAndFuture' },
           );
           const masterRecurrence = original.recurrence;
           const written = await writeSeriesSplit(
@@ -1484,12 +1500,30 @@ export default function EventEditorModal({
               allDay,
             )
           : { start, end };
+        // The whole series moves as "this and all following" from its own
+        // start would (decision 198): when its start moved or it switched
+        // between all-day and a time of day, its rule moves with the date, its
+        // deleted occurrences keep their place, its bound the length and its
+        // zone follows the kind (191, 195). Its start stays where the edit put
+        // it, off its own rule too. Untouched, the recurrence stays as it is.
+        // Mirrors the desktop.
+        const wholePlan =
+          !wholeCut &&
+          base.recurrence?.rrule &&
+          (Date.parse(times.start) !== Date.parse(base.start) || allDay !== base.all_day)
+            ? planSeriesSplit(
+                base,
+                base.start,
+                (await readSeriesRows(base, base.start, getSeriesRows)).rows,
+              )
+            : null;
         // "This and all following" from the series' first occurrence on keeps
         // the rule the repeat field shows — its own from the cut on, moved
         // with a new date, unless the field changed — and takes the deleted
-        // occurrences along as a split does (decisions 152, 188, 189, 197).
-        // A whole-series edit moves them to a new time of day, or the
-        // occurrences they cancel would come back at that time.
+        // occurrences along as a split does (decisions 152, 188, 189, 197), and
+        // so does a moved whole series (198). An untouched one moves them to a
+        // new time of day, or the occurrences they cancel would come back at
+        // that time.
         const seriesRecurrence = wholeCut
           ? tailRecurrenceForEdit(
               {
@@ -1500,13 +1534,25 @@ export default function EventEditorModal({
               },
               // Read as a change to the series from its cut, as its start is.
               wholeCut.occIso,
+              { from: wholeCut.occIso, refused: 'thisAndFuture' },
             )
-          : exceptionsAtSeriesTime(
-              recurrenceToSend,
-              base.start,
-              times.start,
-              allDay || base.all_day,
-            );
+          : wholePlan?.kind === 'whole'
+            ? tailRecurrenceForEdit(
+                {
+                  master: base,
+                  cutoffIso: base.start,
+                  plan: wholePlan,
+                  tail: { start: times.start, all_day: allDay },
+                },
+                base.start,
+                { from: seededOccurrence?.start ?? base.start, refused: 'series' },
+              )
+            : exceptionsAtSeriesTime(
+                recurrenceToSend,
+                base.start,
+                times.start,
+                allDay || base.all_day,
+              );
         const updated = await updateEvent(
           {
             ...base,
@@ -2113,9 +2159,12 @@ export default function EventEditorModal({
             // Before the controls, so it is read on the way to them: the rule
             // they show stays as it is, and saving will say so too (193).
             <Text style={styles.hint}>
-              {t('dialogs.event.recurrence.cannotMove', {
-                reason: t(`dialogs.moveScope.refusal.${shownRule.refused}`),
-              })}
+              {t(
+                isOccurrence
+                  ? 'dialogs.event.recurrence.cannotMove'
+                  : 'dialogs.event.recurrence.cannotMoveSeries',
+                { reason: t(`dialogs.moveScope.refusal.${shownRule.refused}`) },
+              )}
             </Text>
           )}
           <RecurrenceSelector

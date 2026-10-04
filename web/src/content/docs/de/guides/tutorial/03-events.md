@@ -222,8 +222,16 @@ wieder. Und in einer ganztägigen Serie bei Google oder CalDAV bleibt ein in
 einer anderen App geänderter Termin vorerst auch in der alten Serie, dieser Tag
 steht dann doppelt.
 **Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
-auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit gilt für jeden Termin, ein neues Datum verschiebt den
-Beginn der Serie. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
+auch wenn du sie von einem späteren Termin aus geöffnet hast. Eine neue Uhrzeit
+gilt für jeden Termin. Ein neues Datum verschiebt die Serie so, wie es **diesen
+und alle folgenden** ab ihrem ersten Termin täte: Aus jeden Montag wird jeden
+Dienstag, gelöschte Termine wandern nach ihrem Platz mit, und ein Enddatum rückt
+so, dass die Serie so lang bleibt, wie sie war. Das Feld für die Wiederholung
+zeigt die verschobene Regel sofort, und eine Regel, die nicht wandern kann, sagt
+es dort und beim Speichern. Wechselt die ganze Serie zwischen ganztägig und mit
+Uhrzeit, bleibt ein gelöschter Termin auf dem Tag, an dem du ihn gesehen hast,
+und eine ganztägige Serie, die eine Uhrzeit bekommt, bekommt die Zeitzone deines
+Geräts dazu. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
 Termin bearbeiten**, und wird beim Öffnen vorgelesen. Am Desktop wiederholt das
 Formular sie im schreibgeschützten Feld **Anwenden auf**, das du wie jedes andere
 Feld mit `Tab` erreichst.

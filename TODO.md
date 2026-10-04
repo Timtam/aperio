@@ -2424,12 +2424,17 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
-    - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
-      derselbe 18-Uhr-Fehler beim Bearbeiten der ganzen Serie
-      (`exceptionsAtSeriesTime` lässt ganztägige Wechsel aus), und ein neues
-      Datum verschiebt dort den Beginn, aber nicht die Tage einer Regel, die sie
-      nennt (beim Ziehen schon). Eigener kleiner PR, mit `movedTailRule` bzw.
-      `begin_series_anew`.
+    - ✅ **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
+      Der Editor liest eine Bearbeitung der ganzen Serie, deren Beginn wandert
+      oder die zwischen ganztägig und Uhrzeit wechselt, wie „dieser und alle
+      folgenden“ ab ihrem eigenen Beginn (198): Regel wandert mit, gelöschte
+      Termine nach Platz oder Tag (die Ausnahme um 18 Uhr bleibt auf ihrem Tag),
+      das Ende hält die Länge, die Zone folgt der Art (ganztägig keine, aus
+      ganztägig die Gerätezone). Das Feld zeigt die verschobene Regel sofort
+      (199). Eine Serie, die neben ihrer Regel beginnt, behält ihren Beginn und
+      zählt ihre Plätze ab dem ersten Vorkommen (`old_start`). Unberührt bleibt
+      die Wiederholung byte-genau. Das Ziehen bleibt Ziehen. Beide Editoren.
+      ↻ im Test.
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des

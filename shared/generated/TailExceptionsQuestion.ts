@@ -46,4 +46,10 @@ deleted: Array<string>,
  * Exceptions that stay as they are spelled: occurrences a row of the
  * series still stands in for, kept when the series is rewritten in place.
  */
-standing: Array<string>, };
+standing: Array<string>, 
+/**
+ * The instant the old series is read from, when that need not be one of
+ * its occurrences: the start of a whole series (decision 198), which may
+ * lie off its own rule. Absent, the first old slot is the cut.
+ */
+old_start?: string, };

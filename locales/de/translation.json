@@ -1537,6 +1537,7 @@
       "thisAndFutureLoadFailed": "Die Serie „{{title}}\" konnte zum Aufteilen nicht geladen werden; es wurde nichts geändert.",
       "thisAndFutureNotRepeating": "„{{title}}\" wiederholt sich nicht mehr; es wurde anderswo geändert. Hier wurde nichts geändert. Öffne den Termin neu, um ihn zu bearbeiten.",
       "thisAndFutureShiftRefused": "„{{title}}\" lässt sich ab hier nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu, oder bearbeite nur diesen Termin.",
+      "seriesShiftRefused": "„{{title}}\" lässt sich als ganze Serie nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu.",
       "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender, bevor du erneut speicherst.",
       "thisAndFutureUpdatedMaybeTwice": "„{{title}}\" wurde ab diesem Termin geändert. Ob die alte Serie jetzt davor endet, ist aber unklar ({{detail}}): Ab {{date}} steht sie möglicherweise doppelt. Bitte prüfen.",
       "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
@@ -1675,7 +1676,8 @@
         "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus.",
         "storedLabel": "Gespeicherte Wiederholung",
         "movedLabel": "Wiederholung ab hier",
-        "cannotMove": "Die Wiederholung kann nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}. Wähle sie selbst neu, oder bearbeite nur diesen Termin."
+        "cannotMove": "Die Wiederholung kann nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}. Wähle sie selbst neu, oder bearbeite nur diesen Termin.",
+        "cannotMoveSeries": "Die Wiederholung kann nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}. Wähle sie selbst neu."
       },
       "prefillCalendarReadOnly": "Der frühere Termin liegt in „{{calendar}}\", und dorthin lassen sich keine neuen Termine schreiben. Der Kalender unten bleibt, wie er ist.",
       "prefillCalendarUnknown": "Der Kalender des früheren Termins steht hier nicht zur Verfügung. Der Kalender unten bleibt, wie er ist.",

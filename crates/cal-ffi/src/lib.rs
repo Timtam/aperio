@@ -766,7 +766,7 @@ mod tests {
         const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/tailExceptions.json");
         let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
         let rows = doc["rows"].as_array().expect("rows");
-        assert!(rows.len() >= 36, "the contract covers the shapes");
+        assert!(rows.len() >= 37, "the contract covers the shapes");
         for row in rows {
             let name = row["name"].as_str().expect("a name");
             let answered =

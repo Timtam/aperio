@@ -38,6 +38,10 @@ const { invokeMock, onFile, announced, announce } = vi.hoisted(() => {
     if (command === 'get_event_by_id') {
       return Promise.resolve(onFile.series);
     }
+    // The series' own rows, as the host keeps them: none here.
+    if (command === 'get_series_rows') {
+      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+    }
     // A string command: the RSVP block asks whose calendar this is.
     if (command === 'calendar_current_user_email' || command === 'get_user_pref') {
       return Promise.resolve(null);
@@ -110,14 +114,24 @@ vi.mock('../state/useTitleSuggestions', async () => {
   );
   return { ...actual, useTitleSuggestions: () => [] };
 });
-// The rule picker, reduced to one button: the one-off case turns an event into
-// a weekly series without driving the real picker's controls. Until it is
-// pressed the form keeps the rule the event was opened with.
+// The rule picker, reduced to the rule it shows and one button: the one-off
+// case turns an event into a weekly series without driving the real picker's
+// controls. Until it is pressed the form keeps the rule the event was opened
+// with.
 vi.mock('./RecurrenceSelector', () => ({
-  RecurrenceSelector: ({ onChange }: { onChange: (rrule: string | null) => void }) => (
-    <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
-      weekly
-    </button>
+  RecurrenceSelector: ({
+    value,
+    onChange,
+  }: {
+    value: string | null;
+    onChange: (rrule: string | null) => void;
+  }) => (
+    <>
+      <output aria-label="rule shown">{value ?? ''}</output>
+      <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
+        weekly
+      </button>
+    </>
   ),
 }));
 
@@ -672,5 +686,120 @@ describe('EventDialog → who may notify the attendees', () => {
     } finally {
       delete cal.supports_scheduling;
     }
+  });
+});
+
+describe('EventDialog → the whole series moves as from its first occurrence (191, 195, 198, 199)', () => {
+  const setStartDate = (value: string) =>
+    fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
+      target: { value },
+    });
+  const ruleShown = () => screen.getByRole('status', { name: 'rule shown' }).textContent;
+
+  it('moves "every Monday" to Tuesday with a later occurrence, and its deletion by place', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    const sent = await saveEditedEvent(
+      JULY_OCCURRENCE,
+      () => {
+        setStartDate('2026-07-07');
+        // In the field before anything is saved (199).
+        expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
+      },
+      'series',
+    );
+    // The series' own start, a day on; the deleted 22 June is the deleted 23rd.
+    expect(sent.start).toBe('2026-06-16T07:00:00.000Z');
+    expect(sent.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      exceptions: ['2026-06-23T07:00:00.000Z'],
+      tzid: 'Europe/Berlin',
+    });
+  });
+
+  it('moves the series opened as itself', async () => {
+    deviceInBerlin();
+    const sent = await saveEditedEvent(SERIES, () => {
+      setStartDate('2026-06-16');
+      expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
+    });
+    expect(sent.start).toBe('2026-06-16T07:00:00.000Z');
+    expect(sent.recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(sent.recurrence?.exceptions).toEqual(['2026-06-23T07:00:00.000Z']);
+  });
+
+  it('keeps an evening deletion on its day when the whole series becomes all-day (191)', async () => {
+    // 18:00 sat closer to the next day's midnight than to its own, so the
+    // switch deleted the Tuesday instead. Read on this machine's clock, as the
+    // field and the expansion are; the zone goes with the time of day.
+    const evening = {
+      ...SERIES,
+      start: new Date(2026, 5, 15, 18).toISOString(),
+      end: new Date(2026, 5, 15, 19).toISOString(),
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: [new Date(2026, 5, 22, 18).toISOString()],
+        tzid: null,
+      },
+    } as unknown as CalendarEvent;
+    const sent = await saveEditedEvent(evening, () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig|all day/i }));
+    });
+    expect(sent.all_day).toBe(true);
+    expect(sent.recurrence?.exceptions).toEqual([new Date(2026, 5, 22).toISOString()]);
+    expect(sent.recurrence?.tzid ?? null).toBeNull();
+  });
+
+  it("gives an all-day series that gets a time of day the device's zone, its deletion at that time", async () => {
+    deviceInBerlin();
+    const days = {
+      ...SERIES,
+      start: new Date(2026, 5, 15).toISOString(),
+      end: new Date(2026, 5, 16).toISOString(),
+      all_day: true,
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: [new Date(2026, 5, 22).toISOString()],
+        tzid: null,
+      },
+    } as unknown as CalendarEvent;
+    const sent = await saveEditedEvent(days, () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig|all day/i }));
+      fireEvent.change(screen.getByLabelText(/startzeit|start time/i), {
+        target: { value: '09:00' },
+      });
+    });
+    expect(sent.all_day).toBe(false);
+    expect(sent.recurrence?.tzid).toBe('Europe/Berlin');
+    expect(sent.recurrence?.exceptions).toEqual([new Date(Date.parse(sent.start) + 7 * 86_400_000).toISOString()]);
+  });
+
+  it('says a whole series that cannot move with its date, and writes nothing (193)', async () => {
+    deviceInBerlin();
+    const firstMonday = {
+      ...SERIES,
+      start: '2026-06-01T07:00:00.000Z',
+      end: '2026-06-01T08:00:00.000Z',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=1MO', exceptions: [], tzid: 'Europe/Berlin' },
+    } as unknown as CalendarEvent;
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={firstMonday} />
+      </StrictMode>,
+    );
+    await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
+    setStartDate('2026-06-02');
+    expect(ruleShown()).toBe('FREQ=MONTHLY;BYDAY=1MO');
+    // Focusable, and without "only this occurrence": the series itself is open.
+    const hint = screen.getByText(
+      /^Die Wiederholung kann nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: .*Wähle sie selbst neu\.$|^The repeat cannot move with the new date or time: .*Choose it yourself\.$/,
+    );
+    expect(hint.getAttribute('tabindex')).toBe('0');
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+    expect(
+      await screen.findByText(/als ganze Serie nicht auf das neue Datum|as a whole series/),
+    ).toBeTruthy();
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(false);
   });
 });

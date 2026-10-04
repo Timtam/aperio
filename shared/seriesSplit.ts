@@ -761,6 +761,9 @@ export function tailRecurrenceFor(input: {
     tail_tzid: tzid ?? null,
     deleted: plan.deleted,
     standing: plan.standing,
+    // The cut, which a whole series' own start may be without being one of
+    // its occurrences (decision 198).
+    old_start: cutoffIso,
   });
   return { rrule, exceptions: answer.exceptions, tzid: tzid ?? null };
 }

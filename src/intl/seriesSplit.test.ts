@@ -1652,6 +1652,33 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
   });
 });
 
+describe('tailRecurrenceFor: a whole series moved from its own start (198)', () => {
+  it('moves the deletions of a series that starts off its rule by their place', () => {
+    // "Every Monday" from a Wednesday, the whole series a day on: its start
+    // stays off the rule, and the deleted 24 August is the deleted 25th.
+    const offRule = {
+      ...weekly,
+      start: '2026-08-05T08:00:00.000Z',
+      end: '2026-08-05T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-08-24T08:00:00.000Z'],
+        tzid: null as string | null,
+      },
+    };
+    const plan = planSeriesSplit(offRule, offRule.start, []);
+    const tail = tailRecurrenceFor({
+      master: offRule,
+      cutoffIso: offRule.start,
+      plan: wholeOf(plan),
+      tail: { start: '2026-08-06T08:00:00.000Z', all_day: false },
+      opened: offRule.start,
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
+  });
+});
+
 describe('movedTailRule (189, 192-194)', () => {
   /** An instant of 2026 on UTC, the clock of a series without a zone. */
   const at = (day: string, time = '09:00') => `2026-${day}T${time}:00.000Z`;

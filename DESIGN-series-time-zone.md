@@ -540,6 +540,21 @@ ganztägige Serie, unberührt gespeichert, behält ihren Wert wörtlich.
 gespeicherte ganztägige Serie ohne solche Uhr bekommt die Gerätezone, und die
 Uhrzeiten gelten wie getippt.
 
+**Ganze Serie (191, 195, 198, 199):** Bearbeitet der Editor die ganze Serie, und
+ihr Beginn wandert (Datum oder Uhrzeit) oder sie wechselt zwischen ganztägig und
+mit Uhrzeit, liest er das wie „diesen und alle folgenden“ ab ihrem eigenen
+Beginn: `planSeriesSplit(series, series.start)` ergibt den Plan `whole`,
+`tailRecurrenceFor` die Regel (mitgewandert, 189), die gelöschten Termine (nach
+Platz oder Tag), das Ende (194) und die Zone (ganztägig keine, aus ganztägig die
+Gerätezone). Der Beginn bleibt, wo die Bearbeitung ihn hinlegt, auch neben der
+eigenen Regel, wie Anbieter ihn zeigen; beginnen alte und neue Serie beide neben
+ihrer Regel, gelten ihre ersten Vorkommen als erste Plätze (`old_start` im
+Kern). Unberührt bleibt die Wiederholung, wie sie ist: Ein neuer Titel schreibt
+keine Ausnahme um. Das Feld zeigt die verschobene Regel sofort (199), eine
+Ablehnung (193) sagt es ohne „nur diesen Termin“, wenn die Serie selbst geöffnet
+ist. Das Ziehen einer ganzen Serie bleibt eine Verschiebung jedes Vorkommens um
+gleich viele Tage (`shift_series`, 198).
+
 **Nur dieser Termin:** Geräte-Uhr, keine Zone. **Diesen und alle folgenden:** Uhr
 der Serie (21a), der Rest behält die Zone der ganzen Serie.
 
