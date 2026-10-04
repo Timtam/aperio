@@ -355,11 +355,11 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All but two read `shared/contracts/`, the directory holding the contracts
+/// All but three read `shared/contracts/`, the directory holding the contracts
 /// that BOTH languages check themselves against. The exceptions are the phone's
-/// series-clock and zone-list doors, which read cal-core's own fixtures;
-/// cal-ffi never leaves this repository, so those reaches hold as long as
-/// cal-core stays beside it.
+/// series-clock, zone-list and repeat-summary doors, which read cal-core's own
+/// fixtures; cal-ffi never leaves this repository, so those reaches hold as
+/// long as cal-core stays beside it.
 /// All but the last are the app reading a file in its own checkout and are
 /// correct as they stand.
 ///
