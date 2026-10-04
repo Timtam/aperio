@@ -684,8 +684,10 @@ export function tailRecurrenceFor(input: {
   tail: { start: string; all_day: boolean };
   opened?: string;
   rule?: { form: string | null; opened: string | null; touched?: boolean };
+  /** The whole series, rewritten from its own start (`cutoffIso`, 198). */
+  whole?: boolean;
 }): TailRecurrence | null {
-  const { master, cutoffIso, plan, tail, opened, rule } = input;
+  const { master, cutoffIso, plan, tail, opened, rule, whole } = input;
   const ruleChanged =
     rule !== undefined && (rule.touched === true || rule.form !== rule.opened);
   let rrule = ruleChanged
@@ -761,9 +763,9 @@ export function tailRecurrenceFor(input: {
     tail_tzid: tzid ?? null,
     deleted: plan.deleted,
     standing: plan.standing,
-    // The cut, which a whole series' own start may be without being one of
-    // its occurrences (decision 198).
-    old_start: cutoffIso,
+    // A whole series rewritten from its own start (decision 198): read from
+    // there, on its rule or off it, and its first occurrence may stay deleted.
+    old_start: whole === true ? cutoffIso : undefined,
   });
   return { rrule, exceptions: answer.exceptions, tzid: tzid ?? null };
 }

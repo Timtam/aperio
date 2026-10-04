@@ -48,8 +48,10 @@ deleted: Array<string>,
  */
 standing: Array<string>, 
 /**
- * The instant the old series is read from, when that need not be one of
- * its occurrences: the start of a whole series (decision 198), which may
- * lie off its own rule. Absent, the first old slot is the cut.
+ * The start of a whole series rewritten from it (decision 198), when that
+ * is what is written: then the old series is read from its own start,
+ * which may lie off its rule, and its first occurrence is no occurrence
+ * the user is saving, so it may stay deleted. Absent, the first old slot
+ * is the cut, and the new series' first occurrence the one being saved.
  */
 old_start?: string, };

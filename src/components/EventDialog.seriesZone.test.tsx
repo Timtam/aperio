@@ -2,7 +2,10 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
+import { dateInput } from '@aperio/shared';
+
 import type { Calendar, CalendarEvent } from '../api/types';
+import { localTimeZone } from '../intl/recurrence';
 
 /**
  * Editing a series as a whole keeps the zone it was written in.
@@ -131,6 +134,9 @@ vi.mock('./RecurrenceSelector', () => ({
       <button type="button" onClick={() => onChange('FREQ=WEEKLY')}>
         weekly
       </button>
+      <button type="button" onClick={() => onChange('FREQ=WEEKLY;BYDAY=TU')}>
+        tuesdays
+      </button>
     </>
   ),
 }));
@@ -156,7 +162,7 @@ function deviceInBerlin() {
 /** Open the event, make the given change, save, and return the event that went out. */
 async function saveEditedEvent(
   event: CalendarEvent,
-  change?: () => void,
+  change?: () => void | Promise<void>,
   initialScope?: 'series',
 ): Promise<CalendarEvent> {
   const { EventDialog } = await import('./EventDialog');
@@ -166,7 +172,7 @@ async function saveEditedEvent(
     </StrictMode>,
   );
   await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
-  change?.();
+  await change?.();
   fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
   await waitFor(() =>
     expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
@@ -730,8 +736,10 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
 
   it('keeps an evening deletion on its day when the whole series becomes all-day (191)', async () => {
     // 18:00 sat closer to the next day's midnight than to its own, so the
-    // switch deleted the Tuesday instead. Read on this machine's clock, as the
-    // field and the expansion are; the zone goes with the time of day.
+    // switch deleted the Tuesday instead. All on this machine's clock — the
+    // series in its zone, the field and the device's days alike — and the
+    // zone goes with the time of day.
+    const machineZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
     const evening = {
       ...SERIES,
       start: new Date(2026, 5, 15, 18).toISOString(),
@@ -739,7 +747,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       recurrence: {
         rrule: 'FREQ=WEEKLY;BYDAY=MO',
         exceptions: [new Date(2026, 5, 22, 18).toISOString()],
-        tzid: null,
+        tzid: machineZone,
       },
     } as unknown as CalendarEvent;
     const sent = await saveEditedEvent(evening, () => {
@@ -751,7 +759,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
   });
 
   it("gives an all-day series that gets a time of day the device's zone, its deletion at that time", async () => {
-    deviceInBerlin();
+    // On this machine's clock and days: the device is the machine.
     const days = {
       ...SERIES,
       start: new Date(2026, 5, 15).toISOString(),
@@ -770,8 +778,76 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       });
     });
     expect(sent.all_day).toBe(false);
-    expect(sent.recurrence?.tzid).toBe('Europe/Berlin');
+    expect(sent.recurrence?.tzid ?? null).toBe(localTimeZone());
     expect(sent.recurrence?.exceptions).toEqual([new Date(Date.parse(sent.start) + 7 * 86_400_000).toISOString()]);
+  });
+
+  it('writes the rule the field shows when one set at another date is put back', async () => {
+    // Moved to Tuesday, "Tuesdays" set there, the date back on Monday: the
+    // field says Mondays, and Mondays are written, not the Tuesdays.
+    deviceInBerlin();
+    const sent = await saveEditedEvent(SERIES, () => {
+      setStartDate('2026-06-16');
+      fireEvent.click(screen.getByRole('button', { name: 'tuesdays' }));
+      setStartDate('2026-06-15');
+      expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=MO');
+    });
+    expect(sent.start).toBe(SERIES.start);
+    expect(sent.recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=MO');
+    expect(sent.recurrence?.exceptions).toEqual(['2026-06-22T07:00:00.000Z']);
+  });
+
+  it('keeps a deleted first occurrence deleted when the whole series gets a new time', async () => {
+    // Nobody is saving the first Monday: it stays deleted at the new time.
+    deviceInBerlin();
+    const firstDeleted = {
+      ...SERIES,
+      recurrence: { ...SERIES.recurrence, exceptions: [SERIES.start] },
+    } as unknown as CalendarEvent;
+    const sent = await saveEditedEvent(firstDeleted, () => {
+      fireEvent.change(screen.getByLabelText(/startzeit|start time/i), {
+        target: { value: '10:30' },
+      });
+    });
+    expect(sent.start).not.toBe(SERIES.start);
+    expect(sent.recurrence?.exceptions).toEqual([sent.start]);
+  });
+
+  it('shows the end a whole series opened at a later occurrence will be written with', async () => {
+    // Monthly from 31 January until 31 December, seven times: moved a day on
+    // from its 31 March, the series starts on 1 February and keeps seven,
+    // so it ends on 1 August — read from the series' own start, in the field
+    // as on saving.
+    deviceInBerlin();
+    const monthly = {
+      ...SERIES,
+      start: '2026-01-31T08:00:00.000Z',
+      end: '2026-01-31T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;UNTIL=20261231T080000Z',
+        exceptions: [],
+        tzid: 'Europe/Berlin',
+      },
+    } as unknown as CalendarEvent;
+    onFile.series = monthly;
+    const march = {
+      ...monthly,
+      id: 'ev-series@2026-03-31T07:00:00.000Z',
+      series_id: 'ev-series',
+      occurrence_start: '2026-03-31T07:00:00.000Z',
+      start: '2026-03-31T07:00:00.000Z',
+      end: '2026-03-31T08:00:00.000Z',
+    } as unknown as CalendarEvent;
+    const sent = await saveEditedEvent(
+      march,
+      async () => {
+        setStartDate(dateInput(new Date(Date.parse('2026-03-31T07:00:00.000Z') + 86_400_000)));
+        await waitFor(() => expect(ruleShown()).toBe('FREQ=MONTHLY;UNTIL=20260801T070000Z'));
+      },
+      'series',
+    );
+    expect(sent.start).toBe('2026-02-01T08:00:00.000Z');
+    expect(sent.recurrence?.rrule).toBe('FREQ=MONTHLY;UNTIL=20260801T070000Z');
   });
 
   it('says a whole series that cannot move with its date, and writes nothing (193)', async () => {

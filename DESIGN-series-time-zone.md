@@ -259,12 +259,16 @@ das Speichern schreibt nichts und sagt den Grund, die Mitzieh-Dialoge melden die
 Kopie als nicht übertragen. Das Feld zeigt die verschobene Regel sofort (197),
 und wo es sie nur in Worten sagen kann, heißt die Zeile „Wiederholung ab hier“
 statt „Gespeicherte Wiederholung“; was der Nutzer dort danach selbst einstellt,
-gilt ab dem Beginn, an dem er es einstellte, und wandert von dort mit einem
-weiteren neuen Datum. Beim Speichern wandert die Regel zum tatsächlich
-geschriebenen Beginn: Eine ganz von ihrem ersten Vorkommen an neu geschriebene
-Serie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich blieb, und
-ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann das Feld dann
-um eine Zeitumstellung danebenliegen.
+gilt ab dem Beginn, der beim Einstellen geschrieben worden wäre, und wandert von
+dort mit einem weiteren neuen Datum. Feld und Speichern lesen denselben
+Beginn, den geschriebenen: bei „diesen und alle folgenden“ den des Formulars,
+bei der ganzen Serie ihren eigenen, den die Bearbeitung um so viele Tage
+verschiebt, wie der geöffnete Termin wanderte (`ruleFrame`; der Desktop lädt
+dafür die Serie, wenn ein Termin als ganze Serie offen ist). Nur „diesen und
+alle folgenden“ ab dem ersten Vorkommen schreibt erst beim Speichern als ganze
+Serie: Sie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich
+blieb, und ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann
+das Feld dort um eine Zeitumstellung danebenliegen.
 
 Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —

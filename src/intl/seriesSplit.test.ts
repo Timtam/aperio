@@ -1673,9 +1673,33 @@ describe('tailRecurrenceFor: a whole series moved from its own start (198)', () 
       plan: wholeOf(plan),
       tail: { start: '2026-08-06T08:00:00.000Z', all_day: false },
       opened: offRule.start,
+      whole: true,
     });
     expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
     expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
+  });
+
+  it('keeps its deleted first occurrence deleted', () => {
+    // Every Monday from 3 August, that first Monday deleted, the whole series
+    // an hour later: nobody is saving the first occurrence.
+    const first = {
+      ...weekly,
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-08-03T08:00:00.000Z'],
+        tzid: null as string | null,
+      },
+    };
+    const plan = planSeriesSplit(first, first.start, []);
+    const tail = tailRecurrenceFor({
+      master: first,
+      cutoffIso: first.start,
+      plan: wholeOf(plan),
+      tail: { start: '2026-08-03T09:00:00.000Z', all_day: false },
+      opened: first.start,
+      whole: true,
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-03T09:00:00.000Z']);
   });
 });
 
