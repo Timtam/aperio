@@ -240,8 +240,9 @@ Die gelöschten Termine gehen mit (152, 188, 189; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —
 gleiches Muster (ein neues Ende oder eine andere Schreibweise ist keine neue
 Regel), eine Regel, die Tage und Uhrzeiten aus dem Beginn nimmt, und jedes
-Vorkommen um gleich viele Tage verschoben (vom 31. auf den 30. überspringt eine
-Monatsregel andere Monate) —, auch wenn das Datum
+Vorkommen um denselben Schritt in der Einheit der Regel verschoben — Tage,
+Monate oder Jahre; vom 31. auf den 30. überspringt eine Monatsregel andere
+Monate —, auch wenn das Datum
 wandert oder die Serie zwischen ganztägig und mit Uhrzeit wechselt; geschrieben
 als der Zeitpunkt des Vorkommens der neuen Serie. Sonst nach ihrem Tag: bei neuer
 Regel nur, wo sie diesen Tag noch trifft, und bei einer Regel, die ihre Tage

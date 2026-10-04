@@ -2383,7 +2383,8 @@ Siehe DESIGN §4.2.
       Gelöschte Termine gehen mit der Änderung mit. Nach ihrem Platz in der
       Serie (152), wenn jedes Vorkommen mit dem Beginn wandert (gleiches Muster,
       ein neues Ende zählt nicht; Tage und Uhrzeiten aus dem Beginn; jedes um
-      gleich viele Tage, was eine Monatsregel vom 31. auf den 30. nicht tut):
+      denselben Schritt in Tagen, Monaten oder Jahren, was eine Monatsregel vom
+      31. auf den 30. nicht tut):
       ein verschobenes Datum
       nimmt sie mit, aus dem gelöschten dritten Montag wird der gelöschte dritte
       Dienstag, und ein Wechsel zwischen ganztägig und mit Uhrzeit lässt eine

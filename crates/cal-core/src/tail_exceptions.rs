@@ -25,8 +25,9 @@
 //!
 //! By place only when every occurrence moves with the start: the pattern is
 //! the same, the rule takes its days and times from the start rather than
-//! naming them, and every occurrence handed over moved by the same number of
-//! days. A rule that names its days — weekdays, days of the month, months, or
+//! naming them, and every occurrence handed over moved by the same step in the
+//! rule's own unit — days for a daily or weekly rule, months for a monthly
+//! one, years for a yearly one. A rule that names its days — weekdays, days of the month, months, or
 //! its times of day — keeps them when one occurrence moves: "every Monday"
 //! moved to a Tuesday still repeats on Mondays, and "every weekday" moved from
 //! Monday to Tuesday still has its Wednesday and its Thursday where they were.
@@ -56,11 +57,11 @@
 //! module below reads it, and so do the phone's door test in cal-ffi and the
 //! TypeScript contract test through the WebAssembly door.
 
-use chrono::{DateTime, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 // The rule is read once, for every module that asks (`rrule_parts`).
-use crate::rrule_parts::parse_parts;
+use crate::rrule_parts::{parse_freq, parse_parts, part, Freq};
 use crate::series_clock::{canonical_zone, expansion_clock, ExpansionClock};
 
 /// Half a day: two instants this close name the same day of a series of days,
@@ -187,18 +188,44 @@ fn days_follow_start(rrule: &str) -> bool {
 }
 
 /// Whether the new series' occurrences are the old series' occurrences moved
-/// by one and the same number of days, place for place, as far as both reach.
-/// A rule that takes its days from the start still skips months or years by
-/// its day: from the 31st every month without one, from 29 February every
-/// year that is no leap year.
-fn moved_alike(old: &[TailSlot], tail: &[TailSlot], day_of: impl Fn(&TailSlot) -> String) -> bool {
-    let day = |slot: &TailSlot| NaiveDate::parse_from_str(&day_of(slot), "%Y-%m-%d").ok();
+/// by one and the same step, place for place, as far as both reach, counted in
+/// the rule's own unit: days for a daily or weekly rule (and finer), months
+/// for a monthly one, years for a yearly one. A rule that takes its days from
+/// the start still skips months or years by its day — from the 31st every
+/// month without one, from 29 February every year that is no leap year — so
+/// moved onto another day it can meet months the old one skipped. Counted in
+/// days instead, a monthly move from the 25th to the 2nd of the next month
+/// would look uneven only because the months differ in length.
+fn moved_alike(
+    rule: &str,
+    old: &[TailSlot],
+    tail: &[TailSlot],
+    day_of: impl Fn(&TailSlot) -> String,
+) -> bool {
+    let freq = parse_parts(rule)
+        .ok()
+        .and_then(|(_, parts)| part(&parts, "FREQ").and_then(parse_freq));
+    let Some(freq) = freq else {
+        return false;
+    };
+    let step = |date: NaiveDate| -> i64 {
+        match freq {
+            Freq::Monthly => i64::from(date.year()) * 12 + i64::from(date.month0()),
+            Freq::Yearly => i64::from(date.year()),
+            _ => i64::from(date.num_days_from_ce()),
+        }
+    };
+    let at = |slot: &TailSlot| {
+        NaiveDate::parse_from_str(&day_of(slot), "%Y-%m-%d")
+            .ok()
+            .map(step)
+    };
     let mut moved = None;
     for (before, after) in old.iter().zip(tail) {
-        let (Some(before), Some(after)) = (day(before), day(after)) else {
+        let (Some(before), Some(after)) = (at(before), at(after)) else {
             return false;
         };
-        let by = (after - before).num_days();
+        let by = after - before;
         if *moved.get_or_insert(by) != by {
             return false;
         }
@@ -275,8 +302,12 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
     let carried_by = if same_pattern
         && days_follow_start(&question.tail_rule)
         && aligned
-        && moved_alike(&question.old_slots, &question.tail, day_of)
-    {
+        && moved_alike(
+            &question.tail_rule,
+            &question.old_slots,
+            &question.tail,
+            day_of,
+        ) {
         TailCarry::Place
     } else {
         TailCarry::Day
@@ -587,6 +618,28 @@ mod tests {
         let answer = tail_exceptions(&q);
         assert_eq!(answer.carried_by, TailCarry::Day);
         assert!(answer.exceptions.is_empty());
+    }
+
+    #[test]
+    fn a_monthly_rule_moved_into_the_next_month_keeps_its_places() {
+        // The 25th moved to the 2nd of the next month: every occurrence moves
+        // one month on, though the days between differ with the months.
+        let old = vec![
+            slot("2026-08-25T08:00:00.000Z", "2026-08-25"),
+            slot("2026-09-25T08:00:00.000Z", "2026-09-25"),
+            slot("2026-10-25T09:00:00.000Z", "2026-10-25"),
+        ];
+        let tail = vec![
+            slot("2026-09-02T08:00:00.000Z", "2026-09-02"),
+            slot("2026-10-02T08:00:00.000Z", "2026-10-02"),
+            slot("2026-11-02T09:00:00.000Z", "2026-11-02"),
+        ];
+        let mut q = question(old, tail, &["2026-10-25T09:00:00.000Z"]);
+        q.old_rule = "FREQ=MONTHLY".into();
+        q.tail_rule = "FREQ=MONTHLY".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-11-02T09:00:00.000Z"]);
     }
 
     #[test]

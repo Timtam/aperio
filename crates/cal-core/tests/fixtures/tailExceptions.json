@@ -1,6 +1,6 @@
 {
   "what": "The deleted occurrences a series keeps when \"this and all following\" writes it from the cut on: cal_core::tail_exceptions, row by row. Read by the core's own test, by the phone's door test in cal-ffi, and by the TypeScript contract test through the WebAssembly door.",
-  "why": "Decisions 152 (a deletion keeps its place when every occurrence moves with the start, by one and the same number of days), 188 (with a new rule it keeps its day, only where the new rule still meets it; a new end or another spelling is no new rule) and 189 (a rule that names its days keeps them when one occurrence moves, and so do its deletions, until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them, on the series' own clock and on the device's.",
+  "why": "Decisions 152 (a deletion keeps its place when every occurrence moves with the start, by one and the same step in the rule's unit: days, months or years), 188 (with a new rule it keeps its day, only where the new rule still meets it; a new end or another spelling is no new rule) and 189 (a rule that names its days keeps them when one occurrence moves, and so do its deletions, until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them, on the series' own clock and on the device's.",
   "rows": [
     {
       "name": "A1 an evening deletion stays on its day when the series becomes all-day",
@@ -706,6 +706,35 @@
       "expected": {
         "exceptions": ["2026-08-25T07:00:00.000Z"],
         "carried_by": "day",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a monthly rule moved into the next month keeps its places",
+      "note": "The 25th moved to the 2nd of the next month: every occurrence moves one month on, though the days between differ with the months.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-25T08:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-25T08:00:00.000Z", "day": "2026-09-25", "device_day": "2026-09-25" },
+          { "at": "2026-10-25T09:00:00.000Z", "day": "2026-10-25", "device_day": "2026-10-25" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=MONTHLY",
+        "tail": [
+          { "at": "2026-09-02T08:00:00.000Z", "day": "2026-09-02", "device_day": "2026-09-02" },
+          { "at": "2026-10-02T08:00:00.000Z", "day": "2026-10-02", "device_day": "2026-10-02" },
+          { "at": "2026-11-02T09:00:00.000Z", "day": "2026-11-02", "device_day": "2026-11-02" }
+        ],
+        "tail_start": "2026-09-02T08:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=MONTHLY",
+        "deleted": ["2026-10-25T09:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-11-02T09:00:00.000Z"],
+        "carried_by": "place",
         "dropped": []
       }
     }

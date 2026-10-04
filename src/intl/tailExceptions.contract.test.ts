@@ -24,7 +24,7 @@ const rows = contract.rows as unknown as Row[];
 
 describe('the deleted occurrences a series keeps from a cut on', () => {
   it('covers the cases the decisions turn on', () => {
-    expect(rows.length).toBeGreaterThanOrEqual(25);
+    expect(rows.length).toBeGreaterThanOrEqual(26);
     for (const name of [
       'A1 an evening deletion stays on its day when the series becomes all-day',
       'B2 every second week keeps the deletion it still meets',
