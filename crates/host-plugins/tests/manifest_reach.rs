@@ -371,7 +371,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 9] = [
+const KNOWN_REACHES: [(&str, &str); 10] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -407,6 +407,14 @@ const KNOWN_REACHES: [(&str, &str); 9] = [
     (
         "crates/cal-ffi/src/host.rs",
         "shared/contracts/calendarDefaultReminders.json",
+    ),
+    // The device's access status, which the phone's two native bridges write
+    // and the device adapter reads (decision 187). Read here, through the
+    // provider the Host builds, and not in the adapter, which may leave this
+    // repository. Same crate, same reason as the hop above.
+    (
+        "crates/cal-ffi/src/host.rs",
+        "shared/contracts/deviceAccessStatus.json",
     ),
     // The phone's doors into the series-clock rule, driven by the core's own
     // table: each door writes "none" as "", which the core cannot get wrong and

@@ -891,38 +891,6 @@ mod tests {
         refused(ready(adapter.list_task_lists()), "reminders NotAsked");
     }
 
-    #[test]
-    fn reads_the_access_status_contract() {
-        // The shapes both native bridges write; check-ffi-bridges.mjs holds
-        // the writers' keys to the same samples. A key Rust does not read is
-        // ignored without a word, so this is where a renamed one shows.
-        const CONTRACT: &str = include_str!("../../../shared/contracts/deviceAccessStatus.json");
-        let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
-        let samples = contract["samples"].as_array().unwrap();
-        assert!(samples.len() >= 12, "the contract lost its samples");
-        for sample in samples {
-            let name = sample["name"].as_str().unwrap();
-            let platform = sample["platform"].as_str();
-            assert!(
-                matches!(platform, Some("ios" | "android")),
-                "{name}: platform {platform:?}"
-            );
-            let provider = AccessOnly {
-                status: Box::leak(sample["status"].to_string().into_boxed_str()),
-                reminders: platform == Some("ios"),
-            };
-            let calendar: OsAccess = serde_json::from_value(sample["calendar"].clone()).unwrap();
-            let tasks: Option<OsAccess> = serde_json::from_value(sample["tasks"].clone()).unwrap();
-            let settled: Vec<String> =
-                serde_json::from_value(sample["settledByGrant"].clone()).unwrap();
-            let read = read_device_access(&provider);
-            assert_eq!(read.calendar, calendar, "{name}");
-            assert_eq!(read.tasks, tasks, "{name}");
-            assert_eq!(read.settled_by_grant(), settled, "{name}");
-            assert_eq!(device_access(&provider), (calendar, tasks), "{name}");
-        }
-    }
-
     /// Minimal wire shapes for the write calls, never sent anywhere.
     const NEW_EVENT: &str = r#"{"title":"t","start":"2026-01-01T09:00:00Z","end":"2026-01-01T10:00:00Z","all_day":false,"reminders":[],"attendees":[]}"#;
     const EVENT: &str = r#"{"id":"ev","calendar_id":"cal","title":"t","start":"2026-01-01T09:00:00Z","end":"2026-01-01T10:00:00Z","all_day":false,"reminders":[],"attendees":[],"keep_fields":[],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;

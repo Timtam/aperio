@@ -13194,8 +13194,10 @@ mod tests {
         fn request_access(&self, _: bool, _: bool) -> Result<bool, DeviceCalError> {
             unreachable!("reading the access asks nobody")
         }
+        /// As the real bridges have it: iOS names the reminders' access,
+        /// Android has no reminders store and writes them as null.
         fn supports_reminders(&self) -> bool {
-            true
+            !self.0.contains(r#""reminders":null"#)
         }
         fn list_calendars(&self) -> Result<String, DeviceCalError> {
             Err(DeviceCalError::Unavailable)
@@ -13378,6 +13380,50 @@ mod tests {
         let report = access_report(&host);
         assert!(report.restorable);
         assert_eq!(report.repair, AccessRepair::None);
+    }
+
+    #[test]
+    fn reads_the_access_status_contract() {
+        // The shapes both native bridges write, read through the provider the
+        // host builds over them. Here and not in the adapter: the adapter may
+        // leave this repository, the contract does not. check-ffi-bridges.mjs
+        // holds the writers' key paths to the same samples; a key Rust does
+        // not read is ignored without a word, so this is where a renamed one
+        // shows on the reading side.
+        const CONTRACT: &str = include_str!("../../../shared/contracts/deviceAccessStatus.json");
+        let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
+        let samples = contract["samples"].as_array().unwrap();
+        assert!(samples.len() >= 12, "the contract lost its samples");
+        for sample in samples {
+            let name = sample["name"].as_str().unwrap();
+            let platform = sample["platform"].as_str();
+            assert!(
+                matches!(platform, Some("ios" | "android")),
+                "{name}: platform {platform:?}"
+            );
+            let status: &'static str = Box::leak(sample["status"].to_string().into_boxed_str());
+            let provider = BridgeDeviceProvider {
+                bridge: Arc::new(AccessBridge(status)),
+            };
+            assert_eq!(
+                provider.supports_reminders(),
+                platform == Some("ios"),
+                "{name}: only iOS has a reminders store"
+            );
+            let calendar: OsAccess = serde_json::from_value(sample["calendar"].clone()).unwrap();
+            let tasks: Option<OsAccess> = serde_json::from_value(sample["tasks"].clone()).unwrap();
+            let settled: Vec<String> =
+                serde_json::from_value(sample["settledByGrant"].clone()).unwrap();
+            let read = read_device_access(&provider);
+            assert_eq!(read.calendar, calendar, "{name}");
+            assert_eq!(read.tasks, tasks, "{name}");
+            assert_eq!(read.settled_by_grant(), settled, "{name}");
+            assert_eq!(
+                adapter_device_calendar::device_access(&provider),
+                (calendar, tasks),
+                "{name}"
+            );
+        }
     }
 
     #[test]

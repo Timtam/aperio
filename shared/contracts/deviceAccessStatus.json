@@ -5,7 +5,10 @@
     "mobile/modules/cal-ffi/ios/IosDeviceEventStore.swift (accessStatus)",
     "mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi/AndroidDeviceCalendar.kt (accessStatus)"
   ],
-  "readBy": ["crates/adapter-device-calendar/src/lib.rs (read_device_access)"],
+  "readBy": [
+    "crates/adapter-device-calendar/src/lib.rs (read_device_access)",
+    "crates/cal-ffi/src/host.rs (reads_the_access_status_contract, through the Host's provider)"
+  ],
 
   "samples": [
     {
