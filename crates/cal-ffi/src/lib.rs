@@ -551,6 +551,17 @@ pub fn series_shift(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The deleted occurrences a series keeps when "this and all following" writes
+/// it from the cut on: by their place or by their day (decisions 152, 188).
+/// The desktop asks the same rule through WebAssembly.
+#[uniffi::export]
+pub fn tail_exceptions(input_json: String) -> Result<String, StoreError> {
+    cal_core::tail_exceptions_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "tail exceptions question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// A repeat rule in words (decision 84a): the desktop asks the same rule
 /// through WebAssembly, and a locked invitation shows its answer as a field.
 #[uniffi::export]
@@ -742,6 +753,31 @@ mod tests {
         match series_shift("not json".to_string()) {
             Err(StoreError::InvalidField { field, .. }) => {
                 assert_eq!(field, "series shift question")
+            }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's tail-exceptions table, through the phone's own
+    /// door. A free function crosses UniFFI unwatched by the bridge check, so
+    /// the rows are what proves the door is wired to the rule at all.
+    #[test]
+    fn tail_exceptions_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/tailExceptions.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(rows.len() >= 26, "the contract covers the shapes");
+        for row in rows {
+            let name = row["name"].as_str().expect("a name");
+            let answered =
+                tail_exceptions(row["question"].to_string()).expect("a readable question");
+            let answered: serde_json::Value =
+                serde_json::from_str(&answered).expect("the answer parses");
+            assert_eq!(answered, row["expected"], "{name}");
+        }
+        match tail_exceptions("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "tail exceptions question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
         }

@@ -11,13 +11,13 @@ import {
 
 import {
   carryOnto,
-  exceptionsAtSeriesTime,
   firstOccurrenceFrom,
   futureCarryRow,
   occurrenceCarryRow,
   organizerOf,
   planCarry,
   planSeriesSplit,
+  tailRecurrenceFor,
   cutoffDay,
   readSeriesRows,
   seriesMaybeShownTwice,
@@ -335,14 +335,15 @@ export default function EventGroupCarryModal({
             await updateEvent(
               {
                 ...row,
-                // What the copy repeats by from its cut on, its exceptions
-                // moved with a new time of day, as the anchor's are.
-                recurrence: exceptionsAtSeriesTime(
-                  { ...currentRecurrence, ...splitPlan.tail },
-                  anchorIso,
-                  row.start,
-                  row.all_day || current.all_day,
-                ),
+                // What the copy repeats by from its cut on, its deleted
+                // occurrences carried along with a new date, time or kind
+                // as the anchor's are (decision 152).
+                recurrence: tailRecurrenceFor({
+                  master: current,
+                  cutoffIso: anchorIso,
+                  plan: splitPlan,
+                  tail: { start: row.start, all_day: row.all_day },
+                }),
                 send_invitations: false,
               },
               target.calendar_id,
@@ -358,9 +359,18 @@ export default function EventGroupCarryModal({
             });
           } else {
             splitAt = anchorIso;
+            // Decided before anything is written: the copy's deleted
+            // occurrences, carried along with a new date, time or kind as
+            // the anchor's are (decision 152).
+            const tailRecurrence = tailRecurrenceFor({
+              master: current,
+              cutoffIso: anchorIso,
+              plan: splitPlan,
+              tail: { start: row.start, all_day: row.all_day },
+            });
             const written = await writeSeriesSplit(
               {
-                createTail: (recurrence) =>
+                createTail: () =>
                   createEvent(
                     {
                       calendar_id: target.calendar_id,
@@ -370,14 +380,7 @@ export default function EventGroupCarryModal({
                       start: row.start,
                       end: row.end,
                       all_day: row.all_day,
-                      // Its exceptions follow a new time of day, or the
-                      // occurrences they cancel come back at it.
-                      recurrence: exceptionsAtSeriesTime(
-                        recurrence,
-                        anchorIso,
-                        row.start,
-                        row.all_day || current.all_day,
-                      ),
+                      recurrence: tailRecurrence,
                       // The copy keeps its own: what travels is what the
                       // appointment IS.
                       color_label: current.color_label,

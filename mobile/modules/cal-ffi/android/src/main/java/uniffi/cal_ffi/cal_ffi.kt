@@ -894,6 +894,8 @@ external fun uniffi_cal_ffi_checksum_func_subtask_progress(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_suggest_group_mate(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_tail_exceptions(
+): Short
 external fun uniffi_cal_ffi_checksum_func_task_assignment_mode(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_task_i18n_keys(
@@ -1752,6 +1754,8 @@ external fun uniffi_cal_ffi_fn_func_subtask_progress(`inputJson`: RustBuffer.ByV
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_suggest_group_mate(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_tail_exceptions(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_assignment_mode(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_task_i18n_keys(uniffi_out_err: UniffiRustCallStatus, 
@@ -1998,6 +2002,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_suggest_group_mate() != 60991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_tail_exceptions() != 58321.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_task_assignment_mode() != 19595.toShort()) {
@@ -11159,6 +11166,22 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_suggest_group_mate(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The deleted occurrences a series keeps when "this and all following" writes
+         * it from the cut on: by their place or by their day (decisions 152, 188).
+         * The desktop asks the same rule through WebAssembly.
+         */
+    @Throws(StoreException::class) fun `tailExceptions`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_tail_exceptions(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

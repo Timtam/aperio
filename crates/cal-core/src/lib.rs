@@ -62,6 +62,7 @@ mod task_grouping_gate {
 pub mod read_refusal;
 pub mod series_clock;
 pub mod series_shift;
+pub mod tail_exceptions;
 pub mod task_occurrences;
 pub mod task_priority;
 pub mod task_settings;
@@ -149,6 +150,10 @@ pub use signatures::{
 };
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
+pub use tail_exceptions::{
+    tail_exceptions, tail_exceptions_json, TailCarry, TailExceptions, TailExceptionsQuestion,
+    TailSlot,
+};
 pub use task_assignment::{
     clamp_assignees, clamp_assignees_json, is_mine_or_unassigned, self_assign_on_status_change,
     self_assign_on_status_json, task_assignment_mode, task_assignment_mode_json,

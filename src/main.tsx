@@ -21,6 +21,7 @@ import {
   installTextCollation,
   installRecurrenceSummaryRules,
   installSeriesShiftRules,
+  installTailExceptionsRules,
   installSeriesClockRules,
   installZoneListRules,
 } from '@aperio/shared';
@@ -70,6 +71,7 @@ import {
   priorityRank,
   recurrenceSummaryJson,
   seriesShiftJson,
+  tailExceptionsJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
   expansionClockThroughCore,
@@ -200,6 +202,9 @@ initCoreRules()
     // The task settings: how the stored preferences read, and what a change stores.
     installTaskSettingsRules({ taskSettingsJson });
     installSeriesShiftRules({ seriesShiftJson });
+    // Which deleted occurrences a series keeps when "this and all following"
+    // writes it from the cut on (decisions 152, 188).
+    installTailExceptionsRules({ tailExceptionsJson });
 
     // A repeat rule in words (84a): the locked invitation shows it, and
     // so does the editor when the picker cannot rebuild the stored rule.

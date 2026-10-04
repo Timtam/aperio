@@ -13,6 +13,8 @@ import {
   planSeriesSplit,
   readSeriesRows,
   ruleFromCut,
+  localTimeZone,
+  tailRecurrenceFor,
   seriesFromCut,
   seriesMaybeShownTwice,
   cutoffDay,
@@ -25,6 +27,7 @@ import {
   writeSeriesSplit,
   type SeriesCutPlan,
   type SeriesSplitPlan,
+  type TailRecurrence,
   type WholeSeriesPlan,
 } from '@aperio/shared';
 
@@ -731,6 +734,8 @@ describe('writeSeriesSplit', () => {
     headRule: 'FREQ=WEEKLY;UNTIL=20260824T075959Z',
     tail: { rrule: 'FREQ=WEEKLY;COUNT=7', exceptions: [], tzid: null },
     occurrencesBefore: 3,
+    deleted: [],
+    standing: [],
   };
 
   /** Runs a split whose truncate fails with `failure`; says what happened. */
@@ -939,6 +944,8 @@ describe('carrying a future edit to another copy', () => {
     split: boolean;
     headRule: string | null;
     tailRule: string | null;
+    /** The whole recurrence the tail (or the rewritten copy) is written with. */
+    tailRecurrence: TailRecurrence | null;
   } | null> {
     const anchorIso = firstOccurrenceFrom(current, cutoffIso, rows);
     if (anchorIso == null) return null;
@@ -948,10 +955,30 @@ describe('carrying a future edit to another copy', () => {
     if (row == null) throw new Error('the fixture has an unreadable cut point');
     const plan = planSeriesSplit(current, anchorIso, rows);
     if (plan == null) {
-      return { anchorIso, row, split: false, headRule: null, tailRule: null };
+      return {
+        anchorIso,
+        row,
+        split: false,
+        headRule: null,
+        tailRule: null,
+        tailRecurrence: null,
+      };
     }
+    const tailRecurrence = tailRecurrenceFor({
+      master: current,
+      cutoffIso: anchorIso,
+      plan,
+      tail: { start: row.start, all_day: row.all_day },
+    });
     if (plan.kind === 'whole') {
-      return { anchorIso, row, split: false, headRule: null, tailRule: plan.tail.rrule };
+      return {
+        anchorIso,
+        row,
+        split: false,
+        headRule: null,
+        tailRule: plan.tail.rrule,
+        tailRecurrence,
+      };
     }
     let headRule: string | null = null;
     let tailRule: string | null = null;
@@ -960,15 +987,15 @@ describe('carrying a future edit to another copy', () => {
         truncate: async (rule) => {
           headRule = rule;
         },
-        createTail: async (recurrence) => {
-          tailRule = recurrence.rrule;
+        createTail: async () => {
+          tailRule = tailRecurrence?.rrule ?? null;
           return { id: 'ev-private-tail' };
         },
         removeTail: async () => undefined,
       },
       plan,
     );
-    return { anchorIso, row, split: true, headRule, tailRule };
+    return { anchorIso, row, split: true, headRule, tailRule, tailRecurrence };
   }
 
   /** The anchor's occurrence as it stood before the edit. */
@@ -1170,6 +1197,341 @@ describe('carrying a future edit to another copy', () => {
     expect(result?.split).toBe(false);
     expect(result?.row.start).toBe('2026-08-03T09:00:00.000Z');
     expect(result?.row.reminders).toEqual(['-PT30M']);
+  });
+
+  it('carries a copy\'s deletions along with a new date (152)', async () => {
+    // The copy's 5th Monday is deleted; the appointment moves from Monday to
+    // Tuesday from its 3rd occurrence on. The deletion keeps its place.
+    const withDeletion = {
+      ...copy,
+      recurrence: { ...copy.recurrence, exceptions: ['2026-08-31T08:00:00.000Z'] },
+    };
+    const before = { ...stood, start: '2026-08-17T08:00:00.000Z', end: '2026-08-17T09:00:00.000Z' };
+    const after = { ...before, start: '2026-08-18T08:00:00.000Z', end: '2026-08-18T09:00:00.000Z' };
+    const result = await carryFuture(withDeletion, '2026-08-17T08:00:00.000Z', before, after, [
+      'start',
+      'end',
+    ]);
+    expect(result?.split).toBe(true);
+    expect(result?.tailRecurrence?.exceptions).toEqual(['2026-09-01T08:00:00.000Z']);
+  });
+});
+
+describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)', () => {
+  /** A weekly series on UTC, Mondays 08:00 from 03.08: its clock is the same
+   *  on every test machine. */
+  const mondays = {
+    ...weekly,
+    recurrence: { ...weekly.recurrence, rrule: 'FREQ=WEEKLY' },
+  };
+  const deleting = (series: typeof mondays, exceptions: string[]) => ({
+    ...series,
+    recurrence: { ...series.recurrence, exceptions },
+  });
+  /** Local midnight of a day of August 2026, as an all-day series spells it. */
+  const midnight = (day: number) => new Date(2026, 7, day).toISOString();
+
+  it('moves a deleted occurrence by its place when the date moves (152)', () => {
+    // Cut at the 2nd Monday, the 4th deleted; "this and all following" moved
+    // to Tuesday: the deleted 3rd one from the cut is a deleted 3rd Tuesday.
+    const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
+    const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
+    expect(tail?.rrule).toBe('FREQ=WEEKLY');
+  });
+
+  it('keeps an evening deletion on its day when the series becomes all-day', () => {
+    // Daily 18:00 UTC, the 27th deleted; the new series is all-day from the
+    // 24th. Left at 18:00 the exception sat closer to the 28th's midnight and
+    // deleted that day instead.
+    const daily = {
+      ...weekly,
+      start: '2026-08-20T18:00:00.000Z',
+      end: '2026-08-20T19:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY', exceptions: ['2026-08-27T18:00:00.000Z'], tzid: null },
+    };
+    const plan = planSeriesSplit(daily, '2026-08-24T18:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: daily,
+      cutoffIso: '2026-08-24T18:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: midnight(24), all_day: true },
+    });
+    expect(tail?.exceptions).toEqual([midnight(27)]);
+    expect(tail?.tzid).toBeNull();
+  });
+
+  it('gives a deleted all-day occurrence the new time of day, and the device zone', () => {
+    const allDay = {
+      ...weekly,
+      start: midnight(20),
+      end: midnight(21),
+      all_day: true,
+      recurrence: { rrule: 'FREQ=DAILY', exceptions: [midnight(27)], tzid: null },
+    };
+    const plan = planSeriesSplit(allDay, midnight(24), []);
+    const nineOn = (day: number) => new Date(2026, 7, day, 9).toISOString();
+    const tail = tailRecurrenceFor({
+      master: allDay,
+      cutoffIso: midnight(24),
+      plan: cutOf(plan),
+      tail: { start: nineOn(24), all_day: false },
+    });
+    expect(tail?.exceptions).toEqual([nineOn(27)]);
+    // "Ganztägig aus": the series gets the device's zone, as a created one does.
+    expect(tail?.tzid).toBe(localTimeZone());
+  });
+
+  it('drops a deletion on a day a new rule never meets (188)', () => {
+    const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
+    const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+      rule: { form: 'FREQ=WEEKLY;BYDAY=TU', opened: 'FREQ=WEEKLY' },
+    });
+    expect(tail?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(tail?.exceptions).toEqual([]);
+  });
+
+  it('keeps a deletion on a day the new rule still meets (188)', () => {
+    // Every second week: the 17th is no occurrence any more, the 24th is.
+    const master = deleting(mondays, ['2026-08-17T08:00:00.000Z', '2026-08-24T08:00:00.000Z']);
+    const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-10T08:00:00.000Z', all_day: false },
+      rule: { form: 'FREQ=WEEKLY;INTERVAL=2', opened: 'FREQ=WEEKLY' },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-24T08:00:00.000Z']);
+  });
+
+  it('leaves the deletions of "every Monday" moved to a Tuesday on Monday (189)', () => {
+    const named = {
+      ...mondays,
+      recurrence: {
+        ...mondays.recurrence,
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-08-24T08:00:00.000Z'],
+      },
+    };
+    const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: named,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-24T08:00:00.000Z']);
+  });
+
+  it('reaches a deletion years ahead', () => {
+    const daily = {
+      ...weekly,
+      start: '2026-01-01T08:00:00.000Z',
+      end: '2026-01-01T09:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY', exceptions: ['2029-01-10T08:00:00.000Z'], tzid: null },
+    };
+    const plan = planSeriesSplit(daily, '2026-01-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: daily,
+      cutoffIso: '2026-01-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-01-11T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.exceptions).toEqual(['2029-01-11T08:00:00.000Z']);
+  });
+
+  it('keeps an exception a row stands in for as spelled when the series is rewritten whole', () => {
+    // Nothing before the cut: the series is rewritten in place. The 2nd
+    // occurrence is deleted, the 3rd was changed in Outlook and has its row.
+    const master = deleting(mondays, ['2026-08-10T08:00:00Z', '2026-08-17T08:00:00Z']);
+    const changed: RecurringRow = {
+      id: 'ev-1::rid::2026-08-17T08:00:00Z',
+      start: '2026-08-17T10:00:00.000Z',
+      end: '2026-08-17T11:00:00.000Z',
+      all_day: false,
+      recurrence: null,
+    };
+    const plan = wholeOf(planSeriesSplit(master, master.start, [changed]));
+    expect(plan.deleted).toEqual(['2026-08-10T08:00:00Z']);
+    expect(plan.standing).toEqual(['2026-08-17T08:00:00Z']);
+    const tail = tailRecurrenceFor({
+      master,
+      cutoffIso: master.start,
+      plan,
+      tail: { start: '2026-08-04T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-11T08:00:00.000Z', '2026-08-17T08:00:00Z']);
+  });
+
+  it('writes no series when the repeat field was cleared', () => {
+    const plan = planSeriesSplit(mondays, '2026-08-10T08:00:00.000Z', []);
+    expect(
+      tailRecurrenceFor({
+        master: mondays,
+        cutoffIso: '2026-08-10T08:00:00.000Z',
+        plan: cutOf(plan),
+        tail: { start: '2026-08-10T08:00:00.000Z', all_day: false },
+        rule: { form: null, opened: 'FREQ=WEEKLY' },
+      }),
+    ).toBeNull();
+  });
+
+  it('counts a changed rule against what the field was filled with', () => {
+    // The desktop fills the field from the opened row: a row the provider
+    // keeps for one occurrence may carry no rule. Untouched, it is no change,
+    // and the new series keeps the series' rule.
+    const plan = planSeriesSplit(mondays, '2026-08-10T08:00:00.000Z', []);
+    expect(
+      tailRecurrenceFor({
+        master: mondays,
+        cutoffIso: '2026-08-10T08:00:00.000Z',
+        plan: cutOf(plan),
+        tail: { start: '2026-08-10T08:00:00.000Z', all_day: false },
+        rule: { form: null, opened: null },
+      })?.rrule,
+    ).toBe('FREQ=WEEKLY');
+  });
+
+  it('keeps the deletions of "every weekday" moved onto another of its days', () => {
+    // Monday moved to Tuesday: Wednesday and Thursday stay where they were,
+    // so the deleted Thursday stays deleted, and Friday stays.
+    const weekdays = {
+      ...mondays,
+      recurrence: {
+        ...mondays.recurrence,
+        rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+        exceptions: ['2026-08-27T08:00:00.000Z'],
+      },
+    };
+    const plan = planSeriesSplit(weekdays, '2026-08-24T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: weekdays,
+      cutoffIso: '2026-08-24T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-25T08:00:00.000Z', all_day: false },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-27T08:00:00.000Z']);
+  });
+
+  it('still moves a deletion with the date when only the end changed', () => {
+    // A new COUNT is no new rule: the occurrences are the same (188).
+    const counted = deleting(
+      { ...mondays, recurrence: { ...mondays.recurrence, rrule: 'FREQ=WEEKLY;COUNT=10' } },
+      ['2026-08-24T08:00:00.000Z'],
+    );
+    const plan = planSeriesSplit(counted, '2026-08-10T08:00:00.000Z', []);
+    const tail = tailRecurrenceFor({
+      master: counted,
+      cutoffIso: '2026-08-10T08:00:00.000Z',
+      plan: cutOf(plan),
+      tail: { start: '2026-08-11T08:00:00.000Z', all_day: false },
+      rule: { form: 'FREQ=WEEKLY;COUNT=12', opened: 'FREQ=WEEKLY;COUNT=10' },
+    });
+    expect(tail?.exceptions).toEqual(['2026-08-25T08:00:00.000Z']);
+  });
+
+  describe('the zone of the series written from the cut', () => {
+    /** The device in Berlin, whatever zone the test machine is in. */
+    const inBerlin = <T,>(body: () => T): T => {
+      const real = new Intl.DateTimeFormat().resolvedOptions();
+      const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+        ...real,
+        timeZone: 'Europe/Berlin',
+      });
+      try {
+        return body();
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    const inNewYork = {
+      ...mondays,
+      recurrence: { ...mondays.recurrence, tzid: 'America/New_York' },
+    };
+
+    it('keeps the zone while the series stays timed', () => {
+      const plan = planSeriesSplit(inNewYork, '2026-08-10T08:00:00.000Z', []);
+      const tail = inBerlin(() =>
+        tailRecurrenceFor({
+          master: inNewYork,
+          cutoffIso: '2026-08-10T08:00:00.000Z',
+          plan: cutOf(plan),
+          tail: { start: '2026-08-10T09:00:00.000Z', all_day: false },
+        }),
+      );
+      expect(tail?.tzid).toBe('America/New_York');
+    });
+
+    it('drops the zone when the series becomes all-day', () => {
+      const plan = planSeriesSplit(inNewYork, '2026-08-10T08:00:00.000Z', []);
+      const tail = inBerlin(() =>
+        tailRecurrenceFor({
+          master: inNewYork,
+          cutoffIso: '2026-08-10T08:00:00.000Z',
+          plan: cutOf(plan),
+          tail: { start: '2026-08-09T22:00:00.000Z', all_day: true },
+        }),
+      );
+      expect(tail?.tzid).toBeNull();
+    });
+
+    it("reads a deletion's day on the device's calendar when the clocks differ", () => {
+      // Daily 19:00 New York is 01:00 the next day in Berlin. Switched to
+      // all-day under a new rule, the deleted Monday evening is the Tuesday
+      // the user saw it on, not the Monday of New York.
+      const newYorkEvenings = {
+        ...mondays,
+        start: '2026-08-24T23:00:00.000Z',
+        end: '2026-08-25T00:00:00.000Z',
+        recurrence: {
+          rrule: 'FREQ=DAILY',
+          exceptions: ['2026-09-07T23:00:00.000Z'],
+          tzid: 'America/New_York',
+        },
+      };
+      const tail = inBerlin(() => {
+        const plan = planSeriesSplit(newYorkEvenings, '2026-08-31T23:00:00.000Z', []);
+        return tailRecurrenceFor({
+          master: newYorkEvenings,
+          cutoffIso: '2026-08-31T23:00:00.000Z',
+          plan: cutOf(plan),
+          tail: { start: '2026-08-31T22:00:00.000Z', all_day: true },
+          rule: { form: 'FREQ=WEEKLY;BYDAY=TU', opened: 'FREQ=DAILY' },
+        });
+      });
+      expect(tail?.exceptions).toEqual(['2026-09-07T22:00:00.000Z']);
+    });
+
+    it("gives an all-day series that gets a time of day the device's zone", () => {
+      const allDay = {
+        ...mondays,
+        start: '2026-08-02T22:00:00.000Z',
+        end: '2026-08-03T22:00:00.000Z',
+        all_day: true,
+      };
+      const tail = inBerlin(() => {
+        const plan = planSeriesSplit(allDay, '2026-08-09T22:00:00.000Z', []);
+        return tailRecurrenceFor({
+          master: allDay,
+          cutoffIso: '2026-08-09T22:00:00.000Z',
+          plan: cutOf(plan),
+          tail: { start: '2026-08-10T07:00:00.000Z', all_day: false },
+        });
+      });
+      expect(tail?.tzid).toBe('Europe/Berlin');
+    });
   });
 });
 

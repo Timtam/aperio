@@ -77,11 +77,16 @@ import {
   expandAll,
   expandEvent,
   isExpandedOccurrence,
+  localTimeZone,
   overrideRecurrenceIso,
   overrideSeriesId,
+  ruleFromCut,
+  seriesDayKey,
   slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
+import { tailExceptions } from './tailExceptions';
+import type { TailSlot } from './types';
 
 /** The least a master needs for its series to be split. */
 export interface SplittableEvent extends RecurringEventLike {
@@ -111,6 +116,19 @@ interface SeriesPlanCommon {
    * that cannot see it can only check the split from the outside.
    */
   occurrencesBefore: number;
+  /**
+   * The occurrences from the cutoff on that the calendar shows nothing for
+   * (`deletedSlots`): what the series written from the cutoff must not show
+   * either, wherever an edit moves them (`tailRecurrenceFor`).
+   */
+  deleted: string[];
+  /**
+   * The exceptions from the cutoff on that a row of the series stands in for:
+   * Exchange lists the slot of an occurrence changed in Outlook among them.
+   * Only a series rewritten in place keeps them, as they are spelled; a new
+   * series owns no rows.
+   */
+  standing: string[];
 }
 
 /** The series keeps a head: at least one occurrence before the cutoff. */
@@ -335,11 +353,21 @@ export function planSeriesSplit<E extends SplittableEvent>(
   if (headShown === 0) {
     // Written whole, in place: an exception on the cutoff's own slot stays, so
     // the occurrence the provider keeps there goes on standing in for it
-    // (decision 122).
+    // (decision 122). Of the exceptions from the cutoff on, those a row stands
+    // in for stay as they are; the others are deletions, and so is every
+    // cancelled row's slot.
+    const tail = tailWith((x) => x >= at - slotMargin);
+    const same = slotMatcher(master);
+    const deleted = deletedSlots(master, ownRows).filter((x) => Date.parse(x) >= at - slotMargin);
+    const deletedAt = deleted.map((x) => Date.parse(x));
     return {
       kind: 'whole',
-      tail: tailWith((x) => x >= at - slotMargin),
+      tail,
       occurrencesBefore,
+      deleted,
+      standing: tail.exceptions.filter(
+        (x) => !deletedAt.some((d) => same(d, Date.parse(x))),
+      ),
     };
   }
   // A NEW series from the cutoff: the slot it starts on is the occurrence
@@ -358,16 +386,138 @@ export function planSeriesSplit<E extends SplittableEvent>(
   // too, and it goes with the truncate, not here: keeping the exception for
   // it would take the changed occurrences of Exchange out of both halves.
   const after = (x: number) => (master.all_day ? x >= at + slotMargin : x > at);
+  const deleted = deletedSlots(master, ownRows).filter((x) => after(Date.parse(x)));
   return {
     kind: 'cut',
     headRule: oldRule,
     tail: {
       rrule: newRule,
-      exceptions: deletedSlots(master, ownRows).filter((x) => after(Date.parse(x))),
+      exceptions: deleted,
       tzid: recurrence.tzid ?? null,
     },
     occurrencesBefore,
+    deleted,
+    standing: [],
   };
+}
+
+/** An occurrence with its day on its series' clock and on the device's. */
+function slotOf(at: string, tzid: string | null | undefined, allDay: boolean): TailSlot {
+  return {
+    at,
+    day: seriesDayKey(at, tzid, allDay),
+    device_day: seriesDayKey(at, null, true),
+  };
+}
+
+const HALF_DAY_MS = 12 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Past any series a calendar sensibly holds, as `firstOccurrenceFrom` reaches. */
+const LONGEST_REACH_MS = 15_000 * DAY_MS;
+
+/**
+ * The recurrence of the series written from the cutoff on: the new series of
+ * a split, or the series itself when "this and all following" rewrites it
+ * whole (`kind: 'whole'`).
+ *
+ * - The rule: the series' own from the cutoff on, or the one the user set in
+ *   the repeat field (`rule.form`, when it differs from `rule.opened`, what the
+ *   field was filled with), its COUNT counted from the series' first
+ *   occurrence as the field showed it (decision 121). A cleared field gives no
+ *   rule, and `null` comes back: the edit writes a single event.
+ * - The zone: kept as it is while the series stays timed or stays all-day (a
+ *   continuation expands as its other half does); none once it becomes all-day;
+ *   the device's once it gets a time of day, as a created series does
+ *   (DESIGN-series-time-zone.md, "Ganztägig aus").
+ * - The exceptions: the deleted occurrences (`plan.deleted`) go along with the
+ *   edit — by their place when every occurrence moves with the date, by their
+ *   day under a new rule or a rule that names its days — and the ones a row
+ *   stands in for stay as spelled (`plan.standing`). Which goes where is the
+ *   core's rule (`cal_core::tail_exceptions`); this expands both series for it,
+ *   with each occurrence's day on its series' clock and on the device's,
+ *   because the device's zone is this surface's to know.
+ *
+ * `tail` is the start and the kind of the row being written; `rule` only an
+ * editor passes — a carry never changes the rule. Throws when the door into
+ * the core is missing (a phone library older than it), before anything is
+ * written.
+ */
+export function tailRecurrenceFor(input: {
+  master: SplittableEvent;
+  cutoffIso: string;
+  plan: SeriesSplitPlan;
+  tail: { start: string; all_day: boolean };
+  rule?: { form: string | null; opened: string | null };
+}): TailRecurrence | null {
+  const { master, cutoffIso, plan, tail, rule } = input;
+  const ruleChanged = rule !== undefined && rule.form !== rule.opened;
+  const rrule = ruleChanged
+    ? rule.form && ruleFromCut(rule.form, plan.occurrencesBefore)
+    : plan.tail.rrule;
+  if (!rrule) return null;
+  const tzid =
+    tail.all_day === master.all_day
+      ? plan.tail.tzid
+      : tail.all_day
+        ? null
+        : localTimeZone();
+
+  const cut = Date.parse(cutoffIso);
+  const deletedAt = plan.deleted.map((x) => Date.parse(x)).filter((x) => Number.isFinite(x));
+  let oldSlots: TailSlot[] = [];
+  let tailSlots: TailSlot[] = [];
+  if (deletedAt.length > 0 && Number.isFinite(cut) && master.recurrence) {
+    // The old series' slots from the cutoff to its last deleted one, as its
+    // rule generates them: the exceptions cleared, so a deletion has its place.
+    // A series of days names a slot within half a day of it (decision 95).
+    const last = Math.max(...deletedAt);
+    const oldMargin = master.all_day ? HALF_DAY_MS : 0;
+    oldSlots = expandEvent(
+      { ...master, recurrence: { ...master.recurrence, exceptions: [] } },
+      { start: new Date(cut - oldMargin), end: new Date(last + oldMargin) },
+    ).map((occ) => slotOf(occ.start, master.recurrence?.tzid, master.all_day));
+    // The new series' occurrences, as many as the old slots and at least past
+    // the last deleted day — the date may have moved either way. Widening, as
+    // `firstOccurrenceFrom` does, until there are enough or the rule ends.
+    const start = Date.parse(tail.start);
+    const from = new Date(start - (tail.all_day ? HALF_DAY_MS : 0));
+    const series: SplittableEvent = {
+      id: 'tail',
+      start: tail.start,
+      end: tail.start,
+      all_day: tail.all_day,
+      recurrence: { rrule, exceptions: [], tzid },
+    };
+    let span = Math.max(last, start) + Math.abs(start - cut) + 2 * DAY_MS - from.getTime();
+    let found = -1;
+    for (;;) {
+      const expanded = expandEvent(series, { start: from, end: new Date(from.getTime() + span) });
+      tailSlots = expanded.map((occ) => slotOf(occ.start, tzid, tail.all_day));
+      if (
+        tailSlots.length >= oldSlots.length ||
+        tailSlots.length === found ||
+        span >= LONGEST_REACH_MS
+      ) {
+        break;
+      }
+      found = tailSlots.length;
+      span = Math.min(span * 4, LONGEST_REACH_MS);
+    }
+  }
+  const answer = tailExceptions({
+    old_slots: oldSlots,
+    old_all_day: master.all_day,
+    old_tzid: master.recurrence?.tzid ?? null,
+    old_rule: master.recurrence?.rrule ?? '',
+    tail: tailSlots,
+    tail_rule: rrule,
+    tail_start: tail.start,
+    tail_all_day: tail.all_day,
+    tail_tzid: tzid ?? null,
+    deleted: plan.deleted,
+    standing: plan.standing,
+  });
+  return { rrule, exceptions: answer.exceptions, tzid: tzid ?? null };
 }
 
 /**

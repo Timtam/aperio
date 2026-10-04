@@ -191,7 +191,21 @@ ab dem die Serie möglicherweise doppelt steht, bis du ihn schließt. Scheitert
 auch das Löschen der neuen, sagt Aperio auch das und bittet dich, den Kalender
 zu prüfen, bevor du erneut speicherst. Gelöschte Termine lässt Aperio in der
 neuen Serie weg, und in einer anderen Kalender-App geänderte bleiben darin, zur
-üblichen Uhrzeit und mit dem Inhalt der neuen Serie. Noch behält nicht jeder
+üblichen Uhrzeit und mit dem Inhalt der neuen Serie. Gelöschte Termine gehen
+mit deiner Änderung mit: Verschiebst du den Termin auf einen anderen Tag, wandert
+jeder gelöschte nach seinem Platz in der Serie mit, aus einem gelöschten dritten
+Montag wird ein gelöschter dritter Dienstag; wechselst du zwischen ganztägig und
+mit Uhrzeit, bleibt er auf dem Tag, an dem du ihn gesehen hast. Bekommt die neue
+Serie eine andere Wiederholung, bleibt ein gelöschter Termin nur an einem Tag
+gelöscht, den die neue Regel noch trifft; ein neues Ende allein ist keine neue
+Regel. Eine Regel, die ihre Tage nennt, etwa jeden Montag, jeden Werktag oder
+jeden 10. des Monats, behält sie, wenn du einen Termin auf einen anderen Tag
+verschiebst, und ihre Löschungen vorerst auch. Überspringt eine monatliche oder
+jährliche Serie durch das neue Datum andere Monate oder Jahre, etwa vom 31. auf
+den 30. verschoben, wandern ihre Löschungen nur so weit nach ihrem Platz mit,
+wie beide Fassungen noch übereinstimmen; liegt eine Löschung dahinter, bleiben
+alle auf ihrem Tag, und ein gelöschter Termin kann wieder erscheinen. Noch
+behält nicht jeder
 Kalender diese Löschungen: CalDAV-Kalender tun es bei Serien mit Uhrzeit, bei
 Exchange, bei Google und bei ganztägigen CalDAV-Serien kann ein gelöschter
 Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem

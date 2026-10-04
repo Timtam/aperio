@@ -57,6 +57,7 @@ import {
   installTextCollation,
   installRecurrenceSummaryRules,
   installSeriesShiftRules,
+  installTailExceptionsRules,
   installSeriesClockRules,
   installZoneListRules,
 } from '@aperio/shared';
@@ -102,6 +103,7 @@ import {
   priorityRank,
   recurrenceSummaryJson,
   seriesShiftJson,
+  tailExceptionsJson,
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
   expansionClockThroughCore,
@@ -174,6 +176,7 @@ installSignatureRules({ signatureInJson, stripSignatureJson, applySignatureJson 
 installDayStartRules({ dayStartJson });
 installTaskSettingsRules({ taskSettingsJson });
 installSeriesShiftRules({ seriesShiftJson });
+installTailExceptionsRules({ tailExceptionsJson });
 installRecurrenceSummaryRules({ recurrenceSummaryJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,

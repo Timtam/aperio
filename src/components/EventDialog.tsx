@@ -19,7 +19,7 @@ import {
   sendsInvitations as sendsInvitationsFor,
   organizerOf,
   signatureIn,
-  type TailRecurrence,
+  type WholeSeriesPlan,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -56,8 +56,8 @@ import {
   seriesFromCut,
   thisAndFutureDeletedKey,
   readSeriesRows,
-  ruleFromCut,
   seriesMaybeShownTwice,
+  tailRecurrenceFor,
   cutoffDay,
 } from '../intl/recurrence';
 import {
@@ -1404,8 +1404,9 @@ export function EventDialog({
           let wholeFromCut: {
             series: CalendarEvent;
             occIso: string;
-            /** What the rule generated before the cut, for a COUNT the user set. */
-            occurrencesBefore: number;
+            /** The series as loaded, whose occurrences the cut counts from. */
+            master: CalendarEvent;
+            plan: WholeSeriesPlan;
           } | null = null;
           if (isOccurrence && editScope === 'this_and_future') {
             // Split the series at this occurrence: create a NEW series from
@@ -1461,30 +1462,23 @@ export function EventDialog({
               wholeFromCut = {
                 series: seriesFromCut(master, plan, occIso),
                 occIso,
-                occurrencesBefore: plan.occurrencesBefore,
+                master,
+                plan,
               };
             } else {
-              // What the user set in the repeat field, if they changed it — its
-              // COUNT, like the one the field showed, counted from the series'
-              // first occurrence — and the series' own pattern from here on
-              // otherwise. Either way the exceptions follow a new time of day,
-              // or the occurrences they cancel come back at it.
-              const ruleChanged =
-                form.rrule !== (event.recurrence?.rrule ?? null);
-              const tailRecurrence = (planned: TailRecurrence) =>
-                exceptionsAtSeriesTime(
-                  ruleChanged
-                    ? editedRecurrence(
-                        form.rrule &&
-                          ruleFromCut(form.rrule, plan.occurrencesBefore),
-                        planned,
-                        form.allDay,
-                      )
-                    : planned,
-                  occIso,
-                  start,
-                  form.allDay || master.all_day,
-                );
+              // What the user set in the repeat field, if they changed it, or
+              // the series' own pattern from here on; the zone; and the
+              // deleted occurrences, carried along with the edit by their
+              // place or their day (decisions 152, 188, 189; the core's rule,
+              // see `tailRecurrenceFor`). Decided before anything is written,
+              // so a failure changes nothing.
+              const tailRecurrence = tailRecurrenceFor({
+                master,
+                cutoffIso: occIso,
+                plan,
+                tail: { start, all_day: form.allDay },
+                rule: { form: form.rrule, opened: event.recurrence?.rrule ?? null },
+              });
               // The arithmetic — the COUNT the tail keeps, the EXDATEs that
               // travel with it, the zone it inherits — lives in
               // `planSeriesSplit`; the order and the undo in
@@ -1492,7 +1486,7 @@ export function EventDialog({
               // those details decides whether the two halves line up.
               const written = await writeSeriesSplit(
                 {
-                  createTail: (recurrence) =>
+                  createTail: () =>
                     apiCreateEvent(
                       {
                         calendar_id: form.calendarId,
@@ -1502,7 +1496,7 @@ export function EventDialog({
                         start,
                         end,
                         all_day: form.allDay,
-                        recurrence: tailRecurrence(recurrence),
+                        recurrence: tailRecurrence,
                         color_label: form.colorLabel,
                         reminders: remindersForWire,
                         sound: null,
@@ -1629,12 +1623,7 @@ export function EventDialog({
             ? editedRecurrence(
                 form.rrule === (event.recurrence?.rrule ?? null)
                   ? (series.recurrence?.rrule ?? form.rrule)
-                  : // A COUNT the user set counts from the series' first
-                    // occurrence, as the field showed it; from the cut, what
-                    // is left of it (decision 121).
-                    wholeFromCut && form.rrule
-                    ? ruleFromCut(form.rrule, wholeFromCut.occurrencesBefore)
-                    : form.rrule,
+                  : form.rrule,
                 series.recurrence ?? { exceptions: [] },
                 form.allDay,
               )
@@ -1649,14 +1638,24 @@ export function EventDialog({
             all_day: form.allDay,
             location: form.location.trim() || null,
             description: form.description.trim() || null,
-            // A new time of day takes the exceptions along, or the occurrences
-            // they cancel would come back at that time.
-            recurrence: exceptionsAtSeriesTime(
-              seriesRecurrence,
-              series.start,
-              times.start,
-              form.allDay || series.all_day,
-            ),
+            // "This and all following" from the series' first occurrence on
+            // takes the deleted occurrences along as a split does (decisions
+            // 152, 188); a whole-series edit moves them to a new time of day,
+            // or the occurrences they cancel would come back at that time.
+            recurrence: wholeFromCut
+              ? tailRecurrenceFor({
+                  master: wholeFromCut.master,
+                  cutoffIso: wholeFromCut.occIso,
+                  plan: wholeFromCut.plan,
+                  tail: { start: times.start, all_day: form.allDay },
+                  rule: { form: form.rrule, opened: event.recurrence?.rrule ?? null },
+                })
+              : exceptionsAtSeriesTime(
+                  seriesRecurrence,
+                  series.start,
+                  times.start,
+                  form.allDay || series.all_day,
+                ),
             color_label: form.colorLabel,
             reminders: remindersForWire,
             attendees: form.attendees,

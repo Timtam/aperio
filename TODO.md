@@ -2379,12 +2379,41 @@ Siehe DESIGN §4.2.
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
       jetzt die Zeilen der Kopie und schneidet nach dem Platz in der Serie
       (141); beide Mitzieh-Dialoge lesen die Zeilen einmal, vor dem Anker.
-    - 🚩 **Tail-Regel bei Wechsel und neuer Regel** (PR 3b): wechselt die neue
-      Serie zwischen ganztägig und mit Uhrzeit, trifft eine Ausnahme um 18 Uhr
-      den FOLGENDEN Tag (halber Tag Abstand); eine geänderte Regel behält
-      Ausnahmen an Tagen, die sie nie erzeugt (EWS bricht dann beim Löschen
-      ab). Offen ist die Frage, ob Löschungen mitwandern, wenn „dieser und alle
-      folgenden“ das Datum verschiebt (heute bleiben sie auf ihrem Tag).
+    - ✅ **Tail-Regel bei Wechsel und neuer Regel** (PR 3b, 152, 186-191):
+      Gelöschte Termine gehen mit der Änderung mit. Nach ihrem Platz in der
+      Serie (152), wenn jedes Vorkommen mit dem Beginn wandert (gleiches Muster,
+      ein neues Ende zählt nicht; Tage und Uhrzeiten aus dem Beginn; jedes bis
+      zur letzten Löschung um denselben Schritt in Tagen, Monaten oder Jahren,
+      was eine Monatsregel vom 31. auf den 30. ab dem nächsten kürzeren Monat
+      nicht mehr tut):
+      ein verschobenes Datum
+      nimmt sie mit, aus dem gelöschten dritten Montag wird der gelöschte dritte
+      Dienstag, und ein Wechsel zwischen ganztägig und mit Uhrzeit lässt eine
+      Ausnahme um 18 Uhr auf ihrem Tag statt auf dem folgenden. Sonst nach ihrem
+      Tag, auf der gemeinsamen Uhr beider Serien oder den Tagen des Geräts: bei
+      neuer Regel nur, wo sie ihn noch trifft (188), die anderen fallen weg,
+      statt dass EWS beim Löschen abbricht; bei einer Regel, die ihre Tage nennt
+      (jeden Werktag, jeden 10.), bleiben sie, weil die übrigen Vorkommen nicht
+      wandern (189); ein Vorkommen zum selben Zeitpunkt behält seine Löschung.
+      Nie auf dem ersten Vorkommen der neuen Serie. Die Regel lebt im Kern (190,
+      `cal_core::tail_exceptions`, Fixture `tailExceptions.json`, Türen per
+      WebAssembly und UniFFI), die Shell expandiert beide Serien
+      (`tailRecurrenceFor`). Gilt für beide Editoren, beide Mitzieh-Dialoge und
+      „dieser und alle folgenden“ ohne Kopf, der die Serie ganz neu schreibt; die
+      Zone wird ganztägig keine, aus ganztägig mit Uhrzeit die Gerätezone. Ein
+      altes Handy-.so ohne die Tür scheitert, bevor etwas geschrieben wird.
+      ↻ im Test.
+    - 🚩 **PR 3c (189):** Eine Regel, die ihre Tage nennt („jeden Montag“,
+      „jeden 10.“), bleibt beim Verschieben von „dieser und alle folgenden“ auf
+      ihren Tagen, und ein verschobenes Vorkommen außerhalb davon erscheint gar
+      nicht; bis die Regel mitwandert wie beim Ziehen einer ganzen Serie
+      (`shiftSeriesRule`), bleiben ihre Löschungen auf ihrem Tag.
+    - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191):** derselbe
+      18-Uhr-Fehler beim Bearbeiten der ganzen Serie (`exceptionsAtSeriesTime`
+      lässt ganztägige Wechsel aus). Eigener kleiner PR.
+    - 🚩 Verschiebt „dieser und alle folgenden“ eine Serie mit UNTIL nach vorn,
+      fällt ihr letztes Vorkommen weg: `ruleFromCut` bewegt UNTIL nicht, das
+      Ziehen einer ganzen Serie schon (`movedSeriesUntil`).
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des

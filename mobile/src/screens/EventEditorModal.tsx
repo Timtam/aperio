@@ -55,12 +55,12 @@ import {
   editedRecurrence,
   exceptionsAtSeriesTime,
   readSeriesRows,
-  ruleFromCut,
   seriesFromCut,
   seriesMaybeShownTwice,
   cutoffDay,
   seriesTimesFromOccurrenceEdit,
-  type TailRecurrence,
+  tailRecurrenceFor,
+  type WholeSeriesPlan,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -1179,8 +1179,8 @@ export default function EventEditorModal({
       // "This and all following" where nothing comes before: the whole series
       // from here, written in place by the series branch below (decision 118).
       let wholeFromCut: CalendarEvent | null = null;
-      // What the rule generated before that cut, for a COUNT the user set.
-      let occurrencesBeforeCut = 0;
+      // Its plan and its cut, for what it repeats by from there.
+      let wholeCut: { plan: WholeSeriesPlan; occIso: string } | null = null;
       if (
         editing &&
         original != null &&
@@ -1209,31 +1209,26 @@ export default function EventEditorModal({
         }
         if (plan.kind === 'whole') {
           wholeFromCut = seriesFromCut(original, plan, occurrence);
-          occurrencesBeforeCut = plan.occurrencesBefore;
+          wholeCut = { plan, occIso: occurrence };
         } else {
-          // The new series continues the original pattern — unless the user
-          // changed the repeat field, which then is its rule (decision 121),
-          // its COUNT counted from the series' first occurrence as the field
-          // showed it. Either way the exceptions follow a new time of day, or
-          // the occurrences they cancel come back at it. Mirrors the desktop.
-          const ruleChanged = recurrence !== (original.recurrence?.rrule ?? null);
-          const tailRecurrence = (planned: TailRecurrence) =>
-            exceptionsAtSeriesTime(
-              ruleChanged
-                ? editedRecurrence(
-                    recurrence && ruleFromCut(recurrence, plan.occurrencesBefore),
-                    planned,
-                    allDay,
-                  )
-                : planned,
-              occurrence,
-              start,
-              allDay || original.all_day,
-            );
+          // What the user set in the repeat field, if they changed it, or the
+          // series' own pattern from here on; the zone; and the deleted
+          // occurrences, carried along with the edit by their place or their
+          // day (decisions 152, 188, 189; the core's rule, see
+          // `tailRecurrenceFor`). Decided before anything is written, so a
+          // failure — a native library older than the door included —
+          // changes nothing. Mirrors the desktop.
+          const tailRecurrence = tailRecurrenceFor({
+            master: original,
+            cutoffIso: occurrence,
+            plan,
+            tail: { start, all_day: allDay },
+            rule: { form: recurrence, opened: original.recurrence?.rrule ?? null },
+          });
           const masterRecurrence = original.recurrence;
           const written = await writeSeriesSplit(
             {
-              createTail: (planned) =>
+              createTail: () =>
                 createEvent(
                   {
                     calendar_id: calId,
@@ -1243,7 +1238,7 @@ export default function EventEditorModal({
                     start,
                     end,
                     all_day: allDay,
-                    recurrence: tailRecurrence(planned),
+                    recurrence: tailRecurrence,
                     color_label: colorToSend,
                     reminders: remindersForWire,
                     sound: null,
@@ -1374,19 +1369,25 @@ export default function EventEditorModal({
               allDay,
             )
           : { start, end };
-        // An untouched repeat field keeps the rule the series has from the cut
-        // on; a changed one is the user's.
-        const seriesRecurrence = wholeFromCut
-          ? editedRecurrence(
-              recurrence === (original.recurrence?.rrule ?? null)
-                ? (wholeFromCut.recurrence?.rrule ?? recurrence)
-                : // A COUNT the user set counts from the series' first
-                  // occurrence; from the cut, what is left of it (121).
-                  recurrence && ruleFromCut(recurrence, occurrencesBeforeCut),
-              wholeFromCut.recurrence ?? { exceptions: [] },
-              allDay,
-            )
-          : recurrenceToSend;
+        // "This and all following" from the series' first occurrence on keeps
+        // the rule it has from the cut on unless the field changed, and takes
+        // the deleted occurrences along as a split does (decisions 152, 188).
+        // A whole-series edit moves them to a new time of day, or the
+        // occurrences they cancel would come back at that time.
+        const seriesRecurrence = wholeCut
+          ? tailRecurrenceFor({
+              master: original,
+              cutoffIso: wholeCut.occIso,
+              plan: wholeCut.plan,
+              tail: { start: times.start, all_day: allDay },
+              rule: { form: recurrence, opened: original.recurrence?.rrule ?? null },
+            })
+          : exceptionsAtSeriesTime(
+              recurrenceToSend,
+              base.start,
+              times.start,
+              allDay || base.all_day,
+            );
         const updated = await updateEvent(
           {
             ...base,
@@ -1399,14 +1400,7 @@ export default function EventEditorModal({
             description: description.trim() || null,
             color_label: colorToSend,
             reminders: remindersForWire,
-            // A new time of day takes the exceptions along, or the occurrences
-            // they cancel would come back at that time.
-            recurrence: exceptionsAtSeriesTime(
-              seriesRecurrence,
-              base.start,
-              times.start,
-              allDay || base.all_day,
-            ),
+            recurrence: seriesRecurrence,
             attendees,
             send_invitations: sendInvitations,
           },

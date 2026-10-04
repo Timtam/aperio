@@ -18,6 +18,7 @@ import {
   installTaskSettingsRules,
   installRecurrenceSummaryRules,
   installSeriesShiftRules,
+  installTailExceptionsRules,
   installSeriesClockRules,
   installZoneListRules,
   type ZoneOffsets,
@@ -178,6 +179,14 @@ installTaskSettingsRules({
 // WebAssembly.
 installSeriesShiftRules({
   seriesShiftJson: (inputJson) => CalFfi.seriesShift(inputJson),
+});
+
+// Which deleted occurrences a series keeps when "this and all following" writes
+// it from the cut on (decisions 152, 188). A native library older than the door
+// has no such function: "this and all following" then fails before it writes
+// anything, as the series shift does, rather than guessing here.
+installTailExceptionsRules({
+  tailExceptionsJson: (inputJson) => CalFfi.tailExceptions(inputJson),
 });
 
 // A repeat rule in words (84a): the locked invitation shows it, and so does
