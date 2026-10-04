@@ -180,13 +180,14 @@ entfernt (beim Löschen). Die neue Serie wiederholt sich so, wie es das Feld fü
 die Wiederholung sagt: Änderst du dort die Regel, folgt die neue Serie ihr;
 lässt du sie, läuft das Muster einfach weiter. Verschiebst du den Termin auf
 einen anderen Tag, wandert das Feld sofort mit: Aus jeden Montag wird jeden
-Dienstag, aus jeden 10. des Monats jeden 11., und ein Enddatum rückt genauso
-weit, damit der letzte Termin bleibt. Nur ein neues Datum bewegt es: Änderst du
-bei einem früher einzeln verschobenen Termin nur den Titel, behält die Serie
-ihre Tage. Manche Regeln lassen sich nicht um Tage verschieben, ohne etwas
-anderes zu bedeuten, etwa der zweite Dienstag im Monat oder jeder 30.: Das Feld
-behält die Regel und sagt, warum, und das Speichern sagt es auch. Wähle die
-Wiederholung dann selbst, oder bearbeite nur diesen Termin. Liegt vor dem gewählten Termin
+Dienstag, aus jeden 10. des Monats jeden 11., und ein Enddatum rückt so mit,
+dass die neue Serie auf dem Termin am Platz des alten letzten endet. Änderst du
+nur etwas anderes, bleibt die Wiederholung, wie sie ist. Manche Regeln lassen
+sich nicht um Tage verschieben, ohne etwas anderes zu bedeuten, etwa der zweite
+Dienstag im Monat oder jeder 30., oder eine Regel mit eigenen Uhrzeiten, wenn
+sich die Uhrzeit ändert: Das Feld behält die Regel und sagt, warum, und das
+Speichern sagt es auch. Wähle die Wiederholung dann selbst, oder bearbeite nur
+diesen Termin. Liegt vor dem gewählten Termin
 keiner mehr – du hast den ersten gewählt, oder alle früheren sind gelöscht –,
 gibt es nichts zu behalten: Das Bearbeiten ändert die ganze Serie, die derselbe
 Eintrag bleibt, und das Löschen entfernt die Serie. Aperio sagt es dir dann.

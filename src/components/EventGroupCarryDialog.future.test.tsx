@@ -409,7 +409,7 @@ describe('EventGroupCarryDialog → a copy whose rule names its days (189, 193)'
     });
     expect(
       await screen.findByText(
-        /In Privat kann die Wiederholung nicht mit dem neuen Datum wandern|In Privat, the repeat cannot move with the new date/,
+        /In Privat kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern|In Privat, the repeat cannot move with the new date or time/,
       ),
     ).toBeTruthy();
     expect(calls('create_event')).toHaveLength(0);

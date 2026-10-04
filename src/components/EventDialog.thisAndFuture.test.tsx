@@ -225,6 +225,23 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     await waitFor(() => expect(announced.some((m) => WHOLE.test(m))).toBe(true));
   });
 
+  it('moves the rule of a series rewritten whole to the start it writes (189)', async () => {
+    // Monday 15 June to Tuesday 16 June: the whole series from there repeats on
+    // Tuesdays, its deleted 13 July is the deleted 14 July.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    await open(FIRST);
+    fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
+      target: { value: '2026-06-16' },
+    });
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
+    expect(sent.start).toBe('2026-06-16T07:00:00.000Z');
+    expect(sent.recurrence?.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(sent.recurrence?.exceptions).toEqual(['2026-07-14T07:00:00.000Z']);
+  });
+
   it('takes a new time for the whole series, and its exceptions along', async () => {
     deviceInBerlin();
     onFile.series = SERIES;
@@ -646,15 +663,17 @@ describe('EventDialog → the rule moves with "this and all following" (189, 192
       end: '2026-07-06T08:00:00.000Z',
     } as unknown as CalendarEvent);
     setStartDate('2026-07-07');
-    // The field keeps the rule, and says why on the way to it.
+    // The field keeps the rule, and says why on the way to it — focusable, so
+    // a screen reader in the dialog's application role stops on it.
     expect(ruleShown()).toBe('FREQ=MONTHLY;BYDAY=1MO');
-    expect(
-      screen.getByText(/kann nicht mit dem neuen Datum wandern|cannot move with the new date/),
-    ).toBeTruthy();
+    const hint = screen.getByText(
+      /kann nicht mit dem neuen Datum oder der neuen Uhrzeit wandern|cannot move with the new date or time/,
+    );
+    expect(hint.getAttribute('tabindex')).toBe('0');
     save();
     expect(
       await screen.findByText(
-        /lässt sich ab hier nicht auf das neue Datum verschieben|cannot move to the new date from here on/,
+        /lässt sich ab hier nicht auf das neue Datum oder die neue Uhrzeit verschieben|cannot move to the new date or time from here on/,
       ),
     ).toBeTruthy();
     expect(calls('create_event')).toHaveLength(0);
@@ -675,15 +694,10 @@ describe('EventDialog → the rule moves with "this and all following" (189, 192
     expect(tailRequest().recurrence?.exceptions).toEqual(['2026-07-14T07:00:00.000Z']);
   });
 
-  it('keeps the days of an occurrence moved on its own earlier when only the title changes (192)', async () => {
+  it('keeps the days when only the title changes (192)', async () => {
     deviceInBerlin();
     onFile.series = SERIES;
-    // 6 July's occurrence sits on Wednesday the 8th.
-    await open({
-      ...JULY,
-      start: '2026-07-08T07:00:00.000Z',
-      end: '2026-07-08T08:00:00.000Z',
-    } as unknown as CalendarEvent);
+    await open(JULY);
     fireEvent.change(screen.getByRole('combobox', { name: /titel|title/i }), {
       target: { value: 'Teamrunde neu' },
     });

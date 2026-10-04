@@ -1714,6 +1714,44 @@ describe('movedTailRule (189, 192-194)', () => {
     ).toEqual(shifted('FREQ=DAILY;UNTIL=20260901'));
   });
 
+  it('ends a monthly series that begins anew on another day on its last place (194)', () => {
+    // All-day on the 25th until 25 October, moved to the 2nd: each occurrence
+    // moves by another number of days. Moved by the first one's seven, the
+    // bound cut off 2 November, the place of 25 October.
+    const midnight = (month: number, day: number) => new Date(2026, month - 1, day).toISOString();
+    expect(
+      moved('FREQ=MONTHLY;UNTIL=20261025', midnight(9, 25), midnight(9, 25), midnight(10, 2), {
+        tzid: null,
+        all_day: true,
+      }),
+    ).toEqual(shifted('FREQ=MONTHLY;UNTIL=20261102'));
+  });
+
+  it('ends a series that gets a time of day on its last occurrence, not at its midnight (194)', () => {
+    // All-day until 31 August; from the 26th on at 18:00, a day later. The
+    // date bound read at midnight dropped the last one, 1 September 18:00.
+    const midnight = (day: number) => new Date(2026, 7, day).toISOString();
+    const evening = (month: number, day: number) => new Date(2026, month - 1, day, 18);
+    const utc = (when: Date) => when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    expect(
+      movedTailRule({
+        rrule: 'FREQ=DAILY;UNTIL=20260831',
+        series: { tzid: null, all_day: true },
+        from: midnight(26),
+        opened: midnight(26),
+        tail: { start: evening(8, 27).toISOString(), all_day: false },
+      }),
+    ).toEqual(shifted(`FREQ=DAILY;UNTIL=${utc(evening(9, 1))}`));
+  });
+
+  it('keeps the end of a day the repeat field writes when only the time moves', () => {
+    // Still 31 December, the day the field shows; moved by the hour it would
+    // read 1 January, and touching the field then added that day.
+    expect(
+      moved('FREQ=DAILY;UNTIL=20261231T235959Z', at('10-05'), at('10-05'), at('10-05', '10:00')),
+    ).toEqual(shifted('FREQ=DAILY;UNTIL=20261231T235959Z'));
+  });
+
   it('moves the days only when this edit moved the date (192)', () => {
     // Opened on the Wednesday its occurrence was moved to on its own, and
     // saved with a new title only: Mondays stay Mondays, and the end follows

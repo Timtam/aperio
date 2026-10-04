@@ -242,16 +242,27 @@ verschiebt sie wie das Ziehen einer ganzen Serie — aus jeden Montag wird jeden
 Dienstag, aus jedem 10. jeder 11. —, gezählt vom Platz des Termins in der Serie
 bis zum neuen Beginn auf der Uhr der Serie (beim Wechsel ganztägig/Uhrzeit auf
 den Tagen des Geräts). Eine Regel, die ihre Tage aus dem Beginn nimmt, nimmt sie
-aus dem neuen und wird nie abgelehnt. In beiden rückt ein UNTIL so weit wie das
-erste Vorkommen, die neue Uhrzeit eingeschlossen. Nur ein in dieser Bearbeitung
-geändertes Datum verschiebt die Tage (192); ein früher einzeln verschobener
-Termin, dem nur der Titel geändert wird, lässt sie. Eine Regel, die nicht um
-ganze Tage wandern kann (gezählter Wochentag, Tag nach dem 28., BYSETPOS, nur
-bestimmte Monate), wird abgelehnt (193): Das Feld behält sie mit einem Hinweis,
+aus dem neuen und wird nie abgelehnt. In beiden rückt ein UNTIL so, dass die neue
+Serie auf dem Vorkommen am Platz des alten letzten endet (194): um ganze Tage,
+wo das reicht (so bleibt seine Schreibweise, etwa das Tagesende des Felds), sonst
+mit der neuen Uhrzeit, sonst genau auf jenes Vorkommen — als Datum bei einer
+ganztägigen Serie, als UTC-Zeit sonst; das braucht eine Monatsregel, die auf
+einem anderen Monatstag neu beginnt, und eine ganztägige Serie, die eine Uhrzeit
+bekommt (`keepingLength`, nur wenn die neue Serie auf ihrer eigenen Regel
+beginnt). Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage
+(192). Eine Regel, die nicht um ganze Tage wandern kann (gezählter Wochentag,
+Tag nach dem 28., BYSETPOS, nur bestimmte Monate) oder bei neuer Uhrzeit eigene
+Uhrzeiten nennt, wird abgelehnt (193): Das Feld behält sie mit einem Hinweis,
 das Speichern schreibt nichts und sagt den Grund, die Mitzieh-Dialoge melden die
-Kopie als nicht übertragen. Das Feld zeigt die verschobene Regel sofort (197);
-was der Nutzer dort danach selbst einstellt, gilt ab dem Beginn, an dem er es
-einstellte, und wandert von dort mit einem weiteren neuen Datum.
+Kopie als nicht übertragen. Das Feld zeigt die verschobene Regel sofort (197),
+und wo es sie nur in Worten sagen kann, heißt die Zeile „Wiederholung ab hier“
+statt „Gespeicherte Wiederholung“; was der Nutzer dort danach selbst einstellt,
+gilt ab dem Beginn, an dem er es einstellte, und wandert von dort mit einem
+weiteren neuen Datum. Beim Speichern wandert die Regel zum tatsächlich
+geschriebenen Beginn: Eine ganz von ihrem ersten Vorkommen an neu geschriebene
+Serie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich blieb, und
+ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann das Feld dann
+um eine Zeitumstellung danebenliegen.
 
 Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —

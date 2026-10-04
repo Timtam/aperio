@@ -166,12 +166,13 @@ The new series repeats the way the repeat field says: change the rule there and
 the new series follows it, leave it alone and the pattern simply continues.
 Move the occurrence to another day and the repeat field moves with it right
 away: every Monday becomes every Tuesday, every 10th of the month becomes every
-11th, and an end date moves as far, so the last occurrence stays. Only a new
-date moves it: change just the title of an occurrence you moved on its own
-before, and the series keeps its days. Some rules cannot move by days without
-meaning something else, such as the second Tuesday of the month or every 30th:
-the field keeps the rule and says why, and saving says so too. Choose the
-repeat yourself then, or edit just this occurrence.
+11th, and an end date moves along so that the new series ends on the occurrence
+in the place of the old last one. Change only something else, and the repeat
+stays as it is. Some rules cannot move by days without meaning something else,
+such as the second Tuesday of the month or every 30th, or a rule that names its
+own times when the time changes: the field keeps the rule and says why, and
+saving says so too. Choose the repeat yourself then, or edit just this
+occurrence.
 When nothing comes before the chosen occurrence — you picked the first one, or
 every earlier one was deleted — there is nothing to keep: an edit changes the
 whole series, which stays the same entry, and a delete removes the series.

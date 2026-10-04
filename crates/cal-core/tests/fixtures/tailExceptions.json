@@ -292,8 +292,8 @@
       }
     },
     {
-      "name": "C4 \"every Monday\" moved to a Tuesday keeps its deletion on Monday",
-      "note": "The rule names its weekday, so the new series still repeats on Mondays and starts off its own rule (decision 189). By place the deletion would land a week late.",
+      "name": "C4 \"every Monday\" kept by hand on a Tuesday start keeps its deletion on Monday",
+      "note": "The date moved to Tuesday and the repeat set back to Mondays by hand: not the moved rule (decisions 189, 196), so the new series still repeats on Mondays and starts off its own rule. By place the deletion would land a week late.",
       "question": {
         "old_slots": [
           { "at": "2026-08-24T08:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
@@ -477,8 +477,8 @@
       }
     },
     {
-      "name": "\"every weekday\" moved onto another of its days keeps its deletions",
-      "note": "Monday 24.08 moved to Tuesday: Wednesday and Thursday stay where they were, so the deleted Thursday stays deleted. By place it shifted onto Friday, a day nobody deleted.",
+      "name": "\"every weekday\" kept by hand on a moved start keeps its deletions",
+      "note": "Monday 24.08 moved to Tuesday, the repeat set back to every weekday by hand: Wednesday and Thursday stay where they were, so the deleted Thursday stays deleted. By place it shifted onto Friday, a day nobody deleted. Moved with the date, the rule is Tuesday to Saturday (\"every weekday\" moved with the start keeps its places).",
       "question": {
         "old_slots": [
           { "at": "2026-08-24T06:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
@@ -508,8 +508,8 @@
       }
     },
     {
-      "name": "a monthly rule on a named day keeps its deletion on that day",
-      "note": "The shape Exchange and Microsoft 365 write: moved from the 10th to the 11th, the series still repeats on the 10th.",
+      "name": "a monthly rule on a named day kept by hand keeps its deletion on that day",
+      "note": "The shape Exchange and Microsoft 365 write, moved from the 10th to the 11th with the repeat set back to the 10th by hand: the series still repeats on the 10th.",
       "question": {
         "old_slots": [
           { "at": "2026-08-10T06:00:00.000Z", "day": "2026-08-10", "device_day": "2026-08-10" },
@@ -937,6 +937,62 @@
       },
       "expected": {
         "exceptions": ["2026-09-08T07:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a rule that follows its start, written out by the repeat field, is the moved rule",
+      "note": "Monthly from the 25th moved to the 2nd of the next month; touching the repeat field writes the day out. The same series as monthly from the 2nd, so the same deletions, counted in months (decision 196).",
+      "question": {
+        "old_slots": [
+          { "at": "2026-09-25T07:00:00.000Z", "day": "2026-09-25", "device_day": "2026-09-25" },
+          { "at": "2026-10-25T08:00:00.000Z", "day": "2026-10-25", "device_day": "2026-10-25" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=MONTHLY",
+        "tail": [
+          { "at": "2026-10-02T07:00:00.000Z", "day": "2026-10-02", "device_day": "2026-10-02" },
+          { "at": "2026-11-02T08:00:00.000Z", "day": "2026-11-02", "device_day": "2026-11-02" }
+        ],
+        "tail_start": "2026-10-02T07:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=MONTHLY;BYMONTHDAY=2;COUNT=4",
+        "deleted": ["2026-10-25T08:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-11-02T08:00:00.000Z"],
+        "carried_by": "place",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a week start that changes no date is no new rule",
+      "note": "Every other Monday moved to Tuesday, its end then set in the repeat field, which writes no week start: every other Tuesday counts its weeks from its start either way, so the same series as the moved one (decision 196).",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T07:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-09-07T07:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" },
+          { "at": "2026-09-21T07:00:00.000Z", "day": "2026-09-21", "device_day": "2026-09-21" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+        "tail": [
+          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-09-08T07:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" },
+          { "at": "2026-09-22T07:00:00.000Z", "day": "2026-09-22", "device_day": "2026-09-22" }
+        ],
+        "tail_start": "2026-08-25T07:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;COUNT=3",
+        "deleted": ["2026-09-21T07:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-09-22T07:00:00.000Z"],
         "carried_by": "place",
         "dropped": []
       }

@@ -24,13 +24,16 @@ const rows = contract.rows as unknown as Row[];
 
 describe('the deleted occurrences a series keeps from a cut on', () => {
   it('covers the cases the decisions turn on', () => {
-    expect(rows.length).toBeGreaterThanOrEqual(33);
+    expect(rows.length).toBeGreaterThanOrEqual(35);
     for (const name of [
       'A1 an evening deletion stays on its day when the series becomes all-day',
       'B2 every second week keeps the deletion it still meets',
       'C a deleted third Monday becomes a deleted third Tuesday',
-      'C4 "every Monday" moved to a Tuesday keeps its deletion on Monday',
-      '"every weekday" moved onto another of its days keeps its deletions',
+      'C4 "every Monday" kept by hand on a Tuesday start keeps its deletion on Monday',
+      '"every weekday" kept by hand on a moved start keeps its deletions',
+      'B a rule set to the moved weekday is the moved rule',
+      '"every weekday" moved with the start keeps its places',
+      'a rule that follows its start, written out by the repeat field, is the moved rule',
       'without a clock in common a day is the one the device shows',
       'a monthly rule from the 31st moved to the 30th keeps its deletion on its day',
     ]) {

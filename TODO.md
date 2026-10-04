@@ -2407,9 +2407,11 @@ Siehe DESIGN §4.2.
       „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
       nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
       jeden 10. → jeden 11.), und ihre Löschungen nach ihrem Platz; eine Regel,
-      die ihre Tage aus dem Beginn nimmt, nimmt sie aus dem neuen. UNTIL rückt so
-      weit wie das erste Vorkommen, auch bei neuer Uhrzeit; damit fällt das
-      letzte Vorkommen nicht mehr weg (früher: `ruleFromCut` bewegte UNTIL nicht).
+      die ihre Tage aus dem Beginn nimmt, nimmt sie aus dem neuen. UNTIL rückt so,
+      dass die neue Serie auf dem Vorkommen am Platz des alten letzten endet, auch
+      bei neuer Uhrzeit, bei einer Monatsregel auf neuem Monatstag und beim Wechsel
+      von ganztägig zu Uhrzeit (`keepingLength`); früher bewegte `ruleFromCut`
+      UNTIL nicht, und das letzte Vorkommen fiel weg.
       Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage (192).
       Eine Regel, die nicht um ganze Tage wandern kann, wird abgelehnt, bevor
       etwas geschrieben wird (193). Das Feld zeigt die verschobene Regel sofort
@@ -2418,12 +2420,6 @@ Siehe DESIGN §4.2.
       `series_shift::begin_series_anew` (Fragefeld `begins_anew`) und
       `tail_exceptions` erkennt die verschobene Regel selbst; Shell
       `movedTailRule`; beide Editoren, beide Mitzieh-Dialoge. ↻ im Test.
-    - 🚩 Ein früher einzeln verschobener Termin (Montagsserie, dieser liegt auf
-      Mittwoch), für „dieser und alle folgenden“ nur im Titel geändert: Die neue
-      Serie beginnt am Mittwoch mit der Montagsregel (192), und der Mittwoch
-      erscheint nicht, weil der Expander einen Beginn neben der Regel auslässt
-      (RFC 5545 zählt ihn mit). Entweder der Expander zählt DTSTART, oder die
-      neue Serie beginnt am Platz und trägt den Mittwoch als Ausnahme-Zeile.
     - 🚩 Wechsel ganztägig/Uhrzeit bei einer Serie, deren Zone einen anderen Tag
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die

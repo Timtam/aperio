@@ -1472,25 +1472,42 @@ export function EventDialog({
           }
 
           // The recurrence "this and all following" writes, with the rule the
-          // repeat field shows (decision 197): moved with a new date read
-          // against the occurrence this editor was filled from, or as the user
-          // set it. A rule that cannot move with the date is said in words,
-          // before anything is written (decision 193).
+          // repeat field shows (decision 197), moved to the start actually
+          // written: the series' own read against `opened` (in
+          // `tailRecurrenceFor`), the user's from the start they set it at. A
+          // rule that cannot move with the date or time is said in words,
+          // before anything is written (decision 193). The field reads the
+          // form's start; a series rewritten whole from its first occurrence
+          // keeps its own clock's time where the device's did not change
+          // (`seriesTimesFromOccurrenceEdit`), and its rule follows that.
           const tailRecurrenceForEdit = (
             args: Omit<Parameters<typeof tailRecurrenceFor>[0], 'opened' | 'rule'>,
+            opened: string,
           ) => {
             try {
-              if (shownRule.refused !== null) {
-                throw new TailShiftRefusedError(shownRule.refused);
+              const openedRule = event.recurrence?.rrule ?? null;
+              let rule = form.rrule;
+              const own = ruleSetAt !== null || rule !== openedRule;
+              if (own && rule) {
+                const moved = movedTailRule({
+                  rrule: rule,
+                  series: {
+                    tzid: args.master.recurrence?.tzid,
+                    all_day: args.master.all_day,
+                  },
+                  from: ruleSetAt ?? args.cutoffIso,
+                  opened: ruleSetAt ?? opened,
+                  tail: args.tail,
+                });
+                if (moved.outcome === 'refused') {
+                  throw new TailShiftRefusedError(moved.reason);
+                }
+                rule = moved.rrule;
               }
               return tailRecurrenceFor({
                 ...args,
-                opened: event.start,
-                rule: {
-                  form: shownRule.rrule,
-                  opened: event.recurrence?.rrule ?? null,
-                  touched: ruleSetAt !== null,
-                },
+                opened,
+                rule: { form: rule, opened: openedRule, touched: own },
               });
             } catch (err) {
               if (err instanceof TailShiftRefusedError) {
@@ -1582,12 +1599,15 @@ export function EventDialog({
               // edit by their place or their day (decisions 152, 188, 189,
               // 197; the core's rule, see `tailRecurrenceFor`). Decided before
               // anything is written, so a failure changes nothing.
-              const tailRecurrence = tailRecurrenceForEdit({
-                master,
-                cutoffIso: occIso,
-                plan,
-                tail: { start, all_day: form.allDay },
-              });
+              const tailRecurrence = tailRecurrenceForEdit(
+                {
+                  master,
+                  cutoffIso: occIso,
+                  plan,
+                  tail: { start, all_day: form.allDay },
+                },
+                event.start,
+              );
               // The arithmetic — the COUNT the tail keeps, the EXDATEs that
               // travel with it, the zone it inherits — lives in
               // `planSeriesSplit`; the order and the undo in
@@ -1753,12 +1773,16 @@ export function EventDialog({
             // them to a new time of day, or the occurrences they cancel would
             // come back at that time.
             recurrence: wholeFromCut
-              ? tailRecurrenceForEdit({
-                  master: wholeFromCut.master,
-                  cutoffIso: wholeFromCut.occIso,
-                  plan: wholeFromCut.plan,
-                  tail: { start: times.start, all_day: form.allDay },
-                })
+              ? tailRecurrenceForEdit(
+                  {
+                    master: wholeFromCut.master,
+                    cutoffIso: wholeFromCut.occIso,
+                    plan: wholeFromCut.plan,
+                    tail: { start: times.start, all_day: form.allDay },
+                  },
+                  // Read as a change to the series from its cut, as its start is.
+                  wholeFromCut.occIso,
+                )
               : exceptionsAtSeriesTime(
                   seriesRecurrence,
                   series.start,
@@ -1874,7 +1898,6 @@ export function EventDialog({
       locked,
       isOccurrence,
       editScope,
-      shownRule,
       ruleSetAt,
       keepRemindersAsDefault,
       // What was STORED for this event decides whether an emptied list is a
@@ -2590,18 +2613,23 @@ export function EventDialog({
             // two adjacent stops with the same name saying different things
             // is worse than no summary at all.
             <ReadOnlyField
-              label={t('dialogs.event.recurrence.storedLabel')}
+              label={t(
+                shownRule.rrule !== form.rrule
+                  ? 'dialogs.event.recurrence.movedLabel'
+                  : 'dialogs.event.recurrence.storedLabel',
+              )}
               value={repeatSentence}
             />
           )}
           {shownRule.refused !== null && (
-            // Before the controls, so it is read on the way to them: the rule
-            // they show stays as it is, and saving will say so too (193).
-            <p className="form__hint">
+            // Before the controls, and focusable, so it is read on the way to
+            // them inside the dialog's application role: the rule they show
+            // stays as it is, and saving will say so too (193).
+            <FocusableNote className="form__hint">
               {t('dialogs.event.recurrence.cannotMove', {
                 reason: t(`dialogs.moveScope.refusal.${shownRule.refused}`),
               })}
-            </p>
+            </FocusableNote>
           )}
           <RecurrenceSelector
             value={shownRule.rrule}

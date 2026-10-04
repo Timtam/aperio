@@ -427,7 +427,7 @@ const LONGEST_REACH_MS = 15_000 * DAY_MS;
  */
 export class TailShiftRefusedError extends Error {
   constructor(readonly reason: ShiftRefusal) {
-    super(`the repeat rule cannot move with the new date: ${reason}`);
+    super(`the repeat rule cannot move with the new date or time: ${reason}`);
     this.name = 'TailShiftRefusedError';
   }
 }
@@ -453,23 +453,146 @@ export interface TailRuleMove {
 }
 
 /**
+ * The zone of the series written from the cut on: kept while it stays timed or
+ * stays all-day (a continuation expands as its other half does), none once it
+ * becomes all-day, the device's once it gets a time of day, as a created
+ * series does (DESIGN-series-time-zone.md, "Ganztägig aus").
+ */
+function tailZone(
+  zone: string | null | undefined,
+  allDay: boolean,
+  tailAllDay: boolean,
+): string | null {
+  if (tailAllDay === allDay) return zone ?? null;
+  return tailAllDay ? null : localTimeZone();
+}
+
+/** A rule's UNTIL as written, when it ends by one. */
+function untilOf(rrule: string): string | null {
+  return /(?:^|[;:])\s*UNTIL=([^;]*)/i.exec(rrule)?.[1]?.trim() ?? null;
+}
+
+/** The rule with its UNTIL written as `value`. */
+function withUntil(rrule: string, value: string): string {
+  return rrule.replace(/((?:^|[;:])\s*UNTIL=)[^;]*/i, `$1${value}`);
+}
+
+/** The rule without its UNTIL: it repeats on, for as long as it is read. */
+function withoutUntil(rrule: string): string {
+  const [, prefix = '', body = ''] = /^(RRULE:)?(.*)$/is.exec(rrule.trim()) ?? [];
+  return (
+    prefix +
+    body
+      .split(';')
+      .filter((part) => part.trim() !== '' && !/^\s*UNTIL=/i.test(part))
+      .join(';')
+  );
+}
+
+/**
+ * Far enough past a rule's UNTIL to see every occurrence it keeps, read
+ * loosely: a date or a floating time as UTC, two days on.
+ */
+function pastUntil(value: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})/.exec(value);
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + 2 * DAY_MS : NaN;
+}
+
+/** The occurrences a rule generates from `start` up to `until`, no exception. */
+function occurrencesFrom(
+  start: string,
+  allDay: boolean,
+  rrule: string,
+  tzid: string | null,
+  until: number,
+): string[] {
+  const series: SplittableEvent = {
+    id: 'moved',
+    start,
+    end: start,
+    all_day: allDay,
+    recurrence: { rrule, exceptions: [], tzid },
+  };
+  const from = new Date(Date.parse(start) - (allDay ? HALF_DAY_MS : 0));
+  return expandEvent(series, { start: from, end: new Date(until) }).map((occ) => occ.start);
+}
+
+/**
+ * The moved rule with the bound that keeps the series as long as it was: the
+ * new series ends on the occurrence in the place of the old one's last
+ * (decision 194).
+ *
+ * `candidates` are the moved rule with its bound moved two ways: by whole
+ * days, which keeps its spelling — the end of a day the repeat field writes, a
+ * provider's date — and by the days and the new time of day. The first that
+ * keeps as many occurrences as the old series had from `from` is it. Neither
+ * does when the occurrences move by other steps than the start: a monthly rule
+ * that begins anew on another day of the month moves each by another number of
+ * days, and a date bound ends a series that got a time of day at its midnight.
+ * Then the bound is the new series' own occurrence in that place, written the
+ * way its kind needs: a date for an all-day series, a UTC time otherwise. All
+ * that only when the new series starts on its own rule — places line up then;
+ * otherwise the bound moves by the days and the new time of day.
+ */
+function keepingLength(
+  rrule: string,
+  candidates: readonly string[],
+  series: { tzid: string | null; all_day: boolean },
+  from: string,
+  tail: { start: string; all_day: boolean; tzid: string | null },
+): string {
+  const last = candidates[candidates.length - 1];
+  const old = untilOf(rrule);
+  if (old == null || untilOf(candidates[0]) == null || /(?:^|[;:])\s*COUNT=/i.test(rrule)) {
+    return last;
+  }
+  const before = occurrencesFrom(from, series.all_day, rrule, series.tzid, pastUntil(old));
+  if (before.length === 0) return last;
+  const same = slotMatcher({ all_day: tail.all_day, recurrence: { tzid: tail.tzid } });
+  const reach = (candidate: string) =>
+    pastUntil(untilOf(candidate) ?? '') + Math.abs(Date.parse(tail.start) - Date.parse(from));
+  const counted = candidates.map((candidate) =>
+    occurrencesFrom(tail.start, tail.all_day, candidate, tail.tzid, reach(candidate)),
+  );
+  const first = counted[0][0];
+  if (first === undefined || !same(Date.parse(first), Date.parse(tail.start))) return last;
+  const keeping = candidates.find((_, i) => counted[i].length === before.length);
+  if (keeping !== undefined) return keeping;
+  // The new series without its bound, as far as the old one's occurrences.
+  const open = withoutUntil(candidates[0]);
+  let span = reach(candidates[0]) - Date.parse(tail.start) + 2 * DAY_MS;
+  let found: string[] = [];
+  for (;;) {
+    found = occurrencesFrom(tail.start, tail.all_day, open, tail.tzid, Date.parse(tail.start) + span);
+    if (found.length >= before.length || span >= LONGEST_REACH_MS) break;
+    span = Math.min(span * 4, LONGEST_REACH_MS);
+  }
+  const end = found[before.length - 1];
+  if (end === undefined) return last;
+  return withUntil(
+    candidates[0],
+    tail.all_day
+      ? seriesDayKey(end, null, true).replace(/-/g, '')
+      : new Date(end).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''),
+  );
+}
+
+/**
  * The rule "this and all following" writes when its start moved (decisions
  * 189, 192-194), through the core's `begin_series_anew`.
  *
  * - Its days move only when this edit moved the date, from `opened` to the new
- *   start (192): an occurrence moved on its own earlier, edited from there on
- *   in nothing but its title, keeps its series' rule. They move from `from`,
- *   so the rule names the new start: "every Monday" from a Monday the user put
- *   on Thursday is "every Thursday". Days are counted on the series' clock,
- *   where its rule is read — or on the device's days when the series switches
- *   between all-day and a time of day, as the core counts them then: an
- *   all-day start is the device's midnight, which another clock may put on
- *   the day before.
+ *   start (192). They move from `from`, so the rule names the new start:
+ *   "every Monday" from a Monday the user put on Thursday is "every Thursday".
+ *   Days are counted on the series' clock, where its rule is read — or on the
+ *   device's days when the series switches between all-day and a time of day,
+ *   as the core counts them then: an all-day start is the device's midnight,
+ *   which another clock may put on the day before.
  * - A rule that names its days moves them, or is refused (193): the answer is
- *   `refused`, with the reason the surface says.
- * - Its UNTIL moves as far as its first occurrence did (194), the new time of
- *   day included, so the last occurrence still falls within it — also when the
- *   occurrence the edit started from sat at another time than its slot.
+ *   `refused`, with the reason the surface says. One that names its times is
+ *   refused for a new time of day as well.
+ * - Its UNTIL moves so that the new series ends on the occurrence in the place
+ *   of the old one's last (194, `keepingLength`).
  *
  * Nothing moved gives the rule back as it was written.
  */
@@ -485,24 +608,43 @@ export function movedTailRule({ rrule, series, from, opened, tail }: TailRuleMov
       ? 0
       : Math.round(dayNumber(tail.start) - dayNumber(from));
   // A time of day only while the series stays timed; the switch to or from
-  // all-day is the zone's (`tailRecurrenceFor`).
+  // all-day is the zone's (`tailZone`).
   const timed = !allDay && !tail.all_day;
   const timeChanges =
     timed &&
     moveSeriesInstant(opened, tzid, false, 0, tail.start) !==
       moveSeriesInstant(opened, tzid, false, 0);
-  const to = moveSeriesInstant(from, tzid, allDay, days, timed ? tail.start : undefined);
-  if (days === 0 && !timeChanges && Date.parse(to) === Date.parse(from)) {
+  const byDays = moveSeriesInstant(from, tzid, allDay, days);
+  const byTime = moveSeriesInstant(from, tzid, allDay, days, timed ? tail.start : undefined);
+  if (sameKind && Date.parse(byTime) === Date.parse(from)) {
     return { outcome: 'shifted', rrule };
   }
-  return shiftSeriesRule(
-    rrule,
-    seriesDayKey(from, tzid, allDay),
-    days,
-    timeChanges,
-    movedSeriesUntil(rrule, tzid, allDay, from, to),
-    { beginsAnew: true },
-  );
+  let moved = rrule;
+  if (days !== 0 || timeChanges) {
+    const answer = shiftSeriesRule(
+      rrule,
+      seriesDayKey(from, tzid, allDay),
+      days,
+      timeChanges,
+      movedSeriesUntil(rrule, tzid, allDay, from, byDays),
+      { beginsAnew: true },
+    );
+    if (answer.outcome === 'refused') return answer;
+    moved = answer.rrule;
+  }
+  // The bound moved by the new time of day too, where that is another one.
+  const timedBound = movedSeriesUntil(rrule, tzid, allDay, from, byTime);
+  const candidates =
+    timedBound !== undefined && Date.parse(byTime) !== Date.parse(byDays)
+      ? [moved, withUntil(moved, timedBound)]
+      : [moved];
+  return {
+    outcome: 'shifted',
+    rrule: keepingLength(rrule, candidates, { tzid, all_day: allDay }, from, {
+      ...tail,
+      tzid: tailZone(tzid, allDay, tail.all_day),
+    }),
+  };
 }
 
 /**
@@ -552,6 +694,7 @@ export function tailRecurrenceFor(input: {
     ? rule.form && ruleFromCut(rule.form, plan.occurrencesBefore)
     : plan.tail.rrule;
   if (!rrule) return null;
+  const tzid = tailZone(plan.tail.tzid, master.all_day, tail.all_day);
   if (!ruleChanged && opened !== undefined) {
     const moved = movedTailRule({
       rrule,
@@ -565,12 +708,6 @@ export function tailRecurrenceFor(input: {
     }
     rrule = moved.rrule;
   }
-  const tzid =
-    tail.all_day === master.all_day
-      ? plan.tail.tzid
-      : tail.all_day
-        ? null
-        : localTimeZone();
 
   const cut = Date.parse(cutoffIso);
   const deletedAt = plan.deleted.map((x) => Date.parse(x)).filter((x) => Number.isFinite(x));

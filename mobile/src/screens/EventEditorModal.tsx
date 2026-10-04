@@ -1247,25 +1247,40 @@ export default function EventEditorModal({
       // Its plan and its cut, for what it repeats by from there.
       let wholeCut: { plan: WholeSeriesPlan; occIso: string } | null = null;
       // The recurrence "this and all following" writes, with the rule the
-      // repeat field shows (decision 197): moved with a new date read against
-      // the occurrence this editor was opened on, or as the user set it. A rule
-      // that cannot move with the date is said in words, before anything is
-      // written (decision 193). Mirrors the desktop.
+      // repeat field shows (decision 197), moved to the start actually written:
+      // the series' own read against `opened` (in `tailRecurrenceFor`), the
+      // user's from the start they set it at. A rule that cannot move with the
+      // date or time is said in words, before anything is written (decision
+      // 193). Mirrors the desktop, also where a series rewritten whole from
+      // its first occurrence keeps its own clock's time.
       const tailRecurrenceForEdit = (
         args: Omit<Parameters<typeof tailRecurrenceFor>[0], 'opened' | 'rule'>,
+        opened: string,
       ) => {
         try {
-          if (shownRule.refused !== null) {
-            throw new TailShiftRefusedError(shownRule.refused);
+          const openedRule = original?.recurrence?.rrule ?? null;
+          let rule = recurrence;
+          const own = ruleSetAt !== null || rule !== openedRule;
+          if (own && rule) {
+            const moved = movedTailRule({
+              rrule: rule,
+              series: {
+                tzid: args.master.recurrence?.tzid,
+                all_day: args.master.all_day,
+              },
+              from: ruleSetAt ?? args.cutoffIso,
+              opened: ruleSetAt ?? opened,
+              tail: args.tail,
+            });
+            if (moved.outcome === 'refused') {
+              throw new TailShiftRefusedError(moved.reason);
+            }
+            rule = moved.rrule;
           }
           return tailRecurrenceFor({
             ...args,
-            opened: occurrence ?? undefined,
-            rule: {
-              form: shownRule.rrule,
-              opened: original?.recurrence?.rrule ?? null,
-              touched: ruleSetAt !== null,
-            },
+            opened,
+            rule: { form: rule, opened: openedRule, touched: own },
           });
         } catch (err) {
           if (err instanceof TailShiftRefusedError) {
@@ -1316,12 +1331,15 @@ export default function EventEditorModal({
           // rule, see `tailRecurrenceFor`). Decided before anything is
           // written, so a failure — a native library older than the door
           // included — changes nothing. Mirrors the desktop.
-          const tailRecurrence = tailRecurrenceForEdit({
-            master: original,
-            cutoffIso: occurrence,
-            plan,
-            tail: { start, all_day: allDay },
-          });
+          const tailRecurrence = tailRecurrenceForEdit(
+            {
+              master: original,
+              cutoffIso: occurrence,
+              plan,
+              tail: { start, all_day: allDay },
+            },
+            occurrence,
+          );
           const masterRecurrence = original.recurrence;
           const written = await writeSeriesSplit(
             {
@@ -1473,12 +1491,16 @@ export default function EventEditorModal({
         // A whole-series edit moves them to a new time of day, or the
         // occurrences they cancel would come back at that time.
         const seriesRecurrence = wholeCut
-          ? tailRecurrenceForEdit({
-              master: original,
-              cutoffIso: wholeCut.occIso,
-              plan: wholeCut.plan,
-              tail: { start: times.start, all_day: allDay },
-            })
+          ? tailRecurrenceForEdit(
+              {
+                master: original,
+                cutoffIso: wholeCut.occIso,
+                plan: wholeCut.plan,
+                tail: { start: times.start, all_day: allDay },
+              },
+              // Read as a change to the series from its cut, as its start is.
+              wholeCut.occIso,
+            )
           : exceptionsAtSeriesTime(
               recurrenceToSend,
               base.start,
@@ -1602,7 +1624,6 @@ export default function EventEditorModal({
     recurrence,
     reminders,
     ruleSetAt,
-    shownRule,
     startDate,
     startTime,
     t,
@@ -2080,7 +2101,11 @@ export default function EventEditorModal({
           {repeatSentence !== '' && (
             // Its own label: the controls below carry `recurrence.label`.
             <ReadOnlyField
-              label={t('dialogs.event.recurrence.storedLabel')}
+              label={t(
+                shownRule.rrule !== recurrence
+                  ? 'dialogs.event.recurrence.movedLabel'
+                  : 'dialogs.event.recurrence.storedLabel',
+              )}
               value={repeatSentence}
             />
           )}

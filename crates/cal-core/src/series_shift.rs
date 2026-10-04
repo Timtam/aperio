@@ -166,12 +166,48 @@ pub fn begin_series_anew(
     let answer = if days_follow_start(rrule) {
         moved_bound(rrule, days, until)
     } else {
+        let new_start = start.checked_add_signed(Duration::days(i64::from(days)));
         shift(rrule, start, days, time_changes, until)
+            .map(|moved| without_needless_week_start(rrule, moved, new_start))
     };
     match answer {
         Ok(rrule) => SeriesShift::Shifted { rrule },
         Err(reason) => SeriesShift::Refused { reason },
     }
+}
+
+/// The shifted rule without a week start the shift added that changes no date
+/// of a series beginning anew on `new_start`: every other week on the one
+/// weekday that start falls on counts its weeks from the start, wherever weeks
+/// begin. A drag needs it — its start may lie off the weekday — but left in
+/// here, the repeat field could not hold the rule and said it in words instead
+/// (decision 197). A week start the rule had of its own stays.
+fn without_needless_week_start(
+    original: &str,
+    moved: String,
+    new_start: Option<NaiveDate>,
+) -> String {
+    let Some(new_start) = new_start else {
+        return moved;
+    };
+    if parse_parts(original).map_or(true, |(_, before)| part(&before, "WKST").is_some()) {
+        return moved;
+    }
+    let Ok((prefix, parts)) = parse_parts(&moved) else {
+        return moved;
+    };
+    let weekday = WEEKDAY_TOKENS[new_start.weekday().num_days_from_monday() as usize];
+    let weekly = part(&parts, "FREQ").is_some_and(|f| f.eq_ignore_ascii_case("WEEKLY"));
+    let on_start = part(&parts, "BYDAY").is_some_and(|v| v.trim().eq_ignore_ascii_case(weekday));
+    if !weekly || !on_start {
+        return moved;
+    }
+    let kept: Vec<&str> = parts
+        .iter()
+        .filter(|p| p.key != "WKST")
+        .map(|p| p.raw.trim())
+        .collect();
+    format!("{prefix}{}", kept.join(";"))
 }
 
 /// A rule whose days follow its start, with only its `UNTIL` moved: to `until`
@@ -868,6 +904,26 @@ mod tests {
         assert_eq!(
             shifted_anew("FREQ=MONTHLY;BYMONTHDAY=10;COUNT=7", "2026-09-10", 1, None),
             "FREQ=MONTHLY;BYMONTHDAY=11;COUNT=7"
+        );
+        // Every other week on the weekday the new start falls on needs no week
+        // start: its weeks count from that start. Two weekdays do, and so does
+        // a week start the rule had of its own.
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;WKST=TU"
+        );
+        assert_eq!(
+            shifted_anew(
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;WKST=SU",
+                "2026-08-24",
+                1,
+                None
+            ),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=MO"
         );
         // Refused where a drag is (decision 193).
         for (rrule, start, days, reason) in [
