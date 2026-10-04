@@ -80,6 +80,8 @@ import {
   localTimeZone,
   movedSeriesUntil,
   moveSeriesInstant,
+  nthOccurrence,
+  occurrenceCount,
   overrideRecurrenceIso,
   overrideSeriesId,
   ruleFromCut,
@@ -490,32 +492,11 @@ function withoutUntil(rrule: string): string {
 }
 
 /**
- * Far enough past a rule's UNTIL to see every occurrence it keeps, read
- * loosely: a date or a floating time as UTC, two days on.
+ * Past this many occurrences from the cut the bound is moved, not counted: an
+ * hourly rule a year ahead, a daily one into the next century. Counting them on
+ * every change of a date in the editor cost seconds.
  */
-function pastUntil(value: string): number {
-  const m = /^(\d{4})(\d{2})(\d{2})/.exec(value);
-  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + 2 * DAY_MS : NaN;
-}
-
-/** The occurrences a rule generates from `start` up to `until`, no exception. */
-function occurrencesFrom(
-  start: string,
-  allDay: boolean,
-  rrule: string,
-  tzid: string | null,
-  until: number,
-): string[] {
-  const series: SplittableEvent = {
-    id: 'moved',
-    start,
-    end: start,
-    all_day: allDay,
-    recurrence: { rrule, exceptions: [], tzid },
-  };
-  const from = new Date(Date.parse(start) - (allDay ? HALF_DAY_MS : 0));
-  return expandEvent(series, { start: from, end: new Date(until) }).map((occ) => occ.start);
-}
+const LONGEST_COUNT = 5_000;
 
 /**
  * The moved rule with the bound that keeps the series as long as it was: the
@@ -528,11 +509,12 @@ function occurrencesFrom(
  * keeps as many occurrences as the old series had from `from` is it. Neither
  * does when the occurrences move by other steps than the start: a monthly rule
  * that begins anew on another day of the month moves each by another number of
- * days, and a date bound ends a series that got a time of day at its midnight.
- * Then the bound is the new series' own occurrence in that place, written the
- * way its kind needs: a date for an all-day series, a UTC time otherwise. All
- * that only when the new series starts on its own rule — places line up then;
- * otherwise the bound moves by the days and the new time of day.
+ * days, and a date bound ends a series that got a time of day at its midnight
+ * — on the last occurrence, before it even starts. Then the bound is the new
+ * series' own occurrence in that place, written the way its kind needs: a date
+ * for an all-day series, a UTC time otherwise. All that only when the new
+ * series starts on its own rule — places line up then — and within
+ * `LONGEST_COUNT`; otherwise the bound moves by the days and the new time.
  */
 function keepingLength(
   rrule: string,
@@ -542,33 +524,33 @@ function keepingLength(
   tail: { start: string; all_day: boolean; tzid: string | null },
 ): string {
   const last = candidates[candidates.length - 1];
-  const old = untilOf(rrule);
-  if (old == null || untilOf(candidates[0]) == null || /(?:^|[;:])\s*COUNT=/i.test(rrule)) {
+  if (
+    untilOf(rrule) == null ||
+    untilOf(candidates[0]) == null ||
+    /(?:^|[;:])\s*COUNT=/i.test(rrule)
+  ) {
     return last;
   }
-  const before = occurrencesFrom(from, series.all_day, rrule, series.tzid, pastUntil(old));
-  if (before.length === 0) return last;
-  const same = slotMatcher({ all_day: tail.all_day, recurrence: { tzid: tail.tzid } });
-  const reach = (candidate: string) =>
-    pastUntil(untilOf(candidate) ?? '') + Math.abs(Date.parse(tail.start) - Date.parse(from));
-  const counted = candidates.map((candidate) =>
-    occurrencesFrom(tail.start, tail.all_day, candidate, tail.tzid, reach(candidate)),
+  const before = occurrenceCount(
+    { start: from, all_day: series.all_day, recurrence: { rrule, tzid: series.tzid } },
+    LONGEST_COUNT,
   );
-  const first = counted[0][0];
-  if (first === undefined || !same(Date.parse(first), Date.parse(tail.start))) return last;
-  const keeping = candidates.find((_, i) => counted[i].length === before.length);
+  if (before == null || before === 0 || before > LONGEST_COUNT) return last;
+  const newSeries = (rule: string) => ({
+    start: tail.start,
+    all_day: tail.all_day,
+    recurrence: { rrule: rule, tzid: tail.tzid },
+  });
+  const open = newSeries(withoutUntil(candidates[0]));
+  const first = nthOccurrence(open, 1);
+  const same = slotMatcher({ all_day: tail.all_day, recurrence: { tzid: tail.tzid } });
+  if (first == null || !same(Date.parse(first), Date.parse(tail.start))) return last;
+  const keeping = candidates.find(
+    (candidate) => occurrenceCount(newSeries(candidate), before) === before,
+  );
   if (keeping !== undefined) return keeping;
-  // The new series without its bound, as far as the old one's occurrences.
-  const open = withoutUntil(candidates[0]);
-  let span = reach(candidates[0]) - Date.parse(tail.start) + 2 * DAY_MS;
-  let found: string[] = [];
-  for (;;) {
-    found = occurrencesFrom(tail.start, tail.all_day, open, tail.tzid, Date.parse(tail.start) + span);
-    if (found.length >= before.length || span >= LONGEST_REACH_MS) break;
-    span = Math.min(span * 4, LONGEST_REACH_MS);
-  }
-  const end = found[before.length - 1];
-  if (end === undefined) return last;
+  const end = nthOccurrence(open, before);
+  if (end == null) return last;
   return withUntil(
     candidates[0],
     tail.all_day

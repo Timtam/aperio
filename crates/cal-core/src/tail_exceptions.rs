@@ -71,7 +71,7 @@ use serde::{Deserialize, Serialize};
 // The rule is read once, for every module that asks (`rrule_parts`).
 use crate::rrule_parts::{parse_freq, parse_interval, parse_parts, part, Freq, WEEKDAY_TOKENS};
 use crate::series_clock::{canonical_zone, expansion_clock, ExpansionClock};
-use crate::series_shift::{days_follow_start, shift_series, SeriesShift};
+use crate::series_shift::{days_follow_start, shift_series, week_start_matters, SeriesShift};
 
 /// Half a day: two instants this close name the same day of a series of days,
 /// and two that far apart never can (decision 95; the shell's `sameSlot`).
@@ -185,7 +185,8 @@ fn pattern(rrule: &str) -> Option<Vec<(String, String)>> {
 /// A rule's [`pattern`] with the days its start gives it written out: weekly
 /// from a Tuesday is weekly on Tuesday, monthly from the 11th is monthly on the
 /// 11th, yearly from 29 February is yearly on 29 February, and yearly in March
-/// from the 15th is yearly on 15 March. Two spellings of one series read alike
+/// from the 15th is yearly on 15 March; a week start that moves no day from
+/// the start is left out. Two spellings of one series read alike
 /// then — the same series keeps the same deletions, however the user got there
 /// (decision 196); the repeat field writes the day out as soon as it is
 /// touched.
@@ -218,6 +219,11 @@ fn pattern_from(rrule: &str, start: NaiveDate) -> Option<Vec<(String, String)>> 
             .into_iter()
             .map(|(key, value)| (key.to_string(), value)),
     );
+    // And a week start that moves no day from this start is none, whatever
+    // the weekdays (`week_start_matters`).
+    if !week_start_matters(rrule, start) {
+        pattern.retain(|(key, _)| key != "WKST");
+    }
     pattern.sort();
     Some(pattern)
 }
@@ -909,6 +915,23 @@ mod tests {
         let answer = tail_exceptions(&q);
         assert_eq!(answer.carried_by, TailCarry::Place);
         assert_eq!(answer.exceptions, vec!["2026-11-02T08:00:00.000Z"]);
+    }
+
+    #[test]
+    fn a_week_start_that_moves_no_day_from_the_start_is_no_new_rule() {
+        // Every other Monday and Thursday, moved a day on: Tuesdays and Fridays
+        // share a week whether weeks begin on Monday or Tuesday, so the field's
+        // spelling without a week start is the moved rule (196).
+        let tuesday = NaiveDate::from_ymd_opt(2026, 8, 25).unwrap();
+        assert_eq!(
+            pattern_from("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;WKST=TU", tuesday),
+            pattern_from("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;COUNT=6", tuesday)
+        );
+        let friday = NaiveDate::from_ymd_opt(2026, 8, 28).unwrap();
+        assert_ne!(
+            pattern_from("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR,MO;WKST=FR", friday),
+            pattern_from("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR,MO", friday)
+        );
     }
 
     #[test]

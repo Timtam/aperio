@@ -167,6 +167,84 @@ function expansionZoneFor(event: {
   return zoneOfClock(expansionClock(event.all_day === true, tzid), tzid);
 }
 
+/**
+ * A series' rule as `expandEvent` iterates it — on the clock the core chose, in
+ * that clock's wall time — with the zone to turn a wall time back into an
+ * instant, `null` for UTC. `null` when the rule cannot be read.
+ */
+function wallRule(series: {
+  start: string;
+  all_day?: boolean;
+  recurrence: { rrule: string; tzid?: string | null };
+}): { rule: RRule; zone: string | null } | null {
+  const dtstart = new Date(series.start);
+  if (Number.isNaN(dtstart.getTime())) return null;
+  const zone = expansionZoneFor(series);
+  try {
+    if (zone) {
+      try {
+        return {
+          rule: buildRule(shiftUntilToWall(series.recurrence.rrule, zone), realToWall(dtstart, zone)),
+          zone,
+        };
+      } catch {
+        // A zone `Intl` cannot load reads on UTC, as `zonedOccurrences` does.
+      }
+    }
+    return { rule: buildRule(series.recurrence.rrule, dtstart), zone: null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How many occurrences a series' rule generates from its start, its own bound
+ * ending them — counted up to `limit`, past which it answers `limit + 1`. The
+ * same occurrences `expandEvent` gives, without an exception, and without
+ * turning each into an instant: an editor asks on every change of a date, and
+ * thousands of zoned occurrences through `Intl` froze the field. `null` when
+ * the rule cannot be read.
+ */
+export function occurrenceCount(
+  series: { start: string; all_day?: boolean; recurrence: { rrule: string; tzid?: string | null } },
+  limit: number,
+): number | null {
+  const built = wallRule(series);
+  if (!built) return null;
+  let count = 0;
+  built.rule.all(() => {
+    count += 1;
+    return count <= limit;
+  });
+  return count;
+}
+
+/**
+ * The `nth` occurrence (counted from 1) of a series' rule from its start, as an
+ * instant; `null` when it has fewer, or the rule cannot be read. Like
+ * {@link occurrenceCount}, only the one asked for is turned into an instant.
+ */
+export function nthOccurrence(
+  series: { start: string; all_day?: boolean; recurrence: { rrule: string; tzid?: string | null } },
+  nth: number,
+): string | null {
+  const built = wallRule(series);
+  if (!built || nth < 1) return null;
+  let seen = 0;
+  let found: Date | null = null;
+  built.rule.all((at) => {
+    seen += 1;
+    if (seen === nth) {
+      found = at;
+      return false;
+    }
+    return true;
+  });
+  if (found === null) return null;
+  const at: Date = found;
+  return (built.zone ? wallToReal(at, built.zone) : at).toISOString();
+}
+
 /** {@link expansionZoneFor} for a series named by its two facts. */
 function clockZone(allDay: boolean, tzid: string | null | undefined): string | null {
   return zoneOfClock(expansionClock(allDay, tzid), tzid);

@@ -1744,6 +1744,29 @@ describe('movedTailRule (189, 192-194)', () => {
     ).toEqual(shifted(`FREQ=DAILY;UNTIL=${utc(evening(9, 1))}`));
   });
 
+  it('ends a series cut at its last occurrence, which gets a time of day, on it (194)', () => {
+    // All-day until 31 August, cut there and given 18:00: read at its
+    // midnight, the date bound left the new series without an occurrence.
+    const at31 = new Date(2026, 7, 31, 18);
+    expect(
+      movedTailRule({
+        rrule: 'FREQ=DAILY;UNTIL=20260831',
+        series: { tzid: null, all_day: true },
+        from: new Date(2026, 7, 31).toISOString(),
+        opened: new Date(2026, 7, 31).toISOString(),
+        tail: { start: at31.toISOString(), all_day: false },
+      }),
+    ).toEqual(
+      shifted(`FREQ=DAILY;UNTIL=${at31.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`),
+    );
+  });
+
+  it('moves the end of a very long series by the days, without counting it', () => {
+    expect(
+      moved('FREQ=DAILY;UNTIL=20991231T235959Z', at('08-24'), at('08-24'), at('08-25')),
+    ).toEqual(shifted('FREQ=DAILY;UNTIL=21000101T235959Z'));
+  });
+
   it('keeps the end of a day the repeat field writes when only the time moves', () => {
     // Still 31 December, the day the field shows; moved by the hour it would
     // read 1 January, and touching the field then added that day.

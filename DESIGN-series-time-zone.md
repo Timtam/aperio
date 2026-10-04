@@ -249,7 +249,9 @@ mit der neuen Uhrzeit, sonst genau auf jenes Vorkommen — als Datum bei einer
 ganztägigen Serie, als UTC-Zeit sonst; das braucht eine Monatsregel, die auf
 einem anderen Monatstag neu beginnt, und eine ganztägige Serie, die eine Uhrzeit
 bekommt (`keepingLength`, nur wenn die neue Serie auf ihrer eigenen Regel
-beginnt). Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage
+beginnt und die alte ab dem Schnitt höchstens 5000 Vorkommen hat; gezählt wird
+auf der Wanduhr, ohne jedes Vorkommen umzurechnen, sonst stockte das Feld bei
+jeder Datumsänderung — darüber rückt UNTIL um die Tage und die neue Uhrzeit). Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage
 (192). Eine Regel, die nicht um ganze Tage wandern kann (gezählter Wochentag,
 Tag nach dem 28., BYSETPOS, nur bestimmte Monate) oder bei neuer Uhrzeit eigene
 Uhrzeiten nennt, wird abgelehnt (193): Das Feld behält sie mit einem Hinweis,
