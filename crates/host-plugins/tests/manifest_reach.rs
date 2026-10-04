@@ -355,11 +355,11 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All but three read `shared/contracts/`, the directory holding the contracts
+/// All but four read `shared/contracts/`, the directory holding the contracts
 /// that BOTH languages check themselves against. The exceptions are the phone's
-/// series-clock, zone-list and repeat-summary doors, which read cal-core's own
-/// fixtures; cal-ffi never leaves this repository, so those reaches hold as
-/// long as cal-core stays beside it.
+/// series-clock, zone-list, repeat-summary and tail-exceptions doors, which read
+/// cal-core's own fixtures; cal-ffi never leaves this repository, so those
+/// reaches hold as long as cal-core stays beside it.
 /// All but the last are the app reading a file in its own checkout and are
 /// correct as they stand.
 ///
@@ -371,7 +371,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 10] = [
+const KNOWN_REACHES: [(&str, &str); 11] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -435,6 +435,12 @@ const KNOWN_REACHES: [(&str, &str); 10] = [
     (
         "crates/cal-ffi/src/lib.rs",
         "cal-core/tests/fixtures/recurrenceSummary.json",
+    ),
+    // And for the doors of the deleted occurrences a series keeps from a cut
+    // on (decisions 152, 188), for the same reason.
+    (
+        "crates/cal-ffi/src/lib.rs",
+        "cal-core/tests/fixtures/tailExceptions.json",
     ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by

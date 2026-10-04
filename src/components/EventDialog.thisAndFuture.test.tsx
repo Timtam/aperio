@@ -522,3 +522,77 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     ]);
   });
 });
+
+describe('EventDialog → deleted occurrences follow "this and all following" (152, 188)', () => {
+  /** Weekly in Berlin with no named weekday, one July Monday deleted. */
+  const plainWeekly = (time: { utc: string }) =>
+    ({
+      ...SERIES,
+      start: `2026-06-15T${time.utc}`,
+      end: `2026-06-15T${time.utc.replace(/^(\d\d)/, (h) => String(Number(h) + 1).padStart(2, '0'))}`,
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        exceptions: [`2026-07-13T${time.utc}`],
+        tzid: 'Europe/Berlin',
+      },
+    }) as unknown as CalendarEvent;
+  const occurrenceOf = (series: CalendarEvent, iso: string) =>
+    ({
+      ...series,
+      id: `ev-series@${iso}`,
+      series_id: 'ev-series',
+      occurrence_start: iso,
+      start: iso,
+      end: new Date(Date.parse(iso) + 60 * 60 * 1000).toISOString(),
+    }) as unknown as CalendarEvent;
+  const tailRequest = () => (calls('create_event')[0][1] as { request: CalendarEvent }).request;
+
+  it('moves a deleted Monday to the Tuesday in its place when the date moves (152)', async () => {
+    // Left on its Monday, the exception cancelled nothing: the new series
+    // repeats on Tuesdays, and the deleted week came back.
+    deviceInBerlin();
+    const series = plainWeekly({ utc: '07:00:00.000Z' });
+    onFile.series = series;
+    await open(occurrenceOf(series, '2026-07-06T07:00:00.000Z'));
+    fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
+      target: { value: '2026-07-07' },
+    });
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().recurrence?.exceptions).toEqual(['2026-07-14T07:00:00.000Z']);
+  });
+
+  it('keeps an evening deletion on its day when the series becomes all-day', async () => {
+    // 19:00 on the device's clock sat closer to the next day's midnight than
+    // to its own, so the switch deleted the Tuesday instead of the Monday.
+    // Read on this machine's clock, as the field and the expansion are.
+    const evening = new Date(2026, 6, 6, 19).toISOString();
+    const deleted = new Date(2026, 6, 13, 19).toISOString();
+    const series = {
+      ...plainWeekly({ utc: '07:00:00.000Z' }),
+      start: new Date(2026, 5, 15, 19).toISOString(),
+      end: new Date(2026, 5, 15, 20).toISOString(),
+      recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [deleted], tzid: null },
+    } as unknown as CalendarEvent;
+    onFile.series = series;
+    await open(occurrenceOf(series, evening));
+    fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig|all day/i }));
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().all_day).toBe(true);
+    expect(tailRequest().recurrence?.exceptions).toEqual([new Date(2026, 6, 13).toISOString()]);
+  });
+
+  it('drops a deletion on a week a fortnightly rule never meets (188)', async () => {
+    // Kept, it named no occurrence of the new series; Exchange refuses to
+    // delete an occurrence it cannot find, and the whole save failed.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    await open(JULY);
+    fireEvent.click(screen.getByRole('button', { name: 'fortnightly ten' }));
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(tailRequest().recurrence?.rrule).toContain('INTERVAL=2');
+    expect(tailRequest().recurrence?.exceptions).toEqual([]);
+  });
+});

@@ -26,6 +26,7 @@ export {
   thisAndFutureDeletedKey,
   readSeriesRows,
   ruleFromCut,
+  tailRecurrenceFor,
   occurrenceOfSeries,
   firstOccurrenceFrom,
   seriesTimesFromOccurrenceEdit,

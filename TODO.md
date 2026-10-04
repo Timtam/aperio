@@ -2379,12 +2379,32 @@ Siehe DESIGN §4.2.
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
       jetzt die Zeilen der Kopie und schneidet nach dem Platz in der Serie
       (141); beide Mitzieh-Dialoge lesen die Zeilen einmal, vor dem Anker.
-    - 🚩 **Tail-Regel bei Wechsel und neuer Regel** (PR 3b): wechselt die neue
-      Serie zwischen ganztägig und mit Uhrzeit, trifft eine Ausnahme um 18 Uhr
-      den FOLGENDEN Tag (halber Tag Abstand); eine geänderte Regel behält
-      Ausnahmen an Tagen, die sie nie erzeugt (EWS bricht dann beim Löschen
-      ab). Offen ist die Frage, ob Löschungen mitwandern, wenn „dieser und alle
-      folgenden“ das Datum verschiebt (heute bleiben sie auf ihrem Tag).
+    - ✅ **Tail-Regel bei Wechsel und neuer Regel** (PR 3b, 152, 186-191):
+      Gelöschte Termine gehen mit der Änderung mit. Bei gleicher Regel nach
+      ihrem Platz in der Serie (152): ein verschobenes Datum nimmt sie mit, aus
+      dem gelöschten dritten Montag wird der gelöschte dritte Dienstag, und ein
+      Wechsel zwischen ganztägig und mit Uhrzeit lässt eine Ausnahme um 18 Uhr
+      auf ihrem Tag statt auf dem folgenden. Bei neuer Regel nach ihrem Tag, nur
+      wo die neue Regel ihn noch trifft (188); die anderen fallen weg, statt dass
+      EWS beim Löschen abbricht. Die Regel lebt im Kern (190,
+      `cal_core::tail_exceptions`, Fixture `tailExceptions.json`, Türen per
+      WebAssembly und UniFFI), die Shell expandiert beide Serien
+      (`tailRecurrenceFor`). Gilt für beide Editoren, beide Mitzieh-Dialoge und
+      „dieser und alle folgenden“ ohne Kopf, der die Serie ganz neu schreibt; die
+      Zone wird ganztägig keine, aus ganztägig mit Uhrzeit die Gerätezone. Ein
+      altes Handy-.so ohne die Tür scheitert, bevor etwas geschrieben wird.
+      ↻ im Test.
+    - 🚩 **PR 3c (189):** Eine Regel, die ihre Wochentage nennt („jeden
+      Montag“), bleibt beim Verschieben von „dieser und alle folgenden“ auf
+      ihren Tagen, und das verschobene Vorkommen erscheint gar nicht; bis die
+      Regel mitwandert wie beim Ziehen einer ganzen Serie (`shiftSeriesRule`),
+      bleiben ihre Löschungen auf ihrem Tag.
+    - 🚩 **Ganze Serie, Wechsel ganztägig/Uhrzeit (191):** derselbe
+      18-Uhr-Fehler beim Bearbeiten der ganzen Serie (`exceptionsAtSeriesTime`
+      lässt ganztägige Wechsel aus). Eigener kleiner PR.
+    - 🚩 Verschiebt „dieser und alle folgenden“ eine Serie mit UNTIL nach vorn,
+      fällt ihr letztes Vorkommen weg: `ruleFromCut` bewegt UNTIL nicht, das
+      Ziehen einer ganzen Serie schon (`movedSeriesUntil`).
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des

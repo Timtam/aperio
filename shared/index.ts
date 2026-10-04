@@ -28,6 +28,7 @@ export * from './assigneePool';
 export * from './dayStart';
 export * from './taskSettings';
 export * from './seriesShift';
+export * from './tailExceptions';
 export * from './recurrenceSummary';
 export * from './intlNames';
 export * from './eventWriteError';

@@ -426,6 +426,13 @@ pub fn series_shift(input_json: &str) -> Result<String, JsValue> {
     rules::series_shift(input_json).map_err(to_js)
 }
 
+/// The deleted occurrences a series keeps when "this and all following" writes
+/// it from the cut on: by their place, or by their day (decisions 152, 188).
+#[wasm_bindgen(js_name = tailExceptions)]
+pub fn tail_exceptions(input_json: &str) -> Result<String, JsValue> {
+    rules::tail_exceptions(input_json).map_err(to_js)
+}
+
 /// A repeat rule in words: the keys and values a sentence is built from, or
 /// why the rule has no sentence (decision 84a).
 #[wasm_bindgen(js_name = recurrenceSummary)]

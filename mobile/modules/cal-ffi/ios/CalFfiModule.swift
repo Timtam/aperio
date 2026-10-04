@@ -440,6 +440,11 @@ public class CalFfiModule: Module {
       try seriesShift(inputJson: inputJson)
     }
 
+    // The deleted occurrences a series keeps from a cut on: one question, one answer.
+    Function("tailExceptions") { (inputJson: String) -> String in
+      try tailExceptions(inputJson: inputJson)
+    }
+
     // A repeat rule in words: keys and values the surface renders.
     Function("recurrenceSummary") { (inputJson: String) -> String in
       try recurrenceSummary(inputJson: inputJson)

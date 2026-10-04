@@ -57,6 +57,7 @@ import init, {
   dayStart as wasmDayStart,
   taskSettings as wasmTaskSettings,
   seriesShift as wasmSeriesShift,
+  tailExceptions as wasmTailExceptions,
   recurrenceSummary as wasmRecurrenceSummary,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
@@ -331,6 +332,12 @@ export function taskSettingsJson(inputJson: string): string {
 export function seriesShiftJson(inputJson: string): string {
   assertReady();
   return wasmSeriesShift(inputJson);
+}
+
+/** See `cal_core::tail_exceptions::tail_exceptions_json`. */
+export function tailExceptionsJson(inputJson: string): string {
+  assertReady();
+  return wasmTailExceptions(inputJson);
 }
 
 /** See `cal_core::recurrence_summary::recurrence_summary_json`. */

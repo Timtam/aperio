@@ -51,6 +51,7 @@ import uniffi.cal_ffi.dayStart as uniffiDayStart
 import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
 import uniffi.cal_ffi.recurrenceSummary as uniffiRecurrenceSummary
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
+import uniffi.cal_ffi.tailExceptions as uniffiTailExceptions
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
 import uniffi.cal_ffi.futureCarryFields as uniffiFutureCarryFields
 import uniffi.cal_ffi.findMeetingLinkPairs as uniffiFindMeetingLinkPairs
@@ -582,6 +583,11 @@ class CalFfiModule : Module() {
     // Shifting a recurring series by whole days: one question, one answer.
     Function("seriesShift") { inputJson: String ->
       uniffiSeriesShift(inputJson)
+    }
+
+    // The deleted occurrences a series keeps from a cut on: one question, one answer.
+    Function("tailExceptions") { inputJson: String ->
+      uniffiTailExceptions(inputJson)
     }
 
     // A repeat rule in words: keys and values the surface renders.

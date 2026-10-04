@@ -181,6 +181,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  writes, or why it cannot move. */
   seriesShift(inputJson: string): string;
 
+  /** The deleted occurrences a series keeps when "this and all following"
+   *  writes it from the cut on: by their place, or by their day. */
+  tailExceptions(inputJson: string): string;
+
   /** A repeat rule in words: the keys and values a sentence is built from,
    *  or why the rule has no sentence. */
   recurrenceSummary(inputJson: string): string;

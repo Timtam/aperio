@@ -236,6 +236,14 @@ beim Öffnen, wie das Handy. Gelingt das nicht, sagt der Editor es mit der
 Meldung, die heute beim Speichern kommt, und fällt nicht still auf die
 Geräte-Uhr zurück.
 
+Die gelöschten Termine gehen mit (152, 188; `cal_core::tail_exceptions`): Bei
+gleicher Regel nach ihrem Platz in der Serie, auch wenn das Datum wandert oder
+die Serie zwischen ganztägig und mit Uhrzeit wechselt, und geschrieben als der
+Zeitpunkt des Vorkommens der neuen Serie; bei neuer Regel nach ihrem Tag, und
+nur, wo die neue Regel diesen Tag noch trifft. Für die Zone gilt beim Wechsel
+dasselbe wie unten: ganztägig ohne Zone, aus ganztägig mit Uhrzeit die
+Gerätezone.
+
 ### Beschriftung, Hinweis und was man hört
 
 **Weicht die Uhr der Felder von der des Geräts ab**, heißen die vier Felder
