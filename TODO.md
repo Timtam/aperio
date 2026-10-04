@@ -2432,9 +2432,11 @@ Siehe DESIGN §4.2.
       das Ende hält die Länge, die Zone folgt der Art (ganztägig keine, aus
       ganztägig die Gerätezone). Das Feld zeigt die verschobene Regel sofort
       (199). Eine Serie, die neben ihrer Regel beginnt, behält ihren Beginn und
-      zählt ihre Plätze ab dem ersten Vorkommen (`old_start`). Unberührt bleibt
-      die Wiederholung byte-genau. Das Ziehen bleibt Ziehen. Beide Editoren.
-      ↻ im Test.
+      zählt ihre Plätze ab dem ersten Vorkommen (`old_start`); ihr gelöschtes
+      erstes Vorkommen bleibt gelöscht. Unberührt bleibt die Wiederholung
+      byte-genau. Feld und Speichern lesen denselben geschriebenen Beginn
+      (`ruleFrame`). Die Mitzieh-Dialoge schreiben Kopien, die Serien sind,
+      ebenso. Das Ziehen bleibt Ziehen. Beide Editoren. ↻ im Test.
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des

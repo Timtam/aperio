@@ -556,8 +556,11 @@ ihrer Regel, gelten ihre ersten Vorkommen als erste Plätze (`old_start` im
 Kern). Unberührt bleibt die Wiederholung, wie sie ist: Ein neuer Titel schreibt
 keine Ausnahme um. Das Feld zeigt die verschobene Regel sofort (199), eine
 Ablehnung (193) sagt es ohne „nur diesen Termin“, wenn die Serie selbst geöffnet
-ist. Das Ziehen einer ganzen Serie bleibt eine Verschiebung jedes Vorkommens um
-gleich viele Tage (`shift_series`, 198).
+ist. Die Mitzieh-Dialoge schreiben jede Kopie, die eine Serie ist, ebenso ab
+ihrem eigenen Beginn, wenn ihr Beginn wandert oder ihre Art wechselt; eine
+Kopie, deren Regel nicht wandern kann, melden sie mit dem Grund. Das Ziehen
+einer ganzen Serie bleibt eine Verschiebung jedes Vorkommens um gleich viele
+Tage (`shift_series`, 198).
 
 **Nur dieser Termin:** Geräte-Uhr, keine Zone. **Diesen und alle folgenden:** Uhr
 der Serie (21a), der Rest behält die Zone der ganzen Serie.

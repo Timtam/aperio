@@ -701,6 +701,9 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       target: { value },
     });
   const ruleShown = () => screen.getByRole('status', { name: 'rule shown' }).textContent;
+  /** The day the form shows for an instant, `days` on: the form reads this
+   *  machine's clock. */
+  const dayOn = (iso: string, days = 0) => dateInput(new Date(Date.parse(iso) + days * 86_400_000));
 
   it('moves "every Monday" to Tuesday with a later occurrence, and its deletion by place', async () => {
     deviceInBerlin();
@@ -708,7 +711,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
     const sent = await saveEditedEvent(
       JULY_OCCURRENCE,
       () => {
-        setStartDate('2026-07-07');
+        setStartDate(dayOn(JULY_OCCURRENCE.start, 1));
         // In the field before anything is saved (199).
         expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
       },
@@ -726,7 +729,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
   it('moves the series opened as itself', async () => {
     deviceInBerlin();
     const sent = await saveEditedEvent(SERIES, () => {
-      setStartDate('2026-06-16');
+      setStartDate(dayOn(SERIES.start, 1));
       expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
     });
     expect(sent.start).toBe('2026-06-16T07:00:00.000Z');
@@ -787,9 +790,9 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
     // field says Mondays, and Mondays are written, not the Tuesdays.
     deviceInBerlin();
     const sent = await saveEditedEvent(SERIES, () => {
-      setStartDate('2026-06-16');
+      setStartDate(dayOn(SERIES.start, 1));
       fireEvent.click(screen.getByRole('button', { name: 'tuesdays' }));
-      setStartDate('2026-06-15');
+      setStartDate(dayOn(SERIES.start));
       expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=MO');
     });
     expect(sent.start).toBe(SERIES.start);
@@ -841,7 +844,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
     const sent = await saveEditedEvent(
       march,
       async () => {
-        setStartDate(dateInput(new Date(Date.parse('2026-03-31T07:00:00.000Z') + 86_400_000)));
+        setStartDate(dayOn('2026-03-31T07:00:00.000Z', 1));
         await waitFor(() => expect(ruleShown()).toBe('FREQ=MONTHLY;UNTIL=20260801T070000Z'));
       },
       'series',
@@ -865,7 +868,7 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       </StrictMode>,
     );
     await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
-    setStartDate('2026-06-02');
+    setStartDate(dayOn(firstMonday.start, 1));
     expect(ruleShown()).toBe('FREQ=MONTHLY;BYDAY=1MO');
     // Focusable, and without "only this occurrence": the series itself is open.
     const hint = screen.getByText(

@@ -211,7 +211,8 @@ stays as long as it was. The repeat field shows the moved rule right away, and
 a rule that cannot move says so there and when you save. Switching the whole
 series between all-day and a time of day keeps a deleted occurrence on the day
 you saw it on, and an all-day series that gets a time of day gets your
-device's time zone with it. The editor's title
+device's time zone with it. When you carry such a change to the other copies
+of the appointment, each copy that repeats moves the same way. The editor's title
 names your choice, such as **Edit this occurrence only**, and is read out when
 the editor opens. On the desktop the form repeats it as the read-only field
 **Apply to**, which `Tab` reaches like every other field.

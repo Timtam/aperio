@@ -231,7 +231,8 @@ zeigt die verschobene Regel sofort, und eine Regel, die nicht wandern kann, sagt
 es dort und beim Speichern. Wechselt die ganze Serie zwischen ganztägig und mit
 Uhrzeit, bleibt ein gelöschter Termin auf dem Tag, an dem du ihn gesehen hast,
 und eine ganztägige Serie, die eine Uhrzeit bekommt, bekommt die Zeitzone deines
-Geräts dazu. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
+Geräts dazu. Ziehst du eine solche Änderung bei den anderen Kopien des Termins
+mit, wandert jede Kopie, die sich wiederholt, genauso. Der Titel des Editors nennt deine Wahl, etwa **Nur diesen
 Termin bearbeiten**, und wird beim Öffnen vorgelesen. Am Desktop wiederholt das
 Formular sie im schreibgeschützten Feld **Anwenden auf**, das du wie jedes andere
 Feld mit `Tab` erreichst.
