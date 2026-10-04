@@ -11,6 +11,7 @@ import {
   planCarry,
   planSeriesSplit,
   tailRecurrenceFor,
+  TailShiftRefusedError,
   cutoffDay,
   readSeriesRows,
   seriesMaybeShownTwice,
@@ -366,14 +367,16 @@ export function EventGroupCarryDialog({
             await updateEvent(
               {
                 ...row,
-                // What the copy repeats by from its cut on, its deleted
-                // occurrences carried along with a new date, time or kind
+                // What the copy repeats by from its cut on — its rule moved
+                // with a new date (decision 189) — and its deleted
+                // occurrences, carried along with a new date, time or kind
                 // as the anchor's are (decision 152).
                 recurrence: tailRecurrenceFor({
                   master: current,
                   cutoffIso: anchorIso,
                   plan: splitPlan,
                   tail: { start: row.start, all_day: row.all_day },
+                  opened: anchorIso,
                 }),
                 send_invitations: false,
               },
@@ -390,14 +393,16 @@ export function EventGroupCarryDialog({
             });
           } else {
             splitAt = anchorIso;
-            // Decided before anything is written: the copy's deleted
-            // occurrences, carried along with a new date, time or kind as
-            // the anchor's are (decision 152).
+            // Decided before anything is written: the copy's rule, moved
+            // with a new date (decision 189), and its deleted occurrences,
+            // carried along with a new date, time or kind as the anchor's
+            // are (decision 152).
             const tailRecurrence = tailRecurrenceFor({
               master: current,
               cutoffIso: anchorIso,
               plan: splitPlan,
               tail: { start: row.start, all_day: row.all_day },
+              opened: anchorIso,
             });
             const written = await writeSeriesSplit(
               {
@@ -486,7 +491,16 @@ export function EventGroupCarryDialog({
           continue;
         }
         failed.push(target);
-        if (isCommandError(err)) {
+        if (err instanceof TailShiftRefusedError) {
+          // Nothing was written for this copy: its rule cannot move with the
+          // new date (decision 193), and the user learns why.
+          setError(
+            t('dialogs.eventGroupCarry.shiftRefused', {
+              calendar: calendarName(target.calendar_id),
+              reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+            }),
+          );
+        } else if (isCommandError(err)) {
           setError(err.message);
         }
       }

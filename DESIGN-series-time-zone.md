@@ -223,7 +223,7 @@ stehen.
 | gespeicherter Einzeltermin, hier zur Serie gemacht | ja | aus | wählbar; Vorgabe wie beim neuen Termin | Uhr der Serie |
 | ganze Serie | ja | aus | wählbar | gespeicherte Zone; UTC, wenn keine |
 | ganze Serie, auf „keine Wiederholung“ gestellt | – | egal | nicht da | Geräte-Uhr |
-| diesen und alle folgenden | ja; eine hier geänderte Regel gilt ab diesem Termin, ihr COUNT von Beginn der Serie an gezählt (121), sonst läuft das Muster der Serie weiter | aus | nur ein Hinweis: „Zeitzone der Serie: New York. Ändern lässt sie sich, wenn du die ganze Serie bearbeitest.“ | Uhr der Serie (21a) |
+| diesen und alle folgenden | ja; eine hier geänderte Regel gilt ab diesem Termin, ihr COUNT von Beginn der Serie an gezählt (121), sonst läuft das Muster der Serie weiter — mit einem neuen Datum verschoben, sofort im Feld (189, 192-194, 197) | aus | nur ein Hinweis: „Zeitzone der Serie: New York. Ändern lässt sie sich, wenn du die ganze Serie bearbeitest.“ | Uhr der Serie (21a) |
 | nur dieser Termin | – | egal | nicht da | Geräte-Uhr |
 | Umfang-Auswahl im Formular (Ausweichweg ohne vorherige Frage) | egal | egal | nicht da | Geräte-Uhr |
 
@@ -236,18 +236,50 @@ beim Öffnen, wie das Handy. Gelingt das nicht, sagt der Editor es mit der
 Meldung, die heute beim Speichern kommt, und fällt nicht still auf die
 Geräte-Uhr zurück.
 
-Die gelöschten Termine gehen mit (152, 188, 189; `cal_core::tail_exceptions`):
+Die Regel wandert mit einem neuen Datum (189, 192-194; `movedTailRule`, im Kern
+`cal_core::series_shift::begin_series_anew`): Eine Regel, die ihre Tage nennt,
+verschiebt sie wie das Ziehen einer ganzen Serie — aus jeden Montag wird jeden
+Dienstag, aus jedem 10. jeder 11. —, gezählt vom Platz des Termins in der Serie
+bis zum neuen Beginn auf der Uhr der Serie (beim Wechsel ganztägig/Uhrzeit auf
+den Tagen des Geräts). Eine Regel, die ihre Tage aus dem Beginn nimmt, nimmt sie
+aus dem neuen und wird nie abgelehnt. In beiden rückt ein UNTIL so, dass die neue
+Serie auf dem Vorkommen am Platz des alten letzten endet (194): um ganze Tage,
+wo das reicht (so bleibt seine Schreibweise, etwa das Tagesende des Felds), sonst
+mit der neuen Uhrzeit, sonst genau auf jenes Vorkommen — als Datum bei einer
+ganztägigen Serie, als UTC-Zeit sonst; das braucht eine Monatsregel, die auf
+einem anderen Monatstag neu beginnt, und eine ganztägige Serie, die eine Uhrzeit
+bekommt (`keepingLength`, nur wenn die neue Serie auf ihrer eigenen Regel
+beginnt und die alte ab dem Schnitt höchstens 5000 Vorkommen hat; gezählt wird
+auf der Wanduhr, ohne jedes Vorkommen umzurechnen, sonst stockte das Feld bei
+jeder Datumsänderung — darüber rückt UNTIL um die Tage und die neue Uhrzeit). Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage
+(192). Eine Regel, die nicht um ganze Tage wandern kann (gezählter Wochentag,
+Tag nach dem 28., BYSETPOS, nur bestimmte Monate) oder bei neuer Uhrzeit eigene
+Uhrzeiten nennt, wird abgelehnt (193): Das Feld behält sie mit einem Hinweis,
+das Speichern schreibt nichts und sagt den Grund, die Mitzieh-Dialoge melden die
+Kopie als nicht übertragen. Das Feld zeigt die verschobene Regel sofort (197),
+und wo es sie nur in Worten sagen kann, heißt die Zeile „Wiederholung ab hier“
+statt „Gespeicherte Wiederholung“; was der Nutzer dort danach selbst einstellt,
+gilt ab dem Beginn, an dem er es einstellte, und wandert von dort mit einem
+weiteren neuen Datum. Beim Speichern wandert die Regel zum tatsächlich
+geschriebenen Beginn: Eine ganz von ihrem ersten Vorkommen an neu geschriebene
+Serie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich blieb, und
+ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann das Feld dann
+um eine Zeitumstellung danebenliegen.
+
+Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —
 gleiches Muster (ein neues Ende oder eine andere Schreibweise ist keine neue
-Regel), eine Regel, die Tage und Uhrzeiten aus dem Beginn nimmt, und jedes
-Vorkommen bis zur letzten Löschung um denselben Schritt in der Einheit der Regel
-verschoben — Tage, Monate oder Jahre; vom 31. auf den 30. überspringt eine
-Monatsregel ab dem nächsten kürzeren Monat andere Monate —, auch wenn das Datum
-wandert oder die Serie zwischen ganztägig und mit Uhrzeit wechselt; geschrieben
-als der Zeitpunkt des Vorkommens der neuen Serie. Sonst nach ihrem Tag: bei neuer
-Regel nur, wo sie diesen Tag noch trifft, und bei einer Regel, die ihre Tage
-nennt (Wochentage, Monatstage, Monate), bleiben sie auf ihrem Tag, weil ihre
-übrigen Vorkommen nicht wandern. Ein Vorkommen, das die neue Serie zum selben
+Regel) und eine Regel, die Tage und Uhrzeiten aus dem Beginn nimmt, oder eine
+Regel, die genau die mit dem Datum verschobene alte ist, wer sie auch schrieb
+und wie sie auch geschrieben ist (wöchentlich ab Dienstag ist jeden Dienstag) —,
+und jedes Vorkommen bis zur letzten Löschung um denselben Schritt verschoben: in
+der Einheit der Regel — Tage, Monate oder Jahre; vom 31. auf den 30. überspringt
+eine Monatsregel ab dem nächsten kürzeren Monat andere Monate — oder, bei einer
+verschobenen Regel, in Tagen. Das gilt auch, wenn die Serie zwischen ganztägig
+und mit Uhrzeit wechselt; geschrieben als der Zeitpunkt des Vorkommens der neuen
+Serie. Sonst nach ihrem Tag: bei neuer Regel nur, wo sie diesen Tag noch trifft,
+und bei einer Regel, die ihre Tage nennt und nicht wanderte, bleiben sie auf
+ihrem Tag, weil ihre übrigen Vorkommen nicht wandern. Ein Vorkommen, das die neue Serie zum selben
 Zeitpunkt hat, behält seine Löschung genau so. Ein Tag wird auf der Uhr gelesen, auf der beide
 Serien wiederholen, sonst auf den Tagen des Geräts — den Tagen, an denen der
 Nutzer die Termine gesehen hat. Das erste Vorkommen der neuen Serie wird nie

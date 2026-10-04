@@ -18,6 +18,8 @@ import {
   exceptionsAtSeriesTime,
   movedSeriesUntil,
   moveSeriesInstant,
+  nthOccurrence,
+  occurrenceCount,
   seriesDayKey,
 } from '@aperio/shared';
 
@@ -965,5 +967,43 @@ describe('the day an all-day series is read on', () => {
     // Monday 2026-10-26, after the change to winter time: local midnight is
     // 23:00 UTC on the Sunday now.
     expect(seriesDayKey('2026-10-25T23:00:00.000Z', null, true)).toBe('2026-10-26');
+  });
+});
+
+describe('occurrenceCount and nthOccurrence read a rule as expandEvent does', () => {
+  // Weekly Monday 09:00 Berlin across the October clock change.
+  const series = {
+    id: 'count',
+    start: '2026-10-05T07:00:00.000Z',
+    end: '2026-10-05T08:00:00.000Z',
+    all_day: false,
+    recurrence: {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T080000Z',
+      exceptions: [] as string[],
+      tzid: 'Europe/Berlin',
+    },
+  };
+  const expanded = expandEvent(series, {
+    start: new Date('2026-10-01T00:00:00Z'),
+    end: new Date('2026-12-01T00:00:00Z'),
+  }).map((occ) => occ.start);
+
+  it('counts the same occurrences, its bound included', () => {
+    expect(occurrenceCount(series, 100)).toBe(expanded.length);
+    expect(expanded).toHaveLength(5);
+  });
+
+  it('stops counting past the limit', () => {
+    expect(occurrenceCount(series, 3)).toBe(4);
+    expect(
+      occurrenceCount({ ...series, recurrence: { ...series.recurrence, rrule: 'FREQ=DAILY' } }, 10),
+    ).toBe(11);
+  });
+
+  it('gives the nth occurrence as the instant the views show', () => {
+    expect(nthOccurrence(series, 1)).toBe(expanded[0]);
+    expect(nthOccurrence(series, 5)).toBe(expanded[4]);
+    expect(nthOccurrence(series, 5)).toBe('2026-11-02T08:00:00.000Z');
+    expect(nthOccurrence(series, 6)).toBeNull();
   });
 });

@@ -349,3 +349,70 @@ describe('EventGroupCarryDialog → where a copy with rows of its own is cut (14
     expect(calls('get_series_rows')).toHaveLength(1);
   });
 });
+
+describe('EventGroupCarryDialog → a copy whose rule names its days (189, 193)', () => {
+  /** The anchor moved a day on, to Tuesday, at the same time. */
+  const NEXT_DAY = { ...STOOD, start: '2026-08-25T08:00:00.000Z', end: '2026-08-25T09:00:00.000Z' };
+
+  async function carryNextDay(
+    copy: Omit<typeof COPY, 'recurrence'> & {
+      recurrence: { rrule: string; exceptions: string[]; tzid: string | null };
+    },
+  ) {
+    copyOnFile.current = copy;
+    const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
+    render(
+      <EventGroupCarryDialog
+        isOpen
+        onClose={() => {}}
+        group={GROUP}
+        anchor={ANCHOR}
+        before={STOOD}
+        after={NEXT_DAY}
+        scope="future"
+        occurrence={CUT}
+        successor={{ ...ANCHOR, title: 'Wochenplanung', starts_at: NEXT_DAY.start }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
+  }
+
+  it('moves "every Monday" to Tuesday with the anchor, and its deletion in its place', async () => {
+    await carryNextDay({
+      ...COPY,
+      start: '2026-08-10T08:00:00.000Z',
+      end: '2026-08-10T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-09-07T08:00:00.000Z'],
+        tzid: null,
+      },
+    });
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    const tail = (
+      calls('create_event')[0][1] as {
+        request: { start: string; recurrence: { rrule: string; exceptions: string[] } };
+      }
+    ).request;
+    expect(tail.start).toBe('2026-08-25T08:00:00.000Z');
+    expect(tail.recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=TU');
+    expect(tail.recurrence.exceptions).toEqual(['2026-09-08T08:00:00.000Z']);
+  });
+
+  it('says a copy whose rule cannot move, and writes nothing for it', async () => {
+    // The fourth Monday of each month cannot move by a day.
+    await carryNextDay({
+      ...COPY,
+      start: '2026-07-27T08:00:00.000Z',
+      end: '2026-07-27T09:00:00.000Z',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=4MO', exceptions: [], tzid: null },
+    });
+    expect(
+      await screen.findByText(
+        /In Privat kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern|In Privat, the repeat cannot move with the new date or time/,
+      ),
+    ).toBeTruthy();
+    expect(calls('create_event')).toHaveLength(0);
+    expect(calls('update_event')).toHaveLength(0);
+  });
+});

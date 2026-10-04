@@ -178,7 +178,16 @@ gewählten Termin: Die früheren Termine bleiben unangetastet, dieser und jeder
 spätere werden geändert (beim Bearbeiten übernimmt ab hier eine neue Serie) oder
 entfernt (beim Löschen). Die neue Serie wiederholt sich so, wie es das Feld für
 die Wiederholung sagt: Änderst du dort die Regel, folgt die neue Serie ihr;
-lässt du sie, läuft das Muster einfach weiter. Liegt vor dem gewählten Termin
+lässt du sie, läuft das Muster einfach weiter. Verschiebst du den Termin auf
+einen anderen Tag, wandert das Feld sofort mit: Aus jeden Montag wird jeden
+Dienstag, aus jeden 10. des Monats jeden 11., und ein Enddatum rückt so mit,
+dass die neue Serie auf dem Termin am Platz des alten letzten endet. Änderst du
+nur etwas anderes, bleibt die Wiederholung, wie sie ist. Manche Regeln lassen
+sich nicht um Tage verschieben, ohne etwas anderes zu bedeuten, etwa der zweite
+Dienstag im Monat oder jeder 30., oder eine Regel mit eigenen Uhrzeiten, wenn
+sich die Uhrzeit ändert: Das Feld behält die Regel und sagt, warum, und das
+Speichern sagt es auch. Wähle die Wiederholung dann selbst, oder bearbeite nur
+diesen Termin. Liegt vor dem gewählten Termin
 keiner mehr – du hast den ersten gewählt, oder alle früheren sind gelöscht –,
 gibt es nichts zu behalten: Das Bearbeiten ändert die ganze Serie, die derselbe
 Eintrag bleibt, und das Löschen entfernt die Serie. Aperio sagt es dir dann.
@@ -198,9 +207,8 @@ Montag wird ein gelöschter dritter Dienstag; wechselst du zwischen ganztägig u
 mit Uhrzeit, bleibt er auf dem Tag, an dem du ihn gesehen hast. Bekommt die neue
 Serie eine andere Wiederholung, bleibt ein gelöschter Termin nur an einem Tag
 gelöscht, den die neue Regel noch trifft; ein neues Ende allein ist keine neue
-Regel. Eine Regel, die ihre Tage nennt, etwa jeden Montag, jeden Werktag oder
-jeden 10. des Monats, behält sie, wenn du einen Termin auf einen anderen Tag
-verschiebst, und ihre Löschungen vorerst auch. Überspringt eine monatliche oder
+Regel, und auch nicht die Regel, die das neue Datum ohnehin ergibt, von Hand
+eingestellt. Überspringt eine monatliche oder
 jährliche Serie durch das neue Datum andere Monate oder Jahre, etwa vom 31. auf
 den 30. verschoben, wandern ihre Löschungen nur so weit nach ihrem Platz mit,
 wie beide Fassungen noch übereinstimmen; liegt eine Löschung dahinter, bleiben

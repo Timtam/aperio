@@ -10,6 +10,12 @@
 // by whole days (the second Sunday of a month, a set position, a day past the
 // 28th, …) comes back refused, and the surface offers to move only the
 // occurrence instead.
+//
+// "This and all following" moved to another day writes a series that begins
+// anew there (decision 189, `beginsAnew`): a rule that names its days moves
+// them as a drag does and is refused where a drag is, and a rule that takes
+// its days from its start keeps taking them from the new one, so only its
+// UNTIL moves.
 
 import type { SeriesShift, SeriesShiftQuestion, ShiftRefusal } from './types';
 
@@ -32,6 +38,8 @@ export function installSeriesShiftRules(rules: SeriesShiftRules): void {
  * series' own clock) and moves by `days` whole days on that clock, with the
  * time of day changing too when `timeChanges`. `until` is the rule's UTC UNTIL
  * already moved on the series' clock (`YYYYMMDDTHHMMSSZ`), when it has one.
+ * `beginsAnew` asks for the rule of a series that begins anew at the moved
+ * start, as "this and all following" writes it, rather than for a drag's.
  */
 export function shiftSeriesRule(
   rrule: string,
@@ -39,6 +47,7 @@ export function shiftSeriesRule(
   days: number,
   timeChanges: boolean,
   until?: string,
+  options: { beginsAnew?: boolean } = {},
 ): SeriesShift {
   if (installedRules === null) {
     // Loud, not a local fallback: a copy of the rule here is the copy the core
@@ -54,6 +63,7 @@ export function shiftSeriesRule(
     days,
     time_changes: timeChanges,
     until: until ?? null,
+    begins_anew: options.beginsAnew === true,
   };
   return JSON.parse(installedRules.seriesShiftJson(JSON.stringify(question))) as SeriesShift;
 }

@@ -28,4 +28,10 @@ time_changes: boolean,
  * the shell has. Without it a UTC `UNTIL` moves by whole UTC days. A date
  * or a floating `UNTIL` moves by days here, and this is ignored for it.
  */
-until: string | null, };
+until: string | null, 
+/**
+ * Whether the series begins anew at the moved start, as "this and all
+ * following" writes it, rather than every occurrence of it moving, as a
+ * drag does. See [`begin_series_anew`].
+ */
+begins_anew: boolean, };

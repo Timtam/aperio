@@ -19,6 +19,13 @@
 //! rule that recurs only in some months or years, a yearly rule whose shift
 //! touches the end of February (leap years), time-of-day parts when the time
 //! changes too, a part given twice, and any part this module does not know.
+//!
+//! "This and all following" moved to another day writes a series that begins
+//! anew at the moved start ([`begin_series_anew`], decision 189). A rule that
+//! names its days moves them as a drag does, and is refused where a drag is
+//! (decision 193). A rule that takes its days from its start keeps taking them
+//! from the new one: the start says which day of the month or of the year it
+//! repeats on, so only its `UNTIL` moves, and nothing about its days is refused.
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
@@ -92,6 +99,34 @@ pub struct SeriesShiftQuestion {
     /// or a floating `UNTIL` moves by days here, and this is ignored for it.
     #[serde(default)]
     pub until: Option<String>,
+    /// Whether the series begins anew at the moved start, as "this and all
+    /// following" writes it, rather than every occurrence of it moving, as a
+    /// drag does. See [`begin_series_anew`].
+    #[serde(default)]
+    pub begins_anew: bool,
+}
+
+/// The parts that name the days or the times a rule repeats on, instead of
+/// taking them from the start.
+const NAMING_PARTS: [&str; 9] = [
+    "BYDAY",
+    "BYMONTHDAY",
+    "BYYEARDAY",
+    "BYWEEKNO",
+    "BYSETPOS",
+    "BYMONTH",
+    "BYHOUR",
+    "BYMINUTE",
+    "BYSECOND",
+];
+
+/// Whether a rule takes its days and times from its start, so its occurrences
+/// move when the start does. Unreadable reads as no: by day is the side that
+/// cannot shift a deletion onto an occurrence the user never deleted, and a
+/// rule that cannot be read is not one to rewrite.
+pub(crate) fn days_follow_start(rrule: &str) -> bool {
+    parse_parts(rrule)
+        .is_ok_and(|(_, parts)| !parts.iter().any(|p| NAMING_PARTS.contains(&p.key.as_str())))
 }
 
 /// The rule for a series that starts on `start` and moves by `days`, with the
@@ -110,10 +145,184 @@ pub fn shift_series(
     }
 }
 
+/// The rule for a series that begins anew at a start moved by `days` from
+/// `start`, as "this and all following" writes it (decision 189).
+///
+/// A rule that names its days moves them as [`shift_series`] does, and is
+/// refused where that is (decision 193): "every Monday" moved to a Tuesday
+/// repeats on Tuesdays, and "the second Sunday" cannot be moved by a day. A
+/// rule that takes its days from its start keeps taking them from the new one,
+/// so only its `UNTIL` moves (decision 194) — `until` when the shell moved a
+/// UTC bound, by `days` otherwise — and nothing about its days is refused:
+/// "monthly" from the 25th moved to the 2nd of the next month repeats on the
+/// 2nd, where a drag, which keeps every occurrence's distance, has to refuse.
+pub fn begin_series_anew(
+    rrule: &str,
+    start: NaiveDate,
+    days: i32,
+    time_changes: bool,
+    until: Option<&str>,
+) -> SeriesShift {
+    let answer = if days_follow_start(rrule) {
+        moved_bound(rrule, days, until)
+    } else {
+        // With no days moved the rule stays as written: the new series may
+        // start off the cut's day (an occurrence moved there on its own), and a
+        // week start it spelled can matter from there.
+        let new_start = start.checked_add_signed(Duration::days(i64::from(days)));
+        shift(rrule, start, days, time_changes, until).map(|moved| {
+            if days == 0 {
+                moved
+            } else {
+                without_needless_week_start(moved, new_start)
+            }
+        })
+    };
+    match answer {
+        Ok(rrule) => SeriesShift::Shifted { rrule },
+        Err(reason) => SeriesShift::Refused { reason },
+    }
+}
+
+/// Whether a rule's week start changes a day it repeats on from `start`.
+///
+/// RFC 5545 counts it for week numbers, and for a weekly rule every other week
+/// (or rarer) on given weekdays: which weeks are "on" is counted from the week
+/// the start falls in, and where a week begins decides whether two of its
+/// weekdays share one. So the rule is walked twice over two of its periods
+/// from the start — once with its week start, once with Monday's — and they
+/// must agree. A part this cannot read keeps the week start: by day is the
+/// side that never shifts a deletion onto an occurrence nobody deleted.
+pub(crate) fn week_start_matters(rrule: &str, start: NaiveDate) -> bool {
+    let Ok((_, parts)) = parse_parts(rrule) else {
+        return true;
+    };
+    let Some(week_start) = part(&parts, "WKST") else {
+        return false;
+    };
+    if part(&parts, "BYWEEKNO").is_some() {
+        return true;
+    }
+    let weekly = part(&parts, "FREQ").is_some_and(|f| f.eq_ignore_ascii_case("WEEKLY"));
+    let interval = parse_interval(part(&parts, "INTERVAL")).unwrap_or(1);
+    if !weekly || interval < 2 {
+        return false;
+    }
+    // Only weekdays (or the start's) choose the days here; a day of the month
+    // or of the year would be read week by week too, and is not walked.
+    let only_weekdays = parts.iter().all(|p| {
+        matches!(
+            p.key.as_str(),
+            "FREQ"
+                | "INTERVAL"
+                | "BYDAY"
+                | "WKST"
+                | "COUNT"
+                | "UNTIL"
+                | "BYMONTH"
+                | "BYHOUR"
+                | "BYMINUTE"
+                | "BYSECOND"
+        )
+    });
+    if !only_weekdays {
+        return true;
+    }
+    let index = |token: &str| {
+        WEEKDAY_TOKENS
+            .iter()
+            .position(|w| w.eq_ignore_ascii_case(token.trim()))
+    };
+    let Some(week_start) = index(week_start) else {
+        return true;
+    };
+    let weekdays: Option<Vec<usize>> = match part(&parts, "BYDAY") {
+        Some(value) => value.split(',').map(index).collect(),
+        None => Some(vec![start.weekday().num_days_from_monday() as usize]),
+    };
+    let Some(weekdays) = weekdays else {
+        return true;
+    };
+    // The "on" weeks are every `interval`-th from the start's: the days of the
+    // first, cut short by the start, and of the next, whole. Every later one is
+    // the next moved by a whole period, so these two weeks — a week either way
+    // of each, since week starts differ by under one — say it all, however
+    // large the interval.
+    let period = 7 * i64::from(interval);
+    let offsets: Vec<i64> = (0..14).chain(period - 7..period + 14).collect();
+    let days_with = |first_day: usize| -> Vec<i64> {
+        let back =
+            (i64::from(start.weekday().num_days_from_monday()) - first_day as i64).rem_euclid(7);
+        offsets
+            .iter()
+            .copied()
+            .filter(|offset| {
+                let weekday = (i64::from(start.weekday().num_days_from_monday()) + offset)
+                    .rem_euclid(7) as usize;
+                weekdays.contains(&weekday) && ((back + offset) / 7) % i64::from(interval) == 0
+            })
+            .collect()
+    };
+    days_with(week_start) != days_with(0)
+}
+
+/// The shifted rule without a week start that changes no day of a series
+/// beginning anew on `new_start` ([`week_start_matters`]): every other Tuesday
+/// from a Tuesday, or every other Tuesday and Friday, counts its weeks from the
+/// start whether weeks begin on Monday or on Tuesday. A drag needs the week
+/// start the shift moves along — its start may lie off the weekdays — but left
+/// in here, the repeat field could not hold the rule and said it in words
+/// instead (decision 197). One that does change a day stays.
+fn without_needless_week_start(moved: String, new_start: Option<NaiveDate>) -> String {
+    let Some(new_start) = new_start else {
+        return moved;
+    };
+    if week_start_matters(&moved, new_start) {
+        return moved;
+    }
+    let Ok((prefix, parts)) = parse_parts(&moved) else {
+        return moved;
+    };
+    if part(&parts, "WKST").is_none() {
+        return moved;
+    }
+    let kept: Vec<&str> = parts
+        .iter()
+        .filter(|p| p.key != "WKST")
+        .map(|p| p.raw.trim())
+        .collect();
+    format!("{prefix}{}", kept.join(";"))
+}
+
+/// A rule whose days follow its start, with only its `UNTIL` moved: to `until`
+/// when the shell moved a UTC bound, otherwise by `days`. The rule comes back
+/// as it was written when it has no bound to move.
+fn moved_bound(rrule: &str, days: i32, until: Option<&str>) -> Result<String, ShiftRefusal> {
+    let trimmed = rrule.trim();
+    let (prefix, parts) = parse_parts(trimmed).map_err(|_| ShiftRefusal::Unreadable)?;
+    let freq = part(&parts, "FREQ").ok_or(ShiftRefusal::Unreadable)?;
+    if parse_freq(freq).is_none() {
+        return Err(ShiftRefusal::Unreadable);
+    }
+    let moved = match (part(&parts, "UNTIL"), until) {
+        (Some(value), Some(moved)) if is_utc_date_time(value) => checked_utc_until(moved)?,
+        (Some(value), _) if days != 0 => shift_until(value, days)?,
+        _ => return Ok(trimmed.to_string()),
+    };
+    Ok(write(prefix, &parts, &[("UNTIL", moved)]))
+}
+
 /// The door: a [`SeriesShiftQuestion`] as JSON in, a [`SeriesShift`] as JSON out.
 pub fn series_shift_json(input_json: &str) -> Result<String, serde_json::Error> {
     let question: SeriesShiftQuestion = serde_json::from_str(input_json)?;
     let answer = match NaiveDate::parse_from_str(&question.start, "%Y-%m-%d") {
+        Ok(start) if question.begins_anew => begin_series_anew(
+            &question.rrule,
+            start,
+            question.days,
+            question.time_changes,
+            question.until.as_deref(),
+        ),
         Ok(start) => shift_series(
             &question.rrule,
             start,
@@ -734,5 +943,277 @@ mod tests {
             series_shift_json(r#"{"rrule":"FREQ=DAILY","start":"May 4","days":1}"#).unwrap(),
             r#"{"outcome":"refused","reason":"unreadable"}"#
         );
+        // A series that begins anew takes the monthly day from its new start;
+        // a drag of the same rule refuses.
+        assert_eq!(
+            series_shift_json(
+                r#"{"rrule":"FREQ=MONTHLY","start":"2026-08-25","days":8,"begins_anew":true}"#
+            )
+            .unwrap(),
+            r#"{"outcome":"shifted","rrule":"FREQ=MONTHLY"}"#
+        );
+        assert_eq!(
+            series_shift_json(r#"{"rrule":"FREQ=MONTHLY","start":"2026-08-25","days":8}"#).unwrap(),
+            r#"{"outcome":"refused","reason":"month_end"}"#
+        );
+    }
+
+    fn anew(
+        rrule: &str,
+        start: &str,
+        days: i32,
+        time_changes: bool,
+        until: Option<&str>,
+    ) -> SeriesShift {
+        begin_series_anew(rrule, day(start), days, time_changes, until)
+    }
+
+    fn shifted_anew(rrule: &str, start: &str, days: i32, until: Option<&str>) -> String {
+        match anew(rrule, start, days, false, until) {
+            SeriesShift::Shifted { rrule } => rrule,
+            SeriesShift::Refused { reason } => panic!("{rrule} +{days} was refused: {reason:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rule_that_names_its_days_begins_anew_as_a_drag_moves_it() {
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;BYDAY=MO", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;BYDAY=TU,WE,TH,FR,SA"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY;BYMONTHDAY=10;COUNT=7", "2026-09-10", 1, None),
+            "FREQ=MONTHLY;BYMONTHDAY=11;COUNT=7"
+        );
+        // A week start is kept, or added, only where it moves a day of the
+        // series from its new start, whether the shift added it or the rule had
+        // it: every other Tuesday from a Tuesday needs none, nor do Tuesdays
+        // and Fridays, which share a week whether weeks begin on Monday or on
+        // Tuesday; Fridays and Mondays do.
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+        );
+        // Tuesdays and Fridays share a week whether weeks begin on Monday or
+        // on Tuesday; Fridays and Mondays do not.
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH", "2026-08-24", 1, None),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH", "2026-08-24", 4, None),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR,MO;WKST=FR"
+        );
+        // A week start the rule spelled out, Monday as a provider writes it.
+        assert_eq!(
+            shifted_anew(
+                "RRULE:FREQ=WEEKLY;WKST=MO;INTERVAL=2;BYDAY=MO",
+                "2026-08-24",
+                1,
+                None
+            ),
+            "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+        );
+        assert_eq!(
+            shifted_anew(
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;WKST=SU",
+                "2026-08-24",
+                1,
+                None
+            ),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+        );
+        // Refused where a drag is (decision 193).
+        for (rrule, start, days, reason) in [
+            (
+                "FREQ=MONTHLY;BYDAY=2TU",
+                "2026-09-08",
+                1,
+                ShiftRefusal::OrdinalWeekday,
+            ),
+            (
+                "FREQ=MONTHLY;BYMONTHDAY=10",
+                "2026-09-10",
+                20,
+                ShiftRefusal::MonthEnd,
+            ),
+            (
+                "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR",
+                "2026-09-25",
+                1,
+                ShiftRefusal::SetPosition,
+            ),
+            (
+                "FREQ=WEEKLY;BYDAY=MO;BYMONTH=9",
+                "2026-09-07",
+                1,
+                ShiftRefusal::LimitedMonths,
+            ),
+        ] {
+            assert_eq!(
+                anew(rrule, start, days, false, None),
+                SeriesShift::Refused { reason },
+                "{rrule}"
+            );
+        }
+        // Its times of day, when the time changes too.
+        assert_eq!(
+            anew("FREQ=DAILY;BYHOUR=9", "2026-09-07", 0, true, None),
+            SeriesShift::Refused {
+                reason: ShiftRefusal::TimeOfDay
+            }
+        );
+    }
+
+    #[test]
+    fn a_rule_that_follows_its_start_begins_anew_with_only_its_end_moved() {
+        // The new start says which day it repeats on: no day refused.
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY", "2026-08-25", 8, None),
+            "FREQ=MONTHLY"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY", "2026-08-30", 1, None),
+            "FREQ=MONTHLY"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=YEARLY", "2028-02-29", 1, None),
+            "FREQ=YEARLY"
+        );
+        // Every other month or week from the new start, as written.
+        assert_eq!(
+            shifted_anew("FREQ=MONTHLY;INTERVAL=2;COUNT=4", "2026-08-25", 8, None),
+            "FREQ=MONTHLY;INTERVAL=2;COUNT=4"
+        );
+        // Its bound moves: a date by days, a UTC one to what the shell moved.
+        assert_eq!(
+            shifted_anew("FREQ=DAILY;UNTIL=20260831", "2026-08-24", 1, None),
+            "FREQ=DAILY;UNTIL=20260901"
+        );
+        assert_eq!(
+            shifted_anew(
+                "FREQ=DAILY;UNTIL=20260831T070000Z",
+                "2026-08-24",
+                1,
+                Some("20260901T070000Z")
+            ),
+            "FREQ=DAILY;UNTIL=20260901T070000Z"
+        );
+        // A new time of day on the same day moves a UTC bound as well.
+        assert_eq!(
+            match anew(
+                "FREQ=DAILY;UNTIL=20260831T070000Z",
+                "2026-08-24",
+                0,
+                true,
+                Some("20260831T090000Z")
+            ) {
+                SeriesShift::Shifted { rrule } => rrule,
+                SeriesShift::Refused { reason } => panic!("refused: {reason:?}"),
+            },
+            "FREQ=DAILY;UNTIL=20260831T090000Z"
+        );
+        // Nothing to move leaves the rule as written.
+        assert_eq!(
+            shifted_anew("RRULE:FREQ=DAILY;COUNT=3;", "2026-08-24", 1, None),
+            "RRULE:FREQ=DAILY;COUNT=3;"
+        );
+        assert_eq!(
+            shifted_anew("FREQ=DAILY;UNTIL=20260831", "2026-08-24", 0, None),
+            "FREQ=DAILY;UNTIL=20260831"
+        );
+        // Still read, not guessed at.
+        for rrule in ["COUNT=3", "FREQ=FORTNIGHTLY", "FREQ=DAILY;FREQ=DAILY"] {
+            assert_eq!(
+                anew(rrule, "2026-08-24", 1, false, None),
+                SeriesShift::Refused {
+                    reason: ShiftRefusal::Unreadable
+                },
+                "{rrule}"
+            );
+        }
+        assert_eq!(
+            anew("FREQ=DAILY;UNTIL=2026-08-31", "2026-08-24", 1, false, None),
+            SeriesShift::Refused {
+                reason: ShiftRefusal::Unreadable
+            }
+        );
+    }
+
+    #[test]
+    fn a_week_start_matters_only_where_it_moves_a_day() {
+        let tuesday = day("2026-08-25");
+        let friday = day("2026-08-28");
+        assert!(!week_start_matters("FREQ=WEEKLY;BYDAY=TU;WKST=SU", tuesday));
+        assert!(!week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=TU",
+            tuesday
+        ));
+        assert!(!week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;WKST=TU",
+            tuesday
+        ));
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR,MO;WKST=FR",
+            friday
+        ));
+        assert!(week_start_matters(
+            "FREQ=YEARLY;BYWEEKNO=1;WKST=SU",
+            tuesday
+        ));
+        assert!(!week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU",
+            tuesday
+        ));
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=2TU;WKST=SU",
+            tuesday
+        ));
+        // A day of the month picks the days week by week: not walked, kept.
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=2;BYMONTHDAY=16;WKST=FR",
+            day("2026-09-16")
+        ));
+        // However large the interval, two of its weeks are read.
+        assert!(!week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=4294967295;BYDAY=TU,FR;WKST=TU",
+            tuesday
+        ));
+        assert!(week_start_matters(
+            "FREQ=WEEKLY;INTERVAL=4294967295;BYDAY=FR,MO;WKST=FR",
+            friday
+        ));
+    }
+
+    #[test]
+    fn a_rule_begun_anew_on_its_day_keeps_its_week_start() {
+        // Only a new time: the new series may start off the cut's day, where a
+        // week start the rule spelled can matter.
+        assert_eq!(
+            anew(
+                "FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=MO",
+                "2026-08-24",
+                0,
+                true,
+                None
+            ),
+            SeriesShift::Shifted {
+                rrule: "FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=MO".into()
+            }
+        );
+    }
+
+    #[test]
+    fn which_rules_take_their_days_from_the_start() {
+        assert!(days_follow_start("FREQ=MONTHLY"));
+        assert!(days_follow_start("FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231"));
+        assert!(!days_follow_start("FREQ=MONTHLY;BYMONTHDAY=10"));
+        assert!(!days_follow_start("FREQ=WEEKLY;BYDAY=MO"));
+        assert!(!days_follow_start("FREQ=DAILY;BYHOUR=9"));
+        assert!(!days_follow_start("not a rule"));
     }
 }
