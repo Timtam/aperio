@@ -1487,6 +1487,33 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       expect(tail?.tzid).toBeNull();
     });
 
+    it("reads a deletion's day on the device's calendar when the clocks differ", () => {
+      // Daily 19:00 New York is 01:00 the next day in Berlin. Switched to
+      // all-day under a new rule, the deleted Monday evening is the Tuesday
+      // the user saw it on, not the Monday of New York.
+      const newYorkEvenings = {
+        ...mondays,
+        start: '2026-08-24T23:00:00.000Z',
+        end: '2026-08-25T00:00:00.000Z',
+        recurrence: {
+          rrule: 'FREQ=DAILY',
+          exceptions: ['2026-09-07T23:00:00.000Z'],
+          tzid: 'America/New_York',
+        },
+      };
+      const tail = inBerlin(() => {
+        const plan = planSeriesSplit(newYorkEvenings, '2026-08-31T23:00:00.000Z', []);
+        return tailRecurrenceFor({
+          master: newYorkEvenings,
+          cutoffIso: '2026-08-31T23:00:00.000Z',
+          plan: cutOf(plan),
+          tail: { start: '2026-08-31T22:00:00.000Z', all_day: true },
+          rule: { form: 'FREQ=WEEKLY;BYDAY=TU', opened: 'FREQ=DAILY' },
+        });
+      });
+      expect(tail?.exceptions).toEqual(['2026-09-07T22:00:00.000Z']);
+    });
+
     it("gives an all-day series that gets a time of day the device's zone", () => {
       const allDay = {
         ...mondays,

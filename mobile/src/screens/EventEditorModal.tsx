@@ -1213,10 +1213,11 @@ export default function EventEditorModal({
         } else {
           // What the user set in the repeat field, if they changed it, or the
           // series' own pattern from here on; the zone; and the deleted
-          // occurrences, carried by their place when the date moves and by
-          // their day under a new rule (decisions 152, 188). Decided before
-          // anything is written, so a failure — a native library older than
-          // the door included — changes nothing. Mirrors the desktop.
+          // occurrences, carried along with the edit by their place or their
+          // day (decisions 152, 188, 189; the core's rule, see
+          // `tailRecurrenceFor`). Decided before anything is written, so a
+          // failure — a native library older than the door included —
+          // changes nothing. Mirrors the desktop.
           const tailRecurrence = tailRecurrenceFor({
             master: original,
             cutoffIso: occurrence,

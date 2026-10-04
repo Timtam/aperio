@@ -2382,7 +2382,9 @@ Siehe DESIGN §4.2.
     - ✅ **Tail-Regel bei Wechsel und neuer Regel** (PR 3b, 152, 186-191):
       Gelöschte Termine gehen mit der Änderung mit. Nach ihrem Platz in der
       Serie (152), wenn jedes Vorkommen mit dem Beginn wandert (gleiches Muster,
-      ein neues Ende zählt nicht; Tage aus dem Beginn): ein verschobenes Datum
+      ein neues Ende zählt nicht; Tage und Uhrzeiten aus dem Beginn; jedes um
+      gleich viele Tage, was eine Monatsregel vom 31. auf den 30. nicht tut):
+      ein verschobenes Datum
       nimmt sie mit, aus dem gelöschten dritten Montag wird der gelöschte dritte
       Dienstag, und ein Wechsel zwischen ganztägig und mit Uhrzeit lässt eine
       Ausnahme um 18 Uhr auf ihrem Tag statt auf dem folgenden. Sonst nach ihrem
@@ -2390,7 +2392,8 @@ Siehe DESIGN §4.2.
       neuer Regel nur, wo sie ihn noch trifft (188), die anderen fallen weg,
       statt dass EWS beim Löschen abbricht; bei einer Regel, die ihre Tage nennt
       (jeden Werktag, jeden 10.), bleiben sie, weil die übrigen Vorkommen nicht
-      wandern (189). Nie auf dem ersten Vorkommen der neuen Serie. Die Regel lebt im Kern (190,
+      wandern (189); ein Vorkommen zum selben Zeitpunkt behält seine Löschung.
+      Nie auf dem ersten Vorkommen der neuen Serie. Die Regel lebt im Kern (190,
       `cal_core::tail_exceptions`, Fixture `tailExceptions.json`, Türen per
       WebAssembly und UniFFI), die Shell expandiert beide Serien
       (`tailRecurrenceFor`). Gilt für beide Editoren, beide Mitzieh-Dialoge und

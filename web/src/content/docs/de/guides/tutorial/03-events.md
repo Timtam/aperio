@@ -200,7 +200,9 @@ Serie eine andere Wiederholung, bleibt ein gelöschter Termin nur an einem Tag
 gelöscht, den die neue Regel noch trifft; ein neues Ende allein ist keine neue
 Regel. Eine Regel, die ihre Tage nennt, etwa jeden Montag, jeden Werktag oder
 jeden 10. des Monats, behält sie, wenn du einen Termin auf einen anderen Tag
-verschiebst, und ihre Löschungen vorerst auch. Noch behält nicht jeder
+verschiebst, und ihre Löschungen vorerst auch. Ebenso eine monatliche Serie, die
+du auf den 29., 30. oder 31. oder davon weg verschiebst, weil sie die kürzeren
+Monate anders überspringt. Noch behält nicht jeder
 Kalender diese Löschungen: CalDAV-Kalender tun es bei Serien mit Uhrzeit, bei
 Exchange, bei Google und bei ganztägigen CalDAV-Serien kann ein gelöschter
 Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem

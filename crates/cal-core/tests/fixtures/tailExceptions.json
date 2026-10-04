@@ -1,6 +1,6 @@
 {
   "what": "The deleted occurrences a series keeps when \"this and all following\" writes it from the cut on: cal_core::tail_exceptions, row by row. Read by the core's own test, by the phone's door test in cal-ffi, and by the TypeScript contract test through the WebAssembly door.",
-  "why": "Decisions 152 (a deletion keeps its place when every occurrence moves with the start), 188 (with a new rule it keeps its day, only where the new rule still meets it; a new end or another spelling is no new rule) and 189 (a rule that names its days keeps them when one occurrence moves, and so do its deletions, until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them, on the series' own clock and on the device's.",
+  "why": "Decisions 152 (a deletion keeps its place when every occurrence moves with the start, by one and the same number of days), 188 (with a new rule it keeps its day, only where the new rule still meets it; a new end or another spelling is no new rule) and 189 (a rule that names its days keeps them when one occurrence moves, and so do its deletions, until the rule itself moves). Every instant here is the shell's expansion as a Berlin device writes it; the core reads no clock, so the days come with them, on the series' own clock and on the device's.",
   "rows": [
     {
       "name": "A1 an evening deletion stays on its day when the series becomes all-day",
@@ -621,19 +621,22 @@
     },
     {
       "name": "without a clock in common a day is the one the device shows",
-      "note": "Daily 19:00 New York is 01:00 the next day in Berlin. Switched to all-day under a new rule, the deleted Monday evening is the Tuesday the user saw it on.",
+      "note": "Daily 19:00 New York is 01:00 the next day in Berlin. Cut on the occurrence the device shows on Sunday 06.09 and switched to all-day from that Sunday under a new rule: the deleted Monday evening is the Tuesday the user saw it on.",
       "question": {
         "old_slots": [
+          { "at": "2026-09-05T23:00:00.000Z", "day": "2026-09-05", "device_day": "2026-09-06" },
+          { "at": "2026-09-06T23:00:00.000Z", "day": "2026-09-06", "device_day": "2026-09-07" },
           { "at": "2026-09-07T23:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-08" }
         ],
         "old_all_day": false,
         "old_tzid": "America/New_York",
         "old_rule": "FREQ=DAILY",
         "tail": [
+          { "at": "2026-09-05T22:00:00.000Z", "day": "2026-09-06", "device_day": "2026-09-06" },
           { "at": "2026-09-06T22:00:00.000Z", "day": "2026-09-07", "device_day": "2026-09-07" },
           { "at": "2026-09-07T22:00:00.000Z", "day": "2026-09-08", "device_day": "2026-09-08" }
         ],
-        "tail_start": "2026-08-24T22:00:00.000Z",
+        "tail_start": "2026-09-05T22:00:00.000Z",
         "tail_all_day": true,
         "tail_tzid": null,
         "tail_rule": "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR,SA,SU",
@@ -641,6 +644,67 @@
       },
       "expected": {
         "exceptions": ["2026-09-07T22:00:00.000Z"],
+        "carried_by": "day",
+        "dropped": []
+      }
+    },
+    {
+      "name": "a monthly rule from the 31st moved to the 30th keeps its deletion on its day",
+      "note": "From the 31st the rule skips November and February; from the 30th only February. By place the deleted March landed on 30 January, which nobody deleted. On its day it meets no occurrence of the new series and hides nothing.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-10-31T09:00:00.000Z", "day": "2026-10-31", "device_day": "2026-10-31" },
+          { "at": "2026-12-31T09:00:00.000Z", "day": "2026-12-31", "device_day": "2026-12-31" },
+          { "at": "2027-01-31T09:00:00.000Z", "day": "2027-01-31", "device_day": "2027-01-31" },
+          { "at": "2027-03-31T08:00:00.000Z", "day": "2027-03-31", "device_day": "2027-03-31" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=MONTHLY",
+        "tail": [
+          { "at": "2026-10-30T09:00:00.000Z", "day": "2026-10-30", "device_day": "2026-10-30" },
+          { "at": "2026-11-30T09:00:00.000Z", "day": "2026-11-30", "device_day": "2026-11-30" },
+          { "at": "2026-12-30T09:00:00.000Z", "day": "2026-12-30", "device_day": "2026-12-30" },
+          { "at": "2027-01-30T09:00:00.000Z", "day": "2027-01-30", "device_day": "2027-01-30" },
+          { "at": "2027-03-30T08:00:00.000Z", "day": "2027-03-30", "device_day": "2027-03-30" }
+        ],
+        "tail_start": "2026-10-30T09:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=MONTHLY",
+        "deleted": ["2027-03-31T08:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": [],
+        "carried_by": "day",
+        "dropped": ["2027-03-31T08:00:00.000Z"]
+      }
+    },
+    {
+      "name": "a rule that names its times keeps the deletion of an occurrence that did not move",
+      "note": "09:00 and 21:00 Berlin, the opened 09:00 moved to 21:00: the next 09:00 is where it was.",
+      "question": {
+        "old_slots": [
+          { "at": "2026-08-24T07:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-24T19:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" }
+        ],
+        "old_all_day": false,
+        "old_tzid": "Europe/Berlin",
+        "old_rule": "FREQ=DAILY;BYHOUR=9,21",
+        "tail": [
+          { "at": "2026-08-24T19:00:00.000Z", "day": "2026-08-24", "device_day": "2026-08-24" },
+          { "at": "2026-08-25T07:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" },
+          { "at": "2026-08-25T19:00:00.000Z", "day": "2026-08-25", "device_day": "2026-08-25" }
+        ],
+        "tail_start": "2026-08-24T19:00:00.000Z",
+        "tail_all_day": false,
+        "tail_tzid": "Europe/Berlin",
+        "tail_rule": "FREQ=DAILY;BYHOUR=9,21",
+        "deleted": ["2026-08-25T07:00:00.000Z"]
+      },
+      "expected": {
+        "exceptions": ["2026-08-25T07:00:00.000Z"],
         "carried_by": "day",
         "dropped": []
       }
