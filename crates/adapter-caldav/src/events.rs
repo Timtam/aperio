@@ -13,7 +13,7 @@
 //! ID/etag tracking concern (completed_at vs start_utc).
 
 use cal_core::{rrule_until_instant, AttendeeStatus, DateRange, Event, EventRecurrence, NewEvent};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use reqwest::{
     header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     Client, Method, StatusCode,
@@ -1303,13 +1303,11 @@ fn exdate_line(master: &str, occurrence: DateTime<Utc>) -> String {
         // An all-day instant is local midnight (`reference_allday_local_midnight`),
         // so its day is the local one: in Berlin the 16th is stored as the
         // 15th at 23:00 UTC, and `EXDATE;VALUE=DATE:20261115` would exclude
-        // nothing at all — the bug this line exists to fix.
+        // nothing at all — the bug this line exists to fix. The day a whole
+        // write gives it too (`mapping::all_day_date`).
         format!(
             "EXDATE;VALUE=DATE:{}",
-            occurrence
-                .with_timezone(&Local)
-                .date_naive()
-                .format("%Y%m%d")
+            crate::mapping::all_day_date(occurrence).format("%Y%m%d")
         )
     } else {
         format!("EXDATE:{}", format_utc_compact(occurrence))

@@ -196,9 +196,8 @@ other months or years, such as one moved from the 31st to the 30th, moves its
 deletions by their place only as far as the two versions still line up; if a
 deletion lies beyond that, they all stay on their day, where a deleted
 occurrence can show again. Not every calendar keeps those deletions yet:
-CalDAV calendars do for a series with a time of day, but on Exchange, on
-Google, and in an all-day series on CalDAV, a deleted occurrence can still come
-back for now. On Google, Aperio also knows deleted occurrences only about a year
+CalDAV calendars do, but on Exchange and on Google a deleted occurrence can
+still come back for now. On Google, Aperio also knows deleted occurrences only about a year
 ahead, so one deleted further out comes back in the new series. And in an
 all-day series on Google or CalDAV, an occurrence changed in another app also
 stays in the old series for now, so that day shows twice.

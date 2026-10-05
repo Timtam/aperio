@@ -1924,8 +1924,9 @@ Siehe DESIGN §4.2.
   Überlappung (die frühere Lesung), zonierte Serien an den Bereichsrändern, ein
   zoniertes UNTIL mit `Z` über eine Umstellung, WKST, ganztägige Serien ohne
   Zone (steppen in UTC, nach der Umstellung um 23:00 am Vortag), das
-  `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behält
-  einen Tag zu viel — `wasTypeScript`) und ein Vorkommen, das vor dem Bereich
+  `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behielt
+  einen Tag zu viel — seit 201 entschieden: Ziffern auf der Tagesuhr) und ein
+  Vorkommen, das vor dem Bereich
   begann (fehlt, gewählt wird nach dem Start). Verträge:
   `src/intl/eventOccurrences.contract.test.ts` (Ansichten) und
   `event_occurrence_contract` in `host-core/src/reminders.rs` (Erinnerungen,
@@ -2369,11 +2370,9 @@ Siehe DESIGN §4.2.
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
       nicht (140), Google verwirft UTC-EXDATEs auf Serien mit Zone (137).
-      Ganztägige Serien schreiben CalDAV (`apply_common`) und Google
-      (`recurrence_to_lines`) beim Anlegen als UTC-Zeitpunkt, der bei einem
-      Datums-Beginn nichts ausschließt; nur das Löschen eines Vorkommens
-      schreibt bei CalDAV schon `VALUE=DATE` (`exdate_line`). Dafür sind PR 5
-      (CalDAV) und 137 (Google, nach Live-Test) da.
+      Ganztägige Serien schreibt Google (`recurrence_to_lines`) beim Anlegen
+      als UTC-Zeitpunkt, der bei einem Datums-Beginn nichts ausschließt; dafür
+      ist 137 da (nach Live-Test). CalDAV schreibt sie seit PR 5 als Datum.
     - ✅ Das Mitziehen schnitt eine Exchange-Kopie ein Vorkommen zu spät, wenn
       ihr Vorkommen am Schnitttag in Outlook geändert wurde, und eine
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
@@ -2424,6 +2423,20 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
+      CalDAV schreibt die Ausnahmen einer ganztägigen Serie als
+      `EXDATE;VALUE=DATE` (der Tag der nächsten lokalen Mitternacht, wie 95
+      Tage liest) und ein UTC-Ende als Datum seiner Ziffern, beim Anlegen und
+      Bearbeiten (`apply_common`, `all_day_date`, `all_day_rule`); vorher
+      schlossen die UTC-Zeitpunkte bei iPhone und anderen Programmen nichts aus.
+      Bestehende Serien heilen beim nächsten Speichern. Und überall liest eine
+      Serie von Tagen ihr UNTIL nach seinen Ziffern auf der Tagesuhr, ein Datum
+      als ganzen Tag (201): „bis 31.12.“ aus dem Feld (`…T235959Z`) zeigte in
+      Berlin auch den 1.1., die Erinnerungen ebenso; ein Datums- oder
+      schwebendes UNTIL wies die rrule-Kiste ab, und die Erinnerungen blieben
+      beim ersten Termin. Ansichten (`untilOnClock`, auch `occurrenceCount`)
+      und Erinnerungen (`until_on_day_clock`) lesen gleich; vier Vertragszeilen
+      in `eventOccurrences.json` sind jetzt einig. ↻ im Test.
     - ✅ **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
       Der Editor liest eine Bearbeitung der ganzen Serie, deren Beginn wandert
       oder die zwischen ganztägig und Uhrzeit wechselt, wie „dieser und alle

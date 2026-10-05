@@ -213,10 +213,8 @@ jährliche Serie durch das neue Datum andere Monate oder Jahre, etwa vom 31. auf
 den 30. verschoben, wandern ihre Löschungen nur so weit nach ihrem Platz mit,
 wie beide Fassungen noch übereinstimmen; liegt eine Löschung dahinter, bleiben
 alle auf ihrem Tag, und ein gelöschter Termin kann wieder erscheinen. Noch
-behält nicht jeder
-Kalender diese Löschungen: CalDAV-Kalender tun es bei Serien mit Uhrzeit, bei
-Exchange, bei Google und bei ganztägigen CalDAV-Serien kann ein gelöschter
-Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem
+behält nicht jeder Kalender diese Löschungen: CalDAV-Kalender tun es, bei
+Exchange und bei Google kann ein gelöschter Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem
 nur etwa ein Jahr voraus, ein weiter vorn gelöschter kommt in der neuen Serie
 wieder. Und in einer ganztägigen Serie bei Google oder CalDAV bleibt ein in
 einer anderen App geänderter Termin vorerst auch in der alten Serie, dieser Tag

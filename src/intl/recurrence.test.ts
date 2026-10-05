@@ -1007,3 +1007,47 @@ describe('occurrenceCount and nthOccurrence read a rule as expandEvent does', ()
     expect(nthOccurrence(series, 6)).toBeNull();
   });
 });
+
+describe('an all-day series ends on the day its UNTIL names (201)', () => {
+  /** The device in `zone`, whatever zone the test machine is in. */
+  const deviceIn = (zone: string) => {
+    const real = new Intl.DateTimeFormat().resolvedOptions();
+    return vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ ...real, timeZone: zone });
+  };
+  // Tuesday 29 December 2026 at the device's midnight, daily until the 31st.
+  const midnights: Record<string, string[]> = {
+    'Europe/Berlin': ['2026-12-28T23:00:00.000Z', '2026-12-29T23:00:00.000Z', '2026-12-30T23:00:00.000Z'],
+    'America/New_York': ['2026-12-29T05:00:00.000Z', '2026-12-30T05:00:00.000Z', '2026-12-31T05:00:00.000Z'],
+  };
+  for (const [zone, days] of Object.entries(midnights)) {
+    for (const rrule of [
+      'FREQ=DAILY;UNTIL=20261231T235959Z',
+      'FREQ=DAILY;UNTIL=20261231',
+      'FREQ=DAILY;UNTIL=20261231T120000',
+    ]) {
+      it(`${rrule} on a device in ${zone}`, () => {
+        const spy = deviceIn(zone);
+        try {
+          const series = {
+            id: 'holiday',
+            start: days[0],
+            end: new Date(Date.parse(days[0]) + 86_400_000).toISOString(),
+            all_day: true,
+            recurrence: { rrule, exceptions: [] as string[], tzid: null as string | null },
+          };
+          const shown = expandEvent(series, {
+            start: new Date('2026-12-01T00:00:00Z'),
+            end: new Date('2027-01-31T00:00:00Z'),
+          }).map((o) => o.start);
+          expect(shown).toEqual(days);
+          // The counter the bound of a moved series is checked with agrees.
+          expect(occurrenceCount(series, 10)).toBe(3);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    }
+  }
+});

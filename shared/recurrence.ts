@@ -80,8 +80,12 @@ export function expandEvent<E extends RecurringEventLike>(
   let occurrences: Date[];
   try {
     occurrences = tzid
-      ? zonedOccurrences(event.recurrence.rrule, dtstart, tzid, range)
-      : utcOccurrences(event.recurrence.rrule, dtstart, range);
+      ? zonedOccurrences(event.recurrence.rrule, dtstart, tzid, range, byDay)
+      : utcOccurrences(
+          byDay ? untilOnClock(event.recurrence.rrule, 'UTC', true) : event.recurrence.rrule,
+          dtstart,
+          range,
+        );
   } catch (err) {
     // Bad rule string — fall back to showing the master at its stored start so
     // the user can still see and edit it.
@@ -184,14 +188,20 @@ function wallRule(series: {
     if (zone) {
       try {
         return {
-          rule: buildRule(shiftUntilToWall(series.recurrence.rrule, zone), realToWall(dtstart, zone)),
+          rule: buildRule(
+            untilOnClock(series.recurrence.rrule, zone, readsCalendarDays(series)),
+            realToWall(dtstart, zone),
+          ),
           zone,
         };
       } catch {
         // A zone `Intl` cannot load reads on UTC, as `zonedOccurrences` does.
       }
     }
-    return { rule: buildRule(series.recurrence.rrule, dtstart), zone: null };
+    const body = readsCalendarDays(series)
+      ? untilOnClock(series.recurrence.rrule, 'UTC', true)
+      : series.recurrence.rrule;
+    return { rule: buildRule(body, dtstart), zone: null };
   } catch {
     return null;
   }
@@ -338,6 +348,7 @@ function zonedOccurrences(
   dtstart: Date,
   tzid: string,
   range: { start: Date; end: Date },
+  byDay = false,
 ): Date[] {
   let dtstartWall: Date;
   try {
@@ -346,11 +357,11 @@ function zonedOccurrences(
     // Unresolvable IANA zone (a typo, a Windows zone name, or a custom VTIMEZONE
     // id `Intl` can't load) — degrade to UTC expansion rather than dropping the
     // series. Worst case is the pre-fix behaviour, never worse.
-    return utcOccurrences(rruleBody, dtstart, range);
+    return utcOccurrences(byDay ? untilOnClock(rruleBody, tzid, true) : rruleBody, dtstart, range);
   }
   // Iterate UNTIL in wall-clock space too, else a bounded series' final cutoff is
   // off by the zone offset.
-  const rule = buildRule(shiftUntilToWall(rruleBody, tzid), dtstartWall);
+  const rule = buildRule(untilOnClock(rruleBody, tzid, byDay), dtstartWall);
   // Pad the wall-clock window a day each side (any zone offset is < 24h) so no
   // occurrence near a real-range edge is missed; the precise real filter trims.
   const lo = new Date(realToWall(range.start, tzid).getTime() - DAY_MS);
@@ -439,6 +450,30 @@ function wallToReal(wall: Date, tzid: string): Date {
 
 /** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with
  *  the wall-clock iteration above; other UNTIL forms are left untouched. */
+/**
+ * The rule with its UNTIL as the wall-clock bound it is iterated against.
+ *
+ * A timed series' UTC UNTIL is an instant: it is shifted into the zone's wall
+ * time. A series of DAYS (decision 201) reads its UNTIL by its digits as
+ * written, on its day clock — a date covers that whole day, a date-time is
+ * that wall time, with or without `Z`: "until 31 December" ends with the 31st
+ * however it is spelled. The repeat field writes `…1231T235959Z`, and shifted
+ * from UTC into Berlin's wall time that was 1 January 00:59, which put 1
+ * January in the series; it is the day the field shows, and the one the
+ * sentence names (`lastOccurrenceDayKey`). A date read as its midnight lost
+ * the last day of a series whose days begin later than midnight on this
+ * device — one written in another zone. The reminders read it the same way
+ * (`until_on_day_clock` in host-core).
+ */
+function untilOnClock(rruleBody: string, tzid: string, byDay: boolean): string {
+  if (!byDay) return shiftUntilToWall(rruleBody, tzid);
+  return rruleBody.replace(
+    /(UNTIL=)(\d{8})(?:T(\d{6})Z?)?(?=;|$)/i,
+    (_whole, key: string, date: string, time: string | undefined) =>
+      `${key}${date}T${time ?? '235959'}Z`,
+  );
+}
+
 function shiftUntilToWall(rruleBody: string, tzid: string): string {
   return rruleBody.replace(
     /UNTIL=(\d{8})T(\d{6})Z/i,
