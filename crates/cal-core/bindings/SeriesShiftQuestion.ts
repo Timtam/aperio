@@ -23,9 +23,17 @@ days: number,
 time_changes: boolean, 
 /**
  * The moved bound for a rule whose `UNTIL` is a UTC date-time, written
- * `YYYYMMDDTHHMMSSZ`. That bound is an instant: it moves on the series'
- * clock by the days and by the change in time of day, which needs the zone
- * the shell has. Without it a UTC `UNTIL` moves by whole UTC days. A date
+ * `YYYYMMDDTHHMMSSZ`. A timed series' bound is an instant: it moves on the
+ * series' clock by the days and by the change in time of day, which needs
+ * the zone the shell has. A series of days reads its bound by its digits
+ * on the device's day clock (decision 201), so the shell moves the digits
+ * by its days. Without it a UTC `UNTIL` moves by whole UTC days. A date
  * or a floating `UNTIL` moves by days here, and this is ignored for it.
  */
-until: string | null, };
+until: string | null, 
+/**
+ * Whether the series begins anew at the moved start, as "this and all
+ * following" writes it, rather than every occurrence of it moving, as a
+ * drag does. See [`begin_series_anew`].
+ */
+begins_anew: boolean, };

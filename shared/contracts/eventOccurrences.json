@@ -1578,9 +1578,7 @@
     },
     {
       "name": "an-all-day-series-west-of-utc-until-its-local-day",
-      "note": "All-day in New York, read on a device in Berlin: the stored instant is 04:00 UTC. truncateRRuleBefore writes the local day as a date-only UNTIL for an all-day split, so May 6 is meant to be the last day. The views read the date as 00:00 UTC and lose May 6. The rrule crate does not accept a date-only UNTIL on a named clock, so the reminders keep only the master — as before 48a, which changed WHICH clock the series is read on, not what the crate accepts.",
-      "wasTypeScript": true,
-      "surfacesDiffer": true,
+      "note": "All-day in New York, read on a device in Berlin: the stored instant is 04:00 UTC. truncateRRuleBefore writes the local day as a date-only UNTIL for an all-day split, so May 6 is meant to be the last day. A series of days reads its UNTIL on its day clock, and a date covers that whole day (decision 201): the views read it as May 6 23:59:59 on the device's clock and keep May 6; the reminders take the same bound as a UTC instant, which the rrule crate accepts against a zoned start. Before, the views read the date as midnight and lost May 6, and the crate refused the date, so the reminders kept only the master.",
       "input": {
         "events": [
           {
@@ -1607,19 +1605,16 @@
         {
           "event": 0,
           "start": "2026-05-05T04:00:00.000Z"
-        }
-      ],
-      "reminders": [
+        },
         {
           "event": 0,
-          "start": "2026-05-04T04:00:00.000Z"
+          "start": "2026-05-06T04:00:00.000Z"
         }
       ]
     },
     {
       "name": "a-date-only-until-on-an-all-day-series-east-of-utc",
-      "note": "All-day in Berlin from May 4 (local midnight is 22:00 UTC the day before), with the date-only UNTIL an all-day split writes: May 6 is meant to be the last day. The views read the date as 00:00 UTC, which is 02:00 on May 6 in Berlin, and keep May 6 as the last day. The rrule crate does not accept a date-only UNTIL, so the reminders keep only the master.",
-      "surfacesDiffer": true,
+      "note": "All-day in Berlin from May 4 (local midnight is 22:00 UTC the day before), with the date-only UNTIL an all-day split writes, and the one CalDAV now writes for every all-day series (decision 200): May 6 is the last day. Read on the day clock as the whole of May 6 (201), by the views and the reminders alike; the reminders used to keep only the master, because the rrule crate refused a date-only UNTIL.",
       "input": {
         "events": [
           {
@@ -1651,18 +1646,11 @@
           "event": 0,
           "start": "2026-05-05T22:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-03T22:00:00.000Z"
-        }
       ]
     },
     {
       "name": "the-editors-until-on-an-all-day-series-east-of-utc",
-      "note": "The same Berlin all-day series ended through the editor, which writes UNTIL=20260506T235959Z for “ends on May 6” whether or not the series is all-day. Read as an instant, that is 01:59 on May 7 in Berlin, and May 7 is kept as a fourth day.",
-      "wasTypeScript": true,
+      "note": "The same Berlin all-day series ended through the editor, which writes UNTIL=20260506T235959Z for “ends on May 6” whether or not the series is all-day. A series of days reads its UNTIL by its digits on its day clock (decision 201): May 6, the day the repeat field shows and the sentence names. Read as an instant it was 01:59 on May 7 in Berlin, and May 7 was kept as a fourth day.",
       "input": {
         "events": [
           {
@@ -1693,10 +1681,42 @@
         {
           "event": 0,
           "start": "2026-05-05T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "a-floating-until-on-an-all-day-series",
+      "note": "A date-time UNTIL without Z on a Berlin all-day series: read on the day clock as written (201), May 6 12:00 there, so May 6 is the last day. The rrule crate refused a floating UNTIL against a zoned start and the reminders kept only the master; they now take the same wall time as a UTC instant.",
+      "input": {
+        "events": [
+          {
+            "id": "s",
+            "all_day": true,
+            "start": "2026-05-03T22:00:00Z",
+            "end": "2026-05-04T22:00:00Z",
+            "recurrence": {
+              "rrule": "FREQ=DAILY;UNTIL=20260506T120000",
+              "exceptions": []
+            }
+          }
+        ],
+        "range": {
+          "start": "2026-04-01T00:00:00Z",
+          "end": "2026-06-01T00:00:00Z"
+        }
+      },
+      "expect": [
+        {
+          "event": 0,
+          "start": "2026-05-03T22:00:00.000Z"
         },
         {
           "event": 0,
-          "start": "2026-05-06T22:00:00.000Z"
+          "start": "2026-05-04T22:00:00.000Z"
+        },
+        {
+          "event": 0,
+          "start": "2026-05-05T22:00:00.000Z"
         }
       ]
     },

@@ -805,6 +805,54 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<Strin
     }
 }
 
+/// The day an all-day series' instant names: the date of the local midnight
+/// nearest to it. Aperio stores an all-day occurrence, and its exception, as
+/// local midnight; another writer's spelling of that day — midnight UTC, noon,
+/// the midnight of a zone an hour or two away — sits within hours of it, and
+/// is read as the same day (decision 95). Its plain local date would put
+/// midnight UTC on the day before west of Greenwich.
+pub(crate) fn all_day_date(instant: DateTime<Utc>) -> NaiveDate {
+    (instant + chrono::Duration::hours(12))
+        .with_timezone(&Local)
+        .date_naive()
+}
+
+/// An all-day series' rule with a date-time `UNTIL` written as the date its
+/// digits name: RFC 5545 has the bound take the start's value type, and the
+/// repeat field writes "until 31 December" as `…1231T235959Z` (decision 200).
+/// The date is the digits', the day the field shows, as every reader of an
+/// all-day series takes it (decision 201). Anything else stays as written.
+pub(crate) fn all_day_rule(rrule: &str) -> String {
+    let trimmed = rrule.trim();
+    let (prefix, body) = match trimmed.get(..6) {
+        Some(p) if p.eq_ignore_ascii_case("RRULE:") => trimmed.split_at(6),
+        _ => ("", trimmed),
+    };
+    let parts: Vec<String> = body
+        .split(';')
+        .map(|part| {
+            let Some((key, value)) = part.split_once('=') else {
+                return part.to_string();
+            };
+            let value = value.trim();
+            let digits = value
+                .get(..8)
+                .filter(|d| d.bytes().all(|b| b.is_ascii_digit()));
+            match digits {
+                Some(date)
+                    if key.trim().eq_ignore_ascii_case("UNTIL")
+                        && value.len() > 8
+                        && value.as_bytes()[8].eq_ignore_ascii_case(&b'T') =>
+                {
+                    format!("{}={date}", key.trim())
+                }
+                _ => part.to_string(),
+            }
+        })
+        .collect();
+    format!("{prefix}{}", parts.join(";"))
+}
+
 /// Anchor a DATE value (all-day boundary) at LOCAL midnight, expressed
 /// as a UTC instant — the app-internal all-day convention. Anchoring at
 /// UTC midnight instead would shift the rendered day for any user west
@@ -1091,9 +1139,21 @@ fn apply_common(
         ical_ev.ends(event.end);
     }
     if let Some(rec) = &event.recurrence {
-        ical_ev.add_property("RRULE", &rec.rrule);
-        for exdate in &rec.exceptions {
-            ical_ev.add_multi_property("EXDATE", &format_utc_compact(*exdate));
+        if event.all_day {
+            // A series of days is excluded by days, and bounded by one (RFC
+            // 5545 §3.8.5.1, §3.3.10): a UTC instant excludes nothing on a date
+            // start, so other clients showed every deleted day again (200).
+            ical_ev.add_property("RRULE", all_day_rule(&rec.rrule));
+            for exdate in &rec.exceptions {
+                ical_ev.append_multi_property(
+                    DatePerhapsTime::Date(all_day_date(*exdate)).to_property("EXDATE"),
+                );
+            }
+        } else {
+            ical_ev.add_property("RRULE", &rec.rrule);
+            for exdate in &rec.exceptions {
+                ical_ev.add_multi_property("EXDATE", &format_utc_compact(*exdate));
+            }
         }
     }
     // VALARM children — one per Reminder so iCloud's iOS / Alexa
@@ -2331,6 +2391,132 @@ END:VCALENDAR\r
         let body = new_event_to_ical("conf-uid", &event);
         assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
         assert!(body.contains("DTEND;VALUE=DATE:20260612"), "{body}");
+    }
+
+    /// An all-day series, as the editor sends it: its deletions at local
+    /// midnight, its end from the repeat field (`…T235959Z`).
+    fn all_day_series(rrule: &str, exceptions: Vec<DateTime<Utc>>) -> NewEvent {
+        NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
+            title: "Holiday".into(),
+            description: None,
+            location: None,
+            start: local_midnight_utc(2026, 12, 28),
+            end: local_midnight_utc(2026, 12, 29),
+            all_day: true,
+            recurrence: Some(EventRecurrence {
+                rrule: rrule.into(),
+                exceptions,
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        }
+    }
+
+    #[test]
+    fn an_all_day_series_is_excluded_and_bounded_by_dates() {
+        // A UTC instant excludes nothing on a date start: iPhone and the other
+        // clients showed the deleted day again (decision 200). The end is the
+        // day the repeat field showed (201).
+        let body = new_event_to_ical(
+            "holiday-uid",
+            &all_day_series(
+                "FREQ=DAILY;UNTIL=20261231T235959Z",
+                vec![local_midnight_utc(2026, 12, 30)],
+            ),
+        );
+        assert!(
+            body.contains("RRULE:FREQ=DAILY;UNTIL=20261231\r\n"),
+            "{body}"
+        );
+        assert!(body.contains("EXDATE;VALUE=DATE:20261230"), "{body}");
+        assert!(!body.contains("EXDATE:2026"), "{body}");
+    }
+
+    #[test]
+    fn another_spelling_of_an_all_day_deletion_names_the_same_date() {
+        // Hours off local midnight either way — another writer's day (95).
+        let body = new_event_to_ical(
+            "holiday-uid",
+            &all_day_series(
+                "FREQ=DAILY",
+                vec![
+                    local_midnight_utc(2026, 12, 29) + chrono::Duration::hours(3),
+                    local_midnight_utc(2026, 12, 31) - chrono::Duration::hours(3),
+                ],
+            ),
+        );
+        assert!(body.contains("EXDATE;VALUE=DATE:20261229"), "{body}");
+        assert!(body.contains("EXDATE;VALUE=DATE:20261231"), "{body}");
+    }
+
+    #[test]
+    fn a_timed_series_keeps_its_instants() {
+        let mut event = all_day_series(
+            "FREQ=DAILY;UNTIL=20261231T235959Z",
+            vec![Utc.with_ymd_and_hms(2026, 12, 30, 9, 0, 0).unwrap()],
+        );
+        event.all_day = false;
+        event.start = Utc.with_ymd_and_hms(2026, 12, 28, 9, 0, 0).unwrap();
+        event.end = Utc.with_ymd_and_hms(2026, 12, 28, 10, 0, 0).unwrap();
+        let body = new_event_to_ical("standup-uid", &event);
+        assert!(
+            body.contains("RRULE:FREQ=DAILY;UNTIL=20261231T235959Z"),
+            "{body}"
+        );
+        assert!(body.contains("EXDATE:20261230T090000Z"), "{body}");
+    }
+
+    #[test]
+    fn an_all_day_series_keeps_its_dates_through_a_read_and_a_write() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:holiday@aperio\r
+SUMMARY:Holiday\r
+DTSTART;VALUE=DATE:20261228\r
+DTEND;VALUE=DATE:20261229\r
+RRULE:FREQ=DAILY;UNTIL=20261231\r
+EXDATE;VALUE=DATE:20261230\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        let rewritten = event_to_ical(&events[0]);
+        assert!(
+            rewritten.contains("RRULE:FREQ=DAILY;UNTIL=20261231\r\n"),
+            "{rewritten}"
+        );
+        assert!(
+            rewritten.contains("EXDATE;VALUE=DATE:20261230"),
+            "{rewritten}"
+        );
+    }
+
+    #[test]
+    fn an_all_day_rule_writes_its_date_time_end_as_a_date() {
+        assert_eq!(
+            all_day_rule("FREQ=DAILY;UNTIL=20261231T235959Z"),
+            "FREQ=DAILY;UNTIL=20261231"
+        );
+        assert_eq!(
+            all_day_rule("RRULE:freq=weekly;until=20261231t120000;BYDAY=MO"),
+            "RRULE:freq=weekly;until=20261231;BYDAY=MO"
+        );
+        for unchanged in [
+            "FREQ=DAILY;UNTIL=20261231",
+            "FREQ=DAILY;COUNT=3",
+            "FREQ=DAILY",
+        ] {
+            assert_eq!(all_day_rule(unchanged), unchanged);
+        }
     }
 
     /// Server → Aperio → server round-trip: DATE boundaries read from a

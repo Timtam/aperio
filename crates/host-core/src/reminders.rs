@@ -22,7 +22,7 @@ use cal_core::{
     TaskRecurrence,
 };
 use chrono::{
-    DateTime, Duration as ChronoDuration, Local, NaiveDateTime, NaiveTime, TimeZone, Utc,
+    DateTime, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
 };
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
@@ -1129,6 +1129,18 @@ fn expand_occurrences(
 ) -> Vec<DateTime<Utc>> {
     let trimmed = rrule_body.trim();
     let body = trimmed.strip_prefix("RRULE:").unwrap_or(trimmed);
+    // A series of days reads its UNTIL on the device's day clock (201).
+    let by_days = matches!(
+        cal_core::expansion_clock(all_day, tzid),
+        cal_core::ExpansionClock::DeviceDays
+    );
+    let on_day_clock;
+    let body = if by_days {
+        on_day_clock = until_on_day_clock(body, &device);
+        on_day_clock.as_str()
+    } else {
+        body
+    };
 
     let unvalidated: RRule<rrule::Unvalidated> = match body.parse() {
         Ok(r) => r,
@@ -1147,10 +1159,7 @@ fn expand_occurrences(
     // calendar days (48a): it carries no zone of its own, and read on UTC a
     // named weekday lands a day late east of Greenwich — on the day the views
     // no longer show it.
-    if matches!(
-        cal_core::expansion_clock(all_day, tzid),
-        cal_core::ExpansionClock::DeviceDays
-    ) {
+    if by_days {
         return expand_on(
             dt_start_utc,
             unvalidated,
@@ -1195,6 +1204,66 @@ fn expand_occurrences(
         end_bound,
         body,
     )
+}
+
+/// A series of days' rule with its UNTIL read on the device's day clock, by
+/// its digits as written (decision 201): a date covers that whole day, a
+/// date-time — with or without `Z` — is that wall time. "Until 31 December"
+/// ends with the 31st however it is spelled: the repeat field writes
+/// `…1231T235959Z`, which read as an instant reached 1 January's midnight east
+/// of Greenwich and reminded on a day the series no longer shows. The rrule
+/// crate wants a UTC instant against a zoned start — a date there it refused
+/// outright, and the series reminded only at its first occurrence — so the
+/// bound goes in as the UTC instant of that wall time on the device's clock.
+fn until_on_day_clock(body: &str, device: &RruleTz) -> String {
+    body.split(';')
+        .map(|part| {
+            let Some((key, value)) = part.split_once('=') else {
+                return part.to_string();
+            };
+            if !key.trim().eq_ignore_ascii_case("UNTIL") {
+                return part.to_string();
+            }
+            let digits = value.trim().trim_end_matches(['Z', 'z']);
+            let wall = NaiveDateTime::parse_from_str(digits, "%Y%m%dT%H%M%S")
+                .ok()
+                .or_else(|| {
+                    NaiveDate::parse_from_str(digits, "%Y%m%d")
+                        .ok()
+                        .and_then(|day| day.and_hms_opt(23, 59, 59))
+                });
+            match wall.and_then(|wall| last_at_or_before(device, wall)) {
+                Some(at) => format!(
+                    "{}={}",
+                    key.trim(),
+                    at.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ")
+                ),
+                None => part.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// The last instant whose wall time on `device` is `wall` or earlier, as the
+/// views compare a wall-clock bound: `wall` itself, at its later reading when
+/// the clock shows it twice — or, when a clock change skips it, the last
+/// second before the change, since every wall time after it is already later
+/// than the bound. Left unchanged there, the rrule crate refused the bound,
+/// and the series reminded only at its first occurrence; rounded forward like
+/// a start, it would have admitted the next day's midnight.
+fn last_at_or_before(device: &RruleTz, wall: NaiveDateTime) -> Option<DateTime<RruleTz>> {
+    let at = |w: NaiveDateTime| device.from_local_datetime(&w).latest();
+    // A gap is an hour or two, a whole day where a zone skipped one: back by
+    // the minute to a wall time that exists, then forward by the second to
+    // the last one before the gap.
+    let minutes = (0..=26 * 60).find(|m| at(wall - ChronoDuration::minutes(*m)).is_some())?;
+    let before = wall - ChronoDuration::minutes(minutes);
+    (0..60)
+        .rev()
+        .map(|s| before + ChronoDuration::seconds(s))
+        .filter(|w| *w <= wall)
+        .find_map(at)
 }
 
 /// Half a day: two instants this close name the same DAY of a series of days.
@@ -2798,6 +2867,90 @@ mod tests {
         );
     }
 
+    /// A series of days ends on the day its UNTIL names, however spelled
+    /// (decision 201): the repeat field's `…T235959Z` reached the next day's
+    /// midnight in Berlin, and a date the rrule crate refused outright.
+    #[test]
+    fn an_all_day_series_ends_on_the_day_its_until_names() {
+        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        // Tuesday 29 December 2026 in Berlin begins at 23:00 UTC the day before.
+        let start = Utc.with_ymd_and_hms(2026, 12, 28, 23, 0, 0).unwrap();
+        for rule in [
+            "FREQ=DAILY;UNTIL=20261231T235959Z",
+            "FREQ=DAILY;UNTIL=20261231",
+            "FREQ=DAILY;UNTIL=20261231T120000",
+        ] {
+            let days: Vec<NaiveDate> = expand_occurrences(
+                start,
+                rule,
+                &[],
+                None,
+                true,
+                berlin,
+                start,
+                Utc.with_ymd_and_hms(2027, 1, 31, 0, 0, 0).unwrap(),
+            )
+            .iter()
+            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .collect();
+            assert_eq!(
+                days,
+                vec![
+                    NaiveDate::from_ymd_opt(2026, 12, 29).unwrap(),
+                    NaiveDate::from_ymd_opt(2026, 12, 30).unwrap(),
+                    NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+                ],
+                "{rule}",
+            );
+        }
+        assert_eq!(
+            until_on_day_clock("FREQ=DAILY;UNTIL=20261231;BYHOUR=9", &berlin),
+            "FREQ=DAILY;UNTIL=20261231T225959Z;BYHOUR=9"
+        );
+        assert_eq!(
+            until_on_day_clock("FREQ=DAILY;COUNT=3", &berlin),
+            "FREQ=DAILY;COUNT=3"
+        );
+    }
+
+    /// A clock change can skip the bound's wall time: Nuuk springs from 23:00
+    /// to midnight on 28 March 2026, so 23:59:59 that day does not exist. The
+    /// series still ends with the 28th, as the views show it — not with the
+    /// first occurrence, which is all a bound the crate refused left.
+    #[test]
+    fn an_all_day_series_ends_on_its_day_when_a_clock_change_skips_the_bound() {
+        let nuuk = RruleTz::Tz(chrono_tz::America::Nuuk);
+        // Thursday 26 March 2026 begins at 02:00 UTC in Nuuk.
+        let start = Utc.with_ymd_and_hms(2026, 3, 26, 2, 0, 0).unwrap();
+        let days: Vec<NaiveDate> = expand_occurrences(
+            start,
+            "FREQ=DAILY;UNTIL=20260328",
+            &[],
+            None,
+            true,
+            nuuk,
+            start,
+            Utc.with_ymd_and_hms(2026, 4, 30, 0, 0, 0).unwrap(),
+        )
+        .iter()
+        .map(|o| o.with_timezone(&chrono_tz::America::Nuuk).date_naive())
+        .collect();
+        assert_eq!(
+            days,
+            vec![
+                NaiveDate::from_ymd_opt(2026, 3, 26).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 3, 27).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 3, 28).unwrap(),
+            ]
+        );
+        // The last second before the change: 22:59:59 there, while the 29th
+        // begins at 01:00 UTC.
+        assert_eq!(
+            until_on_day_clock("FREQ=DAILY;UNTIL=20260328", &nuuk),
+            "FREQ=DAILY;UNTIL=20260329T005959Z"
+        );
+    }
+
     /// An all-day exception names a DAY (decision 95). The instant it was
     /// stored as is one spelling of that day: a provider that anchors a date at
     /// midnight UTC writes another than the local midnight the occurrence has,
@@ -3721,8 +3874,6 @@ mod tests {
         /// The rows where the reminders answer differently, by name: a count would
         /// break on exactly the change it has to survive.
         const DIFFERING: &[&str] = &[
-            "an-all-day-series-west-of-utc-until-its-local-day",
-            "a-date-only-until-on-an-all-day-series-east-of-utc",
             "a-start-with-milliseconds",
             "a-trailing-semicolon",
             "a-date-only-until-without-a-zone",
@@ -3746,8 +3897,15 @@ mod tests {
         /// The zone rows decided on 2026-09-14 (decision 26a): the views and the
         /// reminders read a stored zone name through one rule,
         /// `cal_core::series_clock`, so none of these may record a reminders
-        /// answer of its own again. Named, like `DIFFERING`.
+        /// answer of its own again. And the rows of a series of days' UNTIL,
+        /// decided on 2026-10-05 (decision 201): both read it on the day clock
+        /// by its digits, a date as the whole day (`until_on_day_clock` here,
+        /// `untilOnClock` in the views). Named, like `DIFFERING`.
         const AGREEING: &[&str] = &[
+            "an-all-day-series-west-of-utc-until-its-local-day",
+            "a-date-only-until-on-an-all-day-series-east-of-utc",
+            "the-editors-until-on-an-all-day-series-east-of-utc",
+            "a-floating-until-on-an-all-day-series",
             "a-zone-named-utc",
             "an-empty-zone",
             "an-unknown-zone",

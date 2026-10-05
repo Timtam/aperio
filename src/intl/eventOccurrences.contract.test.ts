@@ -130,6 +130,7 @@ describe('eventOccurrences contract (views)', () => {
       'an-until-without-z-before-the-wall-clock-time',
       'a-date-only-until-on-an-all-day-series-east-of-utc',
       'the-editors-until-on-an-all-day-series-east-of-utc',
+      'a-floating-until-on-an-all-day-series',
       'a-zoned-until-with-z-across-the-autumn-change',
       'a-zoned-series-on-both-range-ends-into-summer',
       'a-zoned-occurrence-just-past-the-range-end',

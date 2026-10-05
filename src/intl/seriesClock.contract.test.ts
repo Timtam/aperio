@@ -93,5 +93,14 @@ describe('seriesClock before its door is installed', () => {
     const recurrence = await import('../../shared/recurrence');
     expect(() => shell.seriesClockZone('Europe/Berlin')).toThrow(/installSeriesClockRules/);
     expect(() => recurrence.localTimeZone()).toThrow(/installSeriesClockRules/);
+    // Nor may the repeat sentence read it as a rule without a last day.
+    expect(() =>
+      recurrence.lastOccurrenceDayKey({
+        id: 'e',
+        start: '2026-06-15T07:00:00.000Z',
+        end: '2026-06-15T08:00:00.000Z',
+        recurrence: { rrule: 'FREQ=WEEKLY;UNTIL=20261231T235959Z', exceptions: [], tzid: 'Europe/Berlin' },
+      }),
+    ).toThrow(/installSeriesClockRules/);
   });
 });
