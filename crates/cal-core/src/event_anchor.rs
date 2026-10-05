@@ -283,7 +283,14 @@ pub fn plan_repairs(
 /// sees would need the device's timezone, which the core may never read.
 fn starts_the_same(ev: &Event, wanted: DateTime<Utc>) -> bool {
     if ev.all_day {
-        ev.start.date_naive() == wanted.date_naive()
+        // An all-day start is a local midnight, and a device in another zone
+        // writes the same day as another instant: Berlin's 2 June is 22:00 UTC
+        // on 1 June, New York's 04:00 UTC on 2 June. Both name their day 12
+        // hours into it, for any zone in (−12h, +12h] (decision 216); read by
+        // its UTC date, Berlin's named 1 June, and a row signed in Berlin
+        // missed its day in New York or found the day before.
+        let day = |at: DateTime<Utc>| (at + chrono::Duration::hours(12)).date_naive();
+        day(ev.start) == day(wanted)
     } else {
         ev.start == wanted
     }
@@ -712,6 +719,43 @@ mod tests {
             week_of(1),
         )
         .is_empty());
+    }
+
+    /// An all-day single change read in another zone: the row was signed in
+    /// Berlin (2 June is 22:00 UTC on 1 June), the device is in New York now
+    /// (2 June is 04:00 UTC on 2 June), and the day before is a single change
+    /// of the same title too. The row follows its own day.
+    #[test]
+    fn an_all_day_row_finds_its_day_in_another_zone() {
+        let berlin: DateTime<Utc> = "2026-06-01T22:00:00Z".parse().unwrap();
+        let new_york: DateTime<Utc> = "2026-06-02T04:00:00Z".parse().unwrap();
+        let day_before: DateTime<Utc> = "2026-06-01T04:00:00Z".parse().unwrap();
+        let old = "M:ID|CK::rid::2026-06-01T22:00:00+00:00";
+        let ours = "M:ID|CK::rid::2026-06-02T04:00:00+00:00";
+        let mut events = vec![
+            event(
+                "M:ID|CK::rid::2026-06-01T04:00:00+00:00",
+                "cal",
+                "Homeoffice",
+                day_before,
+            ),
+            event(ours, "cal", "Homeoffice", new_york),
+        ];
+        for ev in &mut events {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row(old, "cal", "Homeoffice", berlin)],
+                "cal",
+                &events,
+                (day_before, new_york),
+            ),
+            vec![Repair::Repoint {
+                event_id: old.into(),
+                to: ours.into(),
+            }],
+        );
     }
 
     #[test]

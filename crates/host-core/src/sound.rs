@@ -1,7 +1,7 @@
 //! Notification-sound resolution (DESIGN.md §14.4).
 //!
 //! Aperio resolves the effective [`SoundConfig`] for a reminder
-//! occurrence from a four-level hierarchy. All "override" levels live
+//! occurrence from a hierarchy, most specific first. All "override" levels live
 //! in `user_prefs` (prefix `sound.`, already on the event-log sync
 //! whitelist), so the same mechanism works for local AND external
 //! calendars/items and survives a cache refresh:
@@ -9,6 +9,7 @@
 //! ```text
 //! reminder.sound                       (Reminder.sound, per alarm)
 //!   ?? prefs["sound.item.{itemId}"]    (per event / task override)
+//!   ?? prefs["sound.item.{seriesId}"]  (a single change of a series, 216)
 //!   ?? prefs["sound.{calendar|tasklist}.{containerId}"]  (container)
 //!   ?? prefs["sound.global"]           (global default)
 //!   ?? System                          (SoundConfig::default())

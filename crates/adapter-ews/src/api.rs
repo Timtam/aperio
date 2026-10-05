@@ -1084,27 +1084,27 @@ pub async fn delete_series_occurrence(
 
     // 3. Verify the candidate (and ±1) against the server; delete the occurrence
     //    whose real Start matches `target`, else abort. On an all-day series the
-    //    server's slot is midnight in the mailbox's zone, and `target` the local
+    //    server's slot is midnight in the series' zone, and `target` the local
     //    midnight of that day — an occurrence the views expanded, or an override
-    //    id (`override_slot`) — or, from an id minted before decision 215, the
-    //    raw instant again. So the server's slot is also read as the local
-    //    midnight of its day, as the read anchors it (decision 216); a device
-    //    more than the tolerance from the mailbox's zone could not delete a day
-    //    of an all-day series otherwise. `target` itself is never re-read: it is
-    //    exact for this device, and anchoring it would move a midnight east of
-    //    UTC+12 onto the day before.
+    //    id (`override_slot`). Where Exchange names the series' zone, the
+    //    server's slot is read in it (decision 217) and compared as the read
+    //    anchors it: the day is exact, so a neighbour, a whole day away, never
+    //    comes within the tolerance. Where it names none, the raw instants are
+    //    compared as before, and a device far from the mailbox's zone aborts
+    //    rather than trust a day the 12-hour sample may get wrong.
+    let day_zone = if master.is_all_day {
+        crate::mapping::all_day_zone(&master)
+    } else {
+        None
+    };
     let mut best: Option<(u32, i64)> = None;
     for index in candidate_indices(candidate) {
         if let Some(s) = occurrence_start(client, master_id, change_key, index).await? {
-            let as_read = if master.is_all_day {
-                crate::mapping::all_day_local_anchor(s)
-            } else {
-                s
+            let slot = match day_zone {
+                Some(zone) => crate::mapping::all_day_anchor(s, Some(zone)),
+                None => s,
             };
-            let delta = (s - target)
-                .num_seconds()
-                .abs()
-                .min((as_read - target).num_seconds().abs());
+            let delta = (slot - target).num_seconds().abs();
             if best.map(|(_, bd)| delta < bd).unwrap_or(true) {
                 best = Some((index, delta));
             }
@@ -3534,16 +3534,11 @@ mod tests {
         assert!(matches!(err, EwsError::Protocol(_)));
     }
 
-    /// An exception moved three days away from its slot is still the
-    /// occurrence of that slot: it is matched by its `OriginalStart`, not by
-    /// where it now starts. Matched by its Start it was never found, the delete
-    /// aborted, and a move that had already created the new event left the
-    /// exception behind as a duplicate.
-    /// Decision 216: an all-day series' slots are the mailbox's midnights on
-    /// the server (here Honolulu's, 10:00 UTC) and the device's local midnights
-    /// in Aperio — an expanded occurrence, or an override id. The server's slot
-    /// is read as the read anchors it, so a device far from the mailbox's zone
-    /// still deletes the day it names, and only that one.
+    /// Decisions 216, 217: an all-day series' slots are the mailbox's midnights
+    /// on the server (here Honolulu's, 10:00 UTC) and the device's local
+    /// midnights in Aperio — an expanded occurrence, or an override id. The
+    /// server's slot is read in the series' zone, so a device far from the
+    /// mailbox's zone still deletes the day it names, and only that one.
     #[tokio::test]
     async fn an_all_day_day_is_found_far_from_the_mailboxs_zone() {
         let mut server = Server::new_async().await;
@@ -3568,6 +3563,8 @@ mod tests {
         <t:Start>2026-07-06T10:00:00Z</t:Start>
         <t:End>2026-07-07T10:00:00Z</t:End>
         <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:StartTimeZone Id="Hawaiian Standard Time"/>
+        <t:EndTimeZone Id="Hawaiian Standard Time"/>
         <t:IsRecurring>true</t:IsRecurring>
         <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
         <t:Recurrence>
@@ -3627,13 +3624,125 @@ mod tests {
             .await;
 
         // The day as this device names it: its local midnight of July 20.
-        let day = crate::mapping::all_day_local_anchor("2026-07-20T10:00:00Z".parse().unwrap());
+        let day = crate::mapping::all_day_anchor(
+            "2026-07-20T10:00:00Z".parse().unwrap(),
+            Some(chrono_tz::Pacific::Honolulu),
+        );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
             .unwrap();
         del.assert_async().await;
     }
 
+    /// Decision 217: a daily all-day series in an Auckland mailbox, begun in
+    /// New Zealand's winter (+12) and deleted from in its summer (+13). Its
+    /// January slots are 11:00 UTC the day before. The 12-hour sample read
+    /// each as the day before, so the NEXT day's slot named the target and was
+    /// deleted. Read in the series' own zone, the day it names is exact.
+    #[tokio::test]
+    async fn an_all_day_day_in_auckland_s_summer_is_the_day_itself() {
+        use chrono::TimeZone;
+        let auckland = chrono_tz::Pacific::Auckland;
+        let midnight = |index: i64| -> DateTime<Utc> {
+            let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
+                + chrono::Duration::days(index - 1);
+            auckland
+                .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+                .single()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let mut server = Server::new_async().await;
+        let _master = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex(r#"ItemId Id="MASTER""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="CK"/>
+        <t:Subject>Daily all-day</t:Subject>
+        <t:Start>2026-05-31T12:00:00Z</t:Start>
+        <t:End>2026-06-01T12:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:IsRecurring>true</t:IsRecurring>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:DailyRecurrence>
+            <t:Interval>1</t:Interval>
+          </t:DailyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-06-01</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+        <t:StartTimeZone Id="New Zealand Standard Time"/>
+        <t:EndTimeZone Id="New Zealand Standard Time"/>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .create_async()
+            .await;
+        let mut probes = Vec::new();
+        for index in 225..=233 {
+            let iso = midnight(index).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            probes.push(
+                server
+                    .mock("POST", "/")
+                    .match_body(mockito::Matcher::AllOf(vec![
+                        mockito::Matcher::Regex("m:GetItem".into()),
+                        mockito::Matcher::Regex(format!(r#"InstanceIndex="{index}""#)),
+                    ]))
+                    .with_status(200)
+                    .with_body(occurrence_get_response(&iso))
+                    .create_async()
+                    .await,
+            );
+        }
+        // 15 January 2027 is the 229th day.
+        let del = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="229""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        // The day as this device names it: its local midnight of 15 January.
+        let day = crate::mapping::all_day_anchor(midnight(229), Some(auckland));
+        delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
+            .await
+            .unwrap();
+        del.assert_async().await;
+    }
+
+    /// An exception moved three days away from its slot is still the
+    /// occurrence of that slot: it is matched by its `OriginalStart`, not by
+    /// where it now starts. Matched by its Start it was never found, the delete
+    /// aborted, and a move that had already created the new event left the
+    /// exception behind as a duplicate.
     #[tokio::test]
     async fn delete_series_occurrence_finds_an_exception_moved_far_by_its_slot() {
         let mut server = Server::new_async().await;

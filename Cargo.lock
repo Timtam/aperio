@@ -104,6 +104,7 @@ dependencies = [
  "base64 0.22.1",
  "cal-core",
  "chrono",
+ "chrono-tz",
  "futures",
  "iana-time-zone",
  "mockito",

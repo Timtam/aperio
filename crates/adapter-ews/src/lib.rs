@@ -558,7 +558,7 @@ impl EwsAdapter {
     /// What the emitted events depend on beyond Exchange's data: the zone
     /// translation ([`windows_tz::translation_id`]), and the device's zone. An
     /// all-day series' start, its exceptions and the slot in its single
-    /// changes' ids are the device's local midnights (`all_day_local_anchor`,
+    /// changes' ids are the device's local midnights (`all_day_anchor`,
     /// decision 215), so a device that moved to another zone reads the folder
     /// again rather than keep ids no write finds any more (decision 216).
     fn emitted_with() -> String {

@@ -2483,13 +2483,21 @@ Siehe DESIGN §4.2.
       findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
       einmal neu. Die Folgen (216): Weil diese Plätze von der Zone des Geräts
       abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
-      Token nennt die Zone); einen Tag einer ganztägigen Serie zu löschen
-      liest den Platz des Servers wie das Lesen (vorher scheiterte das über
-      sechs Stunden Abstand zum Postfach, auch bei normalen Vorkommen); eine
-      Farbe oder ein Meeting an einer Einzeländerung wandert bei einer neuen
-      Kennung zu ihr, nie auf die ganze Serie (`plan_repairs`, hilft auch
+      Token nennt die Zone); eine Farbe oder ein Meeting an einer
+      Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
+      Serie, und ein ganztägiger Termin wird dabei nach dem Tag gefunden, den
+      er nennt, auch aus einer anderen Zone (`plan_repairs`, hilft auch
       CalDAV und Google); ohne eigenen Ton klingelt eine Einzeländerung mit
-      dem der Serie. ↻ im Test.
+      dem der Serie. Und 217: Exchange liest die Zeitpunkte einer ganztägigen
+      Serie in ihrer eigenen Zone (Startzone wie die Zone der Serie, UTC für
+      eine ohne Zone, `all_day_zone`), nicht mehr mit der 12-Stunden-Regel,
+      die eine Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den
+      Vortag las; die Regel bleibt nur, wo Exchange keine lesbare Zone nennt.
+      Einen Tag einer ganztägigen Serie zu löschen vergleicht den Platz des
+      Servers in dieser Zone; vorher scheiterte das über sechs Stunden Abstand
+      zum Postfach, und mit der Regel hätte es in Neuseelands Sommer den
+      Folgetag gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und
+      im Zweifel abgebrochen. ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
