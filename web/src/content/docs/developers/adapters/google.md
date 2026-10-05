@@ -63,7 +63,9 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   - a wall clock in a zone, `EXDATE;TZID=Europe/Berlin:20260601T090000`
     (Google's own export form), and without `TZID`, a wall clock in the
     series' `start.timeZone`;
-  - a UTC instant, `EXDATE:…Z` or `EXDATE;VALUE=DATE-TIME:…Z`;
+  - a UTC instant, `EXDATE:…Z` or `EXDATE;VALUE=DATE-TIME:…Z`. On a series
+    of days, UTC midnight is its date: the form Aperio wrote a date in
+    before, and no local midnight of another date falls on it;
   - a date, `EXDATE;VALUE=DATE:20260601`, which on a series of days names
     that day (its local midnight). Google ignores a date on a timed series,
     and so does the adapter.
@@ -72,7 +74,8 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   with parameters (`RRULE;X-…:FREQ=…`) are read too. A wall clock a clock
   change repeats is its first reading; one it skips takes the offset from
   before the change, where the views place the occurrence. A zone tzdata
-  does not know costs only a wall clock on a timed series. A line the
+  does not know, named by `TZID` or by the series' `start.timeZone`, costs
+  only a wall clock on a timed series. A line the
   adapter does not keep (`RDATE`, `EXRULE`, an earlier of two rules, an
   unknown zone's wall clock) is logged as a warning once per run.
 - **Deletions are written as Google spells them.** The wall clock in the
@@ -89,9 +92,13 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   paired with. Before, every save, a rename included, wrote the array anew
   and erased deletions other apps had written.
 - **Zone data.** Wall clocks are read and written with chrono-tz's tzdata
-  (2025b). For a zone whose rules changed since (Casablanca from
-  2026-09-20, Vancouver and Edmonton from 2026-11-01), a wall-clock
-  deletion can sit an hour from Google's occurrence.
+  (2025b, the newest chrono-tz release). For a zone whose rules changed
+  since (Casablanca and El Aaiún from 2026-09-20; Vancouver, Edmonton and
+  Inuvik from 2026-11-01; Chișinău's transition times), a wall clock can
+  sit an hour from Google's occurrence. That holds for every timed deletion
+  written there, a UTC one another app wrote included: it is written as a
+  wall clock too. A line read as a wall clock and written again keeps its
+  digits, since both directions use the same data.
 
 ## Testing
 

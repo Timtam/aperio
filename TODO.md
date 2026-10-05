@@ -2446,11 +2446,15 @@ Siehe DESIGN §4.2.
       nicht an (`keep_fields`), bleiben alle vier aus dem PATCH, gemeinsam:
       Googles Zeilen hängen am Beginn, und ein behaltener Beginn kann die
       neuere Änderung eines anderen Geräts sein (106). Eine unbekannte Zone
-      kostet nur eine Wanduhr; UTC und Datum braucht sie nicht. Bekannt:
-      Aperios Zeitzonendaten (2025b) kennen die neueren Regeln für Marokko
-      (ab 20.9.2026) und British Columbia/Alberta (ab 1.11.2026) nicht; dort
-      kann eine Wanduhr-Löschung eine Stunde neben Googles Vorkommen liegen
-      (eigene Aufgabe: Zeitzonendaten aktuell halten). Offen: das
+      (per `TZID` oder als Zone der Serie) kostet nur eine Wanduhr; UTC und
+      Datum braucht sie nicht. UTC-Mitternacht ist bei ganztägig ihr Datum
+      (so schrieb Aperio Datums-Löschungen bisher). Bekannt: Aperios
+      Zeitzonendaten (2025b, neuestes chrono-tz) kennen die neueren Regeln für
+      Marokko/Westsahara (ab 20.9.2026), British Columbia/Alberta/Inuvik (ab
+      1.11.2026) und Chișinău nicht; dort kann jede geschriebene Löschung mit
+      Uhrzeit, auch eine UTC-Löschung einer anderen App, eine Stunde neben
+      Googles Vorkommen liegen (eigene Aufgabe: Zeitzonendaten aktuell
+      halten). Offen: das
       `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
       CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
     - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):

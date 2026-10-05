@@ -142,6 +142,11 @@ fn recurrence_line(line: &str) -> Option<RecurrenceLine<'_>> {
     })
 }
 
+/// The zone a series' wall clocks are read in: none for a series of days or
+/// one on UTC, its zone, or the reason it has none Aperio can use — a name
+/// tzdata does not know, which costs a wall clock that needs it.
+type SeriesZone = Result<Option<Tz>, &'static str>;
+
 /// The zone tzdata names `name`, in any ASCII case and by any of its links.
 fn zone_named(name: &str) -> Option<Tz> {
     cal_core::canonical_zone(name)?.parse().ok()
@@ -215,13 +220,13 @@ pub(crate) fn all_day_slot(slot: DateTime<Utc>) -> NaiveDate {
 fn exdates_of_line(
     line: &RecurrenceLine<'_>,
     all_day: bool,
-    series_zone: Option<Tz>,
+    series_zone: SeriesZone,
 ) -> (Vec<DateTime<Utc>>, Option<&'static str>) {
     let zone = match line.param("TZID") {
         Some(name) => zone_named(name)
             .map(Some)
             .ok_or("a zone tzdata does not know"),
-        None => Ok(series_zone),
+        None => series_zone,
     };
     let mut read = Vec::new();
     let mut problem = None;
@@ -233,7 +238,16 @@ fn exdates_of_line(
                 Err(_) => problem = Some("a value that is no date or date-time"),
             }
         } else if let Ok(utc) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ") {
-            read.push(Utc.from_utc_datetime(&utc));
+            // On a series of days, UTC midnight is its date: how Aperio read
+            // and wrote a date deletion before decision 205, and the local
+            // midnight of a device on UTC. No device's local midnight of
+            // another date falls on it. Read as an instant, it named the next
+            // day from UTC+12 on.
+            read.push(if all_day && utc.time() == NaiveTime::MIN {
+                local_midnight(utc.date())
+            } else {
+                Utc.from_utc_datetime(&utc)
+            });
         } else if let Ok(wall) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%S") {
             match zone {
                 _ if all_day => read.push(local_midnight(wall.date())),
@@ -258,7 +272,7 @@ fn read_recurrence(
     series: &str,
     lines: &[String],
     all_day: bool,
-    series_zone: Option<Tz>,
+    series_zone: SeriesZone,
 ) -> (Option<String>, Vec<DateTime<Utc>>) {
     let mut rrule: Option<(String, &str)> = None;
     let mut exdates = Vec::new();
@@ -587,10 +601,12 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     // local and CalDAV adapters use — in whatever spelling Google returns it.
     // A timed series' wall clocks are its `start.timeZone`'s, the zone Google
     // documents it expands in.
-    let series_zone = if all_day {
-        None
-    } else {
-        entry.start.time_zone.as_deref().and_then(zone_named)
+    let series_zone: SeriesZone = match entry.start.time_zone.as_deref() {
+        _ if all_day => Ok(None),
+        None | Some("") => Ok(None),
+        Some(name) => zone_named(name)
+            .map(Some)
+            .ok_or("a series zone tzdata does not know"),
     };
     let (rrule, exceptions) = match entry.recurrence.as_deref() {
         Some(lines) => read_recurrence(&entry.id, lines, all_day, series_zone),
@@ -1700,6 +1716,38 @@ mod tests {
             let ev = master_with(&["RRULE:FREQ=DAILY", line], None);
             assert_eq!(deletions(&ev), [local_midnight(day)], "{line}");
         }
+    }
+
+    /// Aperio wrote a date deletion of a series of days as UTC midnight
+    /// before decision 205; it is that date, also where UTC midnight lies
+    /// half a day or more from the local one. Another instant stays one.
+    #[test]
+    fn utc_midnight_on_a_series_of_days_is_its_date() {
+        let day = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        for line in [
+            "EXDATE:20261010T000000Z",
+            "EXDATE;VALUE=DATE-TIME:20261010T000000Z",
+        ] {
+            let ev = master_with(&["RRULE:FREQ=DAILY", line], None);
+            assert_eq!(deletions(&ev), [local_midnight(day)], "{line}");
+        }
+        let ev = master_with(&["RRULE:FREQ=DAILY", "EXDATE:20261010T110000Z"], None);
+        assert_eq!(deletions(&ev), [utc(2026, 10, 10, 11, 0)]);
+    }
+
+    /// A series zone tzdata does not know cannot place a wall clock either:
+    /// it is left out, as under an unknown `TZID`, not read as UTC.
+    #[test]
+    fn an_unknown_series_zone_costs_its_wall_clocks() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE:20260601T090000",
+                "EXDATE:20260608T070000Z",
+            ],
+            Some("Mars/Olympus"),
+        );
+        assert_eq!(deletions(&ev), [utc(2026, 6, 8, 7, 0)]);
     }
 
     #[test]
