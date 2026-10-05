@@ -96,15 +96,16 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   since (Casablanca and El Aaiún from 2026-09-20; Vancouver, Edmonton and
   Inuvik from 2026-11-01; Chișinău's transition times), a wall clock can
   sit an hour from Google's occurrence. That holds for a timed deletion
-  written there that was not read as a wall clock — a UTC one another app
-  wrote, say: it is written as a wall clock too. A line read as a wall
-  clock and written again keeps its digits, since both directions use the
-  same data — except a wall clock that data skips: it goes back as the
-  reading after the change (02:30 as 03:30), the same instant in Aperio's
-  data. Where Google's data has no gap
-  there, or another one (Vancouver, Edmonton and Inuvik each March from
-  2027; Chișinău's spring hour), Google reads it an hour later, and the
-  deletion meets no occurrence.
+  written there that was not read as a wall clock in the series' own zone
+  — a UTC one another app wrote, say, or a wall clock in another zone: both
+  are written as a wall clock in the series' zone. A wall clock read in the
+  series' own zone and written again keeps its digits, since both
+  directions use the same data — except one that data skips: it goes back
+  as the reading after the change (02:30 as 03:30), the same instant in
+  Aperio's data. Where Google's data has no gap there, or another one
+  (Casablanca and El Aaiún after each Ramadan from 2027; Vancouver,
+  Edmonton and Inuvik each March from 2027; Chișinău's spring hour),
+  Google reads it an hour later, and the deletion meets no occurrence.
 
 ## Testing
 

@@ -2452,12 +2452,13 @@ Siehe DESIGN §4.2.
       Zeitzonendaten (2025b, neuestes chrono-tz) kennen die neueren Regeln für
       Marokko/Westsahara (ab 20.9.2026), British Columbia/Alberta/Inuvik (ab
       1.11.2026) und Chișinău nicht; dort kann eine geschriebene Löschung mit
-      Uhrzeit, die nicht als Wanduhr gelesen wurde (etwa die UTC-Löschung
-      einer anderen App), eine Stunde neben Googles Vorkommen liegen, ebenso
-      eine Wanduhr in einer Lücke, die nur
-      2025b kennt (02:30 geht als 03:30 zurück); eine gelesene Wanduhr
-      außerhalb einer Lücke behält ihre Ziffern (eigene Aufgabe:
-      Zeitzonendaten aktuell halten). Offen: das
+      Uhrzeit, die nicht als Wanduhr in der Zone der Serie gelesen wurde
+      (etwa die UTC-Löschung einer anderen App oder eine Wanduhr in einer
+      anderen Zone), eine Stunde neben Googles Vorkommen liegen, ebenso eine
+      Wanduhr in einer Lücke, die nur 2025b kennt (02:30 geht als 03:30
+      zurück); eine in der Zone der Serie gelesene Wanduhr außerhalb einer
+      Lücke behält ihre Ziffern (eigene Aufgabe: Zeitzonendaten aktuell
+      halten). Offen: das
       `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
       CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
     - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
