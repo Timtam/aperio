@@ -7753,8 +7753,8 @@ mod tests {
     /// Live round 3, T2: an Outlook all-day single in Berlin, re-dated by
     /// Aperio's writer (UTC midnights, no zone), came back as 18 Oct 22:00 UTC
     /// to 20 Oct 22:00 UTC with both zones `tzone://Microsoft/Utc` — Berlin's
-    /// midnights labelled UTC. Outlook shows Monday 19 and Tuesday 20. Read 12
-    /// hours into the day in the zone Exchange names, so are they; read as the
+    /// midnights labelled UTC. Outlook shows Monday 19 and Tuesday 20. Read
+    /// 13:45 into the day in the zone Exchange names, so are they; read as the
     /// UTC date, Sunday and Monday.
     #[test]
     fn a_relabelled_all_day_item_keeps_its_days() {

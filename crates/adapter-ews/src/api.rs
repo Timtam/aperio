@@ -1091,7 +1091,7 @@ pub async fn delete_series_occurrence(
     //    anchors it: the day is exact, so a neighbour, a whole day away, never
     //    comes within the tolerance. Where it names none, the raw instants are
     //    compared as before, and a device far from the mailbox's zone aborts
-    //    rather than trust a day the 12-hour sample may get wrong.
+    //    rather than trust a day the sample 13:45 in may get wrong.
     let day_zone = if master.is_all_day {
         crate::mapping::all_day_zone(&master)
     } else {
