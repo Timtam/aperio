@@ -68,6 +68,35 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Action-Buttons in Toasts: **Öffnen** / **Snooze** (konfigurierbare Dauer) / **Erledigt** (nur Aufgaben)
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
+- [ ] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
+  DESIGN §14.3 „Öffnen“). Heute bringt ein Tipp auf iOS und Android nur die App
+  nach vorn, auf dem zuletzt offenen Bildschirm; unter Windows tut ein Klick
+  nichts (kein Klick-Handler, Fenster bleibt verborgen). Befund (nur gelesen):
+  - **Handy (ein JS-Weg für beide):** Erinnerungen laufen über
+    `expo-notifications` (`mobile/src/reminders/scheduler.ts`, `data` hat nur
+    `itemId`/`itemKind`). Ergänzen: `containerId` und den Beginn des
+    Vorkommens (ohne ihn findet ein Tipp bei Serien das Vorkommen nicht).
+    Nahe der App-Wurzel `addNotificationResponseReceivedListener` plus
+    `getLastNotificationResponse` (Kaltstart), erst nach bereitem Navigator,
+    wiederhergestelltem Stand und entsperrter App-Sperre; dann
+    `navigateNested('CalendarTab','EventEditor',{eventId, calendarId,
+    occurrence, initialTitle})` (Geburtstage brauchen den Titel, wie
+    `RemindersScreen.openReminder`), Aufgaben `TaskEditor` mit `listId`.
+    Kein Kotlin/Swift nötig; API-Namen gegen die Expo-SDK-Doku prüfen.
+  - **Windows:** keinerlei Klick-Haken (`tauri-plugin-notification` setzt
+    kein `on_activated`). Entweder den Toast selbst über
+    `tauri-winrt-notification` mit `on_activated` bauen (Fenster zeigen per
+    `show_main_window`, dann ein Ereignis an die Oberfläche: `getEventById`
+    → `occurrenceOfSeries` → `openEventDialog`; Klicks aus dem Info-Center
+    erreichen ihn evtl. nicht) oder `aperio://`-Link mit Deep-Link- und
+    Single-Instance-Plugin. Vorher klären: Der Toast nutzt die App-Id
+    `com.aperio.app`, registriert und angeheftet ist `Aperio.Calendar`
+    (`src-tauri/src/platform.rs`).
+  - **Auch:** die Erinnerungsliste des Desktops trägt weder Kalender noch
+    Beginn (`RemindersDialog.openRow` öffnet die Serie statt des Vorkommens,
+    externe Termine ohne Kalender-Id evtl. gar nicht). Ein Tipp auf die
+    Tagesstart-Benachrichtigung soll die Tagesübersicht öffnen (heute nur,
+    solange sie an dem Tag noch nicht lief).
 
 ### A7a · Wie oft die Daten hinter den Widgets frisch werden `[x]`
 Gerätebefund: das Widget hing tagelang hinterher, geschätzt ein bis zwei
