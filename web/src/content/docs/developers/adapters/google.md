@@ -56,6 +56,56 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   Google's list, the organizer's row included, stays as it is. One that
   removed every invitee (`clear_attendees`) sends an empty array; an empty
   list alone leaves the array out.
+- **Deletions come in several spellings.** Google itself deletes an
+  occurrence as a cancelled instance, never as an `EXDATE` line, but other
+  apps write `EXDATE` lines into the master's `recurrence`, and Google
+  returns them as written. The adapter reads every spelling seen:
+  - a wall clock in a zone, `EXDATE;TZID=Europe/Berlin:20260601T090000`
+    (Google's own export form), and without `TZID`, a wall clock in the
+    series' `start.timeZone`;
+  - a UTC instant, `EXDATE:…Z` or `EXDATE;VALUE=DATE-TIME:…Z`. On a series
+    of days, UTC midnight is its date: the form Aperio wrote a date in
+    before, and no local midnight of another date falls on it;
+  - a date, `EXDATE;VALUE=DATE:20260601`, which on a series of days names
+    that day (its local midnight). Google ignores a date on a timed series,
+    and so does the adapter.
+
+  Several values on one line, any line order, names in any case and a rule
+  with parameters (`RRULE;X-…:FREQ=…`) are read too. A wall clock a clock
+  change repeats is its first reading; one it skips takes the offset from
+  before the change, where the views place the occurrence. A zone tzdata
+  does not know, named by `TZID` or by the series' `start.timeZone`, costs
+  only a wall clock on a timed series. A line the
+  adapter does not keep (`RDATE`, `EXRULE`, an earlier of two rules, an
+  unknown zone's wall clock) is logged as a warning once per run.
+- **Deletions are written as Google spells them.** The wall clock in the
+  series' zone with `TZID`, a date (`VALUE=DATE`) on a series of days (the
+  only form Google's documentation allows there), and the UTC instant on a
+  series without a zone or for the second pass of an hour the clock shows
+  twice. One value per line.
+- **A kept start, end and repeat stay out of the PATCH, together.** A PATCH
+  replaces the whole `recurrence` array, so an update that kept the start,
+  the end, the all-day flag and the repeat (`keep_fields`) leaves all four
+  out, and lines the adapter does not read stay on Google. They go
+  together: Google expands the lines from the start, and a kept field may
+  be another device's newer change, which this device's start must not be
+  paired with. Before, every save, a rename included, wrote the array anew
+  and erased deletions other apps had written.
+- **Zone data.** Wall clocks are read and written with chrono-tz's tzdata
+  (2025b, the newest chrono-tz release). For a zone whose rules changed
+  since (Casablanca and El Aaiún from 2026-09-20; Vancouver, Edmonton and
+  Inuvik from 2026-11-01; Chișinău's transition times), a wall clock can
+  sit an hour from Google's occurrence. That holds for a timed deletion
+  written there that was not read as a wall clock in the series' own zone
+  — a UTC one another app wrote, say, or a wall clock in another zone: both
+  are written as a wall clock in the series' zone. A wall clock read in the
+  series' own zone and written again keeps its digits, since both
+  directions use the same data — except one that data skips: it goes back
+  as the reading after the change (02:30 as 03:30), the same instant in
+  Aperio's data. Where Google's data has no gap there, or another one
+  (Casablanca and El Aaiún after each Ramadan from 2027; Vancouver,
+  Edmonton and Inuvik each March from 2027; Chișinău's spring hour),
+  Google reads it an hour later, and the deletion meets no occurrence.
 
 ## Testing
 

@@ -1579,24 +1579,27 @@ export default function EventEditorModal({
                 times.start,
                 allDay || base.all_day,
               );
-        const updated = await updateEvent(
-          {
-            ...base,
-            title: trimmedTitle,
-            calendar_id: calId,
-            all_day: allDay,
-            start: times.start,
-            end: times.end,
-            location: location.trim() || null,
-            description: description.trim() || null,
-            color_label: colorToSend,
-            reminders: remindersForWire,
-            recurrence: seriesRecurrence,
-            attendees,
-            send_invitations: sendInvitations,
-          },
-          original.calendar_id,
-        );
+        // What the user saved. The row that comes back is the provider's,
+        // and a provider that keeps what the edit left alone (Google leaves
+        // a kept start out of the write, decision 205) answers with its own,
+        // perhaps another device's newer one: no change of theirs to offer
+        // the other copies. The desktop offers the request as well.
+        const sent: CalendarEvent = {
+          ...base,
+          title: trimmedTitle,
+          calendar_id: calId,
+          all_day: allDay,
+          start: times.start,
+          end: times.end,
+          location: location.trim() || null,
+          description: description.trim() || null,
+          color_label: colorToSend,
+          reminders: remindersForWire,
+          recurrence: seriesRecurrence,
+          attendees,
+          send_invitations: sendInvitations,
+        };
+        const updated = await updateEvent(sent, original.calendar_id);
         await savePrivate(updated);
         // External calendar: a capable provider now stores the colour natively
         // (clear any stale override so the native value wins); a non-capable one
@@ -1625,8 +1628,9 @@ export default function EventEditorModal({
                 updated,
                 'future',
                 occurrence,
+                sent,
               )
-            : await offerToCarry(original, updated)
+            : await offerToCarry(original, updated, 'series', null, sent)
         ) {
           return;
         }

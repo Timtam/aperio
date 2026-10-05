@@ -2265,8 +2265,10 @@ Siehe DESIGN §4.2.
     anhängen, einen Termin überspringen) und scheitert das nach dem Server,
     zählt nur das erfolgreiche Ende den Stand hoch. Das betrifft nur ein
     Zurücknehmen genau so einer Änderung vor der nächsten Aktualisierung.
-  - CalDAV, Google und Graph lesen `keep_fields` noch nicht. CalDAV folgt mit
-    der Bewahrung (58a Teil 3).
+  - CalDAV und Graph lesen `keep_fields` noch nicht; Google nur für Beginn,
+    Ende, „ganztägig“ und Wiederholung: sind alle vier behalten, bleiben sie
+    gemeinsam aus dem PATCH (PR 6, 205). CalDAV folgt mit der Bewahrung (58a
+    Teil 3).
   - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie
     oben: Gast entfernt, gespeichert, vor der Aktualisierung wieder
     hinzugefügt — das Hinzufügen wird nicht geschrieben. Gegen den Grund von
@@ -2369,10 +2371,14 @@ Siehe DESIGN §4.2.
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
-      nicht (140), Google verwirft UTC-EXDATEs auf Serien mit Zone (137).
-      Ganztägige Serien schreibt Google (`recurrence_to_lines`) beim Anlegen
-      als UTC-Zeitpunkt, der bei einem Datums-Beginn nichts ausschließt; dafür
-      ist 137 da (nach Live-Test). CalDAV schreibt sie seit PR 5 als Datum.
+      nicht (140). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
+      (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
+      Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
+      legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
+      gelöschten Vorkommen danach einzeln ab, wie Google selbst löscht (202:
+      anlegen, dann absagen, nachgelesen; 203: scheitert eine Absage, wird
+      alles zurückgenommen; 204: Absagen folgen dem Benachrichtigen-Schalter).
+      CalDAV schreibt sie seit PR 5 als Datum.
     - ✅ Das Mitziehen schnitt eine Exchange-Kopie ein Vorkommen zu spät, wenn
       ihr Vorkommen am Schnitttag in Outlook geändert wurde, und eine
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
@@ -2423,6 +2429,38 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
+      Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
+      Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
+      Googles eigener Export. Aperio las nur UTC und Datum, zeigte die anderen
+      Vorkommen wieder, und jedes Speichern der Serie, auch ein neuer Titel,
+      schrieb die Zeilen ohne sie neu: dann waren sie überall wieder da. Jetzt
+      liest der Adapter Wanduhr mit und ohne Zone, UTC, Datum (ganztägig als
+      lokale Mitternacht, wie ein Datums-Beginn), mehrere Werte je Zeile, jede
+      Reihenfolge und Schreibweise der Namen und eine Regel mit Parametern;
+      eine Wanduhr an einer Zeitumstellung landet dort, wo die Ansichten das
+      Vorkommen hinsetzen. Was er nicht liest (`RDATE`, `EXRULE`, eine
+      unbekannte Zone), nennt das Log einmal je Lauf. Er schreibt Löschungen
+      wie Googles Export (Wanduhr mit `TZID`, ganztägig `VALUE=DATE`, sonst
+      UTC). Fasst eine Änderung Beginn, Ende, „ganztägig“ und Wiederholung
+      nicht an (`keep_fields`), bleiben alle vier aus dem PATCH, gemeinsam:
+      Googles Zeilen hängen am Beginn, und ein behaltener Beginn kann die
+      neuere Änderung eines anderen Geräts sein (106). Eine unbekannte Zone
+      (per `TZID` oder als Zone der Serie) kostet nur eine Wanduhr; UTC und
+      Datum braucht sie nicht. UTC-Mitternacht ist bei ganztägig ihr Datum
+      (so schrieb Aperio Datums-Löschungen bisher). Bekannt: Aperios
+      Zeitzonendaten (2025b, neuestes chrono-tz) kennen die neueren Regeln für
+      Marokko/Westsahara (ab 20.9.2026), British Columbia/Alberta/Inuvik (ab
+      1.11.2026) und Chișinău nicht; dort kann eine geschriebene Löschung mit
+      Uhrzeit, die nicht als Wanduhr in der Zone der Serie gelesen wurde
+      (etwa die UTC-Löschung einer anderen App oder eine Wanduhr in einer
+      anderen Zone), eine Stunde neben Googles Vorkommen liegen, ebenso eine
+      Wanduhr in einer Lücke, die nur 2025b kennt (02:30 geht als 03:30
+      zurück); eine in der Zone der Serie gelesene Wanduhr außerhalb einer
+      Lücke behält ihre Ziffern (eigene Aufgabe: Zeitzonendaten aktuell
+      halten). Offen: das
+      `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
+      CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
     - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
       CalDAV schreibt die Ausnahmen einer ganztägigen Serie als
       `EXDATE;VALUE=DATE` (der Tag der nächsten lokalen Mitternacht, wie 95
