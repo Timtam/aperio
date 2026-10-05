@@ -209,7 +209,9 @@ pub(crate) fn all_day_slot(slot: DateTime<Utc>) -> NaiveDate {
 ///   its local midnight, as a date start is read. Google ignores a date on a
 ///   timed series, and so does Aperio;
 /// - a UTC date-time (`20260601T070000Z`, with or without
-///   `VALUE=DATE-TIME`): that instant;
+///   `VALUE=DATE-TIME`): that instant. On a series of days, UTC midnight is
+///   its date (its local midnight), the form Aperio wrote a date deletion in
+///   before decision 205;
 /// - a wall clock in a zone (`TZID=Europe/Berlin:20260601T090000`), or
 ///   without one, in the zone the series repeats in (`start.timeZone`, UTC
 ///   when it has none): the instant of that wall clock, as Google's own
@@ -1865,6 +1867,12 @@ mod tests {
         assert_eq!(
             written(vec![utc(2026, 6, 1, 7, 0)], Some("europe/berlin"))[1],
             "EXDATE;TZID=europe/berlin:20260601T090000"
+        );
+        // A wall clock the clock change skips was read with the offset from
+        // before it; it goes back as the reading after it, the same instant.
+        assert_eq!(
+            written(vec![utc(2026, 3, 29, 1, 30)], Some("Europe/Berlin"))[1],
+            "EXDATE;TZID=Europe/Berlin:20260329T033000"
         );
         // The second pass of the hour Berlin shows twice has no wall clock of
         // its own; it goes as its instant.
