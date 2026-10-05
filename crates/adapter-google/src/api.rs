@@ -2264,8 +2264,9 @@ mod tests {
         body
     }
 
-    /// Decision 205: a rename leaves Google's repeat lines as they are, so
-    /// another app's deletion, and any line Aperio does not read, stays.
+    /// Decision 205: a rename leaves Google's start, end and repeat lines as
+    /// they are, so another app's deletion, any line Aperio does not read and
+    /// another device's newer start all stay, and stay together.
     #[tokio::test]
     async fn a_rename_leaves_the_repeat_lines_alone() {
         use cal_core::event_diff::EventField;
@@ -2280,7 +2281,9 @@ mod tests {
         ])
         .await;
         assert!(body.contains(r#""summary":"Renamed""#), "{body}");
-        assert!(!body.contains("recurrence"), "{body}");
+        for left_alone in ["recurrence", "\"start\"", "\"end\""] {
+            assert!(!body.contains(left_alone), "{left_alone}: {body}");
+        }
     }
 
     /// Without a copy proven to be the one the editor opened, the lines are

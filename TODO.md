@@ -2265,8 +2265,10 @@ Siehe DESIGN §4.2.
     anhängen, einen Termin überspringen) und scheitert das nach dem Server,
     zählt nur das erfolgreiche Ende den Stand hoch. Das betrifft nur ein
     Zurücknehmen genau so einer Änderung vor der nächsten Aktualisierung.
-  - CalDAV, Google und Graph lesen `keep_fields` noch nicht. CalDAV folgt mit
-    der Bewahrung (58a Teil 3).
+  - CalDAV und Graph lesen `keep_fields` noch nicht; Google nur für Beginn,
+    Ende, „ganztägig“ und Wiederholung: sind alle vier behalten, bleiben sie
+    gemeinsam aus dem PATCH (PR 6, 205). CalDAV folgt mit der Bewahrung (58a
+    Teil 3).
   - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie
     oben: Gast entfernt, gespeichert, vor der Aktualisierung wieder
     hinzugefügt — das Hinzufügen wird nicht geschrieben. Gegen den Grund von
@@ -2440,8 +2442,15 @@ Siehe DESIGN §4.2.
       Vorkommen hinsetzen. Was er nicht liest (`RDATE`, `EXRULE`, eine
       unbekannte Zone), nennt das Log einmal je Lauf. Er schreibt Löschungen
       wie Googles Export (Wanduhr mit `TZID`, ganztägig `VALUE=DATE`, sonst
-      UTC) und lässt die Wiederholung aus dem PATCH, wenn die Änderung sie,
-      den Beginn und „ganztägig“ nicht anfasst (`keep_fields`). Offen: das
+      UTC). Fasst eine Änderung Beginn, Ende, „ganztägig“ und Wiederholung
+      nicht an (`keep_fields`), bleiben alle vier aus dem PATCH, gemeinsam:
+      Googles Zeilen hängen am Beginn, und ein behaltener Beginn kann die
+      neuere Änderung eines anderen Geräts sein (106). Eine unbekannte Zone
+      kostet nur eine Wanduhr; UTC und Datum braucht sie nicht. Bekannt:
+      Aperios Zeitzonendaten (2025b) kennen die neueren Regeln für Marokko
+      (ab 20.9.2026) und British Columbia/Alberta (ab 1.11.2026) nicht; dort
+      kann eine Wanduhr-Löschung eine Stunde neben Googles Vorkommen liegen
+      (eigene Aufgabe: Zeitzonendaten aktuell halten). Offen: das
       `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
       CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
     - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):

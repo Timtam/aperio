@@ -209,17 +209,19 @@ pub(crate) fn all_day_slot(slot: DateTime<Utc>) -> NaiveDate {
 ///   without one, in the zone the series repeats in (`start.timeZone`, UTC
 ///   when it has none): the instant of that wall clock, as Google's own
 ///   export writes a deletion. On a series of days, its date.
+///
+/// A zone tzdata does not know costs only the values that need it — a wall
+/// clock on a timed series; a UTC instant and a date do not.
 fn exdates_of_line(
     line: &RecurrenceLine<'_>,
     all_day: bool,
     series_zone: Option<Tz>,
 ) -> (Vec<DateTime<Utc>>, Option<&'static str>) {
     let zone = match line.param("TZID") {
-        Some(name) => match zone_named(name) {
-            Some(tz) => Some(tz),
-            None => return (Vec::new(), Some("a zone tzdata does not know")),
-        },
-        None => series_zone,
+        Some(name) => zone_named(name)
+            .map(Some)
+            .ok_or("a zone tzdata does not know"),
+        None => Ok(series_zone),
     };
     let mut read = Vec::new();
     let mut problem = None;
@@ -233,14 +235,12 @@ fn exdates_of_line(
         } else if let Ok(utc) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ") {
             read.push(Utc.from_utc_datetime(&utc));
         } else if let Ok(wall) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%S") {
-            read.push(if all_day {
-                local_midnight(wall.date())
-            } else {
-                match zone {
-                    Some(tz) => wall_clock_in(tz, wall),
-                    None => Utc.from_utc_datetime(&wall),
-                }
-            });
+            match zone {
+                _ if all_day => read.push(local_midnight(wall.date())),
+                Ok(Some(tz)) => read.push(wall_clock_in(tz, wall)),
+                Ok(None) => read.push(Utc.from_utc_datetime(&wall)),
+                Err(why) => problem = Some(why),
+            }
         } else {
             problem = Some("a value that is no date or date-time");
         }
@@ -250,16 +250,17 @@ fn exdates_of_line(
 
 /// A recurring master's rule and its deletions, read from Google's
 /// `recurrence` lines in any order and any spelling of their names. A line
-/// Aperio does not keep (RDATE, EXRULE, a second RRULE, an EXDATE it cannot
-/// read) is named in the log, once per run: a change to this series' repeat
-/// writes the lines anew and leaves it out.
+/// Aperio does not keep (RDATE, EXRULE, an RRULE before the last one, an
+/// EXDATE it cannot read) is named in the log, once per run: a save that
+/// writes the lines anew leaves it out — every save that is not proven to
+/// keep this series' start, end, all-day flag and repeat ([`event_to_body`]).
 fn read_recurrence(
     series: &str,
     lines: &[String],
     all_day: bool,
     series_zone: Option<Tz>,
 ) -> (Option<String>, Vec<DateTime<Utc>>) {
-    let mut rrule: Option<String> = None;
+    let mut rrule: Option<(String, &str)> = None;
     let mut exdates = Vec::new();
     for raw in lines {
         let Some(line) = recurrence_line(raw) else {
@@ -268,8 +269,12 @@ fn read_recurrence(
         };
         match line.name.as_str() {
             "RRULE" => {
-                if rrule.replace(line.value.to_string()).is_some() {
-                    unread_line(series, raw, "a second RRULE; Aperio keeps the last one");
+                if let Some((_, dropped)) = rrule.replace((line.value.to_string(), raw.as_str())) {
+                    unread_line(
+                        series,
+                        dropped,
+                        "an earlier RRULE; Aperio keeps the last one",
+                    );
                 }
             }
             "EXDATE" => {
@@ -286,7 +291,7 @@ fn read_recurrence(
         unread_line(series, "EXDATE", "deletions on an event without a rule");
         exdates.clear();
     }
-    (rrule, exdates)
+    (rrule.map(|(rule, _)| rule), exdates)
 }
 
 /// Warn once per run that `line` of `series` was not read, then only at
@@ -304,7 +309,7 @@ fn unread_line(series: &str, line: &str, why: &str) {
             series = %series,
             line = %line,
             why,
-            "google recurrence line not read; a change to this series' repeat leaves it out"
+            "google recurrence line not read; a save that writes this series' repeat anew leaves it out"
         );
     } else {
         debug!(series = %series, line = %line, why, "google recurrence line not read");
@@ -745,8 +750,12 @@ pub struct EventWriteBody {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
-    pub start: EventDateTimeWrite,
-    pub end: EventDateTimeWrite,
+    /// Always on a create; `None` leaves Google's own start, end and repeat
+    /// together on a PATCH that kept them ([`event_to_body`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<EventDateTimeWrite>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<EventDateTimeWrite>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Vec<String>>,
     pub reminders: EventRemindersWrite,
@@ -817,8 +826,8 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
         summary: Some(new.title.clone()),
         description: new.description.clone(),
         location: new.location.clone(),
-        start: range_to_write(new.start, new.all_day, tzid),
-        end: range_to_write(new.end, new.all_day, tzid),
+        start: Some(range_to_write(new.start, new.all_day, tzid)),
+        end: Some(range_to_write(new.end, new.all_day, tzid)),
         recurrence: new
             .recurrence
             .as_ref()
@@ -828,35 +837,38 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
     }
 }
 
-/// Convert an existing `Event` into a PATCH body. We send every
-/// mutable field so PATCH-with-this-body is effectively a full
-/// replacement of the user-visible state — simpler than computing
-/// a diff and Google handles it the same.
+/// Convert an existing `Event` into a PATCH body: every mutable field, but
+/// those the edit kept where Google's copy may hold more than this device's —
+/// the invitees (decision 71a), and the start, end and repeat (205).
 pub fn event_to_body(ev: &Event) -> EventWriteBody {
     // The core's rule: an all-day series hands Google no zone (decision 46a).
     let tzid = cal_core::written_series_zone(
         ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
         ev.all_day,
     );
+    // The start, end, all-day flag and repeat go together, or not at all:
+    // Google expands the lines from the start's wall clock in its zone, and
+    // a deletion names an occurrence the start makes. Left out together
+    // when the edit kept them all (decisions 106, 205) — a PATCH replaces the
+    // whole array, Google's copy may hold lines Aperio does not read, and a
+    // kept field may be another device's newer change, which this device's
+    // start must not be paired with. Only a copy proven to be the one the
+    // editor opened names kept fields.
+    let keeps_slot = [
+        EventField::Start,
+        EventField::End,
+        EventField::AllDay,
+        EventField::Recurrence,
+    ]
+    .iter()
+    .all(|field| ev.keep_fields.contains(field));
     EventWriteBody {
         summary: Some(ev.title.clone()),
         description: ev.description.clone(),
         location: ev.location.clone(),
-        start: range_to_write(ev.start, ev.all_day, tzid),
-        end: range_to_write(ev.end, ev.all_day, tzid),
-        // Left out of the PATCH when the edit kept the repeat, and the start
-        // and the kind of day its deletions are written against (decision
-        // 205): a PATCH replaces the whole array, and Google's copy may hold
-        // lines Aperio does not read, or another device's change (106). Only
-        // a copy proven to be the one the editor opened names kept fields.
-        recurrence: if [
-            EventField::Recurrence,
-            EventField::Start,
-            EventField::AllDay,
-        ]
-        .iter()
-        .all(|field| ev.keep_fields.contains(field))
-        {
+        start: (!keeps_slot).then(|| range_to_write(ev.start, ev.all_day, tzid)),
+        end: (!keeps_slot).then(|| range_to_write(ev.end, ev.all_day, tzid)),
+        recurrence: if keeps_slot {
             None
         } else {
             ev.recurrence
@@ -1182,14 +1194,14 @@ mod tests {
         let ev = map_event(entry, "primary").unwrap().unwrap();
         let write = event_to_body(&ev);
         assert_eq!(
-            write.start.date,
+            write.start.as_ref().unwrap().date,
             Some(NaiveDate::from_ymd_opt(2026, 6, 10).unwrap()),
         );
         assert_eq!(
-            write.end.date,
+            write.end.as_ref().unwrap().date,
             Some(NaiveDate::from_ymd_opt(2026, 6, 12).unwrap()),
         );
-        assert!(write.start.date_time.is_none());
+        assert!(write.start.as_ref().unwrap().date_time.is_none());
     }
 
     #[test]
@@ -1644,8 +1656,12 @@ mod tests {
     }
 
     /// A date names a day of a series of days, at the local midnight a date
-    /// start is read at; read at UTC midnight, it named the day before west
-    /// of UTC and none at all far east (Auckland's midnight is 13 hours off).
+    /// start is read at. Read at UTC midnight, as before, it lay hours off
+    /// that midnight: the same-day reading (decision 95, within 12 hours)
+    /// still found the day from UTC-11 to UTC+11, but at UTC+12 (Auckland in
+    /// June) it lay half a day from both neighbours and deleted neither, and
+    /// beyond (Auckland in summer, Tonga) it deleted the next day. On a UTC
+    /// machine both readings coincide, so the anchor itself only shows off UTC.
     #[test]
     fn a_date_deletion_names_its_day_on_a_series_of_days() {
         let day = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
@@ -1660,6 +1676,29 @@ mod tests {
             let ev = master_with(&["RRULE:FREQ=DAILY", line], None);
             assert_eq!(deletions(&ev), [local_midnight(day)], "{line}");
             assert_eq!(all_day_slot(deletions(&ev)[0]), day, "{line}");
+        }
+    }
+
+    /// A zone tzdata does not know costs only a wall clock on a timed series:
+    /// a UTC instant and a date need no zone, and main read them.
+    #[test]
+    fn an_unknown_zone_costs_only_the_wall_clock() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;TZID=W. Europe Standard Time:20260601T070000Z",
+                "EXDATE;TZID=Mars/Olympus:20260608T090000",
+            ],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(deletions(&ev), [utc(2026, 6, 1, 7, 0)]);
+        let day = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        for line in [
+            r#"EXDATE;TZID="Customized Time Zone";VALUE=DATE:20260601"#,
+            "EXDATE;TZID=Mars/Olympus:20260601T000000",
+        ] {
+            let ev = master_with(&["RRULE:FREQ=DAILY", line], None);
+            assert_eq!(deletions(&ev), [local_midnight(day)], "{line}");
         }
     }
 
@@ -1743,6 +1782,12 @@ mod tests {
         );
         assert_eq!(ev.recurrence.as_ref().unwrap().rrule, "FREQ=WEEKLY");
         assert!(deletions(&ev).is_empty(), "{:?}", deletions(&ev));
+        // Of several rules, the last one is kept.
+        let ev = master_with(
+            &["RRULE:FREQ=DAILY", "RRULE:FREQ=WEEKLY;BYDAY=MO"],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(ev.recurrence.unwrap().rrule, "FREQ=WEEKLY;BYDAY=MO");
         // Deletions without a rule make no series.
         let ev = master_with(&["EXDATE:20260601T070000Z"], Some("Europe/Berlin"));
         assert!(ev.recurrence.is_none());
@@ -1815,9 +1860,11 @@ mod tests {
         assert_eq!(deletions(&master_with(&refs, None)), days);
     }
 
-    /// An edit that kept the repeat, the start and the kind of day leaves the
-    /// lines alone: a PATCH replaces the whole array, and Google's copy may
-    /// hold lines Aperio does not read.
+    /// An edit that kept the start, the end, the kind of day and the repeat
+    /// leaves them to Google, together: a PATCH replaces the whole array,
+    /// Google's copy may hold lines Aperio does not read, and a kept start may
+    /// be stale, which must not be paired with Google's lines. One that
+    /// changed any of them writes all of them.
     #[test]
     fn a_kept_repeat_stays_out_of_the_patch() {
         let mut ev = master_with(
@@ -1836,15 +1883,21 @@ mod tests {
             EventField::Recurrence,
         ];
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
-        assert!(json.get("recurrence").is_none(), "{json}");
+        for left_alone in ["recurrence", "start", "end"] {
+            assert!(json.get(left_alone).is_none(), "{left_alone}: {json}");
+        }
+        assert_eq!(json["summary"], "Renamed");
         for moved in [
             EventField::Start,
+            EventField::End,
             EventField::AllDay,
             EventField::Recurrence,
         ] {
             let mut edit = ev.clone();
             edit.keep_fields.retain(|field| *field != moved);
             let json = serde_json::to_value(event_to_body(&edit)).unwrap();
+            assert_eq!(json["start"]["timeZone"], "Europe/Berlin", "{moved:?}");
+            assert!(json["end"]["dateTime"].is_string(), "{moved:?}");
             assert_eq!(
                 json["recurrence"],
                 serde_json::json!([

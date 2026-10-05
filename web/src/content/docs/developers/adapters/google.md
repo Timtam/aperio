@@ -71,19 +71,27 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   Several values on one line, any line order, names in any case and a rule
   with parameters (`RRULE;X-…:FREQ=…`) are read too. A wall clock a clock
   change repeats is its first reading; one it skips takes the offset from
-  before the change, where the views place the occurrence. A line the
-  adapter does not keep (`RDATE`, `EXRULE`, an unknown zone) is logged as a
-  warning once per run.
+  before the change, where the views place the occurrence. A zone tzdata
+  does not know costs only a wall clock on a timed series. A line the
+  adapter does not keep (`RDATE`, `EXRULE`, an earlier of two rules, an
+  unknown zone's wall clock) is logged as a warning once per run.
 - **Deletions are written as Google spells them.** The wall clock in the
   series' zone with `TZID`, a date (`VALUE=DATE`) on a series of days (the
   only form Google's documentation allows there), and the UTC instant on a
   series without a zone or for the second pass of an hour the clock shows
   twice. One value per line.
-- **A kept repeat stays out of the PATCH.** A PATCH replaces the whole
-  `recurrence` array, so an update that kept the repeat, the start and the
-  all-day flag (`keep_fields`) leaves the array out, and lines the adapter
-  does not read stay on Google. Before, every save, a rename included,
-  wrote the array anew and erased deletions other apps had written.
+- **A kept start, end and repeat stay out of the PATCH, together.** A PATCH
+  replaces the whole `recurrence` array, so an update that kept the start,
+  the end, the all-day flag and the repeat (`keep_fields`) leaves all four
+  out, and lines the adapter does not read stay on Google. They go
+  together: Google expands the lines from the start, and a kept field may
+  be another device's newer change, which this device's start must not be
+  paired with. Before, every save, a rename included, wrote the array anew
+  and erased deletions other apps had written.
+- **Zone data.** Wall clocks are read and written with chrono-tz's tzdata
+  (2025b). For a zone whose rules changed since (Casablanca from
+  2026-09-20, Vancouver and Edmonton from 2026-11-01), a wall-clock
+  deletion can sit an hour from Google's occurrence.
 
 ## Testing
 
