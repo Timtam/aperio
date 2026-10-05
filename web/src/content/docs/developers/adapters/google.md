@@ -56,6 +56,34 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   Google's list, the organizer's row included, stays as it is. One that
   removed every invitee (`clear_attendees`) sends an empty array; an empty
   list alone leaves the array out.
+- **Deletions come in several spellings.** Google itself deletes an
+  occurrence as a cancelled instance, never as an `EXDATE` line, but other
+  apps write `EXDATE` lines into the master's `recurrence`, and Google
+  returns them as written. The adapter reads every spelling seen:
+  - a wall clock in a zone, `EXDATE;TZID=Europe/Berlin:20260601T090000`
+    (Google's own export form), and without `TZID`, a wall clock in the
+    series' `start.timeZone`;
+  - a UTC instant, `EXDATE:…Z` or `EXDATE;VALUE=DATE-TIME:…Z`;
+  - a date, `EXDATE;VALUE=DATE:20260601`, which on a series of days names
+    that day (its local midnight). Google ignores a date on a timed series,
+    and so does the adapter.
+
+  Several values on one line, any line order, names in any case and a rule
+  with parameters (`RRULE;X-…:FREQ=…`) are read too. A wall clock a clock
+  change repeats is its first reading; one it skips takes the offset from
+  before the change, where the views place the occurrence. A line the
+  adapter does not keep (`RDATE`, `EXRULE`, an unknown zone) is logged as a
+  warning once per run.
+- **Deletions are written as Google spells them.** The wall clock in the
+  series' zone with `TZID`, a date (`VALUE=DATE`) on a series of days (the
+  only form Google's documentation allows there), and the UTC instant on a
+  series without a zone or for the second pass of an hour the clock shows
+  twice. One value per line.
+- **A kept repeat stays out of the PATCH.** A PATCH replaces the whole
+  `recurrence` array, so an update that kept the repeat, the start and the
+  all-day flag (`keep_fields`) leaves the array out, and lines the adapter
+  does not read stay on Google. Before, every save, a rename included,
+  wrote the array anew and erased deletions other apps had written.
 
 ## Testing
 

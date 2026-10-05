@@ -25,8 +25,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse, EventEntry,
-    EventListResponse,
+    all_day_slot, event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse,
+    EventEntry, EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -1000,9 +1000,10 @@ pub enum ExdateOutcome {
 /// occurrence" flow).
 ///
 /// Google models a per-occurrence deletion as a cancelled INSTANCE resource, NOT
-/// as an EXDATE on the master. Patching the master's `recurrence` with a UTC
-/// EXDATE is silently dropped for a zoned series (RFC 5545 wants the EXDATE in the
-/// DTSTART zone) and isn't Google's mechanism anyway, so it was a no-op. Instead
+/// as an EXDATE on the master: its own deletions never appear as EXDATE lines.
+/// Patching a UTC EXDATE onto the master was a no-op in the field (July 2026);
+/// why was never measured — the reporter's build could not read cancelled
+/// instances back then, and RFC 5545 itself allows a UTC EXDATE. Instead
 /// we cancel the instance Google keeps in the slot, found by [`instance_in_slot`]
 /// however far it was moved. [`map_event`] turns the cancelled instance back into
 /// a `{master}::rid::{start}` cancelled override, so the next read suppresses the
@@ -1120,23 +1121,6 @@ async fn instance_in_slot(
         "instance lookup by original start"
     );
     Ok(instance)
-}
-
-/// The day an all-day slot names.
-///
-/// Aperio anchors an all-day date at local midnight, but a slot does not always
-/// sit there. Since 48a an all-day series repeats on the device's calendar
-/// days, so its slots ARE local midnight; a slot written by a build before
-/// that, or by another client, can still lie an hour or two off it across a
-/// clock change. A date whose midnight a clock change skips resolves to that
-/// date's UTC midnight (`EventDateTime::resolve`), which west of UTC reads as
-/// the evening before. All of them stay within hours of the local midnight they
-/// stand for, so the day is the one whose midnight lies nearest: twelve hours
-/// on, then the local date.
-fn all_day_slot(slot: DateTime<Utc>) -> chrono::NaiveDate {
-    (slot + Duration::hours(12))
-        .with_timezone(&chrono::Local)
-        .date_naive()
 }
 
 /// `PATCH /calendars/{id}` with `{ "summary": "..." }`. Google's
@@ -2243,6 +2227,77 @@ mod tests {
         let state = fixture_state(&server.url());
         let err = list_calendars(&state).await.unwrap_err();
         assert!(matches!(err, GoogleError::Http { status: 500, .. }));
+    }
+
+    /// A Berlin series whose deletion another app wrote in Google's own
+    /// spelling, renamed: what the PATCH carries.
+    async fn rename_series(keep_fields: Vec<cal_core::event_diff::EventField>) -> String {
+        let mut server = mockito::Server::new_async().await;
+        let sent = Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = Arc::clone(&sent);
+        let answer = br##"{"id":"series-1","summary":"Renamed",
+            "start":{"dateTime":"2026-05-25T07:00:00Z","timeZone":"Europe/Berlin"},
+            "end":{"dateTime":"2026-05-25T08:00:00Z","timeZone":"Europe/Berlin"},
+            "recurrence":["RRULE:FREQ=WEEKLY","EXDATE;TZID=Europe/Berlin:20260601T090000"]}"##;
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/series-1?sendUpdates=none",
+            )
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                *sink.lock().unwrap() = request.utf8_lossy_body().unwrap().into_owned();
+                answer.to_vec()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let read: EventEntry = serde_json::from_slice(answer).unwrap();
+        let mut series = map_event(read, "primary").unwrap().unwrap();
+        series.title = "Renamed".into();
+        series.keep_fields = keep_fields;
+
+        let state = fixture_state(&server.url());
+        update_event(&state, &series).await.unwrap();
+        patch.assert_async().await;
+        let body = sent.lock().unwrap().clone();
+        body
+    }
+
+    /// Decision 205: a rename leaves Google's repeat lines as they are, so
+    /// another app's deletion, and any line Aperio does not read, stays.
+    #[tokio::test]
+    async fn a_rename_leaves_the_repeat_lines_alone() {
+        use cal_core::event_diff::EventField;
+        let body = rename_series(vec![
+            EventField::Description,
+            EventField::Location,
+            EventField::Start,
+            EventField::End,
+            EventField::AllDay,
+            EventField::Recurrence,
+            EventField::Reminders,
+        ])
+        .await;
+        assert!(body.contains(r#""summary":"Renamed""#), "{body}");
+        assert!(!body.contains("recurrence"), "{body}");
+    }
+
+    /// Without a copy proven to be the one the editor opened, the lines are
+    /// written — the deletion among them, as Google spelled it. Before, it
+    /// was not read, so the save erased it and the occurrence came back.
+    #[tokio::test]
+    async fn a_series_written_whole_keeps_another_apps_deletion() {
+        let body = rename_series(Vec::new()).await;
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            json["recurrence"],
+            serde_json::json!([
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;TZID=Europe/Berlin:20260601T090000"
+            ]),
+            "{body}"
+        );
     }
 }
 

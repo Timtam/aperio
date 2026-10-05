@@ -14,9 +14,17 @@ use cal_core::{
     AttendeeStatus, Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent,
     Reminder, ReminderKind,
 };
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+
+use cal_core::event_diff::EventField;
+use chrono::{
+    DateTime, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
+    Utc,
+};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::error::{GoogleError, GoogleResult};
 
@@ -73,20 +81,270 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
     }
 }
 
-/// Parse one EXDATE value from a `RECURRENCE` line. Accepts the two
-/// common iCal shapes: `YYYYMMDDTHHMMSSZ` (compact UTC date-time) and
-/// `YYYYMMDD` (date-only, anchored at 00:00 UTC).
-fn parse_exdate_value(raw: &str) -> Option<DateTime<Utc>> {
-    if raw.len() == 8 {
-        let d = NaiveDate::parse_from_str(raw, "%Y%m%d").ok()?;
-        let mid = d.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-        return Some(Utc.from_utc_datetime(&mid));
+// ── Recurrence lines ────────────────────────────────────────────────────
+
+/// One line of an event's `recurrence` array, split the way RFC 5545 splits a
+/// content line: its name, its parameters, and its value after the first `:`
+/// outside quotes — `EXDATE;TZID="Europe/Berlin":20260601T090000`. Names and
+/// parameter names are upper-cased; a parameter's quotes are dropped.
+struct RecurrenceLine<'a> {
+    name: String,
+    params: Vec<(String, String)>,
+    value: &'a str,
+}
+
+impl RecurrenceLine<'_> {
+    fn param(&self, name: &str) -> Option<&str> {
+        self.params
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
     }
-    if raw.ends_with('Z') {
-        let naive = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ").ok()?;
-        return Some(Utc.from_utc_datetime(&naive));
+}
+
+/// `line` split into its parts, or `None` when it has no value at all.
+fn recurrence_line(line: &str) -> Option<RecurrenceLine<'_>> {
+    let mut quoted = false;
+    let mut head_parts = Vec::new();
+    let mut part_start = 0;
+    let mut colon = None;
+    for (at, c) in line.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                head_parts.push(&line[part_start..at]);
+                part_start = at + 1;
+            }
+            ':' if !quoted => {
+                colon = Some(at);
+                break;
+            }
+            _ => {}
+        }
     }
-    None
+    let colon = colon?;
+    head_parts.push(&line[part_start..colon]);
+    let mut head = head_parts.into_iter();
+    let name = head.next()?.trim().to_ascii_uppercase();
+    let params = head
+        .filter_map(|param| {
+            let (key, value) = param.split_once('=')?;
+            Some((
+                key.trim().to_ascii_uppercase(),
+                value.trim().trim_matches('"').to_string(),
+            ))
+        })
+        .collect();
+    Some(RecurrenceLine {
+        name,
+        params,
+        value: line[colon + 1..].trim(),
+    })
+}
+
+/// The zone tzdata names `name`, in any ASCII case and by any of its links.
+fn zone_named(name: &str) -> Option<Tz> {
+    cal_core::canonical_zone(name)?.parse().ok()
+}
+
+/// The instant a wall-clock time names in `tz`, as RFC 5545 reads one
+/// (section 3.3.5) and as the views place an occurrence (`wallToReal` in
+/// `shared/recurrence.ts`): a time the clock shows twice is its first
+/// reading; a time a clock change skips is read with the offset from before
+/// the change. A timed deletion has to land on the occurrence's instant
+/// exactly, or it cancels nothing.
+pub(crate) fn wall_clock_in(tz: Tz, wall: NaiveDateTime) -> DateTime<Utc> {
+    match tz.from_local_datetime(&wall) {
+        LocalResult::Single(at) | LocalResult::Ambiguous(at, _) => at.with_timezone(&Utc),
+        LocalResult::None => {
+            let before = tz
+                .offset_from_utc_datetime(&(wall - Duration::days(1)))
+                .fix();
+            Utc.from_utc_datetime(&(wall - Duration::seconds(before.local_minus_utc().into())))
+        }
+    }
+}
+
+/// A date as Aperio anchors every all-day boundary: the instant of its LOCAL
+/// midnight — the app-internal all-day convention shared with the CalDAV
+/// adapter, so the views' local-day bucketing and the write-side round-trip
+/// line up in any timezone. A zone that skips midnight that day falls back to
+/// UTC midnight.
+fn local_midnight(day: NaiveDate) -> DateTime<Utc> {
+    let midnight = day.and_time(NaiveTime::MIN);
+    Local
+        .from_local_datetime(&midnight)
+        .earliest()
+        .map(|l| l.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
+}
+
+/// The day an all-day slot names — an occurrence's, or a deletion's.
+///
+/// Aperio anchors an all-day date at local midnight, but a slot does not always
+/// sit there. Since 48a an all-day series repeats on the device's calendar
+/// days, so its slots ARE local midnight; a slot written by a build before
+/// that, or by another client, can still lie an hour or two off it across a
+/// clock change. A date whose midnight a clock change skips resolves to that
+/// date's UTC midnight ([`local_midnight`]), which west of UTC reads as the
+/// evening before. All of them stay within hours of the local midnight they
+/// stand for (decision 95), so the day is the one whose midnight lies nearest:
+/// twelve hours on, then the local date.
+pub(crate) fn all_day_slot(slot: DateTime<Utc>) -> NaiveDate {
+    (slot + Duration::hours(12))
+        .with_timezone(&Local)
+        .date_naive()
+}
+
+/// The deletions one EXDATE line names, and why some of it names none Aperio
+/// can read.
+///
+/// Every spelling Google is seen to return, with one or several values:
+/// - a date (`20261230`, with or without `VALUE=DATE`): on a series of days
+///   its local midnight, as a date start is read. Google ignores a date on a
+///   timed series, and so does Aperio;
+/// - a UTC date-time (`20260601T070000Z`, with or without
+///   `VALUE=DATE-TIME`): that instant;
+/// - a wall clock in a zone (`TZID=Europe/Berlin:20260601T090000`), or
+///   without one, in the zone the series repeats in (`start.timeZone`, UTC
+///   when it has none): the instant of that wall clock, as Google's own
+///   export writes a deletion. On a series of days, its date.
+fn exdates_of_line(
+    line: &RecurrenceLine<'_>,
+    all_day: bool,
+    series_zone: Option<Tz>,
+) -> (Vec<DateTime<Utc>>, Option<&'static str>) {
+    let zone = match line.param("TZID") {
+        Some(name) => match zone_named(name) {
+            Some(tz) => Some(tz),
+            None => return (Vec::new(), Some("a zone tzdata does not know")),
+        },
+        None => series_zone,
+    };
+    let mut read = Vec::new();
+    let mut problem = None;
+    for raw in line.value.split(',').map(str::trim) {
+        if raw.len() == 8 {
+            match NaiveDate::parse_from_str(raw, "%Y%m%d") {
+                Ok(day) if all_day => read.push(local_midnight(day)),
+                Ok(_) => problem = Some("a date on a timed series, which Google ignores"),
+                Err(_) => problem = Some("a value that is no date or date-time"),
+            }
+        } else if let Ok(utc) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ") {
+            read.push(Utc.from_utc_datetime(&utc));
+        } else if let Ok(wall) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%S") {
+            read.push(if all_day {
+                local_midnight(wall.date())
+            } else {
+                match zone {
+                    Some(tz) => wall_clock_in(tz, wall),
+                    None => Utc.from_utc_datetime(&wall),
+                }
+            });
+        } else {
+            problem = Some("a value that is no date or date-time");
+        }
+    }
+    (read, problem)
+}
+
+/// A recurring master's rule and its deletions, read from Google's
+/// `recurrence` lines in any order and any spelling of their names. A line
+/// Aperio does not keep (RDATE, EXRULE, a second RRULE, an EXDATE it cannot
+/// read) is named in the log, once per run: a change to this series' repeat
+/// writes the lines anew and leaves it out.
+fn read_recurrence(
+    series: &str,
+    lines: &[String],
+    all_day: bool,
+    series_zone: Option<Tz>,
+) -> (Option<String>, Vec<DateTime<Utc>>) {
+    let mut rrule: Option<String> = None;
+    let mut exdates = Vec::new();
+    for raw in lines {
+        let Some(line) = recurrence_line(raw) else {
+            unread_line(series, raw, "no value");
+            continue;
+        };
+        match line.name.as_str() {
+            "RRULE" => {
+                if rrule.replace(line.value.to_string()).is_some() {
+                    unread_line(series, raw, "a second RRULE; Aperio keeps the last one");
+                }
+            }
+            "EXDATE" => {
+                let (read, problem) = exdates_of_line(&line, all_day, series_zone);
+                exdates.extend(read);
+                if let Some(problem) = problem {
+                    unread_line(series, raw, problem);
+                }
+            }
+            _ => unread_line(series, raw, "Aperio keeps only RRULE and EXDATE"),
+        }
+    }
+    if rrule.is_none() && !exdates.is_empty() {
+        unread_line(series, "EXDATE", "deletions on an event without a rule");
+        exdates.clear();
+    }
+    (rrule, exdates)
+}
+
+/// Warn once per run that `line` of `series` was not read, then only at
+/// debug level: the list is read again every half hour, and a log that
+/// repeats an expected answer is a log nobody reads.
+fn unread_line(series: &str, line: &str, why: &str) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let first = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut seen| seen.insert(format!("{series}\n{line}")))
+        .unwrap_or(true);
+    if first {
+        warn!(
+            series = %series,
+            line = %line,
+            why,
+            "google recurrence line not read; a change to this series' repeat leaves it out"
+        );
+    } else {
+        debug!(series = %series, line = %line, why, "google recurrence line not read");
+    }
+}
+
+/// A series' recurrence as Google's lines: its rule, and each deletion one
+/// line, as Google's own export spells it (decision 205) — a date on a series
+/// of days (`EXDATE;VALUE=DATE`, the only form Google's documentation allows
+/// there), the wall clock in the series' zone (`EXDATE;TZID=`, the zone its
+/// `start.timeZone` names), or a UTC instant on a series without one. A
+/// deletion the zone's wall clock cannot name — the second pass of an hour
+/// the clock shows twice — goes as its UTC instant.
+fn recurrence_to_lines(rec: &EventRecurrence, all_day: bool, zone: Option<&str>) -> Vec<String> {
+    let zone = cal_core::series_clock_zone(zone).and_then(|name| Some((name, zone_named(name)?)));
+    let mut lines = Vec::with_capacity(1 + rec.exceptions.len());
+    // Google expects the RFC 5545 prefix; the rest of Aperio stores
+    // the bare rule body.
+    lines.push(format!("RRULE:{}", rec.rrule));
+    for &deleted in &rec.exceptions {
+        lines.push(if all_day {
+            format!(
+                "EXDATE;VALUE=DATE:{}",
+                all_day_slot(deleted).format("%Y%m%d")
+            )
+        } else {
+            match zone {
+                Some((name, tz))
+                    if wall_clock_in(tz, deleted.with_timezone(&tz).naive_local()) == deleted =>
+                {
+                    format!(
+                        "EXDATE;TZID={name}:{}",
+                        deleted.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+                    )
+                }
+                _ => format!("EXDATE:{}", deleted.format("%Y%m%dT%H%M%SZ")),
+            }
+        });
+    }
+    lines
 }
 
 fn parse_hex_color(raw: String) -> Option<ContainerColor> {
@@ -242,23 +500,13 @@ pub struct EventDateTime {
 
 impl EventDateTime {
     /// Returns `(utc_datetime, is_all_day)`. All-day dates anchor at
-    /// LOCAL midnight (expressed as a UTC instant) — the app-internal
-    /// all-day convention shared with the CalDAV adapter, so the views'
-    /// local-day bucketing and the write-side round-trip line up in any
-    /// timezone. DST edge: a zone can skip midnight on a transition
-    /// day; fall forward to the first valid local time then.
+    /// LOCAL midnight (expressed as a UTC instant, [`local_midnight`]).
     pub(crate) fn resolve(&self) -> GoogleResult<(DateTime<Utc>, bool)> {
         if let Some(dt) = self.date_time {
             return Ok((dt, false));
         }
         if let Some(d) = self.date {
-            let midnight = d.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-            let anchored = Local
-                .from_local_datetime(&midnight)
-                .earliest()
-                .map(|l| l.with_timezone(&Utc))
-                .unwrap_or_else(|| Utc.from_utc_datetime(&midnight));
-            return Ok((anchored, true));
+            return Ok((local_midnight(d), true));
         }
         Err(GoogleError::Protocol(
             "event start/end has neither dateTime nor date".into(),
@@ -329,33 +577,18 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     // they disagree (Google quirk), trust the start.
     let all_day = start_all_day || end_all_day;
 
-    // Recurrence comes as a list of lines (RRULE, EXDATE, RDATE). We
-    // keep the RRULE verbatim and parse EXDATEs into `DateTime<Utc>`
-    // — same convention the local + CalDAV adapters use.
-    let (rrule, exceptions) = match entry.recurrence {
-        Some(lines) => {
-            let mut rrule = None;
-            let mut exdates: Vec<DateTime<Utc>> = Vec::new();
-            for line in lines {
-                if let Some(rest) = line.strip_prefix("RRULE:") {
-                    rrule = Some(rest.to_string());
-                } else if let Some(rest) = line.strip_prefix("EXDATE") {
-                    // EXDATE can carry params (e.g. `EXDATE;VALUE=DATE:...`).
-                    // We split on the first `:` and parse each comma-
-                    // separated value as either YYYYMMDDTHHMMSSZ
-                    // (date-time, common) or YYYYMMDD (date-only,
-                    // anchored at 00:00 UTC like the iCal adapter).
-                    if let Some((_, values)) = rest.split_once(':') {
-                        for raw in values.split(',') {
-                            if let Some(parsed) = parse_exdate_value(raw.trim()) {
-                                exdates.push(parsed);
-                            }
-                        }
-                    }
-                }
-            }
-            (rrule, exdates)
-        }
+    // Recurrence comes as a list of lines (RRULE, EXDATE, RDATE). We keep the
+    // rule verbatim and read each deletion as an instant — the convention the
+    // local and CalDAV adapters use — in whatever spelling Google returns it.
+    // A timed series' wall clocks are its `start.timeZone`'s, the zone Google
+    // documents it expands in.
+    let series_zone = if all_day {
+        None
+    } else {
+        entry.start.time_zone.as_deref().and_then(zone_named)
+    };
+    let (rrule, exceptions) = match entry.recurrence.as_deref() {
+        Some(lines) => read_recurrence(&entry.id, lines, all_day, series_zone),
         None => (None, Vec::new()),
     };
     let recurrence = rrule.map(|r| EventRecurrence {
@@ -589,7 +822,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
         recurrence: new
             .recurrence
             .as_ref()
-            .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
+            .map(|r| recurrence_to_lines(r, new.all_day, tzid)),
         reminders: reminders_to_write(&new.reminders),
         attendees: Some(attendees_to_write(&new.attendees)).filter(|list| !list.is_empty()),
     }
@@ -611,10 +844,25 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
         location: ev.location.clone(),
         start: range_to_write(ev.start, ev.all_day, tzid),
         end: range_to_write(ev.end, ev.all_day, tzid),
-        recurrence: ev
-            .recurrence
-            .as_ref()
-            .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
+        // Left out of the PATCH when the edit kept the repeat, and the start
+        // and the kind of day its deletions are written against (decision
+        // 205): a PATCH replaces the whole array, and Google's copy may hold
+        // lines Aperio does not read, or another device's change (106). Only
+        // a copy proven to be the one the editor opened names kept fields.
+        recurrence: if [
+            EventField::Recurrence,
+            EventField::Start,
+            EventField::AllDay,
+        ]
+        .iter()
+        .all(|field| ev.keep_fields.contains(field))
+        {
+            None
+        } else {
+            ev.recurrence
+                .as_ref()
+                .map(|r| recurrence_to_lines(r, ev.all_day, tzid))
+        },
         reminders: reminders_to_write(&ev.reminders),
         // Left out of the PATCH when the edit did not change the invitees
         // (decision 71a): a PATCH replaces the whole array, and Google's copy
@@ -651,21 +899,6 @@ fn range_to_write(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> Eve
             time_zone: tzid.unwrap_or("Etc/UTC").to_string(),
         }
     }
-}
-
-fn recurrence_to_lines(rrule: &str, exceptions: &[DateTime<Utc>]) -> Vec<String> {
-    let mut lines = Vec::with_capacity(1 + exceptions.len());
-    // Google expects the RFC 5545 prefix; the rest of Aperio stores
-    // the bare rule body.
-    lines.push(format!("RRULE:{rrule}"));
-    for ex in exceptions {
-        // EXDATE in compact UTC form, one per line.
-        lines.push(format!(
-            "EXDATE;VALUE=DATE-TIME:{}",
-            ex.format("%Y%m%dT%H%M%SZ")
-        ));
-    }
-    lines
 }
 
 fn reminders_to_write(reminders: &[Reminder]) -> EventRemindersWrite {
@@ -1303,7 +1536,8 @@ mod tests {
         let json = serde_json::to_value(&body).unwrap();
         let rec = &json["recurrence"];
         assert_eq!(rec[0], "RRULE:FREQ=WEEKLY;BYDAY=MO");
-        assert_eq!(rec[1], "EXDATE;VALUE=DATE-TIME:20260601T180000Z");
+        // A series without a zone writes its deletion as the UTC instant.
+        assert_eq!(rec[1], "EXDATE:20260601T180000Z");
     }
 
     #[test]
@@ -1344,5 +1578,281 @@ mod tests {
         // Only the Relative one made it through.
         assert_eq!(overrides.len(), 1);
         assert_eq!(overrides[0]["method"], "popup");
+    }
+
+    // ── Deletions in every spelling (decision 205) ──────────────────────
+
+    /// A recurring master as Google lists it: timed in `zone`, or all-day
+    /// when `zone` is `None`, with these recurrence lines.
+    fn master_with(lines: &[&str], zone: Option<&str>) -> Event {
+        let (start, end) = match zone {
+            Some(tz) => (
+                serde_json::json!({ "dateTime": "2026-05-25T07:00:00Z", "timeZone": tz }),
+                serde_json::json!({ "dateTime": "2026-05-25T08:00:00Z", "timeZone": tz }),
+            ),
+            None => (
+                serde_json::json!({ "date": "2026-05-25" }),
+                serde_json::json!({ "date": "2026-05-26" }),
+            ),
+        };
+        let raw = serde_json::json!({
+            "id": "series-1",
+            "summary": "Series",
+            "start": start,
+            "end": end,
+            "recurrence": lines,
+        });
+        let entry: EventEntry = serde_json::from_value(raw).unwrap();
+        map_event(entry, "primary").unwrap().unwrap()
+    }
+
+    fn deletions(ev: &Event) -> Vec<DateTime<Utc>> {
+        ev.recurrence.as_ref().unwrap().exceptions.clone()
+    }
+
+    fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap()
+    }
+
+    /// Google's own export spells a deletion as the wall clock in the
+    /// series' zone. Read before as nothing, so the next save erased it.
+    #[test]
+    fn a_deletion_in_the_series_zone_is_read() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;TZID=Europe/Berlin:20260601T090000",
+            ],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(deletions(&ev), [utc(2026, 6, 1, 7, 0)]);
+    }
+
+    #[test]
+    fn several_deletions_on_one_line_are_each_read() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=DAILY",
+                "EXDATE;TZID=America/Montreal:20240831T130000,20240901T130000",
+            ],
+            Some("America/Montreal"),
+        );
+        assert_eq!(
+            deletions(&ev),
+            [utc(2024, 8, 31, 17, 0), utc(2024, 9, 1, 17, 0)]
+        );
+    }
+
+    /// A date names a day of a series of days, at the local midnight a date
+    /// start is read at; read at UTC midnight, it named the day before west
+    /// of UTC and none at all far east (Auckland's midnight is 13 hours off).
+    #[test]
+    fn a_date_deletion_names_its_day_on_a_series_of_days() {
+        let day = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        for line in [
+            "EXDATE;VALUE=DATE:20260601",
+            "exdate;value=date:20260601",
+            // Google quoted the zone and kept it on a date (2011).
+            r#"EXDATE;TZID="America/Vancouver";VALUE=DATE:20260601"#,
+            // A wall clock on a series of days names its date.
+            "EXDATE;TZID=Europe/Helsinki:20260601T000000",
+        ] {
+            let ev = master_with(&["RRULE:FREQ=DAILY", line], None);
+            assert_eq!(deletions(&ev), [local_midnight(day)], "{line}");
+            assert_eq!(all_day_slot(deletions(&ev)[0]), day, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_utc_deletion_reads_as_before() {
+        for line in [
+            "EXDATE:20260601T070000Z",
+            "EXDATE;VALUE=DATE-TIME:20260601T070000Z",
+        ] {
+            let ev = master_with(&["RRULE:FREQ=WEEKLY", line], Some("Europe/Berlin"));
+            assert_eq!(deletions(&ev), [utc(2026, 6, 1, 7, 0)], "{line}");
+        }
+    }
+
+    #[test]
+    fn the_lines_are_read_in_any_order() {
+        let ev = master_with(
+            &[
+                "EXDATE;TZID=Europe/Berlin:20260601T090000",
+                "RRULE:FREQ=WEEKLY",
+            ],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(ev.recurrence.as_ref().unwrap().rrule, "FREQ=WEEKLY");
+        assert_eq!(deletions(&ev), [utc(2026, 6, 1, 7, 0)]);
+    }
+
+    /// The occurrence the views place for a wall clock a clock change
+    /// repeats or skips, as RFC 5545 reads it: the first reading, and the
+    /// offset from before the gap.
+    #[test]
+    fn a_deletion_at_a_clock_change_lands_where_the_occurrence_does() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=DAILY",
+                "EXDATE;TZID=Europe/Berlin:20261025T023000",
+                "EXDATE;TZID=Europe/Berlin:20260329T023000",
+            ],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(
+            deletions(&ev),
+            [utc(2026, 10, 25, 0, 30), utc(2026, 3, 29, 1, 30)]
+        );
+    }
+
+    #[test]
+    fn a_deletion_without_a_zone_is_a_wall_clock_in_the_series_zone() {
+        let ev = master_with(
+            &["RRULE:FREQ=WEEKLY", "EXDATE:20190617T090000"],
+            Some("America/Chicago"),
+        );
+        assert_eq!(deletions(&ev), [utc(2019, 6, 17, 14, 0)]);
+    }
+
+    /// Google returns a rule with parameters too; read as no rule, the series
+    /// was a single event.
+    #[test]
+    fn a_rule_with_parameters_is_read() {
+        let ev = master_with(
+            &["RRULE;X-EVOLUTION-ENDDATE=20200120:FREQ=WEEKLY;BYDAY=MO"],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(ev.recurrence.unwrap().rrule, "FREQ=WEEKLY;BYDAY=MO");
+    }
+
+    /// What names no deletion Aperio can read stays out, and the series with
+    /// it: an unknown zone, a date on a timed series (Google ignores it),
+    /// lines Aperio does not keep.
+    #[test]
+    fn what_names_no_readable_deletion_is_left_out() {
+        let ev = master_with(
+            &[
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;TZID=Mars/Olympus:20260601T090000",
+                "EXDATE;VALUE=DATE:20260608",
+                "RDATE:20260610T070000Z",
+                "EXDATE:not-a-date",
+            ],
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(ev.recurrence.as_ref().unwrap().rrule, "FREQ=WEEKLY");
+        assert!(deletions(&ev).is_empty(), "{:?}", deletions(&ev));
+        // Deletions without a rule make no series.
+        let ev = master_with(&["EXDATE:20260601T070000Z"], Some("Europe/Berlin"));
+        assert!(ev.recurrence.is_none());
+    }
+
+    /// The written lines, as Google's export spells them, for a series that
+    /// repeats in `zone` (timed) or on days (`None`).
+    fn written(exceptions: Vec<DateTime<Utc>>, zone: Option<&str>) -> Vec<String> {
+        let rec = EventRecurrence {
+            rrule: "FREQ=DAILY".into(),
+            exceptions,
+            tzid: zone.map(str::to_string),
+        };
+        recurrence_to_lines(&rec, zone.is_none(), zone)
+    }
+
+    #[test]
+    fn deletions_are_written_as_google_spells_them() {
+        assert_eq!(
+            written(vec![utc(2026, 6, 1, 7, 0)], Some("Europe/Berlin")),
+            [
+                "RRULE:FREQ=DAILY",
+                "EXDATE;TZID=Europe/Berlin:20260601T090000"
+            ]
+        );
+        // A zone spelled another way is written as the start names it.
+        assert_eq!(
+            written(vec![utc(2026, 6, 1, 7, 0)], Some("europe/berlin"))[1],
+            "EXDATE;TZID=europe/berlin:20260601T090000"
+        );
+        // The second pass of the hour Berlin shows twice has no wall clock of
+        // its own; it goes as its instant.
+        assert_eq!(
+            written(
+                vec![utc(2026, 10, 25, 0, 30), utc(2026, 10, 25, 1, 30)],
+                Some("Europe/Berlin")
+            )[1..],
+            [
+                "EXDATE;TZID=Europe/Berlin:20261025T023000",
+                "EXDATE:20261025T013000Z"
+            ]
+        );
+        // A series on UTC, or in a zone tzdata does not know.
+        for zone in ["Etc/UTC", "Mars/Olympus"] {
+            assert_eq!(
+                written(vec![utc(2026, 6, 1, 7, 0)], Some(zone))[1],
+                "EXDATE:20260601T070000Z",
+                "{zone}"
+            );
+        }
+        // A series of days: the day, the only form Google's documentation
+        // allows there; before, a date-time it forbids.
+        let day = NaiveDate::from_ymd_opt(2026, 12, 30).unwrap();
+        assert_eq!(
+            written(vec![local_midnight(day)], None)[1],
+            "EXDATE;VALUE=DATE:20261230"
+        );
+    }
+
+    /// What is written is read back as the same deletions.
+    #[test]
+    fn written_deletions_read_back_as_themselves() {
+        let timed = vec![utc(2026, 6, 1, 7, 0), utc(2026, 10, 25, 1, 30)];
+        let lines = written(timed.clone(), Some("Europe/Berlin"));
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        assert_eq!(deletions(&master_with(&refs, Some("Europe/Berlin"))), timed);
+        let days = vec![local_midnight(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap())];
+        let lines = written(days.clone(), None);
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        assert_eq!(deletions(&master_with(&refs, None)), days);
+    }
+
+    /// An edit that kept the repeat, the start and the kind of day leaves the
+    /// lines alone: a PATCH replaces the whole array, and Google's copy may
+    /// hold lines Aperio does not read.
+    #[test]
+    fn a_kept_repeat_stays_out_of_the_patch() {
+        let mut ev = master_with(
+            &[
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;TZID=Europe/Berlin:20260601T090000",
+            ],
+            Some("Europe/Berlin"),
+        );
+        ev.title = "Renamed".into();
+        ev.keep_fields = vec![
+            EventField::Description,
+            EventField::Start,
+            EventField::End,
+            EventField::AllDay,
+            EventField::Recurrence,
+        ];
+        let json = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert!(json.get("recurrence").is_none(), "{json}");
+        for moved in [
+            EventField::Start,
+            EventField::AllDay,
+            EventField::Recurrence,
+        ] {
+            let mut edit = ev.clone();
+            edit.keep_fields.retain(|field| *field != moved);
+            let json = serde_json::to_value(event_to_body(&edit)).unwrap();
+            assert_eq!(
+                json["recurrence"],
+                serde_json::json!([
+                    "RRULE:FREQ=WEEKLY",
+                    "EXDATE;TZID=Europe/Berlin:20260601T090000"
+                ]),
+                "{moved:?}"
+            );
+        }
     }
 }

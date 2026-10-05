@@ -2369,10 +2369,14 @@ Siehe DESIGN §4.2.
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
-      nicht (140), Google verwirft UTC-EXDATEs auf Serien mit Zone (137).
-      Ganztägige Serien schreibt Google (`recurrence_to_lines`) beim Anlegen
-      als UTC-Zeitpunkt, der bei einem Datums-Beginn nichts ausschließt; dafür
-      ist 137 da (nach Live-Test). CalDAV schreibt sie seit PR 5 als Datum.
+      nicht (140). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
+      (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
+      Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
+      legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
+      gelöschten Vorkommen danach einzeln ab, wie Google selbst löscht (202:
+      anlegen, dann absagen, nachgelesen; 203: scheitert eine Absage, wird
+      alles zurückgenommen; 204: Absagen folgen dem Benachrichtigen-Schalter).
+      CalDAV schreibt sie seit PR 5 als Datum.
     - ✅ Das Mitziehen schnitt eine Exchange-Kopie ein Vorkommen zu spät, wenn
       ihr Vorkommen am Schnitttag in Outlook geändert wurde, und eine
       Google-Kopie auf einem gelöschten Vorkommen. `firstOccurrenceFrom` liest
@@ -2423,6 +2427,23 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
+      Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
+      Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
+      Googles eigener Export. Aperio las nur UTC und Datum, zeigte die anderen
+      Vorkommen wieder, und jedes Speichern der Serie, auch ein neuer Titel,
+      schrieb die Zeilen ohne sie neu: dann waren sie überall wieder da. Jetzt
+      liest der Adapter Wanduhr mit und ohne Zone, UTC, Datum (ganztägig als
+      lokale Mitternacht, wie ein Datums-Beginn), mehrere Werte je Zeile, jede
+      Reihenfolge und Schreibweise der Namen und eine Regel mit Parametern;
+      eine Wanduhr an einer Zeitumstellung landet dort, wo die Ansichten das
+      Vorkommen hinsetzen. Was er nicht liest (`RDATE`, `EXRULE`, eine
+      unbekannte Zone), nennt das Log einmal je Lauf. Er schreibt Löschungen
+      wie Googles Export (Wanduhr mit `TZID`, ganztägig `VALUE=DATE`, sonst
+      UTC) und lässt die Wiederholung aus dem PATCH, wenn die Änderung sie,
+      den Beginn und „ganztägig“ nicht anfasst (`keep_fields`). Offen: das
+      `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
+      CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
     - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
       CalDAV schreibt die Ausnahmen einer ganztägigen Serie als
       `EXDATE;VALUE=DATE` (der Tag der nächsten lokalen Mitternacht, wie 95

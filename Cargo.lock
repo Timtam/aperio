@@ -178,6 +178,7 @@ dependencies = [
  "base64 0.22.1",
  "cal-core",
  "chrono",
+ "chrono-tz",
  "futures",
  "hex",
  "mockito",
