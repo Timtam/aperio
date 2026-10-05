@@ -1197,17 +1197,18 @@ export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
   const upper = body.toUpperCase();
   if (!upper.includes('UNTIL=') || upper.includes('COUNT=')) return null;
   if (/FREQ=(SECONDLY|MINUTELY|HOURLY)/.test(upper)) return null;
+  // The rule exactly as the views iterate it (`wallRule`): on the clock they
+  // expand this series on, an all-day series' days included (48a), in that
+  // clock's wall-clock time, with its bound on that clock — a timed series'
+  // instant shifted into it, a series of days' digits as written (201). Built
+  // from the stored bound instead, a date ended a series of days a day early
+  // where its days begin after this device's midnight, and an evening
+  // occurrence on a timed bound's own day fell out by the zone's offset, while
+  // the calendar showed both. Outside the `try`, as for `occurrenceCount`: an
+  // unreadable rule comes back `null`, and a missing series-clock door throws.
+  const rule = wallRule({ ...event, recurrence: { ...event.recurrence, rrule: body } })?.rule;
+  if (!rule) return null;
   try {
-    // The rule exactly as the views iterate it (`wallRule`): on the clock they
-    // expand this series on, an all-day series' days included (48a), in that
-    // clock's wall-clock time, with its bound on that clock — a timed series' instant
-    // shifted into it, a series of days' digits as written (201). Built from
-    // the stored bound instead, a date ended a series of days a day early
-    // where its days begin after this device's midnight, and an evening
-    // occurrence on a timed bound's own day fell out by the zone's offset,
-    // while the calendar showed both.
-    const rule = wallRule({ ...event, recurrence: { ...event.recurrence, rrule: body } })?.rule;
-    if (!rule) return null;
     const until = rule.options.until;
     if (!until) return null;
     const last = rule.before(until, true);
