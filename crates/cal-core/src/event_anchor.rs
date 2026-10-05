@@ -765,7 +765,7 @@ mod tests {
     }
 
     /// A row signed in New Zealand's summer (+13) and read in Berlin: 15
-    /// January there is 11:00 UTC on the 14th, Berlin's 22:00 UTC on the 14th.
+    /// January there is 11:00 UTC on the 14th, Berlin's 23:00 UTC on the 14th.
     /// Read 12 hours in, the row named the 14th and moved to the day before.
     #[test]
     fn an_all_day_row_signed_in_new_zealand_s_summer_finds_its_day() {

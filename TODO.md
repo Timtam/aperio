@@ -2489,14 +2489,21 @@ Siehe DESIGN §4.2.
       Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
       Serie (`plan_repairs`, hilft auch CalDAV und Google); ohne eigenen Ton
       klingelt eine Einzeländerung mit dem der Serie. Und 217: Exchange liest
-      die Zeitpunkte einer ganztägigen Serie 12 Stunden in den Tag hinein in
-      der Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für
-      eine ohne Zone, `all_day_zone`), nicht mehr in UTC, was eine Mitternacht
-      östlich von UTC+12 (Neuseelands Sommer) als den Vortag las; die 12
-      Stunden fangen auch ein Etikett ab, das Exchange nach Aperios eigenem
+      die Zeitpunkte einer ganztägigen Serie 13:45 in den Tag hinein in der
+      Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für eine
+      ohne Zone, `all_day_zone`), statt 12 Stunden in UTC, was eine
+      Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den Vortag las;
+      das fängt auch ein Etikett ab, das Exchange nach Aperios eigenem
       Schreiben auf UTC umstellt, während die Zeitpunkte Mitternacht der alten
-      Zone bleiben (Live-Runde 3). Ohne lesbare Zone bleibt es beim Lesen in
-      UTC. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
+      Zone bleiben (Live-Runde 3), für jede alte Zone in (−10:15, +13:45]
+      (Niue, Pago Pago, Kiritimati liegen außerhalb). Ohne lesbare Zone wird
+      in UTC gelesen, mit demselben Fenster. Fällt die Mitternacht des Geräts
+      an einer Umstellung aus, gilt die erste Stunde danach, wie in den
+      Ansichten. Offen: einen eigenen Ton für einen einzelnen Termin speichert
+      nur das Handy, unter der Kennung des Termins (`sound.item.{id}`); eine
+      neu geprägte Kennung (Exchange bei jeder ChangeKey-Änderung, seit 215/216
+      ein ganztägiger Platz in anderer Zone) verliert ihn, die Reparatur kennt
+      Töne nicht, und der Desktop speichert Töne nur je Serie. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
       in der Zone ihrer Serie gelesen wie ihre Zeile. Einen Tag einer
       ganztägigen Serie zu löschen vergleicht den Platz des Servers so
       gelesen; vorher scheiterte das über sechs Stunden Abstand zum Postfach,

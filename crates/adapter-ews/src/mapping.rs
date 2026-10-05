@@ -2578,22 +2578,30 @@ pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<chrono_tz::Tz> {
 /// the item's zone (the mailbox's, or UTC for boundaries we wrote ourselves)
 /// — mostly: after Aperio's own write of an Outlook item, which sends UTC
 /// midnights without a zone, Exchange rounds in the item's old zone and
-/// labels it UTC (live round 3). So the day is sampled 12 hours INTO it, in
-/// the zone Exchange names ([`all_day_zone`], decision 217): the right day
-/// for a label up to twelve hours off, and for any offset the zone has —
-/// Auckland's summer (+13) included, which the sample in UTC read as the day
-/// before. Where Exchange names no zone Aperio can read, the sample is taken
-/// in UTC: the intended day for any offset in (−12h, +12h]. DST edge: fall
-/// forward when the local zone skips midnight.
+/// labels it UTC (live round 3). So the day is sampled 13:45 INTO it, in the
+/// zone Exchange names ([`all_day_zone`], decision 217): exact for a midnight
+/// that zone names, and the intended day for a label off by any offset in
+/// (−10:15, +13:45] — New Zealand's summer, the Chatham Islands, Tonga and
+/// Samoa among them, which twelve hours read as the day before; the same
+/// window `cal_core`'s anchor repair reads days in. Where Exchange names no
+/// zone Aperio can read, the sample is taken in UTC, with the same window.
+/// DST edge: a device zone that skips midnight that day gets the first hour
+/// after it, where the views place the day too.
 pub(crate) fn all_day_anchor(when: DateTime<Utc>, zone: Option<chrono_tz::Tz>) -> DateTime<Utc> {
+    let into_the_day = chrono::Duration::minutes(13 * 60 + 45);
     let day = match zone {
-        Some(tz) => (when.with_timezone(&tz) + chrono::Duration::hours(12)).date_naive(),
-        None => (when + chrono::Duration::hours(12)).date_naive(),
+        Some(tz) => (when.with_timezone(&tz) + into_the_day).date_naive(),
+        None => (when + into_the_day).date_naive(),
     };
     let midnight = day.and_hms_opt(0, 0, 0).unwrap();
     Local
         .from_local_datetime(&midnight)
         .earliest()
+        .or_else(|| {
+            Local
+                .from_local_datetime(&(midnight + chrono::Duration::hours(1)))
+                .earliest()
+        })
         .map(|l| l.with_timezone(&Utc))
         .unwrap_or(when)
 }
@@ -7772,8 +7780,30 @@ mod tests {
             end_time_zone: Some("tzone://Microsoft/Utc".into()),
             ..ParsedItem::default()
         };
-        let ev = to_event(item, "cal").unwrap();
+        let ev = to_event(item.clone(), "cal").unwrap();
         assert_eq!((ev.start, ev.end), (midnight(19), midnight(21)));
+        // The same from an Auckland mailbox in its summer (+13): dragged to
+        // Saturday 16 January, Exchange keeps Auckland's midnights, 11:00 UTC
+        // the day before, and labels them UTC. Twelve hours in read Friday.
+        let auckland_day = |d: u32| {
+            Local
+                .from_local_datetime(
+                    &chrono::NaiveDate::from_ymd_opt(2027, 1, d)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let auckland = ParsedItem {
+            start: Some("2027-01-15T11:00:00Z".parse().unwrap()),
+            end: Some("2027-01-17T11:00:00Z".parse().unwrap()),
+            ..item
+        };
+        let ev = to_event(auckland, "cal").unwrap();
+        assert_eq!((ev.start, ev.end), (auckland_day(16), auckland_day(18)));
     }
 
     #[test]
