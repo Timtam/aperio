@@ -1537,6 +1537,7 @@
       "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
       "thisAndFutureNotRepeating": "\"{{title}}\" no longer repeats; it was changed elsewhere. Nothing was changed here. Open it again to edit it.",
       "thisAndFutureShiftRefused": "\"{{title}}\" cannot move to the new date or time from here on: {{reason}}. Choose the repeat yourself, or edit just this occurrence.",
+      "seriesShiftRefused": "\"{{title}}\" cannot move to the new date or time as a whole series: {{reason}}. Choose the repeat yourself.",
       "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar before saving again.",
       "thisAndFutureUpdatedMaybeTwice": "\"{{title}}\" was changed from this occurrence on. But whether the old series now ends before it is unclear ({{detail}}): from {{date}} it may show twice. Please check it.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
@@ -1675,7 +1676,8 @@
         "editsSeries": "Changes apply to the entire series.",
         "storedLabel": "Stored repeat",
         "movedLabel": "Repeat from here on",
-        "cannotMove": "The repeat cannot move with the new date or time: {{reason}}. Choose it yourself, or edit just this occurrence."
+        "cannotMove": "The repeat cannot move with the new date or time: {{reason}}. Choose it yourself, or edit just this occurrence.",
+        "cannotMoveSeries": "The repeat cannot move with the new date or time: {{reason}}. Choose it yourself."
       },
       "prefillCalendarReadOnly": "The earlier appointment is in \"{{calendar}}\", which cannot take new appointments. The calendar below stays as it is.",
       "prefillCalendarUnknown": "The calendar the earlier appointment is in is not available here. The calendar below stays as it is.",

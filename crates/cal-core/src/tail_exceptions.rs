@@ -51,7 +51,8 @@
 //! common — one becomes all-day, or gets another zone — it is read on the
 //! device's calendar, the days the user saw the occurrences on. And a deletion
 //! never lands on the new series' first occurrence: that is the one the user
-//! is saving.
+//! is saving — unless the whole series is rewritten from its own start
+//! (`old_start`, decision 198), whose first occurrence may stay deleted.
 //!
 //! The shell expands both series — the device's zone is the shell's to know,
 //! and the core reads no clock — and hands over each occurrence with the day it
@@ -121,6 +122,14 @@ pub struct TailExceptionsQuestion {
     /// series still stands in for, kept when the series is rewritten in place.
     #[serde(default)]
     pub standing: Vec<String>,
+    /// The start of a whole series rewritten from it (decision 198), when that
+    /// is what is written: then the old series is read from its own start,
+    /// which may lie off its rule, and its first occurrence is no occurrence
+    /// the user is saving, so it may stay deleted. Absent, the first old slot
+    /// is the cut, and the new series' first occurrence the one being saved.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub old_start: Option<String>,
 }
 
 /// How the deleted occurrences went over to the new series.
@@ -365,9 +374,25 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
     // pattern with days taken from the start, or a rule moved with it, and the
     // new series starting on an occurrence of its own rule.
     let tail_start = instant_ms(&question.tail_start);
-    let aligned = match (question.tail.first(), tail_start) {
-        (Some(first), Some(start)) => instant_ms(&first.at).is_some_and(|at| same_tail(at, start)),
-        _ => false,
+    // Both series start on their own rule, or — a whole series that began
+    // off it, moved as a whole (decision 198) — both start off it: then their
+    // first occurrences are the first places either way.
+    let on_rule =
+        |slot: Option<&TailSlot>, start: Option<i64>, same: &dyn Fn(i64, i64) -> bool| match (
+            slot.and_then(|s| instant_ms(&s.at)),
+            start,
+        ) {
+            (Some(at), Some(start)) => same(at, start),
+            _ => false,
+        };
+    let tail_on_rule = on_rule(question.tail.first(), tail_start, &same_tail);
+    let aligned = match question.old_start.as_deref() {
+        None => tail_on_rule,
+        Some(old_start) => {
+            !question.tail.is_empty()
+                && tail_on_rule
+                    == on_rule(question.old_slots.first(), instant_ms(old_start), &same_old)
+        }
     };
     // A day on the clock both series repeat on, or the device's when they have
     // none in common.
@@ -440,8 +465,12 @@ pub fn tail_exceptions(question: &TailExceptionsQuestion) -> TailExceptions {
                 }
             })
             .and_then(|occ| instant_ms(&occ.at).map(|at| (at, occ.at.clone())))
-            // Never the occurrence the user is saving.
-            .filter(|(at, _)| !tail_start.is_some_and(|start| same_tail(*at, start)));
+            // Never the occurrence the user is saving — which a whole series
+            // rewritten from its own start does not name.
+            .filter(|(at, _)| {
+                question.old_start.is_some()
+                    || !tail_start.is_some_and(|start| same_tail(*at, start))
+            });
         match target {
             Some(found) => kept.push(found),
             None => dropped.push(deleted.clone()),
@@ -507,6 +536,7 @@ mod tests {
             tail_tzid: None,
             deleted: deleted.iter().map(|d| d.to_string()).collect(),
             standing: Vec::new(),
+            old_start: None,
         }
     }
 
@@ -960,6 +990,42 @@ mod tests {
         let answer = tail_exceptions(&q);
         assert_eq!(answer.carried_by, TailCarry::Place);
         assert_eq!(answer.exceptions, vec!["2026-09-22T07:00:00.000Z"]);
+    }
+
+    #[test]
+    fn a_whole_series_that_starts_off_its_rule_moves_by_place() {
+        // "Every Monday" from a Wednesday, moved a day on as a whole: neither
+        // start is an occurrence, the first Monday and the first Tuesday are
+        // the first places (decision 198).
+        let mut q = question(mondays(0), mondays(1), &["2026-09-07T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        q.old_start = Some("2026-08-19T07:00:00.000Z".into());
+        q.tail_start = "2026-08-20T07:00:00.000Z".into();
+        let answer = tail_exceptions(&q);
+        assert_eq!(answer.carried_by, TailCarry::Place);
+        assert_eq!(answer.exceptions, vec!["2026-09-08T07:00:00.000Z"]);
+
+        // One on its rule and one off it do not line up.
+        q.old_start = Some("2026-08-24T07:00:00.000Z".into());
+        assert_eq!(tail_exceptions(&q).carried_by, TailCarry::Day);
+    }
+
+    #[test]
+    fn a_whole_series_keeps_its_first_occurrence_deleted() {
+        // The whole series a day on, its first Monday deleted: nobody is saving
+        // that occurrence, so the first Tuesday stays deleted (decision 198).
+        let mut q = question(mondays(0), mondays(1), &["2026-08-24T07:00:00.000Z"]);
+        q.old_rule = "FREQ=WEEKLY;BYDAY=MO".into();
+        q.tail_rule = "FREQ=WEEKLY;BYDAY=TU".into();
+        q.old_start = Some("2026-08-24T07:00:00.000Z".into());
+        assert_eq!(
+            tail_exceptions(&q).exceptions,
+            vec!["2026-08-25T07:00:00.000Z"]
+        );
+        // Split there instead, it is the occurrence being saved.
+        q.old_start = None;
+        assert!(tail_exceptions(&q).exceptions.is_empty());
     }
 
     #[test]

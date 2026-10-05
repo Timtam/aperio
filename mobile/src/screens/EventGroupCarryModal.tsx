@@ -442,7 +442,38 @@ export default function EventGroupCarryModal({
             after,
             plan.changed,
           );
-          await updateEvent(next, target.calendar_id);
+          // A copy that is a series moves as the anchor did when its start
+          // moved or it switched between all-day and a time of day: its rule,
+          // its deleted occurrences and its zone go along, as from its own
+          // start (decision 198). Moved only in its start, it repeated on its
+          // old days next to the anchor's new ones. A rule that cannot move
+          // reports the copy, with the reason (193).
+          const wholePlan =
+            current.recurrence?.rrule &&
+            (Date.parse(next.start) !== Date.parse(current.start) ||
+              next.all_day !== current.all_day)
+              ? planSeriesSplit(
+                  current,
+                  current.start,
+                  (await readSeriesRows(current, current.start, getSeriesRows)).rows,
+                )
+              : null;
+          await updateEvent(
+            wholePlan?.kind === 'whole'
+              ? {
+                  ...next,
+                  recurrence: tailRecurrenceFor({
+                    master: current,
+                    cutoffIso: current.start,
+                    plan: wholePlan,
+                    tail: { start: next.start, all_day: next.all_day },
+                    opened: current.start,
+                    whole: true,
+                  }),
+                }
+              : next,
+            target.calendar_id,
+          );
         }
         done += 1;
       } catch (err) {

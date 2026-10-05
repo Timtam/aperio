@@ -259,12 +259,16 @@ das Speichern schreibt nichts und sagt den Grund, die Mitzieh-Dialoge melden die
 Kopie als nicht übertragen. Das Feld zeigt die verschobene Regel sofort (197),
 und wo es sie nur in Worten sagen kann, heißt die Zeile „Wiederholung ab hier“
 statt „Gespeicherte Wiederholung“; was der Nutzer dort danach selbst einstellt,
-gilt ab dem Beginn, an dem er es einstellte, und wandert von dort mit einem
-weiteren neuen Datum. Beim Speichern wandert die Regel zum tatsächlich
-geschriebenen Beginn: Eine ganz von ihrem ersten Vorkommen an neu geschriebene
-Serie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich blieb, und
-ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann das Feld dann
-um eine Zeitumstellung danebenliegen.
+gilt ab dem Beginn, der beim Einstellen geschrieben worden wäre, und wandert von
+dort mit einem weiteren neuen Datum. Feld und Speichern lesen denselben
+Beginn, den geschriebenen: bei „diesen und alle folgenden“ den des Formulars,
+bei der ganzen Serie ihren eigenen, den die Bearbeitung um so viele Tage
+verschiebt, wie der geöffnete Termin wanderte (`ruleFrame`; der Desktop lädt
+dafür die Serie, wenn ein Termin als ganze Serie offen ist). Nur „diesen und
+alle folgenden“ ab dem ersten Vorkommen schreibt erst beim Speichern als ganze
+Serie: Sie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich
+blieb, und ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann
+das Feld dort um eine Zeitumstellung danebenliegen.
 
 Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —
@@ -539,6 +543,24 @@ ganztägige Serie, unberührt gespeichert, behält ihren Wert wörtlich.
 **Ganztägig aus:** Die Uhrzeiten kommen auf der gemerkten Uhr zurück. Eine
 gespeicherte ganztägige Serie ohne solche Uhr bekommt die Gerätezone, und die
 Uhrzeiten gelten wie getippt.
+
+**Ganze Serie (191, 195, 198, 199):** Bearbeitet der Editor die ganze Serie, und
+ihr Beginn wandert (Datum oder Uhrzeit) oder sie wechselt zwischen ganztägig und
+mit Uhrzeit, liest er das wie „diesen und alle folgenden“ ab ihrem eigenen
+Beginn: `planSeriesSplit(series, series.start)` ergibt den Plan `whole`,
+`tailRecurrenceFor` die Regel (mitgewandert, 189), die gelöschten Termine (nach
+Platz oder Tag), das Ende (194) und die Zone (ganztägig keine, aus ganztägig die
+Gerätezone). Der Beginn bleibt, wo die Bearbeitung ihn hinlegt, auch neben der
+eigenen Regel, wie Anbieter ihn zeigen; beginnen alte und neue Serie beide neben
+ihrer Regel, gelten ihre ersten Vorkommen als erste Plätze (`old_start` im
+Kern). Unberührt bleibt die Wiederholung, wie sie ist: Ein neuer Titel schreibt
+keine Ausnahme um. Das Feld zeigt die verschobene Regel sofort (199), eine
+Ablehnung (193) sagt es ohne „nur diesen Termin“, wenn die Serie selbst geöffnet
+ist. Die Mitzieh-Dialoge schreiben jede Kopie, die eine Serie ist, ebenso ab
+ihrem eigenen Beginn, wenn ihr Beginn wandert oder ihre Art wechselt; eine
+Kopie, deren Regel nicht wandern kann, melden sie mit dem Grund. Das Ziehen
+einer ganzen Serie bleibt eine Verschiebung jedes Vorkommens um gleich viele
+Tage (`shift_series`, 198).
 
 **Nur dieser Termin:** Geräte-Uhr, keine Zone. **Diesen und alle folgenden:** Uhr
 der Serie (21a), der Rest behält die Zone der ganzen Serie.

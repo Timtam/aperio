@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { dateInput } from '@aperio/shared';
+
 import type { Calendar, CalendarEvent } from '../api/types';
 
 /**
@@ -200,6 +202,9 @@ const setStartTime = (value: string) =>
 
 const save = () => fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
 
+/** The day the form shows for an instant, `days` on: it reads this machine's clock. */
+const dayOn = (iso: string, days = 0) => dateInput(new Date(Date.parse(iso) + days * 86_400_000));
+
 const WHOLE = /Davor war kein Termin mehr übrig|No earlier occurrence was left/;
 
 describe('EventDialog → "this and all following" at the first occurrence', () => {
@@ -232,7 +237,7 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     onFile.series = SERIES;
     await open(FIRST);
     fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
-      target: { value: '2026-06-16' },
+      target: { value: dayOn(FIRST.start, 1) },
     });
     save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
@@ -634,7 +639,7 @@ describe('EventDialog → the rule moves with "this and all following" (189, 192
     onFile.series = SERIES;
     await open(JULY);
     expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=MO');
-    setStartDate('2026-07-07');
+    setStartDate(dayOn(JULY.start, 1));
     // In the field before anything is saved (197).
     expect(ruleShown()).toBe('FREQ=WEEKLY;BYDAY=TU');
     save();
@@ -662,7 +667,7 @@ describe('EventDialog → the rule moves with "this and all following" (189, 192
       start: '2026-07-06T07:00:00.000Z',
       end: '2026-07-06T08:00:00.000Z',
     } as unknown as CalendarEvent);
-    setStartDate('2026-07-07');
+    setStartDate(dayOn('2026-07-06T07:00:00.000Z', 1));
     // The field keeps the rule, and says why on the way to it — focusable, so
     // a screen reader in the dialog's application role stops on it.
     expect(ruleShown()).toBe('FREQ=MONTHLY;BYDAY=1MO');
@@ -684,7 +689,7 @@ describe('EventDialog → the rule moves with "this and all following" (189, 192
     deviceInBerlin();
     onFile.series = SERIES;
     await open(JULY);
-    setStartDate('2026-07-07');
+    setStartDate(dayOn(JULY.start, 1));
     fireEvent.click(screen.getByRole('button', { name: 'weekly' }));
     expect(ruleShown()).toBe('FREQ=WEEKLY');
     save();

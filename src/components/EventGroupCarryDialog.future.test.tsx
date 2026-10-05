@@ -416,3 +416,40 @@ describe('EventGroupCarryDialog → a copy whose rule names its days (189, 193)'
     expect(calls('update_event')).toHaveLength(0);
   });
 });
+
+describe('EventGroupCarryDialog → a whole series moved to another day (198)', () => {
+  it('moves each copy that is a series as the anchor moved: its rule and its deletions', async () => {
+    // The anchor, the whole series, moved from Monday to Tuesday: each copy
+    // repeats on Tuesdays too, and its deleted Monday is the deleted Tuesday.
+    copyOnFile.current = {
+      ...COPY,
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-09-07T08:00:00.000Z'],
+        tzid: null,
+      },
+    };
+    const nextDay = { ...STOOD, start: '2026-08-25T08:00:00.000Z', end: '2026-08-25T09:00:00.000Z' };
+    const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
+    render(
+      <EventGroupCarryDialog
+        isOpen
+        onClose={() => {}}
+        group={GROUP}
+        anchor={ANCHOR}
+        before={STOOD}
+        after={nextDay}
+        scope="series"
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const sent = (calls('update_event')[0][1] as { event: typeof COPY }).event;
+    expect(sent.start).toBe('2026-08-25T08:00:00.000Z');
+    expect(sent.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      exceptions: ['2026-09-08T08:00:00.000Z'],
+      tzid: null,
+    });
+  });
+});
