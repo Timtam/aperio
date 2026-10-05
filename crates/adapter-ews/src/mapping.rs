@@ -2575,16 +2575,19 @@ pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<chrono_tz::Tz> {
 /// The local midnight of the day an all-day instant names.
 ///
 /// EWS hands back a plain instant that is midnight of the intended day in
-/// the item's zone (the mailbox's, or UTC for boundaries we wrote ourselves).
-/// Read in that zone ([`all_day_zone`]), the day is exact whatever its offset
-/// (decision 217). Where Exchange names no zone Aperio can read, the day is
-/// sampled 12 hours INTO it: the sample's UTC date is the intended day for
-/// any zone offset in (−12h, +12h], and the day before beyond — which is how
-/// a midnight of Auckland's summer (+13) was read. DST edge: fall forward
-/// when the local zone skips midnight.
+/// the item's zone (the mailbox's, or UTC for boundaries we wrote ourselves)
+/// — mostly: after Aperio's own write of an Outlook item, which sends UTC
+/// midnights without a zone, Exchange rounds in the item's old zone and
+/// labels it UTC (live round 3). So the day is sampled 12 hours INTO it, in
+/// the zone Exchange names ([`all_day_zone`], decision 217): the right day
+/// for a label up to twelve hours off, and for any offset the zone has —
+/// Auckland's summer (+13) included, which the sample in UTC read as the day
+/// before. Where Exchange names no zone Aperio can read, the sample is taken
+/// in UTC: the intended day for any offset in (−12h, +12h]. DST edge: fall
+/// forward when the local zone skips midnight.
 pub(crate) fn all_day_anchor(when: DateTime<Utc>, zone: Option<chrono_tz::Tz>) -> DateTime<Utc> {
     let day = match zone {
-        Some(tz) => when.with_timezone(&tz).date_naive(),
+        Some(tz) => (when.with_timezone(&tz) + chrono::Duration::hours(12)).date_naive(),
         None => (when + chrono::Duration::hours(12)).date_naive(),
     };
     let midnight = day.and_hms_opt(0, 0, 0).unwrap();
@@ -7737,6 +7740,40 @@ mod tests {
         item.end_time_zone = None;
         assert_eq!(all_day_zone(&item), None);
         assert_eq!(override_slot(&item, &ov), all_day_anchor(slot, None));
+    }
+
+    /// Live round 3, T2: an Outlook all-day single in Berlin, re-dated by
+    /// Aperio's writer (UTC midnights, no zone), came back as 18 Oct 22:00 UTC
+    /// to 20 Oct 22:00 UTC with both zones `tzone://Microsoft/Utc` — Berlin's
+    /// midnights labelled UTC. Outlook shows Monday 19 and Tuesday 20. Read 12
+    /// hours into the day in the zone Exchange names, so are they; read as the
+    /// UTC date, Sunday and Monday.
+    #[test]
+    fn a_relabelled_all_day_item_keeps_its_days() {
+        let midnight = |d: u32| {
+            Local
+                .from_local_datetime(
+                    &chrono::NaiveDate::from_ymd_opt(2026, 10, d)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let item = ParsedItem {
+            item_id: "T2".into(),
+            subject: "Outlook all-day".into(),
+            start: Some("2026-10-18T22:00:00Z".parse().unwrap()),
+            end: Some("2026-10-20T22:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            start_time_zone: Some("tzone://Microsoft/Utc".into()),
+            end_time_zone: Some("tzone://Microsoft/Utc".into()),
+            ..ParsedItem::default()
+        };
+        let ev = to_event(item, "cal").unwrap();
+        assert_eq!((ev.start, ev.end), (midnight(19), midnight(21)));
     }
 
     #[test]

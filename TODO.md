@@ -2135,11 +2135,13 @@ Siehe DESIGN §4.2.
     Vortag fällt. Weder Zeitpunkt- noch Tagesvergleich trifft ihn: der
     gestrichene Tag kommt einmal zurück, und ein erneutes Löschen schreibt ihn
     richtig. Eine Wanderung wurde bewusst nicht gebaut (95).
-  - `plan_repairs` vergleicht ganztägige Zeilen weiter über den UTC-Tag
-    (`starts_the_same`, der Kern darf die Gerätezone nicht lesen). In einer
+  - ✅ `plan_repairs` verglich ganztägige Zeilen über den UTC-Tag; in einer
     Zone, deren lokale Mitternacht über die Umstellung den UTC-Tag wechselt
-    (etwa London), kann ein Anker deshalb den Nachbartag nennen. Betrifft nur
-    das Reparieren verwaister Farb-, Erinnerungs- und Gruppenzeilen.
+    (etwa London), konnte ein Anker den Nachbartag nennen. Seit 217 liest
+    `starts_the_same` den Tag 13:45 in den Zeitpunkt hinein (ohne Gerätezone):
+    eigener Tag für jede Zone in (−10:15, +13:45], auch über Zonen hinweg und
+    an jeder Umstellung; außerhalb (Niue, Pago Pago, Kiritimati, ohne
+    Sommerzeit) stimmen Zeilen und Termine eines Geräts weiter überein.
   **Live-Test Runde 3** (49a), gelaufen am 18.09.2026:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
@@ -2485,19 +2487,24 @@ Siehe DESIGN §4.2.
       abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
       Token nennt die Zone); eine Farbe oder ein Meeting an einer
       Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
-      Serie, und ein ganztägiger Termin wird dabei nach dem Tag gefunden, den
-      er nennt, auch aus einer anderen Zone (`plan_repairs`, hilft auch
-      CalDAV und Google); ohne eigenen Ton klingelt eine Einzeländerung mit
-      dem der Serie. Und 217: Exchange liest die Zeitpunkte einer ganztägigen
-      Serie in ihrer eigenen Zone (Startzone wie die Zone der Serie, UTC für
-      eine ohne Zone, `all_day_zone`), nicht mehr mit der 12-Stunden-Regel,
-      die eine Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den
-      Vortag las; die Regel bleibt nur, wo Exchange keine lesbare Zone nennt.
-      Einen Tag einer ganztägigen Serie zu löschen vergleicht den Platz des
-      Servers in dieser Zone; vorher scheiterte das über sechs Stunden Abstand
-      zum Postfach, und mit der Regel hätte es in Neuseelands Sommer den
-      Folgetag gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und
-      im Zweifel abgebrochen. ↻ im Test.
+      Serie (`plan_repairs`, hilft auch CalDAV und Google); ohne eigenen Ton
+      klingelt eine Einzeländerung mit dem der Serie. Und 217: Exchange liest
+      die Zeitpunkte einer ganztägigen Serie 12 Stunden in den Tag hinein in
+      der Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für
+      eine ohne Zone, `all_day_zone`), nicht mehr in UTC, was eine Mitternacht
+      östlich von UTC+12 (Neuseelands Sommer) als den Vortag las; die 12
+      Stunden fangen auch ein Etikett ab, das Exchange nach Aperios eigenem
+      Schreiben auf UTC umstellt, während die Zeitpunkte Mitternacht der alten
+      Zone bleiben (Live-Runde 3). Ohne lesbare Zone bleibt es beim Lesen in
+      UTC. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
+      in der Zone ihrer Serie gelesen wie ihre Zeile. Einen Tag einer
+      ganztägigen Serie zu löschen vergleicht den Platz des Servers so
+      gelesen; vorher scheiterte das über sechs Stunden Abstand zum Postfach,
+      und mit der UTC-Lesart hätte es in Neuseelands Sommer den Folgetag
+      gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und im
+      Zweifel abgebrochen. `plan_repairs` liest den Tag eines ganztägigen
+      Termins 13:45 in den Zeitpunkt hinein und findet so eine Zeile auch aus
+      einer anderen Zone (siehe oben). ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch

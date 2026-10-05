@@ -49,13 +49,19 @@ The endpoint is discovered or user-supplied.
   an inherited value is wrong, a guessed one would be worse.
 - **An all-day exception names its slot by its day.** EWS reports an
   all-day item's instants, an occurrence's `OriginalStart` among them, as
-  midnight in the item's own zone. The read takes the day in that zone — the
-  start zone, read as the series' zone is, UTC for a series made without one
-  (`all_day_zone`, decision 217) — and re-anchors the start, the series'
-  exceptions and the override id's slot to this device's local midnight of
-  it (`all_day_anchor`, `override_slot`, decision 215). Only where Exchange
-  names no zone the adapter can read is the day sampled twelve hours into
-  it, which reads a midnight east of UTC+12 as the day before. With the raw instant, a device
+  midnight in the item's own zone — mostly: after Aperio's own write of an
+  Outlook item (UTC midnights, no zone) Exchange keeps the old zone's
+  midnights and labels them UTC (live round 3). The read samples the day
+  twelve hours into it, in the zone Exchange names — the start zone, read as
+  the series' zone is, UTC for a series made without one (`all_day_zone`,
+  decision 217) — which holds for any offset the zone has and for a label up
+  to twelve hours off. It re-anchors the start, the series' exceptions and
+  the override id's slot to this device's local midnight of that day
+  (`all_day_anchor`, `override_slot`, decision 215). Where Exchange names no
+  zone the adapter can read, the sample is taken in UTC, which reads a
+  midnight east of UTC+12 as the day before. An exception's own copy, which
+  an update compares with, is read in its series' zone like its row. With
+  the raw instant, a device
   more than twelve hours from the mailbox's zone read the neighbouring day: the
   views hid it, and the reminders, which honour single changes since decision
   214, silenced it. Writing finds the exception by either spelling

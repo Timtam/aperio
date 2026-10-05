@@ -275,21 +275,27 @@ pub fn plan_repairs(
 /// half this was ported from carries the same limit, written down the same
 /// way.
 ///
-/// **The day is the UTC day, which is not always the day the user sees.** For
-/// a reader east of UTC, local midnight on the 10th is the 9th at 22:00Z, so
-/// this compares "the 9th". That is correct here because it is used as a KEY,
-/// not as a date: both sides of the comparison are derived from stored
-/// instants the same way, so they agree. Deriving the calendar day the user
-/// sees would need the device's timezone, which the core may never read.
+/// **The day is read 13:45 into the stored instant, without a zone.** A local
+/// midnight in any zone in (−10:15, +13:45] gets its own date that way, so a
+/// row signed on one device and read on another, or after the device moved,
+/// finds its day; outside the window a device's rows and events still agree,
+/// one day off on both sides. Deriving the calendar day the user sees exactly
+/// would need the device's timezone, which the core may never read.
 fn starts_the_same(ev: &Event, wanted: DateTime<Utc>) -> bool {
     if ev.all_day {
         // An all-day start is a local midnight, and a device in another zone
         // writes the same day as another instant: Berlin's 2 June is 22:00 UTC
-        // on 1 June, New York's 04:00 UTC on 2 June. Both name their day 12
-        // hours into it, for any zone in (−12h, +12h] (decision 216); read by
-        // its UTC date, Berlin's named 1 June, and a row signed in Berlin
-        // missed its day in New York or found the day before.
-        let day = |at: DateTime<Utc>| (at + chrono::Duration::hours(12)).date_naive();
+        // on 1 June, New York's 04:00 UTC on 2 June. Both name their day 13:45
+        // into it, as does a midnight of any zone in (−10:15, +13:45] (decision
+        // 217) — New Zealand's and the Chatham Islands' both offsets, Hawaii
+        // and Adak, London's both, so no zone that keeps summer time sees its
+        // last winter day and first summer day under one key. Read by its UTC
+        // date, Berlin's named 1 June, and a row signed in Berlin missed its
+        // day in New York or found the day before; read 12 hours in, New
+        // Zealand's summer named the day before. Outside the window (Niue,
+        // Pago Pago, Kiritimati, none with summer time) a device's own rows
+        // still agree with its events, one day off on both sides.
+        let day = |at: DateTime<Utc>| (at + chrono::Duration::minutes(13 * 60 + 45)).date_naive();
         day(ev.start) == day(wanted)
     } else {
         ev.start == wanted
@@ -756,6 +762,72 @@ mod tests {
                 to: ours.into(),
             }],
         );
+    }
+
+    /// A row signed in New Zealand's summer (+13) and read in Berlin: 15
+    /// January there is 11:00 UTC on the 14th, Berlin's 22:00 UTC on the 14th.
+    /// Read 12 hours in, the row named the 14th and moved to the day before.
+    #[test]
+    fn an_all_day_row_signed_in_new_zealand_s_summer_finds_its_day() {
+        let auckland: DateTime<Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
+        let berlin_14th: DateTime<Utc> = "2027-01-13T23:00:00Z".parse().unwrap();
+        let berlin_15th: DateTime<Utc> = "2027-01-14T23:00:00Z".parse().unwrap();
+        let mut events = vec![
+            event("day-14", "cal", "Homeoffice", berlin_14th),
+            event("day-15", "cal", "Homeoffice", berlin_15th),
+        ];
+        for ev in &mut events {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row("old", "cal", "Homeoffice", auckland)],
+                "cal",
+                &events,
+                (berlin_14th, berlin_15th),
+            ),
+            vec![Repair::Repoint {
+                event_id: "old".into(),
+                to: "day-15".into(),
+            }],
+        );
+    }
+
+    /// New Zealand's summer time begins on Sunday 27 September 2026: Sunday's
+    /// midnight is 12:00 UTC on the 26th (+12), Monday's 11:00 UTC on the 27th
+    /// (+13). Read 12 hours in, both were the 27th, and a row could not tell
+    /// them apart; each keeps its own day.
+    #[test]
+    fn the_first_summer_day_is_not_the_last_winter_day() {
+        let sunday: DateTime<Utc> = "2026-09-26T12:00:00Z".parse().unwrap();
+        let monday: DateTime<Utc> = "2026-09-27T11:00:00Z".parse().unwrap();
+        let mut both = vec![
+            event("sunday", "cal", "Urlaub", sunday),
+            event("monday", "cal", "Urlaub", monday),
+        ];
+        for ev in &mut both {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row("old", "cal", "Urlaub", monday)],
+                "cal",
+                &both,
+                (sunday, monday),
+            ),
+            vec![Repair::Repoint {
+                event_id: "old".into(),
+                to: "monday".into(),
+            }],
+        );
+        // Sunday alone is not Monday's.
+        assert!(plan_repairs(
+            &[row("old", "cal", "Urlaub", monday)],
+            "cal",
+            &both[..1],
+            (sunday, monday),
+        )
+        .is_empty());
     }
 
     #[test]

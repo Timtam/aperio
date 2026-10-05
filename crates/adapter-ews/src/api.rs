@@ -1159,6 +1159,7 @@ async fn resolve_write_target(
             kind: decoded.kind,
             item_id: decoded.item_id.clone(),
             change_key: decoded.change_key.clone(),
+            series_zone: None,
         });
     }
     let envelope = get_recurring_master(&decoded.item_id, decoded.change_key.as_deref());
@@ -1168,6 +1169,7 @@ async fn resolve_write_target(
         kind: EventIdKind::RecurringMaster,
         item_id: master.id,
         change_key: master.change_key,
+        series_zone: None,
     })
 }
 
@@ -1203,13 +1205,13 @@ async fn resolve_override_target(
     let occurrence = items
         .iter()
         .flat_map(|item| item.modified_occurrences.iter().map(move |ov| (item, ov)))
-        .find(|(item, ov)| crate::mapping::names_override(item, ov, original_start))
-        .map(|(_, ov)| ov);
+        .find(|(item, ov)| crate::mapping::names_override(item, ov, original_start));
     match occurrence {
-        Some(ov) => Ok(WriteTarget {
+        Some((master, ov)) => Ok(WriteTarget {
             kind: EventIdKind::Exception,
             item_id: ov.item_id.clone(),
             change_key: ov.change_key.clone(),
+            series_zone: Some((master.start_time_zone.clone(), master.end_time_zone.clone())),
         }),
         // Refused, not widened. The occurrence is gone from the series — someone
         // deleted it, or the series was rewritten — and the only other thing
@@ -1252,9 +1254,19 @@ async fn read_before(
     };
     let xml = client.post_soap(body).await?;
     let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
-    let Some(item) = items.into_iter().find(|it| it.item_id == target.item_id) else {
+    let Some(mut item) = items.into_iter().find(|it| it.item_id == target.item_id) else {
         return Ok(None);
     };
+    // An exception's row is read in its series' zone (`override_event`), and
+    // the exception shape asks for no zone of its own: read here without one,
+    // an all-day day the series' zone names otherwise would count as moved,
+    // and a title-only edit would write the slot back (decision 217).
+    if let Some((start_zone, end_zone)) = &target.series_zone {
+        if item.start_time_zone.is_none() && item.end_time_zone.is_none() {
+            item.start_time_zone = start_zone.clone();
+            item.end_time_zone = end_zone.clone();
+        }
+    }
     Ok(Some(crate::mapping::to_event(item, calendar_id)?))
 }
 
@@ -1265,6 +1277,9 @@ struct WriteTarget {
     kind: EventIdKind,
     item_id: String,
     change_key: Option<String>,
+    /// For an exception, its series' StartTimeZone and EndTimeZone: the
+    /// zone its all-day day is read in, as its row is (`override_event`).
+    series_zone: Option<(Option<String>, Option<String>)>,
 }
 
 /// Rename a calendar folder via `UpdateFolder` + `folder:DisplayName`.
@@ -2552,6 +2567,136 @@ mod tests {
         );
         assert_eq!(updated.id, override_id, "the override keeps its id");
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
+    }
+
+    /// Decision 217: an all-day exception's row is read in its series' zone,
+    /// and so is the copy the update compares with — the exception shape asks
+    /// for no zone of its own. Read without one, New Zealand's summer named the
+    /// day before, the slot counted as moved, and renaming the occurrence wrote
+    /// its slot back.
+    #[tokio::test]
+    async fn an_all_day_exception_renamed_in_auckland_keeps_its_slot() {
+        use std::sync::{Arc, Mutex};
+        let auckland = chrono_tz::Pacific::Auckland;
+        let mut server = Server::new_async().await;
+        let series = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:StartTimeZone Id="New Zealand Standard Time"/>
+        <t:EndTimeZone Id="New Zealand Standard Time"/>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2027-01-14T11:00:00Z</t:Start>
+          <t:End>2027-01-15T11:00:00Z</t:End>
+          <t:OriginalStart>2027-01-14T11:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let occurrence = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+        <t:Subject>Old title</t:Subject>
+        <t:Start>2027-01-14T11:00:00Z</t:Start>
+        <t:End>2027-01-15T11:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:OriginalStart>2027-01-14T11:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let updated_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="EXC-ID" ChangeKey="ECK-V2"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _any = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("UpdateItem") {
+                    updated_body
+                } else if body.contains(r#"Id="EXC-ID""#) {
+                    occurrence
+                } else {
+                    series
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+
+        // The row as the read gives it: the local midnights of 15 and 16 January.
+        let raw: chrono::DateTime<chrono::Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
+        let start = crate::mapping::all_day_anchor(raw, Some(auckland));
+        let end =
+            crate::mapping::all_day_anchor("2027-01-15T11:00:00Z".parse().unwrap(), Some(auckland));
+        let edit = Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", start),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "New title".into(),
+            description: None,
+            location: None,
+            start,
+            end,
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            etag: Some("ECK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|body| body.contains("UpdateItem"))
+            .expect("an update");
+        assert!(update.contains("item:Subject"), "{update}");
+        assert!(
+            !update.contains("calendar:Start"),
+            "the slot stays: {update}"
+        );
     }
 
     /// Answers an exception update with `update_code` and records every
