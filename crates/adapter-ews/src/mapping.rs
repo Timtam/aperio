@@ -2532,8 +2532,11 @@ pub(crate) fn override_slot(master_item: &ParsedItem, ov: &ModifiedOccurrence) -
 }
 
 /// Whether an override id's slot names this single change: as the id is minted
-/// now ([`override_slot`]), or raw, as an id minted before decision 215 named
-/// it and a row cached under it may still carry it.
+/// now ([`override_slot`]), or raw, as an id minted before decision 215 names
+/// it. Exact on purpose: an all-day slot is the local midnight of the device
+/// that read it, and a device that moves to another zone reads the folder
+/// again ([`crate::EwsAdapter`]'s events token names the zone), so its ids
+/// follow. A slot from another zone is refused, never read as a guessed day.
 pub(crate) fn names_override(
     master_item: &ParsedItem,
     ov: &ModifiedOccurrence,

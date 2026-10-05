@@ -13,6 +13,8 @@ async-trait.workspace = true
 cal-core.workspace = true
 chrono.workspace = true
 futures.workspace = true
+# The device's zone names what an all-day slot was read on (events token).
+iana-time-zone.workspace = true
 rrule.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true

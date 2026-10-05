@@ -55,7 +55,12 @@ The endpoint is discovered or user-supplied.
   more than twelve hours from the mailbox's zone read the neighbouring day: the
   views hid it, and the reminders, which honour single changes since decision
   214, silenced it. Writing finds the exception by either spelling
-  (`names_override`), so an id minted before still resolves.
+  (`names_override`), so an id minted before still resolves. These slots are
+  this device's local midnights, so the events token names the device's zone
+  as well as the zone translation: a device that moved reads the folder again,
+  and its ids follow (decision 216). Deleting one day of an all-day series
+  reads the server's slot the same way before it compares, so a device far
+  from the mailbox's zone finds the day it names.
 - **Exceptions keep their rule field.** Editing one changed occurrence writes
   to the exception's own item, which the override id finds from the series
   head on every write. That update never sends `DeleteItemField

@@ -2481,8 +2481,15 @@ Siehe DESIGN §4.2.
       den Nachbartag. Der Adapter verankert den Platz jetzt wie die Ausnahme
       der Serie (`override_slot`, lokale Mitternacht des Tages), Schreiben
       findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
-      einmal neu; eine Farbe an einer ganztägigen Exchange-Einzeländerung geht
-      dabei einmal verloren. ↻ im Test.
+      einmal neu. Die Folgen (216): Weil diese Plätze von der Zone des Geräts
+      abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
+      Token nennt die Zone); einen Tag einer ganztägigen Serie zu löschen
+      liest den Platz des Servers wie das Lesen (vorher scheiterte das über
+      sechs Stunden Abstand zum Postfach, auch bei normalen Vorkommen); eine
+      Farbe oder ein Meeting an einer Einzeländerung wandert bei einer neuen
+      Kennung zu ihr, nie auf die ganze Serie (`plan_repairs`, hilft auch
+      CalDAV und Google); ohne eigenen Ton klingelt eine Einzeländerung mit
+      dem der Serie. ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch

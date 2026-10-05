@@ -218,13 +218,28 @@ pub fn plan_repairs(
         if wanted_start < lower || wanted_start > upper {
             continue;
         }
-        // Collapse to the series before asking whether the answer is unique: a
-        // master and a provider-sent override of one of its occurrences are
-        // two rows for ONE appointment.
+        // A row bound to ONE occurrence follows that occurrence, never the
+        // series (decision 216): its override was minted again under another
+        // id — a slot read in another zone, a series whose own id moved on —
+        // and the series is a different appointment, which taking the row
+        // would recolour whole. So only another override can be its
+        // occurrence now, by its own id. Any other row collapses to the series
+        // before asking whether the answer is unique: a master and a
+        // provider-sent override of one of its occurrences are two rows for
+        // ONE appointment.
+        let occurrence_bound = row.event_id.contains(OVERRIDE_ID_MARKER);
         let mut candidates: Vec<&str> = events
             .iter()
             .filter(|ev| normalize(&ev.title) == wanted_title && starts_the_same(ev, wanted_start))
-            .map(|ev| series_master_id(&ev.id))
+            .filter_map(|ev| {
+                if !occurrence_bound {
+                    Some(series_master_id(&ev.id))
+                } else if ev.id.contains(OVERRIDE_ID_MARKER) {
+                    Some(ev.id.as_str())
+                } else {
+                    None
+                }
+            })
             .collect();
         candidates.sort_unstable();
         candidates.dedup();
@@ -661,6 +676,39 @@ mod tests {
             &[row(occurrence, "cal", "Standup", start)],
             "cal",
             &[event(occurrence, "cal", "Standup", start)],
+            week_of(1),
+        )
+        .is_empty());
+    }
+
+    /// Decision 216: an occurrence's override minted again under another id —
+    /// its slot read in another zone, or its series' own id moved on — takes
+    /// the row along to the new override. It is never promoted to the series,
+    /// which would colour every other occurrence; and where no override is the
+    /// occurrence now, the row stays where it is.
+    #[test]
+    fn a_row_bound_to_an_occurrence_follows_its_reminted_override() {
+        let start = at(2);
+        let old = "M:ID|CK1::rid::2026-06-01T22:00:00+00:00";
+        let reminted = "M:ID|CK1::rid::2026-06-01T23:00:00+00:00";
+        let series = event("M:ID|CK1", "cal", "Standup", start);
+        assert_eq!(
+            plan_repairs(
+                &[row(old, "cal", "Standup", start)],
+                "cal",
+                &[series.clone(), event(reminted, "cal", "Standup", start)],
+                week_of(1),
+            ),
+            vec![Repair::Repoint {
+                event_id: old.into(),
+                to: reminted.into(),
+            }],
+        );
+        // Only the series answers: the row is left alone, not promoted.
+        assert!(plan_repairs(
+            &[row(old, "cal", "Standup", start)],
+            "cal",
+            &[series],
             week_of(1),
         )
         .is_empty());

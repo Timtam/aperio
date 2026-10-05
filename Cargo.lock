@@ -105,6 +105,7 @@ dependencies = [
  "cal-core",
  "chrono",
  "futures",
+ "iana-time-zone",
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",

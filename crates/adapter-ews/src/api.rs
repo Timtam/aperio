@@ -1083,11 +1083,28 @@ pub async fn delete_series_occurrence(
         })?;
 
     // 3. Verify the candidate (and ±1) against the server; delete the occurrence
-    //    whose real Start matches `target`, else abort.
+    //    whose real Start matches `target`, else abort. On an all-day series the
+    //    server's slot is midnight in the mailbox's zone, and `target` the local
+    //    midnight of that day — an occurrence the views expanded, or an override
+    //    id (`override_slot`) — or, from an id minted before decision 215, the
+    //    raw instant again. So the server's slot is also read as the local
+    //    midnight of its day, as the read anchors it (decision 216); a device
+    //    more than the tolerance from the mailbox's zone could not delete a day
+    //    of an all-day series otherwise. `target` itself is never re-read: it is
+    //    exact for this device, and anchoring it would move a midnight east of
+    //    UTC+12 onto the day before.
     let mut best: Option<(u32, i64)> = None;
     for index in candidate_indices(candidate) {
         if let Some(s) = occurrence_start(client, master_id, change_key, index).await? {
-            let delta = (s - target).num_seconds().abs();
+            let as_read = if master.is_all_day {
+                crate::mapping::all_day_local_anchor(s)
+            } else {
+                s
+            };
+            let delta = (s - target)
+                .num_seconds()
+                .abs()
+                .min((as_read - target).num_seconds().abs());
             if best.map(|(_, bd)| delta < bd).unwrap_or(true) {
                 best = Some((index, delta));
             }
@@ -3522,6 +3539,101 @@ mod tests {
     /// where it now starts. Matched by its Start it was never found, the delete
     /// aborted, and a move that had already created the new event left the
     /// exception behind as a duplicate.
+    /// Decision 216: an all-day series' slots are the mailbox's midnights on
+    /// the server (here Honolulu's, 10:00 UTC) and the device's local midnights
+    /// in Aperio — an expanded occurrence, or an override id. The server's slot
+    /// is read as the read anchors it, so a device far from the mailbox's zone
+    /// still deletes the day it names, and only that one.
+    #[tokio::test]
+    async fn an_all_day_day_is_found_far_from_the_mailboxs_zone() {
+        let mut server = Server::new_async().await;
+        let _master = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex(r#"ItemId Id="MASTER""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="CK"/>
+        <t:Subject>Weekly all-day</t:Subject>
+        <t:Start>2026-07-06T10:00:00Z</t:Start>
+        <t:End>2026-07-07T10:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:IsRecurring>true</t:IsRecurring>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:WeeklyRecurrence>
+            <t:Interval>1</t:Interval>
+            <t:DaysOfWeek>Monday</t:DaysOfWeek>
+          </t:WeeklyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-07-06</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .create_async()
+            .await;
+        let mut probes = Vec::new();
+        for (idx, iso) in [
+            (1, "2026-07-06T10:00:00Z"),
+            (2, "2026-07-13T10:00:00Z"),
+            (3, "2026-07-20T10:00:00Z"),
+            (4, "2026-07-27T10:00:00Z"),
+        ] {
+            probes.push(
+                server
+                    .mock("POST", "/")
+                    .match_body(mockito::Matcher::AllOf(vec![
+                        mockito::Matcher::Regex("m:GetItem".into()),
+                        mockito::Matcher::Regex(format!(r#"InstanceIndex="{idx}""#)),
+                    ]))
+                    .with_status(200)
+                    .with_body(occurrence_get_response(iso))
+                    .create_async()
+                    .await,
+            );
+        }
+        let del = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="3""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        // The day as this device names it: its local midnight of July 20.
+        let day = crate::mapping::all_day_local_anchor("2026-07-20T10:00:00Z".parse().unwrap());
+        delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
+            .await
+            .unwrap();
+        del.assert_async().await;
+    }
+
     #[tokio::test]
     async fn delete_series_occurrence_finds_an_exception_moved_far_by_its_slot() {
         let mut server = Server::new_async().await;

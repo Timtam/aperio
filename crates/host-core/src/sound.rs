@@ -125,14 +125,24 @@ impl SoundPrefs {
     }
 
     /// The sound an item resolves to BEFORE any per-reminder override —
-    /// item ?? container ?? global ?? System.
+    /// item ?? its series ?? container ?? global ?? System.
+    ///
+    /// A single change of a series (`{series}::rid::{slot}`) rings with the
+    /// series' sound when it has none of its own (decision 216): the desktop
+    /// keys an event's sound by its series, and an occurrence's own key names
+    /// a slot that is minted again when the occurrence is read in another
+    /// zone, so it can stop matching while the series' still does.
     pub fn item_fallback(
         &self,
         item_id: &str,
         container_kind: ContainerKind,
         container_id: &str,
     ) -> SoundConfig {
-        if let Some(s) = self.by_item.get(item_id) {
+        if let Some(s) = self
+            .by_item
+            .get(item_id)
+            .or_else(|| self.by_item.get(cal_core::series_master_id(item_id)))
+        {
             return s.clone();
         }
         let by_container = match container_kind {
@@ -173,6 +183,21 @@ mod tests {
         let got = prefs.resolve(None, "ev-1", ContainerKind::Calendar, "cal-1");
         assert_eq!(got, SoundConfig::default());
         assert_eq!(got.source, SoundSource::System);
+    }
+
+    /// Decision 216: a single change without a sound of its own rings with its
+    /// series' — the key the desktop writes — and its own still wins.
+    #[test]
+    fn a_single_change_rings_with_its_series_sound() {
+        let mut prefs = SoundPrefs::default();
+        prefs.insert_key("sound.calendar.cal-1", custom("cal"));
+        prefs.insert_key("sound.item.M:ID|CK", custom("series"));
+        let changed = "M:ID|CK::rid::2026-06-01T22:00:00+00:00";
+        let got = prefs.resolve(None, changed, ContainerKind::Calendar, "cal-1");
+        assert_eq!(got, custom("series"));
+        prefs.insert_key(&format!("sound.item.{changed}"), custom("own"));
+        let got = prefs.resolve(None, changed, ContainerKind::Calendar, "cal-1");
+        assert_eq!(got, custom("own"));
     }
 
     #[test]

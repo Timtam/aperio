@@ -546,13 +546,27 @@ impl EwsAdapter {
     }
 
     /// The token the host keeps for an EWS events folder:
-    /// `zt-{translation}:{cookie}` — the `SyncFolderItems` cookie, prefixed
-    /// with the zone translation ([`windows_tz::translation_id`]) the emitted
-    /// events were made with. The host stores a token only together with the
-    /// change set it came with, so a token naming this build's translation
-    /// proves the host holds events translated by it.
+    /// `zt-{translation}~{device zone}:{cookie}` — the `SyncFolderItems`
+    /// cookie, prefixed with what the emitted events were made with
+    /// ([`Self::emitted_with`]). The host stores a token only together with
+    /// the change set it came with, so a token naming this build's translation
+    /// and this device's zone proves the host holds events made by them.
     fn events_token(cookie: Option<&str>) -> Option<String> {
-        cookie.map(|cookie| format!("zt-{}:{cookie}", windows_tz::translation_id()))
+        cookie.map(|cookie| format!("zt-{}:{cookie}", Self::emitted_with()))
+    }
+
+    /// What the emitted events depend on beyond Exchange's data: the zone
+    /// translation ([`windows_tz::translation_id`]), and the device's zone. An
+    /// all-day series' start, its exceptions and the slot in its single
+    /// changes' ids are the device's local midnights (`all_day_local_anchor`,
+    /// decision 215), so a device that moved to another zone reads the folder
+    /// again rather than keep ids no write finds any more (decision 216).
+    fn emitted_with() -> String {
+        format!(
+            "{}~{}",
+            windows_tz::translation_id(),
+            iana_time_zone::get_timezone().unwrap_or_default()
+        )
     }
 
     /// A host token split into the zone translation it names, if any, and the
@@ -611,8 +625,9 @@ impl EwsAdapter {
         let adapter_warm = prior.sync_state.is_some();
         let mut force_full = since_token.is_none() || !adapter_warm;
         // The host's snapshot holds events translated with the zone
-        // translation its token names. A token from another translation — an
-        // older build's, or one without the prefix — gets every cached item
+        // translation, and read on the device zone, its token names. A token
+        // from another translation or zone — an older build's, one without the
+        // prefix, or one from before the device moved — gets every cached item
         // emitted again from what Exchange sent, so no view keeps a zone an
         // old table read, and no edit writes that zone back to Exchange under
         // a new id. Nothing is re-drained: the cookie inside the token still
@@ -625,7 +640,7 @@ impl EwsAdapter {
             }
             None => (None, None),
         };
-        let translation_current = token_translation == Some(windows_tz::translation_id().as_str());
+        let translation_current = token_translation == Some(Self::emitted_with().as_str());
         let seed = match cookie {
             Some(tok) if adapter_warm => SyncedFolderState {
                 sync_state: Some(tok.to_string()),
@@ -1997,6 +2012,17 @@ mod delta_read_tests {
             .expect(1)
             .create_async()
             .await;
+        let _fourth = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("COOKIE-6".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-7", ""))
+            .expect(1)
+            .create_async()
+            .await;
         let _enrich = server
             .mock("POST", "/")
             .match_body(Matcher::Regex("GetItem".into()))
@@ -2073,6 +2099,30 @@ mod delta_read_tests {
             "another translation's token is a full resync"
         );
         assert_eq!(titles(&third), ["Alpha v2", "Bravo"]);
+
+        // Decision 216: the token names the device's zone too ...
+        let zone = iana_time_zone::get_timezone().expect("the test machine names its zone");
+        assert!(
+            second
+                .new_token
+                .as_deref()
+                .is_some_and(|token| token.contains(&format!("~{zone}:"))),
+            "{:?}",
+            second.new_token
+        );
+        // ... and one with this translation, but read on another device zone —
+        // the device moved, and its all-day slots are other local midnights
+        // now — emits everything again, so the ids follow.
+        let moved = format!("zt-{}~Not/This_Zone:COOKIE-6", windows_tz::translation_id());
+        let fourth = adapter
+            .get_events_delta("FA|FCK", range(), Some(&moved))
+            .await
+            .expect("fourth delta");
+        assert!(
+            fourth.full_resync,
+            "a token read on another device zone is a full resync"
+        );
+        assert_eq!(titles(&fourth), ["Alpha v2", "Bravo"]);
     }
 
     /// State filled by an older item parser lacks fields the read rule needs
