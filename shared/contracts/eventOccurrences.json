@@ -2788,8 +2788,7 @@
     },
     {
       "name": "a-moved-occurrence-stands-in-for-its-slot",
-      "note": "The override’s id names the series and the slot it replaces. The views drop the master’s slot and show the override at its new time. The reminders expand each event on its own and apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The override’s id names the series and the slot it replaces. The views drop the master’s slot and show the override at its new time, and so do the reminders since decision 214: every override takes its slot out of its series before it expands. Before, the reminders fired at the master’s slot as well.",
       "input": {
         "events": [
           {
@@ -2826,30 +2825,11 @@
           "event": 0,
           "start": "2026-06-02T09:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T14:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
       ]
     },
     {
       "name": "a-cancelled-occurrence-removes-its-slot",
-      "note": "The views drop the master’s slot and the cancelled override both. The reminders skip the cancelled override and still fire at the master’s slot.",
-      "surfacesDiffer": true,
+      "note": "The views drop the master’s slot and the cancelled override both. The reminders skip the cancelled override and, since decision 214, take its slot out of the series too, so a deleted occurrence no longer rings. On Google every deleted occurrence is such a row.",
       "input": {
         "events": [
           {
@@ -2883,26 +2863,11 @@
           "event": 0,
           "start": "2026-06-02T09:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
       ]
     },
     {
       "name": "a-moved-occurrence-of-a-zoned-series-after-the-change",
-      "note": "Monday 09:00 Europe/Berlin from summer; CalDAV names the slot of the November 2 occurrence by its winter instant. The views drop that slot and show the override at 12:00 UTC. The reminders apply no override: the November 2 slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "Monday 09:00 Europe/Berlin from summer; CalDAV names the slot of the November 2 occurrence by its winter instant. The views drop that slot and show the override at 12:00 UTC, and so do the reminders since decision 214.",
       "input": {
         "events": [
           {
@@ -2939,24 +2904,6 @@
         {
           "event": 1,
           "start": "2026-11-02T12:00:00Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-10-19T07:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-10-26T08:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-11-02T08:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-11-02T12:00:00.000Z"
         }
       ]
     },
@@ -3031,8 +2978,7 @@
     },
     {
       "name": "an-override-slot-in-another-spelling",
-      "note": "The slot is written with an offset instead of Z and matched as an instant. The reminders apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The slot is written with an offset instead of Z and matched as an instant, by the views and, since decision 214, by the reminders.",
       "input": {
         "events": [
           {
@@ -3064,24 +3010,6 @@
         {
           "event": 1,
           "start": "2026-05-26T14:00:00Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T14:00:00.000Z"
         },
         {
           "event": 0,
@@ -3178,8 +3106,7 @@
     },
     {
       "name": "an-override-listed-before-its-series",
-      "note": "The order of the list does not matter for which slot is dropped. The reminders apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The order of the list does not matter for which slot is dropped, for the views or, since decision 214, the reminders.",
       "input": {
         "events": [
           {
@@ -3211,24 +3138,6 @@
         {
           "event": 0,
           "start": "2026-05-26T14:00:00Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 1,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T14:00:00.000Z"
         },
         {
           "event": 1,

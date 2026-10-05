@@ -1945,12 +1945,13 @@ Siehe DESIGN §4.2.
   Leerzeichen (host-core trimmt, Intl nicht) oder in Kleinbuchstaben (Intl
   nimmt ihn, chrono-tz nicht); eine Zeitumstellung um Mitternacht (Santiago:
   die Ansichten schieben 00:30 auf 01:30, die Erinnerungen lassen den Tag aus
-  und enden einen Tag später); Einzeländerungen, auch an einer zonierten Serie
-  nach der Umstellung (die Erinnerungen wenden keine an, der alte Platz
-  erinnert weiter); eine abgesagte Serie (die Erinnerungen überspringen sie,
+  und enden einen Tag später); eine abgesagte Serie (die Erinnerungen überspringen sie,
   gewollt); und die Kappe der Erinnerungen bei 500 Vorkommen. Auf beiden Seiten
   gleich und gepinnt: die Sommerzeit-Lücke (vorwärts um die Lückenlänge), die
-  Überlappung (die frühere Lesung), zonierte Serien an den Bereichsrändern, ein
+  Überlappung (die frühere Lesung), Einzeländerungen, abgesagt oder verschoben,
+  auch an einer zonierten Serie nach der Umstellung (seit 214 nehmen sie auch
+  in den Erinnerungen ihren Platz aus der Serie), zonierte Serien an den
+  Bereichsrändern, ein
   zoniertes UNTIL mit `Z` über eine Umstellung, WKST, ganztägige Serien ohne
   Zone (steppen in UTC, nach der Umstellung um 23:00 am Vortag), das
   `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behielt
@@ -2458,6 +2459,18 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - ✅ **Abgesagte und verschobene Einzeltermine klingeln richtig** (PR 7a,
+      209, 214): Die Erinnerungen klappten jede Serie für sich aus und wandten
+      ihre Einzeländerungen nicht an. Ein abgesagtes Vorkommen klingelte
+      weiter (bei Google ist jede Löschung so eine Zeile; mit PR 7 hätte das
+      jeden gelöschten Termin eines neuen Serienteils getroffen), ein
+      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV,
+      Google und Exchange. Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
+      Platz aus der Serie (`override_slots`), wie die Ansichten
+      (`expandAll`): genau bei Uhrzeit, nach dem Tag bei ganztägig; ein
+      Platz, der sich nicht lesen lässt, bleibt. Fünf Vertragszeilen in
+      `eventOccurrences.json` sind jetzt einig; die ganze abgesagte Serie
+      bleibt still (gewollt). Desktop und Handy gleich (host-core). ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
