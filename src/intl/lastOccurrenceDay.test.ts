@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { lastOccurrenceDayKey } from '@aperio/shared';
+import { expandEvent, lastOccurrenceDayKey } from '@aperio/shared';
 
 /**
  * Decision 85a: the day a bounded series really ends on, for the sentence
@@ -41,22 +41,53 @@ describe('lastOccurrenceDayKey', () => {
     ).toBe('2027-03-29');
   });
 
-  it('answers with the occurrence the calendar shows, offset and all', () => {
-    // The sentence is about what the user sees. A zoned rule is expanded in
-    // wall-clock space while its UNTIL stays a real instant, so an EVENING
-    // series ends one occurrence earlier than the bound's own day suggests —
-    // in the calendar and in this sentence alike. The offset itself is the
-    // expander's, and it is noted in TODO; a sentence that disagreed with the
-    // grid would be the worse of the two.
-    expect(
-      lastOccurrenceDayKey(
-        event(
-          'FREQ=WEEKLY;BYDAY=MO;UNTIL=20270329T215959Z',
-          '2026-06-15T20:00:00.000Z',
-          'Europe/Berlin',
-        ),
-      ),
-    ).toBe('2027-03-22');
+  it('answers with the occurrence the calendar shows, an evening one included', () => {
+    // An evening series in Berlin: 22:00 there on Monday 29 March is 20:00
+    // UTC, within the bound. The views shift the bound into the series' wall
+    // time before they compare, and the sentence reads the same rule; read
+    // against the bound's UTC digits, it named the Monday before.
+    const series = event(
+      'FREQ=WEEKLY;BYDAY=MO;UNTIL=20270329T215959Z',
+      '2026-06-15T20:00:00.000Z',
+      'Europe/Berlin',
+    );
+    expect(lastOccurrenceDayKey(series)).toBe('2027-03-29');
+    const shown = expandEvent(series, {
+      start: new Date('2027-03-01T00:00:00Z'),
+      end: new Date('2027-04-30T00:00:00Z'),
+    }).map((o) => o.start);
+    expect(shown.at(-1)).toBe('2027-03-29T20:00:00.000Z');
+  });
+
+  it('names the day a series of days ends on, however its bound is spelled (201)', () => {
+    // A series of New York days, read on a device in Berlin: each begins at
+    // 06:00 there. The date bound covers the whole of 6 May, as the views
+    // show it; read as its midnight, it named the 5th.
+    const real = new Intl.DateTimeFormat().resolvedOptions();
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ ...real, timeZone: 'Europe/Berlin' });
+    try {
+      for (const rrule of [
+        'FREQ=DAILY;UNTIL=20260506',
+        'FREQ=DAILY;UNTIL=20260506T235959Z',
+        'FREQ=DAILY;UNTIL=20260506T120000',
+      ]) {
+        const series = {
+          ...event(rrule, '2026-05-04T04:00:00.000Z'),
+          end: '2026-05-05T04:00:00.000Z',
+          all_day: true,
+        };
+        expect(lastOccurrenceDayKey(series), rrule).toBe('2026-05-06');
+        const shown = expandEvent(series, {
+          start: new Date('2026-04-01T00:00:00Z'),
+          end: new Date('2026-06-01T00:00:00Z'),
+        }).map((o) => o.start);
+        expect(shown.at(-1), rrule).toBe('2026-05-06T04:00:00.000Z');
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('says nothing where a day would be a guess', () => {

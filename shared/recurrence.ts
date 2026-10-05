@@ -448,8 +448,6 @@ function wallToReal(wall: Date, tzid: string): Date {
   return new Date(Math.max(candBefore, candAfter)); // gap → round forward
 }
 
-/** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with
- *  the wall-clock iteration above; other UNTIL forms are left untouched. */
 /**
  * The rule with its UNTIL as the wall-clock bound it is iterated against.
  *
@@ -474,6 +472,8 @@ function untilOnClock(rruleBody: string, tzid: string, byDay: boolean): string {
   );
 }
 
+/** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with
+ *  the wall-clock iteration above; other UNTIL forms are left untouched. */
 function shiftUntilToWall(rruleBody: string, tzid: string): string {
   return rruleBody.replace(
     /UNTIL=(\d{8})T(\d{6})Z/i,
@@ -570,9 +570,13 @@ export function moveSeriesInstant(
  * `from` to `to`, written `YYYYMMDDTHHMMSSZ` as the rule stores it; `undefined`
  * when the rule has no UTC date-time `UNTIL`.
  *
- * The bound is an instant. Moved by whole UTC days it slides an hour against
- * the occurrences across a clock change, and left in place while the time of
- * day changes, the last occurrence drops past it or a cut one comes back.
+ * A timed series' bound is an instant. Moved by whole UTC days it slides an
+ * hour against the occurrences across a clock change, and left in place while
+ * the time of day changes, the last occurrence drops past it or a cut one
+ * comes back. A series of days reads its bound by its digits, on its day clock
+ * (decision 201), so the digits move as its days do: moved as an instant
+ * across a clock change, they landed an hour into the next day, and the
+ * series gained one.
  */
 export function movedSeriesUntil(
   rrule: string,
@@ -588,8 +592,10 @@ export function movedSeriesUntil(
   if (Number.isNaN(until)) return undefined;
   const zone = clockZone(allDay, tzid);
   const wall = (ms: number) => (zone ? realToWall(new Date(ms), zone) : new Date(ms)).getTime();
-  const movedWall = wall(until) + wall(Date.parse(to)) - wall(Date.parse(from));
-  const moved = zone ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
+  const shift = wall(Date.parse(to)) - wall(Date.parse(from));
+  const byDigits = expansionClock(allDay, tzid) === 'device-days';
+  const movedWall = (byDigits ? until : wall(until)) + shift;
+  const moved = zone && !byDigits ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
   return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
@@ -1191,20 +1197,17 @@ export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
   const upper = body.toUpperCase();
   if (!upper.includes('UNTIL=') || upper.includes('COUNT=')) return null;
   if (/FREQ=(SECONDLY|MINUTELY|HOURLY)/.test(upper)) return null;
-  // The same clock the views expand this series on, an all-day series' days
-  // included (48a) — the sentence is about the day the calendar will show.
-  const tzid = expansionZoneFor(event);
-  const dtstart = new Date(event.start);
-  if (Number.isNaN(dtstart.getTime())) return null;
   try {
-    // Built exactly as `zonedOccurrences` builds it — a zoned rule is
-    // iterated in WALL-CLOCK space — so this answers with the occurrence the
-    // views show. rrule.js applies the rule's own `UNTIL` while it iterates,
-    // and a zoned rule's `UNTIL` is a real instant read in that wall-clock
-    // space: an evening occurrence on the bound's own day can fall outside it
-    // by the zone's offset. That is the expander's reading, in the calendar
-    // and here alike, and this sentence is about what the calendar shows.
-    const rule = buildRule(body, tzid ? realToWall(dtstart, tzid) : dtstart);
+    // The rule exactly as the views iterate it (`wallRule`): on the clock they
+    // expand this series on, an all-day series' days included (48a), in that
+    // clock's wall-clock time, with its bound on that clock — a timed series' instant
+    // shifted into it, a series of days' digits as written (201). Built from
+    // the stored bound instead, a date ended a series of days a day early
+    // where its days begin after this device's midnight, and an evening
+    // occurrence on a timed bound's own day fell out by the zone's offset,
+    // while the calendar showed both.
+    const rule = wallRule({ ...event, recurrence: { ...event.recurrence, rrule: body } })?.rule;
+    if (!rule) return null;
     const until = rule.options.until;
     if (!until) return null;
     const last = rule.before(until, true);

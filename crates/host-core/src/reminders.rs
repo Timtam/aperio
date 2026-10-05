@@ -1232,7 +1232,7 @@ fn until_on_day_clock(body: &str, device: &RruleTz) -> String {
                         .ok()
                         .and_then(|day| day.and_hms_opt(23, 59, 59))
                 });
-            match wall.and_then(|wall| device.from_local_datetime(&wall).earliest()) {
+            match wall.and_then(|wall| last_at_or_before(device, wall)) {
                 Some(at) => format!(
                     "{}={}",
                     key.trim(),
@@ -1243,6 +1243,27 @@ fn until_on_day_clock(body: &str, device: &RruleTz) -> String {
         })
         .collect::<Vec<_>>()
         .join(";")
+}
+
+/// The last instant whose wall time on `device` is `wall` or earlier, as the
+/// views compare a wall-clock bound: `wall` itself, at its later reading when
+/// the clock shows it twice — or, when a clock change skips it, the last
+/// second before the change, since every wall time after it is already later
+/// than the bound. Left unchanged there, the rrule crate refused the bound,
+/// and the series reminded only at its first occurrence; rounded forward like
+/// a start, it would have admitted the next day's midnight.
+fn last_at_or_before(device: &RruleTz, wall: NaiveDateTime) -> Option<DateTime<RruleTz>> {
+    let at = |w: NaiveDateTime| device.from_local_datetime(&w).latest();
+    // A gap is an hour or two, a whole day where a zone skipped one: back by
+    // the minute to a wall time that exists, then forward by the second to
+    // the last one before the gap.
+    let minutes = (0..=26 * 60).find(|m| at(wall - ChronoDuration::minutes(*m)).is_some())?;
+    let before = wall - ChronoDuration::minutes(minutes);
+    (0..60)
+        .rev()
+        .map(|s| before + ChronoDuration::seconds(s))
+        .filter(|w| *w <= wall)
+        .find_map(at)
 }
 
 /// Half a day: two instants this close name the same DAY of a series of days.
@@ -2889,6 +2910,44 @@ mod tests {
         assert_eq!(
             until_on_day_clock("FREQ=DAILY;COUNT=3", &berlin),
             "FREQ=DAILY;COUNT=3"
+        );
+    }
+
+    /// A clock change can skip the bound's wall time: Nuuk springs from 23:00
+    /// to midnight on 28 March 2026, so 23:59:59 that day does not exist. The
+    /// series still ends with the 28th, as the views show it — not with the
+    /// first occurrence, which is all a bound the crate refused left.
+    #[test]
+    fn an_all_day_series_ends_on_its_day_when_a_clock_change_skips_the_bound() {
+        let nuuk = RruleTz::Tz(chrono_tz::America::Nuuk);
+        // Thursday 26 March 2026 begins at 02:00 UTC in Nuuk.
+        let start = Utc.with_ymd_and_hms(2026, 3, 26, 2, 0, 0).unwrap();
+        let days: Vec<NaiveDate> = expand_occurrences(
+            start,
+            "FREQ=DAILY;UNTIL=20260328",
+            &[],
+            None,
+            true,
+            nuuk,
+            start,
+            Utc.with_ymd_and_hms(2026, 4, 30, 0, 0, 0).unwrap(),
+        )
+        .iter()
+        .map(|o| o.with_timezone(&chrono_tz::America::Nuuk).date_naive())
+        .collect();
+        assert_eq!(
+            days,
+            vec![
+                NaiveDate::from_ymd_opt(2026, 3, 26).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 3, 27).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 3, 28).unwrap(),
+            ]
+        );
+        // The last second before the change: 22:59:59 there, while the 29th
+        // begins at 01:00 UTC.
+        assert_eq!(
+            until_on_day_clock("FREQ=DAILY;UNTIL=20260328", &nuuk),
+            "FREQ=DAILY;UNTIL=20260329T005959Z"
         );
     }
 

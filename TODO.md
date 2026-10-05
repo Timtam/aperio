@@ -2435,8 +2435,13 @@ Siehe DESIGN §4.2.
       Berlin auch den 1.1., die Erinnerungen ebenso; ein Datums- oder
       schwebendes UNTIL wies die rrule-Kiste ab, und die Erinnerungen blieben
       beim ersten Termin. Ansichten (`untilOnClock`, auch `occurrenceCount`)
-      und Erinnerungen (`until_on_day_clock`) lesen gleich; vier Vertragszeilen
-      in `eventOccurrences.json` sind jetzt einig. ↻ im Test.
+      und Erinnerungen (`until_on_day_clock`) lesen gleich, auch wenn eine
+      Zeitumstellung die Grenze überspringt; vier Vertragszeilen in
+      `eventOccurrences.json` sind jetzt einig. Mit ihnen der Satz „letzter
+      Termin am …“ (`lastOccurrenceDayKey` liest die Regel der Ansichten) und
+      das Ziehen der ganzen Serie (`movedSeriesUntil` verschiebt die Ziffern um
+      ihre Tage; als Zeitpunkt verschoben, gewann sie über eine Zeitumstellung
+      einen Tag). ↻ im Test.
     - ✅ **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
       Der Editor liest eine Bearbeitung der ganzen Serie, deren Beginn wandert
       oder die zwischen ganztägig und Uhrzeit wechselt, wie „dieser und alle
@@ -2760,11 +2765,11 @@ Siehe DESIGN §4.2.
   - Auf einem farbfähigen Server versteckt der Editor die Farbe einer fremden
     Einladung, statt sie geräte-lokal zu halten.
   - `WKST` zählt nur in der einen Form, in der es die Wochen verschiebt.
-  - Eine Serie mit Zone wird in Wanduhr-Zeit ausgeklappt, ihr `UNTIL` bleibt
-    aber ein echter Zeitpunkt (`shared/recurrence.ts`, `zonedOccurrences`).
-    Ein Abendtermin am Tag der Grenze fällt dadurch um den Zonen-Versatz
-    heraus — im Kalender und im Satz „letzter Termin am …“ gleichermaßen.
-    Gefunden bei der Prüfung von #85; der Satz sagt, was die Ansicht zeigt.
+  - ✅ Eine Serie mit Zone wird in Wanduhr-Zeit ausgeklappt; ihr `UNTIL`
+    verschieben die Ansichten in dieselbe Wanduhr (`shiftUntilToWall`), und
+    seit PR 5 liest auch der Satz „letzter Termin am …“ genau diese Regel
+    (`wallRule`). Vorher fiel ein Abendtermin am Tag der Grenze nur im Satz
+    um den Zonen-Versatz heraus. Gefunden bei der Prüfung von #85.
   - Die Wiederholungs-Zusammenfassung erscheint auch im normalen Editor, wenn
     die gespeicherte Regel nicht die ist, die der Picker zurückbauen würde
     (87b, gebaut: `pickerMisreadsRule`). Die Bedienelemente selbst halten

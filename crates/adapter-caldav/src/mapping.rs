@@ -805,13 +805,6 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<Strin
     }
 }
 
-/// Anchor a DATE value (all-day boundary) at LOCAL midnight, expressed
-/// as a UTC instant — the app-internal all-day convention. Anchoring at
-/// UTC midnight instead would shift the rendered day for any user west
-/// of UTC (June 10 00:00 UTC is June 9 in the evening in the Americas),
-/// and would break the write-side round-trip (which reads the local day
-/// back off the instant). DST edge: a zone can skip midnight on a
-/// transition day; fall forward to the first valid local time then.
 /// The day an all-day series' instant names: the date of the local midnight
 /// nearest to it. Aperio stores an all-day occurrence, and its exception, as
 /// local midnight; another writer's spelling of that day — midnight UTC, noon,
@@ -860,6 +853,13 @@ pub(crate) fn all_day_rule(rrule: &str) -> String {
     format!("{prefix}{}", parts.join(";"))
 }
 
+/// Anchor a DATE value (all-day boundary) at LOCAL midnight, expressed
+/// as a UTC instant — the app-internal all-day convention. Anchoring at
+/// UTC midnight instead would shift the rendered day for any user west
+/// of UTC (June 10 00:00 UTC is June 9 in the evening in the Americas),
+/// and would break the write-side round-trip (which reads the local day
+/// back off the instant). DST edge: a zone can skip midnight on a
+/// transition day; fall forward to the first valid local time then.
 fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
     let midnight = NaiveDateTime::new(d, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
     Local

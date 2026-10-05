@@ -1050,4 +1050,71 @@ describe('an all-day series ends on the day its UNTIL names (201)', () => {
       });
     }
   }
+
+  it('ends on its day when a clock change skips the bound, as the reminders do', () => {
+    // Nuuk springs from 23:00 to midnight on 28 March 2026: 23:59:59 that day
+    // does not exist. The 28th is the last day here and in host-core.
+    const spy = deviceIn('America/Nuuk');
+    try {
+      const shown = expandEvent(
+        {
+          id: 'spring',
+          start: '2026-03-26T02:00:00.000Z',
+          end: '2026-03-27T02:00:00.000Z',
+          all_day: true,
+          recurrence: { rrule: 'FREQ=DAILY;UNTIL=20260328', exceptions: [] as string[], tzid: null },
+        },
+        { start: new Date('2026-03-01T00:00:00Z'), end: new Date('2026-04-30T00:00:00Z') },
+      ).map((o) => o.start);
+      expect(shown).toEqual([
+        '2026-03-26T02:00:00.000Z',
+        '2026-03-27T02:00:00.000Z',
+        '2026-03-28T02:00:00.000Z',
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // Five days, Monday to Friday, moved a week on across the autumn clock
+  // change: the bound's digits move by the same seven days. Moved as an
+  // instant, they landed an hour into the next Saturday, and the series
+  // gained a day.
+  const autumn: Record<string, { from: string; to: string; until: string; moved: string }> = {
+    'Europe/Berlin': {
+      from: '2026-10-18T22:00:00.000Z',
+      to: '2026-10-25T23:00:00.000Z',
+      until: '20261023T235959Z',
+      moved: '20261030T235959Z',
+    },
+    'America/New_York': {
+      from: '2026-10-26T04:00:00.000Z',
+      to: '2026-11-02T05:00:00.000Z',
+      until: '20261030T235959Z',
+      moved: '20261106T235959Z',
+    },
+  };
+  for (const [zone, { from, to, until, moved }] of Object.entries(autumn)) {
+    it(`a series moved across a clock change keeps its days, on a device in ${zone}`, () => {
+      const spy = deviceIn(zone);
+      try {
+        const rrule = `FREQ=DAILY;UNTIL=${until}`;
+        expect(movedSeriesUntil(rrule, null, true, from, to)).toBe(moved);
+        const series = {
+          id: 'week',
+          start: to,
+          end: new Date(Date.parse(to) + 86_400_000).toISOString(),
+          all_day: true,
+          recurrence: { rrule: `FREQ=DAILY;UNTIL=${moved}`, exceptions: [] as string[], tzid: null },
+        };
+        const shown = expandEvent(series, {
+          start: new Date('2026-10-01T00:00:00Z'),
+          end: new Date('2026-12-01T00:00:00Z'),
+        });
+        expect(shown).toHaveLength(5);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
 });
