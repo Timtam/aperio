@@ -1925,15 +1925,18 @@ Siehe DESIGN §4.2.
   eigene Regel) wird erst nach dem Pin mit gemessener WASM-Größe gewählt.
   ↳ **Schritt 1 (Pin): gebaut.** `shared/contracts/eventOccurrences.json`
   (dort, weil host-core die Tabelle liest und nur von dort einbetten darf),
-  78 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
+  heute 88 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
   (auch zonierte Serien genau an den Rändern), UNTIL (auch das `T235959Z` des
   Editors und ein zoniertes UNTIL über eine Zeitumstellung), Ausnahmen, Zonen,
   ganztägig, Einzeländerungen, Größe. `expect` ist die Antwort der Ansichten
-  (`expandAll`); wo die Erinnerungen anders antworten — jeder Termin einzeln,
-  wie `event_triggers` ausrollt —, trägt die Zeile `reminders`. Verglichen
+  (`expandAll`); wo die Erinnerungen anders antworten — so wie
+  `event_triggers` ausrollt, seit 214 jede Einzeländerung mit ihrem Platz aus
+  ihrer Serie genommen —, trägt die Zeile `reminders`. Verglichen
   werden Zeitpunkte, sortiert nach Zeitpunkt und Position; die Reihenfolge von
-  `expandAll` (nach dem Text des Starts) zählt nicht. **22 Zeilen weichen ab**,
-  jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
+  `expandAll` (nach dem Text des Starts) zählt nicht. Beim Pin wichen **22
+  Zeilen** ab (heute 13, benannt in `DIFFERING` in `reminders.rs`; die Zonen
+  seit 26a, das UNTIL einer Serie von Tagen seit 201 und die
+  Einzeländerungen seit 214 sind einig), jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
   vor dem Start (die rrule-Kiste nimmt die Regel nicht an, die Erinnerungen
   behalten nur den Starttermin; rrule.js liest ohne Zone ein Datum als 00:00
   UTC und eine Uhrzeit ohne `Z` als UTC, bei einer zonierten Serie beides als
@@ -2464,13 +2467,22 @@ Siehe DESIGN §4.2.
       ihre Einzeländerungen nicht an. Ein abgesagtes Vorkommen klingelte
       weiter (bei Google ist jede Löschung so eine Zeile; mit PR 7 hätte das
       jeden gelöschten Termin eines neuen Serienteils getroffen), ein
-      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV,
-      Google und Exchange. Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
+      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV und
+      Google (Exchange trug den alten Platz schon in den Ausnahmen der Serie).
+      Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
       Platz aus der Serie (`override_slots`), wie die Ansichten
       (`expandAll`): genau bei Uhrzeit, nach dem Tag bei ganztägig; ein
       Platz, der sich nicht lesen lässt, bleibt. Fünf Vertragszeilen in
       `eventOccurrences.json` sind jetzt einig; die ganze abgesagte Serie
-      bleibt still (gewollt). Desktop und Handy gleich (host-core). ↻ im Test.
+      bleibt still (gewollt). Desktop und Handy gleich (host-core). Dazu 215:
+      Exchange nannte den Platz einer ganztägigen Einzeländerung als
+      Mitternacht in der Zone des Postfachs; lag das Gerät mehr als zwölf
+      Stunden davon, lasen Ansichten (schon vorher) und nun auch Erinnerungen
+      den Nachbartag. Der Adapter verankert den Platz jetzt wie die Ausnahme
+      der Serie (`override_slot`, lokale Mitternacht des Tages), Schreiben
+      findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
+      einmal neu; eine Farbe an einer ganztägigen Exchange-Einzeländerung geht
+      dabei einmal verloren. ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch

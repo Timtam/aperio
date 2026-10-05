@@ -2446,7 +2446,7 @@ pub fn override_event(
         return Ok(inherited_override_event(master_ev, master_item, ov));
     };
     let mut row = to_event(own.clone(), calendar_id)?;
-    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    row.id = encode_override_event_id(&master_ev.id, override_slot(master_item, ov));
     // An exception carries no rule of its own; the master keeps the series.
     row.recurrence = None;
     // The slot comes from the master's own list, which is what the expander
@@ -2490,7 +2490,7 @@ fn inherited_override_event(
     ov: &ModifiedOccurrence,
 ) -> Event {
     let mut row = master_ev.clone();
-    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    row.id = encode_override_event_id(&master_ev.id, override_slot(master_item, ov));
     row.recurrence = None;
     if master_item.is_all_day {
         row.start = all_day_local_anchor(ov.start);
@@ -2513,6 +2513,33 @@ fn inherited_override_event(
     };
     row.cancelled = master_ev.cancelled || ov.cancelled;
     row
+}
+
+/// The slot a single change names in its id: the instant the master's own
+/// exception names for it (`to_event`). On an all-day series that is the
+/// local midnight of the intended day, not the raw "some-zone midnight" EWS
+/// sends: read by the day it is nearest to, as the views and the reminders
+/// read an all-day slot (decision 95), the raw instant named the neighbouring
+/// day wherever the mailbox's zone lies more than twelve hours from the
+/// device's — the views hid that day, and its reminder fell silent once the
+/// reminders honoured single changes too (decision 215).
+pub(crate) fn override_slot(master_item: &ParsedItem, ov: &ModifiedOccurrence) -> DateTime<Utc> {
+    if master_item.is_all_day {
+        all_day_local_anchor(ov.original_start)
+    } else {
+        ov.original_start
+    }
+}
+
+/// Whether an override id's slot names this single change: as the id is minted
+/// now ([`override_slot`]), or raw, as an id minted before decision 215 named
+/// it and a row cached under it may still carry it.
+pub(crate) fn names_override(
+    master_item: &ParsedItem,
+    ov: &ModifiedOccurrence,
+    slot: DateTime<Utc>,
+) -> bool {
+    override_slot(master_item, ov) == slot || ov.original_start == slot
 }
 
 /// EWS hands back a plain instant that is midnight of the intended day
@@ -7558,6 +7585,59 @@ mod tests {
             ev.start,
             all_day_local_anchor("2026-01-01T00:00:00Z".parse().unwrap())
         );
+    }
+
+    /// Decision 215: a single change of an all-day series names its slot as
+    /// the series' own exception does — the local midnight of its day — so the
+    /// views and the reminders read the same day for both. The raw instant is
+    /// midnight in the mailbox's zone (here New York), which a device more than
+    /// twelve hours away read as the neighbouring day. Zone-generic: asserts
+    /// against `all_day_local_anchor`, as the test above does.
+    #[test]
+    fn an_all_day_single_change_names_its_slot_as_the_series_does() {
+        let orig: DateTime<Utc> = "2026-05-26T04:00:00Z".parse().unwrap();
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Daily all-day".into(),
+            start: Some("2026-05-20T04:00:00Z".parse().unwrap()),
+            end: Some("2026-05-21T04:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 30 },
+        });
+        let ov = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-05-27T04:00:00Z".parse().unwrap(),
+            end: "2026-05-28T04:00:00Z".parse().unwrap(),
+            original_start: orig,
+            cancelled: false,
+            own: None,
+        };
+        item.modified_occurrences = vec![ov.clone()];
+        let master = to_event(item.clone(), "cal").unwrap();
+        let row = override_event(&master, &item, &ov, "cal").unwrap();
+        let (series, slot) = cal_core::split_override_id(&row.id).unwrap().unwrap();
+        assert_eq!(series, master.id);
+        assert_eq!(slot, all_day_local_anchor(orig));
+        assert!(master.recurrence.unwrap().exceptions.contains(&slot));
+        // Writing finds the change by the id's slot, and by the raw one an
+        // older id carries; never by another day's.
+        assert!(names_override(&item, &ov, slot));
+        assert!(names_override(&item, &ov, orig));
+        assert!(!names_override(
+            &item,
+            &ov,
+            all_day_local_anchor("2026-05-27T04:00:00Z".parse().unwrap())
+        ));
+        // A timed series keeps its exact instant.
+        item.is_all_day = false;
+        assert_eq!(override_slot(&item, &ov), orig);
     }
 
     #[test]

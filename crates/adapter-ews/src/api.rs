@@ -1180,10 +1180,14 @@ async fn resolve_override_target(
     )]);
     let response = client.post_soap(envelope).await?;
     let items = crate::mapping::parse_get_calendar_items_response(&response)?;
+    // The slot as the id names it (`override_slot`): the local midnight of the
+    // day on an all-day series, and the raw instant on an id minted before
+    // decision 215.
     let occurrence = items
         .iter()
-        .flat_map(|item| item.modified_occurrences.iter())
-        .find(|ov| ov.original_start == original_start);
+        .flat_map(|item| item.modified_occurrences.iter().map(move |ov| (item, ov)))
+        .find(|(item, ov)| crate::mapping::names_override(item, ov, original_start))
+        .map(|(_, ov)| ov);
     match occurrence {
         Some(ov) => Ok(WriteTarget {
             kind: EventIdKind::Exception,

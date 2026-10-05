@@ -47,6 +47,15 @@ The endpoint is discovered or user-supplied.
   from the master. An item that cannot be read, or that answers for another
   slot, leaves the row inheriting the series' content and says so in the log:
   an inherited value is wrong, a guessed one would be worse.
+- **An all-day exception names its slot by its day.** EWS reports an
+  occurrence's `OriginalStart` as midnight in some zone, the mailbox's, without
+  saying which. The series' own exceptions are re-anchored to the local
+  midnight of that day (`all_day_local_anchor`), and the override id names the
+  same instant (`override_slot`, decision 215). With the raw instant, a device
+  more than twelve hours from the mailbox's zone read the neighbouring day: the
+  views hid it, and the reminders, which honour single changes since decision
+  214, silenced it. Writing finds the exception by either spelling
+  (`names_override`), so an id minted before still resolves.
 - **Exceptions keep their rule field.** Editing one changed occurrence writes
   to the exception's own item, which the override id finds from the series
   head on every write. That update never sends `DeleteItemField
