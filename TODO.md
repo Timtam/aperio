@@ -3014,6 +3014,75 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
 - [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
   ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
+- [ ] **Erinnerung zum Beginn (221).** Gewünscht von Toni am 2026-10-06. Alle
+  Anbieter sehen eine Erinnerung genau zum Beginn vor: RFC 5545
+  (`TRIGGER:PT0S`), der iPhone-Kalender („Zum Zeitpunkt des Termins“), Google
+  (0 bis 40320 Minuten), Exchange und Graph (mit eigenem Ein-Schalter, 0 heißt
+  nicht „aus“), Todoist und Vikunja mit eigener Wahl. Kern, beide
+  Erinnerungsplaner und alle Kalender-Adapter können `minutes_before: 0` schon;
+  die eingebaute Geburtstags-Erinnerung nutzt es. Nur der Erinnerungs-Editor
+  sperrt es, am Desktop und am Handy gleich (`RemindersEditor.tsx`: das Feld
+  hat `min={1}`, eine eingetippte 0 wird zu 1, ein Wechsel der Einheit ebenso).
+  Das Handy hat das vom Desktop übernommen; eine Begründung steht nirgends.
+  Entschieden: eine eigene Art im Typ-Feld neben „Vor Beginn“ und „Zu festem
+  Zeitpunkt“, „Zu Beginn“, bei Aufgaben „Bei Fälligkeit“, bei ganztägigen
+  Terminen „Am Tag selbst“ (dort klingelt 0 zur Tagesstart-Uhrzeit,
+  standardmäßig 00:00). Anzahl und Einheit fallen dann weg. Gespeichert bleibt
+  `Relative` mit 0, die Art wird daraus abgeleitet; zurück zu „Vor Beginn“
+  ergibt 15 Minuten. Desktop und Handy im selben Build, sonst könnte eine 0
+  vom Handy, etwa als Standard-Erinnerung eines Kalenders, am Desktop jeden
+  neuen Termin dieses Kalenders unspeicherbar machen (nächster Punkt). Dazu
+  Texte deutsch und englisch, ein Muster mit 0 in
+  `shared/contracts/calendarDefaultReminders.json`, Editor-Tests (nur der
+  Desktop hat einen Testläufer), DESIGN §14.1 und die Anleitung.
+- [ ] **Desktop speichert eine Erinnerung zum Beginn nicht.** Schon heute:
+  Kommt eine solche Erinnerung von iCloud, Google oder Outlook, etwa im
+  iPhone-Kalender gesetzt, zeigt der Editor „Vor Beginn, Anzahl 0, Minuten“.
+  Das Feld (`min={1}`) steht in einem Formular mit Absende-Knopf ohne
+  `noValidate`; die Eingabeprüfung des Browsers verweigert dann vermutlich das
+  Speichern, und ob NVDA ihre Meldung ansagt, ist offen, sodass Speichern
+  nichts zu tun schiene. Aus dem Code abgeleitet, nicht ausprobiert. Dieselbe 0
+  kommt auch über Titel-Vorschläge, die angehängten Standard-Erinnerungen
+  eines Kalenders, Duplizieren und Verschieben oder Kopieren. Am Handy bleibt
+  sie erhalten, solange die Zeile unberührt bleibt. Mit 221 erledigt.
+- [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
+  positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
+  Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
+  Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „0 Minuten
+  vor Beginn“ (`splitRelative` fasst alles bis 0 zusammen), und wer die Zeile
+  bearbeitet, macht daraus eine Erinnerung davor. Entschieden: richtig zeigen
+  („10 Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach
+  Beginn“, nur wo sie ankommt: bei Kalendern, deren Anbieter sie speichert
+  (CalDAV), bei lokalen Kalendern und bei Erinnerungen „nur in Aperio“.
+  Google, Exchange, Graph und Android kennen nur Minuten davor. Welcher
+  Kalender das kann, sagt eine Fähigkeit im Manifest, nicht der Name des
+  Adapters. Zu prüfen: ob der Planer eine Erinnerung nach dem Ende des Termins
+  noch auslöst, und was „nach Beginn“ bei ganztägigen Terminen heißt.
+- [ ] **Exchange-Aufgaben: Speichern schaltet die Erinnerung aus.** Hat eine
+  Exchange-Aufgabe eine Erinnerung ohne eigenen Zeitpunkt (`ReminderIsSet`
+  ohne `ReminderDueBy`), liest Aperio sie als „0 Minuten vor Fälligkeit“
+  (`adapter-ews/src/tasks.rs`). Schreiben kann der Adapter aber nur die erste
+  feste Erinnerung; alles andere geht als `ReminderIsSet=false` hinaus, und
+  das Ändern löscht dazu `ReminderDueBy`. Jedes Speichern der Aufgabe aus
+  Aperio schaltet die Erinnerung auf dem Server also aus, am Handy auch ohne
+  die Zeile zu berühren.
+- [ ] **Aufgaben-Editoren bieten an, was verloren geht.** Relative
+  Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange und To Do
+  schreiben nur die erste feste Erinnerung, CalDAV-Aufgaben, Google Tasks,
+  Vikunja und Todoist gar keine. Beide Aufgaben-Editoren bieten trotzdem jede
+  Art an, auch „Beim nächsten App-Start“ (`allowAppStart` gilt dort, weil
+  nicht gesetzt). Der Termin-Editor folgt schon der Regel „nichts anbieten,
+  was still bleibt“ (`allowAppStart={targetIsLocal}`); die Aufgaben-Editoren
+  sollten nach der Fähigkeit der Liste ebenso verfahren oder es sagen.
+- [ ] **Anleitung beschreibt, was es nicht gibt.**
+  `web/src/content/docs/de/guides/tutorial/07-notifications.md` und der
+  englische Zwilling beschreiben Schlummern („später erinnern“) in der
+  Benachrichtigung, Knöpfe „Öffnen“, „Schließen“ und „Später erinnern“ in der
+  App und eine Einstellungsseite „Benachrichtigungen“ mit
+  Standard-Schlummerdauer und Standard-Vorlaufzeit. Nichts davon gibt es;
+  Schlummern gibt es nur beim Tagesstart. DESIGN §14.1 verspricht globale
+  Standard-Erinnerungen für neue Termine und Aufgaben; gebaut sind nur
+  Standard-Erinnerungen je Kalender, Aufgabenlisten haben keine.
 
 ---
 
