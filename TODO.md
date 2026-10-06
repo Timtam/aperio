@@ -3204,6 +3204,59 @@ an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Proto
 nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
 von Toni getestet).
 
+### B13 · Abhaken am Handy wartet auf den Erinnerungs-Abgleich (218-220) `[ ]`
+
+Gemeldet am 2026-10-06: Eine Vikunja-Aufgabe per Rotor-Aktion als erledigt zu
+markieren, dauerte am iPhone über eine Sekunde bis zur Ansage. Laut Protokoll
+dauert das Schreiben selbst etwa 0,2 s bei einer einmaligen Aufgabe (PATCH,
+`PUT assignees/bulk`, `GET` für `reconcile_parent`) und etwa 0,4 s bei einer
+wiederkehrenden (dazu die nächste Runde anlegen und in ihre Kanban-Spalte
+legen). Auf dieses Schreiben wartet die Ansage bewusst, sie ist nicht
+optimistisch. Der Rest war Warten in der Schlange: `upcomingRemindersJson`, der
+Erinnerungs-Abgleich, läuft auf Expos einer gemeinsamen seriellen
+Standard-Warteschlange (`CalFfiModule.swift` und `.kt`, ohne `runOnQueue`). Er
+liest live alle Konten (3,4 bis 4 s, einmal 17 s) und hält währenddessen
+`updateTaskJson` und die Einstellungs-Lesungen davor auf. Das erste Abhaken
+hatte den Abgleich selbst ausgelöst (`scheduleBackgroundPush` →
+`refreshRemindersSoon`, 2,5 s später); das PATCH des zweiten, wiederkehrenden,
+kam 32 ms nach seinem Ende. Die Aufteilung der Warteschlangen (49f7a9c) hatte
+diese Funktion ausgelassen. Der Desktop ist nicht betroffen (eigener
+tokio-Arbeiter). Die Lücke von etwa 0,9 s nach dem Nachladen der Liste ist
+gewollt (700 ms Zusammenfassen in `cacheObserver.ts`) und kommt nach der Ansage.
+
+- [ ] **218 · Eigene Warteschlange für den Abgleich (iOS und Android).**
+  `upcomingRemindersJson` bekommt eine eigene serielle Warteschlange: unter iOS
+  eine `DispatchQueue` wie `accessQueue`, unter Android einen eigenen Thread
+  wie `slowScope`. Nicht `slowQueue`, sonst warten Senden und Abgleichen auf
+  ihn und er auf sie. Dazu `rescheduleReminders`
+  (`mobile/src/reminders/scheduler.ts`): Heute verwirft es eine Anfrage, die
+  während eines Abgleichs kommt (`if (inFlight) return;`). Künftig läuft danach
+  noch einer, sonst kann ein Abgleich, der vor dem Schreiben gelesen hat, eine
+  Erinnerung für eine schon erledigte Aufgabe stehen lassen; mit eigener
+  Warteschlange wird das häufiger. Und eine Protokollzeile, wann das Abhaken
+  ausgelöst wurde, damit die nächste Messung die Zeit vom Tippen bis zum PATCH
+  direkt zeigt. Braucht einen Handy-Build.
+- [-] **219 · Kein 5-Minuten-Speicher am Handy.** Entschieden: Der Abgleich am
+  Handy liest weiter bei jedem Anlass live, anders als der Desktop, der die
+  Konten 5 Minuten aufbewahrt. So erreicht eine Änderung von einem anderen Gerät
+  die Benachrichtigungen sofort. Der Preis: im Protokoll etwa 6 volle
+  Durchläufe pro Minute Benutzung; nach 218 halten sie nichts mehr auf.
+- [ ] **220 · Nur Geändertes senden.** `TasksFeature::update_task`
+  (`cal-core`) bekommt die vorige Zeile als optionalen, allgemeinen Parameter;
+  beide Hosts geben die Zeile aus dem Cache von vor dem Schreiben mit, die der
+  Host-Kern für wiederkehrende Aufgaben schon liest. Jeder Adapter darf damit
+  nur senden, was sich geändert hat. Vikunja spart so `PUT assignees/bulk` und
+  den `GET` für die Eltern-Aufgabe, wenn Zuweisungen und Eltern gleich bleiben
+  (etwa 90 ms je Änderung, Desktop und Handy). Gewollte Verhaltensänderung: Hat
+  ein anderes Gerät Zuweisungen oder Eltern seit dem letzten Laden geändert,
+  überschreibt Aperio das nicht mehr mit seinem alten Stand. Berührt alle
+  Adapter (Standard: den Parameter nicht beachten) und beide Hosts.
+
+🚩 **Offen:** Ein Abgleich hing 17 s an einer Vikunja-Seite („error decoding
+response body“, 09:34:25 UTC); warum die Antwort nicht lesbar war, ist
+ungeklärt. Bis 218 hält so ein Hänger jedes Schreiben am Handy auf, danach nur
+noch den Abgleich.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)
