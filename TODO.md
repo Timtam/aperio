@@ -3258,23 +3258,29 @@ gewollt (dieselben 700 ms) und kommt nach der Ansage.
 - [ ] **220 · Nur Geändertes senden.** `TasksFeature::update_task`
   (`cal-core`) bekommt die vorige Zeile als optionalen, allgemeinen Parameter;
   beide Hosts lesen sie vor jedem Schreiben aus dem Cache und geben sie mit.
-  Heute liest der Host-Kern den Cache von vor dem Schreiben nur beim Erledigen
-  einer wiederkehrenden Aufgabe, als ganze Liste. Jeder Adapter darf damit
-  nur senden, was sich geändert hat. Vikunja spart so `PUT assignees/bulk` und
-  den `GET /tasks/{id}` für `reconcile_parent`, wenn Zuweisungen und Eltern
-  gleich bleiben (etwa 90 ms je Änderung, Desktop und Handy). Gewollte
-  Verhaltensänderung: Hat ein anderes Gerät Zuweisungen oder Eltern seit dem
-  letzten Laden geändert, überschreibt Aperio das nicht mehr mit seinem alten
-  Stand. Berührt `cal-core`, die Plugin-Schnittstelle, alle Adapter (Standard:
-  den Parameter nicht beachten) und beide Hosts. Die Plugin-Schnittstelle ist
-  der eigentliche Weg: Jeder Aufgaben-Adapter außer den beiden eingebauten,
-  dem lokalen Speicher (`adapter-local`) und dem Geräte-Adapter, die die Hosts
-  direkt aufrufen, wird nur über sie erreicht, Vikunja eingeschlossen. Heute
-  geht dort ein nacktes `Task` hinüber (Shim in
-  `plugin-core`, `ffi_update_task` der sechs Aufgaben-Plugins: CalDAV, EWS,
-  Google, Graph, Todoist, Vikunja). Ohne neue Argumentform oder eigenen
-  Eintrag in der Vtable käme die vorige Zeile dort nie an; dazu gehört die
-  Frage nach der ABI-Version (`ABI_VERSION` heute 4, `ABI_VERSION_MIN` 3).
+  Heute liest der Host-Kern die Liste erst nach dem Schreiben beim Anbieter aus
+  dem Cache, jedes Mal als ganze Liste: bei jeder Änderung einer externen
+  Aufgabe (`write_through_task`, nur um zu prüfen, ob die Liste Zeilen hat)
+  und beim Erledigen einer wiederkehrenden Aufgabe
+  (`record_external_recurrence_completion`). Vor dem Schreiben liest er die
+  Zeile nie. Jeder Adapter darf damit nur senden, was sich geändert hat.
+  Vikunja spart so `PUT assignees/bulk` und den `GET /tasks/{id}` für
+  `reconcile_parent`, wenn Zuweisungen und Eltern gleich bleiben: zwei
+  Anfragen weniger je Änderung, auf Desktop und Handy, am iPhone gemessen
+  etwa 90 ms. Gewollte Verhaltensänderung: Hat ein anderes Gerät Zuweisungen
+  oder Eltern seit dem letzten Laden geändert, überschreibt Aperio das nicht
+  mehr mit seinem alten Stand. Berührt `cal-core`, die Plugin-Schnittstelle,
+  alle Adapter (Standard: den Parameter nicht beachten) und beide Hosts.
+
+  Die Plugin-Schnittstelle ist der eigentliche Weg. Die Hosts rufen nur die
+  beiden eingebauten Aufgaben-Adapter direkt auf, den lokalen Speicher
+  (`adapter-local`) und den Geräte-Adapter. Jeder andere Aufgaben-Adapter,
+  Vikunja eingeschlossen, wird nur über die Plugin-Schnittstelle erreicht, und
+  heute geht dort ein nacktes `Task` hinüber (Shim in `plugin-core`,
+  `ffi_update_task` der sechs Aufgaben-Plugins: CalDAV, EWS, Google, Graph,
+  Todoist, Vikunja). Ohne neue Argumentform oder eigenen Eintrag in der
+  Vtable käme die vorige Zeile dort nie an; dazu gehört die Frage nach der
+  ABI-Version (`ABI_VERSION` heute 4, `ABI_VERSION_MIN` 3).
 
 🚩 **Offen:** Ein späterer Durchlauf, nach dem zweiten Abhaken, stand 17 s
 still („error decoding response body“, 09:34:25 UTC). In dieser Zeit schwieg
