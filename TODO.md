@@ -3056,17 +3056,18 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   eines Kalenders. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
   keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
   sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
-  erhalten, solange die Zeile unberührt bleibt. Eine Erinnerung nach dem
+  erhalten, solange niemand Anzahl oder Einheit ändert. Eine Erinnerung nach dem
   Beginn sperrt das Speichern genauso (nächster Punkt). Mit 221 erledigt, für
   Erinnerungen nach dem Beginn mit 222.
 - [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
   positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
   Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
   Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „0 Minuten
-  vor Beginn“ (`splitRelative` fasst alles bis 0 zusammen), und wer die Zeile
-  bearbeitet, macht daraus eine Erinnerung davor. Am Desktop sperrt sie wie
-  die 0 zudem das Speichern (voriger Punkt); am Handy bleibt sie erhalten,
-  solange die Zeile unberührt bleibt. Entschieden: richtig zeigen („10
+  vor Beginn“ (`splitRelative` fasst alles bis 0 zusammen), und wer Anzahl
+  oder Einheit ändert, macht daraus eine Erinnerung davor; Ton oder „Gilt“ zu
+  ändern lässt sie, wie sie ist. Am Desktop sperrt sie wie die 0 zudem das
+  Speichern (voriger Punkt); am Handy bleibt sie erhalten, solange niemand
+  Anzahl oder Einheit ändert. Entschieden: richtig zeigen („10
   Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach Beginn“, nur
   wo sie ankommt: bei Kalendern, deren Anbieter sie speichert (CalDAV), bei
   lokalen Kalendern und bei Erinnerungen „Nur in Aperio“. Google, Exchange und
@@ -3097,13 +3098,18 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Aufgaben-Editoren bieten trotzdem jede Art an, auch „Beim nächsten
   App-Start nach Fälligkeit“ (`allowAppStart` gilt dort, weil nicht gesetzt).
   Der Termin-Editor folgt der Regel „nichts anbieten, was still bleibt“ bisher
-  nur für diese Art (`allowAppStart={targetIsLocal}`). Bei Exchange und
-  Microsoft 365 bietet er weiter eine feste Uhrzeit und weitere Erinnerungen
-  „An diesem Termin“ an, obwohl dort nur die erste „Vor Beginn“ ankommt, und
-  bei Gerätekalendern bietet das Handy Erinnerungen an, die der Adapter
-  verwirft und der Planer überspringt. Beide Editoren sollten nach der
-  Fähigkeit des Kalenders oder der Liste nur anbieten, was ankommt, oder es
-  sagen.
+  nur für diese Art (`allowAppStart={targetIsLocal}`), und auch das nur am
+  Desktop: Das Handy löst „Beim nächsten App-Start“ nie aus, bietet es aber
+  für lokale Kalender und für jede Aufgabenliste an. Eine dort gesetzte
+  Erinnerung klingelt erst, wenn ein Desktop den Eintrag per Sync bekommt und
+  neu startet. Bei Google kommt eine feste Uhrzeit „An diesem Termin“ nicht an:
+  Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, gelten die
+  Standard-Erinnerungen des Google-Kalenders. Bei Exchange und Microsoft 365
+  kommt ebenfalls keine feste Uhrzeit an und von mehreren Erinnerungen „Vor
+  Beginn“ nur die erste. Bei Gerätekalendern bietet das Handy Erinnerungen
+  an, die der Adapter verwirft und der Planer überspringt. Beide Editoren
+  sollten nach der Fähigkeit des Kalenders oder der Liste nur anbieten, was
+  ankommt, oder es sagen.
 - [ ] **Anleitung beschreibt, was es nicht gibt.**
   `web/src/content/docs/de/guides/tutorial/07-notifications.md` und der
   englische Zwilling beschreiben Schlummern („später erinnern“, „Snooze“) in
@@ -3120,7 +3126,8 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   des Telefons nur mit, und dort gehörten die Erinnerungen ohnehin Aperio.
   Tatsächlich schreibt Aperio dort Termine, aber keine Erinnerungen, und der
   Planer überspringt Gerätekonten; eine dort gesetzte Erinnerung klingelt also
-  nirgends. DESIGN
+  nirgends. Schließlich sagt die Anleitung, „Beim nächsten App-Start“ werde
+  ausgelöst, wenn es am Eintrag selbst gesetzt ist; das gilt nur am Desktop. DESIGN
   verspricht Schlummern und „Öffnen“ in der Mitteilung (§14.3, §14.5, §14.6)
   und in §14.1 globale Standard-Erinnerungen für neue Termine und Aufgaben;
   gebaut sind nur Standard-Erinnerungen je Kalender, Aufgabenlisten haben
