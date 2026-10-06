@@ -3020,7 +3020,9 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   „At time of event“), Google (0 bis 40320 Minuten), Exchange und Graph (mit
   eigenem Ein-Schalter, 0 heißt nicht „aus“). Bei Aufgaben bieten Todoist
   („At time of task“) und Vikunja („Zum Fälligkeitsdatum“) es als eigene
-  Auswahl an; Google Tasks kennt gar keine Erinnerung, Microsoft To Do nur
+  Auswahl an. Google Tasks meldet sich nur selbst zum gesetzten Zeitpunkt
+  (ohne Uhrzeit um 9 Uhr) und hat keine einstellbare Erinnerung; seine API
+  kennt weder eine Erinnerung noch die Uhrzeit. Microsoft To Do kennt nur
   einen festen Zeitpunkt. Kern, beide Erinnerungsplaner und alle
   Kalender-Adapter, die Erinnerungen tragen (CalDAV/iCloud, Google, Exchange,
   Graph, lokal, iCal lesend), können `minutes_before: 0` schon; die
@@ -3048,10 +3050,13 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Das Feld (`min={1}`) steht in einem Formular mit Absende-Knopf ohne
   `noValidate`; die Eingabeprüfung des Browsers verweigert dann vermutlich das
   Speichern und setzt den Fokus auf das Feld „Anzahl“. Ob NVDA dazu sagt,
-  warum, ist offen. Aus dem Code abgeleitet, nicht ausprobiert. Dieselbe 0
-  kommt auch über Titel-Vorschläge, die angehängten Standard-Erinnerungen
-  eines Kalenders, Duplizieren und Verschieben oder Kopieren. Am Handy bleibt
-  sie erhalten, solange die Zeile unberührt bleibt. Eine Erinnerung nach dem
+  warum, ist offen. Aus dem Code abgeleitet, nicht ausprobiert. In den
+  Desktop-Editor kommt dieselbe 0 auch über Titel-Vorschläge (im Editor und
+  aus dem Schnell-Hinzufügen) und über die angehängten Standard-Erinnerungen
+  eines Kalenders. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
+  keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
+  sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
+  erhalten, solange die Zeile unberührt bleibt. Eine Erinnerung nach dem
   Beginn sperrt das Speichern genauso (nächster Punkt). Mit 221 erledigt, für
   Erinnerungen nach dem Beginn mit 222.
 - [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
@@ -3079,9 +3084,12 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   das Ändern löscht dazu `ReminderDueBy`. Jedes Speichern der Aufgabe aus
   Aperio schaltet die Erinnerung auf dem Server also aus: am Handy auch ohne
   die Zeile zu berühren, am Desktop bei jedem Weg ohne den Editor, etwa
-  Abhaken, Priorität, Ziehen auf einen Tag oder eine Uhrzeit, Abschnitt
-  wechseln oder die Tagesstart-Planung. Nur der Desktop-Editor selbst
-  speichert die 0 nicht (`min={1}`).
+  Abhaken, Priorität, Ziehen auf einen Tag oder eine Uhrzeit, die
+  Tagesstart-Planung und der stille Deadline-Pin, der eine heute fällige
+  Aufgabe ohne Zutun speichert, also genau am Fälligkeitstag. Auch das
+  Verschieben in eine andere Exchange-Liste legt sie dort mit
+  `ReminderIsSet=false` neu an. Nur der Desktop-Editor selbst speichert die 0
+  nicht (`min={1}`).
 - [ ] **Editoren bieten an, was verloren geht.** Relative
   Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange und To Do
   schreiben nur die erste feste Erinnerung, CalDAV-Aufgaben, Google Tasks,
@@ -3098,13 +3106,21 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   sagen.
 - [ ] **Anleitung beschreibt, was es nicht gibt.**
   `web/src/content/docs/de/guides/tutorial/07-notifications.md` und der
-  englische Zwilling beschreiben Schlummern („später erinnern“) in der
-  Benachrichtigung, Knöpfe „Öffnen“, „Schließen“ und „Später erinnern“ in der
-  App und eine Einstellungsseite „Benachrichtigungen“ mit
-  Standard-Schlummerdauer und Standard-Vorlaufzeit. Dazu versprechen sie einen
-  „Hinweis in der App“ und eine Ansage über eine Live-Region. Nichts davon
-  gibt es: Eine ausgelöste Erinnerung kommt nur als Mitteilung des
-  Betriebssystems, und Schlummern gibt es nur beim Tagesstart. DESIGN
+  englische Zwilling beschreiben Schlummern („später erinnern“, „Snooze“) in
+  der Benachrichtigung und in der Zusammenfassung, Knöpfe „Öffnen“,
+  „Schließen“ und „Später erinnern“ in der App und eine Einstellungsseite
+  „Benachrichtigungen“ mit einem Schalter für System-Benachrichtigungen,
+  „Standard-Snooze-Dauer“ und „Standard-Vorlaufzeit für neue Termine“. Dazu
+  versprechen sie einen „Hinweis in der App“ und eine Ansage über eine
+  Live-Region. Nichts davon gibt es: Eine ausgelöste Erinnerung kommt nur als
+  Mitteilung des Betriebssystems, und Schlummern gibt es nur beim Tagesstart.
+  Schlummern versprechen zudem die Startseite (`guides/index.md`) und die
+  Handy-Anleitung (`guides/mobile.md`), jeweils in beiden Sprachen. Und der
+  Abschnitt „Erinnerungen, die nur du bekommst“ sagt, Aperio lese den Kalender
+  des Telefons nur mit, und dort gehörten die Erinnerungen ohnehin Aperio.
+  Tatsächlich schreibt Aperio dort Termine, aber keine Erinnerungen, und der
+  Planer überspringt Gerätekonten; eine dort gesetzte Erinnerung klingelt also
+  nirgends. DESIGN
   verspricht Schlummern und „Öffnen“ in der Mitteilung (§14.3, §14.5, §14.6)
   und in §14.1 globale Standard-Erinnerungen für neue Termine und Aufgaben;
   gebaut sind nur Standard-Erinnerungen je Kalender, Aufgabenlisten haben
