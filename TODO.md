@@ -3216,8 +3216,9 @@ nächste Runde anlegen und in ihre Kanban-Spalte legen). Auf dieses Schreiben
 wartet die Ansage bewusst, sie ist nicht optimistisch.
 
 Der Rest war Warten in der Schlange. `upcomingRemindersJson`, der
-Erinnerungs-Durchlauf, läuft auf Expos einer gemeinsamen seriellen
-Standard-Warteschlange (`CalFfiModule.swift` und `.kt`, ohne `runOnQueue`). Er
+Erinnerungs-Durchlauf, läuft auf der gemeinsamen seriellen
+Standard-Warteschlange von Expo (`CalFfiModule.swift` und `.kt`, ohne
+`runOnQueue`). Er
 liest live alle Konten, meist in 3,4 bis 4 s, einmal in 5,2 s. Solange er
 läuft, warten `updateTaskJson` und die Einstellungs-Lesungen, die das Abhaken
 vor dem Schreiben macht. Den Durchlauf, auf den das zweite Abhaken wartete
@@ -3227,10 +3228,10 @@ Cache-Meldungen 700 ms zusammen und ruft dann `refreshRemindersSoon` auf. Das
 startet seine 2,5 s bei jedem Aufruf neu und verschiebt so den früheren Aufruf
 aus `scheduleBackgroundPush`; der Durchlauf begann etwa 3,8 s nach dem
 Schreiben. Das PATCH des zweiten Abhakens kam 32 ms nach der letzten Antwort
-dieses Durchlaufs. Die Aufteilung der Warteschlangen (49f7a9c) hatte diese Funktion
-ausgelassen. Der Desktop ist nicht betroffen (eigener tokio-Arbeiter). Die
-Lücke von etwa 0,9 s nach dem Nachladen der Liste ist gewollt (dieselben
-700 ms) und kommt nach der Ansage.
+dieses Durchlaufs. Die Aufteilung der Warteschlangen (49f7a9c) hatte diese
+Funktion ausgelassen. Der Desktop ist nicht betroffen (eigener
+tokio-Arbeiter). Die Lücke von etwa 0,9 s nach dem Nachladen der Liste ist
+gewollt (dieselben 700 ms) und kommt nach der Ansage.
 
 - [ ] **218 · Eigene Warteschlange für den Erinnerungs-Durchlauf (iOS und
   Android).** `upcomingRemindersJson` bekommt eine eigene serielle
@@ -3256,8 +3257,9 @@ Lücke von etwa 0,9 s nach dem Nachladen der Liste ist gewollt (dieselben
   Benutzung; nach 218 halten sie nichts mehr auf.
 - [ ] **220 · Nur Geändertes senden.** `TasksFeature::update_task`
   (`cal-core`) bekommt die vorige Zeile als optionalen, allgemeinen Parameter;
-  beide Hosts geben die Zeile aus dem Cache von vor dem Schreiben mit, die der
-  Host-Kern für wiederkehrende Aufgaben schon liest. Jeder Adapter darf damit
+  beide Hosts lesen sie vor jedem Schreiben aus dem Cache und geben sie mit.
+  Heute liest der Host-Kern den Cache von vor dem Schreiben nur beim Erledigen
+  einer wiederkehrenden Aufgabe, als ganze Liste. Jeder Adapter darf damit
   nur senden, was sich geändert hat. Vikunja spart so `PUT assignees/bulk` und
   den `GET /tasks/{id}` für `reconcile_parent`, wenn Zuweisungen und Eltern
   gleich bleiben (etwa 90 ms je Änderung, Desktop und Handy). Gewollte
@@ -3265,9 +3267,10 @@ Lücke von etwa 0,9 s nach dem Nachladen der Liste ist gewollt (dieselben
   letzten Laden geändert, überschreibt Aperio das nicht mehr mit seinem alten
   Stand. Berührt `cal-core`, die Plugin-Schnittstelle, alle Adapter (Standard:
   den Parameter nicht beachten) und beide Hosts. Die Plugin-Schnittstelle ist
-  der eigentliche Weg: Jeder Aufgaben-Adapter außer dem Geräte-Adapter (den
-  der Handy-Host direkt einhängt), Vikunja eingeschlossen, wird nur über sie
-  erreicht, und heute geht dort ein nacktes `Task` hinüber (Shim in
+  der eigentliche Weg: Jeder Aufgaben-Adapter außer den beiden eingebauten,
+  dem lokalen Speicher (`adapter-local`) und dem Geräte-Adapter, die die Hosts
+  direkt aufrufen, wird nur über sie erreicht, Vikunja eingeschlossen. Heute
+  geht dort ein nacktes `Task` hinüber (Shim in
   `plugin-core`, `ffi_update_task` der sechs Aufgaben-Plugins: CalDAV, EWS,
   Google, Graph, Todoist, Vikunja). Ohne neue Argumentform oder eigenen
   Eintrag in der Vtable käme die vorige Zeile dort nie an; dazu gehört die
@@ -3278,11 +3281,12 @@ still („error decoding response body“, 09:34:25 UTC). In dieser Zeit schwieg
 das Protokoll ganz; danach waren alle Verbindungen tot, auch die zu Servern,
 die der Durchlauf gerade nicht nutzte, genau wie nach den Rückkehren aus dem
 Hintergrund um 08:36:45, 09:05:04 und 09:33:22 UTC. Vermutlich war die App im
-Hintergrund und iOS hat die Verbindungen geschlossen; der Vikunja-Server hatte
-nach 51 ms geantwortet. Offen ist nur, ob so ein Abbruch auch im Vordergrund
-vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene Durchlauf zu Ende
-(um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in dieser Zeit darauf,
-danach nur noch der Durchlauf.
+Hintergrund und iOS hat die Verbindungen geschlossen. Der Vikunja-Server hatte
+nach 51 ms die Kopfzeilen geschickt; der Rumpf kam nicht mehr an, daher
+„error decoding response body“. Offen ist nur, ob so ein Abbruch auch im
+Vordergrund vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene
+Durchlauf zu Ende (um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in
+dieser Zeit darauf, danach nur noch der Durchlauf.
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
