@@ -3056,7 +3056,10 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   eines Kalenders. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
   keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
   sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
-  erhalten, solange niemand Anzahl oder Einheit ändert. Eine Erinnerung nach dem
+  erhalten, solange niemand Typ, Anzahl oder Einheit anfasst: Dort löst schon
+  das erneute Wählen des bereits gewählten Werts eine Änderung aus, im
+  Typ-Feld („Vor Beginn“) zu 15 Minuten davor, im Einheiten-Feld („Minuten“)
+  zu 1 Minute davor (`SelectFieldButton` prüft den Wert nicht). Eine Erinnerung nach dem
   Beginn sperrt das Speichern genauso (nächster Punkt). Mit 221 erledigt, für
   Erinnerungen nach dem Beginn mit 222.
 - [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
@@ -3064,10 +3067,12 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
   Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „0 Minuten
   vor Beginn“ (`splitRelative` fasst alles bis 0 zusammen), und wer Anzahl
-  oder Einheit ändert, macht daraus eine Erinnerung davor; Ton oder „Gilt“ zu
-  ändern lässt sie, wie sie ist. Am Desktop sperrt sie wie die 0 zudem das
-  Speichern (voriger Punkt); am Handy bleibt sie erhalten, solange niemand
-  Anzahl oder Einheit ändert. Entschieden: richtig zeigen („10
+  oder Einheit ändert, macht daraus eine Erinnerung davor; am Handy genügt
+  schon, im Typ- oder Einheiten-Feld den bereits gewählten Wert erneut zu
+  wählen (voriger Punkt). Ton oder „Gilt“ zu ändern lässt sie, wie sie ist.
+  Am Desktop sperrt sie wie die 0 zudem das Speichern (voriger Punkt); am
+  Handy bleibt sie erhalten, solange niemand Typ, Anzahl oder Einheit
+  anfasst. Entschieden: richtig zeigen („10
   Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach Beginn“, nur
   wo sie ankommt: bei Kalendern, deren Anbieter sie speichert (CalDAV), bei
   lokalen Kalendern und bei Erinnerungen „Nur in Aperio“. Google, Exchange und
@@ -3100,9 +3105,11 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Der Termin-Editor folgt der Regel „nichts anbieten, was still bleibt“ bisher
   nur für diese Art (`allowAppStart={targetIsLocal}`), und auch das nur am
   Desktop: Das Handy löst „Beim nächsten App-Start“ nie aus, bietet es aber
-  für lokale Kalender und für jede Aufgabenliste an. Eine dort gesetzte
-  Erinnerung klingelt erst, wenn ein Desktop den Eintrag per Sync bekommt und
-  neu startet. Bei Google kommt eine feste Uhrzeit „An diesem Termin“ nicht an:
+  für lokale Kalender und für jede Aufgabenliste an. Bei einem lokalen
+  Kalender oder einer lokalen Liste klingelt eine dort gesetzte Erinnerung
+  erst, wenn ein Desktop den Eintrag per Sync bekommt und neu startet. In
+  einer externen Aufgabenliste klingelt sie nirgends: Kein Adapter schreibt
+  diese Art, und der Desktop sammelt sie nur aus Aperios lokalem Speicher. Bei Google kommt eine feste Uhrzeit „An diesem Termin“ nicht an:
   Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, gelten die
   Standard-Erinnerungen des Google-Kalenders. Bei Exchange und Microsoft 365
   kommt ebenfalls keine feste Uhrzeit an und von mehreren Erinnerungen „Vor
@@ -3127,11 +3134,15 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Tatsächlich schreibt Aperio dort Termine, aber keine Erinnerungen, und der
   Planer überspringt Gerätekonten; eine dort gesetzte Erinnerung klingelt also
   nirgends. Schließlich sagt die Anleitung, „Beim nächsten App-Start“ werde
-  ausgelöst, wenn es am Eintrag selbst gesetzt ist; das gilt nur am Desktop. DESIGN
+  ausgelöst, wenn es am Eintrag selbst gesetzt ist. Das gilt nur am Desktop
+  und nur für Einträge in lokalen Kalendern und Listen, denn kein Anbieter
+  speichert diese Art. DESIGN
   verspricht Schlummern und „Öffnen“ in der Mitteilung (§14.3, §14.5, §14.6)
-  und in §14.1 globale Standard-Erinnerungen für neue Termine und Aufgaben;
-  gebaut sind nur Standard-Erinnerungen je Kalender, Aufgabenlisten haben
-  keine.
+  und in §14.1 globale Standard-Erinnerungen für neue Termine und Aufgaben.
+  Gebaut sind Standard-Erinnerungen nur je Kalender. Für Aufgaben gibt es
+  keine Standard-Erinnerung am Eintrag, weder global noch je Liste, nur die
+  globalen Tagesstart-Erinnerungen an Fristen (Einstellungen → Aufgaben, je
+  Aufgabe überschreibbar als „Frühe Erinnerung“).
 
 ---
 
