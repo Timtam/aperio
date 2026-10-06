@@ -47,6 +47,33 @@ The endpoint is discovered or user-supplied.
   from the master. An item that cannot be read, or that answers for another
   slot, leaves the row inheriting the series' content and says so in the log:
   an inherited value is wrong, a guessed one would be worse.
+- **An all-day exception names its slot by its day.** EWS reports an
+  all-day item's instants, an occurrence's `OriginalStart` among them, as
+  midnight in the item's own zone — mostly: after Aperio's own write of an
+  Outlook item (UTC midnights, no zone) Exchange keeps the old zone's
+  midnights and labels them UTC (live round 3). The read samples the day
+  13:45 into it, in the zone Exchange names — the start zone, read as the
+  series' zone is, UTC for a series made without one (`all_day_zone`,
+  decision 217) — which is exact for a midnight that zone names, and the
+  intended day for a label off by any offset in (−10:15, +13:45], New
+  Zealand's summer included. It re-anchors the start, the series'
+  exceptions and the override id's slot to this device's local midnight of
+  that day (`all_day_anchor`, `override_slot`, decision 215). Where
+  Exchange names no zone the adapter can read, the sample is taken in UTC
+  with the same window. An exception's own copy, which
+  an update compares with, is read in its series' zone like its row. With
+  the raw instant, a device
+  more than twelve hours from the mailbox's zone read the neighbouring day: the
+  views hid it, and the reminders, which honour single changes since decision
+  214, silenced it. Writing finds the exception by either spelling
+  (`names_override`), so an id minted before still resolves. These slots are
+  this device's local midnights, so the events token names the device's zone
+  as well as the zone translation: a device that moved reads the folder again,
+  and its ids follow (decision 216). Deleting one day of an all-day series
+  reads the server's slot in the series' zone before it compares, so a device
+  far from the mailbox's zone finds the day it names, and a neighbour, a whole
+  day away, never comes within the tolerance. Without a zone it compares the
+  raw instants as before and aborts rather than trust a sampled day.
 - **Exceptions keep their rule field.** Editing one changed occurrence writes
   to the exception's own item, which the override id finds from the series
   head on every write. That update never sends `DeleteItemField

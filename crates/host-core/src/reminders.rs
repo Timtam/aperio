@@ -945,6 +945,7 @@ fn event_triggers(
     window_end: DateTime<Utc>,
     day_start: NaiveTime,
 ) -> Vec<Trigger> {
+    let overridden = override_slots(events.iter().map(|ev| ev.id.as_str()));
     let mut out = Vec::new();
     for ev in events {
         // A cancelled meeting never nags — skip it unconditionally, regardless
@@ -970,12 +971,16 @@ fn event_triggers(
         // hasn't started yet) is still useful on app start; one for
         // an event already ended isn't.
         let duration = (ev.end - ev.start).max(ChronoDuration::zero());
+        let recurrence = ev
+            .recurrence
+            .as_ref()
+            .map(|rec| without_overridden_slots(rec, overridden.get(ev.id.as_str())));
         out.extend(occurrence_triggers(
             &ev.id,
             ItemKind::Event,
             &ev.title,
             ev.start,
-            ev.recurrence.as_ref(),
+            recurrence.as_ref(),
             &effective,
             duration,
             window_start,
@@ -987,6 +992,37 @@ fn event_triggers(
         ));
     }
     out
+}
+
+/// Per series, the slots its single changes stand in for: every override row
+/// (`{series}::rid::{slot}`) takes its slot out of the series, cancelled or
+/// moved (decision 214), as the views drop it (`expandAll` in
+/// `shared/recurrence.ts`). A cancelled one then rings nowhere — the row is
+/// skipped as every cancelled event is — and a moved one only at its new
+/// time, where its own row rings. A slot that does not read is left alone,
+/// as the views leave it: never hide what cannot be placed.
+fn override_slots<'a>(ids: impl Iterator<Item = &'a str>) -> HashMap<&'a str, Vec<DateTime<Utc>>> {
+    let mut slots: HashMap<&str, Vec<DateTime<Utc>>> = HashMap::new();
+    for id in ids {
+        if let Ok(Some((series, slot))) = cal_core::split_override_id(id) {
+            slots.entry(series).or_default().push(slot);
+        }
+    }
+    slots
+}
+
+/// A series' recurrence with the slots its single changes stand in for as
+/// deletions too, which the expansion matches as it matches its own: exactly
+/// on a timed series, by the day they name on a series of days.
+fn without_overridden_slots(
+    rec: &EventRecurrence,
+    slots: Option<&Vec<DateTime<Utc>>>,
+) -> EventRecurrence {
+    let mut rec = rec.clone();
+    if let Some(slots) = slots {
+        rec.exceptions.extend(slots.iter().copied());
+    }
+    rec
 }
 
 /// The single primitive every event-trigger emission path funnels
@@ -3161,6 +3197,39 @@ mod tests {
         );
     }
 
+    /// Decision 214: a single change takes its slot out of its series, as the
+    /// views drop it. A deleted occurrence (Google keeps every deletion as such
+    /// a cancelled row) rang at its slot, and a moved one rang twice — at its
+    /// slot through the series and at its new time through its own row.
+    #[test]
+    fn a_single_change_takes_its_slot_out_of_the_series() {
+        let at = |d: u32, m: u32, h: u32| Utc.with_ymd_and_hms(2026, m, d, h, 0, 0).unwrap();
+        let mut series = make_event(vec![rel(15)]);
+        series.id = "cal|s".into();
+        series.start = at(19, 5, 9);
+        series.end = at(19, 5, 10);
+        series.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY;BYDAY=TU".into(),
+            exceptions: Vec::new(),
+            tzid: None,
+        });
+        let mut deleted = make_event(vec![rel(15)]);
+        deleted.id = "cal|s::rid::2026-05-26T09:00:00Z".into();
+        deleted.start = at(26, 5, 9);
+        deleted.end = at(26, 5, 10);
+        deleted.cancelled = true;
+        let mut moved = make_event(vec![rel(15)]);
+        // The slot in another spelling names the same instant.
+        moved.id = "cal|s::rid::2026-06-02T11:00:00+02:00".into();
+        moved.start = at(2, 6, 14);
+        moved.end = at(2, 6, 15);
+
+        let triggers = ev_triggers(&[moved, series, deleted], &[], at(18, 5, 0), at(10, 6, 0));
+        let mut rung: Vec<DateTime<Utc>> = triggers.iter().map(|t| t.start).collect();
+        rung.sort();
+        assert_eq!(rung, vec![at(19, 5, 9), at(2, 6, 14), at(9, 6, 9)]);
+    }
+
     #[test]
     fn all_day_reminder_reads_the_offset_as_whole_days() {
         // "1 week before" (10080 min) → 7 days before at the day-start time.
@@ -3885,11 +3954,6 @@ mod tests {
             "an-until-before-the-start",
             "an-exception-a-millisecond-off-keeps-the-occurrence",
             "a-daily-series-across-a-change-at-midnight",
-            "a-moved-occurrence-stands-in-for-its-slot",
-            "a-cancelled-occurrence-removes-its-slot",
-            "a-moved-occurrence-of-a-zoned-series-after-the-change",
-            "an-override-slot-in-another-spelling",
-            "an-override-listed-before-its-series",
             "a-cancelled-series",
             "a-long-daily-series-in-a-wide-range",
         ];
@@ -3900,8 +3964,16 @@ mod tests {
         /// answer of its own again. And the rows of a series of days' UNTIL,
         /// decided on 2026-10-05 (decision 201): both read it on the day clock
         /// by its digits, a date as the whole day (`until_on_day_clock` here,
-        /// `untilOnClock` in the views). Named, like `DIFFERING`.
+        /// `untilOnClock` in the views). And the rows of a single change,
+        /// decided on 2026-10-05 (decision 214): cancelled or moved, it takes
+        /// its slot out of its series on both (`override_slots` here,
+        /// `expandAll` in the views). Named, like `DIFFERING`.
         const AGREEING: &[&str] = &[
+            "a-moved-occurrence-stands-in-for-its-slot",
+            "a-cancelled-occurrence-removes-its-slot",
+            "a-moved-occurrence-of-a-zoned-series-after-the-change",
+            "an-override-slot-in-another-spelling",
+            "an-override-listed-before-its-series",
             "an-all-day-series-west-of-utc-until-its-local-day",
             "a-date-only-until-on-an-all-day-series-east-of-utc",
             "the-editors-until-on-an-all-day-series-east-of-utc",
@@ -3920,7 +3992,7 @@ mod tests {
         ];
 
         #[test]
-        fn the_zone_rows_agree_between_views_and_reminders() {
+        fn the_decided_rows_agree_between_views_and_reminders() {
             let t = table();
             let cases = t["cases"].as_array().expect("cases");
             for name in AGREEING {
@@ -3931,7 +4003,7 @@ mod tests {
                 assert!(
                     case.get("reminders").is_none() && case.get("surfacesDiffer").is_none(),
                     "{name} records a reminders answer of its own, but views and reminders \
-                     read a zone through one rule (cal_core::series_clock, decision 26a)",
+                     read it through one rule (decisions 26a, 201, 214)",
                 );
             }
         }
@@ -3968,31 +4040,33 @@ mod tests {
                 .expect("an RFC 3339 instant")
         }
 
-        /// Every event on its own, as `event_triggers` expands it: a cancelled event
-        /// is skipped before anything expands, and an override is just another event.
-        /// Sorted by instant, then input index — the order the table records.
+        /// Every event as `event_triggers` expands it: a cancelled event is skipped
+        /// before anything expands, and every override takes its slot out of its
+        /// series (`override_slots`, decision 214). Sorted by instant, then input
+        /// index — the order the table records.
         fn reminder_answer(input: &Value, device: RruleTz) -> Vec<(DateTime<Utc>, usize)> {
             let lo = instant(&input["range"]["start"]);
             let hi = instant(&input["range"]["end"]);
+            let events = input["events"].as_array().expect("events");
+            let overridden =
+                override_slots(events.iter().map(|ev| ev["id"].as_str().expect("an id")));
             let mut rows = Vec::new();
-            for (i, ev) in input["events"]
-                .as_array()
-                .expect("events")
-                .iter()
-                .enumerate()
-            {
+            for (i, ev) in events.iter().enumerate() {
                 if ev["cancelled"].as_bool() == Some(true) {
                     continue;
                 }
                 let start = instant(&ev["start"]);
                 let starts = match ev["recurrence"].as_object() {
                     Some(rec) => {
-                        let exceptions: Vec<DateTime<Utc>> = rec["exceptions"]
+                        let mut exceptions: Vec<DateTime<Utc>> = rec["exceptions"]
                             .as_array()
                             .expect("exceptions")
                             .iter()
                             .map(instant)
                             .collect();
+                        if let Some(slots) = overridden.get(ev["id"].as_str().expect("an id")) {
+                            exceptions.extend(slots.iter().copied());
+                        }
                         expand_occurrences(
                             start,
                             rec["rrule"].as_str().expect("a rule"),

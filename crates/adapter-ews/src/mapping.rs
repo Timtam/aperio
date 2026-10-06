@@ -1753,10 +1753,19 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     let end = item
         .end
         .ok_or_else(|| EwsError::Protocol("CalendarItem missing End".into()))?;
-    // All-day boundaries re-anchor at LOCAL midnight of their local
-    // calendar day (the app-internal convention; see all_day_local_anchor).
+    // All-day boundaries re-anchor at LOCAL midnight of their calendar day,
+    // read in the item's own zone (the app-internal convention; see
+    // all_day_anchor).
+    let day_zone = if item.is_all_day {
+        all_day_zone(&item)
+    } else {
+        None
+    };
     let (start, end) = if item.is_all_day {
-        (all_day_local_anchor(start), all_day_local_anchor(end))
+        (
+            all_day_anchor(start, day_zone),
+            all_day_anchor(end, day_zone),
+        )
     } else {
         (start, end)
     };
@@ -1819,7 +1828,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         // Anchor the exceptions the same way so they line up with the grid.
         let anchor = |dt: DateTime<Utc>| {
             if item.is_all_day {
-                all_day_local_anchor(dt)
+                all_day_anchor(dt, day_zone)
             } else {
                 dt
             }
@@ -2446,7 +2455,7 @@ pub fn override_event(
         return Ok(inherited_override_event(master_ev, master_item, ov));
     };
     let mut row = to_event(own.clone(), calendar_id)?;
-    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    row.id = encode_override_event_id(&master_ev.id, override_slot(master_item, ov));
     // An exception carries no rule of its own; the master keeps the series.
     row.recurrence = None;
     // The slot comes from the master's own list, which is what the expander
@@ -2454,8 +2463,9 @@ pub fn override_event(
     // boundaries always agree — the master's flag decided this before, and a
     // series can hold an occurrence that is not all-day.
     if row.all_day {
-        row.start = all_day_local_anchor(ov.start);
-        row.end = all_day_local_anchor(ov.end);
+        let zone = all_day_zone(master_item);
+        row.start = all_day_anchor(ov.start, zone);
+        row.end = all_day_anchor(ov.end, zone);
     } else {
         row.start = ov.start;
         row.end = ov.end;
@@ -2490,11 +2500,12 @@ fn inherited_override_event(
     ov: &ModifiedOccurrence,
 ) -> Event {
     let mut row = master_ev.clone();
-    row.id = encode_override_event_id(&master_ev.id, ov.original_start);
+    row.id = encode_override_event_id(&master_ev.id, override_slot(master_item, ov));
     row.recurrence = None;
     if master_item.is_all_day {
-        row.start = all_day_local_anchor(ov.start);
-        row.end = all_day_local_anchor(ov.end);
+        let zone = all_day_zone(master_item);
+        row.start = all_day_anchor(ov.start, zone);
+        row.end = all_day_anchor(ov.end, zone);
     } else {
         row.start = ov.start;
         row.end = ov.end;
@@ -2515,18 +2526,82 @@ fn inherited_override_event(
     row
 }
 
-/// EWS hands back a plain instant that is midnight of the intended day
-/// in SOME zone (the mailbox timezone, or UTC for boundaries we wrote
-/// ourselves) without saying which. Sampling 12 hours INTO the day lands
-/// inside the intended day in UTC for any zone offset in (−12h, +12h],
-/// so the sample's UTC date recovers the day without guessing the zone.
-/// DST edge: fall forward when the local zone skips midnight.
-pub(crate) fn all_day_local_anchor(when: DateTime<Utc>) -> DateTime<Utc> {
-    let day = (when + chrono::Duration::hours(12)).date_naive();
+/// The slot a single change names in its id: the instant the master's own
+/// exception names for it (`to_event`). On an all-day series that is the
+/// local midnight of the intended day, read in the series' zone
+/// ([`all_day_anchor`]), not the raw midnight in the mailbox's zone EWS
+/// sends: read by the day it is nearest to, as the views and the reminders
+/// read an all-day slot (decision 95), the raw instant named the neighbouring
+/// day wherever the mailbox's zone lies more than twelve hours from the
+/// device's — the views hid that day, and its reminder fell silent once the
+/// reminders honoured single changes too (decision 215).
+pub(crate) fn override_slot(master_item: &ParsedItem, ov: &ModifiedOccurrence) -> DateTime<Utc> {
+    if master_item.is_all_day {
+        all_day_anchor(ov.original_start, all_day_zone(master_item))
+    } else {
+        ov.original_start
+    }
+}
+
+/// Whether an override id's slot names this single change: as the id is minted
+/// now ([`override_slot`]), or raw, as an id minted before decision 215 names
+/// it. Exact on purpose: an all-day slot is the local midnight of the device
+/// that read it, and a device that moves to another zone reads the folder
+/// again ([`crate::EwsAdapter`]'s events token names the zone), so its ids
+/// follow. A slot from another zone is refused, never read as a guessed day.
+pub(crate) fn names_override(
+    master_item: &ParsedItem,
+    ov: &ModifiedOccurrence,
+    slot: DateTime<Utc>,
+) -> bool {
+    override_slot(master_item, ov) == slot || ov.original_start == slot
+}
+
+/// The zone an all-day item's instants are midnights in, as Exchange names
+/// it: its start zone, read the way its series' zone is read
+/// ([`crate::windows_tz::read_series_zone`]), and UTC for one made without a
+/// zone. `None` where Exchange names none Aperio can read.
+pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<chrono_tz::Tz> {
+    match crate::windows_tz::read_series_zone(
+        item.start_time_zone.as_deref(),
+        item.end_time_zone.as_deref(),
+    ) {
+        Some(crate::windows_tz::WindowsZoneRead::Zone(zone)) => zone.parse().ok(),
+        Some(crate::windows_tz::WindowsZoneRead::Utc) => Some(chrono_tz::UTC),
+        Some(crate::windows_tz::WindowsZoneRead::Unknown) | None => None,
+    }
+}
+
+/// The local midnight of the day an all-day instant names.
+///
+/// EWS hands back a plain instant that is midnight of the intended day in
+/// the item's zone (the mailbox's, or UTC for boundaries we wrote ourselves)
+/// — mostly: after Aperio's own write of an Outlook item, which sends UTC
+/// midnights without a zone, Exchange rounds in the item's old zone and
+/// labels it UTC (live round 3). So the day is sampled 13:45 INTO it, in the
+/// zone Exchange names ([`all_day_zone`], decision 217): exact for a midnight
+/// that zone names, and the intended day for a label off by any offset in
+/// (−10:15, +13:45] — New Zealand's summer, the Chatham Islands, Tonga and
+/// Samoa among them, which twelve hours read as the day before; the same
+/// window `cal_core`'s anchor repair reads days in. Where Exchange names no
+/// zone Aperio can read, the sample is taken in UTC, with the same window.
+/// DST edge: a device zone that skips midnight that day gets the first hour
+/// after it, where the views place the day too.
+pub(crate) fn all_day_anchor(when: DateTime<Utc>, zone: Option<chrono_tz::Tz>) -> DateTime<Utc> {
+    let into_the_day = chrono::Duration::minutes(13 * 60 + 45);
+    let day = match zone {
+        Some(tz) => (when.with_timezone(&tz) + into_the_day).date_naive(),
+        None => (when + into_the_day).date_naive(),
+    };
     let midnight = day.and_hms_opt(0, 0, 0).unwrap();
     Local
         .from_local_datetime(&midnight)
         .earliest()
+        .or_else(|| {
+            Local
+                .from_local_datetime(&(midnight + chrono::Duration::hours(1)))
+                .earliest()
+        })
         .map(|l| l.with_timezone(&Utc))
         .unwrap_or(when)
 }
@@ -7519,7 +7594,7 @@ mod tests {
         // the frontend expander — which anchors on `start` and matches EXDATEs by
         // exact instant — won't suppress the vacated slot on a non-UTC device,
         // rendering it as a duplicate. Zone-generic: asserts the exceptions equal
-        // `all_day_local_anchor` of the raw instants (identity under UTC, shifted
+        // `all_day_anchor` of the raw instants (identity under UTC, shifted
         // under any other zone), matching whatever transform hit `start`.
         let del: DateTime<Utc> = "2026-01-05T00:00:00Z".parse().unwrap();
         let orig: DateTime<Utc> = "2026-01-10T00:00:00Z".parse().unwrap();
@@ -7551,13 +7626,184 @@ mod tests {
         let ev = to_event(item, "cal").unwrap();
         let rec = ev.recurrence.expect("master has recurrence");
         assert_eq!(rec.exceptions.len(), 2);
-        assert_eq!(rec.exceptions[0], all_day_local_anchor(del));
-        assert_eq!(rec.exceptions[1], all_day_local_anchor(orig));
+        assert_eq!(rec.exceptions[0], all_day_anchor(del, None));
+        assert_eq!(rec.exceptions[1], all_day_anchor(orig, None));
         // The master start got the same transform, so grid + EXDATEs line up.
         assert_eq!(
             ev.start,
-            all_day_local_anchor("2026-01-01T00:00:00Z".parse().unwrap())
+            all_day_anchor("2026-01-01T00:00:00Z".parse().unwrap(), None)
         );
+    }
+
+    /// Decision 215: a single change of an all-day series names its slot as
+    /// the series' own exception does — the local midnight of its day — so the
+    /// views and the reminders read the same day for both. The raw instant is
+    /// midnight in the mailbox's zone (here New York), which a device more than
+    /// twelve hours away read as the neighbouring day. Zone-generic: asserts
+    /// against `all_day_anchor`, as the test above does.
+    #[test]
+    fn an_all_day_single_change_names_its_slot_as_the_series_does() {
+        let orig: DateTime<Utc> = "2026-05-26T04:00:00Z".parse().unwrap();
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Daily all-day".into(),
+            start: Some("2026-05-20T04:00:00Z".parse().unwrap()),
+            end: Some("2026-05-21T04:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 30 },
+        });
+        let ov = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-05-27T04:00:00Z".parse().unwrap(),
+            end: "2026-05-28T04:00:00Z".parse().unwrap(),
+            original_start: orig,
+            cancelled: false,
+            own: None,
+        };
+        item.modified_occurrences = vec![ov.clone()];
+        let master = to_event(item.clone(), "cal").unwrap();
+        let row = override_event(&master, &item, &ov, "cal").unwrap();
+        let (series, slot) = cal_core::split_override_id(&row.id).unwrap().unwrap();
+        assert_eq!(series, master.id);
+        assert_eq!(slot, all_day_anchor(orig, None));
+        assert!(master.recurrence.unwrap().exceptions.contains(&slot));
+        // Writing finds the change by the id's slot, and by the raw one an
+        // older id carries; never by another day's.
+        assert!(names_override(&item, &ov, slot));
+        assert!(names_override(&item, &ov, orig));
+        assert!(!names_override(
+            &item,
+            &ov,
+            all_day_anchor("2026-05-27T04:00:00Z".parse().unwrap(), None)
+        ));
+        // A timed series keeps its exact instant.
+        item.is_all_day = false;
+        assert_eq!(override_slot(&item, &ov), orig);
+    }
+
+    /// Decision 217: an all-day item's instants are midnights in its own zone,
+    /// and read in it the day is exact. An Auckland series begun in winter has
+    /// its January slots at 11:00 UTC the day before; the 12-hour sample read
+    /// them as that day before. Its start, its exceptions and the slot in its
+    /// single changes' ids now name the day itself.
+    #[test]
+    fn an_all_day_series_is_read_in_its_own_zone() {
+        let auckland = chrono_tz::Pacific::Auckland;
+        let slot: DateTime<Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
+        let day = chrono::NaiveDate::from_ymd_opt(2027, 1, 15).unwrap();
+        let local_midnight = Local
+            .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+            .earliest()
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Daily all-day".into(),
+            start: Some("2026-05-31T12:00:00Z".parse().unwrap()),
+            end: Some("2026-06-01T12:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            start_time_zone: Some("New Zealand Standard Time".into()),
+            end_time_zone: Some("New Zealand Standard Time".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::NoEnd,
+        });
+        let ov = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: slot,
+            end: "2027-01-15T11:00:00Z".parse().unwrap(),
+            original_start: slot,
+            cancelled: false,
+            own: None,
+        };
+        item.modified_occurrences = vec![ov.clone()];
+        assert_eq!(all_day_zone(&item), Some(auckland));
+        assert_eq!(all_day_anchor(slot, Some(auckland)), local_midnight);
+        let master = to_event(item.clone(), "cal").unwrap();
+        assert_eq!(
+            master.recurrence.as_ref().unwrap().exceptions,
+            vec![local_midnight]
+        );
+        assert_eq!(override_slot(&item, &ov), local_midnight);
+        let row = override_event(&master, &item, &ov, "cal").unwrap();
+        assert_eq!(row.start, local_midnight);
+        // A series made without a zone reads its UTC midnights in UTC.
+        item.start_time_zone = Some("Greenwich Standard Time".into());
+        item.end_time_zone = Some("tzone://Microsoft/Utc".into());
+        assert_eq!(all_day_zone(&item), Some(chrono_tz::UTC));
+        // No zone Aperio can read: the day is sampled, as before.
+        item.start_time_zone = None;
+        item.end_time_zone = None;
+        assert_eq!(all_day_zone(&item), None);
+        assert_eq!(override_slot(&item, &ov), all_day_anchor(slot, None));
+    }
+
+    /// Live round 3, T2: an Outlook all-day single in Berlin, re-dated by
+    /// Aperio's writer (UTC midnights, no zone), came back as 18 Oct 22:00 UTC
+    /// to 20 Oct 22:00 UTC with both zones `tzone://Microsoft/Utc` — Berlin's
+    /// midnights labelled UTC. Outlook shows Monday 19 and Tuesday 20. Read
+    /// 13:45 into the day in the zone Exchange names, so are they; read as the
+    /// UTC date, Sunday and Monday.
+    #[test]
+    fn a_relabelled_all_day_item_keeps_its_days() {
+        let midnight = |d: u32| {
+            Local
+                .from_local_datetime(
+                    &chrono::NaiveDate::from_ymd_opt(2026, 10, d)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let item = ParsedItem {
+            item_id: "T2".into(),
+            subject: "Outlook all-day".into(),
+            start: Some("2026-10-18T22:00:00Z".parse().unwrap()),
+            end: Some("2026-10-20T22:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            start_time_zone: Some("tzone://Microsoft/Utc".into()),
+            end_time_zone: Some("tzone://Microsoft/Utc".into()),
+            ..ParsedItem::default()
+        };
+        let ev = to_event(item.clone(), "cal").unwrap();
+        assert_eq!((ev.start, ev.end), (midnight(19), midnight(21)));
+        // The same from an Auckland mailbox in its summer (+13): dragged to
+        // Saturday 16 January, Exchange keeps Auckland's midnights, 11:00 UTC
+        // the day before, and labels them UTC. Twelve hours in read Friday.
+        let auckland_day = |d: u32| {
+            Local
+                .from_local_datetime(
+                    &chrono::NaiveDate::from_ymd_opt(2027, 1, d)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let auckland = ParsedItem {
+            start: Some("2027-01-15T11:00:00Z".parse().unwrap()),
+            end: Some("2027-01-17T11:00:00Z".parse().unwrap()),
+            ..item
+        };
+        let ev = to_event(auckland, "cal").unwrap();
+        assert_eq!((ev.start, ev.end), (auckland_day(16), auckland_day(18)));
     }
 
     #[test]

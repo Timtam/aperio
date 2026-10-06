@@ -2623,6 +2623,7 @@ Der Reminder-Scheduler lädt einmal pro Scan einen `SoundPrefs`-Snapshot aller `
 ```
 reminder.sound
   ?? prefs["sound.item.{itemId}"]
+  ?? prefs["sound.item.{seriesId}"]    // Einzeländerung {seriesId}::rid::{slot} ohne eigenen Ton (216)
   ?? prefs["sound.{calendar|tasklist}.{containerId}"]
   ?? prefs["sound.global"]
   ?? System            // SoundConfig::default()

@@ -218,13 +218,28 @@ pub fn plan_repairs(
         if wanted_start < lower || wanted_start > upper {
             continue;
         }
-        // Collapse to the series before asking whether the answer is unique: a
-        // master and a provider-sent override of one of its occurrences are
-        // two rows for ONE appointment.
+        // A row bound to ONE occurrence follows that occurrence, never the
+        // series (decision 216): its override was minted again under another
+        // id — a slot read in another zone, a series whose own id moved on —
+        // and the series is a different appointment, which taking the row
+        // would recolour whole. So only another override can be its
+        // occurrence now, by its own id. Any other row collapses to the series
+        // before asking whether the answer is unique: a master and a
+        // provider-sent override of one of its occurrences are two rows for
+        // ONE appointment.
+        let occurrence_bound = row.event_id.contains(OVERRIDE_ID_MARKER);
         let mut candidates: Vec<&str> = events
             .iter()
             .filter(|ev| normalize(&ev.title) == wanted_title && starts_the_same(ev, wanted_start))
-            .map(|ev| series_master_id(&ev.id))
+            .filter_map(|ev| {
+                if !occurrence_bound {
+                    Some(series_master_id(&ev.id))
+                } else if ev.id.contains(OVERRIDE_ID_MARKER) {
+                    Some(ev.id.as_str())
+                } else {
+                    None
+                }
+            })
             .collect();
         candidates.sort_unstable();
         candidates.dedup();
@@ -260,15 +275,28 @@ pub fn plan_repairs(
 /// half this was ported from carries the same limit, written down the same
 /// way.
 ///
-/// **The day is the UTC day, which is not always the day the user sees.** For
-/// a reader east of UTC, local midnight on the 10th is the 9th at 22:00Z, so
-/// this compares "the 9th". That is correct here because it is used as a KEY,
-/// not as a date: both sides of the comparison are derived from stored
-/// instants the same way, so they agree. Deriving the calendar day the user
-/// sees would need the device's timezone, which the core may never read.
+/// **The day is read 13:45 into the stored instant, without a zone.** A local
+/// midnight in any zone in (−10:15, +13:45] gets its own date that way, so a
+/// row signed on one device and read on another, or after the device moved,
+/// finds its day; outside the window a device's rows and events still agree,
+/// one day off on both sides. Deriving the calendar day the user sees exactly
+/// would need the device's timezone, which the core may never read.
 fn starts_the_same(ev: &Event, wanted: DateTime<Utc>) -> bool {
     if ev.all_day {
-        ev.start.date_naive() == wanted.date_naive()
+        // An all-day start is a local midnight, and a device in another zone
+        // writes the same day as another instant: Berlin's 2 June is 22:00 UTC
+        // on 1 June, New York's 04:00 UTC on 2 June. Both name their day 13:45
+        // into it, as does a midnight of any zone in (−10:15, +13:45] (decision
+        // 217) — New Zealand's and the Chatham Islands' both offsets, Hawaii
+        // and Adak, London's both, so no zone that keeps summer time sees its
+        // last winter day and first summer day under one key. Read by its UTC
+        // date, Berlin's named 1 June, and a row signed in Berlin missed its
+        // day in New York or found the day before; read 12 hours in, New
+        // Zealand's summer named the day before. Outside the window (Niue,
+        // Pago Pago, Kiritimati, none with summer time) a device's own rows
+        // still agree with its events, one day off on both sides.
+        let day = |at: DateTime<Utc>| (at + chrono::Duration::minutes(13 * 60 + 45)).date_naive();
+        day(ev.start) == day(wanted)
     } else {
         ev.start == wanted
     }
@@ -662,6 +690,142 @@ mod tests {
             "cal",
             &[event(occurrence, "cal", "Standup", start)],
             week_of(1),
+        )
+        .is_empty());
+    }
+
+    /// Decision 216: an occurrence's override minted again under another id —
+    /// its slot read in another zone, or its series' own id moved on — takes
+    /// the row along to the new override. It is never promoted to the series,
+    /// which would colour every other occurrence; and where no override is the
+    /// occurrence now, the row stays where it is.
+    #[test]
+    fn a_row_bound_to_an_occurrence_follows_its_reminted_override() {
+        let start = at(2);
+        let old = "M:ID|CK1::rid::2026-06-01T22:00:00+00:00";
+        let reminted = "M:ID|CK1::rid::2026-06-01T23:00:00+00:00";
+        let series = event("M:ID|CK1", "cal", "Standup", start);
+        assert_eq!(
+            plan_repairs(
+                &[row(old, "cal", "Standup", start)],
+                "cal",
+                &[series.clone(), event(reminted, "cal", "Standup", start)],
+                week_of(1),
+            ),
+            vec![Repair::Repoint {
+                event_id: old.into(),
+                to: reminted.into(),
+            }],
+        );
+        // Only the series answers: the row is left alone, not promoted.
+        assert!(plan_repairs(
+            &[row(old, "cal", "Standup", start)],
+            "cal",
+            &[series],
+            week_of(1),
+        )
+        .is_empty());
+    }
+
+    /// An all-day single change read in another zone: the row was signed in
+    /// Berlin (2 June is 22:00 UTC on 1 June), the device is in New York now
+    /// (2 June is 04:00 UTC on 2 June), and the day before is a single change
+    /// of the same title too. The row follows its own day.
+    #[test]
+    fn an_all_day_row_finds_its_day_in_another_zone() {
+        let berlin: DateTime<Utc> = "2026-06-01T22:00:00Z".parse().unwrap();
+        let new_york: DateTime<Utc> = "2026-06-02T04:00:00Z".parse().unwrap();
+        let day_before: DateTime<Utc> = "2026-06-01T04:00:00Z".parse().unwrap();
+        let old = "M:ID|CK::rid::2026-06-01T22:00:00+00:00";
+        let ours = "M:ID|CK::rid::2026-06-02T04:00:00+00:00";
+        let mut events = vec![
+            event(
+                "M:ID|CK::rid::2026-06-01T04:00:00+00:00",
+                "cal",
+                "Homeoffice",
+                day_before,
+            ),
+            event(ours, "cal", "Homeoffice", new_york),
+        ];
+        for ev in &mut events {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row(old, "cal", "Homeoffice", berlin)],
+                "cal",
+                &events,
+                (day_before, new_york),
+            ),
+            vec![Repair::Repoint {
+                event_id: old.into(),
+                to: ours.into(),
+            }],
+        );
+    }
+
+    /// A row signed in New Zealand's summer (+13) and read in Berlin: 15
+    /// January there is 11:00 UTC on the 14th, Berlin's 23:00 UTC on the 14th.
+    /// Read 12 hours in, the row named the 14th and moved to the day before.
+    #[test]
+    fn an_all_day_row_signed_in_new_zealand_s_summer_finds_its_day() {
+        let auckland: DateTime<Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
+        let berlin_14th: DateTime<Utc> = "2027-01-13T23:00:00Z".parse().unwrap();
+        let berlin_15th: DateTime<Utc> = "2027-01-14T23:00:00Z".parse().unwrap();
+        let mut events = vec![
+            event("day-14", "cal", "Homeoffice", berlin_14th),
+            event("day-15", "cal", "Homeoffice", berlin_15th),
+        ];
+        for ev in &mut events {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row("old", "cal", "Homeoffice", auckland)],
+                "cal",
+                &events,
+                (berlin_14th, berlin_15th),
+            ),
+            vec![Repair::Repoint {
+                event_id: "old".into(),
+                to: "day-15".into(),
+            }],
+        );
+    }
+
+    /// New Zealand's summer time begins on Sunday 27 September 2026: Sunday's
+    /// midnight is 12:00 UTC on the 26th (+12), Monday's 11:00 UTC on the 27th
+    /// (+13). Read 12 hours in, both were the 27th, and a row could not tell
+    /// them apart; each keeps its own day.
+    #[test]
+    fn the_first_summer_day_is_not_the_last_winter_day() {
+        let sunday: DateTime<Utc> = "2026-09-26T12:00:00Z".parse().unwrap();
+        let monday: DateTime<Utc> = "2026-09-27T11:00:00Z".parse().unwrap();
+        let mut both = vec![
+            event("sunday", "cal", "Urlaub", sunday),
+            event("monday", "cal", "Urlaub", monday),
+        ];
+        for ev in &mut both {
+            ev.all_day = true;
+        }
+        assert_eq!(
+            plan_repairs(
+                &[row("old", "cal", "Urlaub", monday)],
+                "cal",
+                &both,
+                (sunday, monday),
+            ),
+            vec![Repair::Repoint {
+                event_id: "old".into(),
+                to: "monday".into(),
+            }],
+        );
+        // Sunday alone is not Monday's.
+        assert!(plan_repairs(
+            &[row("old", "cal", "Urlaub", monday)],
+            "cal",
+            &both[..1],
+            (sunday, monday),
         )
         .is_empty());
     }

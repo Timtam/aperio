@@ -73,7 +73,12 @@ mod tests;
 ///    instead of carving the occurrence out of its series (decision 79b). A
 ///    listing stored under an earlier generation has no such flag and would
 ///    keep carving out until the next re-bootstrap.
-pub const CACHE_GENERATION: u32 = 6;
+/// 7: an Exchange all-day single change names its slot by the local midnight of
+///    its day, as its series' own exception does (decision 215). A row cached
+///    under 6 carries the raw "some-zone midnight", which the views and the
+///    reminders read as the neighbouring day where the mailbox's zone lies more
+///    than twelve hours from the device's.
+pub const CACHE_GENERATION: u32 = 7;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";

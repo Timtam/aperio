@@ -1,5 +1,5 @@
 {
-  "what": "Event recurrence as a table: which occurrences a set of events (series, the overrides of single occurrences, plain events) yields inside a range. `expect` is what the calendar views and the widget get from shared/recurrence.ts expandAll (rrule.js). Where the reminder path in host-core (expand_occurrences on the rrule crate, one event at a time as event_triggers calls it) answers differently, the row carries that answer as `reminders` and says `surfacesDiffer`. Measured on the real code of both before the port; rows whose note names a decision were changed or added by hand after it.",
+  "what": "Event recurrence as a table: which occurrences a set of events (series, the overrides of single occurrences, plain events) yields inside a range. `expect` is what the calendar views and the widget get from shared/recurrence.ts expandAll (rrule.js). Where the reminder path in host-core (expand_occurrences on the rrule crate, each series with the slots of its single changes taken out, as event_triggers calls it) answers differently, the row carries that answer as `reminders` and says `surfacesDiffer`. Measured on the real code of both before the port; rows whose note names a decision were changed or added by hand after it.",
   "why": "The views and the reminders expand the same series with two libraries in two languages, and the survey of 2026-09-14 found them apart. One expander in the core answers both, and a frontend that is not JavaScript. Every row where the two differ is a decision for the port.",
   "writtenBy": [
     "src/intl/eventOccurrences.measure.test.ts — a one-off, run once and deleted: expandAll on every case.",
@@ -9,7 +9,7 @@
   ],
   "readBy": [
     "src/intl/eventOccurrences.contract.test.ts (the views: expandAll)",
-    "crates/host-core/src/reminders.rs, tests::event_occurrence_contract (the reminders: expand_occurrences, one event at a time)"
+    "crates/host-core/src/reminders.rs, tests::event_occurrence_contract (the reminders: expand_occurrences, with the slots of single changes folded in as event_triggers does)"
   ],
   "whereItLives": {
     "note": "In shared/contracts, beside the other tables both languages check themselves against, because host-core reads it and may embed only from here (KNOWN_REACHES in crates/host-plugins/tests/manifest_reach.rs). When the rule moves into cal-core the table moves beside taskOccurrences.json and host-core stops reading it."
@@ -27,7 +27,7 @@
   "shape": {
     "input": "{events: [{id, start, end, all_day?, recurrence: {rrule, exceptions, tzid?} | null, cancelled?}], range: {start, end}}; instants in RFC 3339, UTC. `all_day` reads as false when absent; an all-day series repeats on the DEVICE's calendar days (48a) and cancels by the day an exception falls on, so its rows only mean what they say when the reader is in `measuredWith.machineZone`",
     "expect": "[{event: index into events, start}], sorted by instant and then by input index",
-    "reminders": "present only where the reminder path answered differently: the same shape and order, each event expanded on its own (a cancelled event skipped, overrides not applied)",
+    "reminders": "present only where the reminder path answered differently: the same shape and order, each event expanded as event_triggers expands it: a cancelled event skipped, and since decision 214 every override (`{series}::rid::{slot}`, cancelled or moved) taking its slot out of its series first",
     "surfacesDiffer": "marks a row that records `reminders`",
     "wasTypeScript": "a row pinning a JavaScript artifact the port may decide against; it must then change the row on purpose, with a note",
     "instants": "compare as instants, never as text: expandAll writes milliseconds (.000Z)",
@@ -2788,8 +2788,7 @@
     },
     {
       "name": "a-moved-occurrence-stands-in-for-its-slot",
-      "note": "The override’s id names the series and the slot it replaces. The views drop the master’s slot and show the override at its new time. The reminders expand each event on its own and apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The override’s id names the series and the slot it replaces. The views drop the master’s slot and show the override at its new time, and so do the reminders since decision 214: every override takes its slot out of its series before it expands. Before, the reminders fired at the master’s slot as well.",
       "input": {
         "events": [
           {
@@ -2826,30 +2825,11 @@
           "event": 0,
           "start": "2026-06-02T09:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T14:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
       ]
     },
     {
       "name": "a-cancelled-occurrence-removes-its-slot",
-      "note": "The views drop the master’s slot and the cancelled override both. The reminders skip the cancelled override and still fire at the master’s slot.",
-      "surfacesDiffer": true,
+      "note": "The views drop the master’s slot and the cancelled override both. The reminders skip the cancelled override and, since decision 214, take its slot out of the series too, so a deleted occurrence no longer rings. On Google every deleted occurrence is such a row.",
       "input": {
         "events": [
           {
@@ -2883,26 +2863,11 @@
           "event": 0,
           "start": "2026-06-02T09:00:00.000Z"
         }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
       ]
     },
     {
       "name": "a-moved-occurrence-of-a-zoned-series-after-the-change",
-      "note": "Monday 09:00 Europe/Berlin from summer; CalDAV names the slot of the November 2 occurrence by its winter instant. The views drop that slot and show the override at 12:00 UTC. The reminders apply no override: the November 2 slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "Monday 09:00 Europe/Berlin from summer; CalDAV names the slot of the November 2 occurrence by its winter instant. The views drop that slot and show the override at 12:00 UTC, and so do the reminders since decision 214.",
       "input": {
         "events": [
           {
@@ -2939,24 +2904,6 @@
         {
           "event": 1,
           "start": "2026-11-02T12:00:00Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-10-19T07:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-10-26T08:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-11-02T08:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-11-02T12:00:00.000Z"
         }
       ]
     },
@@ -3031,8 +2978,7 @@
     },
     {
       "name": "an-override-slot-in-another-spelling",
-      "note": "The slot is written with an offset instead of Z and matched as an instant. The reminders apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The slot is written with an offset instead of Z and matched as an instant, by the views and, since decision 214, by the reminders.",
       "input": {
         "events": [
           {
@@ -3064,24 +3010,6 @@
         {
           "event": 1,
           "start": "2026-05-26T14:00:00Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 0,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T14:00:00.000Z"
         },
         {
           "event": 0,
@@ -3178,8 +3106,7 @@
     },
     {
       "name": "an-override-listed-before-its-series",
-      "note": "The order of the list does not matter for which slot is dropped. The reminders apply no override: the master’s slot fires as well as the override.",
-      "surfacesDiffer": true,
+      "note": "The order of the list does not matter for which slot is dropped, for the views or, since decision 214, the reminders.",
       "input": {
         "events": [
           {
@@ -3211,24 +3138,6 @@
         {
           "event": 0,
           "start": "2026-05-26T14:00:00Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-06-02T09:00:00.000Z"
-        }
-      ],
-      "reminders": [
-        {
-          "event": 1,
-          "start": "2026-05-19T09:00:00.000Z"
-        },
-        {
-          "event": 1,
-          "start": "2026-05-26T09:00:00.000Z"
-        },
-        {
-          "event": 0,
-          "start": "2026-05-26T14:00:00.000Z"
         },
         {
           "event": 1,

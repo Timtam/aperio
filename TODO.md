@@ -1925,15 +1925,18 @@ Siehe DESIGN §4.2.
   eigene Regel) wird erst nach dem Pin mit gemessener WASM-Größe gewählt.
   ↳ **Schritt 1 (Pin): gebaut.** `shared/contracts/eventOccurrences.json`
   (dort, weil host-core die Tabelle liest und nur von dort einbetten darf),
-  78 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
+  heute 88 Zeilen: Regeln (auch WKST, BYMONTH mit BYDAY, BYMONTHDAY=-1), Bereich
   (auch zonierte Serien genau an den Rändern), UNTIL (auch das `T235959Z` des
   Editors und ein zoniertes UNTIL über eine Zeitumstellung), Ausnahmen, Zonen,
   ganztägig, Einzeländerungen, Größe. `expect` ist die Antwort der Ansichten
-  (`expandAll`); wo die Erinnerungen anders antworten — jeder Termin einzeln,
-  wie `event_triggers` ausrollt —, trägt die Zeile `reminders`. Verglichen
+  (`expandAll`); wo die Erinnerungen anders antworten — so wie
+  `event_triggers` ausrollt, seit 214 jede Einzeländerung mit ihrem Platz aus
+  ihrer Serie genommen —, trägt die Zeile `reminders`. Verglichen
   werden Zeitpunkte, sortiert nach Zeitpunkt und Position; die Reihenfolge von
-  `expandAll` (nach dem Text des Starts) zählt nicht. **22 Zeilen weichen ab**,
-  jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
+  `expandAll` (nach dem Text des Starts) zählt nicht. Beim Pin wichen **22
+  Zeilen** ab (heute 13, benannt in `DIFFERING` in `reminders.rs`; die Zonen
+  seit 26a, das UNTIL einer Serie von Tagen seit 201 und die
+  Einzeländerungen seit 214 sind einig), jede eine Entscheidung für den Port: UNTIL als reines Datum, ohne `Z` oder
   vor dem Start (die rrule-Kiste nimmt die Regel nicht an, die Erinnerungen
   behalten nur den Starttermin; rrule.js liest ohne Zone ein Datum als 00:00
   UTC und eine Uhrzeit ohne `Z` als UTC, bei einer zonierten Serie beides als
@@ -1945,12 +1948,13 @@ Siehe DESIGN §4.2.
   Leerzeichen (host-core trimmt, Intl nicht) oder in Kleinbuchstaben (Intl
   nimmt ihn, chrono-tz nicht); eine Zeitumstellung um Mitternacht (Santiago:
   die Ansichten schieben 00:30 auf 01:30, die Erinnerungen lassen den Tag aus
-  und enden einen Tag später); Einzeländerungen, auch an einer zonierten Serie
-  nach der Umstellung (die Erinnerungen wenden keine an, der alte Platz
-  erinnert weiter); eine abgesagte Serie (die Erinnerungen überspringen sie,
+  und enden einen Tag später); eine abgesagte Serie (die Erinnerungen überspringen sie,
   gewollt); und die Kappe der Erinnerungen bei 500 Vorkommen. Auf beiden Seiten
   gleich und gepinnt: die Sommerzeit-Lücke (vorwärts um die Lückenlänge), die
-  Überlappung (die frühere Lesung), zonierte Serien an den Bereichsrändern, ein
+  Überlappung (die frühere Lesung), Einzeländerungen, abgesagt oder verschoben,
+  auch an einer zonierten Serie nach der Umstellung (seit 214 nehmen sie auch
+  in den Erinnerungen ihren Platz aus der Serie), zonierte Serien an den
+  Bereichsrändern, ein
   zoniertes UNTIL mit `Z` über eine Umstellung, WKST, ganztägige Serien ohne
   Zone (steppen in UTC, nach der Umstellung um 23:00 am Vortag), das
   `T235959Z` des Editors auf einer ganztägigen Serie östlich von UTC (behielt
@@ -2131,11 +2135,13 @@ Siehe DESIGN §4.2.
     Vortag fällt. Weder Zeitpunkt- noch Tagesvergleich trifft ihn: der
     gestrichene Tag kommt einmal zurück, und ein erneutes Löschen schreibt ihn
     richtig. Eine Wanderung wurde bewusst nicht gebaut (95).
-  - `plan_repairs` vergleicht ganztägige Zeilen weiter über den UTC-Tag
-    (`starts_the_same`, der Kern darf die Gerätezone nicht lesen). In einer
+  - ✅ `plan_repairs` verglich ganztägige Zeilen über den UTC-Tag; in einer
     Zone, deren lokale Mitternacht über die Umstellung den UTC-Tag wechselt
-    (etwa London), kann ein Anker deshalb den Nachbartag nennen. Betrifft nur
-    das Reparieren verwaister Farb-, Erinnerungs- und Gruppenzeilen.
+    (etwa London), konnte ein Anker den Nachbartag nennen. Seit 217 liest
+    `starts_the_same` den Tag 13:45 in den Zeitpunkt hinein (ohne Gerätezone):
+    eigener Tag für jede Zone in (−10:15, +13:45], auch über Zonen hinweg und
+    an jeder Umstellung; außerhalb (Niue, Pago Pago, Kiritimati, ohne
+    Sommerzeit) stimmen Zeilen und Termine eines Geräts weiter überein.
   **Live-Test Runde 3** (49a), gelaufen am 18.09.2026:
   - eine ganztägige Serie und ein ganztägiger Termin aus Outlook, geändert
     nach der Regel aus 47a und nach der heutigen;
@@ -2458,6 +2464,54 @@ Siehe DESIGN §4.2.
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
+    - ✅ **Abgesagte und verschobene Einzeltermine klingeln richtig** (PR 7a,
+      209, 214): Die Erinnerungen klappten jede Serie für sich aus und wandten
+      ihre Einzeländerungen nicht an. Ein abgesagtes Vorkommen klingelte
+      weiter (bei Google ist jede Löschung so eine Zeile; mit PR 7 hätte das
+      jeden gelöschten Termin eines neuen Serienteils getroffen), ein
+      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV und
+      Google (Exchange trug den alten Platz schon in den Ausnahmen der Serie).
+      Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
+      Platz aus der Serie (`override_slots`), wie die Ansichten
+      (`expandAll`): genau bei Uhrzeit, nach dem Tag bei ganztägig; ein
+      Platz, der sich nicht lesen lässt, bleibt. Fünf Vertragszeilen in
+      `eventOccurrences.json` sind jetzt einig; die ganze abgesagte Serie
+      bleibt still (gewollt). Desktop und Handy gleich (host-core). Dazu 215:
+      Exchange nannte den Platz einer ganztägigen Einzeländerung als
+      Mitternacht in der Zone des Postfachs; lag das Gerät mehr als zwölf
+      Stunden davon, lasen Ansichten (schon vorher) und nun auch Erinnerungen
+      den Nachbartag. Der Adapter verankert den Platz jetzt wie die Ausnahme
+      der Serie (`override_slot`, lokale Mitternacht des Tages), Schreiben
+      findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
+      einmal neu. Die Folgen (216): Weil diese Plätze von der Zone des Geräts
+      abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
+      Token nennt die Zone); eine Farbe oder ein Meeting an einer
+      Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
+      Serie (`plan_repairs`, hilft auch CalDAV und Google); ohne eigenen Ton
+      klingelt eine Einzeländerung mit dem der Serie. Und 217: Exchange liest
+      die Zeitpunkte einer ganztägigen Serie 13:45 in den Tag hinein in der
+      Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für eine
+      ohne Zone, `all_day_zone`), statt 12 Stunden in UTC, was eine
+      Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den Vortag las;
+      das fängt auch ein Etikett ab, das Exchange nach Aperios eigenem
+      Schreiben auf UTC umstellt, während die Zeitpunkte Mitternacht der alten
+      Zone bleiben (Live-Runde 3), für jede alte Zone in (−10:15, +13:45]
+      (Niue, Pago Pago, Kiritimati liegen außerhalb). Ohne lesbare Zone wird
+      in UTC gelesen, mit demselben Fenster. Fällt die Mitternacht des Geräts
+      an einer Umstellung aus, gilt die erste Stunde danach, wie in den
+      Ansichten. Offen: einen eigenen Ton für einen einzelnen Termin speichert
+      nur das Handy, unter der Kennung des Termins (`sound.item.{id}`); eine
+      neu geprägte Kennung (Exchange bei jeder ChangeKey-Änderung, seit 215/216
+      ein ganztägiger Platz in anderer Zone) verliert ihn, die Reparatur kennt
+      Töne nicht, und der Desktop speichert Töne nur je Serie. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
+      in der Zone ihrer Serie gelesen wie ihre Zeile. Einen Tag einer
+      ganztägigen Serie zu löschen vergleicht den Platz des Servers so
+      gelesen; vorher scheiterte das über sechs Stunden Abstand zum Postfach,
+      und mit der UTC-Lesart hätte es in Neuseelands Sommer den Folgetag
+      gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und im
+      Zweifel abgebrochen. `plan_repairs` liest den Tag eines ganztägigen
+      Termins 13:45 in den Zeitpunkt hinein und findet so eine Zeile auch aus
+      einer anderen Zone (siehe oben). ↻ im Test.
     - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
       Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
       Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch

@@ -135,6 +135,8 @@ describe('eventOccurrences contract (views)', () => {
       'a-zoned-series-on-both-range-ends-into-summer',
       'a-zoned-occurrence-just-past-the-range-end',
       'a-moved-occurrence-of-a-zoned-series-after-the-change',
+      'an-override-slot-in-another-spelling',
+      'an-override-listed-before-its-series',
       'every-other-week-with-the-week-starting-on-sunday',
       'a-plain-event-at-the-same-instant-as-an-occurrence',
       'a-zone-with-surrounding-space',
