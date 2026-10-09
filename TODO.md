@@ -3054,9 +3054,13 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Desktop-Editor kommt dieselbe 0 auch über Titel-Vorschläge (im Editor und
   aus dem Schnell-Hinzufügen) und über die angehängten Standard-Erinnerungen
   eines Kalenders. Eine 0 als Standard kann der Desktop heute sogar selbst
-  speichern: Das Anzahl-Feld prüft `> 0` vor dem Abrunden (`RemindersEditor.tsx`),
-  eine eingetippte 0,5 wird so zu 0, und die Kalender-Einstellungen speichern
-  ohne Formular. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
+  speichern: Das Anzahl-Feld prüft `> 0` vor dem Abrunden
+  (`RemindersEditor.tsx`). Eine in einem Schritt eingefügte oder diktierte
+  0,5, oder ein Komma vor einer schon stehenden Ziffer, wird so zu 0; Ziffer
+  für Ziffer getippt springt das Feld dagegen schon nach der 0 auf 1. Die
+  Kalender-Einstellungen speichern das ohne Formular, also ohne die Prüfung
+  von `min={1}`. In Chromium nachgestellt, nicht in Aperio selbst. Duplizieren
+  (Strg+D) und Verschieben oder Kopieren öffnen
   keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
   sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
   erhalten, solange niemand Typ, Anzahl oder Einheit anfasst: Dort löst schon
