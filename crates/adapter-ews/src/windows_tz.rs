@@ -40,7 +40,8 @@
 //! [`translation_id`] names both: the generated table's `TABLE_ID`, which the
 //! generator derives from the table's rows, and [`READ_RULE`], which is bumped
 //! by hand whenever the way an id becomes a series' zone changes outside the
-//! table — here in [`read_series_zone`], or in the read path of `mapping.rs`.
+//! table — here in [`read_series_zone`], or in the read path of `mapping.rs` —
+//! or a cached item otherwise turns into a different event.
 //! The EWS delta sync compares it with the one in the host's token and emits
 //! every cached item again when they differ.
 
@@ -55,13 +56,17 @@ use std::collections::BTreeSet;
 use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
 
 /// The reading rule's version. Bump it when an id read from Exchange becomes
-/// a series' zone differently without the generated table changing, so every
-/// cached event is translated again.
+/// a series' zone differently without the generated table changing, or when
+/// a cached item turns into an event differently, so every cached event is
+/// translated again.
 ///
 /// 1: stage 4 — an id reads as its 001 zone, canonical; `UTC` and unknown ids
 /// are no zone.
 /// 2: stage 4 review — the end zone `tzone://Microsoft/Utc` means no zone.
-pub const READ_RULE: u32 = 2;
+/// 3: a series' `EndDate` reads as its date whatever zone Exchange appends
+/// ("2026-11-05Z", "2026-11-05-05:00"). Before, such a rule was unreadable
+/// and only the series' first occurrence showed.
+pub const READ_RULE: u32 = 3;
 
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";

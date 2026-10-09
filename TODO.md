@@ -2960,6 +2960,16 @@ Siehe DESIGN §4.2.
   „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn
   nicht mehr ab, weil er kein Gast mehr ist.
+  ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
+  2026-10-10): Exchange hängt an die Daten einer Serie die Zone an, in der es
+  sie speichert, `2026-11-05Z` für jede Serie, die Aperio anlegt, und einen
+  Versatz für eine in einer Zone gespeicherte. Der Leser schnitt nur `T` und
+  `+` ab; daraus wurde `UNTIL=20261105ZT235959Z`, beide Ausroller lehnten die
+  Regel ab, und eine solche Serie zeigte nur ihr erstes Vorkommen (auch
+  Erinnerungen nur dafür). Jetzt behält der Leser nur das Datum, beim Lesen
+  und beim Ausgeben aus dem Zwischenspeicher (`range_date`); READ_RULE 3
+  gibt beim nächsten Abgleich alle gespeicherten Termine neu aus. Handy:
+  `.so` und XCFramework frisch bauen.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

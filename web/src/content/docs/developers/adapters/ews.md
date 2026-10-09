@@ -88,6 +88,13 @@ The endpoint is discovered or user-supplied.
   without a cancellation. The event that comes back is the new single. If the
   delete fails, the move stands and the failure is logged; a duplicate may
   remain.
+- **A range's dates carry a zone.** Exchange appends the zone it stores a date
+  in: `2026-11-05Z` for a series stored in UTC, which is every series Aperio
+  creates, and an offset (`+02:00`, `-05:00`) for one stored in a zone. The
+  reader keeps only the date (`range_date`), both when it parses `EndDate`
+  and when it turns a cached range into `UNTIL`. Before READ_RULE 3 it cut
+  only `T` and `+`, so `UNTIL=20261105ZT235959Z` came out, the expanders
+  refused the rule, and such a series showed only its first occurrence.
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by
@@ -155,7 +162,8 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   is `zt-{translation}:{cookie}`, where the translation is the generated
   `TABLE_ID` (hashed from the table's rows) plus `READ_RULE` in
   `windows_tz.rs`. Bump `READ_RULE` whenever an id becomes a series' zone
-  differently without the table changing. A delta whose token names another
+  differently without the table changing, or a cached item otherwise turns
+  into a different event (3: the range's date). A delta whose token names another
   translation emits every cached item again, without re-reading Exchange, so
   no view keeps a zone the old translation read.
 - **Cached items follow the parser.** A zone that needs a field older builds
