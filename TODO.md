@@ -3053,7 +3053,10 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   warum, ist offen. Aus dem Code abgeleitet, nicht ausprobiert. In den
   Desktop-Editor kommt dieselbe 0 auch über Titel-Vorschläge (im Editor und
   aus dem Schnell-Hinzufügen) und über die angehängten Standard-Erinnerungen
-  eines Kalenders. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
+  eines Kalenders. Eine 0 als Standard kann der Desktop heute sogar selbst
+  speichern: Das Anzahl-Feld prüft `> 0` vor dem Abrunden (`RemindersEditor.tsx`),
+  eine eingetippte 0,5 wird so zu 0, und die Kalender-Einstellungen speichern
+  ohne Formular. Duplizieren (Strg+D) und Verschieben oder Kopieren öffnen
   keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
   sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
   erhalten, solange niemand Typ, Anzahl oder Einheit anfasst: Dort löst schon
