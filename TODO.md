@@ -2961,10 +2961,13 @@ Siehe DESIGN §4.2.
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn
   nicht mehr ab, weil er kein Gast mehr ist.
   ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
-  2026-10-10): Exchange hängt an die Daten einer Serie eine Zone an. Gemessen
-  ist `Z` (`2026-10-19Z` bei einer Serie, die Aperio ohne Zone angelegt hat,
-  Runde 2; `19Z` bei einer mit Startzone Greenwich, Runde 3). Ob Exchange bei
-  einer Serie mit Zone einen Versatz schreibt, ist ungemessen. Aperio schickt
+  2026-10-10): Exchange hängt an das Startdatum einer Serie eine Zone an.
+  Gemessen ist zweimal `2026-10-19Z`: bei einer Serie, die Aperio ohne Zone
+  angelegt hat (Runde 2), und bei einer Outlook-Serie, deren Startzone
+  Aperios Änderung auf Greenwich gesetzt hatte (Runde 3). Dass das Enddatum
+  ebenso eine Zone trägt, ist gefolgert, nicht gemessen: gleicher Datentyp,
+  und laut Microsoft hängt EWS an zurückgegebene Werte immer eine Zone an. Ob
+  Exchange bei einer Serie mit Zone einen Versatz schreibt, ist ungemessen. Aperio schickt
   keinen `TimeZoneContext`, und ohne ihn rechnet EWS in UTC. Womöglich kommt
   `Z` also bei JEDER Serie, dann betraf der Fehler jede Exchange-Serie mit
   Enddatum, auch die in Outlook angelegten. Der Leser schnitt nur `T` und `+`

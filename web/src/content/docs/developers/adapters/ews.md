@@ -89,13 +89,15 @@ The endpoint is discovered or user-supplied.
   delete fails, the move stands and the failure is logged; a duplicate may
   remain.
 - **A range's dates carry a zone.** Exchange appends a zone to a series'
-  `StartDate` and `EndDate`. Measured is `Z`: `2026-10-19Z` on a series
-  Aperio created without a zone (live round 2), `19Z` on one whose start zone
-  read Greenwich (round 3), and `2026-07-23Z` on a meeting of unknown zone.
-  The schema also allows an offset (`+02:00`, `-05:00`); whether Exchange
-  writes one for a zoned series is unmeasured. Aperio sends no
-  `TimeZoneContext`, and EWS's default context is UTC, so `Z` may come on
-  every series. The reader keeps only the date (`range_date`), both when it
+  `StartDate`. Measured is `Z`, both times on `2026-10-19Z`: once on a series
+  Aperio created without a zone (live round 2), and once on an Outlook
+  series whose start zone Aperio's update had set to Greenwich while its end
+  zone stayed W. Europe (round 3). `EndDate` has the same `xs:date` type, and
+  Microsoft documents that EWS adds a zone to the values it returns, so it is
+  taken to carry one too; that is inferred, not measured. The schema also
+  allows an offset (`+02:00`, `-05:00`); whether Exchange writes one for a
+  zoned series is unmeasured. Aperio sends no `TimeZoneContext`, and EWS's
+  default context is UTC, so `Z` may come on every series. The reader keeps only the date (`range_date`), both when it
   parses `EndDate` and when it turns a cached range into `UNTIL`. Before
   READ_RULE 3 it cut only `T` and `+`, so `UNTIL=20261105ZT235959Z` came out,
   the expanders refused that rule, and such a series showed only its first

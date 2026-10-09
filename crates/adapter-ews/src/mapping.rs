@@ -3379,9 +3379,10 @@ impl EwsRecurrence {
                 parts.push(format!("COUNT={occurrences}"));
             }
             EwsRecurrenceRange::EndDate { end } => {
-                // EWS sends EndDate as a date, usually with the zone it
-                // stores the series in appended (`2026-11-05Z`, `+02:00`);
-                // `range_date` keeps the date. The series' DTSTART
+                // EWS sends EndDate as a date, possibly with a zone
+                // appended (`Z` was measured on StartDate; an offset such
+                // as `-05:00` is the schema's other form); `range_date`
+                // keeps the date. The series' DTSTART
                 // is a UTC date-time, and RFC 5545 requires UNTIL to
                 // share that value type — i.e. a UTC date-time too. A
                 // bare date-only UNTIL is read as floating/local, and
@@ -3533,9 +3534,9 @@ pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
 }
 
 /// The date of a range's `EndDate`, without a zone Exchange may append to
-/// it: UTC ("2026-12-31Z", measured) or an offset ("2026-12-31+02:00",
-/// "2026-12-31-05:00", the schema's other forms). A value that does not open
-/// with a date is kept as it came.
+/// it: UTC ("2026-12-31Z", the form measured on StartDate) or an offset
+/// ("2026-12-31+02:00", "2026-12-31-05:00", the schema's other forms). A
+/// value that does not open with a date is kept as it came.
 fn range_date(s: &str) -> &str {
     match s.get(..10) {
         Some(day) if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day,
@@ -6986,10 +6987,10 @@ mod tests {
         assert!(matches!(err, EwsError::Protocol(_)));
     }
 
-    /// Exchange appends a zone to a range's dates: `2026-07-23Z` is a real
-    /// server's answer (api.rs's master fixture); an offset is the schema's
-    /// other form. Every spelling ends on its own date, and the rule stays
-    /// one the expanders accept.
+    /// Exchange may append a zone to a range's dates: `Z` was measured live
+    /// on StartDate (rounds 2 and 3), and api.rs's master fixture uses that
+    /// shape; an offset is the schema's other form. Every spelling ends on
+    /// its own date, and the rule stays one the expanders accept.
     #[test]
     fn an_end_date_reads_as_its_date_whatever_zone_exchange_appends() {
         for end in [
