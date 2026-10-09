@@ -2962,14 +2962,25 @@ Siehe DESIGN §4.2.
   nicht mehr ab, weil er kein Gast mehr ist.
   ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
   2026-10-10): Exchange hängt an die Daten einer Serie die Zone an, in der es
-  sie speichert, `2026-11-05Z` für jede Serie, die Aperio anlegt, und einen
-  Versatz für eine in einer Zone gespeicherte. Der Leser schnitt nur `T` und
-  `+` ab; daraus wurde `UNTIL=20261105ZT235959Z`, beide Ausroller lehnten die
-  Regel ab, und eine solche Serie zeigte nur ihr erstes Vorkommen (auch
-  Erinnerungen nur dafür). Jetzt behält der Leser nur das Datum, beim Lesen
-  und beim Ausgeben aus dem Zwischenspeicher (`range_date`); READ_RULE 3
-  gibt beim nächsten Abgleich alle gespeicherten Termine neu aus. Handy:
-  `.so` und XCFramework frisch bauen.
+  sie speichert: `2026-11-05Z` für eine Serie ohne Zone und einen Versatz für
+  eine in einer Zone gespeicherte. Ohne Zone schreibt Aperio jede ganztägige
+  Serie, eine auf UTC und eine mit einer Zone, die Exchange nicht speichern
+  kann. Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
+  westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
+  beide Ausroller ablehnten. Eine solche Serie zeigte deshalb nur ihr erstes
+  Vorkommen, auch die Erinnerungen galten nur dafür. Ein Versatz östlich von
+  UTC wie in Berlin (`+01:00`, `+02:00`) wurde schon vorher richtig gelesen.
+  Jetzt behält der Leser
+  nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
+  (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
+  Termine neu aus. Handy: `.so` und XCFramework frisch bauen.
+  🚩 Offen: Exchange-Aufgaben lesen ihre Wiederholung mit demselben Leser, aber
+  ihre zwischengespeicherten Zeilen gibt READ_RULE nicht neu aus. Eine vor dem
+  Fix gelesene Aufgabe kann deshalb „endlos“ bleiben, bis sich in ihrer Liste
+  etwas ändert, und das nächste Speichern aus Aperio schriebe sie endlos
+  zurück. Das gilt nur, falls Exchange `task:Recurrence` beim Auflisten
+  überhaupt liefert, und das ist ungeprüft (`tasks.rs`). Abhilfe wäre, jede
+  Aufgabenliste einmal neu zu lesen, etwa über eine Version im Aufgaben-Token.
   🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
   UTC-Datum): eigene PRs nach Runde 3.

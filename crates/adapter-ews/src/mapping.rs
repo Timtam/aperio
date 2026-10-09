@@ -3379,7 +3379,9 @@ impl EwsRecurrence {
                 parts.push(format!("COUNT={occurrences}"));
             }
             EwsRecurrenceRange::EndDate { end } => {
-                // EWS sends EndDate as YYYY-MM-DD. The series' DTSTART
+                // EWS sends EndDate as a date, usually with the zone it
+                // stores the series in appended (`2026-11-05Z`, `+02:00`);
+                // `range_date` keeps the date. The series' DTSTART
                 // is a UTC date-time, and RFC 5545 requires UNTIL to
                 // share that value type — i.e. a UTC date-time too. A
                 // bare date-only UNTIL is read as floating/local, and
@@ -3532,9 +3534,9 @@ pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
 
 /// The date of a range's `EndDate`, without the zone Exchange may append to
 /// it: an offset east of UTC ("2026-12-31+02:00"), one west of it
-/// ("2026-12-31-05:00") or UTC ("2026-12-31Z", the form for every series
-/// Aperio creates, which Exchange stores in UTC). A value that does not open
-/// with a date is kept as it came.
+/// ("2026-12-31-05:00") or UTC ("2026-12-31Z", the form for a series stored
+/// without a zone, such as every all-day series Aperio creates). A value
+/// that does not open with a date is kept as it came.
 fn range_date(s: &str) -> &str {
     match s.get(..10) {
         Some(day) if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day,
@@ -6986,9 +6988,9 @@ mod tests {
     }
 
     /// Exchange appends the zone it stores a date in to a range's dates:
-    /// `2026-07-23Z` for a series stored in UTC, which is every series Aperio
-    /// creates (a real server's answer, api.rs's master fixture), and an
-    /// offset for one stored in a zone. Every spelling ends on its own date,
+    /// `2026-07-23Z` for a series stored without a zone (a real server's
+    /// answer, api.rs's master fixture), and an offset for one stored in a
+    /// zone. Every spelling ends on its own date,
     /// and the rule stays one the expanders accept.
     #[test]
     fn an_end_date_reads_as_its_date_whatever_zone_exchange_appends() {
