@@ -3204,6 +3204,96 @@ an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Proto
 nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
 von Toni getestet).
 
+### B13 · Abhaken am Handy wartet auf den Erinnerungs-Durchlauf (218-220) `[ ]`
+
+Gemeldet am 2026-10-06: Eine Vikunja-Aufgabe per Rotor-Aktion als erledigt zu
+markieren, dauerte am iPhone über eine Sekunde bis zur Ansage, laut Toni beim
+zweiten von zwei Abhaken, einer wiederkehrenden Aufgabe. Laut Protokoll dauert
+das Schreiben selbst etwa 0,2 s bei einer einmaligen Aufgabe (PATCH,
+`PUT assignees/bulk`, dann `GET /tasks/{id}`, mit dem `reconcile_parent` die
+Eltern-Beziehung liest) und etwa 0,4 s bei einer wiederkehrenden (dazu die
+nächste Runde anlegen und in ihre Kanban-Spalte legen). Auf dieses Schreiben
+wartet die Ansage bewusst, sie ist nicht optimistisch.
+
+Der Rest war Warten in der Schlange. `upcomingRemindersJson`, der
+Erinnerungs-Durchlauf, läuft auf der gemeinsamen seriellen
+Standard-Warteschlange von Expo (`CalFfiModule.swift` und `.kt`, ohne
+`runOnQueue`). Er
+liest live alle Konten, meist in 3,4 bis 4 s, einmal in 5,2 s. Solange er
+läuft, warten `updateTaskJson` und die Einstellungs-Lesungen, die das Abhaken
+vor dem Schreiben macht. Den Durchlauf, auf den das zweite Abhaken wartete
+(09:33:57 bis 09:34:01 UTC, 4,0 s), hatte das erste Abhaken selbst ausgelöst:
+Nach dem Schreiben lädt die Liste neu, `cacheObserver.ts` fasst die
+Cache-Meldungen 700 ms zusammen und ruft dann `refreshRemindersSoon` auf. Das
+startet seine 2,5 s bei jedem Aufruf neu und verschiebt so den früheren Aufruf
+aus `scheduleBackgroundPush`; der Durchlauf begann etwa 3,8 s nach dem
+Schreiben. Das PATCH des zweiten Abhakens kam 32 ms nach der letzten Antwort
+dieses Durchlaufs. Die Aufteilung der Warteschlangen (49f7a9c) hatte diese
+Funktion ausgelassen. Der Desktop ist nicht betroffen (eigener
+tokio-Arbeiter). Die Lücke von etwa 0,9 s nach dem Nachladen der Liste ist
+gewollt (dieselben 700 ms) und kommt nach der Ansage.
+
+- [ ] **218 · Eigene Warteschlange für den Erinnerungs-Durchlauf (iOS und
+  Android).** `upcomingRemindersJson` bekommt eine eigene serielle
+  Warteschlange: unter iOS eine `DispatchQueue` wie `accessQueue`, unter
+  Android einen eigenen Thread wie `slowScope`. Nicht `slowQueue`, sonst warten
+  Senden und Synchronisieren (`pushNow`, `syncNowJson`) auf den Durchlauf und
+  er auf sie. Dazu `rescheduleReminders` (`mobile/src/reminders/scheduler.ts`):
+  Heute verwirft es eine Anfrage, die während eines Durchlaufs kommt
+  (`if (inFlight) return;`). Künftig läuft danach noch einer, sonst kann ein
+  Durchlauf, der vor dem Schreiben gelesen hat, eine Erinnerung für eine schon
+  erledigte Aufgabe stehen lassen; mit eigener Warteschlange wird das häufiger.
+  Und eine Protokollzeile, wann das Abhaken ausgelöst wurde, damit die nächste
+  Messung die Zeit vom Tippen bis zum PATCH direkt zeigt; heute ist sie nur
+  erschlossen. Braucht einen Handy-Build.
+- [-] **219 · Kein 5-Minuten-Speicher am Handy.** Entschieden: Der
+  Erinnerungs-Durchlauf am Handy liest die Konten weiter bei jedem Anlass live.
+  Der Desktop dagegen bewahrt die Erinnerungen, die er aus den Konten gelesen
+  hat, 5 Minuten auf. So sieht jeder Durchlauf am Handy den aktuellen Stand:
+  Eine Änderung von einem anderen Gerät erreicht die Benachrichtigungen beim
+  nächsten Anlass (Start, Rückkehr in den Vordergrund, Nachladen,
+  Synchronisieren), ohne zusätzlich auf einen bis zu 5 Minuten alten Speicher
+  zu warten. Der Preis: im Protokoll etwa 6 volle Durchläufe in einer Minute
+  Benutzung; nach 218 halten sie nichts mehr auf.
+- [ ] **220 · Nur Geändertes senden.** `TasksFeature::update_task`
+  (`cal-core`) bekommt die vorige Zeile als optionalen, allgemeinen Parameter;
+  beide Hosts lesen sie vor jedem Schreiben aus dem Cache und geben sie mit.
+  Heute liest der Host-Kern die Liste erst nach dem Schreiben beim Anbieter aus
+  dem Cache, jedes Mal als ganze Liste: bei jeder Änderung einer externen
+  Aufgabe (`write_through_task`, nur um zu prüfen, ob die Liste Zeilen hat)
+  und beim Erledigen einer wiederkehrenden Aufgabe
+  (`record_external_recurrence_completion`). Vor dem Schreiben liest er die
+  Zeile nie. Jeder Adapter darf damit nur senden, was sich geändert hat.
+  Vikunja spart so `PUT assignees/bulk` und den `GET /tasks/{id}` für
+  `reconcile_parent`, wenn Zuweisungen und Eltern gleich bleiben: zwei
+  Anfragen weniger je Änderung, auf Desktop und Handy, am iPhone gemessen
+  etwa 90 ms. Gewollte Verhaltensänderung: Hat ein anderes Gerät Zuweisungen
+  oder Eltern seit dem letzten Laden geändert, überschreibt Aperio das nicht
+  mehr mit seinem alten Stand. Berührt `cal-core`, die Plugin-Schnittstelle,
+  alle Adapter (Standard: den Parameter nicht beachten) und beide Hosts.
+
+  Die Plugin-Schnittstelle ist der eigentliche Weg. Die Hosts rufen nur die
+  beiden eingebauten Aufgaben-Adapter direkt auf, den lokalen Speicher
+  (`adapter-local`) und den Geräte-Adapter. Jeder andere Aufgaben-Adapter,
+  Vikunja eingeschlossen, wird nur über die Plugin-Schnittstelle erreicht, und
+  heute geht dort ein nacktes `Task` hinüber (Shim in `plugin-core`,
+  `ffi_update_task` der sechs Aufgaben-Plugins: CalDAV, EWS, Google, Graph,
+  Todoist, Vikunja). Ohne neue Argumentform oder eigenen Eintrag in der
+  Vtable käme die vorige Zeile dort nie an; dazu gehört die Frage nach der
+  ABI-Version (`ABI_VERSION` heute 4, `ABI_VERSION_MIN` 3).
+
+🚩 **Offen:** Ein späterer Durchlauf, nach dem zweiten Abhaken, stand 17 s
+still („error decoding response body“, 09:34:25 UTC). In dieser Zeit schwieg
+das Protokoll ganz; danach waren alle Verbindungen tot, auch die zu Servern,
+die der Durchlauf gerade nicht nutzte, genau wie nach den Rückkehren aus dem
+Hintergrund um 08:36:45, 09:05:04 und 09:33:22 UTC. Vermutlich war die App im
+Hintergrund und iOS hat die Verbindungen geschlossen. Der Vikunja-Server hatte
+nach 51 ms die Kopfzeilen geschickt; der Rumpf kam nicht mehr an, daher
+„error decoding response body“. Offen ist nur, ob so ein Abbruch auch im
+Vordergrund vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene
+Durchlauf zu Ende (um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in
+dieser Zeit darauf, danach nur noch der Durchlauf.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)
