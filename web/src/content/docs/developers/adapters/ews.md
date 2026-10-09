@@ -88,16 +88,19 @@ The endpoint is discovered or user-supplied.
   without a cancellation. The event that comes back is the new single. If the
   delete fails, the move stands and the failure is logged; a duplicate may
   remain.
-- **A range's dates carry a zone.** Exchange appends the zone it stores a date
-  in: `2026-11-05Z` for a series stored without a zone, and an offset
-  (`+02:00`, `-05:00`) for one stored in a zone. Aperio writes no zone for an
-  all-day series (46a), for a series on UTC, or for a zone Exchange cannot
-  store. The reader keeps only the date (`range_date`), both when it parses
-  `EndDate` and when it turns a cached range into `UNTIL`. Before READ_RULE 3
-  it cut only `T` and `+`. A `Z` or a negative offset therefore stayed, and
-  `UNTIL=20261105ZT235959Z` came out. The expanders refused that rule, so
-  such a series showed only its first occurrence. EWS tasks share the
-  reader, but their cached rows are not re-emitted (see TODO).
+- **A range's dates carry a zone.** Exchange appends a zone to a series'
+  `StartDate` and `EndDate`. Measured is `Z`: `2026-10-19Z` on a series
+  Aperio created without a zone (live round 2), `19Z` on one whose start zone
+  read Greenwich (round 3), and `2026-07-23Z` on a meeting of unknown zone.
+  The schema also allows an offset (`+02:00`, `-05:00`); whether Exchange
+  writes one for a zoned series is unmeasured. Aperio sends no
+  `TimeZoneContext`, and EWS's default context is UTC, so `Z` may come on
+  every series. The reader keeps only the date (`range_date`), both when it
+  parses `EndDate` and when it turns a cached range into `UNTIL`. Before
+  READ_RULE 3 it cut only `T` and `+`, so `UNTIL=20261105ZT235959Z` came out,
+  the expanders refused that rule, and such a series showed only its first
+  occurrence. EWS tasks share the reader, but their cached rows are not
+  re-emitted (see TODO).
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by

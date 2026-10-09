@@ -2961,16 +2961,17 @@ Siehe DESIGN §4.2.
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn
   nicht mehr ab, weil er kein Gast mehr ist.
   ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
-  2026-10-10): Exchange hängt an die Daten einer Serie die Zone an, in der es
-  sie speichert: `2026-11-05Z` für eine Serie ohne Zone und einen Versatz für
-  eine in einer Zone gespeicherte. Ohne Zone schreibt Aperio jede ganztägige
-  Serie, eine auf UTC und eine mit einer Zone, die Exchange nicht speichern
-  kann. Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
-  westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
-  beide Ausroller ablehnten. Eine solche Serie zeigte deshalb nur ihr erstes
-  Vorkommen, auch die Erinnerungen galten nur dafür. Ein Versatz östlich von
-  UTC wie in Berlin (`+01:00`, `+02:00`) wurde schon vorher richtig gelesen.
-  Jetzt behält der Leser
+  2026-10-10): Exchange hängt an die Daten einer Serie eine Zone an. Gemessen
+  ist `Z` (`2026-10-19Z` bei einer Serie, die Aperio ohne Zone angelegt hat,
+  Runde 2; `19Z` bei einer mit Startzone Greenwich, Runde 3). Ob Exchange bei
+  einer Serie mit Zone einen Versatz schreibt, ist ungemessen. Aperio schickt
+  keinen `TimeZoneContext`, und ohne ihn rechnet EWS in UTC. Womöglich kommt
+  `Z` also bei JEDER Serie, dann betraf der Fehler jede Exchange-Serie mit
+  Enddatum, auch die in Outlook angelegten. Der Leser schnitt nur `T` und `+`
+  ab. Bei `Z` und bei einem Versatz westlich von UTC wurde daraus eine Regel
+  wie `UNTIL=20261105ZT235959Z`, die beide Ausroller ablehnten. Eine solche
+  Serie zeigte deshalb nur ihr erstes Vorkommen, auch die Erinnerungen galten
+  nur dafür. Jetzt behält der Leser
   nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
   (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
   Termine neu aus. Handy: `.so` und XCFramework frisch bauen.

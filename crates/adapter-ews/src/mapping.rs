@@ -3532,11 +3532,10 @@ pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
     Ok(parse_ews_recurrence(xml)?.to_rrule())
 }
 
-/// The date of a range's `EndDate`, without the zone Exchange may append to
-/// it: an offset east of UTC ("2026-12-31+02:00"), one west of it
-/// ("2026-12-31-05:00") or UTC ("2026-12-31Z", the form for a series stored
-/// without a zone, such as every all-day series Aperio creates). A value
-/// that does not open with a date is kept as it came.
+/// The date of a range's `EndDate`, without a zone Exchange may append to
+/// it: UTC ("2026-12-31Z", measured) or an offset ("2026-12-31+02:00",
+/// "2026-12-31-05:00", the schema's other forms). A value that does not open
+/// with a date is kept as it came.
 fn range_date(s: &str) -> &str {
     match s.get(..10) {
         Some(day) if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day,
@@ -6987,11 +6986,10 @@ mod tests {
         assert!(matches!(err, EwsError::Protocol(_)));
     }
 
-    /// Exchange appends the zone it stores a date in to a range's dates:
-    /// `2026-07-23Z` for a series stored without a zone (a real server's
-    /// answer, api.rs's master fixture), and an offset for one stored in a
-    /// zone. Every spelling ends on its own date,
-    /// and the rule stays one the expanders accept.
+    /// Exchange appends a zone to a range's dates: `2026-07-23Z` is a real
+    /// server's answer (api.rs's master fixture); an offset is the schema's
+    /// other form. Every spelling ends on its own date, and the rule stays
+    /// one the expanders accept.
     #[test]
     fn an_end_date_reads_as_its_date_whatever_zone_exchange_appends() {
         for end in [
