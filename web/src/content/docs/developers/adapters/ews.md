@@ -212,8 +212,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   measured. No editor picks a series' zone yet, so today the refusal meets only a rule
   change — the repeat edited, or a series changed or deleted from one of its
   occurrences on, which cuts the old rule — where Aperio itself would write
-  another zone: a series
-  whose stored end zone is not its start zone, or a stale copy.
+  another zone: a series whose stored end zone is not its start zone, or a
+  copy whose zone is stale. A copy that differs from the server's only in
+  its exceptions changes no rule: an update never writes them, so it opens
+  neither the zone nor the slot.
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written

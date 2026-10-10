@@ -2348,6 +2348,20 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // Whether the start this update would put on the server is not the one
     // already there. Without a copy to compare with, it may be.
     let start_moves = before.is_none_or(|b| b.start != event.start);
+    // Whether the edit changes the series' rule as an update writes it: its
+    // text or its zone. Its exceptions are not part of that — an update never
+    // writes them, a deleted or changed occurrence is an item of its own — so
+    // a copy that differs from the server's only in them, as a stale one does
+    // once another occurrence was deleted, changes no rule here and opens
+    // neither the zone nor the slot below (the sixth check of the zone PR: a
+    // title-only save from such a copy was refused under 245).
+    fn written_rule_of(ev: &Event) -> Option<(&str, Option<&str>)> {
+        ev.recurrence
+            .as_ref()
+            .map(|rec| (rec.rrule.as_str(), rec.tzid.as_deref()))
+    }
+    let rule_changed = touches(EventField::Recurrence)
+        && before.is_none_or(|server| written_rule_of(event) != written_rule_of(server));
     // The slot is ONE fact, written as one group: `all_day_boundary`
     // rewrites both boundaries from `all_day`, and Exchange validates a Start
     // against the End it has stored. Writing one of the three without the
@@ -2361,7 +2375,7 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     let slot_changed = touches(EventField::Start)
         || touches(EventField::End)
         || touches(EventField::AllDay)
-        || (touches(EventField::Recurrence) && event.recurrence.is_some() && start_moves);
+        || (rule_changed && event.recurrence.is_some() && start_moves);
 
     // A KEPT rule is the server's (decision 106): when the slot takes it along,
     // the server's rule is rebuilt on the start being written, never this
@@ -2395,8 +2409,8 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // one the server keeps after this update (`landed`): a kept all-day flag
     // stays, and an all-day item never gets a zone (46a).
     let written = series_windows_zone(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
-    let zone_written = written.is_some()
-        && (touches(EventField::Recurrence) || touches(EventField::AllDay) || slot_changed);
+    let zone_written =
+        written.is_some() && (rule_changed || touches(EventField::AllDay) || slot_changed);
     // An update that writes a NEW zone keeps the item's stored wall clock and
     // relabels it in that zone, so the item moves by the offset (live round 1,
     // B2; the 8a live test, step 9). The zone therefore goes first, and when
@@ -2568,8 +2582,8 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         start_moves || before.is_some_and(|b| first_day_before(b) != first_day_written(landed));
     let rule_follows_slot =
         (slot_changed || clock_moves) && first_day_moves && event.recurrence.is_some();
-    let rule_written = (before.is_none() && touches(EventField::Recurrence))
-        || (touches(EventField::Recurrence) && written_rule == Some(None))
+    let rule_written = (before.is_none() && rule_changed)
+        || (rule_changed && written_rule == Some(None))
         || ((may(EventField::Recurrence) || rule_follows_slot)
             && written_rule != before.and_then(built_rule))
         || (leaves_all_day && rule_of.recurrence.is_some());
@@ -10602,6 +10616,48 @@ mod tests {
                 Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone")),
                 "{rrule}"
             );
+        }
+    }
+
+    /// A copy that differs from the server only in its exceptions — a stale
+    /// one, once another occurrence was deleted — changes no rule: an update
+    /// never writes exceptions. A title-only save from it, with nothing proven
+    /// kept, writes the title alone. Before the sixth check it opened the zone
+    /// gate: on W. Europe storage it wrote the zone too, and where the stored
+    /// end zone is not the start's, 245 refused the rename.
+    #[test]
+    fn a_copy_stale_only_in_its_exceptions_writes_the_title_alone() {
+        let mut server = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;COUNT=4",
+            "Europe/Berlin",
+        );
+        server.recurrence.as_mut().unwrap().exceptions = vec![
+            "2026-11-09T09:00:00Z".parse().unwrap(),
+            "2026-11-16T09:00:00Z".parse().unwrap(),
+        ];
+        let mut stale = server.clone();
+        stale.recurrence.as_mut().unwrap().exceptions.truncate(1);
+        stale.title = "Renamed".into();
+        assert!(stale.keep_fields.is_empty(), "nothing proven kept");
+        for stored in [
+            w_europe_zones(),
+            StoredZones {
+                end: Some(DayZone::Tz(chrono_tz::UTC)),
+                ..w_europe_zones()
+            },
+        ] {
+            let (set, del) = event_to_update_field_xml_in(
+                &stale,
+                Some(&server),
+                &stored,
+                None,
+                EventIdKind::RecurringMaster,
+                &chrono_tz::Europe::Berlin,
+            )
+            .unwrap();
+            assert_eq!(field_uris(&set), ["item:Subject"], "{stored:?}: {set}");
+            assert!(del.is_empty(), "{del}");
         }
     }
 

@@ -201,9 +201,11 @@ elsewhere since Aperio last read it. Aperio writes the repeat again when you
 change it, and also when you change or delete a series from one of its
 appointments on: Aperio then shortens the old series.
 
-What you can do: change the repeat in Outlook, and change or delete the series
-from that appointment on there. You can still change the title, the place and
-the reminder of the whole series or of a single appointment in Aperio.
+What you can do: if the series was changed elsewhere, open it again once Aperio
+has refreshed the calendar, and try again. Otherwise change the repeat in
+Outlook, and change or delete the series from that appointment on there. You
+can still change the title, the place and the reminder of the whole series or
+of a single appointment in Aperio.
 
 If you move a series with such occurrences to another time or another day,
 Aperio sends the start and end anyway, and Exchange drops the occurrences then

@@ -218,9 +218,11 @@ hat. Die Wiederholung schreibt Aperio neu, wenn du sie änderst, und auch, wenn
 du eine Serie ab einem ihrer Termine änderst oder löschst: Dann kürzt Aperio
 die alte Serie.
 
-Was du tun kannst: Ändere die Wiederholung in Outlook, und ändere oder lösche
-die Serie dort ab dem Termin. Titel, Ort und Erinnerung der ganzen Serie oder
-eines einzelnen Termins kannst du in Aperio weiter ändern.
+Was du tun kannst: Wurde die Serie anderswo geändert, öffne sie neu, sobald
+Aperio den Kalender aktualisiert hat, und versuche es noch einmal. Sonst
+ändere die Wiederholung in Outlook, und ändere oder lösche die Serie dort ab
+dem Termin. Titel, Ort und Erinnerung der ganzen Serie oder eines einzelnen
+Termins kannst du in Aperio weiter ändern.
 
 Verschiebst du eine Serie mit solchen Vorkommen auf eine andere Uhrzeit oder
 einen anderen Tag, schickt Aperio Beginn und Ende ohnehin, und Exchange

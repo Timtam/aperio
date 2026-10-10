@@ -226,7 +226,10 @@ keinen, dort ist die Wahl Tonis Sache.
   Zone einer Serie (Stufen 11 und 12). Die Ablehnung trifft deshalb nur ein
   Ändern der Regel, bei dem Aperio selbst eine andere Zone schreiben würde,
   etwa an einer Serie, deren gespeicherte Endzone eine andere als ihre
-  Startzone ist, oder aus einer veralteten Kopie. Gemessen mit Aperios
+  Startzone ist, oder aus einer Kopie mit veralteter Zone. Eine Kopie, die
+  sich vom Server nur in den Ausnahmen unterscheidet, ändert keine Regel:
+  Ein Update schreibt sie nie, deshalb schreibt sie weder Zone noch Beginn
+  und Ende (sechste Prüfung des Zonen-PRs). Gemessen mit Aperios
   Anfrage: Die Ablehnung schickt nichts, und die Serie bleibt mit ihren
   Vorkommen, wie sie war (N2). Eine ganztägige Serie bekommt 10:00 und 00:30
   richtig, ab ihrem ersten Tag (N1, N1b).
