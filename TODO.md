@@ -3003,9 +3003,9 @@ Siehe DESIGN §4.2.
   dem Zusammenführen mit einem Desktop-Build (235).
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
-  neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt
-  „Sonntag“ in der Regel, eine zweiwöchentliche kann eine Woche verrutscht
-  sein.
+  neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
+  Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
+  eine Woche verrutscht sein.
   🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
   🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
   zur Serie mit neuer Zone, setzt Exchange die Zone nach dem Beginn und

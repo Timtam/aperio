@@ -174,9 +174,9 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written
-  zone's day on a create, the stored start zone's day on an update (234:
-  Exchange applies the rule before a zone the same update writes), UTC where
-  none is known. The range's StartDate and the weekday, day of the month and
+  zone's day on a create, the stored start zone's day on an update (234,
+  inferred from live round 1, where Exchange applied an update's fields in
+  order; not measured for a rule and a zone), UTC where none is known. The range's StartDate and the weekday, day of the month and
   month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
   Read off the UTC date, as before, they named the day before east of UTC: a
   daily all-day series created in Berlin for Monday 19 October started on
@@ -185,9 +185,11 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
 - **An all-day day is written on the stored zone's midnights** (47a). An
   update writes an all-day boundary as midnight, in the zone Exchange stores
   that boundary in, of the day the device names (`all_day_boundary`; each
-  boundary in its own zone, 233). Exchange rounds a boundary in its stored
-  zone (R3-5b-u), so the UTC midnights Aperio wrote before stretched an
-  Outlook item over two days. `read_before` returns the zones with the copy
+  boundary in its own zone, 233). Exchange rounds an item with one stored
+  zone in that zone (R3-5b-u), so the UTC midnights Aperio wrote before
+  stretched an Outlook item over two days; that it rounds each boundary in
+  its own zone when the two differ is the decision (233), which R3-2
+  suggests and nobody has measured. `read_before` returns the zones with the copy
   (`StoredZones`); an exception takes its series' ids and definitions. A
   create still writes UTC midnights: Aperio creates without a zone, so
   Exchange stores the item in UTC. Where a boundary's zone cannot be read,

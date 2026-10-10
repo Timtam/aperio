@@ -2457,7 +2457,12 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         .recurrence
         .as_ref()
         .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day(event)).ok());
-    let rule_follows_slot = slot_changed && start_moves && event.recurrence.is_some();
+    // A written slot takes a kept rule along when it moves the rule's first
+    // day: when the start moves, and also when only the all-day flag flips
+    // under the same instant, because the two read the day on different
+    // clocks (`rule_first_day`) — the device's day, or the stored zone's.
+    let first_day_moves = start_moves || before.is_some_and(|b| first_day(b) != first_day(event));
+    let rule_follows_slot = slot_changed && first_day_moves && event.recurrence.is_some();
     let rule_changed = touches(EventField::Recurrence)
         || ((may(EventField::Recurrence) || rule_follows_slot)
             && written_rule != before.and_then(built_rule));
@@ -2812,8 +2817,9 @@ pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono
 /// The day a series' rule starts on, on the clock Exchange repeats it on: an
 /// all-day series on the device's days (48a); a timed one on `clock`, the
 /// zone Exchange expands it in — the zone a create writes with it, the zone
-/// the item is stored in on an update (decision 234: Exchange applies the
-/// rule before a zone the same update writes), UTC where there is none.
+/// the item is stored in on an update (decision 234, inferred from live round
+/// 1, where Exchange applied an update's fields in order; not measured for a
+/// rule and a zone), UTC where there is none.
 pub(crate) fn rule_first_day<D: TimeZone>(
     start: DateTime<Utc>,
     all_day: bool,
@@ -2830,9 +2836,11 @@ pub(crate) fn rule_first_day<D: TimeZone>(
 
 /// The instant an all-day boundary is written as: midnight, in the zone
 /// Exchange stores that boundary in, of the day the device names (decision
-/// 47a; each boundary in its own zone, 233). Exchange rounds a boundary in
-/// that zone (live round 3, R3-5b-u), so UTC midnights stretched an item in
-/// any other zone over two days. Refused where the zone is unknown (237).
+/// 47a; each boundary in its own zone, 233). Exchange rounds an item with one
+/// stored zone in that zone (live round 3, R3-5b-u), so UTC midnights
+/// stretched an item in any other zone over two days; that it rounds each
+/// boundary in its own zone when the two differ is decision 233, which R3-2
+/// suggests and nobody has measured. Refused where the zone is unknown (237).
 fn all_day_boundary<D: TimeZone>(
     when: DateTime<Utc>,
     zone: Option<&DayZone>,
@@ -7707,8 +7715,9 @@ mod tests {
         );
     }
 
-    /// A custom zone's definition, as an Exchange ActiveSync client leaves it
-    /// (`Customized Time Zone`, Name empty), with W. Europe's rules.
+    /// A custom zone's definition with W. Europe's rules, under the id Toni's
+    /// mailbox shows for a custom zone (`Customized Time Zone`, Name empty).
+    /// Synthetic: no definition has been captured from a server yet.
     const CUSTOM_ZONE_BODY: &str = r#"<t:Periods>
                     <t:Period Bias="-PT1H" Name="Standard" Id="custom/std"/>
                     <t:Period Bias="-PT2H" Name="Daylight" Id="custom/dst"/>
@@ -7791,8 +7800,10 @@ mod tests {
     }
 
     /// Both item parsers put a zone's definition on its own boundary, after a
-    /// self-closing zone on the other one: a flag that stayed set after a
-    /// self-closing start zone once took the end zone's children for it.
+    /// self-closing zone on the other one. The flag the walker replaced stayed
+    /// set after a self-closing start zone; it fed only a nested definition's
+    /// id, so it never misread an item, but a definition read through it would
+    /// have landed on the start.
     #[test]
     fn a_zone_definition_lands_on_its_own_boundary() {
         let id_only = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
@@ -8249,11 +8260,7 @@ mod tests {
         assert_eq!(override_slot(&item, &ov), orig);
     }
 
-    /// Decision 217: an all-day item's instants are midnights in its own zone,
-    /// and read in it the day is exact. An Auckland series begun in winter has
-    /// its January slots at 11:00 UTC the day before; the 12-hour sample read
-    /// them as that day before. Its start, its exceptions and the slot in its
-    /// single changes' ids now name the day itself.
+    /// An all-day item with these start and end zone ids.
     fn all_day_item(start_zone: Option<&str>, end_zone: Option<&str>) -> ParsedItem {
         ParsedItem {
             is_all_day: true,
@@ -8267,8 +8274,9 @@ mod tests {
         s.parse().unwrap()
     }
 
-    /// An id that is tzdata's own name (18 of Toni's items carry
-    /// `Europe/Berlin`) reads as that zone (decision 236).
+    /// An id that is tzdata's own name reads as that zone (decision 236). 18
+    /// of Toni's items carry `Europe/Berlin`, all timed singles in a snapshot
+    /// of 15 September; it counts for one made all-day.
     #[test]
     fn an_all_day_item_in_a_zone_named_by_tzdata_reads_its_day() {
         let item = all_day_item(Some("Europe/Berlin"), Some("Europe/Berlin"));
@@ -8370,6 +8378,11 @@ mod tests {
         );
     }
 
+    /// Decision 217: an all-day item's instants are midnights in its own zone,
+    /// and read in it the day is exact. An Auckland series begun in winter has
+    /// its January slots at 11:00 UTC the day before; the 12-hour sample read
+    /// them as that day before. Its start, its exceptions and the slot in its
+    /// single changes' ids now name the day itself.
     #[test]
     fn an_all_day_series_is_read_in_its_own_zone() {
         let auckland = chrono_tz::Pacific::Auckland;
@@ -9446,6 +9459,39 @@ mod tests {
                     "{device}: {set}"
                 );
             }
+        }
+    }
+
+    /// Flipping all-day under the same instant moves a series' first day
+    /// (device day against the stored zone's day), so a kept rule goes along
+    /// with the new day. Without it the kept StartDate named the other clock's
+    /// day: Sunday for an all-day series on Monday 2 November.
+    #[test]
+    fn flipping_all_day_takes_a_kept_rule_to_the_new_first_day() {
+        let device = chrono_tz::Europe::Berlin;
+        let monday = midnight_on("2026-11-02", &device);
+        let mut timed = zoned_master(None);
+        timed.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY".into();
+        timed.start = monday;
+        timed.end = monday + chrono::Duration::hours(1);
+        let mut all_day = timed.clone();
+        all_day.all_day = true;
+        all_day.end = midnight_on("2026-11-03", &device);
+        for (before, mut edit, first_day) in [
+            (timed.clone(), all_day.clone(), "2026-11-02"),
+            (all_day, timed, "2026-11-01"),
+        ] {
+            edit.keep_fields = vec![EventField::Recurrence, EventField::Title];
+            let (set, _) = event_to_update_field_xml_in(
+                &edit,
+                Some(&before),
+                &StoredZones::utc(),
+                None,
+                EventIdKind::RecurringMaster,
+                &device,
+            )
+            .unwrap();
+            assert_eq!(element(&set, "StartDate"), first_day, "{set}");
         }
     }
 

@@ -3050,8 +3050,8 @@ mod server_zone_tests {
         )
     }
 
-    /// A custom zone with W. Europe's rules, as an Exchange ActiveSync
-    /// client leaves it.
+    /// A custom zone with W. Europe's rules (synthetic: no definition has
+    /// been captured from a server yet).
     const CUSTOM_W_EUROPE: &str = r#"<t:StartTimeZone Id="Customized Time Zone" Name="">
           <t:Periods>
             <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>

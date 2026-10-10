@@ -208,8 +208,11 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
     );
     for (const err of [desktop, phone]) {
       expect(eventWriteRefusal(err)?.refusal).toBe('day-zone-unreadable');
-      expect(eventWriteErrorMessage(err, t)).toMatch(/Zeitzone, die Aperio nicht lesen kann/);
-      expect(eventWriteErrorMessage(err, t)).toMatch(/den Titel und anderes schon/);
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Exchange speichert diesen Termin in einer Zeitzone, die Aperio nicht lesen kann. ' +
+          'Seinen Tag kannst du deshalb hier nicht ändern; den Titel und anderes schon. ' +
+          'Es wurde nichts geändert.',
+      );
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/no-zone/);
     }
     expect(eventWriteFailureReason(desktop, t)).toMatch(/Zeitzone, die Aperio nicht lesen kann/);

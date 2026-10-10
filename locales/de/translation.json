@@ -1695,7 +1695,7 @@
         "occurrenceNotWritable": "Dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern. Es wurde nichts geändert.",
         "unsafeToWrite": "Aperio kann diesen Termin nicht sicher ändern: Was auf dem Server noch mit ihm gespeichert ist, stünde auf dem Spiel. Es wurde nichts geändert.",
         "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio. Es wurde nichts geändert.",
-        "dayZoneUnreadable": "Exchange speichert diesen Termin in einer Zeitzone, die Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern, den Titel und anderes schon. Es wurde nichts geändert.",
+        "dayZoneUnreadable": "Exchange speichert diesen Termin in einer Zeitzone, die Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern; den Titel und anderes schon. Es wurde nichts geändert.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "reason": {

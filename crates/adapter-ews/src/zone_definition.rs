@@ -3,10 +3,12 @@
 //!
 //! Most items carry an id the CLDR table maps to a tzdata zone; those are
 //! read through [`crate::windows_tz`]. An item made by another client may
-//! carry a definition of its own instead: `Customized Time Zone` (an
-//! Exchange ActiveSync client such as the iPhone's calendar), an iCalendar
-//! invitation's VTIMEZONE, or a registry-only id. Decision 232 reads such a
-//! definition to find the item's midnights rather than refusing or guessing.
+//! carry a zone of its own instead — `Customized Time Zone` in Toni's mailbox;
+//! by the protocols, what an Exchange ActiveSync client or an iCalendar
+//! invitation's VTIMEZONE leaves — or a registry-only id. Decision 232 reads
+//! such a zone's definition, where Exchange sends one, to find the item's
+//! midnights rather than refusing or guessing. Whether Exchange 2019 sends it
+//! is unmeasured.
 //!
 //! The wire shape (Exchange 2010 and later):
 //!
@@ -412,7 +414,10 @@ impl TryFrom<&ZoneDefinition> for ZoneRules {
                 .iter()
                 .find(|p| p.id.trim() == id.trim())
                 .ok_or_else(|| DefinitionError::UnknownTarget(id.trim().to_string()))?;
+            // A zone's offset stays within a day; a larger one would only
+            // overflow the arithmetic that reads the clock.
             parse_duration(&period.bias)
+                .filter(|bias| bias.num_hours().abs() <= 24)
                 .ok_or_else(|| DefinitionError::BadBias(period.bias.clone()))
         };
         let group_rule = |id: &str| -> Result<Rule, DefinitionError> {
@@ -564,7 +569,15 @@ impl ZoneRules {
         local.sort_by_key(|(when, _)| *when);
         // Windows keeps one rule a year: the bias a year opens with is the
         // one its last change leaves (Sydney is on daylight time on 1 Jan).
-        let opening = local.last()?.1;
+        let mut opening = local.last()?.1;
+        // Except for Windows' marker: a change at 1 January 00:00 is no
+        // clock change but says the year OPENS on its bias (Moscow 2014,
+        // Brazil 2019). Read as a change, it skipped the year's first hour,
+        // and that day's midnight came out an hour late.
+        let year_start = NaiveDate::from_ymd_opt(year, 1, 1)?.and_hms_opt(0, 0, 0)?;
+        if local.first().is_some_and(|(when, _)| *when == year_start) {
+            opening = local.remove(0).1;
+        }
         let mut before = opening;
         let mut utc = Vec::with_capacity(local.len());
         for (when, to) in local {
@@ -1030,6 +1043,67 @@ pub(crate) mod tests {
         assert_eq!(
             rules.midnight(day("2007-11-02")),
             Some(utc("2007-11-02T04:00:00Z"))
+        );
+    }
+
+    /// Windows marks a year that opens on daylight time with a change at
+    /// 1 January 00:00 (Russian Standard Time, 2014): no clock change, so
+    /// that midnight is there, and the year opens on daylight time.
+    #[test]
+    fn a_1_january_marker_opens_the_year_without_a_change() {
+        let def = ZoneDefinition {
+            periods: vec![
+                period("moscow/fixed", "-PT4H"),
+                period("moscow/2014-daylight", "-PT4H"),
+                period("moscow/2014-standard", "-PT3H"),
+            ],
+            groups: vec![
+                GroupDef {
+                    id: "0".into(),
+                    transitions: vec![TransitionDef::Plain {
+                        to_kind: "Period".into(),
+                        to: "moscow/fixed".into(),
+                    }],
+                },
+                GroupDef {
+                    id: "1".into(),
+                    transitions: vec![
+                        day_change("moscow/2014-daylight", "PT0S", "1", "Wednesday", "1"),
+                        day_change("moscow/2014-standard", "PT2H", "10", "Sunday", "-1"),
+                    ],
+                },
+            ],
+            transitions: vec![
+                to_group("0"),
+                TransitionDef::Absolute {
+                    to_kind: "Group".into(),
+                    to: "1".into(),
+                    date_time: "2014-01-01T00:00:00".into(),
+                },
+            ],
+        };
+        let rules = ZoneRules::try_from(&def).unwrap();
+        assert_eq!(
+            rules.midnight(day("2014-01-01")),
+            Some(utc("2013-12-31T20:00:00Z"))
+        );
+        assert!(rules
+            .instant_of(day("2014-01-01").and_hms_opt(0, 30, 0).unwrap())
+            .is_some());
+        // After the October change, UTC+3.
+        assert_eq!(
+            rules.midnight(day("2014-11-01")),
+            Some(utc("2014-10-31T21:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn a_bias_beyond_a_day_is_refused() {
+        let mut def = w_europe();
+        def.periods[0].bias = "P100000000D".into();
+        assert_eq!(
+            ZoneRules::try_from(&def),
+            Err(DefinitionError::BadBias("P100000000D".into()))
         );
     }
 
