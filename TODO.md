@@ -2975,8 +2975,9 @@ Siehe DESIGN §4.2.
   Fehler jede Exchange-Serie mit Enddatum, auch die in Outlook angelegten.
   Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
   westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
-  beide Ausroller ablehnten: Von den unveränderten Vorkommen der Serie
-  erschien nur das erste, und nur dafür kam eine Erinnerung. Geänderte
+  beide Ausroller ablehnten: Die Serie erschien nur am Beginn ihres Masters,
+  dem ersten Termin der Regel, auch wenn dieses Vorkommen geändert oder
+  gelöscht war, und nur dafür kam eine Erinnerung. Geänderte
   Vorkommen sind eigene Zeilen und erschienen weiter. Auch Aperios eigene
   Suche nach der Nummer eines Vorkommens (`nominal_occurrence_index`) las
   diese Regel; ein einzelnes Vorkommen einer solchen Serie auszulassen, wie

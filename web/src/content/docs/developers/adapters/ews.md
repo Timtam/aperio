@@ -102,9 +102,10 @@ The endpoint is discovered or user-supplied.
   is UTC, so `Z` may come on every series. The reader keeps only the date
   (`range_date`), both when it parses `EndDate` and when it turns a cached
   range into `UNTIL`. Before READ_RULE 3 it cut only `T` and `+`, so
-  `UNTIL=20261105ZT235959Z` came out and the expanders refused the rule: of
-  the series' unchanged occurrences only the first showed and reminded.
-  Changed occurrences are rows of their own and still appeared. The
+  `UNTIL=20261105ZT235959Z` came out and the expanders refused the rule: the
+  series showed and reminded only at its master's start, its first slot,
+  even where that occurrence had been changed or deleted. Changed
+  occurrences are rows of their own and still appeared. The
   adapter's own InstanceIndex lookup (`nominal_occurrence_index`) read the
   same rule, so skipping one occurrence of such a series, as a group carry
   does, failed with "could not compute the InstanceIndex"; it reads a fresh
