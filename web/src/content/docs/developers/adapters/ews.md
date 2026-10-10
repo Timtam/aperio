@@ -176,7 +176,9 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   (`rule_first_day`): the device's day for an all-day series, the written
   zone's day on a create, the stored start zone's day on an update (234,
   inferred from live round 1, where Exchange applied an update's fields in
-  order; not measured for a rule and a zone), UTC where none is known. The range's StartDate and the weekday, day of the month and
+  order; not measured for a rule and a zone), the zone the update writes
+  with the rule when the copy could not be read, UTC where none is known.
+  The range's StartDate and the weekday, day of the month and
   month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
   Read off the UTC date, as before, they named the day before east of UTC: a
   daily all-day series created in Berlin for Monday 19 October started on
@@ -197,7 +199,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   (237). Where the copy could not be read at all, it is refused as
   `copy-unreadable`, with the read's error as its detail. Both are carried
   as `Forbidden`, so the phone keeps the sentence and a split knows nothing
-  landed. A save that leaves the day alone still goes out.
+  landed. A read that failed on the sign-in or found the item gone keeps its
+  own error (`Authentication`, `NotFound`; `names_sign_in_or_gone`), as the
+  same edit of a timed appointment reports it: a retry mends neither. A
+  save that leaves the day alone still goes out.
 - **Zone definitions.** `StartTimeZone` and `EndTimeZone` carry the zone's
   full definition (periods with their bias, yearly changes, eras from
   absolute transitions). Both item parsers read it onto its own boundary

@@ -2446,7 +2446,19 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         Some(server) if !may(EventField::Recurrence) => server,
         _ => event,
     };
-    let clock = stored.start.as_ref();
+    // Without the copy the stored zone is unknown. The zone this update writes
+    // beside the rule stands in for it, as on a create: it comes from the
+    // row's own zone, which Aperio read from the stored one, so the rule
+    // starts on the day the user sees instead of the UTC date.
+    let blind_clock = before
+        .is_none()
+        .then(|| {
+            let written =
+                series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones);
+            written_clock(event.all_day, rule_of.recurrence.as_ref(), written)
+        })
+        .flatten();
+    let clock = stored.start.as_ref().or(blind_clock.as_ref());
     let first_day = |ev: &Event| rule_first_day(ev.start, ev.all_day, clock, device);
     let built_rule = |ev: &Event| {
         ev.recurrence
@@ -2835,7 +2847,8 @@ pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono
 /// zone Exchange expands it in — the zone a create writes with it, the zone
 /// the item is stored in on an update (decision 234, inferred from live round
 /// 1, where Exchange applied an update's fields in order; not measured for a
-/// rule and a zone), UTC where there is none.
+/// rule and a zone) or, when its copy could not be read, the zone the update
+/// writes with it, UTC where there is none.
 pub(crate) fn rule_first_day<D: TimeZone>(
     start: DateTime<Utc>,
     all_day: bool,
@@ -5278,12 +5291,16 @@ mod tests {
     /// - the Tokyo items carry a zone on an all-day single;
     /// - R3-7b leaves out the Recurrence delete.
     ///
-    /// Historical since PR 8a: the files reproduce round 3's requests. The
-    /// "today's rule" steps (R3-2, R3-4, R3-5b-u) are what round 3's build
-    /// sent, UTC midnights through `event_to_update_field_xml`, which reads
-    /// every item as stored in UTC; an 8a build writes an Outlook item's
-    /// stored-zone midnights instead. The 47a prototype (R3-1, R3-3, R3-7) is
-    /// Aperio's rule since 8a.
+    /// Historical since PR 8a: the files reproduce round 3's requests, built
+    /// with today's code. The "today's rule" steps (R3-2, R3-4, R3-5b-u) put
+    /// Start and End where round 3's build did, on UTC midnights through
+    /// `event_to_update_field_xml`, which reads every item as stored in UTC;
+    /// an 8a build writes an Outlook item's stored-zone midnights instead. One
+    /// field differs from round 3: the series' rule in R3-1 and R3-2 starts on
+    /// 8a's first day, the device's, StartDate 2026-10-19 on a Berlin device,
+    /// where round 3 sent 2026-10-18 (as R3-6 says). The 47a prototype as round 3 measured it (R3-1, R3-3,
+    /// R3-7b) is Aperio's rule since 8a; R3-7 also carries the Recurrence
+    /// delete Exchange refused.
     #[test]
     #[ignore = "writes the live Exchange test requests of round 3; see the doc comment"]
     fn live_test_requests_round_3() {
@@ -5457,7 +5474,8 @@ mod tests {
             "R3-1-update-s1-47a.xml",
             &format!(
                 "Step R3-1: the 47a prototype, Aperio's rule since PR 8a. Aperio's update of Outlook's S1 \
-                 series with a new title, Start and End moved to midnights of the stored zone. {REPLACE}"
+                 series with a new title, Start and End moved to midnights of the stored zone. Its rule \
+                 starts on 2026-10-19 since PR 8a (round 3 sent 2026-10-18). {REPLACE}"
             ),
             update(&on_stored_midnights(&s1, set), &del),
         );
@@ -5467,7 +5485,8 @@ mod tests {
             "R3-2-update-s2-today.xml",
             &format!(
                 "Step R3-2: Aperio's update of Outlook's S2 series with a new title, as round 3's \
-                 build sent it, before PR 8a (all-day series write no zone, 46a). {REPLACE}"
+                 build sent it, before PR 8a (all-day series write no zone, 46a), but with the rule's \
+                 StartDate 2026-10-19 of PR 8a (round 3 sent 2026-10-18). {REPLACE}"
             ),
             update(&set, &del),
         );
@@ -5519,9 +5538,10 @@ mod tests {
         write(
             "R3-7-update-s3-exception-47a.xml",
             &format!(
-                "Step R3-7: the 47a prototype, Aperio's rule since PR 8a. Aperio's override update of the S3 \
+                "Step R3-7: the 47a prototype. Aperio's override update of the S3 \
                  exception moved to Tuesday 27 October, Start and End on midnights of the stored zone, \
-                 with the Recurrence delete the override path sent until PR #77. {REPLACE}"
+                 with the Recurrence delete the override path sent until PR #77; Exchange refused it \
+                 (ErrorInvalidPropertyDelete). {REPLACE}"
             ),
             update(&on_stored_midnights(&moved, set.clone()), &del),
         );
@@ -5541,7 +5561,8 @@ mod tests {
         write(
             "R3-7b-update-s3-exception-no-recurrence-delete.xml",
             &format!(
-                "Step R3-7b: NOT Aperio's request. R3-7 without the Recurrence delete, as the override path writes since PR #77; sent only if \
+                "Step R3-7b: R3-7 without the Recurrence delete, as the override path writes since PR #77: \
+                 the 47a prototype round 3 measured, Aperio's rule since PR 8a; sent only if \
                  Exchange refuses R3-7. {REPLACE}"
             ),
             update(&on_stored_midnights(&moved, set), &del_without_rule),
@@ -9465,6 +9486,40 @@ mod tests {
         assert_eq!(element(&set, "DaysOfWeek"), "Monday", "{set}");
     }
 
+    /// Without the copy, a zoned timed series starts on the day of the zone
+    /// the update writes beside its rule, as a create does: Monday 00:30 in
+    /// Berlin, not the UTC Sunday, on a device in Honolulu where it is Sunday
+    /// too. A series without a zone keeps the UTC day.
+    #[test]
+    fn a_blind_update_of_a_zoned_series_starts_on_its_written_zones_day() {
+        let device = chrono_tz::Pacific::Honolulu;
+        for (tzid, day, weekday) in [
+            (Some("Europe/Berlin"), "2026-10-19", "Monday"),
+            (None, "2026-10-18", "Sunday"),
+        ] {
+            let mut edit = zoned_master(tzid);
+            edit.start = "2026-10-18T22:30:00Z".parse().unwrap();
+            edit.end = "2026-10-18T23:00:00Z".parse().unwrap();
+            edit.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;COUNT=10".into();
+            let (set, _) = event_to_update_field_xml_in(
+                &edit,
+                None,
+                &StoredZones::default(),
+                None,
+                EventIdKind::RecurringMaster,
+                &device,
+            )
+            .unwrap();
+            assert_eq!(element(&set, "StartDate"), day, "{tzid:?}: {set}");
+            assert_eq!(element(&set, "DaysOfWeek"), weekday, "{tzid:?}: {set}");
+            assert_eq!(
+                set.contains("<t:StartTimeZone Id=\"W. Europe Standard Time\"/>"),
+                tzid.is_some(),
+                "{tzid:?}: {set}"
+            );
+        }
+    }
+
     /// A title-only save of an all-day series writes no rule: both sides of
     /// the comparison build the rule on the same first day.
     #[test]
@@ -9715,11 +9770,13 @@ mod tests {
     }
 
     /// Decision 234: an update that makes a timed appointment a series and
-    /// names a new zone starts the rule on the day the STORED zone reads:
-    /// Exchange applies the rule before the zone the same update writes after
-    /// it. Aperio created the single in UTC; Monday 00:30 in Berlin is Sunday
-    /// there. (That zone, sent after the start, moves the wall clock as well —
-    /// live round 1, stages 9 and 12; the live test of 8a looks at it.)
+    /// names a new zone starts the rule on the day the STORED zone reads. The
+    /// decision assumes Exchange applies the rule before the zone the same
+    /// update writes after it, inferred from round 1's field order and not
+    /// measured for a rule and a zone (live step 9 of 8a looks). Aperio
+    /// created the single in UTC; Monday 00:30 in Berlin is Sunday there.
+    /// (That zone, sent after the start, moves the wall clock as well: live
+    /// round 1, stages 9 and 12.)
     #[test]
     fn a_new_rule_with_a_new_zone_starts_on_the_stored_zones_day() {
         let device = chrono_tz::Europe::Berlin;

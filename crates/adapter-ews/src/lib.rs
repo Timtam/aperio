@@ -1485,6 +1485,32 @@ fn refused_update_code(code: &str) -> Option<&str> {
     REFUSED_UPDATE_CODES.contains(&bare).then_some(bare)
 }
 
+/// The SOAP codes with which Exchange says the sign-in or a permission failed.
+const SIGN_IN_SOAP_CODES: &[&str] = &[
+    "ErrorAccessDenied",
+    "ErrorInvalidAccessToken",
+    "ErrorPasswordExpired",
+    "ErrorADUnavailable",
+    "ErrorNoFreeBusyAccess",
+];
+
+/// The SOAP codes with which Exchange says the item or its folder is gone.
+const GONE_SOAP_CODES: &[&str] = &["ErrorItemNotFound", "ErrorFolderNotFound"];
+
+/// Whether an error says the sign-in failed or the item is gone: what
+/// [`to_core_error`] names `Authentication` or `NotFound`. A retry mends
+/// neither, so the error is reported as itself.
+pub(crate) fn names_sign_in_or_gone(err: &EwsError) -> bool {
+    match err {
+        EwsError::Http { status, .. } => matches!(status, 401 | 403 | 404),
+        EwsError::Soap { code, .. } => {
+            SIGN_IN_SOAP_CODES.contains(&code.as_str()) || GONE_SOAP_CODES.contains(&code.as_str())
+        }
+        EwsError::DiscoveryFailed(_) => true,
+        EwsError::Network(_) | EwsError::Protocol(_) | EwsError::Config(_) => false,
+    }
+}
+
 fn to_core_error(err: EwsError) -> CoreError {
     use EwsError::*;
     match err {
@@ -1495,20 +1521,17 @@ fn to_core_error(err: EwsError) -> CoreError {
             409 | 412 => CoreError::Conflict(message),
             _ => CoreError::Protocol(format!("EWS HTTP {status}: {message}")),
         },
-        Soap { code, message } => match code.as_str() {
-            // EWS encodes auth + permission failures in the SOAP body
-            // even though the HTTP status is 200. Route the familiar
-            // codes into the matching cal-core variants so the UI can
-            // present "wrong password" specifically rather than a
-            // generic protocol error.
-            "ErrorAccessDenied"
-            | "ErrorInvalidAccessToken"
-            | "ErrorPasswordExpired"
-            | "ErrorADUnavailable"
-            | "ErrorNoFreeBusyAccess" => CoreError::Authentication(message),
-            "ErrorItemNotFound" | "ErrorFolderNotFound" => CoreError::NotFound(message),
-            _ => CoreError::Protocol(format!("EWS SOAP {code}: {message}")),
-        },
+        // EWS encodes auth + permission failures in the SOAP body even though
+        // the HTTP status is 200. Route the familiar codes into the matching
+        // cal-core variants so the UI can present "wrong password"
+        // specifically rather than a generic protocol error.
+        Soap { code, message } if SIGN_IN_SOAP_CODES.contains(&code.as_str()) => {
+            CoreError::Authentication(message)
+        }
+        Soap { code, message } if GONE_SOAP_CODES.contains(&code.as_str()) => {
+            CoreError::NotFound(message)
+        }
+        Soap { code, message } => CoreError::Protocol(format!("EWS SOAP {code}: {message}")),
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
         DiscoveryFailed(m) => CoreError::NotFound(m),
@@ -3243,5 +3266,105 @@ mod server_zone_tests {
                 .any(|b| b.contains("UpdateItem")),
             "nothing is sent"
         );
+    }
+
+    /// A failed sign-in or an item that is gone keeps its own error when the
+    /// copy cannot be read: "try again" would not help. Both count as nothing
+    /// written, and nothing is sent.
+    #[tokio::test]
+    async fn a_failed_sign_in_or_a_gone_item_keeps_its_error_without_the_copy() {
+        // The item was deleted in Outlook.
+        let gone = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:MessageText>The specified object was not found in the store.</m:MessageText>
+      <m:ResponseCode>ErrorItemNotFound</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, gone.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+
+        // The password changed.
+        let mut server = Server::new_async().await;
+        let failed = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&failed);
+        server
+            .mock("POST", "/")
+            .with_status(401)
+            .with_body_from_request(move |request| {
+                seen.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                b"Unauthorized".to_vec()
+            })
+            .create_async()
+            .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        assert!(matches!(err, CoreError::Authentication(_)), "{err:?}");
+        assert!(
+            !failed
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sign_in_or_gone_tests {
+    use super::*;
+
+    /// `names_sign_in_or_gone` and `to_core_error` read the same codes: the
+    /// one says which errors stay themselves, the other what they become.
+    #[test]
+    fn names_sign_in_or_gone_agrees_with_to_core_error() {
+        let soap = |code: &str| EwsError::Soap {
+            code: code.into(),
+            message: "no".into(),
+        };
+        let http = |status: u16| EwsError::Http {
+            status,
+            message: "no".into(),
+        };
+        let mut errors: Vec<EwsError> = SIGN_IN_SOAP_CODES
+            .iter()
+            .chain(GONE_SOAP_CODES)
+            .chain(&["ErrorServerBusy", "ErrorInternalServerError"])
+            .map(|code| soap(code))
+            .collect();
+        errors.extend([400, 401, 403, 404, 409, 429, 500, 503].map(http));
+        errors.extend([
+            EwsError::Network("reset".into()),
+            EwsError::Protocol("bad".into()),
+            EwsError::Config("bad".into()),
+            EwsError::DiscoveryFailed("x".into()),
+        ]);
+        for err in errors {
+            let label = format!("{err:?}");
+            let named = names_sign_in_or_gone(&err);
+            let core = to_core_error(err);
+            assert_eq!(
+                named,
+                matches!(core, CoreError::Authentication(_) | CoreError::NotFound(_)),
+                "{label} -> {core:?}"
+            );
+        }
     }
 }

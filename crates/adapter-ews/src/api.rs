@@ -807,9 +807,12 @@ pub async fn update_event(
     // Without the copy the zones the item is stored in are unknown, and an
     // all-day day is never written blind (decision 237). Nothing is sent, and
     // the error says so: `copy-unreadable`, with the read's own failure (or an
-    // item the server no longer has) as its detail. Returned as the read's
-    // error, a dropped connection read as a write that may have landed, and a
-    // split kept its new part next to the uncut series (decision 144).
+    // answer without the item) as its detail. Returned as the read's error, a
+    // dropped connection read as a write that may have landed, and a split
+    // kept its new part next to the uncut series (decision 144). A failed
+    // sign-in or an item that is gone stays itself, as the same edit of a
+    // timed appointment reports it: "try again" would not help, and both
+    // already count as nothing written.
     let (set_xml, delete_xml) = match crate::mapping::event_to_update_field_xml_in(
         event,
         before.as_ref(),
@@ -819,6 +822,9 @@ pub async fn update_event(
         &chrono::Local,
     ) {
         Err(EwsError::Protocol(message)) if before.is_none() && day_zone_unreadable(&message) => {
+            if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+                return Err(err);
+            }
             let why = read_error
                 .map(|err| err.to_string())
                 .unwrap_or_else(|| "the server answered without the item".into());
