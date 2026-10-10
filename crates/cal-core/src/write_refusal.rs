@@ -62,12 +62,60 @@ pub enum WriteRefusal {
     /// write needs it, so nothing was sent: a retry may well work. The detail
     /// is the read's own error, for the log.
     CopyUnreadable,
-    /// The write would make the provider drop a series' changed and deleted
-    /// occurrences, so nothing was sent (decision 245): Exchange drops them
-    /// whenever a series' start and end are written again, and switching its
-    /// time zone has to write them. The detail is a machine token for the
-    /// log: `zone`.
+    /// The write would make the provider drop occurrences of a series the user
+    /// changed on their own — and deleted ones the adapter cannot delete again
+    /// afterwards —, and the user has not agreed ([`crate::Event`]'s
+    /// `accepts_exception_loss`), so nothing was sent (decisions 245-253).
+    /// Exchange drops them whenever a series' start and end, the clock of its
+    /// zone or its pattern are written again. The detail is
+    /// [`SeriesRewrite::detail`]: what the update rewrites and how many
+    /// occurrences would be lost, `slot:3`; the surfaces ask with it and send
+    /// the write again with the consent.
     ExceptionsWouldBeLost,
+}
+
+/// What an update writes again that makes a provider drop a series' changed
+/// and deleted occurrences (decisions 243-253): its start and end — a move, a
+/// new length, all-day on or off —, only the clock its zone names (245), or
+/// its pattern, the days or the interval it repeats on (live round 6). A
+/// change of how often or until when a series runs keeps them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum SeriesRewrite {
+    /// Start and end: a move, a new length, all-day on or off.
+    Slot,
+    /// Only the zone, whose clock is another than the stored one.
+    Zone,
+    /// The pattern: the days or the interval the series repeats on.
+    Pattern,
+}
+
+impl SeriesRewrite {
+    /// The token the detail starts with.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Slot => "slot",
+            Self::Zone => "zone",
+            Self::Pattern => "pattern",
+        }
+    }
+
+    /// The detail of [`WriteRefusal::ExceptionsWouldBeLost`]: this rewrite and
+    /// how many occurrences it would lose, `slot:3`.
+    pub fn detail(self, lost: usize) -> String {
+        format!("{}:{lost}", self.token())
+    }
+
+    /// The rewrite and the count a detail names, as [`Self::detail`] writes
+    /// it; `None` for anything else.
+    pub fn parse_detail(detail: &str) -> Option<(Self, usize)> {
+        let (token, count) = detail.trim().split_once(':')?;
+        let rewrite = [Self::Slot, Self::Zone, Self::Pattern]
+            .into_iter()
+            .find(|r| r.token() == token)?;
+        Some((rewrite, count.parse().ok()?))
+    }
 }
 
 impl WriteRefusal {
@@ -217,6 +265,32 @@ mod tests {
         for status in [200, 401, 403, 404, 409, 412, 500, 502, 503, 504] {
             assert!(!WriteRefusal::refused_status(status), "{status}");
         }
+    }
+
+    #[test]
+    fn a_series_rewrite_detail_comes_back() {
+        for rewrite in [
+            SeriesRewrite::Slot,
+            SeriesRewrite::Zone,
+            SeriesRewrite::Pattern,
+        ] {
+            let detail = rewrite.detail(3);
+            assert_eq!(SeriesRewrite::parse_detail(&detail), Some((rewrite, 3)));
+            // The token is the serialized name the surfaces read.
+            assert_eq!(
+                serde_json::to_value(rewrite).unwrap(),
+                serde_json::json!(rewrite.token()),
+            );
+        }
+        // The wire shape the surfaces parse (shared/exceptionsLoss.ts).
+        assert_eq!(SeriesRewrite::Slot.detail(3), "slot:3");
+        assert_eq!(
+            WriteRefusal::ExceptionsWouldBeLost.message(&SeriesRewrite::Zone.detail(1)),
+            "exceptions-would-be-lost: zone:1"
+        );
+        assert_eq!(SeriesRewrite::parse_detail("slot"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:many"), None);
+        assert_eq!(SeriesRewrite::parse_detail("moved:3"), None);
     }
 
     #[test]

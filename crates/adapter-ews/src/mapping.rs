@@ -1956,6 +1956,8 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
+        accepts_exception_loss: false,
+        deletions_not_restored: Vec::new(),
         id,
         calendar_id: calendar_id.to_string(),
         title: item.subject,
@@ -2294,6 +2296,72 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     target: EventIdKind,
     device: &D,
 ) -> EwsResult<(String, String)> {
+    plan_update_in(event, before, stored, server_zones, target, device)
+        .map(|plan| (plan.set, plan.del))
+}
+
+/// An update as [`plan_update_in`] builds it: the fields it sets and deletes,
+/// and what it writes again that makes Exchange drop the series' changed and
+/// deleted occurrences.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpdatePlan {
+    pub(crate) set: String,
+    pub(crate) del: String,
+    /// `Some` when the update writes a series' start and end, the clock of its
+    /// zone or its pattern again: Exchange then drops every changed and
+    /// deleted occurrence of it (the zone-first live test, L3a, M3, M6; round
+    /// 6, P1, P2). `None` for anything else, for an exception, for a copy that
+    /// is no series or one that is unknown, and for an edit that ends the
+    /// series (decisions 243-253).
+    pub(crate) rewrite: Option<cal_core::SeriesRewrite>,
+    /// Where the series' deleted occurrences stand once the update has
+    /// written it again, so they can be deleted again (decision 253).
+    pub(crate) placement: Placement,
+}
+
+/// Where a deleted occurrence of a series stands after an update that made
+/// Exchange bring it back (decision 253).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// Every occurrence moved as the first one did, the same distance on the
+    /// series' clock: a move, a zone switch, a rule shifted with its start
+    /// (`cal_core::shift_series`). An occurrence keeps its place in the
+    /// pattern, which is how Exchange numbers them (round 6, R1-R3).
+    Shifted,
+    /// The pattern changed under the same slot: a deleted occurrence stands
+    /// where it stood, if the new pattern has it at all.
+    Same,
+    /// The pattern changed together with the slot, or the change is no
+    /// rewrite: no deleted occurrence can be placed.
+    Unknown,
+}
+
+/// The pattern part of a built Exchange rule: everything before its range
+/// (`NumberedRecurrence`, `EndDateRecurrence`, `NoEndRecurrence`). How often
+/// and until when a series runs is its range, and changing that keeps its
+/// exceptions (the zone-first live test, M5; the 8a live test's cut); the
+/// pattern is the days and the interval it repeats on.
+fn pattern_of(rule_xml: &str) -> &str {
+    [
+        "<t:NumberedRecurrence",
+        "<t:EndDateRecurrence",
+        "<t:NoEndRecurrence",
+    ]
+    .iter()
+    .filter_map(|range| rule_xml.find(range))
+    .min()
+    .map_or(rule_xml, |at| &rule_xml[..at])
+}
+
+/// [`event_to_update_field_xml_in`], with what the update rewrites.
+pub(crate) fn plan_update_in<D: TimeZone>(
+    event: &Event,
+    before: Option<&Event>,
+    stored: &StoredZones,
+    server_zones: Option<&ServerTimeZones>,
+    target: EventIdKind,
+    device: &D,
+) -> EwsResult<UpdatePlan> {
     let mut set = String::new();
     let mut del = String::new();
 
@@ -2427,26 +2495,6 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         && (new_clock.is_none()
             || new_clock.as_ref() != stored.start.as_ref()
             || new_clock.as_ref() != stored.end.as_ref());
-    // Exchange drops a series' changed and deleted occurrences whenever its
-    // start and end are written again (the zone-first live test, L3a, M3, M6).
-    // A save that changes the slot writes them anyway, as it always did — the
-    // editor will ask first (decision 243). One that writes them only because
-    // the clock moves would lose them where no save did before, so it is
-    // refused, and nothing is sent (245). Without the copy they are unknown.
-    if clock_moves
-        && !slot_changed
-        && target != EventIdKind::Exception
-        && before.is_some_and(|server| {
-            server
-                .recurrence
-                .as_ref()
-                .is_some_and(|rec| !rec.exceptions.is_empty())
-        })
-    {
-        return Err(EwsError::Protocol(
-            cal_core::WriteRefusal::ExceptionsWouldBeLost.message("zone"),
-        ));
-    }
     // An all-day item given a time of day (the zone-first live test): a zone
     // written first onto an all-day daily series makes Exchange put its days
     // on the new zone's midnights, two days long, and refuse the whole update
@@ -2632,7 +2680,80 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         }
     }
 
-    Ok((set, del))
+    // What the update writes again that makes Exchange drop the series'
+    // changed and deleted occurrences: its start and end (L3a, M3, M6), only
+    // its zone's clock (245), or its pattern under the same slot (round 6, P1,
+    // P2). Its range alone keeps them (M5, the 8a cut). Only a series the
+    // server holds, written as a series again, and never an exception.
+    let server_rule = before.and_then(|b| b.recurrence.as_ref());
+    let stays_a_series =
+        server_rule.is_some() && rule_of.recurrence.is_some() && target != EventIdKind::Exception;
+    let written_pattern = written_rule
+        .as_ref()
+        .and_then(|rule| rule.as_deref())
+        .map(pattern_of);
+    let server_pattern = before
+        .and_then(built_rule)
+        .and_then(|rule| rule.map(|xml| pattern_of(&xml).to_string()));
+    let pattern_changes =
+        rule_written && written_pattern.is_some() && written_pattern != server_pattern.as_deref();
+    let rewrite = if !stays_a_series {
+        None
+    } else if slot_changed {
+        Some(cal_core::SeriesRewrite::Slot)
+    } else if clock_moves {
+        Some(cal_core::SeriesRewrite::Zone)
+    } else if pattern_changes {
+        Some(cal_core::SeriesRewrite::Pattern)
+    } else {
+        None
+    };
+    // Where the deleted ones stand again (decision 253). A move keeps every
+    // occurrence's place in the pattern where the written rule is the
+    // server's, shifted with its first day as a drag shifts it; a new pattern
+    // under the same slot keeps every instant; anything else cannot be told.
+    let placement = match (rewrite, before, server_rule) {
+        (Some(cal_core::SeriesRewrite::Pattern), _, _) => Placement::Same,
+        (Some(_), Some(server), Some(server_rule)) => {
+            let old_day = first_day_before(server);
+            let new_day = first_day_written(landed);
+            let wall_time = |when: DateTime<Utc>, clock: Option<&DayZone>| {
+                clock
+                    .and_then(|zone| zone.wall(when))
+                    .map(|wall| wall.time())
+            };
+            let time_changes = server.all_day != landed.all_day
+                || (!landed.all_day
+                    && wall_time(server.start, old_clock) != wall_time(landed.start, rule_clock));
+            let days = i32::try_from((new_day - old_day).num_days()).unwrap_or(i32::MAX);
+            let shifted =
+                match cal_core::shift_series(&server_rule.rrule, old_day, days, time_changes, None)
+                {
+                    cal_core::SeriesShift::Shifted { rrule } => {
+                        rrule_to_ews_recurrence(&rrule, new_day)
+                            .ok()
+                            .is_some_and(|xml| {
+                                Some(pattern_of(&xml))
+                                    == written_pattern.or(server_pattern.as_deref())
+                            })
+                    }
+                    cal_core::SeriesShift::Refused { .. } => false,
+                };
+            if shifted {
+                Placement::Shifted
+            } else {
+                Placement::Unknown
+            }
+        }
+        _ => Placement::Unknown,
+    };
+
+    Ok(UpdatePlan {
+        set,
+        del,
+        rewrite,
+        placement,
+    })
 }
 
 fn first_relative_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
@@ -4928,6 +5049,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
@@ -5793,6 +5916,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
@@ -6071,6 +6196,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
@@ -10263,14 +10390,15 @@ mod tests {
 
     /// Exchange drops a series' changed and deleted occurrences when its slot
     /// is written again (the zone-first live test, L3a, M3), and a zone switch
-    /// that moves the clock writes it: refused, nothing sent (decision 245).
-    /// Paris shows Berlin's time, but Exchange stores it as another zone
-    /// (`Romance Standard Time`), which counts as another clock (240): refused
-    /// too. Under the same id (Vienna) nothing moves and the zone alone goes
-    /// out; a save that moves the series writes its slot as it always did
-    /// (243 will ask).
+    /// that moves the clock writes it: the plan says it rewrites the zone, so
+    /// the write path asks first (decisions 245, 247). Paris shows Berlin's
+    /// time, but Exchange stores it as another zone (`Romance Standard Time`),
+    /// which counts as another clock (240): a rewrite too. Every occurrence
+    /// moves as the first one, so a deleted one keeps its place (253). Under
+    /// the same id (Vienna) nothing moves and the zone alone goes out; a save
+    /// that moves the series rewrites its slot.
     #[test]
-    fn a_zone_switch_that_would_drop_exceptions_is_refused() {
+    fn a_zone_switch_rewrites_the_zone_and_keeps_every_place() {
         let mut before = timed_series(
             "2026-11-02T09:00:00Z",
             "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
@@ -10281,22 +10409,15 @@ mod tests {
         for zone in ["America/New_York", "Asia/Tokyo", "Europe/Paris"] {
             let mut edit = before.clone();
             edit.recurrence.as_mut().unwrap().tzid = Some(zone.into());
-            edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&before), true);
-            let refusal = event_to_update_field_xml_in(
+            let plan = planned(
                 &edit,
-                Some(&before),
+                &before,
                 &w_europe_zones(),
-                None,
                 EventIdKind::RecurringMaster,
-                &chrono_tz::Europe::Berlin,
-            )
-            .unwrap_err();
-            let EwsError::Protocol(message) = refusal else {
-                panic!("{zone}: {refusal:?}");
-            };
+            );
             assert_eq!(
-                cal_core::WriteRefusal::parse(&message),
-                Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone")),
+                (plan.rewrite, plan.placement),
+                (Some(cal_core::SeriesRewrite::Zone), Placement::Shifted),
                 "{zone}"
             );
         }
@@ -10322,6 +10443,166 @@ mod tests {
             EventIdKind::RecurringMaster,
         );
         assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
+        let plan = planned(
+            &vienna,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(plan.rewrite, None);
+        let plan = planned(
+            &moved,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Slot));
+    }
+
+    /// `edit` planned against `before`, kept fields marked as the host marks
+    /// them, on a Berlin device.
+    fn planned(
+        edit: &Event,
+        before: &Event,
+        stored: &StoredZones,
+        kind: EventIdKind,
+    ) -> UpdatePlan {
+        let mut edit = edit.clone();
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(before), true);
+        plan_update_in(
+            &edit,
+            Some(before),
+            stored,
+            None,
+            kind,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap()
+    }
+
+    /// What each kind of save rewrites that makes Exchange drop a series'
+    /// changed and deleted occurrences, and where the deleted ones stand
+    /// again (decisions 243-253). Start and end — a move by time, by a day
+    /// with the weekday shifted as a drag shifts it, a new length — rewrite
+    /// the slot and keep every occurrence's place; a day move that keeps the
+    /// old weekday cannot be placed. The days or the interval alone rewrite
+    /// the pattern, and a deleted occurrence stays at its instant (round 6,
+    /// P1, P2). How often or until when (M5, the 8a cut), the title, a rule
+    /// removed, an exception and a single made a series rewrite nothing.
+    #[test]
+    fn each_save_says_what_it_rewrites_and_where_deleted_ones_stand() {
+        use cal_core::SeriesRewrite::{Pattern, Slot};
+        let before = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+            "Europe/Berlin",
+        );
+        let with = |change: &dyn Fn(&mut Event)| {
+            let mut edit = before.clone();
+            change(&mut edit);
+            edit
+        };
+        let rule = |rrule: &'static str| {
+            move |e: &mut Event| e.recurrence.as_mut().unwrap().rrule = rrule.into()
+        };
+        let cases: Vec<(&str, Event, Option<cal_core::SeriesRewrite>, Placement)> = vec![
+            (
+                "an hour later",
+                with(&|e| {
+                    e.start += chrono::Duration::hours(1);
+                    e.end += chrono::Duration::hours(1);
+                }),
+                Some(Slot),
+                Placement::Shifted,
+            ),
+            (
+                "a day later, Tuesdays",
+                with(&|e| {
+                    e.start += chrono::Duration::days(1);
+                    e.end += chrono::Duration::days(1);
+                    e.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=TU;COUNT=4".into();
+                }),
+                Some(Slot),
+                Placement::Shifted,
+            ),
+            (
+                "a day later, still Mondays",
+                with(&|e| {
+                    e.start += chrono::Duration::days(1);
+                    e.end += chrono::Duration::days(1);
+                }),
+                Some(Slot),
+                Placement::Unknown,
+            ),
+            (
+                "longer",
+                with(&|e| e.end += chrono::Duration::hours(1)),
+                Some(Slot),
+                Placement::Shifted,
+            ),
+            (
+                "Mondays and Wednesdays",
+                with(&rule("FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4")),
+                Some(Pattern),
+                Placement::Same,
+            ),
+            (
+                "every other Monday",
+                with(&rule("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=4")),
+                Some(Pattern),
+                Placement::Same,
+            ),
+            (
+                "five times",
+                with(&rule("FREQ=WEEKLY;BYDAY=MO;COUNT=5")),
+                None,
+                Placement::Unknown,
+            ),
+            (
+                "until the 16th",
+                with(&rule("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T225959Z")),
+                None,
+                Placement::Unknown,
+            ),
+            (
+                "renamed",
+                with(&|e| e.title = "Renamed".into()),
+                None,
+                Placement::Unknown,
+            ),
+            (
+                "no longer a series",
+                with(&|e| e.recurrence = None),
+                None,
+                Placement::Unknown,
+            ),
+        ];
+        for (name, edit, rewrite, placement) in cases {
+            let plan = planned(
+                &edit,
+                &before,
+                &w_europe_zones(),
+                EventIdKind::RecurringMaster,
+            );
+            assert_eq!(
+                (plan.rewrite, plan.placement),
+                (rewrite, placement),
+                "{name}"
+            );
+        }
+
+        // An exception never rewrites its series.
+        let mut moved = before.clone();
+        moved.start += chrono::Duration::hours(1);
+        moved.end += chrono::Duration::hours(1);
+        let plan = planned(&moved, &before, &w_europe_zones(), EventIdKind::Exception);
+        assert_eq!(plan.rewrite, None);
+
+        // A single made a series has no occurrences to lose.
+        let mut single = before.clone();
+        single.recurrence = None;
+        let plan = planned(&before, &single, &w_europe_zones(), EventIdKind::Single);
+        assert_eq!(plan.rewrite, None);
     }
 
     /// The zone picker on a stored series keeps the instant (DESIGN, "Die Zone
@@ -10587,35 +10868,16 @@ mod tests {
             "{set}"
         );
 
-        // With a deleted occurrence that slot would drop it (245): the rule
-        // change is refused, though the edit keeps the series' zone — the shape
-        // the troubleshooting guide names for this build, where no editor
-        // picks a zone. The cut of a split is such a rule change too.
-        let mut with_exception = before.clone();
-        with_exception.recurrence.as_mut().unwrap().exceptions =
-            vec!["2026-11-09T09:00:00Z".parse().unwrap()];
+        // That slot drops the series' occurrences (245): the rule change
+        // rewrites the zone, though the edit keeps the series' zone — the
+        // shape the troubleshooting guide names for this build, where no
+        // editor picks a zone — so the write path asks first (247). The cut of
+        // a split is such a rule change too.
         for rrule in ["FREQ=WEEKLY;COUNT=5", "FREQ=WEEKLY;UNTIL=20261115T225959Z"] {
-            let mut edit = with_exception.clone();
+            let mut edit = before.clone();
             edit.recurrence.as_mut().unwrap().rrule = rrule.into();
-            edit.keep_fields =
-                cal_core::event_diff::kept_fields(&edit, Some(&with_exception), true);
-            let refusal = event_to_update_field_xml_in(
-                &edit,
-                Some(&with_exception),
-                &stored,
-                None,
-                EventIdKind::RecurringMaster,
-                &chrono_tz::Europe::Berlin,
-            )
-            .unwrap_err();
-            let EwsError::Protocol(message) = refusal else {
-                panic!("{rrule}: {refusal:?}");
-            };
-            assert_eq!(
-                cal_core::WriteRefusal::parse(&message),
-                Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone")),
-                "{rrule}"
-            );
+            let plan = planned(&edit, &before, &stored, EventIdKind::RecurringMaster);
+            assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Zone), "{rrule}");
         }
     }
 

@@ -180,6 +180,8 @@ pub fn events_for_contacts(
                 organized_elsewhere: false,
                 send_invitations: false,
                 truncate_tail_overrides: false,
+                accepts_exception_loss: false,
+                deletions_not_restored: Vec::new(),
                 id: format!("{BIRTHDAY_EVENT_PREFIX}{}:{}", contact.id, year),
                 calendar_id: calendar_id.to_string(),
                 // The age rides IN the title when the birth year is known —

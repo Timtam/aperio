@@ -2119,6 +2119,8 @@ mod tests {
             attendee_responses: vec![],
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
         }

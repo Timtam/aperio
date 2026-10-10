@@ -615,6 +615,8 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
+        accepts_exception_loss: false,
+        deletions_not_restored: Vec::new(),
         id: entry.id,
         calendar_id: calendar_id.to_string(),
         title: entry.subject.unwrap_or_default(),
