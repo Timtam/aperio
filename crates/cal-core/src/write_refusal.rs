@@ -58,6 +58,10 @@ pub enum WriteRefusal {
     /// is a machine token for the log: `no-zone` (no zone, or an id with no
     /// definition), `no-midnight` (the zone has no midnight that day).
     DayZoneUnreadable,
+    /// The provider's current copy of the item could not be read, and the
+    /// write needs it, so nothing was sent: a retry may well work. The detail
+    /// is the read's own error, for the log.
+    CopyUnreadable,
 }
 
 impl WriteRefusal {
@@ -71,6 +75,7 @@ impl WriteRefusal {
             Self::UnsafeToWrite => "unsafe-to-write",
             Self::AccessNotGranted => "access-not-granted",
             Self::DayZoneUnreadable => "day-zone-unreadable",
+            Self::CopyUnreadable => "copy-unreadable",
         }
     }
 
@@ -114,6 +119,7 @@ impl WriteRefusal {
             Self::UnsafeToWrite,
             Self::AccessNotGranted,
             Self::DayZoneUnreadable,
+            Self::CopyUnreadable,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {

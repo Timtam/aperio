@@ -193,10 +193,11 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   (`StoredZones`); an exception takes its series' ids and definitions. A
   create still writes UTC midnights: Aperio creates without a zone, so
   Exchange stores the item in UTC. Where a boundary's zone cannot be read,
-  or the copy could not be read, the day is not written: the update is
-  refused as `day-zone-unreadable` (237), carried as `Forbidden` so the
-  phone keeps the sentence, or the read's own error stands. A save that
-  leaves the day alone still goes out.
+  the day is not written: the update is refused as `day-zone-unreadable`
+  (237). Where the copy could not be read at all, it is refused as
+  `copy-unreadable`, with the read's error as its detail. Both are carried
+  as `Forbidden`, so the phone keeps the sentence and a split knows nothing
+  landed. A save that leaves the day alone still goes out.
 - **Zone definitions.** `StartTimeZone` and `EndTimeZone` carry the zone's
   full definition (periods with their bias, yearly changes, eras from
   absolute transitions). Both item parsers read it onto its own boundary

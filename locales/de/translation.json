@@ -1696,6 +1696,7 @@
         "unsafeToWrite": "Aperio kann diesen Termin nicht sicher ändern: Was auf dem Server noch mit ihm gespeichert ist, stünde auf dem Spiel. Es wurde nichts geändert.",
         "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio. Es wurde nichts geändert.",
         "dayZoneUnreadable": "Exchange speichert diesen Termin in einer Zeitzone, die Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern; den Titel und anderes schon. Es wurde nichts geändert.",
+        "copyUnreadable": "Aperio konnte den aktuellen Stand dieses Termins nicht vom Server lesen und hat ihn deshalb nicht geändert. Versuche es gleich noch einmal.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "reason": {
@@ -1706,6 +1707,7 @@
           "unsafeToWrite": "Aperio kann ihn auf dem Server nicht sicher ändern",
           "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts",
           "dayZoneUnreadable": "Exchange speichert ihn in einer Zeitzone, die Aperio nicht lesen kann, deshalb lässt sich sein Tag hier nicht ändern",
+          "copyUnreadable": "Aperio konnte seinen aktuellen Stand nicht vom Server lesen",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast"
         }

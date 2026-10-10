@@ -182,6 +182,12 @@ What you can do: change the day in Outlook. Everything else, such as the
 title, the place or the reminder, you can still change in Aperio, as long as
 you do not move the day with it.
 
+A similar message is: "Aperio could not read this appointment's current state
+from the server, so it did not change it." To know the time zone,
+Aperio reads the appointment from the server before saving. When that fails,
+for instance because the server is not answering right now, Aperio sends
+nothing. Try again in a moment.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.

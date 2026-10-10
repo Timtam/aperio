@@ -220,6 +220,24 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
   });
 });
 
+describe('a write that needs the current copy, when it cannot be read', () => {
+  it('says to try again, and counts as nothing written', () => {
+    // An all-day day is never written blind: without the copy nothing is sent,
+    // so a split can take its new part back (decision 144).
+    const desktop = command('forbidden', 'copy-unreadable: EWS HTTP 503: Service Unavailable');
+    const phone = new Error(
+      "Calling the 'updateEventJson' function has failed\n→ Caused by: copy-unreadable: network down",
+    );
+    for (const err of [desktop, phone]) {
+      expect(eventWriteRefusal(err)?.refusal).toBe('copy-unreadable');
+      expect(eventWriteErrorMessage(err, t)).toMatch(/aktuellen Stand dieses Termins nicht/);
+      expect(eventWriteErrorMessage(err, t)).toMatch(/Versuche es gleich noch einmal/);
+      expect(eventWriteErrorMessage(err, t)).not.toMatch(/503|network/);
+    }
+    expect(writeNeverLanded(desktop)).toBe(true);
+  });
+});
+
 describe('any write on the phone, not only the event editor', () => {
   it('says a refusal as its sentence and anything else as before', async () => {
     const { writeErrorMessage } = await import('@aperio/shared');

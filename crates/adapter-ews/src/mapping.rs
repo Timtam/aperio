@@ -2536,10 +2536,26 @@ fn finish_zone(
     } else {
         (&mut item.end_time_zone, &mut item.end_zone_definition)
     };
-    *slot = definition;
     if id.is_none() {
         *id = nested_id;
     }
+    // Kept only where it is read: an id that names a clock by itself never
+    // needs it, and every item of a W. Europe mailbox would otherwise carry
+    // two definitions through the cache.
+    *slot = definition.filter(|_| !id_names_a_clock(id.as_deref()));
+}
+
+/// Whether a zone id names a clock by itself — through the CLDR table, as the
+/// end zone Exchange marks an item made without a zone with (43b), or as
+/// tzdata's own name (236) — so a definition beside it is never read.
+fn id_names_a_clock(id: Option<&str>) -> bool {
+    use crate::windows_tz::{read_windows_zone, WindowsZoneRead};
+    let Some(id) = id.map(str::trim) else {
+        return false;
+    };
+    id.eq_ignore_ascii_case("tzone://Microsoft/Utc")
+        || !matches!(read_windows_zone(id), WindowsZoneRead::Unknown)
+        || id.parse::<chrono_tz::Tz>().is_ok()
 }
 
 /// Re-anchor an all-day boundary read from EWS at LOCAL midnight of the
@@ -5261,6 +5277,13 @@ mod tests {
     ///   instead of the UTC midnights of the day;
     /// - the Tokyo items carry a zone on an all-day single;
     /// - R3-7b leaves out the Recurrence delete.
+    ///
+    /// Historical since PR 8a: the files reproduce round 3's requests. The
+    /// "today's rule" steps (R3-2, R3-4, R3-5b-u) are what round 3's build
+    /// sent, UTC midnights through `event_to_update_field_xml`, which reads
+    /// every item as stored in UTC; an 8a build writes an Outlook item's
+    /// stored-zone midnights instead. The 47a prototype (R3-1, R3-3, R3-7) is
+    /// Aperio's rule since 8a.
     #[test]
     #[ignore = "writes the live Exchange test requests of round 3; see the doc comment"]
     fn live_test_requests_round_3() {
@@ -5433,7 +5456,7 @@ mod tests {
         write(
             "R3-1-update-s1-47a.xml",
             &format!(
-                "Step R3-1: NOT Aperio's rule yet (47a prototype). Aperio's update of Outlook's S1 \
+                "Step R3-1: the 47a prototype, Aperio's rule since PR 8a. Aperio's update of Outlook's S1 \
                  series with a new title, Start and End moved to midnights of the stored zone. {REPLACE}"
             ),
             update(&on_stored_midnights(&s1, set), &del),
@@ -5443,8 +5466,8 @@ mod tests {
         write(
             "R3-2-update-s2-today.xml",
             &format!(
-                "Step R3-2: Aperio's update of Outlook's S2 series with a new title, as this build \
-                 sends it (all-day series write no zone, 46a). {REPLACE}"
+                "Step R3-2: Aperio's update of Outlook's S2 series with a new title, as round 3's \
+                 build sent it, before PR 8a (all-day series write no zone, 46a). {REPLACE}"
             ),
             update(&set, &del),
         );
@@ -5457,7 +5480,7 @@ mod tests {
         write(
             "R3-3-update-t1-47a.xml",
             &format!(
-                "Step R3-3: NOT Aperio's rule yet (47a prototype). Aperio's update of Outlook's T1 \
+                "Step R3-3: the 47a prototype, Aperio's rule since PR 8a. Aperio's update of Outlook's T1 \
                  single moved to Tuesday 20 October, Start and End on midnights of the stored zone. {REPLACE}"
             ),
             update(&on_stored_midnights(&t1, set), &del),
@@ -5468,7 +5491,7 @@ mod tests {
             "R3-4-update-t2-today.xml",
             &format!(
                 "Step R3-4: Aperio's update of Outlook's T2 single with a new title, for the planned item (no reminder, location or body) byte for byte as \
-                 main sends it. {REPLACE}"
+                 round 3's main sent it, before PR 8a. {REPLACE}"
             ),
             update(&set, &del),
         );
@@ -5481,8 +5504,8 @@ mod tests {
         write(
             "R3-5b-u-update-tokyo-today.xml",
             &format!(
-                "Step R3-5b-u: Aperio's update of the Tokyo single R3-5b with a new title, as it sends \
-                 it today. In which zone does Exchange round its UTC midnights? {REPLACE}"
+                "Step R3-5b-u: Aperio's update of the Tokyo single R3-5b with a new title, as round \
+                 3's build sent it, before PR 8a. In which zone does Exchange round its UTC midnights? {REPLACE}"
             ),
             update(&set, &del),
         );
@@ -5496,7 +5519,7 @@ mod tests {
         write(
             "R3-7-update-s3-exception-47a.xml",
             &format!(
-                "Step R3-7: NOT Aperio's rule yet (47a prototype). Aperio's override update of the S3 \
+                "Step R3-7: the 47a prototype, Aperio's rule since PR 8a. Aperio's override update of the S3 \
                  exception moved to Tuesday 27 October, Start and End on midnights of the stored zone, \
                  with the Recurrence delete the override path sent until PR #77. {REPLACE}"
             ),
@@ -7846,6 +7869,19 @@ mod tests {
                 Some("W. Europe Standard Time")
             );
             assert_eq!(item.end_zone_definition, None);
+
+            // An id that names a clock by itself keeps no definition: it is
+            // never read, and the cache would carry it for every item.
+            for id in [
+                "W. Europe Standard Time",
+                "Europe/Berlin",
+                "tzone://Microsoft/Utc",
+            ] {
+                let named =
+                    format!(r#"<t:StartTimeZone Id="{id}">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#);
+                let item = parse(&zone_item(&named, ""));
+                assert_eq!(item.start_zone_definition, None, "{id}");
+            }
         }
     }
 

@@ -805,9 +805,11 @@ pub async fn update_event(
         None => (None, crate::mapping::StoredZones::default()),
     };
     // Without the copy the zones the item is stored in are unknown, and an
-    // all-day day is never written blind (decision 237): the user is told what
-    // kept the copy away — the read's own failure, or an item the server no
-    // longer has — rather than that its zone cannot be read.
+    // all-day day is never written blind (decision 237). Nothing is sent, and
+    // the error says so: `copy-unreadable`, with the read's own failure (or an
+    // item the server no longer has) as its detail. Returned as the read's
+    // error, a dropped connection read as a write that may have landed, and a
+    // split kept its new part next to the uncut series (decision 144).
     let (set_xml, delete_xml) = match crate::mapping::event_to_update_field_xml_in(
         event,
         before.as_ref(),
@@ -817,10 +819,12 @@ pub async fn update_event(
         &chrono::Local,
     ) {
         Err(EwsError::Protocol(message)) if before.is_none() && day_zone_unreadable(&message) => {
-            return Err(read_error.unwrap_or_else(|| EwsError::Soap {
-                code: "ErrorItemNotFound".into(),
-                message: "the server answered without the item".into(),
-            }));
+            let why = read_error
+                .map(|err| err.to_string())
+                .unwrap_or_else(|| "the server answered without the item".into());
+            return Err(EwsError::Protocol(
+                cal_core::WriteRefusal::CopyUnreadable.message(&why),
+            ));
         }
         other => other?,
     };

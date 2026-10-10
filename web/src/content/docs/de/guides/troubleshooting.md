@@ -195,6 +195,12 @@ Was du tun kannst: Ändere den Tag in Outlook. Alles andere, etwa Titel, Ort
 oder Erinnerung, kannst du in Aperio weiter ändern, solange du den Tag dabei
 nicht verschiebst.
 
+Ähnlich klingt: „Aperio konnte den aktuellen Stand dieses Termins nicht vom
+Server lesen und hat ihn deshalb nicht geändert.“ Um die Zeitzone zu kennen,
+liest Aperio den Termin vor dem Speichern vom Server. Gelingt das nicht, etwa
+weil der Server gerade nicht antwortet, schickt Aperio nichts. Versuche es
+nach einem Moment noch einmal.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.

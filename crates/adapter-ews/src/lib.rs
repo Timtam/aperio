@@ -1441,12 +1441,17 @@ fn to_update_error(err: EwsError) -> CoreError {
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
         // Nothing was sent: an all-day day in a zone Aperio cannot read
-        // (decision 237). Forbidden, so the phone keeps the message and a
-        // split knows the write never landed.
+        // (decision 237), or one whose copy could not be read. Forbidden, so
+        // the phone keeps the message and a split knows the write never
+        // landed.
         EwsError::Protocol(message)
             if matches!(
                 cal_core::WriteRefusal::parse(&message),
-                Some((cal_core::WriteRefusal::DayZoneUnreadable, _))
+                Some((
+                    cal_core::WriteRefusal::DayZoneUnreadable
+                        | cal_core::WriteRefusal::CopyUnreadable,
+                    _
+                ))
             ) =>
         {
             CoreError::Forbidden(message)
@@ -3178,16 +3183,60 @@ mod server_zone_tests {
     }
 
     /// Without the copy no stored zone is known, and an all-day day is not
-    /// written blind: the user hears what kept the copy away.
+    /// written blind. Nothing is sent, and the error says so as a refusal
+    /// (`copy-unreadable`), carried as Forbidden: a split then knows nothing
+    /// landed (decision 144). Its detail is what kept the copy away.
     #[tokio::test]
     async fn an_all_day_day_is_not_written_without_the_copy() {
+        // The server answers without the item.
         let mut server = Server::new_async().await;
         let requests = serve_stored(&mut server, CREATED.to_string()).await;
         let adapter = EwsAdapter::new(server.url(), alice());
         let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
-        assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((
+                cal_core::WriteRefusal::CopyUnreadable,
+                "the server answered without the item"
+            ))
+        );
         assert!(
             !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+
+        // The read itself fails: the server is down.
+        let mut server = Server::new_async().await;
+        let failed = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&failed);
+        server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_body_from_request(move |request| {
+                seen.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                b"Service Unavailable".to_vec()
+            })
+            .create_async()
+            .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        let (refusal, why) = cal_core::WriteRefusal::parse(&message).expect("a refusal");
+        assert_eq!(refusal, cal_core::WriteRefusal::CopyUnreadable);
+        assert!(why.contains("503"), "the read's own error: {why}");
+        assert!(
+            !failed
                 .lock()
                 .unwrap()
                 .iter()
