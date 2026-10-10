@@ -188,8 +188,9 @@ Exchange behält beim Wechsel der Zeitzone die gespeicherte Uhrzeit und deutet
 sie in der neuen Zone. Seit dieser Version schickt Aperio die Zeitzone zuerst
 und danach Beginn und Ende, so bleibt der Termin, wo er war. Bekommt eine
 ganztägige Serie Uhrzeiten, schickt Aperio Beginn und Ende vor und nach der
-Zeitzone und danach die Wiederholung: Die Zeitzone zuerst lehnt Exchange dort
-ab, und ohne die Wiederholung begänne die Serie einen Tag später.
+Zeitzone und danach die Wiederholung: Die Zeitzone zuerst lehnt Exchange bei
+einer täglichen Serie ab, und ohne die Wiederholung begänne die Serie einen
+Tag später.
 
 Was du tun kannst: Eine Serie, die schon verschoben ist, verschiebst du einmal
 von Hand an die richtige Stelle.
@@ -208,15 +209,18 @@ da, geänderte stehen wieder wie die Serie. Hat die Serie solche Vorkommen,
 schickt Aperio deshalb nichts.
 
 Die Zeitzone einer Serie kannst du in dieser Version nicht selbst wählen. Die
-Meldung kommt deshalb nur, wenn du die Wiederholung einer Serie änderst, auch
-ab einem ihrer Termine, und Aperio dabei eine andere Zeitzone schreiben müsste,
+Meldung kommt deshalb nur, wenn Aperio die Wiederholung einer Serie neu
+schreibt und dabei eine andere Zeitzone schreiben müsste,
 als Exchange gespeichert hat: etwa bei einer Serie aus einem anderen Programm,
 deren Ende in einer anderen Zeitzone steht als ihr Beginn, oder wenn die
 Zeitzone der Serie anderswo geändert wurde, seit Aperio sie zuletzt gelesen
-hat.
+hat. Die Wiederholung schreibt Aperio neu, wenn du sie änderst, und auch, wenn
+du eine Serie ab einem ihrer Termine änderst oder löschst: Dann kürzt Aperio
+die alte Serie.
 
-Was du tun kannst: Ändere die Wiederholung in Outlook. Titel, Ort und
-Erinnerung kannst du in Aperio weiter ändern.
+Was du tun kannst: Ändere die Wiederholung in Outlook, und ändere oder lösche
+die Serie dort ab dem Termin. Titel, Ort und Erinnerung der ganzen Serie oder
+eines einzelnen Termins kannst du in Aperio weiter ändern.
 
 Verschiebst du eine Serie mit solchen Vorkommen auf eine andere Uhrzeit oder
 einen anderen Tag, schickt Aperio Beginn und Ende ohnehin, und Exchange

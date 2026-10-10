@@ -188,8 +188,8 @@ keinen, dort ist die Wahl Tonis Sache.
   bleiben, und schreibt sie neu, wo der Wechsel sie verschiebt, etwa nahe
   Mitternacht. Der Live-Test hat alle drei Fälle und Gegenproben gemessen
   (242, Live-Test Zone, 2026-10-10); was er fand, steht in 243 bis 245.
-  Aperios eigene Anfrage nach 244 und 245 bestand die vierte Runde (N1,
-  N1b, N2, N3).
+  Aperios eigene Anfrage nach 244 und 245 bestand die vierte und die fünfte
+  Runde (N1, N1b, N2, N3; O1, O2).
 - **243 — warnen und fragen.** *(beschlossen, eigener PR direkt nach dem
   Zonen-PR)* Exchange verwirft alle geänderten und gelöschten Vorkommen einer
   Serie, sobald ein Ändern Beginn und Ende des Serienkopfs neu schreibt: beim
@@ -204,10 +204,13 @@ keinen, dort ist die Wahl Tonis Sache.
   Mitternächte der neuen Zone, zwei Tage lang. Ganztägig aus, Beginn und Ende
   vor der Zone und danach noch einmal nimmt es an, die Serie beginnt dann aber
   einen Tag später (M1, M2): Exchange liest das Startdatum der Regel aus dem
-  ganztägigen Tag in UTC neu. Mit der Regel am Ende, auf dem Tag der neuen
+  ganztägigen Tag in UTC neu. Eine wöchentliche nahm die Zone zuerst an
+  (Runde 2, B4); Aperio schreibt trotzdem jede ganztägige Serie so. Mit der Regel am Ende, auf dem Tag der neuen
   Zone, landet sie richtig, in einer Anfrage wie in zweien (M7, M8). So
   schreibt Aperio es jetzt: Ganztägig aus, Beginn, Ende, Zone, Beginn, Ende,
-  Regel, die Regel immer.
+  Regel, die Regel immer. Auch eine ganztägige Serie, die Outlook schon in
+  W. Europe gespeichert hat, wo die Zone also bleibt, landet so richtig,
+  täglich und samstags (O1, O2).
 - **245 — kein Zonenwechsel, der Vorkommen verwirft.** *(gebaut, Zonen-PR)*
   Schreibt ein Ändern Beginn und Ende nur, weil die neue Zone eine andere Uhr
   nennt (240), und hat die Serie geänderte oder gelöschte Vorkommen, lehnt
@@ -1189,8 +1192,10 @@ Handy im selben PR.
   Regel vor einer Zone anwendet, die dieselbe Änderung danach schreibt, ist
   seit dem Zonen-PR ohne Bedeutung: Die Regel kommt immer nach der Zone.
   Ungeprüft sind auch: ob eine neu geschriebene Regel, die mehr als die
-  Anzahl ändert, die Ausnahmen einer Serie stehen lässt (gemessen ist nur
-  die Anzahl, M5; Beginn und Ende neu verwerfen sie, 243); ein Termin mit
+  Anzahl oder das Ende ändert, die Ausnahmen einer Serie stehen lässt, und ob
+  ein Schnitt mit `UNTIL` geänderte Vorkommen behält (gemessen: die Anzahl
+  behält beide Arten, M5; der Schnitt des Live-Tests 8a behielt ein
+  gelöschtes Vorkommen; Beginn und Ende neu verwerfen sie, 243); ein Termin mit
   eigener Zone vom iPhone oder aus einer Einladung und
   die Ablehnung nach 237 am echten Server; ob Exchange ein Ende in der Endzone
   rundet, wenn Beginn und Ende verschiedene Zonen tragen (233, R3-2 legt es

@@ -3036,7 +3036,8 @@ Siehe DESIGN §4.2.
   Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
   (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
   Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
-  behält sie (N3).
+  behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
+  bekommen 10:00 richtig, täglich und samstags (O1, O2).
   🚩 **Warnen und fragen** (243): eigener PR direkt nach dem Zonen-PR. Bevor
   Aperio Beginn und Ende einer Exchange-Serie mit geänderten oder gelöschten
   Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt es das

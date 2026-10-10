@@ -191,12 +191,14 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   counter-checks.
 - **An all-day series given a time** (decision 244) writes IsAllDayEvent,
   Start and End before the zone, Start and End again after it, and the rule
-  last, always. The zone first is refused whole
+  last, always. On a daily series the zone first is refused whole
   (`ErrorOccurrenceTimeSpanTooBig`: on the new zone's midnights each day
-  is two days long, L2). Without the rule, the series lands a day late:
+  is two days long, L2); a weekly one took it (round 2, B4), and gets the
+  same order all the same. Without the rule, the series lands a day late:
   Exchange reads the range's StartDate again from the all-day day it stored
   in UTC (M1, M2). With it, it lands right (M7, M8), and so does Aperio's
-  own request, at 10:00 and at 00:30 (N1, N1b).
+  own request, at 10:00 and at 00:30 (N1, N1b), also on an all-day series
+  Outlook stored in W. Europe, where the zone stays (O1 daily, O2 weekly).
 - **Exchange drops a series' exceptions** — every changed and deleted
   occurrence — when an update writes the master's Start and End (the
   zone-first live test: L3a, L3b, M3, M6). A title (M4) or a changed COUNT
@@ -207,8 +209,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   zone Exchange stores under the same id (Vienna for a W. Europe series)
   goes out alone and keeps them (N3); another id on the same time of day
   (Paris) counts as another clock and is refused, and that id alone is not
-  measured. No editor picks a series' zone yet, so today the refusal meets
-  only a rule change where Aperio itself would write another zone: a series
+  measured. No editor picks a series' zone yet, so today the refusal meets only a rule
+  change — the repeat edited, or a series changed or deleted from one of its
+  occurrences on, which cuts the old rule — where Aperio itself would write
+  another zone: a series
   whose stored end zone is not its start zone, or a stale copy.
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on

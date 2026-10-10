@@ -174,8 +174,8 @@ When its time zone changes, Exchange keeps the stored time of day and reads it
 in the new zone. From this version Aperio sends the time zone first and the
 start and end after it, so the appointment stays where it was. When an all-day
 series gets a time of day, Aperio sends the start and end before and after the
-time zone and the repeat last: Exchange refuses the time zone first there, and
-without the repeat the series would start a day later.
+time zone and the repeat last: Exchange refuses the time zone first for a
+daily series, and without the repeat the series would start a day later.
 
 What you can do: move a series that has already moved back to its place once,
 by hand.
@@ -193,14 +193,17 @@ like the series again. So when a series has such occurrences, Aperio sends
 nothing.
 
 In this version you cannot choose a series' time zone yourself. So the message
-only comes when you change a series' repeat, also from one of its
-appointments on, and Aperio would have to write another time zone than the one
+only comes when Aperio writes a series' repeat again and would have to write
+another time zone than the one
 Exchange stored: for example for a series from another program whose end is in
 another time zone than its start, or when the series' time zone was changed
-elsewhere since Aperio last read it.
+elsewhere since Aperio last read it. Aperio writes the repeat again when you
+change it, and also when you change or delete a series from one of its
+appointments on: Aperio then shortens the old series.
 
-What you can do: change the repeat in Outlook. You can still change the title,
-the place and the reminder in Aperio.
+What you can do: change the repeat in Outlook, and change or delete the series
+from that appointment on there. You can still change the title, the place and
+the reminder of the whole series or of a single appointment in Aperio.
 
 If you move a series with such occurrences to another time or another day,
 Aperio sends the start and end anyway, and Exchange drops the occurrences then

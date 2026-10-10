@@ -2535,12 +2535,14 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // weekday stay the same on the new clock, and rewrites it where the switch
     // moves them; an all-day series given a time always rewrites it
     // (`leaves_all_day`). A rule that only changes its COUNT keeps the
-    // series' exceptions (the zone-first live test, M5); other rewrites are
-    // unmeasured. The slot never deletes a rule: an edit without one says
-    // nothing about the server's. A missing copy's rule is unknown, not equal: a blind
-    // write writes the edit's rule, or deletes the server's. And an edited rule
-    // that no longer builds is written, so the save fails with it instead of
-    // passing for an unchanged one.
+    // series' exceptions (the zone-first live test, M5), and the UNTIL cut of
+    // a split kept a deleted occurrence (the 8a live test); other rewrites,
+    // and changed occurrences under a cut, are unmeasured. The slot never
+    // deletes a rule: an edit without one says nothing about the server's. A
+    // missing copy's rule is unknown, not equal: a blind write writes the
+    // edit's rule, or deletes the server's. And an edited rule that no longer
+    // builds is written, so the save fails with it instead of passing for an
+    // unchanged one.
     let old_clock = stored.start.as_ref();
     let rule_clock = if clock_moves {
         new_clock.as_ref()
@@ -10570,6 +10572,81 @@ mod tests {
             [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
             "{set}"
         );
+
+        // With a deleted occurrence that slot would drop it (245): the rule
+        // change is refused, though the edit keeps the series' zone — the shape
+        // the troubleshooting guide names for this build, where no editor
+        // picks a zone. The cut of a split is such a rule change too.
+        let mut with_exception = before.clone();
+        with_exception.recurrence.as_mut().unwrap().exceptions =
+            vec!["2026-11-09T09:00:00Z".parse().unwrap()];
+        for rrule in ["FREQ=WEEKLY;COUNT=5", "FREQ=WEEKLY;UNTIL=20261115T225959Z"] {
+            let mut edit = with_exception.clone();
+            edit.recurrence.as_mut().unwrap().rrule = rrule.into();
+            edit.keep_fields =
+                cal_core::event_diff::kept_fields(&edit, Some(&with_exception), true);
+            let refusal = event_to_update_field_xml_in(
+                &edit,
+                Some(&with_exception),
+                &stored,
+                None,
+                EventIdKind::RecurringMaster,
+                &chrono_tz::Europe::Berlin,
+            )
+            .unwrap_err();
+            let EwsError::Protocol(message) = refusal else {
+                panic!("{rrule}: {refusal:?}");
+            };
+            assert_eq!(
+                cal_core::WriteRefusal::parse(&message),
+                Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone")),
+                "{rrule}"
+            );
+        }
+    }
+
+    /// The zone-first live test, O1: an all-day series as Outlook stores it,
+    /// already in W. Europe, given 10:00 in Berlin. The zone does not change,
+    /// yet the series leaves all-day (244): the flag and the timed slot, the
+    /// same zone, the slot again, and the rule on Berlin's Saturday.
+    #[test]
+    fn an_outlook_all_day_series_given_a_time_keeps_its_zone_in_the_measured_order() {
+        let mut before = timed_series(
+            "2026-10-23T22:00:00Z",
+            "FREQ=DAILY;COUNT=3",
+            "Europe/Berlin",
+        );
+        before.all_day = true;
+        before.end = "2026-10-24T22:00:00Z".parse().unwrap();
+        let mut edit = before.clone();
+        edit.all_day = false;
+        edit.start = "2026-10-24T08:00:00Z".parse().unwrap();
+        edit.end = "2026-10-24T09:00:00Z".parse().unwrap();
+        let (set, _) = saved(
+            &edit,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(
+            field_uris(&set),
+            [
+                "calendar:IsAllDayEvent",
+                "calendar:Start",
+                "calendar:End",
+                ZONE[0],
+                ZONE[1],
+                "calendar:Start",
+                "calendar:End",
+                "calendar:Recurrence",
+            ],
+            "{set}"
+        );
+        assert!(
+            set.contains(r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#),
+            "{set}"
+        );
+        assert_eq!(element(&set, "StartDate"), "2026-10-24", "{set}");
     }
 
     /// The mirror: this device still holds a series all-day that another device
