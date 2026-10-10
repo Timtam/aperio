@@ -2673,8 +2673,9 @@ Siehe DESIGN §4.2.
     - iOS-Gerätekalender: jedes Schreiben und Löschen nutzt `span:
       .thisEvent` (`IosDeviceEventStore.swift`), trifft bei einer Serie also nur
       das erste Vorkommen. Ungemessen.
-    - Exchange/Graph: ob `EndDate` inklusive ist — dann bliebe bei jedem
-      Kürzen ein Vorkommen zu viel. Ungemessen.
+    - Exchange: `EndDate` ist inklusive (Live-Test 8a, 2026-10-10). Ein
+      Kürzen mit Uhrzeit lässt den Schnitttag deshalb doppelt stehen; die
+      Korrektur ist ein eigener PR (235). Graph: ungemessen.
     - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
       Serie, dann die Kopie (dieselbe Reihenfolge, die #92 in den Editoren
       umgedreht hat).

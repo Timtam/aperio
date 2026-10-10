@@ -1118,7 +1118,10 @@ Handy im selben PR.
   `SyncFolderItems` und `GetItem` mit (Live-Test 8a, an einem per EWS
   angelegten Termin); seit PR 8a liest ein ganztägiger Termin sie selbst, die
   Uhr einer Serie behandelt sie weiter als keine Zone. Ungeprüft aus PR 8a sind
-  außerdem: ein Termin mit eigener Zone vom iPhone oder aus einer Einladung und
+  außerdem: ob Exchange bei einem Ändern die Regel vor der Zone anwendet, die
+  dieselbe Änderung danach schreibt (234; Schritt 9 des Live-Tests 8a kann das
+  nicht zeigen, weil jede Reihenfolge sonntags 23:30 ergibt); ein Termin mit
+  eigener Zone vom iPhone oder aus einer Einladung und
   die Ablehnung nach 237 am echten Server; ob Exchange ein Ende in der Endzone
   rundet, wenn Beginn und Ende verschiedene Zonen tragen (233, R3-2 legt es
   nahe); was Exchange an einem Tag speichert, dessen Mitternacht die
