@@ -932,12 +932,14 @@ Handy im selben PR.
    - Ein in Aperio angelegter Einzeltermin, Montag 00:30, in einem Speichern
      wöchentlich gemacht, steht danach sonntags um 23:30. Die Änderung schrieb
      die Regel (ab Sonntag, dem Tag der gespeicherten Zone UTC, 234) und danach
-     die Zone, aber weder Beginn noch Ende. Exchange hat die Felder in dieser
-     Reihenfolge angewandt, wie 234 annimmt, und die neue Zone hat die
-     gespeicherte Uhrzeit 23:30 behalten. Nach dem Schreibcode von main wäre
-     es dort genauso. Richtig wird es erst, wenn die Zone vor Beginn, Ende und
-     Regel geht und Beginn und Ende mitkommen; dann beginnt die Regel am Tag
-     der neuen Zone, und das löst 234 ab.
+     die Zone, aber weder Beginn noch Ende. Die neue Zone hat die gespeicherte
+     Uhrzeit 23:30 behalten. In welcher Reihenfolge Exchange Regel und Zone
+     anwendet, zeigt das nicht: Die Regel nannte den Sonntag selbst, und eine
+     Zone, die die Uhrzeit behält, behält auch deren Tag; jede Reihenfolge
+     ergäbe sonntags 23:30. 234 bleibt abgeleitet (Runde 1), weder bestätigt
+     noch widerlegt. Nach dem Schreibcode von main wäre es dort genauso. Der
+     nächste PR schreibt die Zone, dann Beginn und Ende, dann die Regel am Tag
+     der neuen Zone, und misst, ob das richtig landet.
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Der Exchange-Teil ist mit PR 8a gebaut, zusammen mit 47a (57a), und im
    Live-Test 8a gemessen. Offen ist

@@ -3023,12 +3023,14 @@ Siehe DESIGN §4.2.
   Änderung ohne Beginn und Ende gemessen: Ein in Aperio angelegter
   Einzeltermin am Montag um 00:30, wöchentlich gemacht, steht danach sonntags
   um 23:30. Die Änderung schrieb nur die Regel (ab dem Tag der alten Zone UTC:
-  Sonntag, 234) und danach die Zone. Exchange wandte die Felder in dieser
-  Reihenfolge an, wie 234 annimmt. Nächster PR nach 8a: die Zone schreiben,
+  Sonntag, 234) und danach die Zone; die Zone hat die gespeicherte Uhrzeit
+  behalten. Über die Reihenfolge von Regel und Zone sagt das nichts: Jede
+  Reihenfolge ergibt sonntags 23:30, weil die Zone mit der Uhrzeit auch den
+  Tag behält. 234 bleibt abgeleitet. Nächster PR nach 8a: die Zone schreiben,
   dann Beginn und Ende, auch wenn sie sich nicht ändern, dann die Regel am Tag
-  der neuen Zone; das löst 234 ab. Dass die Zone zuerst die Zeitpunkte stehen
-  lässt, ist nur an einer ganztägigen Serie gemessen (Runde 2, B4); für eine
-  mit Uhrzeit misst es der PR.
+  der neuen Zone, und messen, ob das richtig landet. Dass die Zone zuerst die
+  Zeitpunkte stehen lässt, ist nur an einer ganztägigen Serie gemessen
+  (Runde 2, B4).
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

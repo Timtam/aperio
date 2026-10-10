@@ -3078,8 +3078,9 @@ mod server_zone_tests {
         )
     }
 
-    /// A custom zone with W. Europe's rules (synthetic: no definition has
-    /// been captured from a server yet).
+    /// A custom zone with W. Europe's rules (synthetic; the 8a live test
+    /// captured Exchange 2019 echoing only a definition the test wrote, none
+    /// from an iPhone or an invitation).
     const CUSTOM_W_EUROPE: &str = r#"<t:StartTimeZone Id="Customized Time Zone" Name="">
           <t:Periods>
             <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>

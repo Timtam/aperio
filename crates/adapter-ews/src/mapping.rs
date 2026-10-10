@@ -2842,13 +2842,15 @@ pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono
 /// The day a series' rule starts on, on the clock Exchange repeats it on: an
 /// all-day series on the device's days (48a); a timed one on `clock`, the
 /// zone Exchange expands it in — the zone a create writes with it, the zone
-/// the item is stored in on an update (decision 234) or, when its copy could
-/// not be read, the zone the update writes with it, UTC where there is none.
-/// Where the update also changes the zone, the item still moves: the 8a live
-/// test made a single weekly; the update sent the rule (on the stored zone's
-/// day) and then the zone, without the start or the end, and the new zone
-/// kept the stored wall clock. The next PR writes the zone, then the start
-/// and the end, then the rule on the new zone's day, which replaces 234.
+/// the item is stored in on an update (decision 234, inferred from live round
+/// 1, where Exchange applied an update's fields in order; not measured for a
+/// rule and a zone) or, when its copy could not be read, the zone the update
+/// writes with it, UTC where there is none. Where the update also changes the
+/// zone, the item still moves: the 8a live test made a single weekly; the
+/// update sent the rule (on the stored zone's day) and then the zone, without
+/// the start or the end, and the new zone kept the stored wall clock. The
+/// next PR writes the zone, then the start and the end, then the rule on the
+/// new zone's day.
 pub(crate) fn rule_first_day<D: TimeZone>(
     start: DateTime<Utc>,
     all_day: bool,
@@ -7763,7 +7765,10 @@ mod tests {
 
     /// A custom zone's definition with W. Europe's rules, under the id Toni's
     /// mailbox shows for a custom zone (`Customized Time Zone`, Name empty).
-    /// Synthetic: no definition has been captured from a server yet.
+    /// Synthetic rules. The 8a live test captured Exchange 2019 echoing a
+    /// definition the test wrote: Name empty, period ids rewritten to
+    /// `trule:Microsoft/Registry/Customized Time Zone/1-Standard`. No
+    /// definition from an iPhone or an invitation has been captured.
     const CUSTOM_ZONE_BODY: &str = r#"<t:Periods>
                     <t:Period Bias="-PT1H" Name="Standard" Id="custom/std"/>
                     <t:Period Bias="-PT2H" Name="Daylight" Id="custom/dst"/>
