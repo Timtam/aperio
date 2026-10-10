@@ -175,6 +175,60 @@ selbst: Für Aperio sieht sie genauso aus wie eine Serie, die absichtlich in UTC
 geführt wird. Um eine betroffene Serie zu reparieren, lege sie neu an oder
 stelle ihre Zeitzone in dem Programm wieder ein, aus dem sie stammt.
 
+## Ein Exchange-Termin ist verschoben, nachdem er zur Serie wurde
+
+Hast du in Aperio einen Termin auf einem Exchange-Konto zur Serie gemacht oder
+einer ganztägigen Exchange-Serie Uhrzeiten gegeben, stand der Termin danach
+meist um ein oder zwei Stunden verschoben, nahe Mitternacht auch an einem
+anderen Tag. Ein in
+Aperio angelegter Termin am Montag um 00:30 stand danach zum Beispiel sonntags
+um 23:30.
+
+Exchange behält beim Wechsel der Zeitzone die gespeicherte Uhrzeit und deutet
+sie in der neuen Zone. Seit dieser Version schickt Aperio die Zeitzone zuerst
+und danach Beginn und Ende, so bleibt der Termin, wo er war. Bekommt eine
+ganztägige Serie Uhrzeiten, schickt Aperio Beginn und Ende vor und nach der
+Zeitzone und danach die Wiederholung: Die Zeitzone zuerst lehnt Exchange bei
+einer täglichen Serie ab, und ohne die Wiederholung begänne die Serie einen
+Tag später.
+
+Was du tun kannst: Eine Serie, die schon verschoben ist, verschiebst du einmal
+von Hand an die richtige Stelle.
+
+## Exchange würde die geänderten und gelöschten Vorkommen einer Serie verwerfen
+
+Aperio sagt dann: „Diese Änderung würde die Zeitzone der Serie wechseln, und
+dabei verwirft Exchange ihre geänderten und gelöschten Vorkommen. Es wurde
+nichts geändert.“
+
+Exchange speichert jede Serie mit einer Zeitzone. Gäbe eine Änderung der Serie
+eine andere Zeitzone, müsste Aperio auch Beginn und Ende der Serie neu
+schicken, damit sie zur selben Zeit bleibt. Dabei verwirft Exchange jedes
+Vorkommen, das einzeln geändert oder gelöscht wurde: Gelöschte stehen wieder
+da, geänderte stehen wieder wie die Serie. Hat die Serie solche Vorkommen,
+schickt Aperio deshalb nichts.
+
+Die Zeitzone einer Serie kannst du in dieser Version nicht selbst wählen. Die
+Meldung kommt deshalb nur, wenn Aperio die Wiederholung einer Serie neu
+schreibt und dabei eine andere Zeitzone schreiben müsste,
+als Exchange gespeichert hat: etwa bei einer Serie aus einem anderen Programm,
+deren Ende in einer anderen Zeitzone steht als ihr Beginn, oder wenn die
+Zeitzone der Serie anderswo geändert wurde, seit Aperio sie zuletzt gelesen
+hat. Die Wiederholung schreibt Aperio neu, wenn du sie änderst, und auch, wenn
+du eine Serie ab einem ihrer Termine änderst oder löschst: Dann kürzt Aperio
+die alte Serie.
+
+Was du tun kannst: Wurde die Serie anderswo geändert, öffne sie neu, sobald
+Aperio den Kalender aktualisiert hat, und versuche es noch einmal. Sonst
+ändere die Wiederholung in Outlook, und ändere oder lösche die Serie dort ab
+dem Termin. Titel, Ort und Erinnerung der ganzen Serie oder eines einzelnen
+Termins kannst du in Aperio weiter ändern.
+
+Verschiebst du eine Serie mit solchen Vorkommen auf eine andere Uhrzeit oder
+einen anderen Tag, schickt Aperio Beginn und Ende ohnehin, und Exchange
+verwirft die Vorkommen dabei ebenfalls. Davor warnt Aperio in dieser Version
+noch nicht.
+
 ## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
 
 Aperio sagt dann: „Exchange speichert diesen Termin in einer Zeitzone, die

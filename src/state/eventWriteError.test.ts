@@ -224,6 +224,30 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
   });
 });
 
+describe("a zone switch that would drop a series' exceptions", () => {
+  it('reads as its own refusal, behind the wrapper too, and as nothing written', () => {
+    // Decision 245: Exchange drops a series' changed and deleted occurrences
+    // when its start and end are written again, and a zone switch that moves
+    // the clock writes them, so nothing is sent.
+    const desktop = command('forbidden', 'exceptions-would-be-lost: zone');
+    const phone = new Error(
+      "Calling the 'updateEventJson' function has failed\n→ Caused by: exceptions-would-be-lost: zone",
+    );
+    for (const err of [desktop, phone]) {
+      expect(eventWriteRefusal(err)?.refusal).toBe('exceptions-would-be-lost');
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Diese Änderung würde die Zeitzone der Serie wechseln, und dabei verwirft ' +
+          'Exchange ihre geänderten und gelöschten Vorkommen. Es wurde nichts geändert.',
+      );
+      expect(eventWriteErrorMessage(err, t)).not.toMatch(/exceptions-would-be-lost/);
+    }
+    expect(eventWriteFailureReason(desktop, t)).toBe(
+      'Exchange würde dabei ihre geänderten und gelöschten Vorkommen verwerfen',
+    );
+    expect(writeNeverLanded(desktop)).toBe(true);
+  });
+});
+
 describe('a write that needs the current copy, when it cannot be read', () => {
   it('says to try again, and counts as nothing written', () => {
     // An all-day day is never written blind: without the copy nothing is sent,

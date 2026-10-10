@@ -3017,21 +3017,37 @@ Siehe DESIGN §4.2.
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
   🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
-  🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
-  zur Serie mit neuer Zone, behält Exchange die gespeicherte Uhrzeit und gibt
-  ihr die neue Zone, der Termin wandert um den Versatz (Runde 1, Stufen 9
-  und 12: eine Zone nach Beginn und Ende). Der Live-Test 8a hat es für eine
-  Änderung ohne Beginn und Ende gemessen: Ein in Aperio angelegter
-  Einzeltermin am Montag um 00:30, wöchentlich gemacht, steht danach sonntags
-  um 23:30. Die Änderung schrieb nur die Regel (ab dem Tag der alten Zone UTC:
-  Sonntag, 234) und danach die Zone; die Zone hat die gespeicherte Uhrzeit
-  behalten. Über die Reihenfolge von Regel und Zone sagt das nichts: Jede
-  Reihenfolge ergibt sonntags 23:30, weil die Zone mit der Uhrzeit auch den
-  Tag behält. 234 bleibt abgeleitet. Nächster PR nach 8a: die Zone schreiben,
-  dann Beginn und Ende, auch wenn sie sich nicht ändern, dann die Regel am Tag
-  der neuen Zone, und messen, ob das richtig landet. Dass die Zone zuerst die
-  Zeitpunkte stehen lässt, ist nur an einer ganztägigen Serie gemessen
-  (Runde 2, B4).
+  ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
+  neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
+  Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
+  in Aperio angelegter Einzeltermin, der zur Serie wird (Live-Test 8a: aus
+  Montag 00:30 wurde Sonntag 23:30), eine ganztägige Serie, die Uhrzeiten
+  bekommt, und der Zonenwechsel an einer gespeicherten Serie, den erst die
+  Stufen 11 und 12 in den Editor bringen. Ein
+  Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
+  Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
+  zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
+  Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
+  Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
+  neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
+  Anzahl allein nicht (M4, M5): Ein Zonenwechsel, der sie nur deshalb
+  schreibt, wird abgelehnt (245). Ganztägig bekommt Uhrzeit: Beginn und Ende
+  vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
+  Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
+  (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
+  Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
+  behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
+  bekommen 10:00 richtig, täglich und samstags (O1, O2).
+  🚩 **Warnen und fragen** (243): eigener PR direkt nach dem Zonen-PR. Bevor
+  Aperio Beginn und Ende einer Exchange-Serie mit geänderten oder gelöschten
+  Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt es das
+  und fragt.
+  🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
+  Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
+  Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
+  neu und lehnt an einer Serie mit Ausnahmen ab (245). Vor dem Picker messen,
+  ob eine andere Windows-Zone allein die Ausnahmen behält; dann Uhren nach
+  ihrem Versatz vergleichen statt nach ihrer Kennung.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

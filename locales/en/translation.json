@@ -1697,6 +1697,7 @@
         "accessNotGranted": "Aperio has no access to this device's calendars and reminders. Allow it for Aperio in the Settings app. Nothing was changed.",
         "dayZoneUnreadable": "Exchange stores this appointment in a time zone Aperio cannot read, so its day cannot be changed here; its title and the rest can. Nothing was changed.",
         "copyUnreadable": "Aperio could not read this appointment's current state from the server, so it did not change it. Try again in a moment.",
+        "exceptionsWouldBeLost": "This change would switch the series' time zone, and Exchange then drops its changed and deleted occurrences. Nothing was changed.",
         "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
         "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
         "reason": {
@@ -1708,6 +1709,7 @@
           "accessNotGranted": "Aperio has no access to this device's calendars and reminders",
           "dayZoneUnreadable": "Exchange stores it in a time zone Aperio cannot read, so its day cannot be changed here",
           "copyUnreadable": "Aperio could not read its current state from the server",
+          "exceptionsWouldBeLost": "Exchange would drop its changed and deleted occurrences",
           "forbidden": "the provider does not allow it ({{detail}})",
           "changedOnServer": "it changed on the server since you opened it"
         }
