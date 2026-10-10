@@ -3017,12 +3017,13 @@ Siehe DESIGN §4.2.
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
   🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
-  ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-242): Eine
+  ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
   neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
   Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
   in Aperio angelegter Einzeltermin, der zur Serie wird (Live-Test 8a: aus
   Montag 00:30 wurde Sonntag 23:30), eine ganztägige Serie, die Uhrzeiten
-  bekommt, und der Zonenwechsel im Editor an einer gespeicherten Serie. Ein
+  bekommt, und der Zonenwechsel an einer gespeicherten Serie, den erst die
+  Stufen 11 und 12 in den Editor bringen. Ein
   Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
   Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
   zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
@@ -3031,12 +3032,21 @@ Siehe DESIGN §4.2.
   neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
   Anzahl allein nicht (M4, M5): Ein Zonenwechsel, der sie nur deshalb
   schreibt, wird abgelehnt (245). Ganztägig bekommt Uhrzeit: Beginn und Ende
-  vor und nach der Zone, die Regel immer (244, M7, M8). Vor dem
-  Zusammenführen noch einmal live: 244 und 245 mit Aperios eigener Anfrage.
+  vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
+  Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
+  (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
+  Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
+  behält sie (N3).
   🚩 **Warnen und fragen** (243): eigener PR direkt nach dem Zonen-PR. Bevor
   Aperio Beginn und Ende einer Exchange-Serie mit geänderten oder gelöschten
   Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt es das
   und fragt.
+  🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
+  Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
+  Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
+  neu und lehnt an einer Serie mit Ausnahmen ab (245). Vor dem Picker messen,
+  ob eine andere Windows-Zone allein die Ausnahmen behält; dann Uhren nach
+  ihrem Versatz vergleichen statt nach ihrer Kennung.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

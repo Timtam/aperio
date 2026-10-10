@@ -166,9 +166,8 @@ from.
 ## An Exchange appointment moved after it became a series
 
 If you turned an appointment on an Exchange account into a series in Aperio,
-changed the time zone of a stored Exchange series, or gave an all-day Exchange
-series a time of day, the appointment usually moved by an hour or two
-afterwards, and near midnight to another day. An appointment created in Aperio
+or gave an all-day Exchange series a time of day, the appointment usually
+moved by an hour or two afterwards, and near midnight to another day. An appointment created in Aperio
 for Monday at 00:30, for example, then stood on Sundays at 23:30.
 
 When its time zone changes, Exchange keeps the stored time of day and reads it
@@ -181,20 +180,31 @@ without the repeat the series would start a day later.
 What you can do: move a series that has already moved back to its place once,
 by hand.
 
-## The time zone of an Exchange series cannot be changed
+## Exchange would drop a series' changed and deleted occurrences
 
 Aperio then says: "This change would switch the series' time zone, and
 Exchange then drops its changed and deleted occurrences. Nothing was changed."
 
-For a series to stay at the same time in another time zone, Aperio has to send
-the series' start and end again. Exchange then drops every occurrence that was
-changed or deleted on its own: deleted ones are back, changed ones are like the
-series again. So when a series has such occurrences, Aperio does not change its
-time zone.
+Exchange stores every series with a time zone. If a change gave the series
+another time zone, Aperio would also have to send the series' start and end
+again, so that it stays at the same time. Exchange then drops every occurrence
+that was changed or deleted on its own: deleted ones are back, changed ones are
+like the series again. So when a series has such occurrences, Aperio sends
+nothing.
 
-What you can do: leave the time zone as it is; you can still change the title,
-the place and the reminder. A time zone with the same time of day, such as
-Vienna instead of Berlin, Aperio saves.
+In this version you cannot choose a series' time zone yourself. So the message
+only comes when you change a series' repeat, also from one of its
+appointments on, and Aperio would have to write another time zone than the one
+Exchange stored: for example for a series from another program whose end is in
+another time zone than its start, or when the series' time zone was changed
+elsewhere since Aperio last read it.
+
+What you can do: change the repeat in Outlook. You can still change the title,
+the place and the reminder in Aperio.
+
+If you move a series with such occurrences to another time or another day,
+Aperio sends the start and end anyway, and Exchange drops the occurrences then
+too. Aperio does not warn about that yet in this version.
 
 ## The day of an all-day Exchange appointment cannot be changed
 

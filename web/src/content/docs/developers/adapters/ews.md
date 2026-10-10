@@ -176,30 +176,40 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   goes first, when the series' zone, its all-day flag or its slot changes.
   Where it names another clock than the stored one (compared as the read
   side maps an id, both boundaries, so `W. Europe Standard Time` and a stored
-  `Europe/Berlin` are one clock), Start, End and IsAllDayEvent follow it even
-  where they did not change; a slot written only for that is the server's,
+  `Europe/Berlin` are one clock, and `Romance Standard Time`, Paris, is
+  another, though it shows the same time today), Start, End and
+  IsAllDayEvent follow it even where they did not change; a slot written
+  only for that is the server's,
   so a boundary another device moved is not put back (106). The rule comes
   last, on the new zone's day, and only where its built form changes (241):
   a zone change writes no rule while the series' first day and weekday stay
   the same on the new clock, and rewrites it where the switch moves them, as
-  near midnight. That covers a single made a series and the zone picker on
-  a stored series, which keeps the instant (the zone-first live test, L1,
-  L1b, L4a to L4e).
+  near midnight. That covers a single made a series (the zone-first live
+  test, L1, L1b) and a zone switch on a stored series, which keeps the
+  instant (L3a, L3b;
+  no editor offers one yet, DESIGN stages 11 and 12). L4a to L4e are the
+  counter-checks.
 - **An all-day series given a time** (decision 244) writes IsAllDayEvent,
   Start and End before the zone, Start and End again after it, and the rule
   last, always. The zone first is refused whole
   (`ErrorOccurrenceTimeSpanTooBig`: on the new zone's midnights each day
   is two days long, L2). Without the rule, the series lands a day late:
   Exchange reads the range's StartDate again from the all-day day it stored
-  in UTC (M1, M2). With it, it lands right (M7, M8).
+  in UTC (M1, M2). With it, it lands right (M7, M8), and so does Aperio's
+  own request, at 10:00 and at 00:30 (N1, N1b).
 - **Exchange drops a series' exceptions** — every changed and deleted
   occurrence — when an update writes the master's Start and End (the
   zone-first live test: L3a, L3b, M3, M6). A title (M4) or a changed COUNT
   (M5) keeps them. A zone switch that writes them only because the clock
   moves is refused, and nothing is sent: `exceptions-would-be-lost: zone`
   (decision 245). A save that moves the series writes them as it always did.
-  A zone on the same clock goes out alone; whether that keeps the exceptions
-  is not measured.
+  The refusal sends nothing, and the series keeps its exceptions (N2). A
+  zone Exchange stores under the same id (Vienna for a W. Europe series)
+  goes out alone and keeps them (N3); another id on the same time of day
+  (Paris) counts as another clock and is refused, and that id alone is not
+  measured. No editor picks a series' zone yet, so today the refusal meets
+  only a rule change where Aperio itself would write another zone: a series
+  whose stored end zone is not its start zone, or a stale copy.
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written

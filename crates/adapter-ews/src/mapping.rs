@@ -10248,8 +10248,11 @@ mod tests {
     /// Exchange drops a series' changed and deleted occurrences when its slot
     /// is written again (the zone-first live test, L3a, M3), and a zone switch
     /// that moves the clock writes it: refused, nothing sent (decision 245).
-    /// Under the same clock nothing moves and the zone alone goes out; a save
-    /// that moves the series writes its slot as it always did (243 will ask).
+    /// Paris shows Berlin's time, but Exchange stores it as another zone
+    /// (`Romance Standard Time`), which counts as another clock (240): refused
+    /// too. Under the same id (Vienna) nothing moves and the zone alone goes
+    /// out; a save that moves the series writes its slot as it always did
+    /// (243 will ask).
     #[test]
     fn a_zone_switch_that_would_drop_exceptions_is_refused() {
         let mut before = timed_series(
@@ -10259,7 +10262,7 @@ mod tests {
         );
         before.recurrence.as_mut().unwrap().exceptions =
             vec!["2026-11-09T09:00:00Z".parse().unwrap()];
-        for zone in ["America/New_York", "Asia/Tokyo"] {
+        for zone in ["America/New_York", "Asia/Tokyo", "Europe/Paris"] {
             let mut edit = before.clone();
             edit.recurrence.as_mut().unwrap().tzid = Some(zone.into());
             edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&before), true);
