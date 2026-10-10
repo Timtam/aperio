@@ -89,20 +89,23 @@ The endpoint is discovered or user-supplied.
   delete fails, the move stands and the failure is logged; a duplicate may
   remain.
 - **A range's dates carry a zone.** Exchange appends a zone to a series'
-  `StartDate`. Measured is `Z`, both times on `2026-10-19Z`: once on a series
-  Aperio created without a zone (live round 2), and once on an Outlook
-  series whose start zone Aperio's update had set to Greenwich while its end
-  zone stayed W. Europe (round 3). `EndDate` has the same `xs:date` type, and
-  Microsoft documents that EWS adds a zone to the values it returns, so it is
-  taken to carry one too; that is inferred, not measured. The schema also
-  allows an offset (`+02:00`, `-05:00`); whether Exchange writes one for a
-  zoned series is unmeasured. Aperio sends no `TimeZoneContext`, and EWS's
-  default context is UTC, so `Z` may come on every series. The reader keeps only the date (`range_date`), both when it
-  parses `EndDate` and when it turns a cached range into `UNTIL`. Before
-  READ_RULE 3 it cut only `T` and `+`, so `UNTIL=20261105ZT235959Z` came out,
-  the expanders refused that rule, and such a series showed only its first
-  occurrence. EWS tasks share the reader, but their cached rows are not
-  re-emitted (see TODO).
+  `StartDate`. Measured is `Z`, both times `2026-10-19Z` on an all-day
+  series: once on one Aperio created without a zone (live round 2), and once
+  on an Outlook one whose start zone Aperio's update had set to Greenwich
+  while its end zone stayed W. Europe (round 3). Both sit at offset 0, so `Z`
+  cannot tell the request's UTC context from the series' own zone.
+  `EndDate` has the same `xs:date` type, and Microsoft documents that EWS
+  adds a zone to the values it returns, so it is taken to carry one too;
+  that is inferred, not measured. The schema also allows an offset (`+02:00`,
+  `-05:00`); whether Exchange writes one for a series in a zone off UTC is
+  unmeasured. Aperio sends no `TimeZoneContext`, and EWS's default context
+  is UTC, so `Z` may come on every series. The reader keeps only the date
+  (`range_date`), both when it parses `EndDate` and when it turns a cached
+  range into `UNTIL`. Before READ_RULE 3 it cut only `T` and `+`, so
+  `UNTIL=20261105ZT235959Z` came out and the expanders refused the rule: of
+  the series' unchanged occurrences only the first showed and reminded.
+  Changed occurrences are rows of their own and still appeared. EWS tasks
+  share the reader, but their cached rows are not re-emitted (see TODO).
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by

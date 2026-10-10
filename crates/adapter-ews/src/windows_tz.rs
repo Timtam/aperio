@@ -64,8 +64,8 @@ use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS
 /// are no zone.
 /// 2: stage 4 review — the end zone `tzone://Microsoft/Utc` means no zone.
 /// 3: a series' `EndDate` reads as its date whatever zone Exchange appends
-/// ("2026-11-05Z", "2026-11-05-05:00"). Before, such a rule was unreadable
-/// and only the series' first occurrence showed.
+/// ("2026-11-05Z", "2026-11-05-05:00"). Before, such a rule was unreadable,
+/// and of the series' unchanged occurrences only the first showed.
 pub const READ_RULE: u32 = 3;
 
 /// The end zone Exchange stores for a series created without a zone.

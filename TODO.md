@@ -2962,19 +2962,22 @@ Siehe DESIGN §4.2.
   nicht mehr ab, weil er kein Gast mehr ist.
   ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
   2026-10-10): Exchange hängt an das Startdatum einer Serie eine Zone an.
-  Gemessen ist zweimal `2026-10-19Z`: bei einer Serie, die Aperio ohne Zone
-  angelegt hat (Runde 2), und bei einer Outlook-Serie, deren Startzone
-  Aperios Änderung auf Greenwich gesetzt hatte (Runde 3). Dass das Enddatum
-  ebenso eine Zone trägt, ist gefolgert, nicht gemessen: gleicher Datentyp,
-  und laut Microsoft hängt EWS an zurückgegebene Werte immer eine Zone an. Ob
-  Exchange bei einer Serie mit Zone einen Versatz schreibt, ist ungemessen. Aperio schickt
-  keinen `TimeZoneContext`, und ohne ihn rechnet EWS in UTC. Womöglich kommt
-  `Z` also bei JEDER Serie, dann betraf der Fehler jede Exchange-Serie mit
-  Enddatum, auch die in Outlook angelegten. Der Leser schnitt nur `T` und `+`
-  ab. Bei `Z` und bei einem Versatz westlich von UTC wurde daraus eine Regel
-  wie `UNTIL=20261105ZT235959Z`, die beide Ausroller ablehnten. Eine solche
-  Serie zeigte deshalb nur ihr erstes Vorkommen, auch die Erinnerungen galten
-  nur dafür. Jetzt behält der Leser
+  Gemessen ist zweimal `2026-10-19Z`, beide Male bei einer ganztägigen Serie:
+  einer, die Aperio ohne Zone angelegt hat (Runde 2), und einer aus Outlook,
+  deren Startzone Aperios Änderung auf Greenwich gesetzt hatte (Runde 3).
+  Beide liegen bei Versatz 0; `Z` sagt dort nicht, ob es die UTC-Rechnung
+  der Anfrage oder die Zone der Serie meint. Dass das Enddatum ebenso eine
+  Zone trägt, ist gefolgert, nicht gemessen: gleicher Datentyp, und laut
+  Microsoft hängt EWS an zurückgegebene Werte eine Zone an. Ob Exchange bei
+  einer Serie in einer Zone abseits von UTC einen Versatz schreibt, ist
+  ungemessen. Aperio schickt keinen `TimeZoneContext`, und ohne ihn rechnet
+  EWS in UTC. Womöglich kommt `Z` also bei JEDER Serie, dann betraf der
+  Fehler jede Exchange-Serie mit Enddatum, auch die in Outlook angelegten.
+  Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
+  westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
+  beide Ausroller ablehnten: Von den unveränderten Vorkommen der Serie
+  erschien nur das erste, und nur dafür kam eine Erinnerung. Geänderte
+  Vorkommen sind eigene Zeilen und erschienen weiter. Jetzt behält der Leser
   nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
   (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
   Termine neu aus. Handy: `.so` und XCFramework frisch bauen.
