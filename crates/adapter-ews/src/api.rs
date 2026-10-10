@@ -2651,6 +2651,144 @@ mod tests {
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
     }
 
+    /// Decisions 232 and 47a for an exception: its series is stored in a
+    /// custom zone Exchange defines in full, and the exception shape asks for
+    /// no zone, so the series' definition rides along (`WriteTarget`). Moved
+    /// from Monday 26 to Tuesday 27 October, the exception goes out on the
+    /// definition's midnights; without the definition its day is refused.
+    #[tokio::test]
+    async fn an_exception_of_a_custom_zone_series_moves_on_the_series_definition() {
+        use std::sync::{Arc, Mutex};
+        let mut server = Server::new_async().await;
+        let series = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:StartTimeZone Id="Customized Time Zone" Name="">
+          <t:Periods>
+            <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>
+            <t:Period Bias="-PT2H" Name="Daylight" Id="c/dst"/>
+          </t:Periods>
+          <t:TransitionsGroups><t:TransitionsGroup Id="0">
+            <t:RecurringDayTransition><t:To Kind="Period">c/dst</t:To><t:TimeOffset>PT2H</t:TimeOffset><t:Month>3</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+            <t:RecurringDayTransition><t:To Kind="Period">c/std</t:To><t:TimeOffset>PT3H</t:TimeOffset><t:Month>10</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+          </t:TransitionsGroup></t:TransitionsGroups>
+          <t:Transitions><t:Transition><t:To Kind="Group">0</t:To></t:Transition></t:Transitions>
+        </t:StartTimeZone>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2026-10-25T23:00:00Z</t:Start>
+          <t:End>2026-10-26T23:00:00Z</t:End>
+          <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let occurrence = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+        <t:Subject>Custom zone</t:Subject>
+        <t:Start>2026-10-25T23:00:00Z</t:Start>
+        <t:End>2026-10-26T23:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let updated = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="EXC-ID" ChangeKey="ECK-V2"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _any = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("UpdateItem") {
+                    updated
+                } else if body.contains(r#"Id="EXC-ID""#) {
+                    occurrence
+                } else {
+                    series
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+
+        let original_start: chrono::DateTime<chrono::Utc> = "2026-10-25T23:00:00Z".parse().unwrap();
+        let midnight = |d: &str| {
+            crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
+        };
+        let edit = Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Custom zone".into(),
+            description: None,
+            location: None,
+            start: midnight("2026-10-27"),
+            end: midnight("2026-10-28"),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            etag: Some("MCK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-26T23:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-27T23:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "{update}");
+    }
+
     /// Decision 217: an all-day exception's row is read in its series' zone,
     /// and so is the copy the update compares with — the exception shape asks
     /// for no zone of its own. Read without one, New Zealand's summer named the

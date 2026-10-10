@@ -9392,6 +9392,30 @@ mod tests {
         }
     }
 
+    /// A zoned timed series whose rule alone changes starts on the day its
+    /// stored zone reads (decision 234): Monday 00:30 in Berlin is Sunday in
+    /// UTC.
+    #[test]
+    fn a_rule_only_edit_of_a_zoned_series_starts_on_the_stored_zones_day() {
+        let device = chrono_tz::Asia::Tokyo;
+        let mut before = zoned_master(Some("Europe/Berlin"));
+        before.start = "2026-10-18T22:30:00Z".parse().unwrap();
+        before.end = "2026-10-18T23:00:00Z".parse().unwrap();
+        let mut edit = before.clone();
+        edit.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;COUNT=4".into();
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &w_europe_zones(),
+            None,
+            EventIdKind::RecurringMaster,
+            &device,
+        )
+        .unwrap();
+        assert_eq!(element(&set, "StartDate"), "2026-10-19", "{set}");
+        assert_eq!(element(&set, "DaysOfWeek"), "Monday", "{set}");
+    }
+
     /// A title-only save of an all-day series writes no rule: both sides of
     /// the comparison build the rule on the same first day.
     #[test]
