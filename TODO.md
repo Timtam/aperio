@@ -2977,7 +2977,11 @@ Siehe DESIGN §4.2.
   westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
   beide Ausroller ablehnten: Von den unveränderten Vorkommen der Serie
   erschien nur das erste, und nur dafür kam eine Erinnerung. Geänderte
-  Vorkommen sind eigene Zeilen und erschienen weiter. Jetzt behält der Leser
+  Vorkommen sind eigene Zeilen und erschienen weiter. Auch Aperios eigene
+  Suche nach der Nummer eines Vorkommens (`nominal_occurrence_index`) las
+  diese Regel; ein einzelnes Vorkommen einer solchen Serie auszulassen, wie
+  es das Mitziehen einer Gruppe tut, scheiterte mit „could not compute the
+  InstanceIndex“. Jetzt behält der Leser
   nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
   (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
   Termine neu aus. Handy: `.so` und XCFramework frisch bauen.

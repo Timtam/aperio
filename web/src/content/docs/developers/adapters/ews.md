@@ -104,7 +104,11 @@ The endpoint is discovered or user-supplied.
   range into `UNTIL`. Before READ_RULE 3 it cut only `T` and `+`, so
   `UNTIL=20261105ZT235959Z` came out and the expanders refused the rule: of
   the series' unchanged occurrences only the first showed and reminded.
-  Changed occurrences are rows of their own and still appeared. EWS tasks
+  Changed occurrences are rows of their own and still appeared. The
+  adapter's own InstanceIndex lookup (`nominal_occurrence_index`) read the
+  same rule, so skipping one occurrence of such a series, as a group carry
+  does, failed with "could not compute the InstanceIndex"; it reads a fresh
+  GetItem, so the parse side alone mends it. EWS tasks
   share the reader, but their cached rows are not re-emitted (see TODO).
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.

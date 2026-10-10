@@ -7040,6 +7040,18 @@ mod tests {
                 "FREQ=DAILY;UNTIL=20261105T235959Z",
                 "cached {end}"
             );
+            // The rrule crate reads the rule too: deleting one occurrence
+            // finds its InstanceIndex through it (third of 2-5 Nov).
+            let at = |d: &str| d.parse::<DateTime<Utc>>().unwrap();
+            assert_eq!(
+                nominal_occurrence_index(
+                    &rec,
+                    at("2026-11-02T08:00:00Z"),
+                    at("2026-11-04T08:00:00Z")
+                ),
+                Some(3),
+                "cached {end}",
+            );
         }
     }
 
