@@ -23,11 +23,11 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use crate::auth::{basic_auth_header, BasicCredentials};
 use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
-    decode_event_id, encode_event_id, event_to_update_field_xml_on,
-    new_event_to_calendar_item_xml_on, parse_find_folder_response, parse_find_item_response,
-    parse_first_item_id, parse_get_user_availability, parse_server_time_zones,
-    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
-    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
+    decode_event_id, encode_event_id, new_event_to_calendar_item_xml_on,
+    parse_find_folder_response, parse_find_item_response, parse_first_item_id,
+    parse_get_user_availability, parse_server_time_zones, parse_sync_folder_items_counts,
+    parse_sync_folder_items_response, split_calendar_id, to_calendar, to_event, DecodedEventId,
+    EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, delete_occurrence_item,
@@ -212,7 +212,10 @@ pub struct SyncedFolderState {
 ///    (`inherited:{occurrence key}:{series key}`, decision 106), so the host
 ///    can never take it for the occurrence's own copy. Rows handed out by
 ///    parser 3 carry the occurrence's bare key for both.
-pub const ITEM_PARSER: u32 = 4;
+/// 5: items carry their zones' full definitions (`start_zone_definition`,
+///    `end_zone_definition`, decision 232), which the all-day read uses for a
+///    zone the CLDR table does not know (decision 239).
+pub const ITEM_PARSER: u32 = 5;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -727,7 +730,7 @@ pub async fn create_event(
 /// Update an existing calendar item with the supplied event payload.
 /// Fields with a value are set; some emptied ones become DeleteItemField
 /// blocks so EWS clears them server-side (see
-/// [`crate::mapping::event_to_update_field_xml_on`]).
+/// [`crate::mapping::event_to_update_field_xml_in`]).
 ///
 /// A plain occurrence id resolves to its series master (`GetItem` with
 /// `RecurringMasterItemId`), and the edit applies to the whole series. An
@@ -761,7 +764,8 @@ pub async fn update_event(
     // item are not facts about the occurrence, and a retry or a new sign-in
     // may well work. Only an answer that arrives WITHOUT the occurrence's copy
     // is the refusal.
-    let before = match read_before(client, &target, &event.calendar_id).await {
+    let mut read_error = None;
+    let copy = match read_before(client, &target, &event.calendar_id).await {
         Ok(None) if target.kind == EventIdKind::Exception => {
             tracing::warn!(
                 target: "adapter_ews::write",
@@ -785,18 +789,68 @@ pub async fn update_event(
         Err(err) => {
             // A single or a series head: the row is the user's own, so it is
             // written without a comparison — every field the host did not mark
-            // as left alone (decision 106).
+            // as left alone (decision 106). Whether it is written at all is
+            // known only once the update is built; that is logged below.
             tracing::warn!(
                 target: "adapter_ews::write",
                 ?err,
                 event_id = %event.id,
-                "the current copy could not be read; writing every field not kept, and a kept rule with a moved slot",
+                "the current copy could not be read",
             );
+            read_error = Some(err);
             None
         }
     };
-    let (set_xml, delete_xml) =
-        event_to_update_field_xml_on(event, before.as_ref(), server_zones, target.kind)?;
+    let (before, stored) = match copy {
+        Some(copy) => (Some(copy.event), copy.zones),
+        None => (None, crate::mapping::StoredZones::default()),
+    };
+    // Without the copy the zones the item is stored in are unknown, and an
+    // all-day day is never written blind (decision 237). Nothing is sent, and
+    // the error says so: `copy-unreadable`, with the read's own failure (or an
+    // answer without the item) as its detail. Returned as the read's error, a
+    // dropped connection read as a write that may have landed, and a split
+    // kept its new part next to the uncut series (decision 144). A failed
+    // sign-in or an item that is gone stays itself, as the same edit of a
+    // timed appointment reports it: "try again" would not help, and both
+    // already count as nothing written.
+    let (set_xml, delete_xml) = match crate::mapping::event_to_update_field_xml_in(
+        event,
+        before.as_ref(),
+        &stored,
+        server_zones,
+        target.kind,
+        &chrono::Local,
+    ) {
+        Err(EwsError::Protocol(message)) if before.is_some() && day_zone_unreadable(&message) => {
+            tracing::warn!(
+                target: "adapter_ews::write",
+                event_id = %event.id,
+                %message,
+                "an all-day day in a zone Aperio cannot read; nothing is written",
+            );
+            return Err(EwsError::Protocol(message));
+        }
+        Err(EwsError::Protocol(message)) if day_zone_unreadable(&message) => {
+            let why = read_error.as_ref().map_or_else(
+                || "the server answered without the item".into(),
+                ToString::to_string,
+            );
+            tracing::warn!(
+                target: "adapter_ews::write",
+                event_id = %event.id,
+                %why,
+                "an all-day day is not written without the current copy; nothing is written",
+            );
+            if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+                return Err(err);
+            }
+            return Err(EwsError::Protocol(
+                cal_core::WriteRefusal::CopyUnreadable.message(&why),
+            ));
+        }
+        other => other?,
+    };
     // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
     // report attendees changed while `keep_attendees` suppresses that block,
     // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits
@@ -816,6 +870,13 @@ pub async fn update_event(
             updated_at: Utc::now(),
             ..event.clone()
         });
+    }
+    if before.is_none() {
+        tracing::warn!(
+            target: "adapter_ews::write",
+            event_id = %event.id,
+            "writing without the current copy: every field not kept, and a kept rule with a moved slot",
+        );
     }
     // Removed invitees count too: with every one removed (`clear_attendees`)
     // they may still get a cancellation (decision 74a).
@@ -1100,7 +1161,7 @@ pub async fn delete_series_occurrence(
     let mut best: Option<(u32, i64)> = None;
     for index in candidate_indices(candidate) {
         if let Some(s) = occurrence_start(client, master_id, change_key, index).await? {
-            let slot = match day_zone {
+            let slot = match &day_zone {
                 Some(zone) => crate::mapping::all_day_anchor(s, Some(zone)),
                 None => s,
             };
@@ -1211,7 +1272,12 @@ async fn resolve_override_target(
             kind: EventIdKind::Exception,
             item_id: ov.item_id.clone(),
             change_key: ov.change_key.clone(),
-            series_zone: Some((master.start_time_zone.clone(), master.end_time_zone.clone())),
+            series_zone: Some(SeriesZone {
+                start_id: master.start_time_zone.clone(),
+                end_id: master.end_time_zone.clone(),
+                start_definition: master.start_zone_definition.clone(),
+                end_definition: master.end_zone_definition.clone(),
+            }),
         }),
         // Refused, not widened. The occurrence is gone from the series — someone
         // deleted it, or the series was rewritten — and the only other thing
@@ -1242,11 +1308,16 @@ async fn resolve_override_target(
 /// `Ok(None)` when the server answered without the item; a transport or parse
 /// failure is `Err`, and the caller decides what that means for the kind of
 /// item it is about to write.
+///
+/// The copy comes with the zones Exchange stores its boundaries in: an all-day
+/// day is written as midnight in them (decision 47a), and a series' rule
+/// starts on its first day as the stored start zone reads it (234; an update
+/// that also changes the zone still moves the item, see `rule_first_day`).
 async fn read_before(
     client: &EwsClient,
     target: &WriteTarget,
     calendar_id: &str,
-) -> EwsResult<Option<Event>> {
+) -> EwsResult<Option<ServerCopy>> {
     let ids = vec![(target.item_id.clone(), None)];
     let body = match target.kind {
         EventIdKind::Exception => crate::soap::get_exception_items(&ids),
@@ -1261,13 +1332,44 @@ async fn read_before(
     // the exception shape asks for no zone of its own: read here without one,
     // an all-day day the series' zone names otherwise would count as moved,
     // and a title-only edit would write the slot back (decision 217).
-    if let Some((start_zone, end_zone)) = &target.series_zone {
+    if let Some(series) = &target.series_zone {
         if item.start_time_zone.is_none() && item.end_time_zone.is_none() {
-            item.start_time_zone = start_zone.clone();
-            item.end_time_zone = end_zone.clone();
+            item.start_time_zone = series.start_id.clone();
+            item.end_time_zone = series.end_id.clone();
+            item.start_zone_definition = series.start_definition.clone();
+            item.end_zone_definition = series.end_definition.clone();
         }
     }
-    Ok(Some(crate::mapping::to_event(item, calendar_id)?))
+    let zones = crate::mapping::StoredZones::of(&item);
+    Ok(Some(ServerCopy {
+        event: crate::mapping::to_event(item, calendar_id)?,
+        zones,
+    }))
+}
+
+/// The provider's current copy of an item and the zones it is stored in.
+#[derive(Debug, Clone)]
+struct ServerCopy {
+    event: Event,
+    zones: crate::mapping::StoredZones,
+}
+
+/// Whether a message is the refusal for a day in an unknown zone.
+fn day_zone_unreadable(message: &str) -> bool {
+    matches!(
+        cal_core::WriteRefusal::parse(message),
+        Some((cal_core::WriteRefusal::DayZoneUnreadable, _))
+    )
+}
+
+/// A series head's zones, as its exception is read and written in them: the
+/// exception shape asks for no zone of its own.
+#[derive(Debug, Clone, Default)]
+struct SeriesZone {
+    start_id: Option<String>,
+    end_id: Option<String>,
+    start_definition: Option<crate::zone_definition::ZoneDefinition>,
+    end_definition: Option<crate::zone_definition::ZoneDefinition>,
 }
 
 /// Helper: the resolved (id, change_key) pair plus the kind we
@@ -1277,9 +1379,10 @@ struct WriteTarget {
     kind: EventIdKind,
     item_id: String,
     change_key: Option<String>,
-    /// For an exception, its series' StartTimeZone and EndTimeZone: the
-    /// zone its all-day day is read in, as its row is (`override_event`).
-    series_zone: Option<(Option<String>, Option<String>)>,
+    /// For an exception, its series' StartTimeZone and EndTimeZone, ids and
+    /// definitions: the zones its all-day day is read and written in, as its
+    /// row is read (`override_event`).
+    series_zone: Option<SeriesZone>,
 }
 
 /// Rename a calendar folder via `UpdateFolder` + `folder:DisplayName`.
@@ -2424,6 +2527,8 @@ mod tests {
       <m:ResponseCode>NoError</m:ResponseCode>
       <m:Items><t:CalendarItem>
         <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:StartTimeZone Id="W. Europe Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>
         <t:ModifiedOccurrences><t:Occurrence>
           <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
           <t:Start>2026-10-25T23:00:00Z</t:Start>
@@ -2498,8 +2603,12 @@ mod tests {
             title: "Moved to Tuesday".into(),
             description: None,
             location: None,
-            start: "2026-10-26T23:00:00Z".parse().unwrap(),
-            end: "2026-10-27T23:00:00Z".parse().unwrap(),
+            // Tuesday 27 to Wednesday 28 October, as this device keeps an
+            // all-day day: its own midnights.
+            start: crate::mapping::local_midnight_in("2026-10-27".parse().unwrap(), &chrono::Local)
+                .unwrap(),
+            end: crate::mapping::local_midnight_in("2026-10-28".parse().unwrap(), &chrono::Local)
+                .unwrap(),
             all_day: true,
             recurrence: None,
             color_label: None,
@@ -2565,8 +2674,154 @@ mod tests {
             3,
             "Start, End and IsAllDayEvent, and nothing else: {update}"
         );
+        // Decision 47a: the day goes out as midnights in the zone its series is
+        // stored in, W. Europe here (live round 3, R3-7b), on any device.
+        assert!(
+            update.contains("<t:Start>2026-10-26T23:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-27T23:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "no zone is written: {update}");
         assert_eq!(updated.id, override_id, "the override keeps its id");
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
+    }
+
+    /// Decisions 232 and 47a for an exception: its series is stored in a
+    /// custom zone Exchange defines in full, and the exception shape asks for
+    /// no zone, so the series' definition rides along (`WriteTarget`). Moved
+    /// from Monday 26 to Tuesday 27 October, the exception goes out on the
+    /// definition's midnights; without the definition its day is refused.
+    #[tokio::test]
+    async fn an_exception_of_a_custom_zone_series_moves_on_the_series_definition() {
+        use std::sync::{Arc, Mutex};
+        let mut server = Server::new_async().await;
+        let series = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:StartTimeZone Id="Customized Time Zone" Name="">
+          <t:Periods>
+            <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>
+            <t:Period Bias="-PT2H" Name="Daylight" Id="c/dst"/>
+          </t:Periods>
+          <t:TransitionsGroups><t:TransitionsGroup Id="0">
+            <t:RecurringDayTransition><t:To Kind="Period">c/dst</t:To><t:TimeOffset>PT2H</t:TimeOffset><t:Month>3</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+            <t:RecurringDayTransition><t:To Kind="Period">c/std</t:To><t:TimeOffset>PT3H</t:TimeOffset><t:Month>10</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+          </t:TransitionsGroup></t:TransitionsGroups>
+          <t:Transitions><t:Transition><t:To Kind="Group">0</t:To></t:Transition></t:Transitions>
+        </t:StartTimeZone>
+        <t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+          <t:Start>2026-10-25T23:00:00Z</t:Start>
+          <t:End>2026-10-26T23:00:00Z</t:End>
+          <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let occurrence = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
+        <t:Subject>Custom zone</t:Subject>
+        <t:Start>2026-10-25T23:00:00Z</t:Start>
+        <t:End>2026-10-26T23:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:OriginalStart>2026-10-25T23:00:00Z</t:OriginalStart>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let updated = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="EXC-ID" ChangeKey="ECK-V2"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _any = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("UpdateItem") {
+                    updated
+                } else if body.contains(r#"Id="EXC-ID""#) {
+                    occurrence
+                } else {
+                    series
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
+
+        let original_start: chrono::DateTime<chrono::Utc> = "2026-10-25T23:00:00Z".parse().unwrap();
+        let midnight = |d: &str| {
+            crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
+        };
+        let edit = Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Custom zone".into(),
+            description: None,
+            location: None,
+            start: midnight("2026-10-27"),
+            end: midnight("2026-10-28"),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
+            etag: Some("MCK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        };
+        update_event(&client_for(&server), &edit, None)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-26T23:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-27T23:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "{update}");
     }
 
     /// Decision 217: an all-day exception's row is read in its series' zone,
@@ -2652,9 +2907,12 @@ mod tests {
 
         // The row as the read gives it: the local midnights of 15 and 16 January.
         let raw: chrono::DateTime<chrono::Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
-        let start = crate::mapping::all_day_anchor(raw, Some(auckland));
-        let end =
-            crate::mapping::all_day_anchor("2027-01-15T11:00:00Z".parse().unwrap(), Some(auckland));
+        let start =
+            crate::mapping::all_day_anchor(raw, Some(&crate::mapping::DayZone::Tz(auckland)));
+        let end = crate::mapping::all_day_anchor(
+            "2027-01-15T11:00:00Z".parse().unwrap(),
+            Some(&crate::mapping::DayZone::Tz(auckland)),
+        );
         let edit = Event {
             keep_attendees: false,
             keep_fields: Vec::new(),
@@ -3771,7 +4029,7 @@ mod tests {
         // The day as this device names it: its local midnight of July 20.
         let day = crate::mapping::all_day_anchor(
             "2026-07-20T10:00:00Z".parse().unwrap(),
-            Some(chrono_tz::Pacific::Honolulu),
+            Some(&crate::mapping::DayZone::Tz(chrono_tz::Pacific::Honolulu)),
         );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
@@ -3876,7 +4134,10 @@ mod tests {
             .await;
 
         // The day as this device names it: its local midnight of 15 January.
-        let day = crate::mapping::all_day_anchor(midnight(229), Some(auckland));
+        let day = crate::mapping::all_day_anchor(
+            midnight(229),
+            Some(&crate::mapping::DayZone::Tz(auckland)),
+        );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
             .unwrap();

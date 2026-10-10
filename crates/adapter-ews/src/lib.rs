@@ -37,6 +37,7 @@ pub mod mapping;
 pub mod soap;
 pub mod tasks;
 pub mod windows_tz;
+pub mod zone_definition;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -1439,6 +1440,22 @@ fn to_update_error(err: EwsError) -> CoreError {
             tracing::warn!(%code, %message, "Exchange refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
+        // Nothing was sent: an all-day day in a zone Aperio cannot read
+        // (decision 237), or one whose copy could not be read. Forbidden, so
+        // the phone keeps the message and a split knows the write never
+        // landed.
+        EwsError::Protocol(message)
+            if matches!(
+                cal_core::WriteRefusal::parse(&message),
+                Some((
+                    cal_core::WriteRefusal::DayZoneUnreadable
+                        | cal_core::WriteRefusal::CopyUnreadable,
+                    _
+                ))
+            ) =>
+        {
+            CoreError::Forbidden(message)
+        }
         other => to_core_error(other),
     }
 }
@@ -1468,6 +1485,32 @@ fn refused_update_code(code: &str) -> Option<&str> {
     REFUSED_UPDATE_CODES.contains(&bare).then_some(bare)
 }
 
+/// The SOAP codes with which Exchange says the sign-in or a permission failed.
+const SIGN_IN_SOAP_CODES: &[&str] = &[
+    "ErrorAccessDenied",
+    "ErrorInvalidAccessToken",
+    "ErrorPasswordExpired",
+    "ErrorADUnavailable",
+    "ErrorNoFreeBusyAccess",
+];
+
+/// The SOAP codes with which Exchange says the item or its folder is gone.
+const GONE_SOAP_CODES: &[&str] = &["ErrorItemNotFound", "ErrorFolderNotFound"];
+
+/// Whether an error says the sign-in failed or the item is gone: what
+/// [`to_core_error`] names `Authentication` or `NotFound`. A retry mends
+/// neither, so the error is reported as itself.
+pub(crate) fn names_sign_in_or_gone(err: &EwsError) -> bool {
+    match err {
+        EwsError::Http { status, .. } => matches!(status, 401 | 403 | 404),
+        EwsError::Soap { code, .. } => {
+            SIGN_IN_SOAP_CODES.contains(&code.as_str()) || GONE_SOAP_CODES.contains(&code.as_str())
+        }
+        EwsError::DiscoveryFailed(_) => true,
+        EwsError::Network(_) | EwsError::Protocol(_) | EwsError::Config(_) => false,
+    }
+}
+
 fn to_core_error(err: EwsError) -> CoreError {
     use EwsError::*;
     match err {
@@ -1478,20 +1521,17 @@ fn to_core_error(err: EwsError) -> CoreError {
             409 | 412 => CoreError::Conflict(message),
             _ => CoreError::Protocol(format!("EWS HTTP {status}: {message}")),
         },
-        Soap { code, message } => match code.as_str() {
-            // EWS encodes auth + permission failures in the SOAP body
-            // even though the HTTP status is 200. Route the familiar
-            // codes into the matching cal-core variants so the UI can
-            // present "wrong password" specifically rather than a
-            // generic protocol error.
-            "ErrorAccessDenied"
-            | "ErrorInvalidAccessToken"
-            | "ErrorPasswordExpired"
-            | "ErrorADUnavailable"
-            | "ErrorNoFreeBusyAccess" => CoreError::Authentication(message),
-            "ErrorItemNotFound" | "ErrorFolderNotFound" => CoreError::NotFound(message),
-            _ => CoreError::Protocol(format!("EWS SOAP {code}: {message}")),
-        },
+        // EWS encodes auth + permission failures in the SOAP body even though
+        // the HTTP status is 200. Route the familiar codes into the matching
+        // cal-core variants so the UI can present "wrong password"
+        // specifically rather than a generic protocol error.
+        Soap { code, message } if SIGN_IN_SOAP_CODES.contains(&code.as_str()) => {
+            CoreError::Authentication(message)
+        }
+        Soap { code, message } if GONE_SOAP_CODES.contains(&code.as_str()) => {
+            CoreError::NotFound(message)
+        }
+        Soap { code, message } => CoreError::Protocol(format!("EWS SOAP {code}: {message}")),
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
         DiscoveryFailed(m) => CoreError::NotFound(m),
@@ -2926,7 +2966,48 @@ mod server_zone_tests {
     #[tokio::test]
     async fn updating_an_all_day_series_neither_asks_for_nor_writes_a_zone() {
         let mut server = Server::new_async().await;
-        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        // The series as Exchange stores it, in W. Europe, a week earlier: the
+        // update moves its day, so the write goes out (decision 237 writes an
+        // all-day day only with the zones the copy names).
+        const STORED: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="IID" ChangeKey="CK"/>
+        <t:Subject>All-day Berlin</t:Subject>
+        <t:Start>2026-10-11T22:00:00Z</t:Start>
+        <t:End>2026-10-12T22:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:CalendarItemType>Single</t:CalendarItemType>
+        <t:StartTimeZone Id="W. Europe Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("GetServerTimeZones") {
+                    ZONES
+                } else if body.contains("<m:GetItem>") {
+                    STORED
+                } else {
+                    CREATED
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
         let adapter = EwsAdapter::new(server.url(), alice());
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
@@ -2969,5 +3050,353 @@ mod server_zone_tests {
             // write after it, which still neither asks for zones nor names one.
             ["read", "no zone"],
         );
+    }
+
+    /// An all-day single as Exchange stores it, its start zone given as
+    /// `zone_xml`, on Monday 12 October in W. Europe.
+    fn stored_single(zone_xml: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="IID" ChangeKey="CK"/>
+        <t:Subject>Custom</t:Subject>
+        <t:Start>2026-10-11T22:00:00Z</t:Start>
+        <t:End>2026-10-12T22:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:CalendarItemType>Single</t:CalendarItemType>
+        {zone_xml}
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A custom zone with W. Europe's rules (synthetic; the 8a live test
+    /// captured Exchange 2019 echoing only a definition the test wrote, none
+    /// from an iPhone or an invitation).
+    const CUSTOM_W_EUROPE: &str = r#"<t:StartTimeZone Id="Customized Time Zone" Name="">
+          <t:Periods>
+            <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>
+            <t:Period Bias="-PT2H" Name="Daylight" Id="c/dst"/>
+          </t:Periods>
+          <t:TransitionsGroups><t:TransitionsGroup Id="0">
+            <t:RecurringDayTransition><t:To Kind="Period">c/dst</t:To><t:TimeOffset>PT2H</t:TimeOffset><t:Month>3</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+            <t:RecurringDayTransition><t:To Kind="Period">c/std</t:To><t:TimeOffset>PT3H</t:TimeOffset><t:Month>10</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+          </t:TransitionsGroup></t:TransitionsGroups>
+          <t:Transitions><t:Transition><t:To Kind="Group">0</t:To></t:Transition></t:Transitions>
+        </t:StartTimeZone>"#;
+
+    /// The same appointment moved to Tuesday 13 October, on this device's
+    /// midnights (an all-day day is kept that way).
+    fn moved_to_tuesday() -> Event {
+        let stamp: chrono::DateTime<chrono::Utc> = "2026-10-01T00:00:00Z".parse().unwrap();
+        let midnight = |d: &str| {
+            crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
+        };
+        Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "S:IID|CK".into(),
+            calendar_id: "FA|FCK".into(),
+            title: "Custom".into(),
+            description: None,
+            location: None,
+            start: midnight("2026-10-13"),
+            end: midnight("2026-10-14"),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: stamp,
+            updated_at: stamp,
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    async fn serve_stored(server: &mut Server, stored: String) -> Arc<StdMutex<Vec<String>>> {
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("<m:GetItem>") {
+                    stored.clone()
+                } else {
+                    CREATED.to_string()
+                };
+                seen.lock().unwrap().push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        requests
+    }
+
+    /// Decisions 232 and 47a through the adapter: a custom zone's day moves
+    /// on the midnights its definition gives, with no zone written.
+    #[tokio::test]
+    async fn an_all_day_day_in_a_custom_zone_moves_on_its_definition() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, stored_single(CUSTOM_W_EUROPE)).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        adapter
+            .update_event(moved_to_tuesday())
+            .await
+            .expect("update");
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-12T22:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-13T22:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "{update}");
+    }
+
+    /// Decision 233 through the adapter: a start and an end stored in
+    /// different zones each move on their own zone's midnight. Greenwich for
+    /// the start, W. Europe for the end: the shape Exchange gave R3-2's series.
+    #[tokio::test]
+    async fn each_all_day_boundary_moves_on_its_own_stored_zone() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(
+            &mut server,
+            stored_single(
+                r#"<t:StartTimeZone Id="Greenwich Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>"#,
+            ),
+        )
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        adapter
+            .update_event(moved_to_tuesday())
+            .await
+            .expect("update");
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-13T00:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-13T22:00:00Z</t:End>"),
+            "{update}"
+        );
+    }
+
+    /// Decision 237 through the adapter: a custom zone Exchange names by id
+    /// alone has no clock; the day is refused by name, carried as Forbidden
+    /// so the phone keeps the sentence, and nothing is sent.
+    #[tokio::test]
+    async fn an_all_day_day_in_an_unreadable_zone_is_refused_and_nothing_is_sent() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(
+            &mut server,
+            stored_single(r#"<t:StartTimeZone Id="Customized Time Zone" Name=""/>"#),
+        )
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::DayZoneUnreadable, "no-zone"))
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
+
+    /// Without the copy no stored zone is known, and an all-day day is not
+    /// written blind. Nothing is sent, and the error says so as a refusal
+    /// (`copy-unreadable`), carried as Forbidden: a split then knows nothing
+    /// landed (decision 144). Its detail is what kept the copy away.
+    #[tokio::test]
+    async fn an_all_day_day_is_not_written_without_the_copy() {
+        // The server answers without the item.
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, CREATED.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((
+                cal_core::WriteRefusal::CopyUnreadable,
+                "the server answered without the item"
+            ))
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+
+        // The read itself fails: the server is down.
+        let mut server = Server::new_async().await;
+        let failed = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&failed);
+        server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_body_from_request(move |request| {
+                seen.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                b"Service Unavailable".to_vec()
+            })
+            .create_async()
+            .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        let (refusal, why) = cal_core::WriteRefusal::parse(&message).expect("a refusal");
+        assert_eq!(refusal, cal_core::WriteRefusal::CopyUnreadable);
+        assert!(why.contains("503"), "the read's own error: {why}");
+        assert!(
+            !failed
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
+
+    /// A failed sign-in or an item that is gone keeps its own error when the
+    /// copy cannot be read: "try again" would not help. Both count as nothing
+    /// written, and nothing is sent.
+    #[tokio::test]
+    async fn a_failed_sign_in_or_a_gone_item_keeps_its_error_without_the_copy() {
+        // The item was deleted in Outlook.
+        let gone = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:MessageText>The specified object was not found in the store.</m:MessageText>
+      <m:ResponseCode>ErrorItemNotFound</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, gone.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+
+        // The password changed.
+        let mut server = Server::new_async().await;
+        let failed = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&failed);
+        server
+            .mock("POST", "/")
+            .with_status(401)
+            .with_body_from_request(move |request| {
+                seen.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                b"Unauthorized".to_vec()
+            })
+            .create_async()
+            .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        assert!(matches!(err, CoreError::Authentication(_)), "{err:?}");
+        assert!(
+            !failed
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sign_in_or_gone_tests {
+    use super::*;
+
+    /// `names_sign_in_or_gone` and `to_core_error` read the same codes: the
+    /// one says which errors stay themselves, the other what they become.
+    #[test]
+    fn names_sign_in_or_gone_agrees_with_to_core_error() {
+        let soap = |code: &str| EwsError::Soap {
+            code: code.into(),
+            message: "no".into(),
+        };
+        let http = |status: u16| EwsError::Http {
+            status,
+            message: "no".into(),
+        };
+        let mut errors: Vec<EwsError> = SIGN_IN_SOAP_CODES
+            .iter()
+            .chain(GONE_SOAP_CODES)
+            .chain(&["ErrorServerBusy", "ErrorInternalServerError"])
+            .map(|code| soap(code))
+            .collect();
+        errors.extend([400, 401, 403, 404, 409, 429, 500, 503].map(http));
+        errors.extend([
+            EwsError::Network("reset".into()),
+            EwsError::Protocol("bad".into()),
+            EwsError::Config("bad".into()),
+            EwsError::DiscoveryFailed("x".into()),
+        ]);
+        for err in errors {
+            let label = format!("{err:?}");
+            let named = names_sign_in_or_gone(&err);
+            let core = to_core_error(err);
+            assert_eq!(
+                named,
+                matches!(core, CoreError::Authentication(_) | CoreError::NotFound(_)),
+                "{label} -> {core:?}"
+            );
+        }
     }
 }
