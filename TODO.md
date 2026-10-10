@@ -2999,8 +2999,16 @@ Siehe DESIGN §4.2.
   Serie beginnt an ihrem ersten Tag auf der Uhr, auf der Exchange sie
   wiederholt; ein ganztägiger Tag geht beim Ändern auf Mitternacht in der
   gespeicherten Zone jeder Grenze; eigene Zonen-Definitionen werden gelesen;
-  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test vor
-  dem Zusammenführen mit einem Desktop-Build (235).
+  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test
+  Runde 6 am 10.10.2026: Schritte 1 bis 7 bestanden, auch eine eigene Zone
+  und „Europe/Berlin“ (Einzelheiten in DESIGN, Stufe 4, „Gemessen“).
+  🚩 **Schnitttag doppelt** (235, gemessen in Runde 6): Ein Schnitt „dieser
+  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigt den Schnitttag
+  in beiden Serien. Die alte Serie endet mit `UNTIL` eine Sekunde vor dem
+  Schnitt, das Enddatum ist dessen Datum, und Exchange zählt es mit. Das
+  Enddatum muss der Tag des letzten Vorkommens vor dem Schnitt sein. Eigener
+  PR, nach der Zonen-Reihenfolge und vor 8b. Ein vor dem Schnitt gelöschtes
+  Vorkommen bleibt gelöscht.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
@@ -3010,8 +3018,13 @@ Siehe DESIGN §4.2.
   🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
   zur Serie mit neuer Zone, setzt Exchange die Zone nach dem Beginn und
   behält dabei die Uhrzeit, der Termin wandert um den Versatz (Runde 1,
-  Stufen 9 und 12). Seit 8a beginnt die Regel am Tag der alten Zone (234);
-  der Live-Test sieht nach.
+  Stufen 9 und 12). Runde 6 hat es gemessen: Ein in Aperio angelegter
+  Einzeltermin am Montag um 00:30, wöchentlich gemacht, steht danach sonntags
+  um 23:30. Die Regel beginnt nach 234 am Tag der alten Zone (UTC: Sonntag);
+  234 ist damit widerlegt. Nächster PR nach 8a: die Zone vor Beginn, Ende und
+  Regel schreiben und die Regel am Tag der neuen Zone beginnen lassen. Dass
+  die Zone zuerst die Zeitpunkte stehen lässt, ist nur an einer ganztägigen
+  Serie gemessen (Runde 2, B4); für eine mit Uhrzeit misst es der PR.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

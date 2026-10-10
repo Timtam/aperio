@@ -2842,10 +2842,12 @@ pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono
 /// The day a series' rule starts on, on the clock Exchange repeats it on: an
 /// all-day series on the device's days (48a); a timed one on `clock`, the
 /// zone Exchange expands it in — the zone a create writes with it, the zone
-/// the item is stored in on an update (decision 234, inferred from live round
-/// 1, where Exchange applied an update's fields in order; not measured for a
-/// rule and a zone) or, when its copy could not be read, the zone the update
-/// writes with it, UTC where there is none.
+/// the item is stored in on an update (decision 234) or, when its copy could
+/// not be read, the zone the update writes with it, UTC where there is none.
+/// Where the update also changes the zone, 234 does not hold: live round 6
+/// found a single made weekly on the stored zone's day and moved by the new
+/// zone, written after the rule, which kept the stored wall clock. The next
+/// PR writes the zone first.
 pub(crate) fn rule_first_day<D: TimeZone>(
     start: DateTime<Utc>,
     all_day: bool,
@@ -9872,13 +9874,12 @@ mod tests {
     }
 
     /// Decision 234: an update that makes a timed appointment a series and
-    /// names a new zone starts the rule on the day the STORED zone reads. The
-    /// decision assumes Exchange applies the rule before the zone the same
-    /// update writes after it, inferred from round 1's field order and not
-    /// measured for a rule and a zone (live step 9 of 8a looks). Aperio
-    /// created the single in UTC; Monday 00:30 in Berlin is Sunday there.
-    /// (That zone, sent after the start, moves the wall clock as well: live
-    /// round 1, stages 9 and 12.)
+    /// names a new zone starts the rule on the day the STORED zone reads.
+    /// Aperio created the single in UTC; Monday 00:30 in Berlin is Sunday
+    /// there. This pins what 8a writes, not what is right: live round 6 sent
+    /// exactly this and found the series on Sundays at 23:30, because the new
+    /// zone, written after the rule, kept the stored wall clock (as in round 1,
+    /// stages 9 and 12). The next PR writes the zone first and changes this.
     #[test]
     fn a_new_rule_with_a_new_zone_starts_on_the_stored_zones_day() {
         let device = chrono_tz::Europe::Berlin;

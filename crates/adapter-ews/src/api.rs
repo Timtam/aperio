@@ -1311,7 +1311,8 @@ async fn resolve_override_target(
 ///
 /// The copy comes with the zones Exchange stores its boundaries in: an all-day
 /// day is written as midnight in them (decision 47a), and a series' rule
-/// starts on its first day as the stored start zone reads it (234).
+/// starts on its first day as the stored start zone reads it (234; wrong
+/// where the update also changes the zone, live round 6).
 async fn read_before(
     client: &EwsClient,
     target: &WriteTarget,

@@ -174,10 +174,14 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written
-  zone's day on a create, the stored start zone's day on an update (234,
-  inferred from live round 1, where Exchange applied an update's fields in
-  order; not measured for a rule and a zone), the zone the update writes
-  with the rule when the copy could not be read, UTC where none is known.
+  zone's day on a create, the stored start zone's day on an update (234),
+  the zone the update writes with the rule when the copy could not be read,
+  UTC where none is known. Where an update also changes the zone, 234 does
+  not hold: live round 6 turned a single created in Aperio, Monday 00:30 in
+  Berlin, into a weekly series and found it on Sundays at 23:30. The rule
+  started on the stored zone's (UTC) Sunday, and the new zone, written
+  after it, kept the stored wall clock (round 1, stages 9 and 12). The next
+  PR writes the zone before the start, the end and the rule.
   The range's StartDate and the weekday, day of the month and
   month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
   Read off the UTC date, as before, they named the day before east of UTC: a
@@ -209,9 +213,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   (`ParsedItem::start_zone_definition`, `end_zone_definition`, ITEM_PARSER
   5), and `zone_definition::ZoneRules` turns it into a clock: the wall time
   at an instant, and a day's midnight (the first hour after it where a
-  change skips it). A fifth weekday reads as the month's last (238). Whether
-  Exchange 2019 fills these elements in `SyncFolderItems` and `GetItem` is
-  unmeasured; the live test of PR 8a reads one.
+  change skips it). A fifth weekday reads as the month's last (238).
+  Exchange 2019 fills these elements in `SyncFolderItems` and `GetItem`, and
+  a custom zone's day moved on its definition's midnight lands as one day
+  (live round 6, PR 8a).
 - **Zones Exchange cannot store** are written without a zone: CLDR has no id
   for them (`Antarctica/Troll`), or the id runs another clock in the five
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,
