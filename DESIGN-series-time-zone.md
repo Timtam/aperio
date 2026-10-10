@@ -172,6 +172,19 @@ keinen, dort ist die Wahl Tonis Sache.
   nicht auf oder über ein Nachbar-Vorkommen ihrer Serie rücken. Der Adapter
   legt sie dann als eigenen Termin zur neuen Zeit an und löscht die Ausnahme
   aus der Serie, so wie Aperio jedes unveränderte Vorkommen einzeln verschiebt.
+- **240 bis 242 — die Zone zuerst.** *(gebaut, Zonen-PR, 2026-10-10)* Eine
+  neue Zone behält die gespeicherte Uhrzeit, also verschob jedes Ändern, das
+  die Uhr eines Exchange-Termins wechselte, ihn um den Versatz: ein
+  Einzeltermin aus Aperio, der zur Serie wird; eine ganztägige Serie, die
+  Uhrzeiten bekommt; der Zonenwechsel im Editor an einer gespeicherten Serie.
+  Ein Ändern schreibt die Zone deshalb zuerst. Nennt sie eine andere Uhr als
+  die gespeicherte, folgen Beginn, Ende und Ganztägig, auch unverändert (240),
+  und zwar mit den Werten des Servers, wo die Bearbeitung sie festhält (106).
+  Dieselbe Uhr unter anderem Namen („W. Europe“ und „Europe/Berlin“) zählt
+  nicht als Wechsel. Die Regel kommt zuletzt, auf der Uhr der neuen Zone, und
+  nur, wenn sich ihre gebaute Form ändert (241): Ein reiner Zonenwechsel
+  schreibt keine Regel und schont so die Ausnahmen der Serie. Der Live-Test
+  misst alle drei Fälle und Gegenproben (242).
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -642,14 +655,14 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   abgelehnt.
 - **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf der
   Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des Geräts,
-  beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone
-  (234), ohne lesbaren Serverstand die Zone, die die Änderung mitschreibt,
-  sonst UTC. Wechselt ein Ändern dabei die Zone, wandert der Termin trotzdem:
-  Der Live-Test 8a hat gemessen, dass ein Einzeltermin, der so zur Serie
-  wird, um den Versatz wandert, weil die neue Zone ohne Beginn und Ende die
-  gespeicherte Uhrzeit behält. Der nächste PR schreibt deshalb die Zone, dann
-  Beginn und Ende (auch unverändert), dann die Regel am Tag der neuen Zone;
-  das löst 234 ab. **Microsoft 365** leitet Start- und Enddatum und die
+  beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone,
+  solange die Uhr bleibt (234), und die geschriebene Zone, wo sie wechselt
+  (241), sonst UTC. Eine neue Zone behält die gespeicherte Uhrzeit (Runde 1,
+  B2; Live-Test 8a, Schritt 9). Deshalb schreibt ein Ändern seit dem
+  Zonen-PR die Zone zuerst; nennt sie eine andere Uhr als die gespeicherte,
+  folgen Beginn, Ende und Ganztägig, auch unverändert, mit den Werten des
+  Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute
+  Form ändert (241). **Microsoft 365** leitet Start- und Enddatum und die
   Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
   lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
@@ -835,7 +848,8 @@ Handy im selben PR.
      - Ein Update, das Beginn und Ende vor einer neuen Zone setzt, verschiebt
        die Zeitpunkte: Exchange behält die Uhrzeit und gibt ihr die neue Zone
        (08:00Z wurde zu 01:00Z). Ein Zonenwechsel muss die Zone deshalb vor
-       Beginn und Ende oder getrennt senden (Stufen 9 und 12).
+       Beginn und Ende oder getrennt senden (Stufen 9 und 12). Seit dem
+       Zonen-PR tut das jedes Ändern (240).
      - Eine Serie ohne Zone kommt mit der Startzone `Greenwich Standard Time`
        und der Endzone `tzone://Microsoft/Utc` zurück. Daraus folgt 43b.
      - Eine ganztägige Serie mit Zone legt Exchange auf die Tagesgrenzen dieser
@@ -938,8 +952,8 @@ Handy im selben PR.
      Zone, die die Uhrzeit behält, behält auch deren Tag; jede Reihenfolge
      ergäbe sonntags 23:30. 234 bleibt abgeleitet (Runde 1), weder bestätigt
      noch widerlegt. Nach dem Schreibcode von main wäre es dort genauso. Der
-     nächste PR schreibt die Zone, dann Beginn und Ende, dann die Regel am Tag
-     der neuen Zone, und misst, ob das richtig landet.
+     Zonen-PR schreibt die Zone, dann Beginn und Ende, dann die Regel am Tag
+     der neuen Zone (240, 241); sein Live-Test misst, ob das richtig landet.
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Der Exchange-Teil ist mit PR 8a gebaut, zusammen mit 47a (57a), und im
    Live-Test 8a gemessen. Offen ist
@@ -1106,7 +1120,8 @@ Handy im selben PR.
     Datum abschneiden. Unterscheiden würde die beiden ein Termin in einer Zone
     wie UTC−11;
   - ob Zone zuerst auch bei einer Serie mit Uhrzeit die Zeitpunkte stehen
-    lässt. Gemessen ist das nur an einer ganztägigen Serie (Stufen 9 und 12);
+    lässt. Gemessen ist das nur an einer ganztägigen Serie (Runde 2, B4); der
+    Live-Test des Zonen-PRs misst es;
   - wie ganztägige Termine mit Teilnehmern angezeigt werden; für sie gilt die
     Regel „schwebend“ nicht;
   - welche Namen Kerio Connect und Zimbra kennen und was sie mit einem
@@ -1120,7 +1135,11 @@ Handy im selben PR.
   Uhr einer Serie behandelt sie weiter als keine Zone. Ungeprüft aus PR 8a sind
   außerdem: ob Exchange bei einem Ändern die Regel vor der Zone anwendet, die
   dieselbe Änderung danach schreibt (234; Schritt 9 des Live-Tests 8a kann das
-  nicht zeigen, weil jede Reihenfolge sonntags 23:30 ergibt); ein Termin mit
+  nicht zeigen, weil jede Reihenfolge sonntags 23:30 ergibt; seit dem
+  Zonen-PR kommt die Regel nach der Zone, und die Frage entscheidet nur noch,
+  wo die Uhr bleibt); ob Beginn und Ende, die einem Zonenwechsel folgen, und
+  eine neu geschriebene Regel die Ausnahmen einer Serie stehen lassen (misst
+  der Live-Test des Zonen-PRs); ein Termin mit
   eigener Zone vom iPhone oder aus einer Einladung und
   die Ablehnung nach 237 am echten Server; ob Exchange ein Ende in der Endzone
   rundet, wenn Beginn und Ende verschiedene Zonen tragen (233, R3-2 legt es

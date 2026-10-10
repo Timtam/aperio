@@ -168,24 +168,32 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   through the core's rule for zones (`series_clock_zone`, then
   `canonical_zone`): no zone, a UTC name or an unknown name writes no zone; any
   spelling of a zone writes that zone's id.
+- **An update writes the zone first** (decisions 240, 241). A new zone keeps
+  the item's stored wall clock and relabels it: Start and End written before
+  it moved by the offset (round 1, B2), and so did an update that sent the
+  zone without them — a single created in Aperio, Monday 00:30 in Berlin,
+  made weekly landed on Sundays at 23:30 (the 8a live test). So the zone
+  goes first, when the series' zone, its all-day flag or its slot changes.
+  Where it names another clock than the stored one (compared as the read
+  side maps an id, both boundaries, so `W. Europe Standard Time` and a stored
+  `Europe/Berlin` are one clock), Start, End and IsAllDayEvent follow it even
+  where they did not change; a slot written only for that is the server's,
+  so a boundary another device moved is not put back (106). The rule comes
+  last, on the new zone's day, and only where its built form changes (241):
+  a zone change alone writes no rule, which spares the series' exceptions.
+  That covers a single made a series, an all-day series given a time, and
+  the zone picker on a stored series, which keeps the instant. Whether zone
+  first keeps a timed series' instants is measured by the live test of this
+  change (round 2, B4, measured it on an all-day series).
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written
-  zone's day on a create, the stored start zone's day on an update (234,
-  inferred from live round 1, where Exchange applied an update's fields in
-  order; not measured for a rule and a zone), the zone the update writes
-  with the rule when the copy could not be read, UTC where none is known.
-  Where an update also changes the zone, the item still moves: the 8a live
-  test turned a single created in Aperio, Monday 00:30 in Berlin, into a
-  weekly series and found it on Sundays at 23:30. The update sent the rule
-  (from the stored zone's Sunday, 234) and then the zone, without the start
-  or the end, and the new zone kept the stored wall clock (as the zone after
-  the start did in round 1, stages 9 and 12). The result does not show the
-  order of the rule and the zone: a zone that keeps the wall clock keeps its
-  day, so either order gives Sundays at 23:30. The next PR writes the zone,
-  then the start and the end even when they did not change, then the rule
-  on the new zone's day, and measures whether that lands.
-  The range's StartDate and the weekday, day of the month and
+  zone's day on a create; on an update the stored start zone's day where the
+  clock stays (234, inferred from live round 1, where Exchange applied an
+  update's fields in order) and the written zone's where it moves (241,
+  including a missing copy or a stored zone Aperio cannot read), UTC where
+  none is known. The rule is read from the slot the server keeps after the
+  update. The range's StartDate and the weekday, day of the month and
   month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
   Read off the UTC date, as before, they named the day before east of UTC: a
   daily all-day series created in Berlin for Monday 19 October started on

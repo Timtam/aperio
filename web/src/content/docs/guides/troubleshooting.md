@@ -163,6 +163,21 @@ looks the same as a series that is meant to run in UTC. To fix an affected
 series, create it again, or set its time zone again in the program it came
 from.
 
+## An Exchange appointment moved after it became a series
+
+If you turned an appointment on an Exchange account into a series in Aperio,
+changed the time zone of a stored Exchange series, or gave an all-day Exchange
+series a time of day, the appointment usually moved by an hour or two
+afterwards, and near midnight to another day. An appointment created in Aperio
+for Monday at 00:30, for example, then stood on Sundays at 23:30.
+
+When its time zone changes, Exchange keeps the stored time of day and reads it
+in the new zone. From this version Aperio sends the time zone first and the
+start and end after it, so the appointment stays where it was.
+
+What you can do: move a series that has already moved back to its place once,
+by hand.
+
 ## The day of an all-day Exchange appointment cannot be changed
 
 Aperio then says: "Exchange stores this appointment in a time zone Aperio

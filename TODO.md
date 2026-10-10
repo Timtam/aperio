@@ -3017,21 +3017,19 @@ Siehe DESIGN §4.2.
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
   🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
-  🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
-  zur Serie mit neuer Zone, behält Exchange die gespeicherte Uhrzeit und gibt
-  ihr die neue Zone, der Termin wandert um den Versatz (Runde 1, Stufen 9
-  und 12: eine Zone nach Beginn und Ende). Der Live-Test 8a hat es für eine
-  Änderung ohne Beginn und Ende gemessen: Ein in Aperio angelegter
-  Einzeltermin am Montag um 00:30, wöchentlich gemacht, steht danach sonntags
-  um 23:30. Die Änderung schrieb nur die Regel (ab dem Tag der alten Zone UTC:
-  Sonntag, 234) und danach die Zone; die Zone hat die gespeicherte Uhrzeit
-  behalten. Über die Reihenfolge von Regel und Zone sagt das nichts: Jede
-  Reihenfolge ergibt sonntags 23:30, weil die Zone mit der Uhrzeit auch den
-  Tag behält. 234 bleibt abgeleitet. Nächster PR nach 8a: die Zone schreiben,
-  dann Beginn und Ende, auch wenn sie sich nicht ändern, dann die Regel am Tag
-  der neuen Zone, und messen, ob das richtig landet. Dass die Zone zuerst die
-  Zeitpunkte stehen lässt, ist nur an einer ganztägigen Serie gemessen
-  (Runde 2, B4).
+  ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-242): Eine
+  neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
+  Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
+  in Aperio angelegter Einzeltermin, der zur Serie wird (Live-Test 8a: aus
+  Montag 00:30 wurde Sonntag 23:30), eine ganztägige Serie, die Uhrzeiten
+  bekommt, und der Zonenwechsel im Editor an einer gespeicherten Serie. Ein
+  Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
+  Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
+  zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
+  Live-Test vor dem Zusammenführen (242): alle drei Fälle, ein Zonenwechsel an
+  einer Serie mit geänderter und gelöschter Ausnahme, Gegenproben. Dass die
+  Zone zuerst die Zeitpunkte einer Serie mit Uhrzeit stehen lässt, misst er;
+  gemessen war es nur an einer ganztägigen (Runde 2, B4).
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

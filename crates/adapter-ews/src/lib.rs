@@ -3176,6 +3176,83 @@ mod server_zone_tests {
         assert!(!update.contains("TimeZone"), "{update}");
     }
 
+    /// Decisions 240 and 241 through the adapter: a weekly Monday series
+    /// Exchange stores in W. Europe, read back as Aperio reads it, switched to
+    /// New York at the same instant. The request names the zone first, then
+    /// the slot on the new clock; 10:00 in Berlin is the same Monday in New
+    /// York, so no rule goes out.
+    #[tokio::test]
+    async fn a_zone_switch_writes_the_zone_before_the_slot_and_no_rule() {
+        let stored = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="IID" ChangeKey="CK"/>
+        <t:Subject>Weekly</t:Subject>
+        <t:Start>2026-11-02T09:00:00Z</t:Start>
+        <t:End>2026-11-02T10:00:00Z</t:End>
+        <t:IsAllDayEvent>false</t:IsAllDayEvent>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:WeeklyRecurrence>
+            <t:Interval>1</t:Interval>
+            <t:DaysOfWeek>Monday</t:DaysOfWeek>
+            <t:FirstDayOfWeek>Monday</t:FirstDayOfWeek>
+          </t:WeeklyRecurrence>
+          <t:NumberedRecurrence>
+            <t:StartDate>2026-11-02+01:00</t:StartDate>
+            <t:NumberOfOccurrences>4</t:NumberOfOccurrences>
+          </t:NumberedRecurrence>
+        </t:Recurrence>
+        <t:StartTimeZone Id="W. Europe Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let item = crate::mapping::parse_get_calendar_items_response(stored)
+            .unwrap()
+            .remove(0);
+        let opened = crate::mapping::to_event(item, "FA|FCK").unwrap();
+        assert_eq!(
+            opened.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
+            Some("Europe/Berlin")
+        );
+        let mut edit = opened.clone();
+        edit.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&opened), true);
+
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, stored.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        adapter.update_event(edit).await.expect("update");
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        let zone = update
+            .find(r#"FieldURI="calendar:StartTimeZone""#)
+            .expect("the zone");
+        let start = update
+            .find(r#"FieldURI="calendar:Start""#)
+            .expect("the slot");
+        assert!(zone < start, "{update}");
+        assert!(
+            update.contains(r#"<t:StartTimeZone Id="Eastern Standard Time"/>"#),
+            "{update}"
+        );
+        assert!(
+            update.contains("<t:Start>2026-11-02T09:00:00Z</t:Start>"),
+            "{update}"
+        );
+        assert!(!update.contains("calendar:Recurrence"), "{update}");
+    }
+
     /// Decision 233 through the adapter: a start and an end stored in
     /// different zones each move on their own zone's midnight. Greenwich for
     /// the start, W. Europe for the end: the shape Exchange gave R3-2's series.

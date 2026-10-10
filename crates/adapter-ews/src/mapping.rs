@@ -2244,9 +2244,14 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// whose slot is written. With `before`, what is emitted
 /// is a SUBSET of what the same event emits without — never a superset, and
 /// never another value — except that a kept rule and its zone are the server's
-/// own. So a field the COMPARISON suppresses is one whose value the server
-/// already has; a field `keep_fields` suppresses may differ from the server's,
-/// on purpose.
+/// own, and so is a slot written only because the zone moves the clock
+/// (decision 240). So a field the COMPARISON suppresses is one whose value the
+/// server already has; a field `keep_fields` suppresses may differ from the
+/// server's, on purpose.
+///
+/// It takes every item as stored in UTC, as Aperio creates them, on this
+/// device's clock: the production path, `api::update_event`, calls
+/// [`event_to_update_field_xml_in`] with the zones the copy is stored in.
 pub fn event_to_update_field_xml_on(
     event: &Event,
     before: Option<&Event>,
@@ -2268,10 +2273,13 @@ pub fn event_to_update_field_xml_on(
 ///
 /// An all-day slot goes out as midnights in the stored zones (decision 47a,
 /// each boundary in its own, 233), refused where one is unknown (237). A
-/// series' rule starts on its first day as Exchange will read it: the
-/// device's day for an all-day series, the stored start zone's day for a
-/// timed one (234) or, without the copy, the day of the zone the update
-/// writes beside the rule, UTC where none is known.
+/// written zone goes first, and where it names another clock than the stored
+/// one the slot follows it (240). A series' rule starts on its first day as
+/// Exchange will read it: the device's day for an all-day series, the stored
+/// start zone's day for a timed one (234), the written zone's day where the
+/// clock moves, a stored zone that is unknown or a missing copy included
+/// (241), UTC where none is known; and it is written only when that changes
+/// what goes on the wire.
 pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     event: &Event,
     before: Option<&Event>,
@@ -2348,16 +2356,68 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         || touches(EventField::End)
         || touches(EventField::AllDay)
         || (touches(EventField::Recurrence) && event.recurrence.is_some() && start_moves);
-    if slot_changed {
+
+    // A KEPT rule is the server's (decision 106): when the slot takes it along,
+    // the server's rule is rebuilt on the start being written, never this
+    // device's copy of it, which may be stale — another device's COUNT or
+    // UNTIL would go. Its zone with it: `same_recurrence` counts the zone as
+    // part of the rule. And a server copy without a rule stays without one.
+    let rule_of: &Event = match before {
+        Some(server) if !may(EventField::Recurrence) => server,
+        _ => event,
+    };
+    // The slot the server holds after this update: the edit's where the slot
+    // changes, the server's where it does not — then it is not written, or is
+    // written only because the clock moves, and a boundary another device has
+    // since moved and this edit kept is not put back (decision 106). The zone
+    // and the rule are read from it, so they agree with what the server keeps.
+    let landed: &Event = match before {
+        Some(server) if !slot_changed => server,
+        _ => event,
+    };
+    // The zone a zoned recurring master is written with, by the same rule as a
+    // create, looked up once: a zone Exchange cannot store is logged once per
+    // write. It goes out when the series' zone, its all-day flag or its slot
+    // may change. `series_windows_zone` is a pure function of (all_day,
+    // recurrence), so those are the exact gate; the slot rides along as
+    // insurance for the unmeasured claim that a server-side edit can drop the
+    // zone. A time-only gate would drop it on a rule-only change — weekly to
+    // daily without moving the series. The rule itself never opens the gate:
+    // a rule this edit writes comes from a change to it, to the slot or to the
+    // zone, all of them here already, and a gate that waited on the rule would
+    // wait on the clock the zone decides. The all-day flag it reads is the
+    // one the server keeps after this update (`landed`): a kept all-day flag
+    // stays, and an all-day item never gets a zone (46a).
+    let written = series_windows_zone(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
+    let zone_written = written.is_some()
+        && (touches(EventField::Recurrence) || touches(EventField::AllDay) || slot_changed);
+    // An update that writes a NEW zone keeps the item's stored wall clock and
+    // relabels it in that zone, so the item moves by the offset (live round 1,
+    // B2; the 8a live test, step 9). The zone therefore goes first, and when
+    // the clock it names is not the one Exchange stores the item on — either
+    // boundary, compared as the read side maps an id, so W. Europe and a stored
+    // `Europe/Berlin` are the same clock (decision 240) — the slot follows it
+    // even where it did not change, putting the edit's instants on the new
+    // clock. A stored zone Aperio cannot read counts as another clock.
+    let new_clock = written
+        .filter(|_| zone_written)
+        .and_then(|id| boundary_zone(Some(id), None));
+    let clock_moves = zone_written
+        && (new_clock.is_none()
+            || new_clock.as_ref() != stored.start.as_ref()
+            || new_clock.as_ref() != stored.end.as_ref());
+    if slot_changed || clock_moves {
+        // A slot written only because the clock moves is the server's.
+        let slot = landed;
         // An all-day boundary is midnight of its day in the zone Exchange
         // stores it in (47a, 233); a timed one is its instant.
-        let (wire_start, wire_end) = if event.all_day {
+        let (wire_start, wire_end) = if slot.all_day {
             (
-                all_day_boundary(event.start, stored.start.as_ref(), device)?,
-                all_day_boundary(event.end, stored.end.as_ref(), device)?,
+                all_day_boundary(slot.start, stored.start.as_ref(), device)?,
+                all_day_boundary(slot.end, stored.end.as_ref(), device)?,
             )
         } else {
-            (event.start, event.end)
+            (slot.start, slot.end)
         };
         push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
         push_set_datetime(&mut set, "calendar:End", "End", wire_end);
@@ -2365,7 +2425,7 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
             &mut set,
             "calendar:IsAllDayEvent",
             "IsAllDayEvent",
-            event.all_day,
+            slot.all_day,
         );
     }
 
@@ -2421,61 +2481,51 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // The rule Exchange stores is the BUILT one, and that depends on the start
     // as well: the range's StartDate is the start's first day
     // ([`rule_first_day`]), and a rule without BYDAY, BYMONTHDAY or BYMONTH
-    // takes those from that day too. Both sides are built on the same clock,
-    // the stored start zone (234), so a save that changes neither the start
-    // nor the rule writes neither. The
-    // rrule text carries none of it, so a series dragged to another day
-    // compares equal on the text alone and would keep its old StartDate on the
-    // server. So the rule is asked twice: as text, which also catches a rule
-    // that no longer builds, and as what would go on the wire.
+    // takes those from that day too. The rrule text carries none of it, so a
+    // series dragged to another day compares equal on the text alone and would
+    // keep its old StartDate on the server. So the rule is compared as what
+    // would go on the wire: the server's built on the clock it is stored on
+    // (234), the edit's on the clock this update leaves it on — the same one,
+    // unless the clock moves, and then the new zone's (decision 241).
     //
-    // Who may cause the second: the rule itself when the edit did not leave
-    // it alone; or a slot that moves the server's start, for an event that has
-    // a rule — a kept rule is then rebuilt from the start it now stands on.
-    // A kept rule under a start that stays is left as the server has it, so
-    // another device's COUNT or UNTIL survives. And the slot never deletes a
-    // rule: an edit without one says nothing about the server's.
-    // A missing copy's rule is unknown, not equal: a blind write whose slot
-    // moves writes the edit's rule with it.
-    //
-    // A KEPT rule is the server's (decision 106): when the slot takes it along,
-    // the server's rule is rebuilt on the start being written, never this
-    // device's copy of it, which may be stale — another device's COUNT or
-    // UNTIL would go. Its zone with it: `same_recurrence` counts the zone as
-    // part of the rule. And a server copy without a rule stays without one.
-    let rule_of: &Event = match before {
-        Some(server) if !may(EventField::Recurrence) => server,
-        _ => event,
+    // Who may cause a rewrite: the rule itself when the edit did not leave it
+    // alone; or a slot that moves the rule's first day, for an event that has a
+    // rule — a kept rule is then rebuilt from the start it now stands on, and a
+    // moving clock counts as such a slot. A kept rule under a first day that
+    // stays is left as the server has it, so another device's COUNT or UNTIL
+    // survives, and so do the series' exceptions: a zone change alone writes no
+    // rule. The slot never deletes a rule: an edit without one says nothing
+    // about the server's. A missing copy's rule is unknown, not equal: a blind
+    // write writes the edit's rule, or deletes the server's. And an edited rule
+    // that no longer builds is written, so the save fails with it instead of
+    // passing for an unchanged one.
+    let old_clock = stored.start.as_ref();
+    let rule_clock = if clock_moves {
+        new_clock.as_ref()
+    } else {
+        old_clock
     };
-    // The zone this update may write beside the rule, looked up once: a zone
-    // Exchange cannot store is logged once per write, as on a create.
-    let written = series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones);
-    // Without the copy the stored zone is unknown. The zone this update writes
-    // beside the rule stands in for it, as on a create: it comes from the
-    // row's own zone, which Aperio read from the stored one, so the rule
-    // starts on the day the user sees instead of the UTC date.
-    let blind_clock = before
-        .is_none()
-        .then(|| written_clock(event.all_day, rule_of.recurrence.as_ref(), written))
-        .flatten();
-    let clock = stored.start.as_ref().or(blind_clock.as_ref());
-    let first_day = |ev: &Event| rule_first_day(ev.start, ev.all_day, clock, device);
+    let first_day_before = |ev: &Event| rule_first_day(ev.start, ev.all_day, old_clock, device);
+    let first_day_written = |ev: &Event| rule_first_day(ev.start, ev.all_day, rule_clock, device);
     let built_rule = |ev: &Event| {
         ev.recurrence
             .as_ref()
-            .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day(ev)).ok())
+            .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day_before(ev)).ok())
     };
     let written_rule = rule_of
         .recurrence
         .as_ref()
-        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day(event)).ok());
+        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day_written(landed)).ok());
     // A written slot takes a kept rule along when it moves the rule's first
     // day: when the start moves, and also when only the all-day flag flips
-    // under the same instant, because the two read the day on different
-    // clocks (`rule_first_day`) — the device's day, or the stored zone's.
-    let first_day_moves = start_moves || before.is_some_and(|b| first_day(b) != first_day(event));
-    let rule_follows_slot = slot_changed && first_day_moves && event.recurrence.is_some();
-    let rule_changed = touches(EventField::Recurrence)
+    // under the same instant or the clock moves, because the two read the day
+    // on different clocks (`rule_first_day`).
+    let first_day_moves =
+        start_moves || before.is_some_and(|b| first_day_before(b) != first_day_written(landed));
+    let rule_follows_slot =
+        (slot_changed || clock_moves) && first_day_moves && event.recurrence.is_some();
+    let rule_written = (before.is_none() && touches(EventField::Recurrence))
+        || (touches(EventField::Recurrence) && written_rule == Some(None))
         || ((may(EventField::Recurrence) || rule_follows_slot)
             && written_rule != before.and_then(built_rule));
     // Two locks on the rule, on purpose. The diff is one: an exception has no
@@ -2483,9 +2533,9 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // the other, and it is the one that still holds when there is no `before`.
     // Together they also stop an ordinary single's save from carrying a
     // pointless `DeleteItemField calendar:Recurrence` every time.
-    if rule_changed {
+    if rule_written {
         if let Some(rec) = &rule_of.recurrence {
-            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, first_day(event))?;
+            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, first_day_written(landed))?;
             // Wrap the recurrence element in a SetItemField against
             // calendar:Recurrence. EWS expects the body's inner shape to
             // start with `<t:CalendarItem>` containing the recurrence.
@@ -2499,20 +2549,20 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
             del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
         }
     }
-    // Keep the zone on a zoned recurring master so a server-side edit doesn't
-    // drop it and re-expand the series in UTC, by the same rule as a create.
-    //
-    // `series_windows_zone` is a pure function of (all_day, recurrence), so
-    // those two are the exact gate; the slot rides along as insurance for the
-    // unmeasured claim above that a server-side edit can drop the zone. A
-    // time-only gate would drop it on a rule-only change — weekly to daily
-    // without moving the series.
-    let zone_may_change = rule_changed || touches(EventField::AllDay) || slot_changed;
-    if let Some(windows) = written.filter(|_| zone_may_change) {
+    // The zone goes FIRST: Exchange applies an update's fields in order, and a
+    // new zone relabels whatever wall clock is stored when it arrives (round
+    // 1, B2: Start and End before the zone moved them; round 2, B4: the zone
+    // first left the series clean). The slot and the rule that follow are then
+    // read on it. A create writes it last, in schema order, which is fine
+    // there: CreateItem sets everything at once.
+    if let Some(windows) = written.filter(|_| zone_written) {
         let win = escape_xml(windows);
-        set.push_str(&format!(
-            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
-        ));
+        set.insert_str(
+            0,
+            &format!(
+                "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
+            ),
+        );
     }
 
     Ok((set, del))
@@ -2841,16 +2891,12 @@ pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono
 
 /// The day a series' rule starts on, on the clock Exchange repeats it on: an
 /// all-day series on the device's days (48a); a timed one on `clock`, the
-/// zone Exchange expands it in — the zone a create writes with it, the zone
-/// the item is stored in on an update (decision 234, inferred from live round
-/// 1, where Exchange applied an update's fields in order; not measured for a
-/// rule and a zone) or, when its copy could not be read, the zone the update
-/// writes with it, UTC where there is none. Where the update also changes the
-/// zone, the item still moves: the 8a live test made a single weekly; the
-/// update sent the rule (on the stored zone's day) and then the zone, without
-/// the start or the end, and the new zone kept the stored wall clock. The
-/// next PR writes the zone, then the start and the end, then the rule on the
-/// new zone's day.
+/// zone Exchange expands it in — the zone a create writes with it; on an
+/// update, the zone the item is stored in where the clock stays (decision
+/// 234, inferred from live round 1, where Exchange applied an update's
+/// fields in order) and the zone the update writes where it moves (241): the
+/// update then writes that zone first and the slot after it (240), so the
+/// rule, written last, is read on it. UTC where there is none.
 pub(crate) fn rule_first_day<D: TimeZone>(
     start: DateTime<Utc>,
     all_day: bool,
@@ -5005,6 +5051,11 @@ mod tests {
     /// updates carry `ITEM_ID` and `CHANGEKEY` placeholders, and each file
     /// starts with an XML comment naming its step. A9 is not Aperio's rule at
     /// all: the A1 request with an invented id, to see what an unknown id gets.
+    ///
+    /// Historical since the zone-first PR (decisions 240, 241): the updates are
+    /// built with today's code, which writes the zone before the slot, so B2
+    /// no longer reproduces round 1's request (Start and End before the zone).
+    /// B3 and B4 build their order explicitly and still do.
     #[test]
     #[ignore = "writes the live Exchange test requests; see the doc comment"]
     fn live_test_requests() {
@@ -5169,7 +5220,7 @@ mod tests {
         );
         update(
             "B2-update-no-zone-to-bangkok.xml",
-            "Step B2: update the A2 series with a zone, in Aperio's field order (Start and End before the zone). Do the occurrences stay at 08:00Z?",
+            "Step B2: update the A2 series with a zone. Round 1 sent it in Aperio's field order of the time (Start and End before the zone); since the zone-first PR Aperio writes the zone first, so this file is no longer round 1's request. Do the occurrences stay at 08:00Z?",
             Event {
                 id: "ITEM_ID|CHANGEKEY".into(),
                 title: "Aperio zone test A2 no zone (updated to Bangkok)".into(),
@@ -6266,8 +6317,44 @@ mod tests {
                         let without = blocks(
                             event_to_update_field_xml_on(edit, None, Some(&server), kind).unwrap(),
                         );
+                        // `_on` stores every item in UTC, so a written W. Europe
+                        // zone moves the clock: the rule is then built on
+                        // Berlin's (decision 241).
+                        let clock_moved = with
+                            .iter()
+                            .any(|b| b.contains(r#"FieldURI="calendar:StartTimeZone""#));
+                        let rule_clock = if clock_moved {
+                            DayZone::Tz(chrono_tz::Europe::Berlin)
+                        } else {
+                            DayZone::Tz(chrono_tz::UTC)
+                        };
                         for block in with {
-                            // The one exception, on purpose: a kept rule and
+                            // The second exception, on purpose: a slot written
+                            // only because the clock moves is the SERVER's
+                            // (decisions 106, 240), not this device's kept one.
+                            let slot_field = [
+                                "calendar:Start\"",
+                                "calendar:End\"",
+                                "calendar:IsAllDayEvent\"",
+                            ]
+                            .iter()
+                            .any(|f| block.contains(&format!(r#"FieldURI="{f}"#)));
+                            let servers_slot = block.contains(&format_ews_datetime(before.start))
+                                || block.contains(&format_ews_datetime(before.end))
+                                || block.contains(&format!(
+                                    "<t:IsAllDayEvent>{}</t:IsAllDayEvent>",
+                                    before.all_day
+                                ));
+                            if slot_field
+                                && clock_moved
+                                && servers_slot
+                                && [EventField::Start, EventField::End, EventField::AllDay]
+                                    .iter()
+                                    .any(|f| keep.contains(f))
+                            {
+                                continue;
+                            }
+                            // The first exception, on purpose: a kept rule and
                             // its zone are the SERVER's, rebuilt on the start
                             // being written (decision 106) — so they are the
                             // server's own values, not this device's.
@@ -6285,7 +6372,7 @@ mod tests {
                                         rule_first_day(
                                             edit.start,
                                             edit.all_day,
-                                            Some(&DayZone::Tz(chrono_tz::UTC)),
+                                            Some(&rule_clock),
                                             &Local,
                                         ),
                                     )
@@ -6410,14 +6497,14 @@ mod tests {
             ),
             (
                 // Same day, same weekday: the rule as built is the same, so it
-                // stays; the zone rides with the slot.
+                // stays; the zone rides with the slot, ahead of it.
                 "an hour later",
                 Event {
                     start: before.start + chrono::Duration::hours(1),
                     end: before.end + chrono::Duration::hours(1),
                     ..before.clone()
                 },
-                [slot, zone].concat(),
+                [zone, slot].concat(),
             ),
             (
                 "daily",
@@ -6429,7 +6516,22 @@ mod tests {
                     }),
                     ..before.clone()
                 },
-                [&["calendar:Recurrence"][..], zone].concat(),
+                [zone, &["calendar:Recurrence"][..]].concat(),
+            ),
+            (
+                // Another clock (decision 240): the zone, then the slot on it;
+                // 10:00 in Berlin is the same Wednesday in New York, so the
+                // rule as built stays (decision 241).
+                "zone only",
+                Event {
+                    recurrence: Some(EventRecurrence {
+                        rrule: "FREQ=WEEKLY".into(),
+                        exceptions: Vec::new(),
+                        tzid: Some("America/New_York".into()),
+                    }),
+                    ..before.clone()
+                },
+                [zone, slot].concat(),
             ),
             (
                 "no rule",
@@ -6441,11 +6543,14 @@ mod tests {
             ),
         ];
         for (name, edit, expected) in cases {
-            let (set, del) = event_to_update_field_xml_on(
+            // Stored as Exchange stores a Berlin series: in W. Europe.
+            let (set, del) = event_to_update_field_xml_in(
                 &edit,
                 Some(&before),
+                &w_europe_zones(),
                 None,
                 EventIdKind::RecurringMaster,
+                &chrono_tz::Europe::Berlin,
             )
             .unwrap();
             let written: Vec<String> = field_uris(&set)
@@ -6862,6 +6967,7 @@ mod tests {
     /// The zone rides with the RULE, not with the clock: weekly to daily
     /// without moving the series still carries the zone the series repeats in
     /// (decision 41a), because a rule written without one re-expands in UTC.
+    /// It goes first, and the stored clock stays, so no slot follows it.
     #[test]
     fn a_rule_change_carries_the_zone_even_when_the_time_stands_still() {
         let before = zoned_master(Some("Europe/Berlin"));
@@ -6873,15 +6979,21 @@ mod tests {
             }),
             ..before.clone()
         };
-        let (set, _) =
-            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::RecurringMaster)
-                .unwrap();
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &w_europe_zones(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap();
         assert_eq!(
             field_uris(&set),
             [
-                "calendar:Recurrence",
                 "calendar:StartTimeZone",
                 "calendar:EndTimeZone",
+                "calendar:Recurrence",
             ],
             "{set}",
         );
@@ -9576,8 +9688,8 @@ mod tests {
     }
 
     /// A zoned timed series whose rule alone changes starts on the day its
-    /// stored zone reads (decision 234): Monday 00:30 in Berlin is Sunday in
-    /// UTC.
+    /// stored zone reads (decision 234, the clock stays): Monday 00:30 in
+    /// Berlin is Sunday in UTC.
     #[test]
     fn a_rule_only_edit_of_a_zoned_series_starts_on_the_stored_zones_day() {
         let device = chrono_tz::Asia::Tokyo;
@@ -9882,42 +9994,406 @@ mod tests {
         );
     }
 
-    /// Decision 234: an update that makes a timed appointment a series and
-    /// names a new zone starts the rule on the day the STORED zone reads.
-    /// Aperio created the single in UTC; Monday 00:30 in Berlin is Sunday
-    /// there. This pins what 8a writes, not what is right: the 8a live test
-    /// sent a request of this shape (Monday 2 November 00:30, StartDate
-    /// 2026-11-01, Sunday; the rule, then the zone, no start or end) and found
-    /// the series on Sundays at 23:30, because the new zone kept the stored
-    /// wall clock (as the zone after the start did in round 1, stages 9 and
-    /// 12). The next PR writes the zone, then the start and the end, then the
-    /// rule on the new zone's day, and changes this.
-    #[test]
-    fn a_new_rule_with_a_new_zone_starts_on_the_stored_zones_day() {
-        let device = chrono_tz::Europe::Berlin;
-        let mut before = zoned_master(None);
-        before.recurrence = None;
-        before.start = "2026-10-18T22:30:00Z".parse().unwrap();
-        before.end = "2026-10-18T23:00:00Z".parse().unwrap();
-        let mut edit = before.clone();
-        edit.recurrence = Some(EventRecurrence {
-            rrule: "FREQ=WEEKLY".into(),
-            exceptions: Vec::new(),
-            tzid: Some("Europe/Berlin".into()),
-        });
-        let (set, _) = event_to_update_field_xml_in(
+    const ZONE: [&str; 2] = ["calendar:StartTimeZone", "calendar:EndTimeZone"];
+    const SLOT: [&str; 3] = ["calendar:Start", "calendar:End", "calendar:IsAllDayEvent"];
+
+    /// A timed series at `start`, an hour long, with `rrule` in `tzid`.
+    fn timed_series(start: &str, rrule: &str, tzid: &str) -> Event {
+        let mut ev = zoned_master(Some(tzid));
+        ev.start = start.parse().unwrap();
+        ev.end = ev.start + chrono::Duration::hours(1);
+        ev.recurrence.as_mut().unwrap().rrule = rrule.into();
+        ev
+    }
+
+    /// `edit` saved against `before`, with the fields it left alone kept as
+    /// the host marks them, on a Berlin device.
+    fn saved(
+        edit: &Event,
+        before: &Event,
+        stored: &StoredZones,
+        kind: EventIdKind,
+    ) -> (String, String) {
+        let mut edit = edit.clone();
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(before), true);
+        event_to_update_field_xml_in(
             &edit,
-            Some(&before),
-            &StoredZones::utc(),
+            Some(before),
+            stored,
             None,
-            EventIdKind::Single,
-            &device,
+            kind,
+            &chrono_tz::Europe::Berlin,
         )
-        .unwrap();
-        assert_eq!(element(&set, "StartDate"), "2026-10-18", "{set}");
+        .unwrap()
+    }
+
+    /// The 8a live test, step 9: a single Aperio created (stored in UTC),
+    /// Monday 2 November 00:30 in Berlin, made weekly in one save. The zone
+    /// goes first, the slot follows it on the new clock (decision 240), and
+    /// the rule starts on the new zone's Monday (241). 8a wrote the rule on
+    /// the stored zone's Sunday and the zone last, without the slot, and the
+    /// series landed on Sundays at 23:30. Tokyo as well: Monday 07:00 there is
+    /// Sunday in UTC and in Berlin.
+    #[test]
+    fn a_single_made_a_series_writes_the_zone_then_the_slot_then_the_rule() {
+        for (tzid, start, windows) in [
+            (
+                "Europe/Berlin",
+                "2026-11-01T23:30:00Z",
+                "W. Europe Standard Time",
+            ),
+            ("Asia/Tokyo", "2026-11-01T22:00:00Z", "Tokyo Standard Time"),
+        ] {
+            let mut before = timed_series(start, "FREQ=WEEKLY", tzid);
+            before.recurrence = None;
+            let mut edit = before.clone();
+            edit.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;COUNT=3".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let (set, del) = saved(&edit, &before, &StoredZones::utc(), EventIdKind::Single);
+            assert_eq!(
+                field_uris(&set),
+                [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
+                "{tzid}: {set}"
+            );
+            assert!(del.is_empty(), "{tzid}: {del}");
+            assert!(
+                set.contains(&format!(r#"<t:StartTimeZone Id="{windows}"/>"#)),
+                "{tzid}: {set}"
+            );
+            assert_eq!(element(&set, "Start"), start, "{tzid}");
+            assert_eq!(element(&set, "StartDate"), "2026-11-02", "{tzid}: {set}");
+            assert_eq!(element(&set, "DaysOfWeek"), "Monday", "{tzid}");
+        }
+    }
+
+    /// An all-day series (stored without a zone, so in UTC) given a time of
+    /// day: the zone first, then the slot on it. The rule as built stays —
+    /// the all-day series starts on the device's day, the timed one on
+    /// Berlin's, the same Monday — so none is written (decision 241).
+    #[test]
+    fn an_all_day_series_given_a_time_writes_the_zone_before_the_slot() {
+        let mut before = timed_series(
+            "2026-11-01T23:00:00Z",
+            "FREQ=DAILY;COUNT=3",
+            "Europe/Berlin",
+        );
+        before.all_day = true;
+        before.end = "2026-11-02T23:00:00Z".parse().unwrap();
+        before.recurrence.as_mut().unwrap().tzid = None;
+        let mut edit = before.clone();
+        edit.all_day = false;
+        edit.start = "2026-11-01T23:30:00Z".parse().unwrap();
+        edit.end = "2026-11-02T00:30:00Z".parse().unwrap();
+        edit.recurrence.as_mut().unwrap().tzid = Some("Europe/Berlin".into());
+        let (set, _) = saved(
+            &edit,
+            &before,
+            &StoredZones::utc(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
+        assert_eq!(element(&set, "IsAllDayEvent"), "false", "{set}");
+        assert_eq!(element(&set, "Start"), "2026-11-01T23:30:00Z", "{set}");
+    }
+
+    /// The zone picker on a stored series keeps the instant (DESIGN, "Die Zone
+    /// wechseln"). Monday 00:30 in Berlin is Sunday 18:30 in New York: the
+    /// zone, then the slot on the new clock (240), then the rule on New York's
+    /// Sunday (241). Whether the edit carries no weekday or answers the
+    /// weekday question with Sunday (15a), the rule is the same.
+    #[test]
+    fn a_zone_switch_that_changes_the_day_rewrites_the_rule_after_the_slot() {
+        for (before_rule, edit_rule) in [
+            ("FREQ=WEEKLY;COUNT=4", "FREQ=WEEKLY;COUNT=4"),
+            (
+                "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+                "FREQ=WEEKLY;BYDAY=SU;COUNT=4",
+            ),
+        ] {
+            let before = timed_series("2026-11-01T23:30:00Z", before_rule, "Europe/Berlin");
+            let mut edit = before.clone();
+            let rec = edit.recurrence.as_mut().unwrap();
+            rec.rrule = edit_rule.into();
+            rec.tzid = Some("America/New_York".into());
+            let (set, _) = saved(
+                &edit,
+                &before,
+                &w_europe_zones(),
+                EventIdKind::RecurringMaster,
+            );
+            assert_eq!(
+                field_uris(&set),
+                [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
+                "{edit_rule}: {set}"
+            );
+            assert!(
+                set.contains(r#"<t:StartTimeZone Id="Eastern Standard Time"/>"#),
+                "{set}"
+            );
+            assert_eq!(
+                element(&set, "Start"),
+                "2026-11-01T23:30:00Z",
+                "{edit_rule}"
+            );
+            assert_eq!(element(&set, "DaysOfWeek"), "Sunday", "{edit_rule}: {set}");
+            assert_eq!(
+                element(&set, "StartDate"),
+                "2026-11-01",
+                "{edit_rule}: {set}"
+            );
+        }
+    }
+
+    /// 10:00 in Berlin is 04:00 in New York, the same Monday: the zone and the
+    /// slot on the new clock, and no rule (decision 241), so a rewritten rule
+    /// puts none of the series' exceptions at risk.
+    #[test]
+    fn a_zone_switch_on_the_same_day_writes_no_rule() {
+        let before = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut edit = before.clone();
+        edit.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        let (set, del) = saved(
+            &edit,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
+        assert!(del.is_empty(), "{del}");
+        assert_eq!(element(&set, "Start"), "2026-11-02T09:00:00Z");
+    }
+
+    /// The same clock under another name writes the zone and nothing it would
+    /// not write anyway (decision 240): Vienna is written as W. Europe, the
+    /// zone a Berlin series is stored in; and a series Exchange stores under
+    /// tzdata's own name `Europe/Berlin` (236), read through the read side,
+    /// is on W. Europe's clock too.
+    #[test]
+    fn the_same_clock_under_another_name_forces_no_slot() {
+        let before = timed_series(
+            "2026-11-01T23:30:00Z",
+            "FREQ=WEEKLY;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut vienna = before.clone();
+        vienna.recurrence.as_mut().unwrap().tzid = Some("Europe/Vienna".into());
+        let (set, _) = saved(
+            &vienna,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(field_uris(&set), ZONE, "{set}");
         assert!(
             set.contains(r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#),
             "{set}"
         );
+
+        let item = ParsedItem {
+            start_time_zone: Some("Europe/Berlin".into()),
+            end_time_zone: Some("Europe/Berlin".into()),
+            ..ParsedItem::default()
+        };
+        let stored = StoredZones::of(&item);
+        let mut daily = before.clone();
+        daily.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;COUNT=4".into();
+        let (set, _) = saved(&daily, &before, &stored, EventIdKind::RecurringMaster);
+        assert_eq!(
+            field_uris(&set),
+            [&ZONE[..], &["calendar:Recurrence"][..]].concat(),
+            "{set}"
+        );
+    }
+
+    /// A title-only save near midnight writes the title alone, whichever clock
+    /// the item is stored on and whether or not the host proved what was
+    /// kept: no field opens the zone's gate, so no clock moves and no rule is
+    /// rebuilt on another one.
+    #[test]
+    fn a_title_only_save_near_midnight_writes_the_title_alone() {
+        let before = timed_series(
+            "2026-11-01T23:30:00Z",
+            "FREQ=WEEKLY;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut edit = before.clone();
+        edit.title = "Renamed".into();
+        for stored in [w_europe_zones(), StoredZones::utc()] {
+            for proven in [true, false] {
+                let mut e = edit.clone();
+                e.keep_fields = if proven {
+                    cal_core::event_diff::kept_fields(&e, Some(&before), true)
+                } else {
+                    Vec::new()
+                };
+                let (set, del) = event_to_update_field_xml_in(
+                    &e,
+                    Some(&before),
+                    &stored,
+                    None,
+                    EventIdKind::RecurringMaster,
+                    &chrono_tz::Europe::Berlin,
+                )
+                .unwrap();
+                assert_eq!(
+                    field_uris(&set),
+                    ["item:Subject"],
+                    "{stored:?}, {proven}: {set}"
+                );
+                assert!(del.is_empty(), "{stored:?}, {proven}: {del}");
+            }
+        }
+    }
+
+    /// A slot that follows the zone only because the clock moves is the
+    /// server's (decisions 106, 240): another device lengthened the meeting
+    /// to 10:30 after this editor opened it at 10:00, and this edit only
+    /// switches the zone, so the server's end is what follows the zone.
+    #[test]
+    fn a_slot_that_only_follows_the_zone_is_the_servers() {
+        let opened = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut server = opened.clone();
+        server.end = "2026-11-02T10:30:00Z".parse().unwrap();
+        let mut edit = opened.clone();
+        edit.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&opened), true);
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&server),
+            &w_europe_zones(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap();
+        assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
+        assert_eq!(element(&set, "End"), "2026-11-02T10:30:00Z", "{set}");
+    }
+
+    /// Without the copy every field goes out; the zone still goes first, the
+    /// title and the slot after it, the rule last, on the new zone's Monday —
+    /// on a device in Honolulu, where it is Sunday.
+    #[test]
+    fn a_blind_update_writes_the_zone_first() {
+        let edit = timed_series(
+            "2026-11-01T23:30:00Z",
+            "FREQ=WEEKLY;COUNT=3",
+            "Europe/Berlin",
+        );
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            None,
+            &StoredZones::default(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Pacific::Honolulu,
+        )
+        .unwrap();
+        let uris = field_uris(&set);
+        let at = |f: &str| {
+            uris.iter()
+                .position(|u| u == f)
+                .unwrap_or_else(|| panic!("{f} missing: {set}"))
+        };
+        assert_eq!(at("calendar:StartTimeZone"), 0, "{set}");
+        assert!(at("item:Subject") < at("calendar:Start"), "{set}");
+        assert!(at("calendar:Start") < at("calendar:Recurrence"), "{set}");
+        assert_eq!(element(&set, "StartDate"), "2026-11-02", "{set}");
+    }
+
+    /// An edited rule that no longer builds fails the save, as it did before
+    /// the comparison of built rules: it is not taken for an unchanged one —
+    /// not even where the server's did not build either.
+    #[test]
+    fn an_edited_rule_that_does_not_build_fails_the_save() {
+        for server_rule in ["FREQ=WEEKLY", "FREQ=HOURLY;INTERVAL=2"] {
+            let before = timed_series("2026-11-02T09:00:00Z", server_rule, "Europe/Berlin");
+            let mut edit = before.clone();
+            edit.recurrence.as_mut().unwrap().rrule = "FREQ=HOURLY".into();
+            edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&before), true);
+            assert!(
+                event_to_update_field_xml_in(
+                    &edit,
+                    Some(&before),
+                    &w_europe_zones(),
+                    None,
+                    EventIdKind::RecurringMaster,
+                    &chrono_tz::Europe::Berlin,
+                )
+                .is_err(),
+                "{server_rule}"
+            );
+        }
+    }
+
+    /// Both boundaries count (233): a series whose start is stored in W.
+    /// Europe and its end in UTC moves its end's clock when the zone is
+    /// written, so the slot follows the zone even on a rule-only change.
+    #[test]
+    fn a_different_stored_end_zone_moves_the_clock() {
+        let before = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut daily = before.clone();
+        daily.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;COUNT=4".into();
+        let stored = StoredZones {
+            end: Some(DayZone::Tz(chrono_tz::UTC)),
+            ..w_europe_zones()
+        };
+        let (set, _) = saved(&daily, &before, &stored, EventIdKind::RecurringMaster);
+        assert_eq!(
+            field_uris(&set),
+            [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
+            "{set}"
+        );
+    }
+
+    /// The zone and the rule are read from the slot the server keeps: an edit
+    /// that changes the rule but leaves the server's all-day flag and slot
+    /// alone — another device made the series all-day after this one opened it
+    /// — writes no zone onto the all-day series (46a), and its rule starts on
+    /// the all-day series' own day, the device's Monday, not on the UTC date
+    /// of this device's stale timed copy.
+    #[test]
+    fn a_kept_all_day_flag_gets_no_zone() {
+        let mut server = timed_series(
+            "2026-11-01T23:00:00Z",
+            "FREQ=DAILY;COUNT=3",
+            "Europe/Berlin",
+        );
+        server.all_day = true;
+        server.end = "2026-11-02T23:00:00Z".parse().unwrap();
+        server.recurrence.as_mut().unwrap().tzid = None;
+        let mut edit = timed_series(
+            "2026-11-01T23:00:00Z",
+            "FREQ=DAILY;COUNT=5",
+            "Europe/Berlin",
+        );
+        edit.keep_fields = vec![EventField::Start, EventField::End, EventField::AllDay];
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&server),
+            &StoredZones::utc(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap();
+        assert!(!set.contains("TimeZone"), "{set}");
+        assert!(!set.contains("calendar:Start\""), "{set}");
+        assert_eq!(element(&set, "StartDate"), "2026-11-02", "{set}");
     }
 }

@@ -175,6 +175,22 @@ selbst: Für Aperio sieht sie genauso aus wie eine Serie, die absichtlich in UTC
 geführt wird. Um eine betroffene Serie zu reparieren, lege sie neu an oder
 stelle ihre Zeitzone in dem Programm wieder ein, aus dem sie stammt.
 
+## Ein Exchange-Termin ist verschoben, nachdem er zur Serie wurde
+
+Hast du in Aperio einen Termin auf einem Exchange-Konto zur Serie gemacht, die
+Zeitzone einer gespeicherten Exchange-Serie gewechselt oder einer ganztägigen
+Exchange-Serie Uhrzeiten gegeben, stand der Termin danach meist um ein oder
+zwei Stunden verschoben, nahe Mitternacht auch an einem anderen Tag. Ein in
+Aperio angelegter Termin am Montag um 00:30 stand danach zum Beispiel sonntags
+um 23:30.
+
+Exchange behält beim Wechsel der Zeitzone die gespeicherte Uhrzeit und deutet
+sie in der neuen Zone. Seit dieser Version schickt Aperio die Zeitzone zuerst
+und danach Beginn und Ende, so bleibt der Termin, wo er war.
+
+Was du tun kannst: Eine Serie, die schon verschoben ist, verschiebst du einmal
+von Hand an die richtige Stelle.
+
 ## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
 
 Aperio sagt dann: „Exchange speichert diesen Termin in einer Zeitzone, die
