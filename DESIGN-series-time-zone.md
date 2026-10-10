@@ -121,11 +121,16 @@ keinen, dort ist die Wahl Tonis Sache.
   deshalb nur diesen Schutz. Die Regel steht einmal im Kern, und die Adapter
   fragen sie. Lesefehler, Update-Regel und Datumsfehler werden eigene Stufen
   nach der dritten Runde.
-- **47a — Änderungen behalten die gespeicherte Zone.** Ändert Aperio einen
-  ganztägigen Exchange-Termin, der schon eine Zone trägt, etwa aus Outlook,
-  gehen Beginn und Ende auf Mitternacht in dieser Zone. Die Zone selbst bleibt
-  unberührt. Das passt zu 18a und dazu, dass Unberührtes wörtlich bleibt. Die
-  dritte Runde bestätigt es vor dem Bau.
+- **47a — Änderungen behalten die gespeicherte Zone.** *(gebaut, PR 8a)*
+  Ändert Aperio einen ganztägigen Exchange-Termin, der schon eine Zone trägt,
+  etwa aus Outlook, gehen Beginn und Ende auf Mitternacht in dieser Zone. Die
+  Zone selbst bleibt unberührt. Das passt zu 18a und dazu, dass Unberührtes
+  wörtlich bleibt. Die dritte Runde hat es bestätigt (R3-1, R3-3, R3-7b). Mit
+  PR 8a kam dazu: jede Grenze in ihrer eigenen gespeicherten Zone (233), auch
+  in einer Zone, deren Kennung tzdatas eigener Name ist (236), oder einer, die
+  Exchange vollständig definiert (232, 239); eine Ausnahme in den Zonen ihrer
+  Serie; ist eine Zone nicht lesbar, wird der Tag nicht geschrieben und die
+  Person hört den Satz aus 237. Der Titel geht trotzdem durch.
 - **48a — ganztägige Serien wiederholen sich an Kalendertagen.** *(gebaut)*
   Aperio wiederholte ganztägige Serien in UTC. Östlich von UTC landete ein
   genannter Wochentag deshalb einen Tag zu spät, bei jedem Anbieter außer
@@ -635,9 +640,12 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   „Exchange kann die Zeitzone {Stadt} nicht speichern; die Serie steht auf
   UTC.“ Kopieren oder Verschieben nach Exchange wird mit der Zone im Grund
   abgelehnt.
-- **Exchange und Microsoft 365** leiten Start- und Enddatum und die Standard-Tage
-  heute aus dem UTC-Datum ab. Beide müssen sie auf der Uhr der Serie lesen, bevor
-  die Editoren Beginn und UNTIL auf diese Uhr stellen.
+- **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf der
+  Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des Geräts,
+  beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone
+  (234), sonst UTC. **Microsoft 365** leitet Start- und Enddatum und die
+  Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
+  lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
 
 ### Nach dem Speichern
@@ -880,7 +888,11 @@ Handy im selben PR.
      eigenen. Die verschobene Ausnahme steht richtig nur am Dienstag.
    - Aperio zeigt die beschädigte Serie einen Tag zu spät (Lesefehler, 48a).
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
-   Danach messen, wie Microsoft 365 recurrenceTimeZone beim Zurücklesen behandelt.
+   Der Exchange-Teil ist mit PR 8a gebaut, zusammen mit 47a (57a). Offen ist
+   Microsoft 365; danach messen, wie es recurrenceTimeZone beim Zurücklesen
+   behandelt. Serien, die Aperio schon mit falschem Starttag geschrieben hat,
+   bleiben, wie sie sind (231): einmal verschieben und Wochentag oder Tag in
+   der Wiederholung neu wählen.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
    `time_zones`: alle, keine (Handy-Kalender) oder nur bestimmte (Exchange). Das
    Handy muss dafür auch die eingebauten Manifeste lesen; ob der Desktop sie
@@ -1048,7 +1060,17 @@ Handy im selben PR.
 
   Ungeprüft bleibt, ob Exchange eigene Zonendefinitionen und Namen, die nur in
   der Windows-Registry stehen (Kamchatka, Mid-Atlantic), so zurückgibt, wie
-  Aperio sie liest: als keine Zone. Ungeprüft ist auch, ob Exchanges eigene
+  Aperio sie liest: als keine Zone. Seit PR 8a liest ein ganztägiger Termin
+  die Definition selbst, wenn Exchange sie mitschickt; ob Exchange 2019 sie in
+  `SyncFolderItems` und `GetItem` füllt, misst der Live-Test von 8a.
+  Ungeprüft aus PR 8a sind außerdem: ob ein Ändern, das Wiederholung und eine
+  neue Zone zusammen schreibt, den ersten Tag in der alten Zone liest (234;
+  die neue Zone nach dem Beginn verschiebt ohnehin die Uhrzeit, Stufen 9 und
+  12); ob Exchange ein Ende in der Endzone rundet, wenn Beginn und Ende
+  verschiedene Zonen tragen (233, R3-2 legt es nahe); was Exchange an einem Tag
+  speichert, dessen Mitternacht die gespeicherte Zone überspringt; ob
+  `EndDate` inklusive ist (ein Schnitt „dieser und alle folgenden“ mit
+  Uhrzeit zeigte den Schnitttag dann doppelt). Ungeprüft ist auch, ob Exchanges eigene
   Zeitzonen-Regeln denen von Windows gleichen, an denen der Uhr-Wächter über die
   Standardzonen gemessen ist.
 - Ob der Desktop die eingebauten Manifeste für die Wiederholungs-Fähigkeiten

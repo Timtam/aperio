@@ -2993,9 +2993,25 @@ Siehe DESIGN §4.2.
   zurück. Das gilt nur, falls Exchange `task:Recurrence` beim Auflisten
   überhaupt liefert, und das ist ungeprüft (`tasks.rs`). Abhilfe wäre, jede
   Aufgabenliste einmal neu zu lesen, etwa über eine Version im Aufgaben-Token.
-  🚩 **Update-Regel für ganztägige Exchange-Termine** (47a) und
+  ↻ **Update-Regel für ganztägige Exchange-Termine** (47a) und
   **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
-  UTC-Datum): eigene PRs nach Runde 3.
+  UTC-Datum): gebaut in PR 8a (2026-10-10, Entscheidungen 231-239). Eine
+  Serie beginnt an ihrem ersten Tag auf der Uhr, auf der Exchange sie
+  wiederholt; ein ganztägiger Tag geht beim Ändern auf Mitternacht in der
+  gespeicherten Zone jeder Grenze; eigene Zonen-Definitionen werden gelesen;
+  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test vor
+  dem Zusammenführen mit einem Desktop-Build (235).
+  🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
+  bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
+  neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt
+  „Sonntag“ in der Regel, eine zweiwöchentliche kann eine Woche verrutscht
+  sein.
+  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
+  🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
+  zur Serie mit neuer Zone, setzt Exchange die Zone nach dem Beginn und
+  behält dabei die Uhrzeit, der Termin wandert um den Versatz (Runde 1,
+  Stufen 9 und 12). Seit 8a beginnt die Regel am Tag der alten Zone (234);
+  der Live-Test sieht nach.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

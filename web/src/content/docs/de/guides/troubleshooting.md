@@ -175,6 +175,25 @@ selbst: Für Aperio sieht sie genauso aus wie eine Serie, die absichtlich in UTC
 geführt wird. Um eine betroffene Serie zu reparieren, lege sie neu an oder
 stelle ihre Zeitzone in dem Programm wieder ein, aus dem sie stammt.
 
+## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
+
+Aperio sagt dann: „Exchange speichert diesen Termin in einer Zeitzone, die
+Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern, den
+Titel und anderes schon. Es wurde nichts geändert.“
+
+Exchange legt einen ganztägigen Termin auf die Mitternächte der Zeitzone, in
+der es ihn speichert. Damit der Termin einen Tag lang bleibt, schreibt Aperio
+einen neuen Tag deshalb als Mitternacht in genau dieser Zeitzone. Meist kennt
+Aperio sie: eine Windows-Zeitzone wie „W. Europe Standard Time“, einen Namen
+wie „Europe/Berlin“ oder eine Zeitzone, die Exchange vollständig mitschickt,
+etwa bei Terminen aus dem Kalender eines iPhones („Customized Time Zone“).
+Schickt Exchange nur einen Namen, den Aperio nicht kennt, ohne ihre Regeln,
+rät Aperio nicht: Sonst stünde der Termin danach in Outlook über zwei Tage.
+
+Was du tun kannst: Ändere den Tag in Outlook. Alles andere, etwa Titel, Ort
+oder Erinnerung, kannst du in Aperio weiter ändern, solange du den Tag dabei
+nicht verschiebst.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.

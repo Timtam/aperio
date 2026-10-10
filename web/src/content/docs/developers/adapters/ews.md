@@ -49,14 +49,17 @@ The endpoint is discovered or user-supplied.
   an inherited value is wrong, a guessed one would be worse.
 - **An all-day exception names its slot by its day.** EWS reports an
   all-day item's instants, an occurrence's `OriginalStart` among them, as
-  midnight in the item's own zone — mostly: after Aperio's own write of an
-  Outlook item (UTC midnights, no zone) Exchange keeps the old zone's
-  midnights and labels them UTC (live round 3). The read samples the day
-  13:45 into it, in the zone Exchange names — the start zone, read as the
-  series' zone is, UTC for a series made without one (`all_day_zone`,
-  decision 217) — which is exact for a midnight that zone names, and the
-  intended day for a label off by any offset in (−10:15, +13:45], New
-  Zealand's summer included. It re-anchors the start, the series'
+  midnight in the item's own zone — mostly: after a write by Aperio before
+  PR 8a (UTC midnights, no zone) Exchange kept the old zone's midnights and
+  labelled them UTC (live round 3). The read samples the day 13:45 into it,
+  in the zone Exchange names for that boundary (`all_day_zone` for the
+  start and the slots, `all_day_end_zone` for the end, decisions 217 and
+  233): an id the CLDR table maps, an id that is tzdata's own name
+  (`Europe/Berlin`, 236), or a zone Exchange defines in full (a custom one
+  such as `Customized Time Zone`, read by `zone_definition`, 232 and 239);
+  UTC for an item made without a zone. That is exact for a midnight the zone
+  names, and the intended day for a label off by any offset in
+  (−10:15, +13:45], New Zealand's summer included. It re-anchors the start, the series'
   exceptions and the override id's slot to this device's local midnight of
   that day (`all_day_anchor`, `override_slot`, decision 215). Where
   Exchange names no zone the adapter can read, the sample is taken in UTC
@@ -151,7 +154,9 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   `Asia/Kolkata`). Exchange keeps one id for a group of cities on one clock, so
   a Vienna series reads back as Berlin. `UTC`, and an id the table does not
   know (custom definitions, registry-only ids), mean no zone; the series
-  repeats in UTC.
+  repeats in UTC. An all-day boundary reads in more zones than a series'
+  clock does: an id that is tzdata's own name and a full definition count
+  there (see the all-day quirk above).
 - **Ids the server knows.** A server refuses a save naming an id it does not
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
   `Sao Tome Standard Time`. The adapter asks each server once
@@ -166,6 +171,39 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   through the core's rule for zones (`series_clock_zone`, then
   `canonical_zone`): no zone, a UTC name or an unknown name writes no zone; any
   spelling of a zone writes that zone's id.
+- **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
+  takes the day the series starts on, on the clock Exchange repeats it on
+  (`rule_first_day`): the device's day for an all-day series, the written
+  zone's day on a create, the stored start zone's day on an update (234:
+  Exchange applies the rule before a zone the same update writes), UTC where
+  none is known. The range's StartDate and the weekday, day of the month and
+  month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
+  Read off the UTC date, as before, they named the day before east of UTC: a
+  daily all-day series created in Berlin for Monday 19 October started on
+  Sunday 18 (R3-6). A series already stored that way stays so (231); moving
+  it and choosing its weekday or day again in the repeat picker mends it.
+- **An all-day day is written on the stored zone's midnights** (47a). An
+  update writes an all-day boundary as midnight, in the zone Exchange stores
+  that boundary in, of the day the device names (`all_day_boundary`; each
+  boundary in its own zone, 233). Exchange rounds a boundary in its stored
+  zone (R3-5b-u), so the UTC midnights Aperio wrote before stretched an
+  Outlook item over two days. `read_before` returns the zones with the copy
+  (`StoredZones`); an exception takes its series' ids and definitions. A
+  create still writes UTC midnights: Aperio creates without a zone, so
+  Exchange stores the item in UTC. Where a boundary's zone cannot be read,
+  or the copy could not be read, the day is not written: the update is
+  refused as `day-zone-unreadable` (237), carried as `Forbidden` so the
+  phone keeps the sentence, or the read's own error stands. A save that
+  leaves the day alone still goes out.
+- **Zone definitions.** `StartTimeZone` and `EndTimeZone` carry the zone's
+  full definition (periods with their bias, yearly changes, eras from
+  absolute transitions). Both item parsers read it onto its own boundary
+  (`ParsedItem::start_zone_definition`, `end_zone_definition`, ITEM_PARSER
+  5), and `zone_definition::ZoneRules` turns it into a clock: the wall time
+  at an instant, and a day's midnight (the first hour after it where a
+  change skips it). A fifth weekday reads as the month's last (238). Whether
+  Exchange 2019 fills these elements in `SyncFolderItems` and `GetItem` is
+  unmeasured; the live test of PR 8a reads one.
 - **Zones Exchange cannot store** are written without a zone: CLDR has no id
   for them (`Antarctica/Troll`), or the id runs another clock in the five
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,

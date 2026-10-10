@@ -5575,14 +5575,18 @@ mod tests {
             ..all_day_single("Aperio zone test R3-6 daily")
         };
         let daily_xml = new_event_to_calendar_item_xml(&daily).unwrap();
+        // Since PR 8a the series starts on the day it names. The builder in
+        // round 3 sent StartDate 2026-10-18 here, and Exchange started the
+        // series on Sunday 18 (R3-6, DESIGN-series-time-zone.md).
         assert!(
-            daily_xml.contains("<t:StartDate>2026-10-18</t:StartDate>"),
+            daily_xml.contains("<t:StartDate>2026-10-19</t:StartDate>"),
             "{daily_xml}"
         );
         write(
             "R3-6-create-daily.xml",
-            "Step R3-6: a daily all-day series from Aperio's create builder, as main sends it: \
-             StartDate 2026-10-18 for Monday 19 October. On which day does Exchange start it?",
+            "Step R3-6: a daily all-day series from Aperio's create builder: StartDate \
+             2026-10-19 for Monday 19 October (round 3 sent 2026-10-18). On which day \
+             does Exchange start it?",
             envelope(&daily_xml),
         );
     }

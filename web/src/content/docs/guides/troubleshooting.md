@@ -163,6 +163,25 @@ looks the same as a series that is meant to run in UTC. To fix an affected
 series, create it again, or set its time zone again in the program it came
 from.
 
+## The day of an all-day Exchange appointment cannot be changed
+
+Aperio then says: "Exchange stores this appointment in a time zone Aperio
+cannot read, so its day cannot be changed here; its title and the rest can.
+Nothing was changed."
+
+Exchange places an all-day appointment on the midnights of the time zone it
+stores it in. So that the appointment stays one day long, Aperio writes a new
+day as midnight in exactly that time zone. Usually Aperio knows it: a Windows
+time zone such as "W. Europe Standard Time", a name such as "Europe/Berlin", or
+a time zone Exchange sends in full, as for appointments from an iPhone's
+calendar ("Customized Time Zone"). When Exchange sends only a name Aperio does
+not know, without its rules, Aperio does not guess: the appointment would
+otherwise stretch over two days in Outlook.
+
+What you can do: change the day in Outlook. Everything else, such as the
+title, the place or the reminder, you can still change in Aperio, as long as
+you do not move the day with it.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.
