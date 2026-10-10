@@ -3175,6 +3175,37 @@ mod server_zone_tests {
         assert!(!update.contains("TimeZone"), "{update}");
     }
 
+    /// Decision 233 through the adapter: a start and an end stored in
+    /// different zones each move on their own zone's midnight. Greenwich for
+    /// the start, W. Europe for the end: the shape Exchange gave R3-2's series.
+    #[tokio::test]
+    async fn each_all_day_boundary_moves_on_its_own_stored_zone() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(
+            &mut server,
+            stored_single(
+                r#"<t:StartTimeZone Id="Greenwich Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>"#,
+            ),
+        )
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        adapter
+            .update_event(moved_to_tuesday())
+            .await
+            .expect("update");
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-13T00:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-13T22:00:00Z</t:End>"),
+            "{update}"
+        );
+    }
+
     /// Decision 237 through the adapter: a custom zone Exchange names by id
     /// alone has no clock; the day is refused by name, carried as Forbidden
     /// so the phone keeps the sentence, and nothing is sent.

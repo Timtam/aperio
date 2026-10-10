@@ -643,7 +643,8 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 - **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf der
   Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des Geräts,
   beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone
-  (234), sonst UTC. **Microsoft 365** leitet Start- und Enddatum und die
+  (234), ohne lesbaren Serverstand die Zone, die die Änderung mitschreibt,
+  sonst UTC. **Microsoft 365** leitet Start- und Enddatum und die
   Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
   lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.

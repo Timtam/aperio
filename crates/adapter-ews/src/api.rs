@@ -730,7 +730,7 @@ pub async fn create_event(
 /// Update an existing calendar item with the supplied event payload.
 /// Fields with a value are set; some emptied ones become DeleteItemField
 /// blocks so EWS clears them server-side (see
-/// [`crate::mapping::event_to_update_field_xml_on`]).
+/// [`crate::mapping::event_to_update_field_xml_in`]).
 ///
 /// A plain occurrence id resolves to its series master (`GetItem` with
 /// `RecurringMasterItemId`), and the edit applies to the whole series. An
@@ -789,12 +789,13 @@ pub async fn update_event(
         Err(err) => {
             // A single or a series head: the row is the user's own, so it is
             // written without a comparison — every field the host did not mark
-            // as left alone (decision 106).
+            // as left alone (decision 106). Whether it is written at all is
+            // known only once the update is built; that is logged below.
             tracing::warn!(
                 target: "adapter_ews::write",
                 ?err,
                 event_id = %event.id,
-                "the current copy could not be read; writing every field not kept, and a kept rule with a moved slot",
+                "the current copy could not be read",
             );
             read_error = Some(err);
             None
@@ -821,19 +822,42 @@ pub async fn update_event(
         target.kind,
         &chrono::Local,
     ) {
-        Err(EwsError::Protocol(message)) if before.is_none() && day_zone_unreadable(&message) => {
+        Err(EwsError::Protocol(message)) if before.is_some() && day_zone_unreadable(&message) => {
+            tracing::warn!(
+                target: "adapter_ews::write",
+                event_id = %event.id,
+                %message,
+                "an all-day day in a zone Aperio cannot read; nothing is written",
+            );
+            return Err(EwsError::Protocol(message));
+        }
+        Err(EwsError::Protocol(message)) if day_zone_unreadable(&message) => {
+            let why = read_error.as_ref().map_or_else(
+                || "the server answered without the item".into(),
+                ToString::to_string,
+            );
+            tracing::warn!(
+                target: "adapter_ews::write",
+                event_id = %event.id,
+                %why,
+                "an all-day day is not written without the current copy; nothing is written",
+            );
             if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
                 return Err(err);
             }
-            let why = read_error
-                .map(|err| err.to_string())
-                .unwrap_or_else(|| "the server answered without the item".into());
             return Err(EwsError::Protocol(
                 cal_core::WriteRefusal::CopyUnreadable.message(&why),
             ));
         }
         other => other?,
     };
+    if before.is_none() {
+        tracing::warn!(
+            target: "adapter_ews::write",
+            event_id = %event.id,
+            "writing without the current copy: every field not kept, and a kept rule with a moved slot",
+        );
+    }
     // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
     // report attendees changed while `keep_attendees` suppresses that block,
     // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits

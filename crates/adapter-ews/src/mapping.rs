@@ -2270,7 +2270,8 @@ pub fn event_to_update_field_xml_on(
 /// each boundary in its own, 233), refused where one is unknown (237). A
 /// series' rule starts on its first day as Exchange will read it: the
 /// device's day for an all-day series, the stored start zone's day for a
-/// timed one (234), UTC where none is known.
+/// timed one (234) or, without the copy, the day of the zone the update
+/// writes beside the rule, UTC where none is known.
 pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     event: &Event,
     before: Option<&Event>,
@@ -8433,6 +8434,68 @@ mod tests {
             all_day_end_zone(&made_without),
             Some(DayZone::Tz(chrono_tz::UTC))
         );
+    }
+
+    /// Decision 233 through the read paths: a single's row and an exception's
+    /// row, inherited or its own, read the end in the end zone. Honolulu's
+    /// midnight of 20 October read in Tokyo, the start's zone, would be the
+    /// 21st.
+    #[test]
+    fn the_read_rows_take_the_end_from_the_end_zone() {
+        let local = |d: &str| local_midnight_in(d.parse().unwrap(), &Local).unwrap();
+        let tokyo_19 = utc("2026-10-18T15:00:00Z");
+        let honolulu_20 = utc("2026-10-20T10:00:00Z");
+        let single = ParsedItem {
+            item_id: "S".into(),
+            subject: "Two zones".into(),
+            start: Some(tokyo_19),
+            end: Some(honolulu_20),
+            item_type: Some("Single".into()),
+            ..all_day_item(Some("Tokyo Standard Time"), Some("Hawaiian Standard Time"))
+        };
+        let row = to_event(single.clone(), "cal").unwrap();
+        assert_eq!(
+            (row.start, row.end),
+            (local("2026-10-19"), local("2026-10-20"))
+        );
+
+        let mut master = ParsedItem {
+            item_id: "M".into(),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..single.clone()
+        };
+        master.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::NoEnd,
+        });
+        let master_ev = to_event(master.clone(), "cal").unwrap();
+        let inherited = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: tokyo_19,
+            end: honolulu_20,
+            original_start: tokyo_19,
+            cancelled: false,
+            own: None,
+        };
+        let own = ModifiedOccurrence {
+            own: Some(Box::new(ParsedItem {
+                item_id: "OCC".into(),
+                item_type: Some("Exception".into()),
+                ..single
+            })),
+            ..inherited.clone()
+        };
+        for ov in [inherited, own] {
+            let row = override_event(&master_ev, &master, &ov, "cal").unwrap();
+            assert_eq!(
+                (row.start, row.end),
+                (local("2026-10-19"), local("2026-10-20")),
+                "own copy: {}",
+                ov.own.is_some()
+            );
+        }
     }
 
     /// Decision 217: an all-day item's instants are midnights in its own zone,
