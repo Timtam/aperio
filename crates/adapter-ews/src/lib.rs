@@ -37,6 +37,7 @@ pub mod mapping;
 pub mod soap;
 pub mod tasks;
 pub mod windows_tz;
+pub mod zone_definition;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

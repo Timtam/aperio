@@ -446,6 +446,16 @@ pub struct ParsedItem {
     /// drained again anyway (`api::ITEM_PARSER`).
     #[serde(default)]
     pub end_time_zone: Option<String>,
+    /// The full definitions Exchange sends inside `<t:StartTimeZone>` and
+    /// `<t:EndTimeZone>`, read for a zone the CLDR table does not know (a
+    /// custom one such as `Customized Time Zone`, decision 232). `None` where
+    /// the element carried only its id. `#[serde(default)]` so older
+    /// persisted state loads; that state is drained again anyway
+    /// (`api::ITEM_PARSER` 5).
+    #[serde(default)]
+    pub start_zone_definition: Option<crate::zone_definition::ZoneDefinition>,
+    #[serde(default)]
+    pub end_zone_definition: Option<crate::zone_definition::ZoneDefinition>,
     /// `<t:OriginalStart>` on an occurrence or exception read by itself (the
     /// occurrence probe): the slot of the series it fills, which stays put when
     /// an exception is moved. `None` elsewhere. `#[serde(default)]` so older
@@ -759,10 +769,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
     let mut current = ParsedItem::default();
     let mut text_target: Option<&'static str> = None;
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
-    // `<t:StartTimeZone>` carries the master's Windows zone id (directly, or on
-    // a nested `<t:TimeZoneDefinition>`); track that we're inside it so the
-    // nested-form id isn't picked up from EndTimeZone.
-    let mut inside_start_timezone = false;
+    // `<t:StartTimeZone>` / `<t:EndTimeZone>` carry their Windows zone id and,
+    // inside, the zone's full definition: a walker reads that subtree, as the
+    // recurrence walker reads `<t:Recurrence>`. `true` for the start zone.
+    let mut zone_walker: Option<(bool, crate::zone_definition::ZoneDefinitionWalker)> = None;
     let mut inside_deleted_occurrences = false;
     let mut inside_deleted_occurrence = false;
     // ModifiedOccurrences mirrors the DeletedOccurrences shape but
@@ -775,7 +785,11 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+            Ok(event @ (XmlEvent::Start(_) | XmlEvent::Empty(_))) => {
+                let empty = matches!(event, XmlEvent::Empty(_));
+                let (XmlEvent::Start(e) | XmlEvent::Empty(e)) = event else {
+                    unreachable!()
+                };
                 let local = e.local_name().as_ref().to_ascii_lowercase();
                 // Recurrence subtree: route to the shared walker
                 // instead of the outer item state machine, so the
@@ -783,6 +797,11 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                 // CalendarItem's `<t:Start>` / `<t:End>` text fields.
                 if let Some(walker) = recurrence_walker.as_mut() {
                     walker.observe_start(local.as_slice());
+                    continue;
+                }
+                // A zone's definition subtree goes to its own walker.
+                if let Some((_, walker)) = zone_walker.as_mut() {
+                    walker.observe_start(local.as_slice(), &e, empty);
                     continue;
                 }
                 match local.as_slice() {
@@ -917,7 +936,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                         text_target = Some("item_type");
                     }
                     b"starttimezone" if inside_item => {
-                        inside_start_timezone = true;
+                        if !empty {
+                            zone_walker =
+                                Some((true, crate::zone_definition::ZoneDefinitionWalker::default()));
+                        }
                         // Simple form: <t:StartTimeZone Id="Eastern Standard Time" .../>.
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
@@ -928,8 +950,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     // The end zone's own id, where Exchange marks a series
                     // created without a zone as `tzone://Microsoft/Utc`
-                    // (decision 43b). Only the element's own id is read; a
-                    // nested full definition belongs to the start zone above.
+                    // (decision 43b), and its own definition (decision 233).
                     b"endtimezone" if inside_item => {
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
@@ -937,16 +958,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
                             }
                         }
-                    }
-                    b"timezonedefinition"
-                        if inside_start_timezone && current.start_time_zone.is_none() =>
-                    {
-                        // Full-definition form: the id sits one level down.
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
-                            }
+                        if !empty {
+                            zone_walker =
+                                Some((false, crate::zone_definition::ZoneDefinitionWalker::default()));
                         }
                     }
                     _ => {}
@@ -982,6 +996,15 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     walker.observe_end_generic();
                     continue;
                 }
+                if let Some((_, walker)) = zone_walker.as_mut() {
+                    if walker.observe_end(local.as_slice()) {
+                        if let Some((is_start, walker)) = zone_walker.take() {
+                            finish_zone(&mut current, is_start, walker);
+                        }
+                    }
+                    text_target = None;
+                    continue;
+                }
                 match local.as_slice() {
                     b"deletedoccurrences" => {
                         inside_deleted_occurrences = false;
@@ -992,7 +1015,6 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"modifiedoccurrences" => {
                         inside_modified_occurrences = false;
                     }
-                    b"starttimezone" => inside_start_timezone = false,
                     b"occurrence" if inside_modified_occurrence => {
                         inside_modified_occurrence = false;
                         if let Some(o) = std::mem::take(&mut current_override).finish() {
@@ -1043,6 +1065,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                 // Recurrence subtree text routes to the walker,
                 // bypassing the outer item field map entirely.
                 if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_text(s);
+                    continue;
+                }
+                if let Some((_, walker)) = zone_walker.as_mut() {
                     walker.observe_text(s);
                     continue;
                 }
@@ -1247,10 +1273,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
     let mut current = ParsedItem::default();
     let mut text_target: Option<&'static str> = None;
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
-    // `<t:StartTimeZone>` carries the master's Windows zone id (directly, or on
-    // a nested `<t:TimeZoneDefinition>`); track that we're inside it so the
-    // nested-form id isn't picked up from EndTimeZone.
-    let mut inside_start_timezone = false;
+    // `<t:StartTimeZone>` / `<t:EndTimeZone>` carry their Windows zone id and,
+    // inside, the zone's full definition: a walker reads that subtree, as the
+    // recurrence walker reads `<t:Recurrence>`. `true` for the start zone.
+    let mut zone_walker: Option<(bool, crate::zone_definition::ZoneDefinitionWalker)> = None;
     let mut inside_deleted_occurrences = false;
     let mut inside_deleted_occurrence = false;
     let mut inside_modified_occurrences = false;
@@ -1265,12 +1291,21 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+            Ok(event @ (XmlEvent::Start(_) | XmlEvent::Empty(_))) => {
+                let empty = matches!(event, XmlEvent::Empty(_));
+                let (XmlEvent::Start(e) | XmlEvent::Empty(e)) = event else {
+                    unreachable!()
+                };
                 let local = e.local_name().as_ref().to_ascii_lowercase();
                 // Recurrence subtree gets routed to the shared walker
                 // — same logic as in `parse_sync_folder_items_response`.
                 if let Some(walker) = recurrence_walker.as_mut() {
                     walker.observe_start(local.as_slice());
+                    continue;
+                }
+                // A zone's definition subtree goes to its own walker.
+                if let Some((_, walker)) = zone_walker.as_mut() {
+                    walker.observe_start(local.as_slice(), &e, empty);
                     continue;
                 }
                 match local.as_slice() {
@@ -1401,7 +1436,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                         text_target = Some("attendee_response");
                     }
                     b"starttimezone" if inside_item => {
-                        inside_start_timezone = true;
+                        if !empty {
+                            zone_walker =
+                                Some((true, crate::zone_definition::ZoneDefinitionWalker::default()));
+                        }
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
                                 current.start_time_zone =
@@ -1409,7 +1447,8 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             }
                         }
                     }
-                    // As in the sync parser: the end zone's own id only.
+                    // As in the sync parser: the end zone's own id and
+                    // definition.
                     b"endtimezone" if inside_item => {
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
@@ -1417,15 +1456,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
                             }
                         }
-                    }
-                    b"timezonedefinition"
-                        if inside_start_timezone && current.start_time_zone.is_none() =>
-                    {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
-                            }
+                        if !empty {
+                            zone_walker =
+                                Some((false, crate::zone_definition::ZoneDefinitionWalker::default()));
                         }
                     }
                     _ => {}
@@ -1452,11 +1485,19 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     walker.observe_end_generic();
                     continue;
                 }
+                if let Some((_, walker)) = zone_walker.as_mut() {
+                    if walker.observe_end(local.as_slice()) {
+                        if let Some((is_start, walker)) = zone_walker.take() {
+                            finish_zone(&mut current, is_start, walker);
+                        }
+                    }
+                    text_target = None;
+                    continue;
+                }
                 match local.as_slice() {
                     b"deletedoccurrences" => inside_deleted_occurrences = false,
                     b"deletedoccurrence" => inside_deleted_occurrence = false,
                     b"modifiedoccurrences" => inside_modified_occurrences = false,
-                    b"starttimezone" => inside_start_timezone = false,
                     b"occurrence" if inside_modified_occurrence => {
                         inside_modified_occurrence = false;
                         if let Some(o) = std::mem::take(&mut current_override).finish() {
@@ -1494,6 +1535,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     continue;
                 }
                 if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_text(s);
+                    continue;
+                }
+                if let Some((_, walker)) = zone_walker.as_mut() {
                     walker.observe_text(s);
                     continue;
                 }
@@ -2428,6 +2473,25 @@ fn format_ews_datetime(ts: DateTime<Utc>) -> String {
 fn ews_all_day_boundary(when: DateTime<Utc>) -> DateTime<Utc> {
     let day = when.with_timezone(&Local).date_naive();
     Utc.from_utc_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+}
+
+/// Store a zone walker's result on the item: the definition, and the id a
+/// nested `TimeZoneDefinition` named where the element itself carried none.
+fn finish_zone(
+    item: &mut ParsedItem,
+    is_start: bool,
+    walker: crate::zone_definition::ZoneDefinitionWalker,
+) {
+    let (definition, nested_id) = walker.finish();
+    let (id, slot) = if is_start {
+        (&mut item.start_time_zone, &mut item.start_zone_definition)
+    } else {
+        (&mut item.end_time_zone, &mut item.end_zone_definition)
+    };
+    *slot = definition;
+    if id.is_none() {
+        *id = nested_id;
+    }
 }
 
 /// Re-anchor an all-day boundary read from EWS at LOCAL midnight of the
@@ -4274,6 +4338,8 @@ mod tests {
             item_type: None,
             start_time_zone: None,
             end_time_zone: None,
+            start_zone_definition: None,
+            end_zone_definition: None,
             original_start: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
@@ -6645,6 +6711,8 @@ mod tests {
             item_type: item_type.map(String::from),
             start_time_zone: None,
             end_time_zone: None,
+            start_zone_definition: None,
+            end_zone_definition: None,
             original_start: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
@@ -7373,6 +7441,136 @@ mod tests {
             crate::windows_tz::read_windows_zone(item.start_time_zone.as_deref().unwrap()),
             crate::windows_tz::WindowsZoneRead::Zone("America/New_York")
         );
+    }
+
+    /// A custom zone's definition, as an Exchange ActiveSync client leaves it
+    /// (`Customized Time Zone`, Name empty), with W. Europe's rules.
+    const CUSTOM_ZONE_BODY: &str = r#"<t:Periods>
+                    <t:Period Bias="-PT1H" Name="Standard" Id="custom/std"/>
+                    <t:Period Bias="-PT2H" Name="Daylight" Id="custom/dst"/>
+                  </t:Periods>
+                  <t:TransitionsGroups>
+                    <t:TransitionsGroup Id="0">
+                      <t:RecurringDayTransition>
+                        <t:To Kind="Period">custom/dst</t:To>
+                        <t:TimeOffset>PT2H</t:TimeOffset>
+                        <t:Month>3</t:Month>
+                        <t:DayOfWeek>Sunday</t:DayOfWeek>
+                        <t:Occurrence>-1</t:Occurrence>
+                      </t:RecurringDayTransition>
+                      <t:RecurringDayTransition>
+                        <t:To Kind="Period">custom/std</t:To>
+                        <t:TimeOffset>PT3H</t:TimeOffset>
+                        <t:Month>10</t:Month>
+                        <t:DayOfWeek>Sunday</t:DayOfWeek>
+                        <t:Occurrence>-1</t:Occurrence>
+                      </t:RecurringDayTransition>
+                    </t:TransitionsGroup>
+                  </t:TransitionsGroups>
+                  <t:Transitions>
+                    <t:Transition><t:To Kind="Group">0</t:To></t:Transition>
+                  </t:Transitions>"#;
+
+    fn zone_item(start_zone: &str, end_zone: &str) -> String {
+        format!(
+            r#"<t:CalendarItem>
+                <t:ItemId Id="ZONED" ChangeKey="CK"/>
+                <t:Subject>Zone</t:Subject>
+                <t:Start>2026-10-11T22:00:00Z</t:Start>
+                <t:End>2026-10-12T22:00:00Z</t:End>
+                <t:IsAllDayEvent>true</t:IsAllDayEvent>
+                <t:CalendarItemType>Single</t:CalendarItemType>
+                {start_zone}
+                {end_zone}
+              </t:CalendarItem>"#
+        )
+    }
+
+    fn in_sync_response(item: &str) -> ParsedItem {
+        let xml = format!(
+            r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>S</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes><t:Create>{item}</t:Create></m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></soap:Body>
+</soap:Envelope>"#
+        );
+        match parse_sync_folder_items_response(&xml).unwrap().changes.remove(0) {
+            SyncChange::Create(item) => item,
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    fn in_get_item_response(item: &str) -> ParsedItem {
+        let xml = format!(
+            r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items>{item}</m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        );
+        parse_get_calendar_items_response(&xml).unwrap().remove(0)
+    }
+
+    /// Both item parsers put a zone's definition on its own boundary, after a
+    /// self-closing zone on the other one: a flag that stayed set after a
+    /// self-closing start zone once took the end zone's children for it.
+    #[test]
+    fn a_zone_definition_lands_on_its_own_boundary() {
+        let id_only = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
+        let custom_end =
+            format!(r#"<t:EndTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:EndTimeZone>"#);
+        let custom_start =
+            format!(r#"<t:StartTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#);
+        let id_only_end = r#"<t:EndTimeZone Id="W. Europe Standard Time"/>"#;
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&zone_item(id_only, &custom_end));
+            assert_eq!(item.start_time_zone.as_deref(), Some("W. Europe Standard Time"));
+            assert_eq!(item.start_zone_definition, None);
+            assert_eq!(item.end_time_zone.as_deref(), Some("Customized Time Zone"));
+            let def = item.end_zone_definition.expect("the end zone's definition");
+            assert_eq!(def.periods.len(), 2);
+            assert_eq!(def.groups.len(), 1);
+            assert_eq!(def.groups[0].transitions.len(), 2);
+            assert_eq!(def.transitions.len(), 1);
+            let rules = crate::zone_definition::ZoneRules::try_from(&def).unwrap();
+            assert_eq!(
+                rules.midnight("2026-10-12".parse().unwrap()),
+                Some("2026-10-11T22:00:00Z".parse().unwrap())
+            );
+            // The item's own fields after the zones are still read.
+            assert_eq!(item.subject, "Zone");
+
+            let item = parse(&zone_item(&custom_start, id_only_end));
+            assert_eq!(item.start_time_zone.as_deref(), Some("Customized Time Zone"));
+            assert!(item.start_zone_definition.is_some());
+            assert_eq!(item.end_time_zone.as_deref(), Some("W. Europe Standard Time"));
+            assert_eq!(item.end_zone_definition, None);
+        }
+    }
+
+    /// A server that wraps the definition in a `TimeZoneDefinition` names the
+    /// id there; it still reaches the item.
+    #[test]
+    fn a_nested_definition_gives_its_id() {
+        let nested = format!(
+            r#"<t:StartTimeZone><t:TimeZoneDefinition Id="Customized Time Zone">{CUSTOM_ZONE_BODY}</t:TimeZoneDefinition></t:StartTimeZone>"#
+        );
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&zone_item(&nested, ""));
+            assert_eq!(item.start_time_zone.as_deref(), Some("Customized Time Zone"));
+            assert!(item.start_zone_definition.is_some());
+        }
     }
 
     /// An exception read on its own carries the slot it fills as its own
