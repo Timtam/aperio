@@ -1136,11 +1136,11 @@ Handy im selben PR.
   `SyncFolderItems` und `GetItem` mit (Live-Test 8a, an einem per EWS
   angelegten Termin); seit PR 8a liest ein ganztägiger Termin sie selbst, die
   Uhr einer Serie behandelt sie weiter als keine Zone. Ungeprüft aus PR 8a sind
-  außerdem: ob Exchange bei einem Ändern die Regel vor der Zone anwendet, die
-  dieselbe Änderung danach schreibt (234; Schritt 9 des Live-Tests 8a kann das
-  nicht zeigen, weil jede Reihenfolge sonntags 23:30 ergibt; seit dem
-  Zonen-PR kommt die Regel nach der Zone, und die Frage entscheidet nur noch,
-  wo die Uhr bleibt); ob Beginn und Ende, die einem Zonenwechsel folgen, und
+  außerdem: ob Exchange das Startdatum einer Regel auf der gespeicherten
+  Startzone liest, wo die Uhr bleibt (234, aus Runde 1 abgeleitet). Ob es eine
+  Regel vor einer Zone anwendet, die dieselbe Änderung danach schreibt, ist
+  seit dem Zonen-PR ohne Bedeutung: Die Zone kommt immer zuerst. Ungeprüft
+  sind auch: ob Beginn und Ende, die einem Zonenwechsel folgen, und
   eine neu geschriebene Regel die Ausnahmen einer Serie stehen lassen (misst
   der Live-Test des Zonen-PRs); ein Termin mit
   eigener Zone vom iPhone oder aus einer Einladung und

@@ -2245,8 +2245,9 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// is a SUBSET of what the same event emits without — never a superset, and
 /// never another value — except that a kept rule and its zone are the server's
 /// own, so is a slot written only because the zone moves the clock (decision
-/// 240), and a rule written over a slot the edit keeps starts on that kept
-/// slot's first day. So a field the COMPARISON suppresses is one whose value the
+/// 240), and a zone and a rule written over a slot the edit keeps are read from
+/// that kept slot: its all-day flag (a timed server item gets its zone, an
+/// all-day one none, 46a) and its first day. So a field the COMPARISON suppresses is one whose value the
 /// server already has; a field `keep_fields` suppresses may differ from the
 /// server's, on purpose.
 ///
@@ -2494,8 +2495,10 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // rule — a kept rule is then rebuilt from the start it now stands on, and a
     // moving clock counts as such a slot. A kept rule under a first day that
     // stays is left as the server has it, so another device's COUNT or UNTIL
-    // survives, and so do the series' exceptions: a zone change alone writes no
-    // rule. The slot never deletes a rule: an edit without one says nothing
+    // survives. A zone change writes no rule while the rule's first day and
+    // weekday stay the same on the new clock, and rewrites it where the switch
+    // moves them; whether Exchange keeps a series' exceptions when the slot or
+    // the rule is written again is measured live, not assumed. The slot never deletes a rule: an edit without one says nothing
     // about the server's. A missing copy's rule is unknown, not equal: a blind
     // write writes the edit's rule, or deletes the server's. And an edited rule
     // that no longer builds is written, so the save fails with it instead of
@@ -6276,6 +6279,25 @@ mod tests {
                     ..base.clone()
                 },
             ),
+            (
+                // An all-day series whose rule carries a zone: the zone a
+                // write reads from a kept all-day flag (46a, `landed`).
+                "all-day weekly in Berlin",
+                Event {
+                    all_day: true,
+                    recurrence: weekly(Some("Europe/Berlin"), "FREQ=WEEKLY"),
+                    ..base.clone()
+                },
+            ),
+            (
+                // The same start, a later end: a kept end that differs.
+                "longer, weekly in Berlin",
+                Event {
+                    end: base.end + chrono::Duration::hours(1),
+                    recurrence: weekly(Some("Europe/Berlin"), "FREQ=WEEKLY"),
+                    ..base.clone()
+                },
+            ),
         ];
         let server = ServerTimeZones::new(["w. europe standard time"]);
         // What the host may mark kept (decision 106): nothing, some, all.
@@ -6379,6 +6401,23 @@ mod tests {
                             if slot_kept
                                 && block.contains(r#"FieldURI="calendar:Recurrence""#)
                                 && rule_on_servers_slot.is_some_and(|rule| block.contains(&rule))
+                            {
+                                continue;
+                            }
+                            // The fourth exception, on purpose: where the edit
+                            // keeps the all-day flag of a server item that is
+                            // timed, the zone is the one a timed item takes —
+                            // read from the kept slot, like the rule — which a
+                            // write without the copy, writing this device's
+                            // all-day flag, never names (46a).
+                            let zone_field = block.contains(r#"FieldURI="calendar:StartTimeZone""#)
+                                || block.contains(r#"FieldURI="calendar:EndTimeZone""#);
+                            let timed_servers_zone =
+                                series_windows_zone(false, edit.recurrence.as_ref(), Some(&server));
+                            if zone_field
+                                && keep.contains(&EventField::AllDay)
+                                && !before.all_day
+                                && timed_servers_zone.is_some_and(|id| block.contains(id))
                             {
                                 continue;
                             }
@@ -10176,8 +10215,8 @@ mod tests {
     }
 
     /// 10:00 in Berlin is 04:00 in New York, the same Monday: the zone and the
-    /// slot on the new clock, and no rule (decision 241), so a rewritten rule
-    /// puts none of the series' exceptions at risk.
+    /// slot on the new clock, and no rule (decision 241). Whether the series'
+    /// exceptions survive the slot written again is the live test's to say.
     #[test]
     fn a_zone_switch_on_the_same_day_writes_no_rule() {
         let before = timed_series(
@@ -10387,6 +10426,44 @@ mod tests {
             [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
             "{set}"
         );
+    }
+
+    /// The mirror: this device still holds a series all-day that another device
+    /// made timed at the same start, and the edit changes only the rule while
+    /// keeping the slot. The server stays timed, so it gets its zone first and,
+    /// stored in UTC, its own timed slot after it on the new clock (240, 106).
+    #[test]
+    fn a_kept_timed_flag_gets_the_zone_and_the_servers_slot() {
+        let server = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut edit = server.clone();
+        edit.all_day = true;
+        edit.end = "2026-11-03T09:00:00Z".parse().unwrap();
+        edit.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;COUNT=5".into();
+        edit.keep_fields = vec![EventField::Start, EventField::End, EventField::AllDay];
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&server),
+            &StoredZones::utc(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap();
+        assert_eq!(
+            field_uris(&set),
+            [&ZONE[..], &SLOT[..], &["calendar:Recurrence"][..]].concat(),
+            "{set}"
+        );
+        assert!(
+            set.contains(r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#),
+            "{set}"
+        );
+        assert_eq!(element(&set, "IsAllDayEvent"), "false", "{set}");
+        assert_eq!(element(&set, "End"), "2026-11-02T10:00:00Z", "{set}");
     }
 
     /// The zone and the rule are read from the slot the server keeps: an edit
