@@ -7,7 +7,9 @@
 //! by the protocols, what an Exchange ActiveSync client or an iCalendar
 //! invitation's VTIMEZONE leaves — or a registry-only id. Decision 232 reads
 //! such a zone's definition, where Exchange sends one, to find the item's
-//! midnights rather than refusing or guessing. Whether Exchange 2019 sends it
+//! midnights rather than refusing or guessing. Exchange 2019 sends it in
+//! `GetItem` and `SyncFolderItems` (the 8a live test, on an item created
+//! through EWS with a definition); an item from an iPhone or an invitation
 //! is unmeasured.
 //!
 //! The wire shape (Exchange 2010 and later):

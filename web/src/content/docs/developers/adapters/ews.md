@@ -97,12 +97,9 @@ The endpoint is discovered or user-supplied.
   on an Outlook one whose start zone Aperio's update had set to Greenwich
   while its end zone stayed W. Europe (round 3). Both sit at offset 0, so `Z`
   cannot tell the request's UTC context from the series' own zone.
-  `EndDate` has the same `xs:date` type, and Microsoft documents that EWS
-  adds a zone to the values it returns, so it is taken to carry one too;
-  that is inferred, not measured. The schema also allows an offset (`+02:00`,
-  `-05:00`); whether Exchange writes one for a series in a zone off UTC is
-  unmeasured. Aperio sends no `TimeZoneContext`, and EWS's default context
-  is UTC, so `Z` may come on every series. The reader keeps only the date
+  A series in W. Europe, read without a `TimeZoneContext`, carries an offset
+  on both dates instead: `2026-11-04+01:00` (the 8a live test, 2026-10-10).
+  So `Z` does not come on every series. The reader keeps only the date
   (`range_date`), both when it parses `EndDate` and when it turns a cached
   range into `UNTIL`. Before READ_RULE 3 it cut only `T` and `+`, so
   `UNTIL=20261105ZT235959Z` came out and the expanders refused the rule: the
@@ -176,12 +173,15 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   (`rule_first_day`): the device's day for an all-day series, the written
   zone's day on a create, the stored start zone's day on an update (234),
   the zone the update writes with the rule when the copy could not be read,
-  UTC where none is known. Where an update also changes the zone, 234 does
-  not hold: live round 6 turned a single created in Aperio, Monday 00:30 in
-  Berlin, into a weekly series and found it on Sundays at 23:30. The rule
-  started on the stored zone's (UTC) Sunday, and the new zone, written
-  after it, kept the stored wall clock (round 1, stages 9 and 12). The next
-  PR writes the zone before the start, the end and the rule.
+  UTC where none is known. Where an update also changes the zone, the item
+  still moves: the 8a live test turned a single created in Aperio, Monday
+  00:30 in Berlin, into a weekly series and found it on Sundays at 23:30.
+  The update sent the rule (from the stored zone's Sunday, 234) and then the
+  zone, without the start or the end. Exchange applied them in that order,
+  as 234 assumes, and the new zone kept the stored wall clock (as the zone
+  after the start did in round 1, stages 9 and 12). The next PR writes the
+  zone, then the start and the end even when they did not change, then the
+  rule on the new zone's day, which replaces 234.
   The range's StartDate and the weekday, day of the month and
   month of a rule without BYDAY, BYMONTHDAY or BYMONTH come from that day.
   Read off the UTC date, as before, they named the day before east of UTC: a
@@ -216,7 +216,8 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   change skips it). A fifth weekday reads as the month's last (238).
   Exchange 2019 fills these elements in `SyncFolderItems` and `GetItem`, and
   a custom zone's day moved on its definition's midnight lands as one day
-  (live round 6, PR 8a).
+  (the 8a live test, on an item created through EWS with a definition). An
+  item with a custom zone from an iPhone or an invitation is unmeasured.
 - **Zones Exchange cannot store** are written without a zone: CLDR has no id
   for them (`Antarctica/Troll`), or the id runs another clock in the five
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,

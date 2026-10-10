@@ -2966,14 +2966,11 @@ Siehe DESIGN §4.2.
   einer, die Aperio ohne Zone angelegt hat (Runde 2), und einer aus Outlook,
   deren Startzone Aperios Änderung auf Greenwich gesetzt hatte (Runde 3).
   Beide liegen bei Versatz 0; `Z` sagt dort nicht, ob es die UTC-Rechnung
-  der Anfrage oder die Zone der Serie meint. Dass das Enddatum ebenso eine
-  Zone trägt, ist gefolgert, nicht gemessen: gleicher Datentyp, und laut
-  Microsoft hängt EWS an zurückgegebene Werte eine Zone an. Ob Exchange bei
-  einer Serie in einer Zone abseits von UTC einen Versatz schreibt, ist
-  ungemessen. Aperio schickt keinen `TimeZoneContext`, und ohne ihn rechnet
-  EWS in UTC. Womöglich kommt `Z` also bei JEDER Serie, dann betraf der
-  Fehler jede Exchange-Serie mit Enddatum, auch die in Outlook angelegten.
-  Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
+  der Anfrage oder die Zone der Serie meint. Der Live-Test 8a (2026-10-10)
+  hat für eine Serie in W. Europe ohne `TimeZoneContext` gemessen: Start- und
+  Enddatum kommen mit Versatz zurück, `2026-11-04+01:00`. `Z` kommt also
+  nicht bei jeder Serie; der Fehler traf Serien mit `Z` und mit einem Versatz
+  westlich von UTC. Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
   westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
   beide Ausroller ablehnten: Die Serie erschien nur am Beginn ihres Masters,
   dem ersten Termin der Regel, auch wenn dieses Vorkommen geändert oder
@@ -2999,10 +2996,14 @@ Siehe DESIGN §4.2.
   Serie beginnt an ihrem ersten Tag auf der Uhr, auf der Exchange sie
   wiederholt; ein ganztägiger Tag geht beim Ändern auf Mitternacht in der
   gespeicherten Zone jeder Grenze; eigene Zonen-Definitionen werden gelesen;
-  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test
-  Runde 6 am 10.10.2026: Schritte 1 bis 7 bestanden, auch eine eigene Zone
-  und „Europe/Berlin“ (Einzelheiten in DESIGN, Stufe 4, „Gemessen“).
-  🚩 **Schnitttag doppelt** (235, gemessen in Runde 6): Ein Schnitt „dieser
+  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test 8a
+  am 10.10.2026: Schritte 1 bis 5 und 7 bestanden. Schritt 6 (ein Termin vom
+  iPhone) war nicht machbar; ein Testprogramm hat stattdessen eigene Termine
+  per EWS angelegt, eine eigene Zone und „Europe/Berlin“, beide bestanden.
+  Ungemessen bleiben ein Termin mit eigener Zone vom iPhone oder aus einer
+  Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
+  DESIGN, Stufe 4, „Gemessen“).
+  🚩 **Schnitttag doppelt** (235, gemessen im Live-Test 8a): Ein Schnitt „dieser
   und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigt den Schnitttag
   in beiden Serien. Die alte Serie endet mit `UNTIL` eine Sekunde vor dem
   Schnitt, das Enddatum ist dessen Datum, und Exchange zählt es mit. Das
@@ -3016,15 +3017,18 @@ Siehe DESIGN §4.2.
   eine Woche verrutscht sein.
   🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
   🚩 **Zone und Wiederholung in einem Ändern:** Wird ein Termin mit Uhrzeit
-  zur Serie mit neuer Zone, setzt Exchange die Zone nach dem Beginn und
-  behält dabei die Uhrzeit, der Termin wandert um den Versatz (Runde 1,
-  Stufen 9 und 12). Runde 6 hat es gemessen: Ein in Aperio angelegter
+  zur Serie mit neuer Zone, behält Exchange die gespeicherte Uhrzeit und gibt
+  ihr die neue Zone, der Termin wandert um den Versatz (Runde 1, Stufen 9
+  und 12: eine Zone nach Beginn und Ende). Der Live-Test 8a hat es für eine
+  Änderung ohne Beginn und Ende gemessen: Ein in Aperio angelegter
   Einzeltermin am Montag um 00:30, wöchentlich gemacht, steht danach sonntags
-  um 23:30. Die Regel beginnt nach 234 am Tag der alten Zone (UTC: Sonntag);
-  234 ist damit widerlegt. Nächster PR nach 8a: die Zone vor Beginn, Ende und
-  Regel schreiben und die Regel am Tag der neuen Zone beginnen lassen. Dass
-  die Zone zuerst die Zeitpunkte stehen lässt, ist nur an einer ganztägigen
-  Serie gemessen (Runde 2, B4); für eine mit Uhrzeit misst es der PR.
+  um 23:30. Die Änderung schrieb nur die Regel (ab dem Tag der alten Zone UTC:
+  Sonntag, 234) und danach die Zone. Exchange wandte die Felder in dieser
+  Reihenfolge an, wie 234 annimmt. Nächster PR nach 8a: die Zone schreiben,
+  dann Beginn und Ende, auch wenn sie sich nicht ändern, dann die Regel am Tag
+  der neuen Zone; das löst 234 ab. Dass die Zone zuerst die Zeitpunkte stehen
+  lässt, ist nur an einer ganztägigen Serie gemessen (Runde 2, B4); für eine
+  mit Uhrzeit misst es der PR.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die
