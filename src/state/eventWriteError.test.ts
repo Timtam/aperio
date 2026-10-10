@@ -198,6 +198,25 @@ describe('a device store the OS has not opened', () => {
   });
 });
 
+describe('an all-day day in a time zone Aperio cannot read', () => {
+  it('reads as its own refusal, behind the wrapper too, and as nothing written', () => {
+    // Decision 237: Exchange stores the appointment in a zone with no clock
+    // Aperio can compute, so its day is not moved; the title still saves.
+    const desktop = command('forbidden', 'day-zone-unreadable: no-zone');
+    const phone = new Error(
+      "Calling the 'updateEventJson' function has failed\n→ Caused by: day-zone-unreadable: no-zone",
+    );
+    for (const err of [desktop, phone]) {
+      expect(eventWriteRefusal(err)?.refusal).toBe('day-zone-unreadable');
+      expect(eventWriteErrorMessage(err, t)).toMatch(/Zeitzone, die Aperio nicht lesen kann/);
+      expect(eventWriteErrorMessage(err, t)).toMatch(/den Titel und anderes schon/);
+      expect(eventWriteErrorMessage(err, t)).not.toMatch(/no-zone/);
+    }
+    expect(eventWriteFailureReason(desktop, t)).toMatch(/Zeitzone, die Aperio nicht lesen kann/);
+    expect(writeNeverLanded(desktop)).toBe(true);
+  });
+});
+
 describe('any write on the phone, not only the event editor', () => {
   it('says a refusal as its sentence and anything else as before', async () => {
     const { writeErrorMessage } = await import('@aperio/shared');

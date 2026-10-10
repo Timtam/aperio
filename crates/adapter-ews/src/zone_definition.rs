@@ -692,7 +692,7 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
         let mut number = String::new();
         let mut unit_at = 0usize;
         for c in part.chars() {
-            if c.is_ascii_digit() || (Some(c) != None && c == '.' && fraction_on.is_some()) {
+            if c.is_ascii_digit() || (c == '.' && fraction_on.is_some()) {
                 number.push(c);
                 continue;
             }

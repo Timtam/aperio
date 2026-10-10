@@ -3023,4 +3023,176 @@ mod server_zone_tests {
             ["read", "no zone"],
         );
     }
+
+    /// An all-day single as Exchange stores it, its start zone given as
+    /// `zone_xml`, on Monday 12 October in W. Europe.
+    fn stored_single(zone_xml: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="IID" ChangeKey="CK"/>
+        <t:Subject>Custom</t:Subject>
+        <t:Start>2026-10-11T22:00:00Z</t:Start>
+        <t:End>2026-10-12T22:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:CalendarItemType>Single</t:CalendarItemType>
+        {zone_xml}
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A custom zone with W. Europe's rules, as an Exchange ActiveSync
+    /// client leaves it.
+    const CUSTOM_W_EUROPE: &str = r#"<t:StartTimeZone Id="Customized Time Zone" Name="">
+          <t:Periods>
+            <t:Period Bias="-PT1H" Name="Standard" Id="c/std"/>
+            <t:Period Bias="-PT2H" Name="Daylight" Id="c/dst"/>
+          </t:Periods>
+          <t:TransitionsGroups><t:TransitionsGroup Id="0">
+            <t:RecurringDayTransition><t:To Kind="Period">c/dst</t:To><t:TimeOffset>PT2H</t:TimeOffset><t:Month>3</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+            <t:RecurringDayTransition><t:To Kind="Period">c/std</t:To><t:TimeOffset>PT3H</t:TimeOffset><t:Month>10</t:Month><t:DayOfWeek>Sunday</t:DayOfWeek><t:Occurrence>-1</t:Occurrence></t:RecurringDayTransition>
+          </t:TransitionsGroup></t:TransitionsGroups>
+          <t:Transitions><t:Transition><t:To Kind="Group">0</t:To></t:Transition></t:Transitions>
+        </t:StartTimeZone>"#;
+
+    /// The same appointment moved to Tuesday 13 October, on this device's
+    /// midnights (an all-day day is kept that way).
+    fn moved_to_tuesday() -> Event {
+        let stamp: chrono::DateTime<chrono::Utc> = "2026-10-01T00:00:00Z".parse().unwrap();
+        let midnight = |d: &str| {
+            crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
+        };
+        Event {
+            keep_attendees: false,
+            keep_fields: Vec::new(),
+            clear_attendees: false,
+            organized_elsewhere: false,
+            id: "S:IID|CK".into(),
+            calendar_id: "FA|FCK".into(),
+            title: "Custom".into(),
+            description: None,
+            location: None,
+            start: midnight("2026-10-13"),
+            end: midnight("2026-10-14"),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: false,
+            created_at: stamp,
+            updated_at: stamp,
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+            scheduling_silenced: false,
+        }
+    }
+
+    async fn serve_stored(server: &mut Server, stored: String) -> Arc<StdMutex<Vec<String>>> {
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("<m:GetItem>") {
+                    stored.clone()
+                } else {
+                    CREATED.to_string()
+                };
+                seen.lock().unwrap().push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        requests
+    }
+
+    /// Decisions 232 and 47a through the adapter: a custom zone's day moves
+    /// on the midnights its definition gives, with no zone written.
+    #[tokio::test]
+    async fn an_all_day_day_in_a_custom_zone_moves_on_its_definition() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, stored_single(CUSTOM_W_EUROPE)).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        adapter
+            .update_event(moved_to_tuesday())
+            .await
+            .expect("update");
+        let requests = requests.lock().unwrap();
+        let update = requests
+            .iter()
+            .find(|b| b.contains("UpdateItem"))
+            .expect("an UpdateItem");
+        assert!(
+            update.contains("<t:Start>2026-10-12T22:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-13T22:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "{update}");
+    }
+
+    /// Decision 237 through the adapter: a custom zone Exchange names by id
+    /// alone has no clock; the day is refused by name, carried as Forbidden
+    /// so the phone keeps the sentence, and nothing is sent.
+    #[tokio::test]
+    async fn an_all_day_day_in_an_unreadable_zone_is_refused_and_nothing_is_sent() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(
+            &mut server,
+            stored_single(r#"<t:StartTimeZone Id="Customized Time Zone" Name=""/>"#),
+        )
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::DayZoneUnreadable, "no-zone"))
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
+
+    /// Without the copy no stored zone is known, and an all-day day is not
+    /// written blind: the user hears what kept the copy away.
+    #[tokio::test]
+    async fn an_all_day_day_is_not_written_without_the_copy() {
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, CREATED.to_string()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(moved_to_tuesday()).await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+    }
 }

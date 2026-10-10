@@ -9204,4 +9204,438 @@ mod tests {
         assert!(body.contains(r#"<t:FieldURI FieldURI="item:Body"/>"#));
         assert!(body.contains("<t:BodyType>Text</t:BodyType>"));
     }
+
+    // ── PR 8a: the date bug and 47a ─────────────────────────────────────
+    //
+    // Every test here pins the device clock through the `_in` builders, so it
+    // reads the same on CI (UTC), on Toni's machine (Berlin) and anywhere else.
+
+    fn midnight_on<D: TimeZone>(day: &str, device: &D) -> DateTime<Utc> {
+        local_midnight_in(day.parse().unwrap(), device).unwrap()
+    }
+
+    /// The `<t:...>` text of the first element named `tag` in `xml`.
+    fn element<'a>(xml: &'a str, tag: &str) -> &'a str {
+        let open = format!("<t:{tag}>");
+        let start = xml
+            .find(&open)
+            .unwrap_or_else(|| panic!("no {tag} in {xml}"))
+            + open.len();
+        let end = start + xml[start..].find("</t:").unwrap();
+        &xml[start..end]
+    }
+
+    fn all_day_new(device: &chrono_tz::Tz, rrule: &str) -> NewEvent {
+        let mut ev = new_event_min("Monday");
+        ev.all_day = true;
+        ev.start = midnight_on("2026-10-19", device);
+        ev.end = midnight_on("2026-10-20", device);
+        ev.recurrence = Some(EventRecurrence {
+            rrule: rrule.into(),
+            exceptions: Vec::new(),
+            tzid: None,
+        });
+        ev
+    }
+
+    /// An all-day series starts on the day it names on every device: read
+    /// off the UTC date, Monday 19 October named Sunday 18 east of UTC, and
+    /// the series started there (live round 3, R3-6).
+    #[test]
+    fn an_all_day_series_starts_on_the_day_it_names() {
+        use chrono_tz::{America, Asia, Europe, Pacific};
+        for device in [
+            Europe::Berlin,
+            Asia::Tokyo,
+            Pacific::Auckland,
+            Pacific::Honolulu,
+            America::New_York,
+        ] {
+            let create = |rrule: &str| {
+                new_event_to_calendar_item_xml_in(&all_day_new(&device, rrule), None, &device)
+                    .unwrap()
+            };
+            let daily = create("FREQ=DAILY;COUNT=4");
+            assert_eq!(element(&daily, "StartDate"), "2026-10-19", "{device}");
+            // The day goes out as UTC midnight: Aperio creates it without a zone.
+            assert_eq!(element(&daily, "Start"), "2026-10-19T00:00:00Z", "{device}");
+            assert_eq!(element(&daily, "End"), "2026-10-20T00:00:00Z", "{device}");
+            assert_eq!(
+                element(&create("FREQ=WEEKLY"), "DaysOfWeek"),
+                "Monday",
+                "{device}"
+            );
+            assert_eq!(
+                element(&create("FREQ=MONTHLY"), "DayOfMonth"),
+                "19",
+                "{device}"
+            );
+            let yearly = create("FREQ=YEARLY");
+            assert_eq!(element(&yearly, "Month"), "October", "{device}");
+            assert_eq!(element(&yearly, "DayOfMonth"), "19", "{device}");
+        }
+    }
+
+    /// A zoned timed series starts on its wall clock's day: Monday 00:30 in
+    /// Berlin is Sunday in UTC, Monday 20:00 in New York is Tuesday in UTC.
+    #[test]
+    fn a_zoned_series_starts_on_its_wall_clock_day() {
+        let device = chrono_tz::Europe::Berlin;
+        for (tzid, start) in [
+            ("Europe/Berlin", "2026-10-18T22:30:00Z"),
+            ("America/New_York", "2026-10-20T00:00:00Z"),
+            ("Asia/Tokyo", "2026-10-18T23:00:00Z"),
+            ("Pacific/Honolulu", "2026-10-20T01:00:00Z"),
+        ] {
+            let mut ev = new_event_min("Weekly");
+            ev.start = start.parse().unwrap();
+            ev.end = ev.start + chrono::Duration::minutes(30);
+            ev.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let xml = new_event_to_calendar_item_xml_in(&ev, None, &device).unwrap();
+            assert_eq!(element(&xml, "StartDate"), "2026-10-19", "{tzid}");
+            assert_eq!(element(&xml, "DaysOfWeek"), "Monday", "{tzid}");
+            assert!(xml.contains("<t:StartTimeZone Id="), "{tzid}: {xml}");
+        }
+    }
+
+    /// A timed series written without a zone repeats on UTC, so its first day
+    /// is the UTC date, whatever the device's day is.
+    #[test]
+    fn a_zoneless_timed_series_starts_on_the_utc_day() {
+        let mut ev = new_event_min("Weekly");
+        ev.start = "2026-10-18T23:30:00Z".parse().unwrap();
+        ev.end = "2026-10-19T00:00:00Z".parse().unwrap();
+        ev.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY".into(),
+            exceptions: Vec::new(),
+            tzid: None,
+        });
+        let xml = new_event_to_calendar_item_xml_in(&ev, None, &chrono_tz::Europe::Berlin).unwrap();
+        assert_eq!(element(&xml, "StartDate"), "2026-10-18");
+        assert_eq!(element(&xml, "DaysOfWeek"), "Sunday");
+        assert!(!xml.contains("TimeZone"), "{xml}");
+    }
+
+    /// A zone this server cannot store goes out without one, so the series
+    /// repeats on UTC and starts on the UTC day: Tokyo's Monday 08:00 is
+    /// Sunday 23:00 in UTC.
+    #[test]
+    fn a_zone_the_server_cannot_store_starts_on_the_utc_day() {
+        let server = ServerTimeZones::new(["W. Europe Standard Time"]);
+        let mut ev = new_event_min("Weekly");
+        ev.start = "2026-10-18T23:00:00Z".parse().unwrap();
+        ev.end = "2026-10-18T23:30:00Z".parse().unwrap();
+        ev.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY".into(),
+            exceptions: Vec::new(),
+            tzid: Some("Asia/Tokyo".into()),
+        });
+        let xml = new_event_to_calendar_item_xml_in(&ev, Some(&server), &chrono_tz::Europe::Berlin)
+            .unwrap();
+        assert!(!xml.contains("TimeZone"), "{xml}");
+        assert_eq!(element(&xml, "StartDate"), "2026-10-18");
+        assert_eq!(element(&xml, "DaysOfWeek"), "Sunday");
+    }
+
+    fn w_europe_zones() -> StoredZones {
+        StoredZones {
+            start: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
+            end: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
+        }
+    }
+
+    fn all_day_master(device: &chrono_tz::Tz, rrule: &str) -> Event {
+        let mut ev = zoned_master(None);
+        ev.all_day = true;
+        ev.start = midnight_on("2026-10-19", device);
+        ev.end = midnight_on("2026-10-20", device);
+        ev.recurrence = Some(EventRecurrence {
+            rrule: rrule.into(),
+            exceptions: Vec::new(),
+            tzid: None,
+        });
+        ev
+    }
+
+    /// An Outlook all-day series whose rule alone changes starts on its day:
+    /// the start does not move, so no slot is written, but the rule carries
+    /// the right StartDate.
+    #[test]
+    fn a_rule_only_edit_of_an_all_day_series_starts_on_its_day() {
+        use chrono_tz::{Asia, Europe, Pacific};
+        for device in [Europe::Berlin, Asia::Tokyo, Pacific::Auckland] {
+            let before = all_day_master(&device, "FREQ=WEEKLY;BYDAY=MO");
+            let mut edit = before.clone();
+            edit.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;COUNT=4".into();
+            let (set, _) = event_to_update_field_xml_in(
+                &edit,
+                Some(&before),
+                &w_europe_zones(),
+                None,
+                EventIdKind::RecurringMaster,
+                &device,
+            )
+            .unwrap();
+            assert_eq!(element(&set, "StartDate"), "2026-10-19", "{device}: {set}");
+            assert!(
+                !set.contains("calendar:Start\""),
+                "{device}: no slot: {set}"
+            );
+        }
+    }
+
+    /// A title-only save of an all-day series writes no rule: both sides of
+    /// the comparison build the rule on the same first day.
+    #[test]
+    fn a_title_only_save_of_an_all_day_series_writes_no_rule() {
+        use chrono_tz::{Asia, Europe, Pacific};
+        for device in [
+            Europe::Berlin,
+            Asia::Tokyo,
+            Pacific::Auckland,
+            Pacific::Honolulu,
+        ] {
+            for stored in [w_europe_zones(), StoredZones::utc()] {
+                let before = all_day_master(&device, "FREQ=WEEKLY");
+                let mut edit = before.clone();
+                edit.title = "Renamed".into();
+                let (set, del) = event_to_update_field_xml_in(
+                    &edit,
+                    Some(&before),
+                    &stored,
+                    None,
+                    EventIdKind::RecurringMaster,
+                    &device,
+                )
+                .unwrap();
+                assert!(set.contains("item:Subject"), "{device}: {set}");
+                assert!(
+                    !set.contains("Recurrence") && !del.contains("Recurrence"),
+                    "{device}: {set}"
+                );
+            }
+        }
+    }
+
+    fn moved_single(device: &chrono_tz::Tz) -> (Event, Event) {
+        let mut before = zoned_master(None);
+        before.recurrence = None;
+        before.all_day = true;
+        before.start = midnight_on("2026-10-19", device);
+        before.end = midnight_on("2026-10-20", device);
+        let mut edit = before.clone();
+        edit.start = midnight_on("2026-10-20", device);
+        edit.end = midnight_on("2026-10-21", device);
+        (before, edit)
+    }
+
+    fn slot_of(set: &str) -> (&str, &str) {
+        (element(set, "Start"), element(set, "End"))
+    }
+
+    /// Decision 47a: an all-day day moves on the midnights of the zone
+    /// Exchange stores the item in, on any device; each boundary in its own
+    /// zone (233). Stored in UTC, the bytes are what Aperio always wrote.
+    #[test]
+    fn an_all_day_day_moves_on_the_stored_zones_midnights() {
+        use chrono_tz::{Asia, Europe, Pacific};
+        let zones = |start: chrono_tz::Tz, end: chrono_tz::Tz| StoredZones {
+            start: Some(DayZone::Tz(start)),
+            end: Some(DayZone::Tz(end)),
+        };
+        let cases = [
+            // Measured good live (R3-3): W. Europe, Berlin device.
+            (
+                Europe::Berlin,
+                zones(Europe::Berlin, Europe::Berlin),
+                "2026-10-19T22:00:00Z",
+                "2026-10-20T22:00:00Z",
+            ),
+            // The Tokyo item edited in Berlin.
+            (
+                Europe::Berlin,
+                zones(Asia::Tokyo, Asia::Tokyo),
+                "2026-10-19T15:00:00Z",
+                "2026-10-20T15:00:00Z",
+            ),
+            // Devices far from the stored zone.
+            (
+                Pacific::Auckland,
+                zones(Europe::Berlin, Europe::Berlin),
+                "2026-10-19T22:00:00Z",
+                "2026-10-20T22:00:00Z",
+            ),
+            (
+                Pacific::Honolulu,
+                zones(Europe::Berlin, Europe::Berlin),
+                "2026-10-19T22:00:00Z",
+                "2026-10-20T22:00:00Z",
+            ),
+            // Two zones: each boundary on its own (233).
+            (
+                Europe::Berlin,
+                zones(Asia::Tokyo, Pacific::Honolulu),
+                "2026-10-19T15:00:00Z",
+                "2026-10-21T10:00:00Z",
+            ),
+            // Stored in UTC: unchanged bytes.
+            (
+                Europe::Berlin,
+                StoredZones::utc(),
+                "2026-10-20T00:00:00Z",
+                "2026-10-21T00:00:00Z",
+            ),
+        ];
+        for (device, stored, start, end) in cases {
+            let (before, edit) = moved_single(&device);
+            let (set, _) = event_to_update_field_xml_in(
+                &edit,
+                Some(&before),
+                &stored,
+                None,
+                EventIdKind::Single,
+                &device,
+            )
+            .unwrap();
+            assert_eq!(slot_of(&set), (start, end), "{device} {stored:?}: {set}");
+            assert!(!set.contains("TimeZone"), "no zone is written: {set}");
+        }
+    }
+
+    /// A zone Exchange defines in full moves the day as its named twin does.
+    #[test]
+    fn an_all_day_day_in_a_custom_zone_moves_on_its_definitions_midnights() {
+        let device = chrono_tz::Europe::Berlin;
+        let rules =
+            crate::zone_definition::ZoneRules::try_from(&crate::zone_definition::tests::w_europe())
+                .unwrap();
+        let custom = DayZone::Rules(std::sync::Arc::new(rules));
+        let stored = StoredZones {
+            start: Some(custom.clone()),
+            end: Some(custom),
+        };
+        let (before, edit) = moved_single(&device);
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &stored,
+            None,
+            EventIdKind::Single,
+            &device,
+        )
+        .unwrap();
+        assert_eq!(
+            slot_of(&set),
+            ("2026-10-19T22:00:00Z", "2026-10-20T22:00:00Z"),
+            "{set}"
+        );
+    }
+
+    /// Switching a timed appointment to all-day goes on the stored zone's
+    /// midnights too (decision 235).
+    #[test]
+    fn a_timed_appointment_made_all_day_lands_on_the_stored_zones_midnights() {
+        let device = chrono_tz::Europe::Berlin;
+        let mut before = zoned_master(None);
+        before.recurrence = None;
+        before.start = "2026-10-19T08:00:00Z".parse().unwrap();
+        before.end = "2026-10-19T09:00:00Z".parse().unwrap();
+        let mut edit = before.clone();
+        edit.all_day = true;
+        edit.start = midnight_on("2026-10-19", &device);
+        edit.end = midnight_on("2026-10-20", &device);
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &w_europe_zones(),
+            None,
+            EventIdKind::Single,
+            &device,
+        )
+        .unwrap();
+        assert_eq!(
+            slot_of(&set),
+            ("2026-10-18T22:00:00Z", "2026-10-19T22:00:00Z"),
+            "{set}"
+        );
+    }
+
+    /// Decision 237: an all-day day in a zone Aperio cannot read is refused,
+    /// by name; a save that leaves the day alone still goes out.
+    #[test]
+    fn an_all_day_day_in_an_unknown_zone_is_refused_and_a_title_is_not() {
+        let device = chrono_tz::Europe::Berlin;
+        let unknown = StoredZones::default();
+        let (before, edit) = moved_single(&device);
+        let err = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &unknown,
+            None,
+            EventIdKind::Single,
+            &device,
+        )
+        .unwrap_err();
+        let EwsError::Protocol(message) = err else {
+            panic!("expected a refusal, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::DayZoneUnreadable, "no-zone"))
+        );
+        let mut renamed = before.clone();
+        renamed.title = "Renamed".into();
+        let (set, _) = event_to_update_field_xml_in(
+            &renamed,
+            Some(&before),
+            &unknown,
+            None,
+            EventIdKind::Single,
+            &device,
+        )
+        .unwrap();
+        assert!(
+            set.contains("item:Subject") && !set.contains("calendar:Start"),
+            "{set}"
+        );
+    }
+
+    /// Decision 234: an update that makes a timed appointment a series and
+    /// names a new zone starts the rule on the day the STORED zone reads:
+    /// Exchange applies the rule before the zone the same update writes after
+    /// it. Aperio created the single in UTC; Monday 00:30 in Berlin is Sunday
+    /// there. (That zone, sent after the start, moves the wall clock as well —
+    /// live round 1, stages 9 and 12; the live test of 8a looks at it.)
+    #[test]
+    fn a_new_rule_with_a_new_zone_starts_on_the_stored_zones_day() {
+        let device = chrono_tz::Europe::Berlin;
+        let mut before = zoned_master(None);
+        before.recurrence = None;
+        before.start = "2026-10-18T22:30:00Z".parse().unwrap();
+        before.end = "2026-10-18T23:00:00Z".parse().unwrap();
+        let mut edit = before.clone();
+        edit.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY".into(),
+            exceptions: Vec::new(),
+            tzid: Some("Europe/Berlin".into()),
+        });
+        let (set, _) = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &StoredZones::utc(),
+            None,
+            EventIdKind::Single,
+            &device,
+        )
+        .unwrap();
+        assert_eq!(element(&set, "StartDate"), "2026-10-18", "{set}");
+        assert!(
+            set.contains(r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#),
+            "{set}"
+        );
+    }
 }

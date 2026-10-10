@@ -1695,6 +1695,7 @@
         "occurrenceNotWritable": "This one occurrence cannot be changed on its own inside its series. Nothing was changed.",
         "unsafeToWrite": "Aperio cannot change this event safely: what else is stored with it on the server would be put at risk. Nothing was changed.",
         "accessNotGranted": "Aperio has no access to this device's calendars and reminders. Allow it for Aperio in the Settings app. Nothing was changed.",
+        "dayZoneUnreadable": "Exchange stores this appointment in a time zone Aperio cannot read, so its day cannot be changed here; its title and the rest can. Nothing was changed.",
         "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
         "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
         "reason": {
@@ -1704,6 +1705,7 @@
           "occurrenceNotWritable": "this occurrence cannot be changed on its own inside its series",
           "unsafeToWrite": "Aperio cannot change it safely on the server",
           "accessNotGranted": "Aperio has no access to this device's calendars and reminders",
+          "dayZoneUnreadable": "Exchange stores it in a time zone Aperio cannot read, so its day cannot be changed here",
           "forbidden": "the provider does not allow it ({{detail}})",
           "changedOnServer": "it changed on the server since you opened it"
         }
