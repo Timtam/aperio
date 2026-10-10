@@ -246,7 +246,9 @@ needs an Exchange/365 mailbox that still exposes EWS. The ignored tests
 `live_test_requests` and `live_test_requests_round_3` write the requests of
 the live zone tests, into the directory `APERIO_LIVE_TEST_DIR` names; each
 file's header comment says what it is. Round 3's files are historical since
-PR 8a: its "today's rule" files (R3-2, R3-4, R3-5b-u) are round 3's requests
-before 8a, rebuilt for an item read as stored in UTC, while an 8a build
-writes an Outlook item's stored-zone midnights; its 47a prototype (R3-1,
-R3-3, R3-7b) is Aperio's rule now.
+PR 8a: its "today's rule" files (R3-2, R3-4, R3-5b-u) put Start and End
+where round 3's build did, rebuilt for an item read as stored in UTC, while
+an 8a build writes an Outlook item's stored-zone midnights; its 47a
+prototype (R3-1, R3-3, R3-7b) is Aperio's rule now. One field differs from
+what round 3 sent: the series' rule in R3-1 and R3-2 starts on 8a's first
+day (StartDate 2026-10-19 on a Berlin device; round 3 sent 2026-10-18).

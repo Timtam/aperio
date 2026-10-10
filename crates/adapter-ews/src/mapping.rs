@@ -2447,17 +2447,16 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         Some(server) if !may(EventField::Recurrence) => server,
         _ => event,
     };
+    // The zone this update may write beside the rule, looked up once: a zone
+    // Exchange cannot store is logged once per write, as on a create.
+    let written = series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones);
     // Without the copy the stored zone is unknown. The zone this update writes
     // beside the rule stands in for it, as on a create: it comes from the
     // row's own zone, which Aperio read from the stored one, so the rule
     // starts on the day the user sees instead of the UTC date.
     let blind_clock = before
         .is_none()
-        .then(|| {
-            let written =
-                series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones);
-            written_clock(event.all_day, rule_of.recurrence.as_ref(), written)
-        })
+        .then(|| written_clock(event.all_day, rule_of.recurrence.as_ref(), written))
         .flatten();
     let clock = stored.start.as_ref().or(blind_clock.as_ref());
     let first_day = |ev: &Event| rule_first_day(ev.start, ev.all_day, clock, device);
@@ -2509,10 +2508,7 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // time-only gate would drop it on a rule-only change — weekly to daily
     // without moving the series.
     let zone_may_change = rule_changed || touches(EventField::AllDay) || slot_changed;
-    if let Some(windows) =
-        series_windows_zone(event.all_day, rule_of.recurrence.as_ref(), server_zones)
-            .filter(|_| zone_may_change)
-    {
+    if let Some(windows) = written.filter(|_| zone_may_change) {
         let win = escape_xml(windows);
         set.push_str(&format!(
             "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
@@ -5285,23 +5281,24 @@ mod tests {
     /// The updates start from Aperio's own read of that planned stored shape (a
     /// SyncFolderItems row through `parse_sync_folder_items_response` and
     /// `to_event`), so they are what Aperio sends after reading those items as
-    /// the owner is asked to create them: no reminder, location or body. The
-    /// requests marked "NOT Aperio's rule" differ on purpose:
-    /// - the 47a prototype puts Start and End on midnights of the stored zone
+    /// the owner is asked to create them: no reminder, location or body. In
+    /// round 3, the requests marked "NOT Aperio's rule" differed on purpose:
+    /// - the 47a prototype put Start and End on midnights of the stored zone
     ///   instead of the UTC midnights of the day;
     /// - the Tokyo items carry a zone on an all-day single;
-    /// - R3-7b leaves out the Recurrence delete.
+    /// - R3-7b left out the Recurrence delete.
     ///
-    /// Historical since PR 8a: the files reproduce round 3's requests, built
-    /// with today's code. The "today's rule" steps (R3-2, R3-4, R3-5b-u) put
-    /// Start and End where round 3's build did, on UTC midnights through
+    /// Only the Tokyo items (R3-5, R3-5b) are still marked so. Historical
+    /// since PR 8a: the files reproduce round 3's requests, built with
+    /// today's code. The "today's rule" steps (R3-2, R3-4, R3-5b-u) put Start
+    /// and End where round 3's build did, on UTC midnights through
     /// `event_to_update_field_xml`, which reads every item as stored in UTC;
     /// an 8a build writes an Outlook item's stored-zone midnights instead. One
     /// field differs from round 3: the series' rule in R3-1 and R3-2 starts on
     /// 8a's first day, the device's, StartDate 2026-10-19 on a Berlin device,
-    /// where round 3 sent 2026-10-18 (as R3-6 says). The 47a prototype as round 3 measured it (R3-1, R3-3,
-    /// R3-7b) is Aperio's rule since 8a; R3-7 also carries the Recurrence
-    /// delete Exchange refused.
+    /// where round 3 sent 2026-10-18 (as R3-6 says). The 47a prototype as
+    /// round 3 measured it (R3-1, R3-3, R3-7b) is Aperio's rule since 8a;
+    /// R3-7 also carries the Recurrence delete Exchange refused.
     #[test]
     #[ignore = "writes the live Exchange test requests of round 3; see the doc comment"]
     fn live_test_requests_round_3() {
