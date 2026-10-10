@@ -1440,6 +1440,17 @@ fn to_update_error(err: EwsError) -> CoreError {
             tracing::warn!(%code, %message, "Exchange refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
+        // Nothing was sent: an all-day day in a zone Aperio cannot read
+        // (decision 237). Forbidden, so the phone keeps the message and a
+        // split knows the write never landed.
+        EwsError::Protocol(message)
+            if matches!(
+                cal_core::WriteRefusal::parse(&message),
+                Some((cal_core::WriteRefusal::DayZoneUnreadable, _))
+            ) =>
+        {
+            CoreError::Forbidden(message)
+        }
         other => to_core_error(other),
     }
 }
@@ -2927,7 +2938,48 @@ mod server_zone_tests {
     #[tokio::test]
     async fn updating_an_all_day_series_neither_asks_for_nor_writes_a_zone() {
         let mut server = Server::new_async().await;
-        let (_mock, requests) = recording_server(&mut server, |_| ZONES.to_string()).await;
+        // The series as Exchange stores it, in W. Europe, a week earlier: the
+        // update moves its day, so the write goes out (decision 237 writes an
+        // all-day day only with the zones the copy names).
+        const STORED: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="IID" ChangeKey="CK"/>
+        <t:Subject>All-day Berlin</t:Subject>
+        <t:Start>2026-10-11T22:00:00Z</t:Start>
+        <t:End>2026-10-12T22:00:00Z</t:End>
+        <t:IsAllDayEvent>true</t:IsAllDayEvent>
+        <t:CalendarItemType>Single</t:CalendarItemType>
+        <t:StartTimeZone Id="W. Europe Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("GetServerTimeZones") {
+                    ZONES
+                } else if body.contains("<m:GetItem>") {
+                    STORED
+                } else {
+                    CREATED
+                };
+                seen.lock().unwrap().push(body);
+                answer.as_bytes().to_vec()
+            })
+            .create_async()
+            .await;
         let adapter = EwsAdapter::new(server.url(), alice());
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {

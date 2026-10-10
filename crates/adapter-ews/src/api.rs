@@ -23,11 +23,11 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use crate::auth::{basic_auth_header, BasicCredentials};
 use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
-    decode_event_id, encode_event_id, event_to_update_field_xml_on,
-    new_event_to_calendar_item_xml_on, parse_find_folder_response, parse_find_item_response,
-    parse_first_item_id, parse_get_user_availability, parse_server_time_zones,
-    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
-    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
+    decode_event_id, encode_event_id, new_event_to_calendar_item_xml_on,
+    parse_find_folder_response, parse_find_item_response, parse_first_item_id,
+    parse_get_user_availability, parse_server_time_zones, parse_sync_folder_items_counts,
+    parse_sync_folder_items_response, split_calendar_id, to_calendar, to_event, DecodedEventId,
+    EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, delete_occurrence_item,
@@ -764,7 +764,8 @@ pub async fn update_event(
     // item are not facts about the occurrence, and a retry or a new sign-in
     // may well work. Only an answer that arrives WITHOUT the occurrence's copy
     // is the refusal.
-    let before = match read_before(client, &target, &event.calendar_id).await {
+    let mut read_error = None;
+    let copy = match read_before(client, &target, &event.calendar_id).await {
         Ok(None) if target.kind == EventIdKind::Exception => {
             tracing::warn!(
                 target: "adapter_ews::write",
@@ -795,11 +796,34 @@ pub async fn update_event(
                 event_id = %event.id,
                 "the current copy could not be read; writing every field not kept, and a kept rule with a moved slot",
             );
+            read_error = Some(err);
             None
         }
     };
-    let (set_xml, delete_xml) =
-        event_to_update_field_xml_on(event, before.as_ref(), server_zones, target.kind)?;
+    let (before, stored) = match copy {
+        Some(copy) => (Some(copy.event), copy.zones),
+        None => (None, crate::mapping::StoredZones::default()),
+    };
+    // Without the copy the zones the item is stored in are unknown, and an
+    // all-day day is never written blind (decision 237): the user is told what
+    // kept the copy away — the read's own failure, or an item the server no
+    // longer has — rather than that its zone cannot be read.
+    let (set_xml, delete_xml) = match crate::mapping::event_to_update_field_xml_in(
+        event,
+        before.as_ref(),
+        &stored,
+        server_zones,
+        target.kind,
+        &chrono::Local,
+    ) {
+        Err(EwsError::Protocol(message)) if before.is_none() && day_zone_unreadable(&message) => {
+            return Err(read_error.unwrap_or_else(|| EwsError::Soap {
+                code: "ErrorItemNotFound".into(),
+                message: "the server answered without the item".into(),
+            }));
+        }
+        other => other?,
+    };
     // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
     // report attendees changed while `keep_attendees` suppresses that block,
     // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits
@@ -1214,7 +1238,12 @@ async fn resolve_override_target(
             kind: EventIdKind::Exception,
             item_id: ov.item_id.clone(),
             change_key: ov.change_key.clone(),
-            series_zone: Some((master.start_time_zone.clone(), master.end_time_zone.clone())),
+            series_zone: Some(SeriesZone {
+                start_id: master.start_time_zone.clone(),
+                end_id: master.end_time_zone.clone(),
+                start_definition: master.start_zone_definition.clone(),
+                end_definition: master.end_zone_definition.clone(),
+            }),
         }),
         // Refused, not widened. The occurrence is gone from the series — someone
         // deleted it, or the series was rewritten — and the only other thing
@@ -1245,11 +1274,15 @@ async fn resolve_override_target(
 /// `Ok(None)` when the server answered without the item; a transport or parse
 /// failure is `Err`, and the caller decides what that means for the kind of
 /// item it is about to write.
+///
+/// The copy comes with the zones Exchange stores its boundaries in: an all-day
+/// day is written as midnight in them (decision 47a), and a series' rule
+/// starts on its first day as the stored start zone reads it (234).
 async fn read_before(
     client: &EwsClient,
     target: &WriteTarget,
     calendar_id: &str,
-) -> EwsResult<Option<Event>> {
+) -> EwsResult<Option<ServerCopy>> {
     let ids = vec![(target.item_id.clone(), None)];
     let body = match target.kind {
         EventIdKind::Exception => crate::soap::get_exception_items(&ids),
@@ -1264,13 +1297,44 @@ async fn read_before(
     // the exception shape asks for no zone of its own: read here without one,
     // an all-day day the series' zone names otherwise would count as moved,
     // and a title-only edit would write the slot back (decision 217).
-    if let Some((start_zone, end_zone)) = &target.series_zone {
+    if let Some(series) = &target.series_zone {
         if item.start_time_zone.is_none() && item.end_time_zone.is_none() {
-            item.start_time_zone = start_zone.clone();
-            item.end_time_zone = end_zone.clone();
+            item.start_time_zone = series.start_id.clone();
+            item.end_time_zone = series.end_id.clone();
+            item.start_zone_definition = series.start_definition.clone();
+            item.end_zone_definition = series.end_definition.clone();
         }
     }
-    Ok(Some(crate::mapping::to_event(item, calendar_id)?))
+    let zones = crate::mapping::StoredZones::of(&item);
+    Ok(Some(ServerCopy {
+        event: crate::mapping::to_event(item, calendar_id)?,
+        zones,
+    }))
+}
+
+/// The provider's current copy of an item and the zones it is stored in.
+#[derive(Debug, Clone)]
+struct ServerCopy {
+    event: Event,
+    zones: crate::mapping::StoredZones,
+}
+
+/// Whether a message is the refusal for a day in an unknown zone.
+fn day_zone_unreadable(message: &str) -> bool {
+    matches!(
+        cal_core::WriteRefusal::parse(message),
+        Some((cal_core::WriteRefusal::DayZoneUnreadable, _))
+    )
+}
+
+/// A series head's zones, as its exception is read and written in them: the
+/// exception shape asks for no zone of its own.
+#[derive(Debug, Clone, Default)]
+struct SeriesZone {
+    start_id: Option<String>,
+    end_id: Option<String>,
+    start_definition: Option<crate::zone_definition::ZoneDefinition>,
+    end_definition: Option<crate::zone_definition::ZoneDefinition>,
 }
 
 /// Helper: the resolved (id, change_key) pair plus the kind we
@@ -1280,9 +1344,10 @@ struct WriteTarget {
     kind: EventIdKind,
     item_id: String,
     change_key: Option<String>,
-    /// For an exception, its series' StartTimeZone and EndTimeZone: the
-    /// zone its all-day day is read in, as its row is (`override_event`).
-    series_zone: Option<(Option<String>, Option<String>)>,
+    /// For an exception, its series' StartTimeZone and EndTimeZone, ids and
+    /// definitions: the zones its all-day day is read and written in, as its
+    /// row is read (`override_event`).
+    series_zone: Option<SeriesZone>,
 }
 
 /// Rename a calendar folder via `UpdateFolder` + `folder:DisplayName`.
@@ -2427,6 +2492,8 @@ mod tests {
       <m:ResponseCode>NoError</m:ResponseCode>
       <m:Items><t:CalendarItem>
         <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:StartTimeZone Id="W. Europe Standard Time"/>
+        <t:EndTimeZone Id="W. Europe Standard Time"/>
         <t:ModifiedOccurrences><t:Occurrence>
           <t:ItemId Id="EXC-ID" ChangeKey="ECK-V1"/>
           <t:Start>2026-10-25T23:00:00Z</t:Start>
@@ -2501,8 +2568,12 @@ mod tests {
             title: "Moved to Tuesday".into(),
             description: None,
             location: None,
-            start: "2026-10-26T23:00:00Z".parse().unwrap(),
-            end: "2026-10-27T23:00:00Z".parse().unwrap(),
+            // Tuesday 27 to Wednesday 28 October, as this device keeps an
+            // all-day day: its own midnights.
+            start: crate::mapping::local_midnight_in("2026-10-27".parse().unwrap(), &chrono::Local)
+                .unwrap(),
+            end: crate::mapping::local_midnight_in("2026-10-28".parse().unwrap(), &chrono::Local)
+                .unwrap(),
             all_day: true,
             recurrence: None,
             color_label: None,
@@ -2568,6 +2639,14 @@ mod tests {
             3,
             "Start, End and IsAllDayEvent, and nothing else: {update}"
         );
+        // Decision 47a: the day goes out as midnights in the zone its series is
+        // stored in, W. Europe here (live round 3, R3-7b), on any device.
+        assert!(
+            update.contains("<t:Start>2026-10-26T23:00:00Z</t:Start>")
+                && update.contains("<t:End>2026-10-27T23:00:00Z</t:End>"),
+            "{update}"
+        );
+        assert!(!update.contains("TimeZone"), "no zone is written: {update}");
         assert_eq!(updated.id, override_id, "the override keeps its id");
         assert_eq!(updated.etag.as_deref(), Some("ECK-V2"));
     }
@@ -2655,12 +2734,12 @@ mod tests {
 
         // The row as the read gives it: the local midnights of 15 and 16 January.
         let raw: chrono::DateTime<chrono::Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
-        let start = crate::mapping::all_day_anchor(raw, Some(&crate::mapping::DayZone::Tz(auckland)));
-        let end =
-            crate::mapping::all_day_anchor(
-                "2027-01-15T11:00:00Z".parse().unwrap(),
-                Some(&crate::mapping::DayZone::Tz(auckland)),
-            );
+        let start =
+            crate::mapping::all_day_anchor(raw, Some(&crate::mapping::DayZone::Tz(auckland)));
+        let end = crate::mapping::all_day_anchor(
+            "2027-01-15T11:00:00Z".parse().unwrap(),
+            Some(&crate::mapping::DayZone::Tz(auckland)),
+        );
         let edit = Event {
             keep_attendees: false,
             keep_fields: Vec::new(),
@@ -3882,7 +3961,10 @@ mod tests {
             .await;
 
         // The day as this device names it: its local midnight of 15 January.
-        let day = crate::mapping::all_day_anchor(midnight(229), Some(&crate::mapping::DayZone::Tz(auckland)));
+        let day = crate::mapping::all_day_anchor(
+            midnight(229),
+            Some(&crate::mapping::DayZone::Tz(auckland)),
+        );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
             .unwrap();

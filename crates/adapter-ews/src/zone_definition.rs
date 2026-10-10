@@ -233,7 +233,12 @@ fn attribute(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<Strin
 impl ZoneDefinitionWalker {
     /// An element opened (`empty` for a self-closing one), its local name in
     /// ASCII lower case.
-    pub fn observe_start(&mut self, local: &[u8], e: &quick_xml::events::BytesStart<'_>, empty: bool) {
+    pub fn observe_start(
+        &mut self,
+        local: &[u8],
+        e: &quick_xml::events::BytesStart<'_>,
+        empty: bool,
+    ) {
         if !empty {
             self.depth += 1;
         }
@@ -250,7 +255,9 @@ impl ZoneDefinitionWalker {
                 });
             }
             b"transitions" if !empty => self.in_top_transitions = true,
-            b"transition" | b"recurringdaytransition" | b"recurringdatetransition"
+            b"transition"
+            | b"recurringdaytransition"
+            | b"recurringdatetransition"
             | b"absolutedatetransition"
                 if !empty =>
             {
@@ -316,7 +323,9 @@ impl ZoneDefinitionWalker {
         }
         self.depth -= 1;
         match local {
-            b"transition" | b"recurringdaytransition" | b"recurringdatetransition"
+            b"transition"
+            | b"recurringdaytransition"
+            | b"recurringdatetransition"
             | b"absolutedatetransition" => {
                 if let Some(t) = self.transition.take().and_then(TransitionBuilder::finish) {
                     match self.group.as_mut() {
@@ -348,8 +357,15 @@ impl ZoneDefinitionWalker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum On {
     /// The `nth` `weekday` of `month`; negative counts from the month's end.
-    NthWeekday { month: u32, weekday: Weekday, nth: i8 },
-    Date { month: u32, day: u32 },
+    NthWeekday {
+        month: u32,
+        weekday: Weekday,
+        nth: i8,
+    },
+    Date {
+        month: u32,
+        day: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,7 +412,8 @@ impl TryFrom<&ZoneDefinition> for ZoneRules {
                 .iter()
                 .find(|p| p.id.trim() == id.trim())
                 .ok_or_else(|| DefinitionError::UnknownTarget(id.trim().to_string()))?;
-            parse_duration(&period.bias).ok_or_else(|| DefinitionError::BadBias(period.bias.clone()))
+            parse_duration(&period.bias)
+                .ok_or_else(|| DefinitionError::BadBias(period.bias.clone()))
         };
         let group_rule = |id: &str| -> Result<Rule, DefinitionError> {
             let group = def
@@ -595,13 +612,16 @@ impl ZoneRules {
                 // next change; a reading `local + bias` counts when it falls
                 // inside the segment of that bias.
                 let mut out = Vec::new();
-                let bounds: Vec<(Option<NaiveDateTime>, Duration)> = std::iter::once((None, opening))
-                    .chain(steps.iter().map(|(at, to)| (Some(*at), *to)))
-                    .collect();
+                let bounds: Vec<(Option<NaiveDateTime>, Duration)> =
+                    std::iter::once((None, opening))
+                        .chain(steps.iter().map(|(at, to)| (Some(*at), *to)))
+                        .collect();
                 for (k, (start, bias)) in bounds.iter().enumerate() {
                     let reading = local + *bias;
                     let after_start = start.is_none_or(|s| reading >= s);
-                    let before_end = bounds.get(k + 1).is_none_or(|(next, _)| next.is_none_or(|n| reading < n));
+                    let before_end = bounds
+                        .get(k + 1)
+                        .is_none_or(|(next, _)| next.is_none_or(|n| reading < n));
                     if after_start && before_end {
                         out.push(reading);
                     }
@@ -626,10 +646,16 @@ impl ZoneRules {
 fn change_day(on: On, year: i32) -> Option<NaiveDate> {
     match on {
         On::Date { month, day } => NaiveDate::from_ymd_opt(year, month, day),
-        On::NthWeekday { month, weekday, nth } if nth > 0 => {
-            NaiveDate::from_weekday_of_month_opt(year, month, weekday, nth as u8)
-        }
-        On::NthWeekday { month, weekday, nth } => {
+        On::NthWeekday {
+            month,
+            weekday,
+            nth,
+        } if nth > 0 => NaiveDate::from_weekday_of_month_opt(year, month, weekday, nth as u8),
+        On::NthWeekday {
+            month,
+            weekday,
+            nth,
+        } => {
             // Counted from the month's end: -1 is its last such weekday.
             let first_next = if month == 12 {
                 NaiveDate::from_ymd_opt(year + 1, 1, 1)?
@@ -688,7 +714,11 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
         if time.is_empty() {
             return None;
         }
-        take(time, &[('H', 3_600_000), ('M', 60_000), ('S', 1_000)], Some('S'))?;
+        take(
+            time,
+            &[('H', 3_600_000), ('M', 60_000), ('S', 1_000)],
+            Some('S'),
+        )?;
     }
     if !any {
         return None;
@@ -738,7 +768,11 @@ fn parse_occurrence(text: &str) -> Result<i8, DefinitionError> {
 /// a value with a zone is refused.
 fn parse_naive(text: &str) -> Option<NaiveDateTime> {
     let text = text.trim();
-    if text.ends_with('Z') || text.get(10..).is_some_and(|t| t.contains('+') || t.contains('-')) {
+    if text.ends_with('Z')
+        || text
+            .get(10..)
+            .is_some_and(|t| t.contains('+') || t.contains('-'))
+    {
         return None;
     }
     NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f").ok()
@@ -801,12 +835,27 @@ pub(crate) mod tests {
     #[test]
     fn w_europe_midnights_follow_the_clock_change() {
         let rules = ZoneRules::try_from(&w_europe()).unwrap();
-        assert_eq!(rules.midnight(day("2026-10-12")), Some(utc("2026-10-11T22:00:00Z")));
-        assert_eq!(rules.midnight(day("2026-11-02")), Some(utc("2026-11-01T23:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-10-12")),
+            Some(utc("2026-10-11T22:00:00Z"))
+        );
+        assert_eq!(
+            rules.midnight(day("2026-11-02")),
+            Some(utc("2026-11-01T23:00:00Z"))
+        );
         // The days of the changes themselves.
-        assert_eq!(rules.midnight(day("2026-03-29")), Some(utc("2026-03-28T23:00:00Z")));
-        assert_eq!(rules.midnight(day("2026-10-25")), Some(utc("2026-10-24T22:00:00Z")));
-        assert_eq!(rules.midnight(day("2026-10-26")), Some(utc("2026-10-25T23:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-03-29")),
+            Some(utc("2026-03-28T23:00:00Z"))
+        );
+        assert_eq!(
+            rules.midnight(day("2026-10-25")),
+            Some(utc("2026-10-24T22:00:00Z"))
+        );
+        assert_eq!(
+            rules.midnight(day("2026-10-26")),
+            Some(utc("2026-10-25T23:00:00Z"))
+        );
     }
 
     #[test]
@@ -814,14 +863,26 @@ pub(crate) mod tests {
         let mut def = w_europe();
         def.groups[0].transitions.reverse();
         let rules = ZoneRules::try_from(&def).unwrap();
-        assert_eq!(rules.midnight(day("2026-10-12")), Some(utc("2026-10-11T22:00:00Z")));
-        assert_eq!(rules.midnight(day("2026-11-02")), Some(utc("2026-11-01T23:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-10-12")),
+            Some(utc("2026-10-11T22:00:00Z"))
+        );
+        assert_eq!(
+            rules.midnight(day("2026-11-02")),
+            Some(utc("2026-11-01T23:00:00Z"))
+        );
     }
 
     #[test]
     fn the_wall_clock_reads_back_the_midnight() {
         let rules = ZoneRules::try_from(&w_europe()).unwrap();
-        for d in ["2026-01-15", "2026-03-29", "2026-07-01", "2026-10-25", "2026-12-31"] {
+        for d in [
+            "2026-01-15",
+            "2026-03-29",
+            "2026-07-01",
+            "2026-10-25",
+            "2026-12-31",
+        ] {
             let m = rules.midnight(day(d)).unwrap();
             assert_eq!(rules.wall(m), day(d).and_hms_opt(0, 0, 0), "{d}");
         }
@@ -845,8 +906,14 @@ pub(crate) mod tests {
             transitions: vec![to_group("0")],
         };
         let rules = ZoneRules::try_from(&def).unwrap();
-        assert_eq!(rules.midnight(day("2026-01-01")), Some(utc("2025-12-31T13:00:00Z")));
-        assert_eq!(rules.midnight(day("2026-06-01")), Some(utc("2026-05-31T14:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-01-01")),
+            Some(utc("2025-12-31T13:00:00Z"))
+        );
+        assert_eq!(
+            rules.midnight(day("2026-06-01")),
+            Some(utc("2026-05-31T14:00:00Z"))
+        );
     }
 
     /// Chile changes at midnight: 23:59:59.999 on the Saturday, so Sunday's
@@ -867,7 +934,10 @@ pub(crate) mod tests {
             transitions: vec![to_group("0")],
         };
         let rules = ZoneRules::try_from(&def).unwrap();
-        assert_eq!(rules.midnight(day("2026-09-06")), Some(utc("2026-09-06T04:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-09-06")),
+            Some(utc("2026-09-06T04:00:00Z"))
+        );
     }
 
     #[test]
@@ -884,7 +954,10 @@ pub(crate) mod tests {
             transitions: vec![to_group("0")],
         };
         let rules = ZoneRules::try_from(&def).unwrap();
-        assert_eq!(rules.midnight(day("2026-10-12")), Some(utc("2026-10-11T18:30:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-10-12")),
+            Some(utc("2026-10-11T18:30:00Z"))
+        );
         let kiribati = ZoneDefinition {
             periods: vec![period("line", "-PT14H")],
             groups: vec![],
@@ -894,7 +967,10 @@ pub(crate) mod tests {
             }],
         };
         let rules = ZoneRules::try_from(&kiribati).unwrap();
-        assert_eq!(rules.midnight(day("2026-10-12")), Some(utc("2026-10-11T10:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-10-12")),
+            Some(utc("2026-10-11T10:00:00Z"))
+        );
     }
 
     /// Microsoft's Eastern Standard Time sample: one rule until 2006, another
@@ -936,13 +1012,25 @@ pub(crate) mod tests {
         };
         let rules = ZoneRules::try_from(&def).unwrap();
         // 20 March 2006: before the April change, standard time.
-        assert_eq!(rules.midnight(day("2006-03-20")), Some(utc("2006-03-20T05:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2006-03-20")),
+            Some(utc("2006-03-20T05:00:00Z"))
+        );
         // 20 March 2007: after the second-Sunday change, daylight time.
-        assert_eq!(rules.midnight(day("2007-03-20")), Some(utc("2007-03-20T04:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2007-03-20")),
+            Some(utc("2007-03-20T04:00:00Z"))
+        );
         // 2 November 2006 (after the last Sunday of October): standard.
-        assert_eq!(rules.midnight(day("2006-11-02")), Some(utc("2006-11-02T05:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2006-11-02")),
+            Some(utc("2006-11-02T05:00:00Z"))
+        );
         // 2 November 2007 (before the first Sunday of November): daylight.
-        assert_eq!(rules.midnight(day("2007-11-02")), Some(utc("2007-11-02T04:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2007-11-02")),
+            Some(utc("2007-11-02T04:00:00Z"))
+        );
     }
 
     #[test]
@@ -952,7 +1040,10 @@ pub(crate) mod tests {
             *occurrence = "5".into();
         }
         let rules = ZoneRules::try_from(&def).unwrap();
-        assert_eq!(rules.midnight(day("2026-11-02")), Some(utc("2026-11-01T23:00:00Z")));
+        assert_eq!(
+            rules.midnight(day("2026-11-02")),
+            Some(utc("2026-11-01T23:00:00Z"))
+        );
     }
 
     #[test]
@@ -974,7 +1065,9 @@ pub(crate) mod tests {
         );
 
         let mut weekday = w_europe();
-        if let TransitionDef::RecurringDay { day_of_week, .. } = &mut weekday.groups[0].transitions[0] {
+        if let TransitionDef::RecurringDay { day_of_week, .. } =
+            &mut weekday.groups[0].transitions[0]
+        {
             *day_of_week = "Weekday".into();
         }
         assert_eq!(
@@ -984,7 +1077,10 @@ pub(crate) mod tests {
 
         let mut no_periods = w_europe();
         no_periods.periods.clear();
-        assert_eq!(ZoneRules::try_from(&no_periods), Err(DefinitionError::NoPeriods));
+        assert_eq!(
+            ZoneRules::try_from(&no_periods),
+            Err(DefinitionError::NoPeriods)
+        );
 
         let mut zoned = w_europe();
         zoned.transitions.push(TransitionDef::Absolute {

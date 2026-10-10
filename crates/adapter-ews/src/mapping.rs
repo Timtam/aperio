@@ -937,8 +937,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     b"starttimezone" if inside_item => {
                         if !empty {
-                            zone_walker =
-                                Some((true, crate::zone_definition::ZoneDefinitionWalker::default()));
+                            zone_walker = Some((
+                                true,
+                                crate::zone_definition::ZoneDefinitionWalker::default(),
+                            ));
                         }
                         // Simple form: <t:StartTimeZone Id="Eastern Standard Time" .../>.
                         for a in e.attributes().flatten() {
@@ -959,8 +961,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                             }
                         }
                         if !empty {
-                            zone_walker =
-                                Some((false, crate::zone_definition::ZoneDefinitionWalker::default()));
+                            zone_walker = Some((
+                                false,
+                                crate::zone_definition::ZoneDefinitionWalker::default(),
+                            ));
                         }
                     }
                     _ => {}
@@ -1437,8 +1441,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     }
                     b"starttimezone" if inside_item => {
                         if !empty {
-                            zone_walker =
-                                Some((true, crate::zone_definition::ZoneDefinitionWalker::default()));
+                            zone_walker = Some((
+                                true,
+                                crate::zone_definition::ZoneDefinitionWalker::default(),
+                            ));
                         }
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
@@ -1457,8 +1463,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             }
                         }
                         if !empty {
-                            zone_walker =
-                                Some((false, crate::zone_definition::ZoneDefinitionWalker::default()));
+                            zone_walker = Some((
+                                false,
+                                crate::zone_definition::ZoneDefinitionWalker::default(),
+                            ));
                         }
                     }
                     _ => {}
@@ -2044,6 +2052,19 @@ pub fn new_event_to_calendar_item_xml_on(
     event: &NewEvent,
     server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<String> {
+    new_event_to_calendar_item_xml_in(event, server_zones, &Local)
+}
+
+/// [`new_event_to_calendar_item_xml_on`] on a given device clock, so tests can
+/// pin one: an all-day boundary is the device's day.
+pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
+    event: &NewEvent,
+    server_zones: Option<&ServerTimeZones>,
+    device: &D,
+) -> EwsResult<String> {
+    // The zone is looked up once: it decides the rule's first day as well as
+    // what is written, and a zone Exchange cannot store is logged once.
+    let written = series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones);
     let mut out = String::new();
     out.push_str("        <t:CalendarItem>\n");
     out.push_str(&format!(
@@ -2068,13 +2089,14 @@ pub fn new_event_to_calendar_item_xml_on(
     } else {
         out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
     }
-    // All-day events pin their boundaries to UTC midnight of the LOCAL
-    // calendar day (see ews_all_day_boundary); timed events write the
-    // instant verbatim.
+    // An all-day event goes out as UTC midnights of the device's days: Aperio
+    // creates it without a zone, so Exchange stores it in UTC
+    // ([`all_day_boundary`] in UTC). Timed events write the instant verbatim.
     let (wire_start, wire_end) = if event.all_day {
+        let utc = DayZone::Tz(chrono_tz::UTC);
         (
-            ews_all_day_boundary(event.start),
-            ews_all_day_boundary(event.end),
+            all_day_boundary(event.start, Some(&utc), device)?,
+            all_day_boundary(event.end, Some(&utc), device)?,
         )
     } else {
         (event.start, event.end)
@@ -2103,7 +2125,9 @@ pub fn new_event_to_calendar_item_xml_on(
     // CalendarItem element order.
     out.push_str(&required_attendees_xml(&event.attendees));
     if let Some(rec) = &event.recurrence {
-        let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
+        let clock = written_clock(event.all_day, Some(rec), written);
+        let first_day = rule_first_day(event.start, event.all_day, clock.as_ref(), device);
+        let rec_xml = rrule_to_ews_recurrence(&rec.rrule, first_day)?;
         out.push_str("          ");
         out.push_str(&rec_xml);
         out.push('\n');
@@ -2112,9 +2136,7 @@ pub fn new_event_to_calendar_item_xml_on(
     // so it expands the series on that clock server-side. Per the EWS
     // CalendarItemType element order, StartTimeZone/EndTimeZone follow
     // <t:Recurrence>.
-    if let Some(windows) =
-        series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)
-    {
+    if let Some(windows) = written {
         out.push_str(&format!(
             "          <t:StartTimeZone Id=\"{}\"/>\n",
             escape_xml(windows)
@@ -2231,6 +2253,32 @@ pub fn event_to_update_field_xml_on(
     server_zones: Option<&ServerTimeZones>,
     target: EventIdKind,
 ) -> EwsResult<(String, String)> {
+    event_to_update_field_xml_in(
+        event,
+        before,
+        &StoredZones::utc(),
+        server_zones,
+        target,
+        &Local,
+    )
+}
+
+/// [`event_to_update_field_xml_on`] for an item Exchange stores in `stored`
+/// (read with `before`, `api::read_before`), on a given device clock.
+///
+/// An all-day slot goes out as midnights in the stored zones (decision 47a,
+/// each boundary in its own, 233), refused where one is unknown (237). A
+/// series' rule starts on its first day as Exchange will read it: the
+/// device's day for an all-day series, the stored start zone's day for a
+/// timed one (234), UTC where none is known.
+pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
+    event: &Event,
+    before: Option<&Event>,
+    stored: &StoredZones,
+    server_zones: Option<&ServerTimeZones>,
+    target: EventIdKind,
+    device: &D,
+) -> EwsResult<(String, String)> {
     let mut set = String::new();
     let mut del = String::new();
 
@@ -2285,7 +2333,7 @@ pub fn event_to_update_field_xml_on(
     // Whether the start this update would put on the server is not the one
     // already there. Without a copy to compare with, it may be.
     let start_moves = before.is_none_or(|b| b.start != event.start);
-    // The slot is ONE fact, written as one group: `ews_all_day_boundary`
+    // The slot is ONE fact, written as one group: `all_day_boundary`
     // rewrites both boundaries from `all_day`, and Exchange validates a Start
     // against the End it has stored. Writing one of the three without the
     // others is how a whole update faults, or how a stored instant is silently
@@ -2300,11 +2348,12 @@ pub fn event_to_update_field_xml_on(
         || touches(EventField::AllDay)
         || (touches(EventField::Recurrence) && event.recurrence.is_some() && start_moves);
     if slot_changed {
-        // Same all-day boundary pinning as the create path.
+        // An all-day boundary is midnight of its day in the zone Exchange
+        // stores it in (47a, 233); a timed one is its instant.
         let (wire_start, wire_end) = if event.all_day {
             (
-                ews_all_day_boundary(event.start),
-                ews_all_day_boundary(event.end),
+                all_day_boundary(event.start, stored.start.as_ref(), device)?,
+                all_day_boundary(event.end, stored.end.as_ref(), device)?,
             )
         } else {
             (event.start, event.end)
@@ -2369,8 +2418,11 @@ pub fn event_to_update_field_xml_on(
         del.push_str(delete_item_field_xml("calendar:OptionalAttendees").as_str());
     }
     // The rule Exchange stores is the BUILT one, and that depends on the start
-    // as well: the range's StartDate is `event.start`'s date, and a rule
-    // without BYDAY, BYMONTHDAY or BYMONTH takes those from the start too. The
+    // as well: the range's StartDate is the start's first day
+    // ([`rule_first_day`]), and a rule without BYDAY, BYMONTHDAY or BYMONTH
+    // takes those from that day too. Both sides are built on the same clock,
+    // the stored start zone (234), so a save that changes neither the start
+    // nor the rule writes neither. The
     // rrule text carries none of it, so a series dragged to another day
     // compares equal on the text alone and would keep its old StartDate on the
     // server. So the rule is asked twice: as text, which also catches a rule
@@ -2394,15 +2446,17 @@ pub fn event_to_update_field_xml_on(
         Some(server) if !may(EventField::Recurrence) => server,
         _ => event,
     };
+    let clock = stored.start.as_ref();
+    let first_day = |ev: &Event| rule_first_day(ev.start, ev.all_day, clock, device);
     let built_rule = |ev: &Event| {
         ev.recurrence
             .as_ref()
-            .map(|rec| rrule_to_ews_recurrence(&rec.rrule, ev.start).ok())
+            .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day(ev)).ok())
     };
     let written_rule = rule_of
         .recurrence
         .as_ref()
-        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, event.start).ok());
+        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day(event)).ok());
     let rule_follows_slot = slot_changed && start_moves && event.recurrence.is_some();
     let rule_changed = touches(EventField::Recurrence)
         || ((may(EventField::Recurrence) || rule_follows_slot)
@@ -2414,7 +2468,7 @@ pub fn event_to_update_field_xml_on(
     // pointless `DeleteItemField calendar:Recurrence` every time.
     if rule_changed {
         if let Some(rec) = &rule_of.recurrence {
-            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
+            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, first_day(event))?;
             // Wrap the recurrence element in a SetItemField against
             // calendar:Recurrence. EWS expects the body's inner shape to
             // start with `<t:CalendarItem>` containing the recurrence.
@@ -2462,17 +2516,6 @@ fn first_relative_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
 /// is what Outlook itself sends, so we stay on the well-trodden path.
 fn format_ews_datetime(ts: DateTime<Utc>) -> String {
     ts.format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
-/// All-day boundary for the wire: UTC midnight of the LOCAL calendar day.
-/// Exchange normalises all-day Start/End to whole days in the request's
-/// timezone context (UTC for us) — writing the raw boundary instant (a
-/// local midnight, e.g. 22:00Z of the previous day for UTC+2) would pin
-/// the event to the WRONG day. The internal end is already exclusive
-/// (next day's midnight), which is the whole-day span EWS expects.
-fn ews_all_day_boundary(when: DateTime<Utc>) -> DateTime<Utc> {
-    let day = when.with_timezone(&Local).date_naive();
-    Utc.from_utc_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
 }
 
 /// Store a zone walker's result on the item: the definition, and the id a
@@ -2650,7 +2693,10 @@ impl DayZone {
 
 /// Midnight on `day` in a chrono zone, the first hour after it where a
 /// change skips it.
-pub(crate) fn local_midnight_in<Z: TimeZone>(day: chrono::NaiveDate, zone: &Z) -> Option<DateTime<Utc>> {
+pub(crate) fn local_midnight_in<Z: TimeZone>(
+    day: chrono::NaiveDate,
+    zone: &Z,
+) -> Option<DateTime<Utc>> {
     let midnight = day.and_hms_opt(0, 0, 0)?;
     zone.from_local_datetime(&midnight)
         .earliest()
@@ -2728,6 +2774,92 @@ pub(crate) fn all_day_end_zone(item: &ParsedItem) -> Option<DayZone> {
         item.end_time_zone.as_deref(),
         item.end_zone_definition.as_ref(),
     )
+}
+
+/// The zones Exchange stores an item's two boundaries in, read with its copy
+/// at write time (`api::read_before`): [`all_day_zone`] and
+/// [`all_day_end_zone`]. `None` where Exchange names none Aperio can read, or
+/// where the copy could not be read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StoredZones {
+    pub(crate) start: Option<DayZone>,
+    pub(crate) end: Option<DayZone>,
+}
+
+impl StoredZones {
+    pub(crate) fn of(item: &ParsedItem) -> Self {
+        Self {
+            start: all_day_zone(item),
+            end: all_day_end_zone(item),
+        }
+    }
+
+    /// An item Exchange stores in UTC, as Aperio creates every item.
+    pub(crate) fn utc() -> Self {
+        Self {
+            start: Some(DayZone::Tz(chrono_tz::UTC)),
+            end: Some(DayZone::Tz(chrono_tz::UTC)),
+        }
+    }
+}
+
+/// The calendar day an all-day boundary names: Aperio keeps it as the
+/// device's midnight of that day.
+pub(crate) fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> chrono::NaiveDate {
+    when.with_timezone(device).date_naive()
+}
+
+/// The day a series' rule starts on, on the clock Exchange repeats it on: an
+/// all-day series on the device's days (48a); a timed one on `clock`, the
+/// zone Exchange expands it in — the zone a create writes with it, the zone
+/// the item is stored in on an update (decision 234: Exchange applies the
+/// rule before a zone the same update writes), UTC where there is none.
+pub(crate) fn rule_first_day<D: TimeZone>(
+    start: DateTime<Utc>,
+    all_day: bool,
+    clock: Option<&DayZone>,
+    device: &D,
+) -> chrono::NaiveDate {
+    if all_day {
+        return device_day(start, device);
+    }
+    clock
+        .and_then(|zone| zone.wall(start))
+        .map_or_else(|| start.date_naive(), |wall| wall.date())
+}
+
+/// The instant an all-day boundary is written as: midnight, in the zone
+/// Exchange stores that boundary in, of the day the device names (decision
+/// 47a; each boundary in its own zone, 233). Exchange rounds a boundary in
+/// that zone (live round 3, R3-5b-u), so UTC midnights stretched an item in
+/// any other zone over two days. Refused where the zone is unknown (237).
+fn all_day_boundary<D: TimeZone>(
+    when: DateTime<Utc>,
+    zone: Option<&DayZone>,
+    device: &D,
+) -> EwsResult<DateTime<Utc>> {
+    let zone = zone.ok_or_else(|| day_zone_refusal("no-zone"))?;
+    zone.midnight(device_day(when, device))
+        .ok_or_else(|| day_zone_refusal("no-midnight"))
+}
+
+fn day_zone_refusal(detail: &str) -> EwsError {
+    EwsError::Protocol(cal_core::WriteRefusal::DayZoneUnreadable.message(detail))
+}
+
+/// The zone a create writes a series with, as a clock: the tzdata zone behind
+/// the Windows id [`series_windows_zone`] wrote. `None` where it wrote none.
+fn written_clock(
+    all_day: bool,
+    recurrence: Option<&EventRecurrence>,
+    written: Option<&str>,
+) -> Option<DayZone> {
+    written?;
+    let tzid = cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day);
+    cal_core::series_clock_zone(tzid)
+        .and_then(cal_core::canonical_zone)
+        .and_then(|zone| zone.parse::<chrono_tz::Tz>().ok())
+        .map(DayZone::Tz)
 }
 
 /// The local midnight of the day an all-day instant names.
@@ -2826,9 +2958,13 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 // series round-trips EWS → RRULE → EWS without drift.
 
 /// Translate an RFC-5545 RRULE into an EWS `<t:Recurrence>` block.
-/// `start` is the master event's start date, used as the
-/// recurrence's StartDate (EWS requires it on every range type).
-pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<String> {
+/// `first_day` is the day the series starts on, on the clock Exchange repeats
+/// it on ([`rule_first_day`]): the range's StartDate (EWS requires one on
+/// every range type), and the weekday, day of the month and month a rule
+/// without BYDAY, BYMONTHDAY or BYMONTH takes. Read off a UTC instant, as
+/// before PR 8a, it named the day before for an all-day series east of UTC,
+/// and a series really started there (live round 3, R3-6).
+pub fn rrule_to_ews_recurrence(rrule: &str, first_day: chrono::NaiveDate) -> EwsResult<String> {
     let parts = parse_rrule(rrule);
     let freq = parts
         .get("FREQ")
@@ -2850,7 +2986,7 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
                 .map(|v| v.as_str())
                 .map(rrule_byday_to_ews_days)
                 .transpose()?
-                .unwrap_or_else(|| weekday_for(start));
+                .unwrap_or_else(|| weekday_for(first_day));
             // Pin the week-start explicitly (honouring WKST, default Monday) so
             // Exchange doesn't expand an INTERVAL>=2 series with the mailbox's
             // own FirstDayOfWeek — which would drift from the RRULE we stored.
@@ -2881,7 +3017,7 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
                     .and_then(|v| v.parse::<u8>().ok())
                     .unwrap_or_else(|| {
                         use chrono::Datelike;
-                        start.day() as u8
+                        first_day.day() as u8
                     });
                 format!(
                     "<t:AbsoluteMonthlyRecurrence><t:Interval>{interval}</t:Interval><t:DayOfMonth>{day}</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
@@ -2893,7 +3029,7 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
             let month_num = parts
                 .get("BYMONTH")
                 .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or_else(|| start.month());
+                .unwrap_or_else(|| first_day.month());
             let month_name = month_number_to_name(month_num).ok_or_else(|| {
                 EwsError::Protocol(format!("RRULE BYMONTH out of range: {month_num}"))
             })?;
@@ -2908,7 +3044,7 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
                 let day = parts
                     .get("BYMONTHDAY")
                     .and_then(|v| v.parse::<u8>().ok())
-                    .unwrap_or_else(|| start.day() as u8);
+                    .unwrap_or_else(|| first_day.day() as u8);
                 format!(
                     "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>{day}</t:DayOfMonth><t:Month>{month_name}</t:Month></t:AbsoluteYearlyRecurrence>",
                 )
@@ -2921,7 +3057,7 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
         }
     };
 
-    let start_date = start.format("%Y-%m-%d").to_string();
+    let start_date = first_day.format("%Y-%m-%d").to_string();
     let range_xml = if let Some(count_str) = parts.get("COUNT") {
         let count = count_str
             .parse::<u32>()
@@ -3150,9 +3286,9 @@ fn ews_day_name(d: EwsDay) -> &'static str {
     }
 }
 
-fn weekday_for(ts: DateTime<Utc>) -> String {
+fn weekday_for(day: chrono::NaiveDate) -> String {
     use chrono::Datelike;
-    match ts.weekday() {
+    match day.weekday() {
         chrono::Weekday::Mon => "Monday",
         chrono::Weekday::Tue => "Tuesday",
         chrono::Weekday::Wed => "Wednesday",
@@ -5266,7 +5402,9 @@ mod tests {
             for (tag, when) in [("Start", event.start), ("End", event.end)] {
                 let today = format!(
                     "<t:{tag}>{}</t:{tag}>",
-                    format_ews_datetime(ews_all_day_boundary(when))
+                    format_ews_datetime(
+                        local_midnight_in(device_day(when, &Local), &chrono_tz::UTC).unwrap()
+                    )
                 );
                 let prototype = format!("<t:{tag}>{}</t:{tag}>", format_ews_datetime(when));
                 assert_eq!(set.matches(&today).count(), 1, "{tag} in {set}");
@@ -5606,7 +5744,7 @@ mod tests {
     #[test]
     fn rrule_daily_translates_to_daily_recurrence() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=2", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=2", start.date_naive()).unwrap();
         assert!(xml.contains("<t:DailyRecurrence>"));
         assert!(xml.contains("<t:Interval>2</t:Interval>"));
         assert!(xml.contains("<t:NoEndRecurrence>"));
@@ -5616,7 +5754,8 @@ mod tests {
     #[test]
     fn rrule_weekly_with_byday_translates_day_names() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR", start.date_naive()).unwrap();
         assert!(xml.contains("<t:WeeklyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Monday Wednesday Friday</t:DaysOfWeek>"));
     }
@@ -5624,7 +5763,8 @@ mod tests {
     #[test]
     fn rrule_monthly_with_bymonthday_translates_to_absolute_monthly() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15", start.date_naive()).unwrap();
         assert!(xml.contains("<t:AbsoluteMonthlyRecurrence>"));
         assert!(xml.contains("<t:DayOfMonth>15</t:DayOfMonth>"));
     }
@@ -5632,7 +5772,9 @@ mod tests {
     #[test]
     fn rrule_yearly_with_bymonth_translates_to_absolute_yearly() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15", start.date_naive())
+                .unwrap();
         assert!(xml.contains("<t:AbsoluteYearlyRecurrence>"));
         assert!(xml.contains("<t:Month>March</t:Month>"));
         assert!(xml.contains("<t:DayOfMonth>15</t:DayOfMonth>"));
@@ -5641,7 +5783,7 @@ mod tests {
     #[test]
     fn rrule_count_translates_to_numbered_recurrence() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=DAILY;COUNT=5", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=DAILY;COUNT=5", start.date_naive()).unwrap();
         assert!(xml.contains("<t:NumberedRecurrence>"));
         assert!(xml.contains("<t:NumberOfOccurrences>5</t:NumberOfOccurrences>"));
     }
@@ -5649,8 +5791,11 @@ mod tests {
     #[test]
     fn rrule_until_translates_to_end_date_recurrence() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml =
-            rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T235959Z", start).unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T235959Z",
+            start.date_naive(),
+        )
+        .unwrap();
         assert!(xml.contains("<t:EndDateRecurrence>"));
         assert!(xml.contains("<t:EndDate>2026-09-01</t:EndDate>"));
     }
@@ -5660,7 +5805,7 @@ mod tests {
         // "Second Wednesday of every month" → RelativeMonthly with
         // a single DaysOfWeek + DayOfWeekIndex=Second.
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=2WE", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=2WE", start.date_naive()).unwrap();
         assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Wednesday</t:DaysOfWeek>"));
         assert!(xml.contains("<t:DayOfWeekIndex>Second</t:DayOfWeekIndex>"));
@@ -5670,7 +5815,7 @@ mod tests {
     fn rrule_relative_monthly_last_maps_negative_ordinal() {
         // BYDAY=-1FR ("last Friday") → DayOfWeekIndex=Last.
         let start: DateTime<Utc> = "2026-05-29T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=-1FR", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=-1FR", start.date_naive()).unwrap();
         assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Friday</t:DaysOfWeek>"));
         assert!(xml.contains("<t:DayOfWeekIndex>Last</t:DayOfWeekIndex>"));
@@ -5681,8 +5826,11 @@ mod tests {
         // "Last weekday of the month": multi-day BYDAY + BYSETPOS=-1
         // collapses back into the EWS composite token `Weekday`.
         let start: DateTime<Utc> = "2026-05-29T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", start)
-            .unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+            start.date_naive(),
+        )
+        .unwrap();
         assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Weekday</t:DaysOfWeek>"));
         assert!(xml.contains("<t:DayOfWeekIndex>Last</t:DayOfWeekIndex>"));
@@ -5692,7 +5840,8 @@ mod tests {
     fn rrule_relative_yearly_translates_to_relative_yearly() {
         // "First Friday of March every year".
         let start: DateTime<Utc> = "2026-03-06T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYDAY=1FR", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYDAY=1FR", start.date_naive()).unwrap();
         assert!(xml.contains("<t:RelativeYearlyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Friday</t:DaysOfWeek>"));
         assert!(xml.contains("<t:DayOfWeekIndex>First</t:DayOfWeekIndex>"));
@@ -5705,7 +5854,7 @@ mod tests {
         // Wednesday monthly", parse the emitted XML back, and the
         // re-derived RRULE must equal the input.
         let start: DateTime<Utc> = "2024-05-15T10:30:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=3WE", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=3WE", start.date_naive()).unwrap();
         let reparsed = parse_ews_recurrence(&xml).unwrap();
         assert_rrule_equivalent(&reparsed.to_rrule(), "FREQ=MONTHLY;BYDAY=3WE");
     }
@@ -5713,7 +5862,7 @@ mod tests {
     #[test]
     fn rrule_with_unknown_freq_rejected() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let err = rrule_to_ews_recurrence("FREQ=HOURLY", start).unwrap_err();
+        let err = rrule_to_ews_recurrence("FREQ=HOURLY", start.date_naive()).unwrap_err();
         match err {
             EwsError::Protocol(m) => assert!(m.contains("HOURLY")),
             other => panic!("expected Protocol, got {other:?}"),
@@ -6070,7 +6219,16 @@ mod tests {
                             .any(|f| block.contains(&format!(r#"FieldURI="{f}""#)));
                             if rule_or_zone && keep.contains(&EventField::Recurrence) {
                                 let rule = before.recurrence.as_ref().map(|r| {
-                                    rrule_to_ews_recurrence(&r.rrule, edit.start).unwrap()
+                                    rrule_to_ews_recurrence(
+                                        &r.rrule,
+                                        rule_first_day(
+                                            edit.start,
+                                            edit.all_day,
+                                            Some(&DayZone::Tz(chrono_tz::UTC)),
+                                            &Local,
+                                        ),
+                                    )
+                                    .unwrap()
                                 });
                                 let zone = series_windows_zone(
                                     edit.all_day,
@@ -6883,7 +7041,7 @@ mod tests {
     #[test]
     fn parse_daily_recurrence_roundtrips() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=3", start).unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=3", start.date_naive()).unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(rec.pattern, EwsRecurrencePattern::Daily { interval: 3 },);
         assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
@@ -6893,7 +7051,9 @@ mod tests {
     #[test]
     fn parse_weekly_with_byday_roundtrips() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10", start.date_naive())
+                .unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -6912,8 +7072,11 @@ mod tests {
         let start: DateTime<Utc> = "2026-07-05T09:00:00Z".parse().unwrap();
 
         // WRITE: a WKST=SU rule pins the wire FirstDayOfWeek to Sunday.
-        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO,TU;WKST=SU", start)
-            .unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO,TU;WKST=SU",
+            start.date_naive(),
+        )
+        .unwrap();
         assert!(
             xml.contains("<t:FirstDayOfWeek>Sunday</t:FirstDayOfWeek>"),
             "expected Sunday first-day on the wire, got {xml}",
@@ -6937,7 +7100,7 @@ mod tests {
 
         // A Monday-week rule: FirstDayOfWeek=Monday on the wire, but NO WKST in
         // the RRULE (the RFC-5545 default — keeps the common rule byte-identical).
-        let mon = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=TH", start).unwrap();
+        let mon = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=TH", start.date_naive()).unwrap();
         assert!(mon.contains("<t:FirstDayOfWeek>Monday</t:FirstDayOfWeek>"));
         assert!(!parse_ews_recurrence(&mon)
             .unwrap()
@@ -6948,9 +7111,11 @@ mod tests {
     #[test]
     fn parse_absolute_monthly_with_enddate_roundtrips() {
         let start: DateTime<Utc> = "2026-05-15T08:00:00Z".parse().unwrap();
-        let xml =
-            rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T000000Z", start)
-                .unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T000000Z",
+            start.date_naive(),
+        )
+        .unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -6977,7 +7142,9 @@ mod tests {
     #[test]
     fn parse_absolute_yearly_roundtrips() {
         let start: DateTime<Utc> = "2026-03-21T09:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21", start).unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21", start.date_naive())
+                .unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -7594,7 +7761,11 @@ mod tests {
   </m:ResponseMessages></m:SyncFolderItemsResponse></soap:Body>
 </soap:Envelope>"#
         );
-        match parse_sync_folder_items_response(&xml).unwrap().changes.remove(0) {
+        match parse_sync_folder_items_response(&xml)
+            .unwrap()
+            .changes
+            .remove(0)
+        {
             SyncChange::Create(item) => item,
             other => panic!("expected Create, got {other:?}"),
         }
@@ -7621,14 +7792,19 @@ mod tests {
     #[test]
     fn a_zone_definition_lands_on_its_own_boundary() {
         let id_only = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
-        let custom_end =
-            format!(r#"<t:EndTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:EndTimeZone>"#);
-        let custom_start =
-            format!(r#"<t:StartTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#);
+        let custom_end = format!(
+            r#"<t:EndTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:EndTimeZone>"#
+        );
+        let custom_start = format!(
+            r#"<t:StartTimeZone Id="Customized Time Zone" Name="">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#
+        );
         let id_only_end = r#"<t:EndTimeZone Id="W. Europe Standard Time"/>"#;
         for parse in [in_sync_response, in_get_item_response] {
             let item = parse(&zone_item(id_only, &custom_end));
-            assert_eq!(item.start_time_zone.as_deref(), Some("W. Europe Standard Time"));
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("W. Europe Standard Time")
+            );
             assert_eq!(item.start_zone_definition, None);
             assert_eq!(item.end_time_zone.as_deref(), Some("Customized Time Zone"));
             let def = item.end_zone_definition.expect("the end zone's definition");
@@ -7645,9 +7821,15 @@ mod tests {
             assert_eq!(item.subject, "Zone");
 
             let item = parse(&zone_item(&custom_start, id_only_end));
-            assert_eq!(item.start_time_zone.as_deref(), Some("Customized Time Zone"));
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("Customized Time Zone")
+            );
             assert!(item.start_zone_definition.is_some());
-            assert_eq!(item.end_time_zone.as_deref(), Some("W. Europe Standard Time"));
+            assert_eq!(
+                item.end_time_zone.as_deref(),
+                Some("W. Europe Standard Time")
+            );
             assert_eq!(item.end_zone_definition, None);
         }
     }
@@ -7661,7 +7843,10 @@ mod tests {
         );
         for parse in [in_sync_response, in_get_item_response] {
             let item = parse(&zone_item(&nested, ""));
-            assert_eq!(item.start_time_zone.as_deref(), Some("Customized Time Zone"));
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("Customized Time Zone")
+            );
             assert!(item.start_zone_definition.is_some());
         }
     }
@@ -8086,7 +8271,11 @@ mod tests {
         let zone = all_day_zone(&item);
         assert_eq!(zone, Some(DayZone::Tz(chrono_tz::Europe::Berlin)));
         // Berlin's midnight of 12 October reads as that day on any device.
-        for device in [chrono_tz::Europe::Berlin, chrono_tz::Asia::Tokyo, chrono_tz::Pacific::Honolulu] {
+        for device in [
+            chrono_tz::Europe::Berlin,
+            chrono_tz::Asia::Tokyo,
+            chrono_tz::Pacific::Honolulu,
+        ] {
             let anchored = all_day_anchor_in(utc("2026-10-11T22:00:00Z"), zone.as_ref(), &device);
             assert_eq!(
                 anchored,
@@ -8147,8 +8336,14 @@ mod tests {
     #[test]
     fn an_all_day_end_reads_in_the_end_zone() {
         let item = all_day_item(Some("Tokyo Standard Time"), Some("Hawaiian Standard Time"));
-        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(chrono_tz::Asia::Tokyo)));
-        assert_eq!(all_day_end_zone(&item), Some(DayZone::Tz(chrono_tz::Pacific::Honolulu)));
+        assert_eq!(
+            all_day_zone(&item),
+            Some(DayZone::Tz(chrono_tz::Asia::Tokyo))
+        );
+        assert_eq!(
+            all_day_end_zone(&item),
+            Some(DayZone::Tz(chrono_tz::Pacific::Honolulu))
+        );
         let device = chrono_tz::Europe::Berlin;
         // Honolulu's midnight of 20 October: read in Tokyo it is the 21st.
         let end = utc("2026-10-20T10:00:00Z");
@@ -8161,8 +8356,14 @@ mod tests {
             local_midnight_in("2026-10-21".parse().unwrap(), &device).unwrap()
         );
         // An item made without a zone reads both boundaries in UTC.
-        let made_without = all_day_item(Some("Greenwich Standard Time"), Some("tzone://Microsoft/Utc"));
-        assert_eq!(all_day_end_zone(&made_without), Some(DayZone::Tz(chrono_tz::UTC)));
+        let made_without = all_day_item(
+            Some("Greenwich Standard Time"),
+            Some("tzone://Microsoft/Utc"),
+        );
+        assert_eq!(
+            all_day_end_zone(&made_without),
+            Some(DayZone::Tz(chrono_tz::UTC))
+        );
     }
 
     #[test]
@@ -8202,7 +8403,10 @@ mod tests {
         };
         item.modified_occurrences = vec![ov.clone()];
         assert_eq!(all_day_zone(&item), Some(DayZone::Tz(auckland)));
-        assert_eq!(all_day_anchor(slot, Some(&DayZone::Tz(auckland))), local_midnight);
+        assert_eq!(
+            all_day_anchor(slot, Some(&DayZone::Tz(auckland))),
+            local_midnight
+        );
         let master = to_event(item.clone(), "cal").unwrap();
         assert_eq!(
             master.recurrence.as_ref().unwrap().exceptions,

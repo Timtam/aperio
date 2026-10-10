@@ -52,6 +52,12 @@ pub enum WriteRefusal {
     /// is the same sentence whichever way the account was touched. The
     /// detail names the store and its state for the log.
     AccessNotGranted,
+    /// An all-day appointment's day could not be changed, because the provider
+    /// stores it in a time zone Aperio cannot read, so its midnights are
+    /// unknown (decision 237). Its title and the rest still save. The detail
+    /// is a machine token for the log: `no-zone` (no zone, or an id with no
+    /// definition), `no-midnight` (the zone has no midnight that day).
+    DayZoneUnreadable,
 }
 
 impl WriteRefusal {
@@ -64,6 +70,7 @@ impl WriteRefusal {
             Self::OccurrenceNotWritable => "occurrence-not-writable",
             Self::UnsafeToWrite => "unsafe-to-write",
             Self::AccessNotGranted => "access-not-granted",
+            Self::DayZoneUnreadable => "day-zone-unreadable",
         }
     }
 
@@ -106,6 +113,7 @@ impl WriteRefusal {
             Self::OccurrenceNotWritable,
             Self::UnsafeToWrite,
             Self::AccessNotGranted,
+            Self::DayZoneUnreadable,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {

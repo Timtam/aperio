@@ -983,7 +983,7 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
 /// can't be expressed in EWS — the recurrence capability greys those out,
 /// so this only guards against a stray rule arriving from elsewhere.
 fn ews_recurrence_xml(rec: &cal_core::TaskRecurrence, start: DateTime<Utc>) -> Option<String> {
-    rrule_to_ews_recurrence(&task_recurrence_to_rrule(rec), start).ok()
+    rrule_to_ews_recurrence(&task_recurrence_to_rrule(rec), start.date_naive()).ok()
 }
 
 /// Build the `<t:ExtendedProperty>` element carrying the Aperio-Extras blob
