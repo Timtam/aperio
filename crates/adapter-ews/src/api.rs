@@ -212,7 +212,10 @@ pub struct SyncedFolderState {
 ///    (`inherited:{occurrence key}:{series key}`, decision 106), so the host
 ///    can never take it for the occurrence's own copy. Rows handed out by
 ///    parser 3 carry the occurrence's bare key for both.
-pub const ITEM_PARSER: u32 = 4;
+/// 5: items carry their zones' full definitions (`start_zone_definition`,
+///    `end_zone_definition`, decision 232), which the all-day read uses for a
+///    zone the CLDR table does not know (decision 239).
+pub const ITEM_PARSER: u32 = 5;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -1100,7 +1103,7 @@ pub async fn delete_series_occurrence(
     let mut best: Option<(u32, i64)> = None;
     for index in candidate_indices(candidate) {
         if let Some(s) = occurrence_start(client, master_id, change_key, index).await? {
-            let slot = match day_zone {
+            let slot = match &day_zone {
                 Some(zone) => crate::mapping::all_day_anchor(s, Some(zone)),
                 None => s,
             };
@@ -2652,9 +2655,12 @@ mod tests {
 
         // The row as the read gives it: the local midnights of 15 and 16 January.
         let raw: chrono::DateTime<chrono::Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
-        let start = crate::mapping::all_day_anchor(raw, Some(auckland));
+        let start = crate::mapping::all_day_anchor(raw, Some(&crate::mapping::DayZone::Tz(auckland)));
         let end =
-            crate::mapping::all_day_anchor("2027-01-15T11:00:00Z".parse().unwrap(), Some(auckland));
+            crate::mapping::all_day_anchor(
+                "2027-01-15T11:00:00Z".parse().unwrap(),
+                Some(&crate::mapping::DayZone::Tz(auckland)),
+            );
         let edit = Event {
             keep_attendees: false,
             keep_fields: Vec::new(),
@@ -3771,7 +3777,7 @@ mod tests {
         // The day as this device names it: its local midnight of July 20.
         let day = crate::mapping::all_day_anchor(
             "2026-07-20T10:00:00Z".parse().unwrap(),
-            Some(chrono_tz::Pacific::Honolulu),
+            Some(&crate::mapping::DayZone::Tz(chrono_tz::Pacific::Honolulu)),
         );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
@@ -3876,7 +3882,7 @@ mod tests {
             .await;
 
         // The day as this device names it: its local midnight of 15 January.
-        let day = crate::mapping::all_day_anchor(midnight(229), Some(auckland));
+        let day = crate::mapping::all_day_anchor(midnight(229), Some(&crate::mapping::DayZone::Tz(auckland)));
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
             .unwrap();

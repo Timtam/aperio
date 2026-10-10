@@ -66,7 +66,10 @@ use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS
 /// 3: a series' `EndDate` reads as its date whatever zone Exchange appends
 /// ("2026-11-05Z", "2026-11-05-05:00"). Before, such a rule was unreadable,
 /// and the series showed only at its master's start.
-pub const READ_RULE: u32 = 3;
+/// 4: an all-day boundary reads in its own zone (the end in the end zone,
+/// decision 233), in a zone whose id is tzdata's own name (236), and in a
+/// zone Exchange defines in full (232, 239).
+pub const READ_RULE: u32 = 4;
 
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";

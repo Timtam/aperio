@@ -745,7 +745,7 @@ fn parse_naive(text: &str) -> Option<NaiveDateTime> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn period(id: &str, bias: &str) -> PeriodDef {

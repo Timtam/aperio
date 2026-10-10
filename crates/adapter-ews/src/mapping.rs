@@ -1801,15 +1801,15 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     // All-day boundaries re-anchor at LOCAL midnight of their calendar day,
     // read in the item's own zone (the app-internal convention; see
     // all_day_anchor).
-    let day_zone = if item.is_all_day {
-        all_day_zone(&item)
+    let (day_zone, end_zone) = if item.is_all_day {
+        (all_day_zone(&item), all_day_end_zone(&item))
     } else {
-        None
+        (None, None)
     };
     let (start, end) = if item.is_all_day {
         (
-            all_day_anchor(start, day_zone),
-            all_day_anchor(end, day_zone),
+            all_day_anchor(start, day_zone.as_ref()),
+            all_day_anchor(end, end_zone.as_ref()),
         )
     } else {
         (start, end)
@@ -1873,7 +1873,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         // Anchor the exceptions the same way so they line up with the grid.
         let anchor = |dt: DateTime<Utc>| {
             if item.is_all_day {
-                all_day_anchor(dt, day_zone)
+                all_day_anchor(dt, day_zone.as_ref())
             } else {
                 dt
             }
@@ -2527,9 +2527,8 @@ pub fn override_event(
     // boundaries always agree — the master's flag decided this before, and a
     // series can hold an occurrence that is not all-day.
     if row.all_day {
-        let zone = all_day_zone(master_item);
-        row.start = all_day_anchor(ov.start, zone);
-        row.end = all_day_anchor(ov.end, zone);
+        row.start = all_day_anchor(ov.start, all_day_zone(master_item).as_ref());
+        row.end = all_day_anchor(ov.end, all_day_end_zone(master_item).as_ref());
     } else {
         row.start = ov.start;
         row.end = ov.end;
@@ -2567,9 +2566,8 @@ fn inherited_override_event(
     row.id = encode_override_event_id(&master_ev.id, override_slot(master_item, ov));
     row.recurrence = None;
     if master_item.is_all_day {
-        let zone = all_day_zone(master_item);
-        row.start = all_day_anchor(ov.start, zone);
-        row.end = all_day_anchor(ov.end, zone);
+        row.start = all_day_anchor(ov.start, all_day_zone(master_item).as_ref());
+        row.end = all_day_anchor(ov.end, all_day_end_zone(master_item).as_ref());
     } else {
         row.start = ov.start;
         row.end = ov.end;
@@ -2601,7 +2599,7 @@ fn inherited_override_event(
 /// reminders honoured single changes too (decision 215).
 pub(crate) fn override_slot(master_item: &ParsedItem, ov: &ModifiedOccurrence) -> DateTime<Utc> {
     if master_item.is_all_day {
-        all_day_anchor(ov.original_start, all_day_zone(master_item))
+        all_day_anchor(ov.original_start, all_day_zone(master_item).as_ref())
     } else {
         ov.original_start
     }
@@ -2621,53 +2619,148 @@ pub(crate) fn names_override(
     override_slot(master_item, ov) == slot || ov.original_start == slot
 }
 
-/// The zone an all-day item's instants are midnights in, as Exchange names
-/// it: its start zone, read the way its series' zone is read
-/// ([`crate::windows_tz::read_series_zone`]), and UTC for one made without a
-/// zone. `None` where Exchange names none Aperio can read.
-pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<chrono_tz::Tz> {
-    match crate::windows_tz::read_series_zone(
-        item.start_time_zone.as_deref(),
-        item.end_time_zone.as_deref(),
-    ) {
-        Some(crate::windows_tz::WindowsZoneRead::Zone(zone)) => zone.parse().ok(),
-        Some(crate::windows_tz::WindowsZoneRead::Utc) => Some(chrono_tz::UTC),
-        Some(crate::windows_tz::WindowsZoneRead::Unknown) | None => None,
+/// The zone an all-day boundary's instants are midnights in, as Exchange
+/// names it: a zone the CLDR table maps, or one whose id is tzdata's own name
+/// (`Europe/Berlin`, decision 236), or one Exchange defines in full (a
+/// custom zone such as `Customized Time Zone`, decision 232).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DayZone {
+    Tz(chrono_tz::Tz),
+    Rules(std::sync::Arc<crate::zone_definition::ZoneRules>),
+}
+
+impl DayZone {
+    /// The wall time at an instant; `None` where a definition cannot say.
+    pub(crate) fn wall(&self, when: DateTime<Utc>) -> Option<NaiveDateTime> {
+        match self {
+            Self::Tz(tz) => Some(when.with_timezone(tz).naive_local()),
+            Self::Rules(rules) => rules.wall(when),
+        }
     }
+
+    /// The instant of midnight on `day`: the first one where the clock reaches
+    /// it twice, and the first hour after it where a change skips it.
+    pub(crate) fn midnight(&self, day: chrono::NaiveDate) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Tz(tz) => local_midnight_in(day, tz),
+            Self::Rules(rules) => rules.midnight(day),
+        }
+    }
+}
+
+/// Midnight on `day` in a chrono zone, the first hour after it where a
+/// change skips it.
+pub(crate) fn local_midnight_in<Z: TimeZone>(day: chrono::NaiveDate, zone: &Z) -> Option<DateTime<Utc>> {
+    let midnight = day.and_hms_opt(0, 0, 0)?;
+    zone.from_local_datetime(&midnight)
+        .earliest()
+        .or_else(|| {
+            zone.from_local_datetime(&(midnight + chrono::Duration::hours(1)))
+                .earliest()
+        })
+        .map(|l| l.with_timezone(&Utc))
+}
+
+/// One boundary's zone from its id and definition: the CLDR table first (as
+/// the series' zone is read, [`crate::windows_tz::read_windows_zone`]), then
+/// an id that is tzdata's own name, then the definition. `None` where none of
+/// them gives a clock.
+fn boundary_zone(
+    id: Option<&str>,
+    definition: Option<&crate::zone_definition::ZoneDefinition>,
+) -> Option<DayZone> {
+    use crate::windows_tz::{read_windows_zone, WindowsZoneRead};
+    match id.map(read_windows_zone) {
+        Some(WindowsZoneRead::Zone(zone)) => return zone.parse().ok().map(DayZone::Tz),
+        Some(WindowsZoneRead::Utc) => return Some(DayZone::Tz(chrono_tz::UTC)),
+        Some(WindowsZoneRead::Unknown) | None => {}
+    }
+    if let Some(tz) = id.and_then(|id| id.trim().parse::<chrono_tz::Tz>().ok()) {
+        return Some(DayZone::Tz(tz));
+    }
+    let definition = definition?;
+    match crate::zone_definition::ZoneRules::try_from(definition) {
+        Ok(rules) => Some(DayZone::Rules(std::sync::Arc::new(rules))),
+        Err(error) => {
+            tracing::warn!(
+                target: "adapter_ews::zones",
+                id = id.unwrap_or(""),
+                %error,
+                "an Exchange zone definition cannot be read",
+            );
+            None
+        }
+    }
+}
+
+/// Whether Exchange marks an item as made without a zone: the end zone
+/// `tzone://Microsoft/Utc`, whatever the start zone says (decision 43b).
+fn made_without_zone(item: &ParsedItem) -> bool {
+    item.end_time_zone
+        .as_deref()
+        .is_some_and(|end| end.trim().eq_ignore_ascii_case("tzone://Microsoft/Utc"))
+}
+
+/// The zone an all-day item's START (and its slots) are midnights in:
+/// [`boundary_zone`] of its start zone, and UTC for one made without a zone.
+/// `None` where Exchange names none Aperio can read.
+pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<DayZone> {
+    if made_without_zone(item) {
+        return Some(DayZone::Tz(chrono_tz::UTC));
+    }
+    boundary_zone(
+        item.start_time_zone.as_deref(),
+        item.start_zone_definition.as_ref(),
+    )
+}
+
+/// The zone an all-day item's END is a midnight in: its own end zone where
+/// Exchange names one (an item can carry two, and Exchange rounds each
+/// boundary in its own, decision 233), else the start's.
+pub(crate) fn all_day_end_zone(item: &ParsedItem) -> Option<DayZone> {
+    if made_without_zone(item) {
+        return Some(DayZone::Tz(chrono_tz::UTC));
+    }
+    if item.end_time_zone.is_none() && item.end_zone_definition.is_none() {
+        return all_day_zone(item);
+    }
+    boundary_zone(
+        item.end_time_zone.as_deref(),
+        item.end_zone_definition.as_ref(),
+    )
 }
 
 /// The local midnight of the day an all-day instant names.
 ///
 /// EWS hands back a plain instant that is midnight of the intended day in
 /// the item's zone (the mailbox's, or UTC for boundaries we wrote ourselves)
-/// — mostly: after Aperio's own write of an Outlook item, which sends UTC
-/// midnights without a zone, Exchange rounds in the item's old zone and
-/// labels it UTC (live round 3). So the day is sampled 13:45 INTO it, in the
-/// zone Exchange names ([`all_day_zone`], decision 217): exact for a midnight
-/// that zone names, and the intended day for a label off by any offset in
+/// — mostly: after a write by Aperio before PR 8a, which sent UTC midnights
+/// without a zone, Exchange rounded in the item's old zone and labelled it
+/// UTC (live round 3). So the day is sampled 13:45 INTO it, in the zone
+/// Exchange names ([`all_day_zone`], decision 217): exact for a midnight that
+/// zone names, and the intended day for a label off by any offset in
 /// (−10:15, +13:45] — New Zealand's summer, the Chatham Islands, Tonga and
 /// Samoa among them, which twelve hours read as the day before; the same
 /// window `cal_core`'s anchor repair reads days in. Where Exchange names no
 /// zone Aperio can read, the sample is taken in UTC, with the same window.
 /// DST edge: a device zone that skips midnight that day gets the first hour
 /// after it, where the views place the day too.
-pub(crate) fn all_day_anchor(when: DateTime<Utc>, zone: Option<chrono_tz::Tz>) -> DateTime<Utc> {
+pub(crate) fn all_day_anchor(when: DateTime<Utc>, zone: Option<&DayZone>) -> DateTime<Utc> {
+    all_day_anchor_in(when, zone, &Local)
+}
+
+/// [`all_day_anchor`] on a given device clock, so tests can pin one.
+pub(crate) fn all_day_anchor_in<D: TimeZone>(
+    when: DateTime<Utc>,
+    zone: Option<&DayZone>,
+    device: &D,
+) -> DateTime<Utc> {
     let into_the_day = chrono::Duration::minutes(13 * 60 + 45);
-    let day = match zone {
-        Some(tz) => (when.with_timezone(&tz) + into_the_day).date_naive(),
-        None => (when + into_the_day).date_naive(),
-    };
-    let midnight = day.and_hms_opt(0, 0, 0).unwrap();
-    Local
-        .from_local_datetime(&midnight)
-        .earliest()
-        .or_else(|| {
-            Local
-                .from_local_datetime(&(midnight + chrono::Duration::hours(1)))
-                .earliest()
-        })
-        .map(|l| l.with_timezone(&Utc))
-        .unwrap_or(when)
+    let wall = zone
+        .and_then(|zone| zone.wall(when))
+        .unwrap_or_else(|| when.naive_utc());
+    let day = (wall + into_the_day).date();
+    local_midnight_in(day, device).unwrap_or(when)
 }
 
 fn push_set_string(out: &mut String, field_uri: &str, tag: &str, value: &str) {
@@ -7972,6 +8065,106 @@ mod tests {
     /// its January slots at 11:00 UTC the day before; the 12-hour sample read
     /// them as that day before. Its start, its exceptions and the slot in its
     /// single changes' ids now name the day itself.
+    fn all_day_item(start_zone: Option<&str>, end_zone: Option<&str>) -> ParsedItem {
+        ParsedItem {
+            is_all_day: true,
+            start_time_zone: start_zone.map(str::to_string),
+            end_time_zone: end_zone.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    fn utc(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
+    /// An id that is tzdata's own name (18 of Toni's items carry
+    /// `Europe/Berlin`) reads as that zone (decision 236).
+    #[test]
+    fn an_all_day_item_in_a_zone_named_by_tzdata_reads_its_day() {
+        let item = all_day_item(Some("Europe/Berlin"), Some("Europe/Berlin"));
+        let zone = all_day_zone(&item);
+        assert_eq!(zone, Some(DayZone::Tz(chrono_tz::Europe::Berlin)));
+        // Berlin's midnight of 12 October reads as that day on any device.
+        for device in [chrono_tz::Europe::Berlin, chrono_tz::Asia::Tokyo, chrono_tz::Pacific::Honolulu] {
+            let anchored = all_day_anchor_in(utc("2026-10-11T22:00:00Z"), zone.as_ref(), &device);
+            assert_eq!(
+                anchored,
+                local_midnight_in("2026-10-12".parse().unwrap(), &device).unwrap(),
+                "{device}"
+            );
+        }
+    }
+
+    /// A zone Exchange defines in full reads by its definition (decisions 232
+    /// and 239): a custom +14 zone's midnight, which a sample in UTC reads as
+    /// the day before.
+    #[test]
+    fn an_all_day_item_in_a_custom_zone_reads_its_day_by_the_definition() {
+        use crate::zone_definition::{PeriodDef, TransitionDef, ZoneDefinition};
+        let mut item = all_day_item(Some("Customized Time Zone"), None);
+        item.start_zone_definition = Some(ZoneDefinition {
+            periods: vec![PeriodDef {
+                id: "line".into(),
+                bias: "-PT14H".into(),
+            }],
+            groups: vec![],
+            transitions: vec![TransitionDef::Plain {
+                to_kind: "Period".into(),
+                to: "line".into(),
+            }],
+        });
+        let zone = all_day_zone(&item);
+        assert!(matches!(zone, Some(DayZone::Rules(_))));
+        // The end has no zone of its own and reads in the start's.
+        assert_eq!(all_day_end_zone(&item), zone);
+        let device = chrono_tz::Europe::Berlin;
+        let day = |d: &str| local_midnight_in(d.parse().unwrap(), &device).unwrap();
+        // Midnight of 12 October at +14 is 10:00Z on the 11th.
+        assert_eq!(
+            all_day_anchor_in(utc("2026-10-11T10:00:00Z"), zone.as_ref(), &device),
+            day("2026-10-12")
+        );
+        // Without the definition the sample in UTC names the 11th.
+        assert_eq!(
+            all_day_anchor_in(utc("2026-10-11T10:00:00Z"), None, &device),
+            day("2026-10-11")
+        );
+        // W. Europe's rules as a custom definition read Berlin's midnights.
+        item.start_zone_definition = Some(crate::zone_definition::tests::w_europe());
+        let zone = all_day_zone(&item);
+        assert_eq!(
+            all_day_anchor_in(utc("2026-10-24T22:00:00Z"), zone.as_ref(), &device),
+            day("2026-10-25")
+        );
+        // An id-only custom zone has no clock.
+        item.start_zone_definition = None;
+        assert_eq!(all_day_zone(&item), None);
+    }
+
+    /// Each boundary reads in its own zone (decision 233): an end Exchange
+    /// rounded in a zone far from the start's names its own day.
+    #[test]
+    fn an_all_day_end_reads_in_the_end_zone() {
+        let item = all_day_item(Some("Tokyo Standard Time"), Some("Hawaiian Standard Time"));
+        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(chrono_tz::Asia::Tokyo)));
+        assert_eq!(all_day_end_zone(&item), Some(DayZone::Tz(chrono_tz::Pacific::Honolulu)));
+        let device = chrono_tz::Europe::Berlin;
+        // Honolulu's midnight of 20 October: read in Tokyo it is the 21st.
+        let end = utc("2026-10-20T10:00:00Z");
+        assert_eq!(
+            all_day_anchor_in(end, all_day_end_zone(&item).as_ref(), &device),
+            local_midnight_in("2026-10-20".parse().unwrap(), &device).unwrap()
+        );
+        assert_eq!(
+            all_day_anchor_in(end, all_day_zone(&item).as_ref(), &device),
+            local_midnight_in("2026-10-21".parse().unwrap(), &device).unwrap()
+        );
+        // An item made without a zone reads both boundaries in UTC.
+        let made_without = all_day_item(Some("Greenwich Standard Time"), Some("tzone://Microsoft/Utc"));
+        assert_eq!(all_day_end_zone(&made_without), Some(DayZone::Tz(chrono_tz::UTC)));
+    }
+
     #[test]
     fn an_all_day_series_is_read_in_its_own_zone() {
         let auckland = chrono_tz::Pacific::Auckland;
@@ -8008,8 +8201,8 @@ mod tests {
             own: None,
         };
         item.modified_occurrences = vec![ov.clone()];
-        assert_eq!(all_day_zone(&item), Some(auckland));
-        assert_eq!(all_day_anchor(slot, Some(auckland)), local_midnight);
+        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(auckland)));
+        assert_eq!(all_day_anchor(slot, Some(&DayZone::Tz(auckland))), local_midnight);
         let master = to_event(item.clone(), "cal").unwrap();
         assert_eq!(
             master.recurrence.as_ref().unwrap().exceptions,
@@ -8021,7 +8214,7 @@ mod tests {
         // A series made without a zone reads its UTC midnights in UTC.
         item.start_time_zone = Some("Greenwich Standard Time".into());
         item.end_time_zone = Some("tzone://Microsoft/Utc".into());
-        assert_eq!(all_day_zone(&item), Some(chrono_tz::UTC));
+        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(chrono_tz::UTC)));
         // No zone Aperio can read: the day is sampled, as before.
         item.start_time_zone = None;
         item.end_time_zone = None;
