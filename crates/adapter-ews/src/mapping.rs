@@ -946,7 +946,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
                                 current.start_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                                    Some(crate::zone_definition::attribute_text(&a));
                             }
                         }
                     }
@@ -957,7 +957,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
                                 current.end_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                                    Some(crate::zone_definition::attribute_text(&a));
                             }
                         }
                         if !empty {
@@ -1449,7 +1449,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
                                 current.start_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                                    Some(crate::zone_definition::attribute_text(&a));
                             }
                         }
                     }
@@ -1459,7 +1459,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
                                 current.end_time_zone =
-                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                                    Some(crate::zone_definition::attribute_text(&a));
                             }
                         }
                         if !empty {
@@ -7902,6 +7902,47 @@ mod tests {
                 let item = parse(&zone_item(&named, ""));
                 assert_eq!(item.start_zone_definition, None, "{id}");
             }
+        }
+    }
+
+    /// An id holding a character XML escapes reads the same in an attribute
+    /// and in a `<To>` target, so the definition still makes a clock. The
+    /// zone's own id is decoded too.
+    #[test]
+    fn ids_with_escaped_characters_match_their_targets() {
+        let body = CUSTOM_ZONE_BODY
+            .replace("custom/", "Pacific (US &amp; Canada)/")
+            .replace(
+                r#"TransitionsGroup Id="0""#,
+                r#"TransitionsGroup Id="g &amp; 0""#,
+            )
+            .replace(
+                r#"<t:To Kind="Group">0</t:To>"#,
+                r#"<t:To Kind="Group">g &amp; 0</t:To>"#,
+            );
+        assert!(
+            body.contains(r#"<t:To Kind="Group">g &amp; 0</t:To>"#),
+            "{body}"
+        );
+        let start = format!(
+            r#"<t:StartTimeZone Id="Pacific Time (US &amp; Canada)" Name="">{body}</t:StartTimeZone>"#
+        );
+        let end = r#"<t:EndTimeZone Id="W. Europe Standard Time"/>"#;
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&zone_item(&start, end));
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("Pacific Time (US & Canada)")
+            );
+            let def = item
+                .start_zone_definition
+                .expect("the start zone's definition");
+            assert_eq!(def.periods[0].id, "Pacific (US & Canada)/std");
+            let rules = crate::zone_definition::ZoneRules::try_from(&def).unwrap();
+            assert_eq!(
+                rules.midnight("2026-10-12".parse().unwrap()),
+                Some("2026-10-11T22:00:00Z".parse().unwrap())
+            );
         }
     }
 

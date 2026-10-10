@@ -229,7 +229,17 @@ fn attribute(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<Strin
     e.attributes()
         .flatten()
         .find(|a| a.key.local_name().as_ref().eq_ignore_ascii_case(name))
-        .map(|a| String::from_utf8_lossy(&a.value).into_owned())
+        .map(|a| attribute_text(&a))
+}
+
+/// An attribute's value as text, its entities decoded: the parsers decode a
+/// `<To>` target's text, so a period or group id holding `&amp;` matches it
+/// only decoded too. A value that does not decode is kept as written.
+pub(crate) fn attribute_text(a: &quick_xml::events::attributes::Attribute<'_>) -> String {
+    a.unescape_value().map_or_else(
+        |_| String::from_utf8_lossy(&a.value).into_owned(),
+        |value| value.into_owned(),
+    )
 }
 
 impl ZoneDefinitionWalker {
