@@ -3026,10 +3026,17 @@ Siehe DESIGN §4.2.
   Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
   Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
   zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
-  Live-Test vor dem Zusammenführen (242): alle drei Fälle, ein Zonenwechsel an
-  einer Serie mit geänderter und gelöschter Ausnahme, Gegenproben. Dass die
-  Zone zuerst die Zeitpunkte einer Serie mit Uhrzeit stehen lässt, misst er;
-  gemessen war es nur an einer ganztägigen (Runde 2, B4).
+  Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
+  Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
+  neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
+  Anzahl allein nicht (M4, M5): Ein Zonenwechsel, der sie nur deshalb
+  schreibt, wird abgelehnt (245). Ganztägig bekommt Uhrzeit: Beginn und Ende
+  vor und nach der Zone, die Regel immer (244, M7, M8). Vor dem
+  Zusammenführen noch einmal live: 244 und 245 mit Aperios eigener Anfrage.
+  🚩 **Warnen und fragen** (243): eigener PR direkt nach dem Zonen-PR. Bevor
+  Aperio Beginn und Ende einer Exchange-Serie mit geänderten oder gelöschten
+  Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt es das
+  und fragt.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

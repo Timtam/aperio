@@ -2244,7 +2244,9 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// whose slot is written. With `before`, what is emitted
 /// is a SUBSET of what the same event emits without — never a superset, and
 /// never another value — except that a kept rule and its zone are the server's
-/// own, so is a slot written only because the zone moves the clock (decision
+/// own, written with a slot that takes them along even where the edit has no
+/// rule (an all-day series given a time always takes its rule, M7), so is a
+/// slot written only because the zone moves the clock (decision
 /// 240), and a zone and a rule written over a slot the edit keeps are read from
 /// that kept slot: its all-day flag (a timed server item gets its zone, an
 /// all-day one none, 46a) and its first day. So a field the COMPARISON suppresses is one whose value the
@@ -2276,7 +2278,9 @@ pub fn event_to_update_field_xml_on(
 /// An all-day slot goes out as midnights in the stored zones (decision 47a,
 /// each boundary in its own, 233), refused where one is unknown (237). A
 /// written zone goes first, and where it names another clock than the stored
-/// one the slot follows it (240). A series' rule starts on its first day as
+/// one the slot follows it (240); an all-day item given a time writes its
+/// timed slot ahead of the zone as well, and its rule after (the zone-first
+/// live test, M7). A series' rule starts on its first day as
 /// Exchange will read it: the device's day for an all-day series, the stored
 /// start zone's day for a timed one (234), the written zone's day where the
 /// clock moves, a stored zone that is unknown or a missing copy included
@@ -2399,8 +2403,9 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // the clock it names is not the one Exchange stores the item on — either
     // boundary, compared as the read side maps an id, so W. Europe and a stored
     // `Europe/Berlin` are the same clock (decision 240) — the slot follows it
-    // even where it did not change, putting the edit's instants on the new
-    // clock. A stored zone Aperio cannot read counts as another clock.
+    // even where it did not change, putting the instants the server keeps
+    // (`landed`, decision 106) on the new clock. A stored zone Aperio cannot
+    // read counts as another clock.
     let new_clock = written
         .filter(|_| zone_written)
         .and_then(|id| boundary_zone(Some(id), None));
@@ -2408,6 +2413,34 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         && (new_clock.is_none()
             || new_clock.as_ref() != stored.start.as_ref()
             || new_clock.as_ref() != stored.end.as_ref());
+    // Exchange drops a series' changed and deleted occurrences whenever its
+    // start and end are written again (the zone-first live test, L3a, M3, M6).
+    // A save that changes the slot writes them anyway, as it always did — the
+    // editor will ask first (decision 243). One that writes them only because
+    // the clock moves would lose them where no save did before, so it is
+    // refused, and nothing is sent (245). Without the copy they are unknown.
+    if clock_moves
+        && !slot_changed
+        && target != EventIdKind::Exception
+        && before.is_some_and(|server| {
+            server
+                .recurrence
+                .as_ref()
+                .is_some_and(|rec| !rec.exceptions.is_empty())
+        })
+    {
+        return Err(EwsError::Protocol(
+            cal_core::WriteRefusal::ExceptionsWouldBeLost.message("zone"),
+        ));
+    }
+    // An all-day item given a time of day (the zone-first live test): a zone
+    // written first onto an all-day daily series makes Exchange put its days
+    // on the new zone's midnights, two days long, and refuse the whole update
+    // (`ErrorOccurrenceTimeSpanTooBig`, L2). So the flag and the timed slot go
+    // first, then the zone, then the slot again on the zone's clock, then the
+    // rule (M7, M8). The rule always: without it Exchange moves the range's
+    // StartDate, read from the all-day day stored in UTC, a day later (M1, M2).
+    let leaves_all_day = zone_written && before.is_some_and(|b| b.all_day) && !landed.all_day;
     if slot_changed || clock_moves {
         // A slot written only because the clock moves is the server's.
         let slot = landed;
@@ -2423,12 +2456,15 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
         };
         push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
         push_set_datetime(&mut set, "calendar:End", "End", wire_end);
-        push_set_bool(
-            &mut set,
-            "calendar:IsAllDayEvent",
-            "IsAllDayEvent",
-            slot.all_day,
-        );
+        // Leaving all-day, the flag went ahead of the zone, once, as measured.
+        if !leaves_all_day {
+            push_set_bool(
+                &mut set,
+                "calendar:IsAllDayEvent",
+                "IsAllDayEvent",
+                slot.all_day,
+            );
+        }
     }
 
     if touches(EventField::Reminders) {
@@ -2497,9 +2533,11 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // stays is left as the server has it, so another device's COUNT or UNTIL
     // survives. A zone change writes no rule while the rule's first day and
     // weekday stay the same on the new clock, and rewrites it where the switch
-    // moves them; whether Exchange keeps a series' exceptions when the slot or
-    // the rule is written again is measured live, not assumed. The slot never deletes a rule: an edit without one says nothing
-    // about the server's. A missing copy's rule is unknown, not equal: a blind
+    // moves them; an all-day series given a time always rewrites it
+    // (`leaves_all_day`). A rule that only changes its COUNT keeps the
+    // series' exceptions (the zone-first live test, M5); other rewrites are
+    // unmeasured. The slot never deletes a rule: an edit without one says
+    // nothing about the server's. A missing copy's rule is unknown, not equal: a blind
     // write writes the edit's rule, or deletes the server's. And an edited rule
     // that no longer builds is written, so the save fails with it instead of
     // passing for an unchanged one.
@@ -2531,7 +2569,8 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     let rule_written = (before.is_none() && touches(EventField::Recurrence))
         || (touches(EventField::Recurrence) && written_rule == Some(None))
         || ((may(EventField::Recurrence) || rule_follows_slot)
-            && written_rule != before.and_then(built_rule));
+            && written_rule != before.and_then(built_rule))
+        || (leaves_all_day && rule_of.recurrence.is_some());
     // Two locks on the rule, on purpose. The diff is one: an exception has no
     // rule on either side, so nothing is emitted. The `target` check below is
     // the other, and it is the one that still holds when there is no `before`.
@@ -2557,8 +2596,9 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
     // new zone relabels whatever wall clock is stored when it arrives (round
     // 1, B2: Start and End before the zone moved them; round 2, B4: the zone
     // first left the series clean). The slot and the rule that follow are then
-    // read on it. A create writes it last, in schema order, which is fine
-    // there: CreateItem sets everything at once.
+    // read on it. Only an item leaving all-day puts its timed slot ahead of it
+    // (`leaves_all_day`). A create writes it last, in schema order, which is
+    // fine there: CreateItem sets everything at once.
     if let Some(windows) = written.filter(|_| zone_written) {
         let win = escape_xml(windows);
         set.insert_str(
@@ -2567,6 +2607,13 @@ pub(crate) fn event_to_update_field_xml_in<D: TimeZone>(
                 "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
             ),
         );
+        if leaves_all_day {
+            let mut lead = String::new();
+            push_set_bool(&mut lead, "calendar:IsAllDayEvent", "IsAllDayEvent", false);
+            push_set_datetime(&mut lead, "calendar:Start", "Start", landed.start);
+            push_set_datetime(&mut lead, "calendar:End", "End", landed.end);
+            set.insert_str(0, &lead);
+        }
     }
 
     Ok((set, del))
@@ -6460,7 +6507,10 @@ mod tests {
                                 // written at all is still the no-before
                                 // write's call — except the server's zone,
                                 // which rides along with a written slot where
-                                // the edit's own rule carries none.
+                                // the edit's own rule carries none, and the
+                                // server's rule, which an all-day series given
+                                // a time always rewrites (M7), where the edit
+                                // has none for the no-before write to write.
                                 let uri_of = |b: &str| {
                                     b.split(r#"FieldURI=""#)
                                         .nth(1)
@@ -6476,8 +6526,15 @@ mod tests {
                                             Some(&server),
                                         )
                                         .is_none();
+                                let servers_rule_only = uri.as_deref()
+                                    == Some("calendar:Recurrence")
+                                    && before.all_day
+                                    && !edit.all_day
+                                    && edit.recurrence.is_none();
                                 assert!(
-                                    servers_zone_only || without.iter().any(|b| uri_of(b) == uri),
+                                    servers_zone_only
+                                        || servers_rule_only
+                                        || without.iter().any(|b| uri_of(b) == uri),
                                     "{kind:?}, {before_name} -> {edit_name}, kept {keep:?}: a \
                                      kept rule or zone written with a before but not without \
                                      one:\n{block}",
@@ -10137,11 +10194,12 @@ mod tests {
     }
 
     /// An all-day series (stored without a zone, so in UTC) given a time of
-    /// day: the zone first, then the slot on it. The rule as built stays —
-    /// the all-day series starts on the device's day, the timed one on
-    /// Berlin's, the same Monday — so none is written (decision 241).
+    /// day, as the zone-first live test measured it (M7): the flag and the
+    /// timed slot, the zone, the slot again, then the rule — even though it
+    /// builds the same, the same Monday, because Exchange otherwise moves its
+    /// StartDate a day later (M1, M2). The zone first is refused whole (L2).
     #[test]
-    fn an_all_day_series_given_a_time_writes_the_zone_before_the_slot() {
+    fn an_all_day_series_given_a_time_writes_the_slot_the_zone_the_slot_and_the_rule() {
         let mut before = timed_series(
             "2026-11-01T23:00:00Z",
             "FREQ=DAILY;COUNT=3",
@@ -10161,9 +10219,90 @@ mod tests {
             &StoredZones::utc(),
             EventIdKind::RecurringMaster,
         );
-        assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
+        assert_eq!(
+            field_uris(&set),
+            [
+                "calendar:IsAllDayEvent",
+                "calendar:Start",
+                "calendar:End",
+                ZONE[0],
+                ZONE[1],
+                "calendar:Start",
+                "calendar:End",
+                "calendar:Recurrence",
+            ],
+            "{set}"
+        );
         assert_eq!(element(&set, "IsAllDayEvent"), "false", "{set}");
-        assert_eq!(element(&set, "Start"), "2026-11-01T23:30:00Z", "{set}");
+        // Both slots are the same instants.
+        for start in set.split("<t:Start>").skip(1) {
+            assert!(start.starts_with("2026-11-01T23:30:00Z<"), "{set}");
+        }
+        for end in set.split("<t:End>").skip(1) {
+            assert!(end.starts_with("2026-11-02T00:30:00Z<"), "{set}");
+        }
+        assert_eq!(element(&set, "StartDate"), "2026-11-02", "{set}");
+        assert_eq!(element(&set, "NumberOfOccurrences"), "3", "{set}");
+    }
+
+    /// Exchange drops a series' changed and deleted occurrences when its slot
+    /// is written again (the zone-first live test, L3a, M3), and a zone switch
+    /// that moves the clock writes it: refused, nothing sent (decision 245).
+    /// Under the same clock nothing moves and the zone alone goes out; a save
+    /// that moves the series writes its slot as it always did (243 will ask).
+    #[test]
+    fn a_zone_switch_that_would_drop_exceptions_is_refused() {
+        let mut before = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+            "Europe/Berlin",
+        );
+        before.recurrence.as_mut().unwrap().exceptions =
+            vec!["2026-11-09T09:00:00Z".parse().unwrap()];
+        for zone in ["America/New_York", "Asia/Tokyo"] {
+            let mut edit = before.clone();
+            edit.recurrence.as_mut().unwrap().tzid = Some(zone.into());
+            edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&before), true);
+            let refusal = event_to_update_field_xml_in(
+                &edit,
+                Some(&before),
+                &w_europe_zones(),
+                None,
+                EventIdKind::RecurringMaster,
+                &chrono_tz::Europe::Berlin,
+            )
+            .unwrap_err();
+            let EwsError::Protocol(message) = refusal else {
+                panic!("{zone}: {refusal:?}");
+            };
+            assert_eq!(
+                cal_core::WriteRefusal::parse(&message),
+                Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone")),
+                "{zone}"
+            );
+        }
+
+        let mut vienna = before.clone();
+        vienna.recurrence.as_mut().unwrap().tzid = Some("Europe/Vienna".into());
+        let (set, _) = saved(
+            &vienna,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(field_uris(&set), ZONE, "{set}");
+
+        let mut moved = before.clone();
+        moved.start += chrono::Duration::hours(1);
+        moved.end += chrono::Duration::hours(1);
+        moved.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        let (set, _) = saved(
+            &moved,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
     }
 
     /// The zone picker on a stored series keeps the instant (DESIGN, "Die Zone
@@ -10215,8 +10354,10 @@ mod tests {
     }
 
     /// 10:00 in Berlin is 04:00 in New York, the same Monday: the zone and the
-    /// slot on the new clock, and no rule (decision 241). Whether the series'
-    /// exceptions survive the slot written again is the live test's to say.
+    /// slot on the new clock, and no rule (decision 241). A series' exceptions
+    /// do not survive the slot written again (the zone-first live test, L3a):
+    /// one that has any is refused instead
+    /// (`a_zone_switch_that_would_drop_exceptions_is_refused`).
     #[test]
     fn a_zone_switch_on_the_same_day_writes_no_rule() {
         let before = timed_series(

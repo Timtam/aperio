@@ -185,9 +185,35 @@ keinen, dort ist die Wahl Tonis Sache.
   nur, wenn sich ihre gebaute Form ändert (241): Ein Zonenwechsel schreibt
   keine Regel, solange erster Tag und Wochentag auf der neuen Uhr gleich
   bleiben, und schreibt sie neu, wo der Wechsel sie verschiebt, etwa nahe
-  Mitternacht. Ob Exchange die geänderten und gelöschten Vorkommen behält,
-  wenn Beginn und Ende oder die Regel neu kommen, misst der Live-Test, mit
-  allen drei Fällen und Gegenproben (242).
+  Mitternacht. Der Live-Test hat alle drei Fälle und Gegenproben gemessen
+  (242, Live-Test Zone, 2026-10-10); was er fand, steht in 243 bis 245.
+- **243 — warnen und fragen.** *(beschlossen, eigener PR direkt nach dem
+  Zonen-PR)* Exchange verwirft alle geänderten und gelöschten Vorkommen einer
+  Serie, sobald ein Ändern Beginn und Ende des Serienkopfs neu schreibt: beim
+  Zonenwechsel (L3a, L3b), beim Verschieben ohne Zone (M3) und mit der Regel
+  dazu (M6). Nur den Titel (M4) oder nur die Anzahl der Wiederholungen (M5) zu
+  ändern, behält sie. Bevor Aperio Beginn und Ende einer Exchange-Serie mit
+  solchen Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt
+  es das und fragt.
+- **244 — ganztägig bekommt Uhrzeit.** *(gebaut, Zonen-PR)* Die Zone zuerst
+  lehnt Exchange an einer ganztägigen täglichen Serie ab
+  (`ErrorOccurrenceTimeSpanTooBig`, L2): Es legt deren Tage auf die
+  Mitternächte der neuen Zone, zwei Tage lang. Ganztägig aus, Beginn und Ende
+  vor der Zone und danach noch einmal nimmt es an, die Serie beginnt dann aber
+  einen Tag später (M1, M2): Exchange liest das Startdatum der Regel aus dem
+  ganztägigen Tag in UTC neu. Mit der Regel am Ende, auf dem Tag der neuen
+  Zone, landet sie richtig, in einer Anfrage wie in zweien (M7, M8). So
+  schreibt Aperio es jetzt: Ganztägig aus, Beginn, Ende, Zone, Beginn, Ende,
+  Regel, die Regel immer.
+- **245 — kein Zonenwechsel, der Vorkommen verwirft.** *(gebaut, Zonen-PR)*
+  Schreibt ein Ändern Beginn und Ende nur, weil die neue Zone eine andere Uhr
+  nennt (240), und hat die Serie geänderte oder gelöschte Vorkommen, lehnt
+  Aperio es ab und schickt nichts: „Diese Änderung würde die Zeitzone der
+  Serie wechseln, und dabei verwirft Exchange ihre geänderten und gelöschten
+  Vorkommen. Es wurde nichts geändert.“ Ein Ändern, das die Serie ohnehin
+  verschiebt, schreibt Beginn und Ende wie vor dem Zonen-PR; davor fragt 243.
+  Dieselbe Uhr unter anderem Namen schreibt nur die Zone und wird nicht
+  abgelehnt.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -665,7 +691,10 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   Zonen-PR die Zone zuerst; nennt sie eine andere Uhr als die gespeicherte,
   folgen Beginn, Ende und Ganztägig, auch unverändert, mit den Werten des
   Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute
-  Form ändert (241). **Microsoft 365** leitet Start- und Enddatum und die
+  Form ändert (241). Bekommt eine ganztägige Serie Uhrzeiten, kommen Beginn
+  und Ende vor und nach der Zone und die Regel immer (244). Ein Zonenwechsel,
+  der geänderte oder gelöschte Vorkommen verwerfen würde, wird abgelehnt
+  (245). **Microsoft 365** leitet Start- und Enddatum und die
   Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
   lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
@@ -956,7 +985,8 @@ Handy im selben PR.
      ergäbe sonntags 23:30. 234 bleibt abgeleitet (Runde 1), weder bestätigt
      noch widerlegt. Nach dem Schreibcode von main wäre es dort genauso. Der
      Zonen-PR schreibt die Zone, dann Beginn und Ende, dann die Regel am Tag
-     der neuen Zone (240, 241); sein Live-Test misst, ob das richtig landet.
+     der neuen Zone (240, 241); der Live-Test Zone hat es so gemessen (L1,
+     L1b).
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Der Exchange-Teil ist mit PR 8a gebaut, zusammen mit 47a (57a), und im
    Live-Test 8a gemessen. Offen ist
@@ -1060,9 +1090,13 @@ Handy im selben PR.
   Windows folgen. Vancouver etwa hätte unter tzdata 2026b ab dem 1. November
   2026 eine andere Uhr als Pacific Standard Time. `cargo xtask windows-zones
   --check` nennt jede solche Zone mit „no longer written to Exchange“.
-- **Feldreihenfolge im Update.** Aperio setzt beim Ändern Beginn und Ende vor
-  der Zone. Ob Exchange die Zeitpunkte verschiebt, wenn im selben Update die
-  Zone dazukommt, ist ungemessen. Der Live-Test (38a) prüft es.
+- **Feldreihenfolge im Update.** Beginn und Ende vor einer neuen Zone
+  verschoben die Zeitpunkte (Runde 1, B2). Seit dem Zonen-PR schreibt ein
+  Ändern die Zone zuerst (240), außer wenn eine ganztägige Serie Uhrzeiten
+  bekommt (244). Beginn und Ende neu verwerfen die Ausnahmen einer Serie
+  (Live-Test Zone, 243); ein Zonenwechsel, der sie nur deshalb schreibt, wird
+  abgelehnt (245). Ob die Zone allein, unter derselben Uhr, die Ausnahmen
+  stehen lässt, ist nicht gemessen.
 - **EWS in Exchange Online endet** ab Oktober 2026, ganz im April 2027. Eigene
   Exchange-Server sind nicht betroffen.
 - **Die Exchange-Tabelle hängt am Monorepo.** Verlässt der EWS-Adapter das

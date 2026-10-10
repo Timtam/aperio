@@ -186,10 +186,29 @@ um 23:30.
 
 Exchange behält beim Wechsel der Zeitzone die gespeicherte Uhrzeit und deutet
 sie in der neuen Zone. Seit dieser Version schickt Aperio die Zeitzone zuerst
-und danach Beginn und Ende, so bleibt der Termin, wo er war.
+und danach Beginn und Ende, so bleibt der Termin, wo er war. Bekommt eine
+ganztägige Serie Uhrzeiten, schickt Aperio Beginn und Ende vor und nach der
+Zeitzone und danach die Wiederholung: Die Zeitzone zuerst lehnt Exchange dort
+ab, und ohne die Wiederholung begänne die Serie einen Tag später.
 
 Was du tun kannst: Eine Serie, die schon verschoben ist, verschiebst du einmal
 von Hand an die richtige Stelle.
+
+## Die Zeitzone einer Exchange-Serie lässt sich nicht wechseln
+
+Aperio sagt dann: „Diese Änderung würde die Zeitzone der Serie wechseln, und
+dabei verwirft Exchange ihre geänderten und gelöschten Vorkommen. Es wurde
+nichts geändert.“
+
+Damit eine Serie in einer anderen Zeitzone zur selben Zeit bleibt, muss Aperio
+Beginn und Ende der Serie neu schicken. Dabei verwirft Exchange jedes
+Vorkommen, das einzeln geändert oder gelöscht wurde: Gelöschte stehen wieder
+da, geänderte stehen wieder wie die Serie. Hat die Serie solche Vorkommen,
+wechselt Aperio ihre Zeitzone deshalb nicht.
+
+Was du tun kannst: Lass die Zeitzone, wie sie ist; Titel, Ort und Erinnerung
+kannst du weiter ändern. Eine Zeitzone mit derselben Uhrzeit, etwa Wien statt
+Berlin, speichert Aperio.
 
 ## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
 

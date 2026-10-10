@@ -62,6 +62,12 @@ pub enum WriteRefusal {
     /// write needs it, so nothing was sent: a retry may well work. The detail
     /// is the read's own error, for the log.
     CopyUnreadable,
+    /// The write would make the provider drop a series' changed and deleted
+    /// occurrences, so nothing was sent (decision 245): Exchange drops them
+    /// whenever a series' start and end are written again, and switching its
+    /// time zone has to write them. The detail is a machine token for the
+    /// log: `zone`.
+    ExceptionsWouldBeLost,
 }
 
 impl WriteRefusal {
@@ -76,6 +82,7 @@ impl WriteRefusal {
             Self::AccessNotGranted => "access-not-granted",
             Self::DayZoneUnreadable => "day-zone-unreadable",
             Self::CopyUnreadable => "copy-unreadable",
+            Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
         }
     }
 
@@ -120,6 +127,7 @@ impl WriteRefusal {
             Self::AccessNotGranted,
             Self::DayZoneUnreadable,
             Self::CopyUnreadable,
+            Self::ExceptionsWouldBeLost,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -181,6 +189,10 @@ mod tests {
             WriteRefusal::IdentityUnknown,
             WriteRefusal::OccurrenceNotWritable,
             WriteRefusal::UnsafeToWrite,
+            WriteRefusal::AccessNotGranted,
+            WriteRefusal::DayZoneUnreadable,
+            WriteRefusal::CopyUnreadable,
+            WriteRefusal::ExceptionsWouldBeLost,
         ] {
             let msg = refusal.message("detail");
             assert_eq!(

@@ -21,6 +21,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'access-not-granted': 'dialogs.event.writeError.accessNotGranted',
   'day-zone-unreadable': 'dialogs.event.writeError.dayZoneUnreadable',
   'copy-unreadable': 'dialogs.event.writeError.copyUnreadable',
+  'exceptions-would-be-lost': 'dialogs.event.writeError.exceptionsWouldBeLost',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -36,6 +37,7 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'access-not-granted': 'dialogs.event.writeError.reason.accessNotGranted',
   'day-zone-unreadable': 'dialogs.event.writeError.reason.dayZoneUnreadable',
   'copy-unreadable': 'dialogs.event.writeError.reason.copyUnreadable',
+  'exceptions-would-be-lost': 'dialogs.event.writeError.reason.exceptionsWouldBeLost',
 };
 
 /** An error as the hosts hand it over: a code and a message. */

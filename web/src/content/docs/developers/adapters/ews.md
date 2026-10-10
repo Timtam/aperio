@@ -182,13 +182,24 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   last, on the new zone's day, and only where its built form changes (241):
   a zone change writes no rule while the series' first day and weekday stay
   the same on the new clock, and rewrites it where the switch moves them, as
-  near midnight. Whether Exchange keeps a series' changed and deleted
-  occurrences when the slot, or the rule, is written again is what the live
-  test of this change measures.
-  That covers a single made a series, an all-day series given a time, and
-  the zone picker on a stored series, which keeps the instant. Whether zone
-  first keeps a timed series' instants is measured by the live test of this
-  change (round 2, B4, measured it on an all-day series).
+  near midnight. That covers a single made a series and the zone picker on
+  a stored series, which keeps the instant (the zone-first live test, L1,
+  L1b, L4a to L4e).
+- **An all-day series given a time** (decision 244) writes IsAllDayEvent,
+  Start and End before the zone, Start and End again after it, and the rule
+  last, always. The zone first is refused whole
+  (`ErrorOccurrenceTimeSpanTooBig`: on the new zone's midnights each day
+  is two days long, L2). Without the rule, the series lands a day late:
+  Exchange reads the range's StartDate again from the all-day day it stored
+  in UTC (M1, M2). With it, it lands right (M7, M8).
+- **Exchange drops a series' exceptions** — every changed and deleted
+  occurrence — when an update writes the master's Start and End (the
+  zone-first live test: L3a, L3b, M3, M6). A title (M4) or a changed COUNT
+  (M5) keeps them. A zone switch that writes them only because the clock
+  moves is refused, and nothing is sent: `exceptions-would-be-lost: zone`
+  (decision 245). A save that moves the series writes them as it always did.
+  A zone on the same clock goes out alone; whether that keeps the exceptions
+  is not measured.
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written

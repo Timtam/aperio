@@ -1441,15 +1441,16 @@ fn to_update_error(err: EwsError) -> CoreError {
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
         // Nothing was sent: an all-day day in a zone Aperio cannot read
-        // (decision 237), or one whose copy could not be read. Forbidden, so
-        // the phone keeps the message and a split knows the write never
-        // landed.
+        // (decision 237), one whose copy could not be read, or a zone switch
+        // that would drop the series' exceptions (245). Forbidden, so the
+        // phone keeps the message and a split knows the write never landed.
         EwsError::Protocol(message)
             if matches!(
                 cal_core::WriteRefusal::parse(&message),
                 Some((
                     cal_core::WriteRefusal::DayZoneUnreadable
-                        | cal_core::WriteRefusal::CopyUnreadable,
+                        | cal_core::WriteRefusal::CopyUnreadable
+                        | cal_core::WriteRefusal::ExceptionsWouldBeLost,
                     _
                 ))
             ) =>
@@ -1476,6 +1477,10 @@ const REFUSED_UPDATE_CODES: &[&str] = &[
     "ErrorCalendarInvalidRecurrence",
     "ErrorInvalidIdMalformed",
     "ErrorInvalidChangeKey",
+    // An occurrence would overlap the next: Exchange checks the series' span
+    // against its pattern before it saves anything (the zone-first live test,
+    // an all-day daily series given a time).
+    "ErrorOccurrenceTimeSpanTooBig",
 ];
 
 /// The code, without the namespace prefix a fault's `faultcode` carries
@@ -3176,14 +3181,9 @@ mod server_zone_tests {
         assert!(!update.contains("TimeZone"), "{update}");
     }
 
-    /// Decisions 240 and 241 through the adapter: a weekly Monday series
-    /// Exchange stores in W. Europe, read back as Aperio reads it, switched to
-    /// New York at the same instant. The request names the zone first, then
-    /// the slot on the new clock; 10:00 in Berlin is the same Monday in New
-    /// York, so no rule goes out.
-    #[tokio::test]
-    async fn a_zone_switch_writes_the_zone_before_the_slot_and_no_rule() {
-        let stored = r#"<?xml version="1.0"?>
+    /// A weekly Monday series, 10:00 in Berlin, four times, as Exchange
+    /// stores it in W. Europe.
+    const STORED_WEEKLY_W_EUROPE: &str = r#"<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
             xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
@@ -3214,6 +3214,15 @@ mod server_zone_tests {
     </m:GetItemResponseMessage>
   </m:ResponseMessages></m:GetItemResponse></s:Body>
 </s:Envelope>"#;
+
+    /// Decisions 240 and 241 through the adapter: a weekly Monday series
+    /// Exchange stores in W. Europe, read back as Aperio reads it, switched to
+    /// New York at the same instant. The request names the zone first, then
+    /// the slot on the new clock; 10:00 in Berlin is the same Monday in New
+    /// York, so no rule goes out.
+    #[tokio::test]
+    async fn a_zone_switch_writes_the_zone_before_the_slot_and_no_rule() {
+        let stored = STORED_WEEKLY_W_EUROPE;
         let item = crate::mapping::parse_get_calendar_items_response(stored)
             .unwrap()
             .remove(0);
@@ -3251,6 +3260,52 @@ mod server_zone_tests {
             "{update}"
         );
         assert!(!update.contains("calendar:Recurrence"), "{update}");
+    }
+
+    /// Decision 245 through the adapter: the same series with one occurrence
+    /// deleted, switched to New York. Writing its slot again would make
+    /// Exchange drop the deletion (the zone-first live test, L3a), so the save
+    /// is refused, carried as Forbidden, and nothing is sent.
+    #[tokio::test]
+    async fn a_zone_switch_on_a_series_with_exceptions_is_refused_and_nothing_is_sent() {
+        let stored = STORED_WEEKLY_W_EUROPE.replace(
+            "</t:Recurrence>",
+            "</t:Recurrence>
+        <t:DeletedOccurrences><t:DeletedOccurrence>
+          <t:Start>2026-11-09T09:00:00Z</t:Start>
+        </t:DeletedOccurrence></t:DeletedOccurrences>",
+        );
+        let item = crate::mapping::parse_get_calendar_items_response(&stored)
+            .unwrap()
+            .remove(0);
+        let opened = crate::mapping::to_event(item, "FA|FCK").unwrap();
+        assert_eq!(
+            opened.recurrence.as_ref().map(|r| r.exceptions.len()),
+            Some(1)
+        );
+        let mut edit = opened.clone();
+        edit.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&opened), true);
+
+        let mut server = Server::new_async().await;
+        let requests = serve_stored(&mut server, stored).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter.update_event(edit).await.unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone"))
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
     }
 
     /// Decision 233 through the adapter: a start and an end stored in
