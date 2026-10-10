@@ -182,9 +182,12 @@ keinen, dort ist die Wahl Tonis Sache.
   und zwar mit den Werten des Servers, wo die Bearbeitung sie festhält (106).
   Dieselbe Uhr unter anderem Namen („W. Europe“ und „Europe/Berlin“) zählt
   nicht als Wechsel. Die Regel kommt zuletzt, auf der Uhr der neuen Zone, und
-  nur, wenn sich ihre gebaute Form ändert (241): Ein reiner Zonenwechsel
-  schreibt keine Regel und schont so die Ausnahmen der Serie. Der Live-Test
-  misst alle drei Fälle und Gegenproben (242).
+  nur, wenn sich ihre gebaute Form ändert (241): Ein Zonenwechsel schreibt
+  keine Regel, solange erster Tag und Wochentag auf der neuen Uhr gleich
+  bleiben, und schreibt sie neu, wo der Wechsel sie verschiebt, etwa nahe
+  Mitternacht. Ob Exchange die geänderten und gelöschten Vorkommen behält,
+  wenn Beginn und Ende oder die Regel neu kommen, misst der Live-Test, mit
+  allen drei Fällen und Gegenproben (242).
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:

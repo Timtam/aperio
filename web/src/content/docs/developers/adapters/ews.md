@@ -180,7 +180,11 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   where they did not change; a slot written only for that is the server's,
   so a boundary another device moved is not put back (106). The rule comes
   last, on the new zone's day, and only where its built form changes (241):
-  a zone change alone writes no rule, which spares the series' exceptions.
+  a zone change writes no rule while the series' first day and weekday stay
+  the same on the new clock, and rewrites it where the switch moves them, as
+  near midnight. Whether Exchange keeps a series' changed and deleted
+  occurrences when the slot, or the rule, is written again is what the live
+  test of this change measures.
   That covers a single made a series, an all-day series given a time, and
   the zone picker on a stored series, which keeps the instant. Whether zone
   first keeps a timed series' instants is measured by the live test of this

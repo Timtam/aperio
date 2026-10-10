@@ -2244,8 +2244,9 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
 /// whose slot is written. With `before`, what is emitted
 /// is a SUBSET of what the same event emits without — never a superset, and
 /// never another value — except that a kept rule and its zone are the server's
-/// own, and so is a slot written only because the zone moves the clock
-/// (decision 240). So a field the COMPARISON suppresses is one whose value the
+/// own, so is a slot written only because the zone moves the clock (decision
+/// 240), and a rule written over a slot the edit keeps starts on that kept
+/// slot's first day. So a field the COMPARISON suppresses is one whose value the
 /// server already has; a field `keep_fields` suppresses may differ from the
 /// server's, on purpose.
 ///
@@ -6351,6 +6352,33 @@ mod tests {
                                 && [EventField::Start, EventField::End, EventField::AllDay]
                                     .iter()
                                     .any(|f| keep.contains(f))
+                            {
+                                continue;
+                            }
+                            // The third exception, on purpose: where the edit
+                            // keeps the server's slot, the edit's rule starts on
+                            // THAT slot's first day — the one the server keeps —
+                            // which a write without the copy, writing the edit's
+                            // slot, cannot know.
+                            let slot_kept =
+                                [EventField::Start, EventField::End, EventField::AllDay]
+                                    .iter()
+                                    .any(|f| keep.contains(f));
+                            let rule_on_servers_slot = edit.recurrence.as_ref().and_then(|r| {
+                                rrule_to_ews_recurrence(
+                                    &r.rrule,
+                                    rule_first_day(
+                                        before.start,
+                                        before.all_day,
+                                        Some(&rule_clock),
+                                        &Local,
+                                    ),
+                                )
+                                .ok()
+                            });
+                            if slot_kept
+                                && block.contains(r#"FieldURI="calendar:Recurrence""#)
+                                && rule_on_servers_slot.is_some_and(|rule| block.contains(&rule))
                             {
                                 continue;
                             }
