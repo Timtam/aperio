@@ -6884,8 +6884,9 @@ mod tests {
     }
 
     /// The slot is one fact: turning an event into an all-day one writes both
-    /// boundaries with it, because `ews_all_day_boundary` rewrites them from
-    /// the flag and Exchange validates a Start against the End it has stored.
+    /// boundaries with it, because `all_day_boundary` rewrites them from the
+    /// flag, in the stored zones, and Exchange validates a Start against the
+    /// End it has stored.
     #[test]
     fn the_slot_is_written_as_one() {
         let before = saved_single("Trip");

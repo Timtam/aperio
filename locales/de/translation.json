@@ -1706,8 +1706,8 @@
           "occurrenceNotWritable": "dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern",
           "unsafeToWrite": "Aperio kann ihn auf dem Server nicht sicher ändern",
           "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts",
-          "dayZoneUnreadable": "Exchange speichert ihn in einer Zeitzone, die Aperio nicht lesen kann, deshalb lässt sich sein Tag hier nicht ändern",
-          "copyUnreadable": "Aperio konnte seinen aktuellen Stand nicht vom Server lesen",
+          "dayZoneUnreadable": "Exchange speichert sie in einer Zeitzone, die Aperio nicht lesen kann, deshalb lässt sich ihr Tag hier nicht ändern",
+          "copyUnreadable": "Aperio konnte ihren aktuellen Stand nicht vom Server lesen",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast"
         }

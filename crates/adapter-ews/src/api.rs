@@ -851,13 +851,6 @@ pub async fn update_event(
         }
         other => other?,
     };
-    if before.is_none() {
-        tracing::warn!(
-            target: "adapter_ews::write",
-            event_id = %event.id,
-            "writing without the current copy: every field not kept, and a kept rule with a moved slot",
-        );
-    }
     // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
     // report attendees changed while `keep_attendees` suppresses that block,
     // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits
@@ -877,6 +870,13 @@ pub async fn update_event(
             updated_at: Utc::now(),
             ..event.clone()
         });
+    }
+    if before.is_none() {
+        tracing::warn!(
+            target: "adapter_ews::write",
+            event_id = %event.id,
+            "writing without the current copy: every field not kept, and a kept rule with a moved slot",
+        );
     }
     // Removed invitees count too: with every one removed (`clear_attendees`)
     // they may still get a cancellation (decision 74a).

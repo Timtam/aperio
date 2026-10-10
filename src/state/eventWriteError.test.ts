@@ -215,7 +215,11 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
       );
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/no-zone/);
     }
-    expect(eventWriteFailureReason(desktop, t)).toMatch(/Zeitzone, die Aperio nicht lesen kann/);
+    // The reason stands only in the split's sentences, about "die alte Serie".
+    expect(eventWriteFailureReason(desktop, t)).toBe(
+      'Exchange speichert sie in einer Zeitzone, die Aperio nicht lesen kann, ' +
+        'deshalb lässt sich ihr Tag hier nicht ändern',
+    );
     expect(writeNeverLanded(desktop)).toBe(true);
   });
 });
@@ -234,6 +238,9 @@ describe('a write that needs the current copy, when it cannot be read', () => {
       expect(eventWriteErrorMessage(err, t)).toMatch(/Versuche es gleich noch einmal/);
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/503|network/);
     }
+    expect(eventWriteFailureReason(desktop, t)).toBe(
+      'Aperio konnte ihren aktuellen Stand nicht vom Server lesen',
+    );
     expect(writeNeverLanded(desktop)).toBe(true);
   });
 });

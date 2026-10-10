@@ -244,6 +244,9 @@ tests ask the mocked server for its zones once and drain an older parser's
 state again. Live testing
 needs an Exchange/365 mailbox that still exposes EWS. The ignored tests
 `live_test_requests` and `live_test_requests_round_3` write the requests of
-the live zone tests as Aperio builds them, into the directory
-`APERIO_LIVE_TEST_DIR` names; each file's header comment says which requests
-are not Aperio's rule yet.
+the live zone tests, into the directory `APERIO_LIVE_TEST_DIR` names; each
+file's header comment says what it is. Round 3's files are historical since
+PR 8a: its "today's rule" files (R3-2, R3-4, R3-5b-u) are round 3's requests
+before 8a, rebuilt for an item read as stored in UTC, while an 8a build
+writes an Outlook item's stored-zone midnights; its 47a prototype (R3-1,
+R3-3, R3-7b) is Aperio's rule now.
