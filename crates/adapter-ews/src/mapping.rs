@@ -3379,7 +3379,10 @@ impl EwsRecurrence {
                 parts.push(format!("COUNT={occurrences}"));
             }
             EwsRecurrenceRange::EndDate { end } => {
-                // EWS sends EndDate as YYYY-MM-DD. The series' DTSTART
+                // EWS sends EndDate as a date, possibly with a zone
+                // appended (`Z` was measured on StartDate; an offset such
+                // as `-05:00` is the schema's other form); `range_date`
+                // keeps the date. The series' DTSTART
                 // is a UTC date-time, and RFC 5545 requires UNTIL to
                 // share that value type — i.e. a UTC date-time too. A
                 // bare date-only UNTIL is read as floating/local, and
@@ -3390,7 +3393,9 @@ impl EwsRecurrence {
                 // instant so the rule validates AND the final day's
                 // occurrences stay included (UNTIL is inclusive).
                 // Matches the frontend's `buildRRule` (`…T235959Z`).
-                let compact: String = end.chars().filter(|c| *c != '-').collect();
+                // `range_date` again here: an item cached before READ_RULE 3
+                // still holds the date with Exchange's zone appended.
+                let compact: String = range_date(end).chars().filter(|c| *c != '-').collect();
                 parts.push(format!("UNTIL={compact}T235959Z"));
             }
         }
@@ -3526,6 +3531,17 @@ pub fn parse_ews_recurrence(xml: &str) -> EwsResult<EwsRecurrence> {
 /// callers that don't need the structured form (most read-path code).
 pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
     Ok(parse_ews_recurrence(xml)?.to_rrule())
+}
+
+/// The date of a range's `EndDate`, without a zone Exchange may append to
+/// it: UTC ("2026-12-31Z", the form measured on StartDate) or an offset
+/// ("2026-12-31+02:00", "2026-12-31-05:00", the schema's other forms). A
+/// value that does not open with a date is kept as it came.
+fn range_date(s: &str) -> &str {
+    match s.get(..10) {
+        Some(day) if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day,
+        _ => s,
+    }
 }
 
 // ── builders (mutable scratch types used during XML walk) ─────────────────
@@ -3707,10 +3723,7 @@ impl RecurrenceWalker {
             }
             Some("end_date") => {
                 if let Some(RangeBuilder::EndDate { end }) = self.range.as_mut() {
-                    // Some servers append a TZ suffix
-                    // ("2026-12-31+02:00"); keep the date part only.
-                    let trimmed = s.split(['T', '+']).next().unwrap_or(s);
-                    *end = trimmed.to_string();
+                    *end = range_date(s).to_string();
                 }
             }
             _ => {}
@@ -6972,6 +6985,74 @@ mod tests {
           </t:Recurrence>"#;
         let err = parse_ews_recurrence(xml).unwrap_err();
         assert!(matches!(err, EwsError::Protocol(_)));
+    }
+
+    /// Exchange may append a zone to a range's dates: `Z` was measured live
+    /// on StartDate (rounds 2 and 3), and api.rs's master fixture uses that
+    /// shape; an offset is the schema's other form. Every spelling ends on
+    /// its own date, and the rule stays one the expanders accept.
+    #[test]
+    fn an_end_date_reads_as_its_date_whatever_zone_exchange_appends() {
+        for end in [
+            "2026-11-05",
+            "2026-11-05Z",
+            "2026-11-05+02:00",
+            "2026-11-05-05:00",
+            "2026-11-05T00:00:00Z",
+        ] {
+            let xml = format!(
+                "<t:Recurrence>\
+                   <t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>\
+                   <t:EndDateRecurrence>\
+                     <t:StartDate>2026-11-02Z</t:StartDate><t:EndDate>{end}</t:EndDate>\
+                   </t:EndDateRecurrence>\
+                 </t:Recurrence>"
+            );
+            let rec = parse_ews_recurrence(&xml).unwrap();
+            assert_eq!(
+                rec.range,
+                EwsRecurrenceRange::EndDate {
+                    end: "2026-11-05".into()
+                },
+                "EndDate {end} is stored as its date",
+            );
+            assert_eq!(
+                rec.to_rrule(),
+                "FREQ=DAILY;UNTIL=20261105T235959Z",
+                "EndDate {end}"
+            );
+        }
+    }
+
+    /// An item cached before READ_RULE 3 holds the date as Exchange sent it.
+    /// Emitting it again must mend the rule, not repeat the broken UNTIL.
+    #[test]
+    fn a_cached_end_date_with_its_zone_still_emits_a_valid_rule() {
+        for end in ["2026-11-05Z", "2026-11-05-05:00", "2026-11-05+02:00"] {
+            let rec = EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 1 },
+                range: EwsRecurrenceRange::EndDate {
+                    end: end.to_string(),
+                },
+            };
+            assert_eq!(
+                rec.to_rrule(),
+                "FREQ=DAILY;UNTIL=20261105T235959Z",
+                "cached {end}"
+            );
+            // The rrule crate reads the rule too: deleting one occurrence
+            // finds its InstanceIndex through it (third of 2-5 Nov).
+            let at = |d: &str| d.parse::<DateTime<Utc>>().unwrap();
+            assert_eq!(
+                nominal_occurrence_index(
+                    &rec,
+                    at("2026-11-02T08:00:00Z"),
+                    at("2026-11-04T08:00:00Z")
+                ),
+                Some(3),
+                "cached {end}",
+            );
+        }
     }
 
     // ── SyncFolderItems response parser ──────────────────────────
