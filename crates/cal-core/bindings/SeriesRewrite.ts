@@ -4,7 +4,9 @@
  * What an update writes again that makes a provider drop a series' changed
  * and deleted occurrences (decisions 243-253): its start and end — a move, a
  * new length, all-day on or off —, only the clock its zone names (245), or
- * its pattern, the days or the interval it repeats on (live round 6). A
- * change of how often or until when a series runs keeps them.
+ * its pattern: its frequency, the days, the interval it repeats on (the
+ * days and the interval measured in live round 6). Its range, how many times
+ * or until when it runs, keeps them (the zone-first live test, M5; round 8,
+ * U1-U3).
  */
 export type SeriesRewrite = "slot" | "zone" | "pattern";

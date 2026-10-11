@@ -267,10 +267,9 @@ export default function EventEditorModal({
   const leavingNotice = useRef(false);
   // A save of a series that would make the provider drop occurrences the user
   // changed or deleted on their own (decisions 243-253) asks first; yes saves
-  // the same form again with the consent, on that one write only. Mirrors
-  // the desktop.
-  const acceptsLossRef = useRef(false);
-  const saveRef = useRef<() => Promise<void>>(async () => undefined);
+  // the same form again with the consent, handed to that one save only, so a
+  // save its own checks stop keeps none for a later one. Mirrors the desktop.
+  const saveRef = useRef<(acceptsLoss?: boolean) => Promise<void>>(async () => undefined);
   const closeNotice = useCallback(() => {
     if (splitNotice == null || leavingNotice.current) return;
     leavingNotice.current = true;
@@ -1009,7 +1008,7 @@ export default function EventEditorModal({
     return allDay ? t('dialogs.event.invitation.allDayValue', { date: text }) : text;
   };
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (acceptsLoss = false) => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
       setError(t('dialogs.event.titleRequired'));
@@ -1617,7 +1616,7 @@ export default function EventEditorModal({
         // write and nothing else; what comes back never carries it.
         lossAskable = true;
         const updated = await updateEvent(
-          acceptsLossRef.current ? { ...sent, accepts_exception_loss: true } : sent,
+          acceptsLoss ? { ...sent, accepts_exception_loss: true } : sent,
           original.calendar_id,
         );
         lossAskable = false;
@@ -1716,7 +1715,7 @@ export default function EventEditorModal({
       // A save that would drop occurrences of the series asks first
       // (decisions 243-253); nothing was sent.
       const loss = exceptionsLossOf(err);
-      if (loss != null && lossAskable && !acceptsLossRef.current && shown.current) {
+      if (loss != null && lossAskable && !acceptsLoss && shown.current) {
         const question = exceptionsLossQuestion(loss, trimmedTitle, t);
         showEventScopeDialog({
           title: question.title,
@@ -1728,8 +1727,7 @@ export default function EventEditorModal({
               label: question.confirm,
               destructive: true,
               run: () => {
-                acceptsLossRef.current = true;
-                void saveRef.current();
+                void saveRef.current(true);
               },
             },
           ],
@@ -1740,7 +1738,6 @@ export default function EventEditorModal({
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {
-      acceptsLossRef.current = false;
       setSaving(false);
     }
   }, [

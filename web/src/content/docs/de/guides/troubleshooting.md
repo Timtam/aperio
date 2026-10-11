@@ -206,14 +206,17 @@ Exchange verwirft jedes einzeln geänderte und jedes gelöschte Vorkommen einer
 Serie, sobald Aperio ihren Beginn und ihr Ende, ihre Zeitzone oder das Muster
 ihrer Wiederholung neu schreibt: wenn du die Serie auf eine andere Uhrzeit oder
 einen anderen Tag legst, ihre Dauer änderst, sie ganztägig machst oder andere
-Wochentage oder einen anderen Abstand wählst. Titel, Ort, Erinnerung, die Anzahl
-der Termine und ihr Ende ändern daran nichts; dann fragt Aperio nicht.
+Wochentage, einen anderen Abstand oder eine andere Häufigkeit wählst (täglich
+statt wöchentlich). Titel, Ort und Erinnerung ändern daran nichts, und in aller
+Regel auch die Anzahl der Termine und ihr Ende nicht; dann fragt Aperio nicht.
+Nur bei einer Serie, deren Zeitzone Aperio mit ihrer Wiederholung neu schreibt
+(siehe unten), bringen auch sie die Frage.
 
 Gelöschte Vorkommen löscht Aperio nach dem Speichern selbst wieder, dort, wo sie
 jetzt stehen. Nur wenn du das Muster und die Uhrzeit oder den Tag zugleich
-änderst, lässt sich nicht sagen, wo sie stehen; dann zählt die Frage sie mit.
-Einzeln geänderte Vorkommen gehen verloren: Sie nehmen wieder die Angaben der
-Serie an.
+änderst oder Aperio die Zeitzone der Serie nicht lesen kann, lässt sich nicht
+sagen, wo sie stehen; dann zählt die Frage sie mit. Einzeln geänderte Vorkommen
+gehen verloren: Sie nehmen wieder die Angaben der Serie an.
 
 Was du tun kannst: „Abbrechen“ lässt die Serie, wie sie ist, und deine Änderung
 bleibt im Editor stehen. „Trotzdem speichern“ speichert sie. Ließ sich ein
@@ -224,15 +227,22 @@ Die Zeitzone einer Serie kannst du in dieser Version nicht selbst wählen. Nach
 einer anderen Zeitzone fragt Aperio deshalb nur bei einer Serie aus einem
 anderen Programm, deren Ende in einer anderen Zeitzone steht als ihr Beginn,
 oder wenn die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie zuletzt
-gelesen hat. Im zweiten Fall öffne die Serie neu, sobald Aperio den Kalender
-aktualisiert hat.
+gelesen hat; im zweiten Fall öffne die Serie neu, sobald Aperio den Kalender
+aktualisiert hat. Bei einer solchen Serie kommt die Frage, sobald Aperio ihre
+Wiederholung neu schreibt: wenn du die Wiederholung änderst, auch nur die Anzahl
+der Termine oder ihr Ende, und wenn du die Serie ab einem ihrer Termine änderst
+oder löschst.
 
 Ziehst du eine Serie mit der Maus oder überträgst du eine Änderung an Kopien in
 anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es
 denselben Satz und „Es wurde nichts geändert.“ Ändere die Serie dann im Editor.
-Änderst oder löschst du eine solche Serie ab einem ihrer Termine, fragt Aperio
-ebenfalls nicht, denn dabei entstünde die neue Serie zweimal: Es sagt den Satz
-und ändert nichts. Das geht dann in Outlook.
+
+Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
+Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur bei
+einer Serie, deren Zeitzone Aperio dabei neu schriebe (siehe oben), fragt Aperio
+dort nicht: Es sagt den Satz und ändert nichts. Das geht dann in Outlook. Ab
+ihrem ersten Termin geändert, wird die ganze Serie neu geschrieben, und Aperio
+fragt wie im Editor.
 
 Kann Aperio den aktuellen Stand einer Serie nicht vom Server lesen, ändert es
 sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:

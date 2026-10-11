@@ -269,27 +269,34 @@ keinen, dort ist die Wahl Tonis Sache.
   gelöschte erscheinen wieder.
 - **253 — gelöschte wieder löschen.** *(gebaut, PR A)* Nach dem Speichern
   löscht Aperio jedes gelöschte Vorkommen wieder, wo es jetzt steht:
-  verschoben wie das erste Vorkommen, also an seinem Platz im Muster, nach
-  dem Exchange zählt (eine Verschiebung, ein Zonenwechsel, eine mit dem
-  Beginn verschobene Regel, `cal_core::shift_series`; Runde 6, R1 bis R3);
-  unter einem neuen Muster an seinem eigenen Zeitpunkt, wenn das Muster ihn
-  noch hat. Ändern sich Muster und Beginn zugleich, lässt es sich nicht
-  zuordnen: Es zählt in der Frage als verloren. Gelöscht wird nur das
+  verschoben wie das erste Vorkommen, also an seinem Platz im Muster, nach dem
+  Exchange zählt (eine Verschiebung, ein Zonenwechsel, eine mit dem Beginn
+  verschobene Regel, `cal_core::shift_series`; Runde 6, R1 bis R3); unter
+  einem neuen Muster an seinem eigenen Zeitpunkt, wenn das Muster ihn noch
+  hat. Ändern sich Muster und Beginn zugleich, verschöbe `shift_series` die
+  Regel nicht, oder ist eine der beiden Uhren nicht lesbar, lässt es sich
+  nicht zuordnen: Es zählt in der Frage als verloren. Gelöscht wird nur das
   Vorkommen, dessen Beginn genau stimmt; hat das Speichern die Teilnehmer
   benachrichtigt, bekommen sie die Absage, denn ihre Serie hat es wieder,
-  sonst geht es ohne Absage. Ein Platz, an dem Exchange kein Vorkommen
-  mehr hat (gelöscht oder hinter dem Ende), brachte nichts zurück. Eines,
-  das sich nicht bestätigen oder löschen lässt, nennen beide Editoren,
-  das Ziehen und das Übertragen nach dem Speichern mit seinem Tag
-  (`deletions_not_restored`). Verschoben verspricht Aperio nur, wo es beide
-  Uhren lesen kann; sonst zählt die Frage die gelöschten mit. Die Frage nennt
-  deshalb nur, was
-  wirklich verloren geht. Mit Aperios eigener Anfrage gemessen (Runde 7):
-  Verschieben und neues Muster fragen und schicken nichts (Q1, Q5); mit
-  Zustimmung geht das geänderte Vorkommen verloren und das gelöschte steht an
-  der neuen Stelle wieder gelöscht (Q2); nur gelöschte fragen nicht und
-  bleiben gelöscht, einen Tag später wie unter einem neuen Muster (Q3, Q4);
-  der Titel allein schreibt nur den Titel (Q6).
+  sonst geht es ohne Absage. Nichts kam zurück, wo die Serie, Index für Index
+  gelesen, über den Platz springt: von einem Vorkommen davor, oder ihrem
+  Beginn, zu einem danach, oder ihrem Ende — sie beginnt oder endet jetzt
+  jenseits davon, oder ein neues Muster hat ihn nicht mehr —, und wo der
+  Index, den die Regel gibt, eine Löschung ist, die Exchange behielt. Ein
+  Index, den Aperio eben wieder gelöscht hat, steht für sein Vorkommen, nicht
+  für den Platz. Ein Vorkommen keinen halben Tag vom Platz, das nicht das
+  erwartete ist, kam unbestätigt zurück. Eines, das sich nicht bestätigen oder
+  löschen lässt, nennen beide Editoren, das Ziehen und das Übertragen nach dem
+  Speichern mit seinem Tag (`deletions_not_restored`); lässt sich die Serie
+  danach nicht lesen, dort, wohin das Speichern sie verschob, als Tag, wenn es
+  sie ganztägig ließ. Verschoben verspricht Aperio nur, wo es beide Uhren
+  lesen kann; sonst zählt die Frage die gelöschten mit. Die Frage nennt
+  deshalb nur, was wirklich verloren geht. Mit Aperios eigener Anfrage
+  gemessen (Runde 7): Verschieben und neues Muster fragen und schicken nichts
+  (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und das
+  gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
+  fragen nicht und bleiben gelöscht, einen Tag später wie unter einem neuen
+  Muster (Q3, Q4); der Titel allein schreibt nur den Titel (Q6).
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -758,22 +765,22 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   „Exchange kann die Zeitzone {Stadt} nicht speichern; die Serie steht auf
   UTC.“ Kopieren oder Verschieben nach Exchange wird mit der Zone im Grund
   abgelehnt.
-- **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf der
-  Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des Geräts,
-  beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone,
-  solange die Uhr bleibt (234), und die geschriebene Zone, wo sie wechselt
-  (241), sonst UTC. Eine neue Zone behält die gespeicherte Uhrzeit (Runde 1,
-  B2; Live-Test 8a, Schritt 9). Deshalb schreibt ein Ändern seit dem
+- **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf
+  der Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des
+  Geräts, beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte
+  Startzone, solange die Uhr bleibt (234), und die geschriebene Zone, wo sie
+  wechselt (241), sonst UTC. Eine neue Zone behält die gespeicherte Uhrzeit
+  (Runde 1, B2; Live-Test 8a, Schritt 9). Deshalb schreibt ein Ändern seit dem
   Zonen-PR die Zone zuerst; nennt sie eine andere Uhr als die gespeicherte,
   folgen Beginn, Ende und Ganztägig, auch unverändert, mit den Werten des
-  Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute
-  Form ändert (241). Bekommt eine ganztägige Serie Uhrzeiten, kommen Beginn
-  und Ende vor und nach der Zone und die Regel immer (244). Schreibt ein
-  Ändern Beginn und Ende, die Zone oder das Muster einer Serie mit
-  geänderten oder gelöschten Vorkommen neu, fragt Aperio vorher und löscht
-  gelöschte danach wieder (243, 246-253). **Microsoft 365** leitet Start-
-  und Enddatum und die Standard-Tage weiter aus dem UTC-Datum ab und muss
-  sie auf der Uhr der Serie
+  Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute Form
+  ändert (241). Bekommt eine ganztägige Serie Uhrzeiten, kommen Beginn und
+  Ende vor und nach der Zone und die Regel immer (244). Schreibt ein Ändern
+  Beginn und Ende, die Zone oder das Muster einer Serie neu, fragt Aperio
+  vorher, was dabei verloren ginge: einzeln geänderte Vorkommen und gelöschte,
+  die es nicht wieder zuordnen kann; die übrigen gelöschten löscht es danach
+  wieder (243, 246-253). **Microsoft 365** leitet Start- und Enddatum und die
+  Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
   lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
 

@@ -993,6 +993,8 @@ pub async fn update_event(
             Restore {
                 placement: plan.placement,
                 written_start: plan.written_start,
+                written_all_day: plan.written_all_day,
+                written_clock: plan.written_clock.clone(),
                 notify,
             },
             &restore,
@@ -1047,14 +1049,18 @@ pub async fn update_event(
 /// (`notify`), the series they were sent has it again, so they are told it is
 /// cancelled again too; otherwise it goes without a cancellation.
 ///
-/// Nothing came back where an index the probes read holds no occurrence —
-/// the series now ends before it, or Exchange kept the deletion — or where a
-/// new pattern no longer has the instant, between two occurrences read on
-/// either side of it. Anything else that cannot be confirmed or deleted,
-/// a probe that could not be read included, is returned: where it now stands,
-/// as the read anchors a day for an all-day series, so the surfaces name the
-/// day the user sees. `written_start` is the first start the update wrote,
-/// for where they stand when the series cannot be read again.
+/// Nothing came back where the series, read index by index, steps over the
+/// place: from an occurrence before it, or the series' start, straight to one
+/// after it, or the series' end — it now begins or ends beyond the place, or
+/// a new pattern no longer has it. Nor where the index the rule gives is a
+/// deletion Exchange kept. An index this restore has just deleted again
+/// stands for the occurrence it held, not for the place. Anything else — an
+/// occurrence at the place that is not the one expected, a probe that could
+/// not be read, a delete that failed — is returned: where it now stands, as
+/// the read anchors a day for an all-day series, so the surfaces name the day
+/// the user sees. Where the series cannot be read again, every one is
+/// returned, moved as the update moved the first start, on the kind and the
+/// clock the update left the series on.
 async fn restore_deletions(
     client: &EwsClient,
     master_id: &str,
@@ -1067,6 +1073,8 @@ async fn restore_deletions(
     let Restore {
         placement,
         written_start,
+        written_all_day,
+        written_clock,
         notify,
     } = restore;
     // Where a deleted occurrence stands now, as far as the update itself says:
@@ -1098,14 +1106,15 @@ async fn restore_deletions(
             item.is_all_day,
         ))
     }) else {
-        // Where they stand, as the update moved them; an all-day day as it was.
-        let anchor_zone = if before.all_day { old_clock } else { None };
+        // Where they stand, as the update moved them: a day where it left the
+        // series all-day, read on the clock it left it on; an instant where it
+        // gave it a time.
         return deleted
             .iter()
             .map(|&gone| {
                 let near = shifted(gone);
-                if before.all_day {
-                    crate::mapping::all_day_anchor(near, anchor_zone)
+                if written_all_day {
+                    crate::mapping::all_day_anchor(near, written_clock.as_ref())
                 } else {
                     near
                 }
@@ -1128,6 +1137,9 @@ async fn restore_deletions(
         .zip(wall(before.start, old_clock))
         .map(|(now, then)| now - then);
     let mut back = Vec::new();
+    // The occurrences this restore has deleted again, by index, with where
+    // they stood: a probe of one answers "deleted" for it.
+    let mut deleted_again: Vec<(u32, DateTime<Utc>)> = Vec::new();
     for &gone in deleted {
         // Where it is expected now, roughly — the index is read from it — and
         // exactly, by the test its start must pass: moved on the clocks as the
@@ -1149,48 +1161,64 @@ async fn restore_deletions(
                 .is_some_and(|(then, now)| now - then == moved),
             None => start == gone,
         };
-        let Some(candidate) = crate::mapping::nominal_occurrence_index(rule, first, near) else {
-            back.push(as_seen(near));
-            continue;
+        let side_of = |start: DateTime<Utc>| {
+            if (start - near).abs() < chrono::Duration::hours(12) {
+                Side::Place
+            } else if start < near {
+                Side::Before
+            } else {
+                Side::After
+            }
         };
-        let mut seen = Vec::new();
+        // Without an index from the rule — it has no occurrence up to two
+        // days after the place, or it cannot be expanded — the series is read
+        // from its first occurrence.
+        let candidate = crate::mapping::nominal_occurrence_index(rule, first, near).unwrap_or(1);
+        // Index 0 is the series' start, before every place.
+        let mut sides = vec![(0, Side::Before)];
         let mut found = None;
-        let (mut unread, mut empty) = (false, false);
         for index in candidate_indices(candidate) {
-            match probe_occurrence(client, master_id, index).await {
+            let side = match probe_occurrence(client, master_id, index).await {
                 Probe::At(start) if matches(start) => {
-                    found = Some(index);
+                    found = Some((index, start));
                     break;
                 }
-                Probe::At(start) => seen.push(start),
-                // Deleted at that index, or past the series' end.
-                Probe::Absent => empty = true,
-                Probe::Unreadable => unread = true,
-            }
+                Probe::At(start) => side_of(start),
+                Probe::Deleted => deleted_again
+                    .iter()
+                    .find(|(again, _)| *again == index)
+                    .map_or(Side::Kept, |&(_, start)| side_of(start)),
+                Probe::PastEnd => Side::After,
+                Probe::Unreadable => Side::Unknown,
+            };
+            sides.push((index, side));
         }
+        let side_at = |index: u32| {
+            sides
+                .iter()
+                .find(|(at, _)| *at == index)
+                .map(|&(_, side)| side)
+        };
+        // Nothing came back: no occurrence stands at the place, and the
+        // series steps over it or the rule's index is a kept deletion.
+        let nothing_back = !sides.iter().any(|&(_, side)| side == Side::Place)
+            && (sides.iter().any(|&(index, side)| {
+                side == Side::Before && side_at(index + 1) == Some(Side::After)
+            }) || side_at(candidate) == Some(Side::Kept));
         match found {
-            Some(index) => {
+            Some((index, start)) => {
                 let envelope = delete_occurrence_item(master_id, None, index, notify);
-                if let Err(err) = client.post_soap(envelope).await {
-                    tracing::warn!(target: "adapter_ews::write", %err, index, "a deleted occurrence came back and could not be deleted again");
-                    back.push(as_seen(near));
+                match client.post_soap(envelope).await {
+                    Ok(_) => deleted_again.push((index, start)),
+                    Err(err) => {
+                        tracing::warn!(target: "adapter_ews::write", %err, index, "a deleted occurrence came back and could not be deleted again");
+                        back.push(as_seen(near));
+                    }
                 }
             }
-            // A probe that could not be read proves nothing either way.
-            None if unread => {
-                tracing::warn!(target: "adapter_ews::write", %near, "a deleted occurrence may have come back; its place could not be read");
-                back.push(as_seen(near));
-            }
-            // Nothing came back there: an index next to it holds no
-            // occurrence, so the series ends before it or the deletion was
-            // kept; or a new pattern no longer has the instant, which lies
-            // between two occurrences read on either side of it.
-            None if empty => {}
-            None if placement == Placement::Same
-                && seen.iter().any(|s| *s < gone)
-                && seen.iter().any(|s| *s > gone) => {}
+            None if nothing_back => {}
             None => {
-                tracing::warn!(target: "adapter_ews::write", %near, "a deleted occurrence came back where it could not be confirmed");
+                tracing::warn!(target: "adapter_ews::write", %near, ?sides, "a deleted occurrence may have come back where it could not be confirmed");
                 back.push(as_seen(near));
             }
         }
@@ -1199,13 +1227,35 @@ async fn restore_deletions(
 }
 
 /// How [`restore_deletions`] places and deletes, from the update it follows.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Restore {
     placement: crate::mapping::Placement,
     /// The first start the update wrote, as it went on the wire.
     written_start: Option<DateTime<Utc>>,
+    /// Whether the update left the series all-day, and the clock it left it
+    /// on: an all-day day is anchored on them when the series cannot be read
+    /// again.
+    written_all_day: bool,
+    written_clock: Option<crate::mapping::DayZone>,
     /// Whether the update told the attendees.
     notify: bool,
+}
+
+/// Where an index the restore read stands against the place a deleted
+/// occurrence is expected at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// An occurrence, or the start of the series, before the place.
+    Before,
+    /// An occurrence at the place — within half a day of it, closer than any
+    /// two of a series' occurrences stand — that is not the one expected.
+    Place,
+    /// An occurrence after the place, or the series' end.
+    After,
+    /// A deletion Exchange kept: where it stood is not said.
+    Kept,
+    /// An answer that says nothing.
+    Unknown,
 }
 
 /// The ChangeKey Exchange holds for an item now.
@@ -1353,16 +1403,18 @@ async fn occurrence_start(
 
 /// What reading occurrence `index` of a series found, for
 /// [`restore_deletions`]: an occurrence and its slot; none, because Exchange
-/// says it is deleted or past the series' end; or nothing it can tell from.
+/// says it is deleted, or past the series' end; or nothing it can tell from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Probe {
     At(DateTime<Utc>),
-    Absent,
+    Deleted,
+    PastEnd,
     Unreadable,
 }
 
-/// [`occurrence_start`], telling "deleted" and "past the end" apart from any
-/// other answer without an occurrence, which proves nothing.
+/// [`occurrence_start`], telling "deleted" and "past the end" apart from each
+/// other and from any other answer without an occurrence, which proves
+/// nothing.
 async fn probe_occurrence(client: &EwsClient, master_id: &str, index: u32) -> Probe {
     let xml = match client
         .post_soap_raw(get_occurrence_item(master_id, None, index))
@@ -1383,14 +1435,9 @@ async fn probe_occurrence(client: &EwsClient, master_id: &str, index: u32) -> Pr
         });
     match start {
         Some(start) => Probe::At(start),
-        None if [
-            "ErrorCalendarOccurrenceIsDeletedFromRecurrence",
-            "ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange",
-        ]
-        .iter()
-        .any(|code| xml.contains(code)) =>
-        {
-            Probe::Absent
+        None if xml.contains("ErrorCalendarOccurrenceIsDeletedFromRecurrence") => Probe::Deleted,
+        None if xml.contains("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange") => {
+            Probe::PastEnd
         }
         None => {
             tracing::warn!(target: "adapter_ews::write", index, "an occurrence's answer named none and no reason");
@@ -1671,7 +1718,6 @@ async fn read_before(
     let series = match (&item.recurrence, item.start) {
         (Some(_), Some(start)) => Some(SeriesShape {
             start,
-            all_day: item.is_all_day,
             changed: item.modified_occurrences.len(),
             deleted: item.deleted_occurrence_starts.clone(),
         }),
@@ -1689,7 +1735,8 @@ async fn read_before(
 struct ServerCopy {
     event: Event,
     zones: crate::mapping::StoredZones,
-    /// For a series head, its rule and occurrences as Exchange holds them.
+    /// For a series head, its first start and its changed and deleted
+    /// occurrences as Exchange holds them.
     series: Option<SeriesShape>,
 }
 
@@ -1699,7 +1746,6 @@ struct ServerCopy {
 #[derive(Debug, Clone)]
 struct SeriesShape {
     start: DateTime<Utc>,
-    all_day: bool,
     changed: usize,
     deleted: Vec<DateTime<Utc>>,
 }

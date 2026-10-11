@@ -164,6 +164,38 @@ describe('EventDialog → a save that would drop occurrences of the series', () 
     expect(screen.getByRole('button', { name: /^speichern$|^save$/i })).toBeTruthy();
   });
 
+  it('leaves no consent behind when the form stops the save again', async () => {
+    // The form stays editable while the first save is on its way: the title
+    // is cleared before the refusal comes back.
+    let refuse = () => {};
+    answers.push(
+      () =>
+        new Promise((_, reject) => {
+          refuse = () =>
+            reject({ code: 'forbidden', message: 'exceptions-would-be-lost: slot:1:0' });
+        }),
+    );
+    answers.push(refusal('slot:1:0'));
+    await openAndSave();
+    const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
+    fireEvent.change(title, { target: { value: '' } });
+    refuse();
+    const dialog = await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /trotzdem speichern/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull(),
+    );
+    // Stopped by the missing title: nothing went out.
+    expect(updatesSent().length).toBe(1);
+
+    // The title back and saved again: that save was never answered yes.
+    fireEvent.change(title, { target: { value: 'Teamrunde' } });
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
+    await waitFor(() => expect(updatesSent().length).toBe(2));
+    expect(updatesSent()[1].accepts_exception_loss).toBeFalsy();
+    await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+  });
+
   it('names the days of deleted occurrences that came back, and the save stands', async () => {
     answers.push((event) =>
       Promise.resolve({

@@ -1207,6 +1207,10 @@ export function EventDialog({
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      // The consent the loss question gave is for the one submit it starts:
+      // read here, at once, because the question withdraws it as soon as that
+      // submit has begun (see its `onConfirm`).
+      const acceptsLoss = acceptsLossRef.current;
       if (submitting) return; // re-entry guard while a slow PUT is in flight
       setError(null);
 
@@ -1248,9 +1252,10 @@ export function EventDialog({
       );
 
       setSubmitting(true);
-      // Only the series' own write asks (decisions 246, 247): a split's cut or
-      // the copies' writes refused the same way show the sentence, because
-      // saying yes there would write the new series a second time.
+      // Only the series' own write asks (decisions 246, 247). A split's cut
+      // refused the same way shows the sentence, because a yes there would
+      // write the new series a second time; the copies' writes show it too,
+      // until the carry asks once for all of them (decision 251).
       let lossAskable = false;
       try {
         // The reminders list to send to the server. When
@@ -1914,7 +1919,7 @@ export function EventDialog({
           // what comes back never carries it.
           lossAskable = true;
           const saved = await apiUpdateEvent(
-            acceptsLossRef.current ? { ...updated, accepts_exception_loss: true } : updated,
+            acceptsLoss ? { ...updated, accepts_exception_loss: true } : updated,
             event.calendar_id,
           );
           lossAskable = false;
@@ -2021,7 +2026,7 @@ export function EventDialog({
         // A save that would drop occurrences of the series asks first
         // (decisions 243-253), in a dialog over the form; nothing was sent.
         const loss = exceptionsLossOf(err);
-        if (loss && lossAskable && !acceptsLossRef.current && shownRef.current) {
+        if (loss && lossAskable && !acceptsLoss && shownRef.current) {
           setLossAsk(loss);
           return;
         }
@@ -2029,7 +2034,6 @@ export function EventDialog({
         // token in its message.
         setError(eventWriteErrorMessage(err, t));
       } finally {
-        acceptsLossRef.current = false;
         setSubmitting(false);
       }
     },
@@ -2952,9 +2956,13 @@ export function EventDialog({
         confirmLabel={lossQuestion.confirm}
         onConfirm={() => {
           // The same save again, now with the consent; the form is what it
-          // was when the question came.
+          // was when the question came. The submit reads the consent before
+          // its first await, and one the form's own validation stops never
+          // starts, so it is withdrawn right after either way: no later save
+          // can carry it.
           acceptsLossRef.current = true;
           formElementRef.current?.requestSubmit();
+          acceptsLossRef.current = false;
         }}
       />
     )}

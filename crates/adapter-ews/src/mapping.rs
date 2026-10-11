@@ -2320,6 +2320,11 @@ pub(crate) struct UpdatePlan {
     /// The first start the update writes, as it goes on the wire; `None`
     /// where it writes no slot.
     pub(crate) written_start: Option<DateTime<Utc>>,
+    /// Whether the series is all-day once the update has landed, and the
+    /// clock it is stored on then: where a deleted occurrence stands is read
+    /// on them when the series cannot be read again.
+    pub(crate) written_all_day: bool,
+    pub(crate) written_clock: Option<DayZone>,
 }
 
 /// Where a deleted occurrence of a series stands after an update that made
@@ -2334,17 +2339,19 @@ pub(crate) enum Placement {
     /// The pattern changed under the same slot: a deleted occurrence stands
     /// where it stood, if the new pattern has it at all.
     Same,
-    /// The pattern changed together with the slot, or the change is no
-    /// rewrite: no deleted occurrence can be placed.
+    /// No deleted occurrence can be placed: the pattern changed together with
+    /// the slot, `cal_core::shift_series` would not shift the rule, a clock
+    /// the move is read on cannot be read, or the change is no rewrite.
     Unknown,
 }
 
 /// The pattern part of a built Exchange rule: everything before its range
-/// (`NumberedRecurrence`, `EndDateRecurrence`, `NoEndRecurrence`). How often
-/// and until when a series runs is its range, and changing that keeps its
-/// changed and deleted occurrences (the zone-first live test, M5; round 8,
-/// U1-U3; the 8a live test's cut kept a deleted one); the pattern is the days
-/// and the interval it repeats on, and a new one drops them (round 6, P1, P2).
+/// (`NumberedRecurrence`, `EndDateRecurrence`, `NoEndRecurrence`). How many
+/// times and until when a series runs is its range, and changing that keeps
+/// its changed and deleted occurrences (the zone-first live test, M5; round 8,
+/// U1-U3; the 8a live test's cut kept a deleted one); the pattern is the
+/// frequency, the days and the interval it repeats on, and a new one drops
+/// them (round 6, P1, P2).
 fn pattern_of(rule_xml: &str) -> &str {
     [
         "<t:NumberedRecurrence",
@@ -2765,6 +2772,8 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         rewrite,
         placement,
         written_start,
+        written_all_day: landed.all_day,
+        written_clock: rule_clock.cloned(),
     })
 }
 
@@ -10499,8 +10508,9 @@ mod tests {
     /// the slot and keep every occurrence's place; a day move that keeps the
     /// old weekday cannot be placed. The days or the interval alone rewrite
     /// the pattern, and a deleted occurrence stays at its instant (round 6,
-    /// P1, P2). How often or until when (M5; round 8, U1-U3), the title, a rule
-    /// removed, an exception and a single made a series rewrite nothing.
+    /// P1, P2). How many times or until when (M5; round 8, U1-U3), the title,
+    /// a rule removed, an exception and a single made a series rewrite
+    /// nothing.
     #[test]
     fn each_save_says_what_it_rewrites_and_where_deleted_ones_stand() {
         use cal_core::SeriesRewrite::{Pattern, Slot};
@@ -10625,7 +10635,10 @@ mod tests {
             &StoredZones::default(),
             EventIdKind::RecurringMaster,
         );
-        assert_eq!((plan.rewrite, plan.placement), (Some(Slot), Placement::Unknown));
+        assert_eq!(
+            (plan.rewrite, plan.placement),
+            (Some(Slot), Placement::Unknown)
+        );
     }
 
     /// The zone picker on a stored series keeps the instant (DESIGN, "Die Zone

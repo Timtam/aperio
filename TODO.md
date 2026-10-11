@@ -3040,12 +3040,13 @@ Siehe DESIGN §4.2.
   behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
   bekommen 10:00 richtig, täglich und samstags (O1, O2).
   ↻ **Warnen und fragen** (243, PR A, Entscheidungen 246-253): Schreibt ein
-  Ändern Beginn und Ende, die Zone oder das Muster einer Exchange-Serie mit
-  geänderten oder gelöschten Vorkommen neu, fragt der Editor vorher, auf dem
-  Desktop und auf dem Handy, mit der Zahl vom Server; gelöschte löscht
-  Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag. Eine
-  Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test Runde 7
-  mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
+  Ändern Beginn und Ende, die Zone oder das Muster einer Exchange-Serie neu,
+  fragt der Editor vorher, was dabei verloren ginge — einzeln geänderte
+  Vorkommen und gelöschte, die Aperio nicht wieder zuordnen kann —, auf dem
+  Desktop und auf dem Handy, mit der Zahl vom Server; die übrigen gelöschten
+  löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
+  Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
+  Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
   🚩 **Warnen und fragen, PR B** (250, 251): Ziehen fragt in einem eigenen
   Bestätigen-Dialog; Übertragen an Kopien fragt einmal nach der Schleife und
   schickt nur die betroffenen noch einmal. Bis dahin sagen beide den Satz.
