@@ -190,14 +190,16 @@ keinen, dort ist die Wahl Tonis Sache.
   (242, Live-Test Zone, 2026-10-10); was er fand, steht in 243 bis 245.
   Aperios eigene Anfrage nach 244 und 245 bestand die vierte und die fünfte
   Runde (N1, N1b, N2, N3; O1, O2).
-- **243 — warnen und fragen.** *(beschlossen, eigener PR direkt nach dem
-  Zonen-PR)* Exchange verwirft alle geänderten und gelöschten Vorkommen einer
-  Serie, sobald ein Ändern Beginn und Ende des Serienkopfs neu schreibt: beim
-  Zonenwechsel (L3a, L3b), auch mit der Regel dazu (M6), und beim Verschieben
-  ohne Zone (M3). Nur den Titel (M4) oder nur die Anzahl der Wiederholungen
-  (M5) zu ändern, behält sie. Bevor Aperio Beginn und Ende einer Exchange-Serie mit
-  solchen Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt
-  es das und fragt.
+- **243 — warnen und fragen.** *(PR A gebaut: Kern, Exchange-Adapter, beide
+  Editoren; PR B offen: Ziehen und Übertragen)* Exchange verwirft alle
+  geänderten und gelöschten Vorkommen einer Serie, sobald ein Ändern Beginn
+  und Ende des Serienkopfs neu schreibt: beim Zonenwechsel (L3a, L3b), auch
+  mit der Regel dazu (M6), und beim Verschieben ohne Zone (M3); ebenso ein
+  neues Muster, andere Wochentage oder ein anderer Abstand, bei gleichem
+  Beginn (Runde 6, P1, P2). Nur den Titel (M4), die Anzahl (M5) oder das Ende
+  (ein Enddatum statt der Anzahl, kein Ende, ein früheres Ende; Runde 8, U1
+  bis U3) zu ändern, behält sie. Bevor Aperio so
+  schreibt, sagt es das und fragt; wie, steht in 246 bis 253.
 - **244 — ganztägig bekommt Uhrzeit.** *(gebaut, Zonen-PR)* Die Zone zuerst
   lehnt Exchange an einer ganztägigen täglichen Serie ab
   (`ErrorOccurrenceTimeSpanTooBig`, L2): Es legt deren Tage auf die
@@ -205,26 +207,26 @@ keinen, dort ist die Wahl Tonis Sache.
   vor der Zone und danach noch einmal nimmt es an, die Serie beginnt dann aber
   einen Tag später (M1, M2): Exchange liest das Startdatum der Regel aus dem
   ganztägigen Tag in UTC neu. Eine wöchentliche nahm die Zone zuerst an
-  (Runde 2, B4); Aperio schreibt trotzdem jede ganztägige Serie so. Mit der Regel am Ende, auf dem Tag der neuen
-  Zone, landet sie richtig, in einer Anfrage wie in zweien (M7, M8). So
+  (Runde 2, B4); Aperio schreibt trotzdem jede ganztägige Serie so. Mit der
+  Regel am Ende, auf dem Tag der neuen Zone, landet sie richtig, in einer
+  Anfrage wie in zweien (M7, M8). So
   schreibt Aperio es jetzt: Ganztägig aus, Beginn, Ende, Zone, Beginn, Ende,
   Regel, die Regel immer. Auch eine ganztägige Serie, die Outlook schon in
   W. Europe gespeichert hat, wo die Zone also bleibt, landet so richtig,
   täglich und samstags (O1, O2).
-- **245 — kein Zonenwechsel, der Vorkommen verwirft.** *(gebaut, Zonen-PR)*
-  Schreibt ein Ändern Beginn und Ende nur, weil die neue Zone eine andere Uhr
-  nennt (240), und hat die Serie geänderte oder gelöschte Vorkommen, lehnt
-  Aperio es ab und schickt nichts: „Diese Änderung würde die Zeitzone der
-  Serie wechseln, und dabei verwirft Exchange ihre geänderten und gelöschten
-  Vorkommen. Es wurde nichts geändert.“ Ein Ändern, das die Serie ohnehin
-  verschiebt, schreibt Beginn und Ende wie vor dem Zonen-PR; davor fragt 243.
+- **245 — kein Zonenwechsel, der Vorkommen verwirft.** *(gebaut, Zonen-PR;
+  seit 247 eine Frage)* Schreibt ein Ändern Beginn und Ende nur, weil die
+  neue Zone eine andere Uhr nennt (240), und hat die Serie geänderte oder
+  gelöschte Vorkommen, lehnte Aperio es im Zonen-PR ab und schickte nichts.
+  Seit 247 fragt es wie bei jedem anderen Neuschreiben (243).
   Eine Zone, die Exchange unter derselben Windows-Zone speichert (Wien statt
-  Berlin: beide „W. Europe Standard Time“), schreibt nur die Zone, wird nicht
-  abgelehnt, und Exchange behält die Vorkommen (N3). Paris statt Berlin heißt
+  Berlin: beide „W. Europe Standard Time“), schreibt nur die Zone, fragt
+  nicht, und Exchange behält die Vorkommen (N3). Paris statt Berlin heißt
   „Romance Standard Time“ und zählt als andere Uhr (240), obwohl beide heute
-  dieselbe Uhrzeit zeigen: abgelehnt. Kein Editor wählt in diesem Stand die
-  Zone einer Serie (Stufen 11 und 12). Die Ablehnung trifft deshalb nur ein
-  Ändern der Regel, bei dem Aperio selbst eine andere Zone schreiben würde,
+  dieselbe Uhrzeit zeigen: Aperio fragt. Kein Editor wählt in diesem Stand
+  die Zone einer Serie (Stufen 11 und 12). Die Frage nach der Zone trifft
+  deshalb nur ein Ändern der Regel, bei dem Aperio selbst eine andere Zone
+  schreiben würde,
   etwa an einer Serie, deren gespeicherte Endzone eine andere als ihre
   Startzone ist, oder aus einer Kopie mit veralteter Zone. Eine Kopie, die
   sich vom Server nur in den Ausnahmen unterscheidet, ändert keine Regel:
@@ -233,6 +235,69 @@ keinen, dort ist die Wahl Tonis Sache.
   Anfrage: Die Ablehnung schickt nichts, und die Serie bleibt mit ihren
   Vorkommen, wie sie war (N2). Eine ganztägige Serie bekommt 10:00 und 00:30
   richtig, ab ihrem ersten Tag (N1, N1b).
+- **246 — der Adapter erkennt, der Editor fragt.** *(gebaut, PR A)* Nur der
+  Adapter sieht am frischen Stand vom Server, ob die Serie geänderte oder
+  gelöschte Vorkommen hat und ob die Zone die Uhr wechselt. Er plant, was
+  ein Ändern neu schreibt (Beginn und Ende, die Zone, das Muster), zählt,
+  was verloren ginge, und schickt ohne Zustimmung nichts:
+  `exceptions-would-be-lost: {Neuschreiben}:{geändert}:{gelöscht}`. Die
+  Editoren fragen damit und schicken dasselbe Speichern noch einmal, mit
+  `accepts_exception_loss` auf genau diesem einen Aufruf. Kein
+  Kalender-Merkmal: Ob Google Ausnahmen verwirft, verschiebt oder behält, ist
+  ungemessen.
+- **247 — 245 wird zur Frage.** *(gebaut, PR A)* Der reine Zonenwechsel
+  fragt wie jedes andere Neuschreiben, mit dem Satz über die Zeitzone. Wo ein
+  Weg noch nicht fragt, sagt er denselben Satz als Ablehnung.
+- **248 — keine Serie blind.** *(gebaut, PR A)* Kann Aperio den Stand einer
+  Serie nicht lesen, schickt es nichts (`copy-unreadable`): Was sie hält, und
+  damit was ein Neuschreiben verwirft, ist sonst unbekannt.
+- **249 — das Muster gemessen.** *(gebaut, PR A)* Ein neues Muster bei
+  gleichem Beginn, montags und mittwochs statt montags (P1) oder alle zwei
+  Wochen (P2), verwirft alle Ausnahmen (Runde 6). Aperio fragt deshalb auch
+  dort; Anzahl und Ende fragen nicht, denn Exchange behält dabei beide Arten
+  (M5; Runde 8, U1 bis U3).
+- **250 — Ziehen fragt in einem eigenen Dialog.** *(beschlossen, PR B)* Nach
+  der Umfang-Wahl ein zweiter Bestätigen-Dialog. Bis dahin sagt das Ziehen
+  den übersetzten Satz der Ablehnung an. Auch ein Teilen „ab hier“ fragt
+  nicht: Ein Ja schriebe die neue Serie ein zweites Mal; lehnt Exchange das
+  Kürzen der alten ab, sagt Aperio den Satz und nimmt die neue zurück.
+- **251 — Übertragen fragt einmal danach.** *(beschlossen, PR B)* Die übrigen
+  Kopien werden übertragen, die betroffenen gesammelt und nach einer Frage
+  noch einmal geschickt. Bis dahin nennt der Dialog den übersetzten Satz.
+- **252 — die Frage nennt, wie viele.** *(gebaut, PR A)* Gezählt am frischen
+  Stand: einzeln geänderte Vorkommen nehmen wieder die Angaben der Serie an,
+  gelöschte erscheinen wieder.
+- **253 — gelöschte wieder löschen.** *(gebaut, PR A)* Nach dem Speichern
+  löscht Aperio jedes gelöschte Vorkommen wieder, wo es jetzt steht:
+  verschoben wie das erste Vorkommen, also an seinem Platz im Muster, nach dem
+  Exchange zählt (eine Verschiebung, ein Zonenwechsel, eine mit dem Beginn
+  verschobene Regel, `cal_core::shift_series`, ob mit oder ohne einen
+  Wochenbeginn, der keinen Tag ändert — der Editor lässt ihn weg, das Ziehen
+  nimmt ihn mit; Runde 6, R1 bis R3); unter einem neuen Muster an seinem
+  eigenen Zeitpunkt, wenn das Muster ihn noch hat. Ändern sich Muster und
+  Beginn zugleich, verschöbe `shift_series` die Regel nicht, oder ist eine der
+  beiden Uhren nicht lesbar, lässt es sich nicht zuordnen: Es zählt in der
+  Frage als verloren. Gelöscht wird nur das Vorkommen, dessen Beginn genau
+  stimmt; hat das Speichern die Teilnehmer benachrichtigt, bekommen sie die
+  Absage, denn ihre Serie hat es wieder, sonst geht es ohne Absage. Nichts kam
+  zurück, wo die Serie, Index für Index gelesen, über den Platz springt: von
+  einem Vorkommen davor, oder ihrem Beginn, zu einem danach, oder ihrem Ende —
+  sie beginnt oder endet jetzt jenseits davon, oder ein neues Muster hat ihn
+  nicht mehr —, und wo der Index, den die Regel gibt, eine Löschung ist, die
+  Exchange behielt. Ein Index, den Aperio eben wieder gelöscht hat, steht für
+  sein Vorkommen, nicht für den Platz. Ein Vorkommen keinen halben Tag vom
+  Platz, das nicht das erwartete ist, kam unbestätigt zurück. Eines, das sich
+  nicht bestätigen oder löschen lässt, nennen beide Editoren, das Ziehen und
+  das Übertragen nach dem Speichern mit seinem Tag (`deletions_not_restored`);
+  lässt sich die Serie danach nicht lesen, dort, wohin das Speichern sie
+  verschob, als Tag, wenn es sie ganztägig ließ. Verschoben verspricht Aperio
+  nur, wo es beide Uhren lesen kann; sonst zählt die Frage die gelöschten mit.
+  Die Frage nennt deshalb nur, was wirklich verloren geht. Mit Aperios eigener
+  Anfrage gemessen (Runde 7): Verschieben und neues Muster fragen und schicken
+  nichts (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und
+  das gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
+  fragen nicht und bleiben gelöscht, einen Tag später wie unter einem neuen
+  Muster (Q3, Q4); der Titel allein schreibt nur den Titel (Q6).
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -701,19 +766,21 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   „Exchange kann die Zeitzone {Stadt} nicht speichern; die Serie steht auf
   UTC.“ Kopieren oder Verschieben nach Exchange wird mit der Zone im Grund
   abgelehnt.
-- **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf der
-  Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des Geräts,
-  beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte Startzone,
-  solange die Uhr bleibt (234), und die geschriebene Zone, wo sie wechselt
-  (241), sonst UTC. Eine neue Zone behält die gespeicherte Uhrzeit (Runde 1,
-  B2; Live-Test 8a, Schritt 9). Deshalb schreibt ein Ändern seit dem
+- **Exchange** liest seit PR 8a den ersten Tag einer Serie auf der Uhr, auf
+  der Exchange sie wiederholt (`rule_first_day`): ganztägig der Tag des
+  Geräts, beim Anlegen die geschriebene Zone, beim Ändern die gespeicherte
+  Startzone, solange die Uhr bleibt (234), und die geschriebene Zone, wo sie
+  wechselt (241), sonst UTC. Eine neue Zone behält die gespeicherte Uhrzeit
+  (Runde 1, B2; Live-Test 8a, Schritt 9). Deshalb schreibt ein Ändern seit dem
   Zonen-PR die Zone zuerst; nennt sie eine andere Uhr als die gespeicherte,
   folgen Beginn, Ende und Ganztägig, auch unverändert, mit den Werten des
-  Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute
-  Form ändert (241). Bekommt eine ganztägige Serie Uhrzeiten, kommen Beginn
-  und Ende vor und nach der Zone und die Regel immer (244). Schreibt ein
-  Ändern Beginn und Ende nur wegen der Zone und hat die Serie geänderte oder
-  gelöschte Vorkommen, wird es abgelehnt (245). **Microsoft 365** leitet Start- und Enddatum und die
+  Servers (240), und die Regel kommt zuletzt, nur wenn sich ihre gebaute Form
+  ändert (241). Bekommt eine ganztägige Serie Uhrzeiten, kommen Beginn und
+  Ende vor und nach der Zone und die Regel immer (244). Schreibt ein Ändern
+  Beginn und Ende, die Zone oder das Muster einer Serie neu, fragt Aperio
+  vorher, was dabei verloren ginge: einzeln geänderte Vorkommen und gelöschte,
+  die es nicht wieder zuordnen kann; die übrigen gelöschten löscht es danach
+  wieder (243, 246-253). **Microsoft 365** leitet Start- und Enddatum und die
   Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
   lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
@@ -1113,9 +1180,9 @@ Handy im selben PR.
   verschoben die Zeitpunkte (Runde 1, B2). Seit dem Zonen-PR schreibt ein
   Ändern die Zone zuerst (240), außer wenn eine ganztägige Serie Uhrzeiten
   bekommt (244). Beginn und Ende neu verwerfen die Ausnahmen einer Serie
-  (Live-Test Zone, 243); ein Zonenwechsel, der sie nur deshalb schreibt, wird
-  abgelehnt (245). Dieselbe Windows-Zone allein lässt sie stehen (N3); eine
-  andere allein ist nicht gemessen.
+  (Live-Test Zone, 243), ein neues Muster ebenso (Runde 6); Aperio fragt
+  vorher und löscht gelöschte danach wieder (246-253). Dieselbe Windows-Zone
+  allein lässt sie stehen (N3); eine andere allein ist nicht gemessen.
 - **EWS in Exchange Online endet** ab Oktober 2026, ganz im April 2027. Eigene
   Exchange-Server sind nicht betroffen.
 - **Die Exchange-Tabelle hängt am Monorepo.** Verlässt der EWS-Adapter das
@@ -1177,8 +1244,8 @@ Handy im selben PR.
     wie UTC−11;
   - ob eine andere Windows-Zone allein, mit derselben Uhrzeit (Paris statt
     Berlin), die Ausnahmen einer Serie stehen lässt. Heute zählt sie als
-    andere Uhr und wird an einer Serie mit Ausnahmen abgelehnt (245); vor
-    dem Zonen-Picker (Stufen 11 und 12) messen;
+    andere Uhr, und an einer Serie mit Ausnahmen fragt Aperio vorher (247);
+    vor dem Zonen-Picker (Stufen 11 und 12) messen;
   - wie ganztägige Termine mit Teilnehmern angezeigt werden; für sie gilt die
     Regel „schwebend“ nicht;
   - welche Namen Kerio Connect und Zimbra kennen und was sie mit einem
@@ -1194,11 +1261,10 @@ Handy im selben PR.
   Startzone liest, wo die Uhr bleibt (234, aus Runde 1 abgeleitet). Ob es eine
   Regel vor einer Zone anwendet, die dieselbe Änderung danach schreibt, ist
   seit dem Zonen-PR ohne Bedeutung: Die Regel kommt immer nach der Zone.
-  Ungeprüft sind auch: ob eine neu geschriebene Regel, die mehr als die
-  Anzahl oder das Ende ändert, die Ausnahmen einer Serie stehen lässt, und ob
-  ein Schnitt mit `UNTIL` geänderte Vorkommen behält (gemessen: die Anzahl
-  behält beide Arten, M5; der Schnitt des Live-Tests 8a behielt ein
-  gelöschtes Vorkommen; Beginn und Ende neu verwerfen sie, 243); ein Termin mit
+  Ungeprüft ist auch, was ein Wechsel der Häufigkeit (täglich
+  statt wöchentlich) mit den Ausnahmen tut (gemessen: Anzahl und Ende
+  behalten beide Arten, M5, Runde 8; Beginn und Ende neu verwerfen sie, 243,
+  ein neues Muster ebenso, Runde 6); ein Termin mit
   eigener Zone vom iPhone oder aus einer Einladung und
   die Ablehnung nach 237 am echten Server; ob Exchange ein Ende in der Endzone
   rundet, wenn Beginn und Ende verschiedene Zonen tragen (233, R3-2 legt es

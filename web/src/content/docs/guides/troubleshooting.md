@@ -180,36 +180,57 @@ daily series, and without the repeat the series would start a day later.
 What you can do: move a series that has already moved back to its place once,
 by hand.
 
-## Exchange would drop a series' changed and deleted occurrences
+## Aperio asks whether occurrences of a series may be lost
 
-Aperio then says: "This change would switch the series' time zone, and
-Exchange then drops its changed and deleted occurrences. Nothing was changed."
+When you save an Exchange series, Aperio sometimes asks "Occurrences will be
+lost", with a sentence such as: ""Team meeting": This change writes the series'
+start and end again. Exchange then drops one occurrence that was changed on its
+own: it takes the series' details again. Save anyway?"
 
-Exchange stores every series with a time zone. If a change gave the series
-another time zone, Aperio would also have to send the series' start and end
-again, so that it stays at the same time. Exchange then drops every occurrence
-that was changed or deleted on its own: deleted ones are back, changed ones are
-like the series again. So when a series has such occurrences, Aperio sends
-nothing.
+Exchange drops every occurrence of a series that was changed or deleted on its
+own as soon as Aperio writes the series' start and end, its time zone or its
+repeat pattern again: when you move the series to another time or another day,
+change how long it lasts, make it all-day, or choose other weekdays, another
+interval or another frequency (daily instead of weekly). The title, the place
+and the reminder change nothing about that, and neither, as a rule, do the
+number of appointments and when the series ends; then Aperio does not ask. Only
+on a series whose time zone Aperio writes again with its repeat (see below) do
+they bring the question too.
 
-In this version you cannot choose a series' time zone yourself. So the message
-only comes when Aperio writes a series' repeat again and would have to write
-another time zone than the one
-Exchange stored: for example for a series from another program whose end is in
+Deleted occurrences Aperio deletes again itself after saving, where they now
+stand. Only when you change the pattern and the time or the day together, or
+when Aperio cannot read the series' time zone, can it not tell where they stand;
+then the question counts them too. Occurrences changed on their own are lost:
+they take the series' details again.
+
+What you can do: "Cancel" leaves the series as it is, and your change stays in
+the editor. "Save anyway" saves it. If a deleted occurrence could not be deleted
+again afterwards, Aperio names its day; then delete it on its own.
+
+In this version you cannot choose a series' time zone yourself. So Aperio asks
+about another time zone only for a series from another program whose end is in
 another time zone than its start, or when the series' time zone was changed
-elsewhere since Aperio last read it. Aperio writes the repeat again when you
-change it, and also when you change or delete a series from one of its
-appointments on: Aperio then shortens the old series.
+elsewhere since Aperio last read it; in the second case, open the series again
+once Aperio has refreshed the calendar. On such a series the question comes
+whenever you change its repeat, even only the number of appointments or the end.
+Changing or deleting it from a later appointment on is refused with the sentence
+instead (below).
 
-What you can do: if the series was changed elsewhere, open it again once Aperio
-has refreshed the calendar, and try again. Otherwise change the repeat in
-Outlook, and change or delete the series from that appointment on there. You
-can still change the title, the place and the reminder of the whole series or
-of a single appointment in Aperio.
+If you drag a series with the mouse or carry a change to copies in other
+calendars, Aperio does not ask yet in this version. There it says the same
+sentence and "Nothing was changed." Change the series in the editor then.
 
-If you move a series with such occurrences to another time or another day,
-Aperio sends the start and end anyway, and Exchange drops the occurrences then
-too. Aperio does not warn about that yet in this version.
+Changing or deleting a series from one of its appointments on only shortens the
+old series, and that keeps its changed and deleted occurrences. Only on a series
+whose time zone Aperio would write again with it (see above) does Aperio not ask
+there: it says the sentence and changes nothing. Do that in Outlook then.
+Changed from its first appointment on, the whole series is written again, and
+Aperio asks as in the editor.
+
+If Aperio cannot read a series' current state from the server, it does not
+change it, because it would not know what would be lost. Aperio then says:
+"Aperio could not read this appointment's current state from the server, so it
+did not change it. Try again in a moment."
 
 ## The day of an all-day Exchange appointment cannot be changed
 

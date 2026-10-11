@@ -102,6 +102,8 @@ import {
   type PositionedSpan,
   type PriorityScale,
   type TimedSpan,
+  eventWriteErrorMessage,
+  deletionsNotRestoredSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -249,7 +251,7 @@ function WeekOutsideBand({
  * derived from it. One state update per key press, one render commit.
  */
 export function WeekView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
@@ -936,15 +938,22 @@ export function WeekView() {
       minute: number | null = null,
     ) => {
       try {
+        let back: string[] | undefined;
         const moved = await moveEventToSlot(
           ev,
           dayKey,
           minute,
           scope,
           calendarById.get(ev.calendar_id),
+          (saved) => {
+            back = saved.deletions_not_restored;
+          },
         );
         if (!moved) return; // nothing changed — nothing to announce
-        announce(
+        // Deleted occurrences of the series that came back and could not be
+        // deleted again (decision 253) are said in place of the plain move.
+        const backSentence = deletionsNotRestoredSentence(back, ev.title, i18n.language, t);
+        const movedSentence =
           minute === null || ev.all_day
             ? t('views.eventMovedToDay', {
                 title: ev.title,
@@ -954,8 +963,8 @@ export function WeekView() {
                 title: ev.title,
                 date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
                 time: clockAt(minute, dayKey),
-              }),
-        );
+              });
+        announce(backSentence ?? movedSentence);
         invalidateData();
       } catch (err) {
         if (err instanceof InvitationLockedError) {
@@ -983,14 +992,12 @@ export function WeekView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        // In words, a provider's refusal included (decisions 243-253: a move
+        // that would drop occurrences of the series says what and how many).
+        announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, fmt, invalidateData, clockAt, calendarById],
+    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById],
   );
   /** Someone else's meeting does not move: said before a scope question
    *  nothing could answer (77a). */

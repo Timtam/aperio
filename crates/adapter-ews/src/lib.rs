@@ -1441,9 +1441,11 @@ fn to_update_error(err: EwsError) -> CoreError {
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
         // Nothing was sent: an all-day day in a zone Aperio cannot read
-        // (decision 237), one whose copy could not be read, or a zone switch
-        // that would drop the series' exceptions (245). Forbidden, so the
-        // phone keeps the message and a split knows the write never landed.
+        // (decision 237), an item or series whose copy could not be read
+        // (248), or a rewrite of start and end, zone or pattern that would
+        // drop occurrences of the series without the user's consent
+        // (246-253). Forbidden, so the phone keeps the message and a split
+        // knows the write never landed.
         EwsError::Protocol(message)
             if matches!(
                 cal_core::WriteRefusal::parse(&message),
@@ -2704,6 +2706,7 @@ mod server_zone_tests {
     //! an id it does not know goes out without a zone.
     use super::*;
     use cal_core::EventRecurrence;
+    use chrono::{DateTime, Utc};
     use mockito::Server;
     use std::sync::{Arc, Mutex as StdMutex};
 
@@ -3040,6 +3043,8 @@ mod server_zone_tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: stamp,
             updated_at: stamp,
             etag: Some("CK".into()),
@@ -3126,6 +3131,8 @@ mod server_zone_tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: stamp,
             updated_at: stamp,
             etag: Some("CK".into()),
@@ -3262,41 +3269,695 @@ mod server_zone_tests {
         assert!(!update.contains("calendar:Recurrence"), "{update}");
     }
 
-    /// Decision 245 through the adapter: the same series with one occurrence
-    /// deleted, switched to New York. Writing its slot again would make
-    /// Exchange drop the deletion (the zone-first live test, L3a), so the save
-    /// is refused, carried as Forbidden, and nothing is sent.
-    #[tokio::test]
-    async fn a_zone_switch_on_a_series_with_exceptions_is_refused_and_nothing_is_sent() {
-        let stored = STORED_WEEKLY_W_EUROPE.replace(
-            "</t:Recurrence>",
-            "</t:Recurrence>
-        <t:DeletedOccurrences><t:DeletedOccurrence>
-          <t:Start>2026-11-09T09:00:00Z</t:Start>
+    /// [`STORED_WEEKLY_W_EUROPE`] with one occurrence changed on its own (the
+    /// 9th, moved an hour later) and, with `deleted`, the 16th deleted.
+    fn stored_with_occurrences(changed: bool, deleted: bool) -> String {
+        let mut extra = String::new();
+        if changed {
+            extra.push_str(
+                "<t:ModifiedOccurrences><t:Occurrence>
+          <t:ItemId Id=\"OCC9\" ChangeKey=\"OCK9\"/>
+          <t:Start>2026-11-09T10:00:00Z</t:Start>
+          <t:End>2026-11-09T11:00:00Z</t:End>
+          <t:OriginalStart>2026-11-09T09:00:00Z</t:OriginalStart>
+        </t:Occurrence></t:ModifiedOccurrences>",
+            );
+        }
+        if deleted {
+            extra.push_str(
+                "<t:DeletedOccurrences><t:DeletedOccurrence>
+          <t:Start>2026-11-16T09:00:00Z</t:Start>
         </t:DeletedOccurrence></t:DeletedOccurrences>",
-        );
-        let item = crate::mapping::parse_get_calendar_items_response(&stored)
+            );
+        }
+        STORED_WEEKLY_W_EUROPE.replace("</t:Recurrence>", &format!("</t:Recurrence>{extra}"))
+    }
+
+    /// The series read back as Aperio reads it, and `change` applied as the
+    /// editor saves it.
+    fn opened_and_edited(stored: &str, change: impl FnOnce(&mut Event)) -> Event {
+        let item = crate::mapping::parse_get_calendar_items_response(stored)
             .unwrap()
             .remove(0);
         let opened = crate::mapping::to_event(item, "FA|FCK").unwrap();
-        assert_eq!(
-            opened.recurrence.as_ref().map(|r| r.exceptions.len()),
-            Some(1)
-        );
         let mut edit = opened.clone();
-        edit.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
+        change(&mut edit);
         edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&opened), true);
+        edit
+    }
+
+    /// A server that answers by the request: `answer` gets each body and
+    /// whether an UpdateItem has already been answered.
+    async fn serve_routed(
+        server: &mut Server,
+        answer: impl Fn(&str, bool) -> String + Send + Sync + 'static,
+    ) -> Arc<StdMutex<Vec<String>>> {
+        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let seen = Arc::clone(&requests);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let mut seen = seen.lock().unwrap();
+                let updated = seen.iter().any(|b| b.contains("<m:UpdateItem"));
+                let reply = answer(&body, updated);
+                seen.push(body);
+                reply.into_bytes()
+            })
+            .create_async()
+            .await;
+        requests
+    }
+
+    fn envelope(inner: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>{inner}</s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    fn updated(change_key: &str) -> String {
+        envelope(&format!(
+            r#"<m:UpdateItemResponse><m:ResponseMessages>
+    <m:UpdateItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem><t:ItemId Id="IID" ChangeKey="{change_key}"/></t:CalendarItem></m:Items>
+    </m:UpdateItemResponseMessage>
+  </m:ResponseMessages></m:UpdateItemResponse>"#
+        ))
+    }
+
+    fn deleted_answer() -> String {
+        envelope(
+            r#"<m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse>"#,
+        )
+    }
+
+    /// One occurrence as a GetItem on its `OccurrenceItemId` answers it.
+    fn occurrence(start: &str) -> String {
+        let start: DateTime<Utc> = start.parse().unwrap();
+        let end = start + chrono::Duration::hours(1);
+        envelope(&format!(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="OCC" ChangeKey="OCK"/>
+        <t:Subject>Weekly</t:Subject>
+        <t:Start>{}</t:Start>
+        <t:End>{}</t:End>
+        <t:CalendarItemType>Occurrence</t:CalendarItemType>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+            start.format("%Y-%m-%dT%H:%M:%SZ"),
+            end.format("%Y-%m-%dT%H:%M:%SZ"),
+        ))
+    }
+
+    fn instance_index(body: &str) -> Option<u32> {
+        let at = body.find("InstanceIndex=\"")? + "InstanceIndex=\"".len();
+        body[at..].split('"').next()?.parse().ok()
+    }
+
+    /// Decisions 245 and 247 through the adapter: the series with one
+    /// occurrence changed on its own, switched to New York. Writing its slot
+    /// again would make Exchange drop that change (the zone-first live test,
+    /// L3a), so without the user's consent nothing is sent, and the refusal,
+    /// carried as Forbidden, says what would be rewritten and how many would be
+    /// lost. With the consent the update goes out.
+    #[tokio::test]
+    async fn a_zone_switch_that_would_drop_a_change_asks_first() {
+        let stored = stored_with_occurrences(true, false);
+        let switch =
+            |e: &mut Event| e.recurrence.as_mut().unwrap().tzid = Some("America/New_York".into());
 
         let mut server = Server::new_async().await;
-        let requests = serve_stored(&mut server, stored).await;
+        let requests = serve_stored(&mut server, stored.clone()).await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let err = adapter
+            .update_event(opened_and_edited(&stored, switch))
+            .await
+            .unwrap_err();
+        let CoreError::Forbidden(message) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone:1:0"))
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("UpdateItem")),
+            "nothing is sent"
+        );
+
+        let mut server = Server::new_async().await;
+        let stored_again = stored.clone();
+        let requests = serve_routed(&mut server, move |body, _| {
+            if body.contains("<m:UpdateItem") {
+                updated("CK2")
+            } else {
+                stored_again.clone()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let consented = opened_and_edited(&stored, |e| {
+            switch(e);
+            e.accepts_exception_loss = true;
+        });
+        let saved = adapter.update_event(consented).await.expect("update");
+        assert!(
+            !saved.accepts_exception_loss,
+            "the consent was for this write only"
+        );
+        assert!(saved.deletions_not_restored.is_empty());
+        assert!(
+            requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| b.contains("<m:UpdateItem")),
+            "the update goes out"
+        );
+    }
+
+    /// Decision 253 through the adapter, as live round 6 measured it (R1): a
+    /// series with only a deleted occurrence, two hours later. Nothing is lost,
+    /// so nothing is asked: the update goes out, and the occurrence Exchange
+    /// brought back is deleted again where it now stands — the third, at its
+    /// moved time, confirmed by its start before the delete.
+    #[tokio::test]
+    async fn a_move_deletes_a_deleted_occurrence_again_where_it_now_stands() {
+        let stored = stored_with_occurrences(false, true);
+        let later = |e: &mut Event| {
+            e.start += chrono::Duration::hours(2);
+            e.end += chrono::Duration::hours(2);
+        };
+        // After the update: the series two hours later, nothing deleted.
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace("2026-11-02T09:00:00Z", "2026-11-02T11:00:00Z")
+            .replace("2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z")
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        for (occurrences_answer_right, back) in
+            [(true, Vec::new()), (false, vec!["2026-11-16T11:00:00Z"])]
+        {
+            let mut server = Server::new_async().await;
+            let (stored, after) = (stored.clone(), after.clone());
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    // The 2nd, 9th, 16th, 23rd at 11:00Z — or, where the
+                    // server answers otherwise, at 09:00Z, which never passes.
+                    let hour = if occurrences_answer_right { 11 } else { 9 };
+                    let day = 2 + 7 * (index - 1);
+                    occurrence(&format!("2026-11-{day:02}T{hour:02}:00:00Z"))
+                } else if was_updated {
+                    after.clone()
+                } else {
+                    stored.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let saved = adapter
+                .update_event(opened_and_edited(
+                    &stored_with_occurrences(false, true),
+                    later,
+                ))
+                .await
+                .expect("update");
+            let back: Vec<DateTime<Utc>> = back.iter().map(|s| s.parse().unwrap()).collect();
+            assert_eq!(saved.deletions_not_restored, back);
+            let requests = requests.lock().unwrap();
+            let deletes: Vec<Option<u32>> = requests
+                .iter()
+                .filter(|b| b.contains("<m:DeleteItem"))
+                .map(|b| instance_index(b))
+                .collect();
+            if occurrences_answer_right {
+                assert_eq!(deletes, [Some(3)], "the third, again");
+                assert_eq!(saved.etag.as_deref(), Some("CK3"), "read after the delete");
+            } else {
+                assert!(deletes.is_empty(), "nothing unconfirmed is deleted");
+            }
+        }
+    }
+
+    /// The update told the attendees, and the series they were sent has the
+    /// deleted occurrence again: deleting it again cancels it for them too.
+    #[tokio::test]
+    async fn a_notified_move_cancels_the_deleted_occurrence_again() {
+        let stored = stored_with_occurrences(false, true);
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace("2026-11-02T09:00:00Z", "2026-11-02T11:00:00Z")
+            .replace("2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z");
+        let mut server = Server::new_async().await;
+        let (stored_answer, after_answer) = (stored.clone(), after.clone());
+        let requests = serve_routed(&mut server, move |body, was_updated| {
+            if body.contains("<m:UpdateItem") {
+                updated("CK2")
+            } else if body.contains("<m:DeleteItem") {
+                deleted_answer()
+            } else if let Some(index) = instance_index(body) {
+                occurrence(&format!("2026-11-{:02}T11:00:00Z", 2 + 7 * (index - 1)))
+            } else if was_updated {
+                after_answer.clone()
+            } else {
+                stored_answer.clone()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let edit = opened_and_edited(&stored, |e| {
+            e.start += chrono::Duration::hours(2);
+            e.end += chrono::Duration::hours(2);
+            e.attendees = vec!["bob@example.com".into()];
+            e.send_invitations = true;
+        });
+        let saved = adapter.update_event(edit).await.expect("update");
+        assert!(saved.deletions_not_restored.is_empty());
+        let requests = requests.lock().unwrap();
+        let delete = requests
+            .iter()
+            .find(|b| b.contains("<m:DeleteItem"))
+            .expect("the third deleted again");
+        assert!(
+            delete.contains(r#"SendMeetingCancellations="SendToAllAndSaveCopy""#),
+            "{delete}"
+        );
+    }
+
+    /// Decision 253 under a new pattern (round 6, P1): Mondays become Mondays
+    /// and Wednesdays, four times. A deleted Monday the new pattern still has
+    /// is deleted again at its own instant; one it no longer reaches — past the
+    /// new end — brought nothing back and is not named; and one whose place
+    /// cannot be read is named, as nothing proves it stayed away.
+    #[tokio::test]
+    async fn a_new_pattern_deletes_again_only_what_it_still_has() {
+        // After the update: Mondays and Wednesdays, four times from the 2nd —
+        // the 2nd, 4th, 9th and 11th.
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace(
+                "<t:DaysOfWeek>Monday</t:DaysOfWeek>",
+                "<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>",
+            )
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        let starts = ["2026-11-02", "2026-11-04", "2026-11-09", "2026-11-11"];
+        // (deleted day, whether the probe of its index answers, expected
+        // re-deletes, expected named)
+        let cases: [(&str, bool, Vec<Option<u32>>, Vec<&str>); 3] = [
+            ("2026-11-09T09:00:00Z", true, vec![Some(3)], vec![]),
+            ("2026-11-16T09:00:00Z", true, vec![], vec![]),
+            (
+                "2026-11-09T09:00:00Z",
+                false,
+                vec![],
+                vec!["2026-11-09T09:00:00Z"],
+            ),
+        ];
+        for (gone, answers, deletes_expected, named) in cases {
+            let stored = stored_with_occurrences(false, true).replace(
+                "<t:Start>2026-11-16T09:00:00Z</t:Start>",
+                &format!("<t:Start>{gone}</t:Start>"),
+            );
+            let mut server = Server::new_async().await;
+            let (stored_answer, after_answer) = (stored.clone(), after.clone());
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    match starts.get(index as usize - 1) {
+                        // The probe of the 9th's place fails to read.
+                        Some(&"2026-11-09") if !answers => "not a SOAP answer".into(),
+                        Some(day) => occurrence(&format!("{day}T09:00:00Z")),
+                        // Past the end of the series.
+                        None => envelope(
+                            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+                        ),
+                    }
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4".into();
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            let named: Vec<DateTime<Utc>> = named.iter().map(|s| s.parse().unwrap()).collect();
+            assert_eq!(saved.deletions_not_restored, named, "{gone}, {answers}");
+            let requests = requests.lock().unwrap();
+            let deletes: Vec<Option<u32>> = requests
+                .iter()
+                .filter(|b| b.contains("<m:DeleteItem"))
+                .map(|b| instance_index(b))
+                .collect();
+            assert_eq!(deletes, deletes_expected, "{gone}, {answers}");
+        }
+    }
+
+    /// An occurrence a GetItem on its `OccurrenceItemId` does not return, with
+    /// Exchange's reason.
+    fn no_occurrence(code: &str) -> String {
+        envelope(&format!(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:ResponseCode>{code}</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#
+        ))
+    }
+
+    /// `stored` with `days` deleted.
+    fn with_deleted(stored: &str, days: &[&str]) -> String {
+        let deleted: String = days
+            .iter()
+            .map(|day| {
+                format!("<t:DeletedOccurrence><t:Start>{day}</t:Start></t:DeletedOccurrence>")
+            })
+            .collect();
+        stored.replace(
+            "</t:Recurrence>",
+            &format!("</t:Recurrence><t:DeletedOccurrences>{deleted}</t:DeletedOccurrences>"),
+        )
+    }
+
+    /// The InstanceIndexes a run deleted, as its requests say.
+    fn deleted_indexes(requests: &StdMutex<Vec<String>>) -> Vec<Option<u32>> {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|b| b.contains("<m:DeleteItem"))
+            .map(|b| instance_index(b))
+            .collect()
+    }
+
+    /// Decision 253, where an occurrence does not stand exactly where it is
+    /// expected. The series of four Mondays moved two hours later: where
+    /// Exchange gives an occurrence another time (as it does in a gap of the
+    /// clock), it came back unconfirmed and is named — also next to one just
+    /// deleted again, and as the last of the series. Where Exchange kept the
+    /// deletion at the index the rule gives, nothing came back.
+    #[tokio::test]
+    async fn a_deleted_occurrence_is_named_unless_the_series_shows_it_stayed_away() {
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace("2026-11-02T09:00:00Z", "2026-11-02T11:00:00Z")
+            .replace("2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z")
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        // (deleted, the index whose deletion Exchange kept, the index Exchange
+        // answers an hour off, expected re-deletes, expected named)
+        let cases: [(
+            Vec<&str>,
+            Option<u32>,
+            Option<u32>,
+            Vec<Option<u32>>,
+            Vec<&str>,
+        ); 3] = [
+            (
+                vec!["2026-11-16T09:00:00Z", "2026-11-23T09:00:00Z"],
+                None,
+                Some(4),
+                vec![Some(3)],
+                vec!["2026-11-23T11:00:00Z"],
+            ),
+            (
+                vec!["2026-11-23T09:00:00Z"],
+                None,
+                Some(4),
+                vec![],
+                vec!["2026-11-23T11:00:00Z"],
+            ),
+            (vec!["2026-11-16T09:00:00Z"], Some(3), None, vec![], vec![]),
+        ];
+        for (deleted, kept, off, deletes_expected, named) in cases {
+            let stored = with_deleted(STORED_WEEKLY_W_EUROPE, &deleted);
+            let mut server = Server::new_async().await;
+            let (stored_answer, after_answer) = (stored.clone(), after.clone());
+            let deleted_again = Arc::new(StdMutex::new(Vec::<u32>::new()));
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_again.lock().unwrap().extend(instance_index(body));
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    let day = 2 + 7 * (index - 1);
+                    if index > 4 {
+                        no_occurrence("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+                    } else if kept == Some(index) || deleted_again.lock().unwrap().contains(&index)
+                    {
+                        no_occurrence("ErrorCalendarOccurrenceIsDeletedFromRecurrence")
+                    } else if off == Some(index) {
+                        occurrence(&format!("2026-11-{day:02}T12:00:00Z"))
+                    } else {
+                        occurrence(&format!("2026-11-{day:02}T11:00:00Z"))
+                    }
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.start += chrono::Duration::hours(2);
+                e.end += chrono::Duration::hours(2);
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            let named: Vec<DateTime<Utc>> = named.iter().map(|s| s.parse().unwrap()).collect();
+            assert_eq!(saved.deletions_not_restored, named, "{deleted:?}");
+            assert_eq!(deleted_indexes(&requests), deletes_expected, "{deleted:?}");
+        }
+    }
+
+    /// Decision 253 under a new pattern that leaves out the start's own
+    /// weekday: Mondays become Wednesdays with the deleted Monday the 2nd as
+    /// the first start. The new series has no occurrence that day, whether
+    /// Exchange keeps the master's start or moves it to the first Wednesday,
+    /// so nothing came back and nothing is named.
+    #[tokio::test]
+    async fn a_new_pattern_without_the_deleted_day_brings_nothing_back() {
+        let stored = with_deleted(STORED_WEEKLY_W_EUROPE, &["2026-11-02T09:00:00Z"]);
+        let wednesdays = STORED_WEEKLY_W_EUROPE
+            .replace(
+                "<t:DaysOfWeek>Monday</t:DaysOfWeek>",
+                "<t:DaysOfWeek>Wednesday</t:DaysOfWeek>",
+            )
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        let moved = wednesdays
+            .replace("2026-11-02T09:00:00Z", "2026-11-04T09:00:00Z")
+            .replace("2026-11-02T10:00:00Z", "2026-11-04T10:00:00Z");
+        for after in [wednesdays, moved] {
+            let mut server = Server::new_async().await;
+            let (stored_answer, after_answer) = (stored.clone(), after.clone());
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    if index > 4 {
+                        no_occurrence("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+                    } else {
+                        // The 4th, 11th, 18th and 25th.
+                        occurrence(&format!("2026-11-{:02}T09:00:00Z", 4 + 7 * (index - 1)))
+                    }
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=WE;COUNT=4".into();
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            assert!(
+                saved.deletions_not_restored.is_empty(),
+                "{:?}",
+                saved.deletions_not_restored
+            );
+            assert!(deleted_indexes(&requests).is_empty());
+        }
+    }
+
+    /// An index the restore has just deleted again still says where its
+    /// occurrence stood. Mondays and Sundays become Mondays only, with Monday
+    /// the 9th and Sunday the 15th deleted: the 9th is deleted again at index
+    /// 2, and the 15th, which the new pattern does not have, lies between it
+    /// and Monday the 16th — nothing came back.
+    #[tokio::test]
+    async fn an_index_deleted_again_still_says_where_it_stood() {
+        let mondays_and_sundays = STORED_WEEKLY_W_EUROPE
+            .replace(
+                "<t:DaysOfWeek>Monday</t:DaysOfWeek>",
+                "<t:DaysOfWeek>Monday Sunday</t:DaysOfWeek>",
+            )
+            .replace(
+                "<t:NumberOfOccurrences>4</t:NumberOfOccurrences>",
+                "<t:NumberOfOccurrences>8</t:NumberOfOccurrences>",
+            );
+        let stored = with_deleted(
+            &mondays_and_sundays,
+            &["2026-11-09T09:00:00Z", "2026-11-15T09:00:00Z"],
+        );
+        let after = STORED_WEEKLY_W_EUROPE.replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        let mut server = Server::new_async().await;
+        let (stored_answer, after_answer) = (stored.clone(), after.clone());
+        let deleted_again = Arc::new(StdMutex::new(Vec::<u32>::new()));
+        let requests = serve_routed(&mut server, move |body, was_updated| {
+            if body.contains("<m:UpdateItem") {
+                updated("CK2")
+            } else if body.contains("<m:DeleteItem") {
+                deleted_again.lock().unwrap().extend(instance_index(body));
+                deleted_answer()
+            } else if let Some(index) = instance_index(body) {
+                if index > 4 {
+                    no_occurrence("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+                } else if deleted_again.lock().unwrap().contains(&index) {
+                    no_occurrence("ErrorCalendarOccurrenceIsDeletedFromRecurrence")
+                } else {
+                    occurrence(&format!("2026-11-{:02}T09:00:00Z", 2 + 7 * (index - 1)))
+                }
+            } else if was_updated {
+                after_answer.clone()
+            } else {
+                stored_answer.clone()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let edit = opened_and_edited(&stored, |e| {
+            e.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=MO;COUNT=4".into();
+        });
+        let saved = adapter.update_event(edit).await.expect("update");
+        assert!(
+            saved.deletions_not_restored.is_empty(),
+            "{:?}",
+            saved.deletions_not_restored
+        );
+        assert_eq!(deleted_indexes(&requests), [Some(2)]);
+    }
+
+    /// Where the series cannot be read again after the update, every deleted
+    /// occurrence is named where the update moved it, on the kind it gave the
+    /// series: an all-day series given 14:00 names the instant on Monday the
+    /// 16th, not the day after; a series at 9:00 in New York made all-day
+    /// names the 16th as the device's day, not an instant early that morning.
+    #[tokio::test]
+    async fn where_the_series_cannot_be_read_again_its_deleted_days_follow_the_new_kind() {
+        use chrono::TimeZone as _;
+        let all_day = with_deleted(
+            &STORED_WEEKLY_W_EUROPE
+                .replace("2026-11-02T09:00:00Z", "2026-11-01T23:00:00Z")
+                .replace("2026-11-02T10:00:00Z", "2026-11-02T23:00:00Z")
+                .replace(
+                    "<t:IsAllDayEvent>false</t:IsAllDayEvent>",
+                    "<t:IsAllDayEvent>true</t:IsAllDayEvent>",
+                ),
+            &["2026-11-15T23:00:00Z"],
+        );
+        let new_york = with_deleted(
+            &STORED_WEEKLY_W_EUROPE
+                .replace("W. Europe Standard Time", "Eastern Standard Time")
+                .replace("2026-11-02T09:00:00Z", "2026-11-02T14:00:00Z")
+                .replace("2026-11-02T10:00:00Z", "2026-11-02T15:00:00Z")
+                .replace("2026-11-02+01:00", "2026-11-02-05:00"),
+            &["2026-11-16T14:00:00Z"],
+        );
+        let local_midnight = |day: u32| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 11, day, 0, 0, 0)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let timed = |e: &mut Event| {
+            e.all_day = false;
+            e.start = "2026-11-02T13:00:00Z".parse().unwrap();
+            e.end = "2026-11-02T14:00:00Z".parse().unwrap();
+        };
+        let whole_day = |e: &mut Event| {
+            e.all_day = true;
+            e.start = local_midnight(2);
+            e.end = local_midnight(3);
+        };
+        let cases: [(&str, &dyn Fn(&mut Event), DateTime<Utc>); 2] = [
+            (&all_day, &timed, "2026-11-16T13:00:00Z".parse().unwrap()),
+            (&new_york, &whole_day, local_midnight(16)),
+        ];
+        for (stored, change, named) in cases {
+            let mut server = Server::new_async().await;
+            let stored_answer = stored.to_string();
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if was_updated {
+                    "not a SOAP answer".into()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let saved = adapter
+                .update_event(opened_and_edited(stored, change))
+                .await
+                .expect("update");
+            assert_eq!(saved.deletions_not_restored, [named]);
+            assert!(deleted_indexes(&requests).is_empty());
+        }
+    }
+
+    /// Decision 248 through the adapter: a series whose copy cannot be read is
+    /// not written blind — what it holds, and so what a rewrite drops, is
+    /// unknown. Nothing is sent, and the refusal says so.
+    #[tokio::test]
+    async fn a_series_is_not_written_without_its_copy() {
+        let edit = opened_and_edited(&stored_with_occurrences(false, false), |e| {
+            e.title = "Renamed".into();
+        });
+        let mut server = Server::new_async().await;
+        // The server answers without the item.
+        let requests = serve_stored(&mut server, CREATED.to_string()).await;
         let adapter = EwsAdapter::new(server.url(), alice());
         let err = adapter.update_event(edit).await.unwrap_err();
         let CoreError::Forbidden(message) = err else {
             panic!("expected Forbidden, got {err:?}");
         };
         assert_eq!(
-            cal_core::WriteRefusal::parse(&message),
-            Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone"))
+            cal_core::WriteRefusal::parse(&message).map(|(refusal, _)| refusal),
+            Some(cal_core::WriteRefusal::CopyUnreadable)
         );
         assert!(
             !requests

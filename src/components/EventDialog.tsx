@@ -70,8 +70,11 @@ import {
   offerOptions,
   offerUsable,
   prefillTarget,
+  deletionsNotRestoredSentence,
   eventWriteErrorMessage,
   eventWriteFailureReason,
+  exceptionsLossOf,
+  exceptionsLossQuestion,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -82,6 +85,7 @@ import {
   worthCarrying,
   type CarryableFields,
   type CarryScope,
+  type ExceptionsLoss,
 } from '@aperio/shared';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -649,6 +653,14 @@ export function EventDialog({
   useEffect(() => {
     if (splitNotice) splitNoticeRef.current?.focus();
   }, [splitNotice]);
+  /**
+   * A save of a series that would make the provider drop occurrences the user
+   * changed or deleted on their own (decisions 243-253): the adapter sent
+   * nothing and said what would be lost, and this asks. Yes submits the same
+   * form again with the consent, handed to that one submit only.
+   */
+  const [lossAsk, setLossAsk] = useState<ExceptionsLoss | null>(null);
+  const lossQuestion = lossAsk && exceptionsLossQuestion(lossAsk, form.title.trim(), t);
   // Closing the notice goes on — once. It stays until the dialog closes or the
   // carry replaces it, so the form never comes back in between with a live
   // Save and the cursor on nothing.
@@ -1190,9 +1202,12 @@ export function EventDialog({
     t,
   ]);
 
+  // `acceptsLoss` is the loss question's yes, handed to the one submit it
+  // starts (decisions 243-253); the form's own submit never carries it, so no
+  // later save can.
   const onSubmit = useCallback(
-    async (e: FormEvent) => {
-      e.preventDefault();
+    async (e: FormEvent | null, acceptsLoss = false) => {
+      e?.preventDefault();
       if (submitting) return; // re-entry guard while a slow PUT is in flight
       setError(null);
 
@@ -1234,6 +1249,11 @@ export function EventDialog({
       );
 
       setSubmitting(true);
+      // Only the series' own write asks (decisions 246, 247). A split's cut
+      // refused the same way shows the sentence, because a yes there would
+      // write the new series a second time; the copies' writes show it too,
+      // until the carry asks once for all of them (decision 251).
+      let lossAskable = false;
       try {
         // The reminders list to send to the server. When
         // `keepRemindersAsDefault` is still true, the editor was never
@@ -1891,7 +1911,15 @@ export function EventDialog({
           // old etag's If-Match can never be satisfied at the new
           // URL. The backend takes the hint and reroutes the
           // change as a create-on-target + delete-from-source.
-          const saved = await apiUpdateEvent(updated, event.calendar_id);
+          // The consent the question gave (decisions 243-253) rides this one
+          // write and nothing else: `updated` goes on to the carry offer, and
+          // what comes back never carries it.
+          lossAskable = true;
+          const saved = await apiUpdateEvent(
+            acceptsLoss ? { ...updated, accepts_exception_loss: true } : updated,
+            event.calendar_id,
+          );
+          lossAskable = false;
           // A calendar-picker move is rerouted as create-on-target +
           // delete-from-source, so the appointment comes back with the id and
           // calendar it has NOW. The private row and the colour are keyed by
@@ -1907,14 +1935,6 @@ export function EventDialog({
               form.colorLabel,
             );
           }
-          announce(
-            t(
-              wholeFromCut
-                ? 'dialogs.event.thisAndFutureUpdatedWhole'
-                : 'dialogs.event.updated',
-              { title: trimmedTitle },
-            ),
-          );
           // The appointment may exist several times over. Ask — after the
           // save, so the user's own change is never at stake — whether the
           // other copies should follow (DESIGN-event-groups.md, Stufe 2).
@@ -1924,14 +1944,43 @@ export function EventDialog({
           // Its "before" is the series at the cut, as the phone's is: the
           // opened row may be an occurrence the provider moved, and offering
           // the copies that move would carry a change nobody made.
-          carriedToGroup = wholeFromCut
-            ? await offerToCarry(
-                wholeFromCut.series,
-                updated,
-                'future',
-                wholeFromCut.occIso,
-              )
-            : await offerToCarry(series, updated);
+          const carry = () =>
+            wholeFromCut
+              ? offerToCarry(wholeFromCut.series, updated, 'future', wholeFromCut.occIso)
+              : offerToCarry(series, updated);
+          // Deleted occurrences the provider brought back and Aperio could not
+          // delete again (253): the save stands, and the days are said on
+          // screen, focused, before the editor goes on — as after a split
+          // that may show twice (146).
+          const back = deletionsNotRestoredSentence(
+            saved?.deletions_not_restored,
+            trimmedTitle,
+            i18n.language,
+            t,
+          );
+          if (back) {
+            if (!shownRef.current) {
+              announce(back);
+              return;
+            }
+            leavingNotice.current = false;
+            setSplitNotice({
+              sentence: back,
+              proceed: async () => {
+                if (!(await carry())) onClose();
+              },
+            });
+            return;
+          }
+          announce(
+            t(
+              wholeFromCut
+                ? 'dialogs.event.thisAndFutureUpdatedWhole'
+                : 'dialogs.event.updated',
+              { title: trimmedTitle },
+            ),
+          );
+          carriedToGroup = await carry();
         } else {
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
@@ -1971,6 +2020,13 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
+        // A save that would drop occurrences of the series asks first
+        // (decisions 243-253), in a dialog over the form; nothing was sent.
+        const loss = exceptionsLossOf(err);
+        if (loss && lossAskable && !acceptsLoss && shownRef.current) {
+          setLossAsk(loss);
+          return;
+        }
         // In words, including a provider's refusal, which reaches here with a
         // token in its message.
         setError(eventWriteErrorMessage(err, t));
@@ -2005,6 +2061,9 @@ export function EventDialog({
       i18n.language,
     ],
   );
+  // The loss question's yes submits again through the latest render's submit.
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
 
   // A meeting you organize (with attendees) offers "cancel + notify" vs
   // "remove silently"; everything else is a plain delete. The same choice is
@@ -2885,6 +2944,22 @@ export function EventDialog({
           void (isOccurrence && editScope === 'occurrence' && event.recurrence
             ? performOccurrenceDelete(send)
             : performDelete(send));
+        }}
+      />
+    )}
+    {lossQuestion && (
+      <ConfirmDialog
+        isOpen
+        onClose={() => setLossAsk(null)}
+        title={lossQuestion.title}
+        message={lossQuestion.message}
+        confirmLabel={lossQuestion.confirm}
+        onConfirm={() => {
+          // The same save again, now with the consent; the form is what it
+          // was when the question came. Called directly, not through the
+          // form's submit: the consent goes to this one submit and nowhere
+          // else, and no web view API it may lack stands in between.
+          void submitRef.current(null, true);
         }}
       />
     )}

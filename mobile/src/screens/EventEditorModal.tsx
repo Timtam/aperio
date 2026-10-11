@@ -35,8 +35,11 @@ import {
   prefillTarget,
   allDayWireEnd,
   describeRecurrence,
+  deletionsNotRestoredSentence,
   eventWriteErrorMessage,
   eventWriteFailureReason,
+  exceptionsLossOf,
+  exceptionsLossQuestion,
   invitationLocked,
   lastOccurrenceDayKey,
   pickerMisreadsRule,
@@ -134,6 +137,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { showEventScopeDialog } from '../state/eventScopeDialog';
 import { writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useSoundPref } from '../state/useSoundPref';
@@ -261,6 +265,11 @@ export default function EventEditorModal({
   // Closing the notice goes on — once. It stays on screen until the editor is
   // replaced or goes away, so nothing of the form comes back in between.
   const leavingNotice = useRef(false);
+  // A save of a series that would make the provider drop occurrences the user
+  // changed or deleted on their own (decisions 243-253) asks first; yes saves
+  // the same form again with the consent, handed to that one save only, so a
+  // save its own checks stop keeps none for a later one. Mirrors the desktop.
+  const saveRef = useRef<(acceptsLoss?: boolean) => Promise<void>>(async () => undefined);
   const closeNotice = useCallback(() => {
     if (splitNotice == null || leavingNotice.current) return;
     leavingNotice.current = true;
@@ -999,7 +1008,7 @@ export default function EventEditorModal({
     return allDay ? t('dialogs.event.invitation.allDayValue', { date: text }) : text;
   };
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (acceptsLoss = false) => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
       setError(t('dialogs.event.titleRequired'));
@@ -1110,6 +1119,10 @@ export default function EventEditorModal({
     const recurrenceToSend = editedRecurrence(recurrence, original?.recurrence, allDay);
     setError(null);
     setSaving(true);
+    // Only the series' own write asks (decisions 246, 247): a split's cut
+    // refused the same way shows the sentence, because saying yes there would
+    // write the new series a second time. Mirrors the desktop.
+    let lossAskable = false;
     try {
       // 77a: a locked invitation writes its own reminders and nothing else.
       // The row goes back as the provider has it, so no form value — and no
@@ -1599,13 +1612,58 @@ export default function EventEditorModal({
           attendees,
           send_invitations: sendInvitations,
         };
-        const updated = await updateEvent(sent, original.calendar_id);
+        // The consent the question gave (decisions 243-253) rides this one
+        // write and nothing else; what comes back never carries it.
+        lossAskable = true;
+        const updated = await updateEvent(
+          acceptsLoss ? { ...sent, accepts_exception_loss: true } : sent,
+          original.calendar_id,
+        );
+        lossAskable = false;
         await savePrivate(updated);
         // External calendar: a capable provider now stores the colour natively
         // (clear any stale override so the native value wins); a non-capable one
         // ignores it, so keep it as a host-local override. Local rides the row.
         if (!isLocalCal) {
           await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
+        }
+        // The appointment may exist several times over. Ask — after the save,
+        // so the user's own change is never at stake — whether the other
+        // copies should follow (DESIGN-event-groups.md, Stufe 2). A "this and
+        // all following" that rewrote the whole series asks as what the user
+        // chose: each copy is cut at the same point, and one with earlier
+        // occurrences keeps them.
+        const carry = () =>
+          wholeFromCut && occurrence != null
+            ? offerToCarry(
+                occurrenceBefore(original, occurrence),
+                updated,
+                'future',
+                occurrence,
+                sent,
+              )
+            : offerToCarry(original, updated, 'series', null, sent);
+        // Deleted occurrences the provider brought back and Aperio could not
+        // delete again (253): the save stands, and the days are said on screen,
+        // focused, before the editor goes on. Mirrors the desktop.
+        const back = deletionsNotRestoredSentence(
+          updated.deletions_not_restored,
+          trimmedTitle,
+          i18n.language,
+          t,
+        );
+        if (back != null) {
+          if (!shown.current) {
+            AccessibilityInfo.announceForAccessibility(back);
+            return;
+          }
+          setSplitNotice({
+            sentence: back,
+            proceed: async () => {
+              if (!(await carry())) navigation.goBack();
+            },
+          });
+          return;
         }
         AccessibilityInfo.announceForAccessibility(
           t(
@@ -1615,23 +1673,7 @@ export default function EventEditorModal({
             { title: updated.title },
           ),
         );
-        // The appointment may exist several times over. Ask — after the save,
-        // so the user's own change is never at stake — whether the other
-        // copies should follow (DESIGN-event-groups.md, Stufe 2). A "this and
-        // all following" that rewrote the whole series asks as what the user
-        // chose: each copy is cut at the same point, and one with earlier
-        // occurrences keeps them.
-        if (
-          wholeFromCut && occurrence != null
-            ? await offerToCarry(
-                occurrenceBefore(original, occurrence),
-                updated,
-                'future',
-                occurrence,
-                sent,
-              )
-            : await offerToCarry(original, updated, 'series', null, sent)
-        ) {
+        if (await carry()) {
           return;
         }
       } else {
@@ -1670,6 +1712,28 @@ export default function EventEditorModal({
       }
       navigation.goBack();
     } catch (err) {
+      // A save that would drop occurrences of the series asks first
+      // (decisions 243-253); nothing was sent.
+      const loss = exceptionsLossOf(err);
+      if (loss != null && lossAskable && !acceptsLoss && shown.current) {
+        const question = exceptionsLossQuestion(loss, trimmedTitle, t);
+        showEventScopeDialog({
+          title: question.title,
+          message: question.message,
+          cancelLabel: t('dialogs.cancel'),
+          options: [
+            {
+              key: 'saveAnyway',
+              label: question.confirm,
+              destructive: true,
+              run: () => {
+                void saveRef.current(true);
+              },
+            },
+          ],
+        });
+        return;
+      }
       const message = eventWriteErrorMessage(err, t);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
@@ -1706,6 +1770,8 @@ export default function EventEditorModal({
     i18n.language,
     title,
   ]);
+  // The question's yes saves again through the save of the latest render.
+  saveRef.current = save;
 
   // Delete with recurrence scope — the same shared confirm the list rows pop
   // (occurrence-vs-series for a recurring event, plain delete otherwise). The

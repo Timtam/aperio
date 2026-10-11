@@ -787,10 +787,11 @@ pub async fn update_event(
             return Err(err);
         }
         Err(err) => {
-            // A single or a series head: the row is the user's own, so it is
-            // written without a comparison — every field the host did not mark
-            // as left alone (decision 106). Whether it is written at all is
-            // known only once the update is built; that is logged below.
+            // A single: the row is the user's own, so it is written without a
+            // comparison — every field the host did not mark as left alone
+            // (decision 106). Whether it is written at all is known only once
+            // the update is built; that is logged below. A series head is not
+            // written without its copy (248, below).
             tracing::warn!(
                 target: "adapter_ews::write",
                 ?err,
@@ -801,9 +802,32 @@ pub async fn update_event(
             None
         }
     };
-    let (before, stored) = match copy {
-        Some(copy) => (Some(copy.event), copy.zones),
-        None => (None, crate::mapping::StoredZones::default()),
+    // A series head is never written blind (decision 248): what Exchange holds
+    // of it — its changed and deleted occurrences, which a rewrite of its start,
+    // zone or pattern drops — is unknown without the copy. Nothing is sent, as
+    // for an all-day day below; a failed sign-in or a vanished item keeps its
+    // own error.
+    if target.kind == EventIdKind::RecurringMaster && copy.is_none() {
+        let why = read_error.as_ref().map_or_else(
+            || "the server answered without the item".into(),
+            ToString::to_string,
+        );
+        tracing::warn!(
+            target: "adapter_ews::write",
+            event_id = %event.id,
+            %why,
+            "a series is not written without its current copy; nothing is written",
+        );
+        if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+            return Err(err);
+        }
+        return Err(EwsError::Protocol(
+            cal_core::WriteRefusal::CopyUnreadable.message(&why),
+        ));
+    }
+    let (before, stored, series) = match copy {
+        Some(copy) => (Some(copy.event), copy.zones, copy.series),
+        None => (None, crate::mapping::StoredZones::default(), None),
     };
     // Without the copy the zones the item is stored in are unknown, and an
     // all-day day is never written blind (decision 237). Nothing is sent, and
@@ -814,7 +838,7 @@ pub async fn update_event(
     // sign-in or an item that is gone stays itself, as the same edit of a
     // timed appointment reports it: "try again" would not help, and both
     // already count as nothing written.
-    let (set_xml, delete_xml) = match crate::mapping::event_to_update_field_xml_in(
+    let plan = match crate::mapping::plan_update_in(
         event,
         before.as_ref(),
         &stored,
@@ -851,6 +875,7 @@ pub async fn update_event(
         }
         other => other?,
     };
+    let (set_xml, delete_xml) = (plan.set.as_str(), plan.del.as_str());
     // Nothing to write. Asked of the BUILT XML, not of the diff: the diff can
     // report attendees changed while `keep_attendees` suppresses that block,
     // and an `UpdateItem` with an empty `<t:Updates>` is a fault. This sits
@@ -868,14 +893,50 @@ pub async fn update_event(
                 .and_then(|b| b.etag.clone())
                 .or_else(|| event.etag.clone()),
             updated_at: Utc::now(),
+            accepts_exception_loss: false,
             ..event.clone()
         });
     }
+    // Decisions 243-253: an update that writes a series' start and end, the
+    // clock of its zone or its pattern again makes Exchange drop every changed
+    // and deleted occurrence of it (the zone-first live test, L3a, M3, M6;
+    // round 6, P1, P2). The deleted ones Aperio deletes again afterwards where
+    // it can tell where they stand (253); the changed ones, and deleted ones it
+    // cannot place, are lost, and that is asked first: without the user's
+    // consent nothing is sent, and the refusal says what would be rewritten
+    // and how many changed and deleted ones would be lost, counted from the
+    // copy just read (252).
+    let restore = match (plan.rewrite, series.as_ref()) {
+        (Some(rewrite), Some(shape)) if shape.changed > 0 || !shape.deleted.is_empty() => {
+            let placeable = plan.placement != crate::mapping::Placement::Unknown;
+            let deleted_lost = if placeable { 0 } else { shape.deleted.len() };
+            if shape.changed + deleted_lost > 0 && !event.accepts_exception_loss {
+                tracing::info!(
+                    target: "adapter_ews::write",
+                    event_id = %event.id,
+                    rewrite = rewrite.token(),
+                    changed = shape.changed,
+                    deleted = deleted_lost,
+                    "the update would drop occurrences of the series; asking first",
+                );
+                return Err(EwsError::Protocol(
+                    cal_core::WriteRefusal::ExceptionsWouldBeLost
+                        .message(&rewrite.detail(shape.changed, deleted_lost)),
+                ));
+            }
+            if placeable {
+                shape.deleted.clone()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
     if before.is_none() {
         tracing::warn!(
             target: "adapter_ews::write",
             event_id = %event.id,
-            "writing without the current copy: every field not kept, and a kept rule with a moved slot",
+            "writing a single without the current copy: every field not kept",
         );
     }
     // Removed invitees count too: with every one removed (`clear_attendees`)
@@ -895,8 +956,8 @@ pub async fn update_event(
     let envelope = update_calendar_item(
         &target.item_id,
         change_key.as_deref(),
-        &set_xml,
-        &delete_xml,
+        set_xml,
+        delete_xml,
         notify,
     );
     let response = match client.post_soap(envelope).await {
@@ -916,7 +977,33 @@ pub async fn update_event(
         }
         other => other?,
     };
-    let item_ref = parse_first_item_id(&response)?;
+    let mut item_ref = parse_first_item_id(&response)?;
+    // The update landed. The deleted occurrences it brought back are deleted
+    // again where they now stand (decision 253); any that cannot be confirmed
+    // or deleted is named on the event that comes back, so the surfaces say
+    // so. Deleting an occurrence changes the series' ChangeKey, so the series
+    // is read once more for it.
+    let mut deletions_not_restored = Vec::new();
+    if let (false, Some(shape)) = (restore.is_empty(), series.as_ref()) {
+        deletions_not_restored = restore_deletions(
+            client,
+            &target.item_id,
+            shape,
+            stored.start.as_ref(),
+            Restore {
+                placement: plan.placement,
+                written_start: plan.written_start,
+                written_all_day: plan.written_all_day,
+                written_clock: plan.written_clock.clone(),
+                notify,
+            },
+            &restore,
+        )
+        .await;
+        if let Ok(Some(change_key)) = current_change_key(client, &target.item_id).await {
+            item_ref.change_key = Some(change_key);
+        }
+    }
     // A single stays a single; a series-wide write (a master, or a master
     // resolved from an occurrence) ends on the master. An exception keeps the
     // override id it was written through: that id names the occurrence, and its
@@ -940,8 +1027,249 @@ pub async fn update_event(
         id: new_id,
         etag: item_ref.change_key,
         updated_at: Utc::now(),
+        // The consent was for this write; the event that comes back is reused
+        // for later ones (the carry offer), which must ask again.
+        accepts_exception_loss: false,
+        deletions_not_restored,
         ..event.clone()
     })
+}
+
+/// Delete again the occurrences of a series the user had deleted and an
+/// update brought back (decision 253), where they now stand: each moved as
+/// the series' first occurrence moved, on the clocks before and after
+/// ([`Placement::Shifted`](crate::mapping::Placement::Shifted)), or at its
+/// own instant under a new pattern ([`Placement::Same`]
+/// (crate::mapping::Placement::Same)), where that pattern still has it.
+///
+/// Each is found as `delete_series_occurrence` finds one: the index the
+/// series' rule gives, then that index and its neighbours read from the
+/// server; only an occurrence whose start is exactly the one expected is
+/// deleted (live round 6, R1-R3). Where the update told the attendees
+/// (`notify`), the series they were sent has it again, so they are told it is
+/// cancelled again too; otherwise it goes without a cancellation.
+///
+/// Nothing came back where the series, read index by index, steps over the
+/// place: from an occurrence before it, or the series' start, straight to one
+/// after it, or the series' end — it now begins or ends beyond the place, or
+/// a new pattern no longer has it. Nor where the index the rule gives is a
+/// deletion Exchange kept. An index this restore has just deleted again
+/// stands for the occurrence it held, not for the place. Anything else — an
+/// occurrence at the place that is not the one expected, a probe that could
+/// not be read, a delete that failed — is returned: where it now stands, as
+/// the read anchors a day for an all-day series, so the surfaces name the day
+/// the user sees. Where the series cannot be read again, every one is
+/// returned, moved as the update moved the first start, on the kind and the
+/// clock the update left the series on.
+async fn restore_deletions(
+    client: &EwsClient,
+    master_id: &str,
+    before: &SeriesShape,
+    old_clock: Option<&crate::mapping::DayZone>,
+    restore: Restore,
+    deleted: &[DateTime<Utc>],
+) -> Vec<DateTime<Utc>> {
+    use crate::mapping::Placement;
+    let Restore {
+        placement,
+        written_start,
+        written_all_day,
+        written_clock,
+        notify,
+    } = restore;
+    // Where a deleted occurrence stands now, as far as the update itself says:
+    // moved as the first start it wrote.
+    let shifted = |gone: DateTime<Utc>| match (placement, written_start) {
+        (Placement::Shifted, Some(written)) => gone + (written - before.start),
+        _ => gone,
+    };
+    // The series as Exchange holds it now: its rule, first start and zone.
+    let now = match client
+        .post_soap(crate::soap::get_calendar_items_with_recurrence(&[(
+            master_id.to_string(),
+            None,
+        )]))
+        .await
+        .and_then(|xml| crate::mapping::parse_get_calendar_items_response(&xml))
+    {
+        Ok(items) => items.into_iter().find(|it| it.item_id == master_id),
+        Err(err) => {
+            tracing::warn!(target: "adapter_ews::write", %err, "the series could not be read again; its deleted occurrences stay back");
+            None
+        }
+    };
+    let Some((rule, first, new_clock, all_day)) = now.as_ref().and_then(|item| {
+        Some((
+            item.recurrence.as_ref()?,
+            item.start?,
+            crate::mapping::StoredZones::of(item).start,
+            item.is_all_day,
+        ))
+    }) else {
+        // Where they stand, as the update moved them: a day where it left the
+        // series all-day, read on the clock it left it on; an instant where it
+        // gave it a time.
+        return deleted
+            .iter()
+            .map(|&gone| {
+                let near = shifted(gone);
+                if written_all_day {
+                    crate::mapping::all_day_anchor(near, written_clock.as_ref())
+                } else {
+                    near
+                }
+            })
+            .collect();
+    };
+    // The day the user sees, for one that is returned.
+    let as_seen = |when: DateTime<Utc>| {
+        if all_day {
+            crate::mapping::all_day_anchor(when, new_clock.as_ref())
+        } else {
+            when
+        }
+    };
+    let wall = |when: DateTime<Utc>, clock: Option<&crate::mapping::DayZone>| {
+        clock.and_then(|zone| zone.wall(when))
+    };
+    // How far the first occurrence moved on the series' clocks.
+    let first_moved = wall(first, new_clock.as_ref())
+        .zip(wall(before.start, old_clock))
+        .map(|(now, then)| now - then);
+    let mut back = Vec::new();
+    // The occurrences this restore has deleted again, by index, with where
+    // they stood: a probe of one answers "deleted" for it.
+    let mut deleted_again: Vec<(u32, DateTime<Utc>)> = Vec::new();
+    for &gone in deleted {
+        // Where it is expected now, roughly — the index is read from it — and
+        // exactly, by the test its start must pass: moved on the clocks as the
+        // first occurrence moved, or at its own instant.
+        let (near, moved_by) = match (placement, first_moved) {
+            (Placement::Shifted, Some(moved)) => (
+                gone + (first - before.start),
+                Some((wall(gone, old_clock), moved)),
+            ),
+            (Placement::Same, _) => (gone, None),
+            _ => {
+                back.push(as_seen(shifted(gone)));
+                continue;
+            }
+        };
+        let matches = |start: DateTime<Utc>| match moved_by {
+            Some((then, moved)) => then
+                .zip(wall(start, new_clock.as_ref()))
+                .is_some_and(|(then, now)| now - then == moved),
+            None => start == gone,
+        };
+        let side_of = |start: DateTime<Utc>| {
+            if (start - near).abs() < chrono::Duration::hours(12) {
+                Side::Place
+            } else if start < near {
+                Side::Before
+            } else {
+                Side::After
+            }
+        };
+        // Without an index from the rule — it has no occurrence up to two
+        // days after the place, or it cannot be expanded — the series is read
+        // from its first occurrence.
+        let candidate = crate::mapping::nominal_occurrence_index(rule, first, near).unwrap_or(1);
+        // Index 0 is the series' start, before every place.
+        let mut sides = vec![(0, Side::Before)];
+        let mut found = None;
+        for index in candidate_indices(candidate) {
+            let side = match probe_occurrence(client, master_id, index).await {
+                Probe::At(start) if matches(start) => {
+                    found = Some((index, start));
+                    break;
+                }
+                Probe::At(start) => side_of(start),
+                Probe::Deleted => deleted_again
+                    .iter()
+                    .find(|(again, _)| *again == index)
+                    .map_or(Side::Kept, |&(_, start)| side_of(start)),
+                Probe::PastEnd => Side::After,
+                Probe::Unreadable => Side::Unknown,
+            };
+            sides.push((index, side));
+        }
+        let side_at = |index: u32| {
+            sides
+                .iter()
+                .find(|(at, _)| *at == index)
+                .map(|&(_, side)| side)
+        };
+        // Nothing came back: no occurrence stands at the place, and the
+        // series steps over it or the rule's index is a kept deletion.
+        let nothing_back = !sides.iter().any(|&(_, side)| side == Side::Place)
+            && (sides.iter().any(|&(index, side)| {
+                side == Side::Before && side_at(index + 1) == Some(Side::After)
+            }) || side_at(candidate) == Some(Side::Kept));
+        match found {
+            Some((index, start)) => {
+                let envelope = delete_occurrence_item(master_id, None, index, notify);
+                match client.post_soap(envelope).await {
+                    Ok(_) => deleted_again.push((index, start)),
+                    Err(err) => {
+                        tracing::warn!(target: "adapter_ews::write", %err, index, "a deleted occurrence came back and could not be deleted again");
+                        back.push(as_seen(near));
+                    }
+                }
+            }
+            None if nothing_back => {}
+            None => {
+                tracing::warn!(target: "adapter_ews::write", %near, ?sides, "a deleted occurrence may have come back where it could not be confirmed");
+                back.push(as_seen(near));
+            }
+        }
+    }
+    back
+}
+
+/// How [`restore_deletions`] places and deletes, from the update it follows.
+#[derive(Debug, Clone)]
+struct Restore {
+    placement: crate::mapping::Placement,
+    /// The first start the update wrote, as it went on the wire.
+    written_start: Option<DateTime<Utc>>,
+    /// Whether the update left the series all-day, and the clock it left it
+    /// on: an all-day day is anchored on them when the series cannot be read
+    /// again.
+    written_all_day: bool,
+    written_clock: Option<crate::mapping::DayZone>,
+    /// Whether the update told the attendees.
+    notify: bool,
+}
+
+/// Where an index the restore read stands against the place a deleted
+/// occurrence is expected at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// An occurrence, or the start of the series, before the place.
+    Before,
+    /// An occurrence at the place — within half a day of it, closer than any
+    /// two of a series' occurrences stand — that is not the one expected.
+    Place,
+    /// An occurrence after the place, or the series' end.
+    After,
+    /// A deletion Exchange kept: where it stood is not said.
+    Kept,
+    /// An answer that says nothing.
+    Unknown,
+}
+
+/// The ChangeKey Exchange holds for an item now.
+async fn current_change_key(client: &EwsClient, item_id: &str) -> EwsResult<Option<String>> {
+    let xml = client
+        .post_soap(crate::soap::get_calendar_items_with_recurrence(&[(
+            item_id.to_string(),
+            None,
+        )]))
+        .await?;
+    Ok(crate::mapping::parse_get_calendar_items_response(&xml)?
+        .into_iter()
+        .find(|it| it.item_id == item_id)
+        .and_then(|it| it.change_key))
 }
 
 /// Move an exception Exchange will not move: create `event` as a single
@@ -1071,6 +1399,51 @@ async fn occurrence_start(
     Ok(items
         .into_iter()
         .find_map(|it| it.original_start.or(it.start)))
+}
+
+/// What reading occurrence `index` of a series found, for
+/// [`restore_deletions`]: an occurrence and its slot; none, because Exchange
+/// says it is deleted, or past the series' end; or nothing it can tell from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    At(DateTime<Utc>),
+    Deleted,
+    PastEnd,
+    Unreadable,
+}
+
+/// [`occurrence_start`], telling "deleted" and "past the end" apart from each
+/// other and from any other answer without an occurrence, which proves
+/// nothing.
+async fn probe_occurrence(client: &EwsClient, master_id: &str, index: u32) -> Probe {
+    let xml = match client
+        .post_soap_raw(get_occurrence_item(master_id, None, index))
+        .await
+    {
+        Ok(xml) => xml,
+        Err(err) => {
+            tracing::warn!(target: "adapter_ews::write", %err, index, "an occurrence could not be read");
+            return Probe::Unreadable;
+        }
+    };
+    let start = crate::mapping::parse_get_calendar_items_response(&xml)
+        .ok()
+        .and_then(|items| {
+            items
+                .into_iter()
+                .find_map(|it| it.original_start.or(it.start))
+        });
+    match start {
+        Some(start) => Probe::At(start),
+        None if xml.contains("ErrorCalendarOccurrenceIsDeletedFromRecurrence") => Probe::Deleted,
+        None if xml.contains("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange") => {
+            Probe::PastEnd
+        }
+        None => {
+            tracing::warn!(target: "adapter_ews::write", index, "an occurrence's answer named none and no reason");
+            Probe::Unreadable
+        }
+    }
 }
 
 /// The candidate InstanceIndexes to probe: the computed ordinal plus its
@@ -1342,9 +1715,18 @@ async fn read_before(
         }
     }
     let zones = crate::mapping::StoredZones::of(&item);
+    let series = match (&item.recurrence, item.start) {
+        (Some(_), Some(start)) => Some(SeriesShape {
+            start,
+            changed: item.modified_occurrences.len(),
+            deleted: item.deleted_occurrence_starts.clone(),
+        }),
+        _ => None,
+    };
     Ok(Some(ServerCopy {
         event: crate::mapping::to_event(item, calendar_id)?,
         zones,
+        series,
     }))
 }
 
@@ -1353,6 +1735,19 @@ async fn read_before(
 struct ServerCopy {
     event: Event,
     zones: crate::mapping::StoredZones,
+    /// For a series head, its first start and its changed and deleted
+    /// occurrences as Exchange holds them.
+    series: Option<SeriesShape>,
+}
+
+/// A series head as Exchange holds it: its first start exactly as stored (not
+/// the all-day anchor the read gives the event), and its changed and deleted
+/// occurrences.
+#[derive(Debug, Clone)]
+struct SeriesShape {
+    start: DateTime<Utc>,
+    changed: usize,
+    deleted: Vec<DateTime<Utc>>,
 }
 
 /// Whether a message is the refusal for a day in an unknown zone.
@@ -1518,6 +1913,8 @@ fn build_event_from_new(
         organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
+        accepts_exception_loss: false,
+        deletions_not_restored: Vec::new(),
         id: aperio_id,
         calendar_id: calendar_id.to_string(),
         title: new.title.clone(),
@@ -2047,6 +2444,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK-V1".into()),
@@ -2463,6 +2862,42 @@ mod tests {
             .with_body(master_lookup_body)
             .create_async()
             .await;
+        // The series' own copy, read before writing: a series is never
+        // written blind (decision 248).
+        let copy_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+        <t:Subject>Series</t:Subject>
+        <t:Start>2026-05-20T08:00:00Z</t:Start>
+        <t:End>2026-05-20T09:00:00Z</t:End>
+        <t:IsAllDayEvent>false</t:IsAllDayEvent>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:WeeklyRecurrence>
+            <t:Interval>1</t:Interval>
+            <t:DaysOfWeek>Wednesday</t:DaysOfWeek>
+          </t:WeeklyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-05-20Z</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let _copy = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                r#"(?s)calendar:DeletedOccurrences.*<t:ItemId Id="MASTER-ID""#.into(),
+            ))
+            .with_status(200)
+            .with_body(copy_body)
+            .create_async()
+            .await;
         let _m2 = server
             .mock("POST", "/")
             .match_body(mockito::Matcher::Regex("UpdateItem".into()))
@@ -2494,6 +2929,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("OCK".into()),
@@ -2619,6 +3056,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             etag: Some("MCK-V1".into()),
@@ -2800,6 +3239,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             etag: Some("MCK-V1".into()),
@@ -2935,6 +3376,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             etag: Some("ECK-V1".into()),
@@ -3085,6 +3528,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             etag: Some("MCK-V1".into()),
@@ -3273,6 +3718,8 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK-V1".into()),

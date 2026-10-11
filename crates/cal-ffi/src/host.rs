@@ -10665,6 +10665,8 @@ mod tests {
                 attendees: Vec::new(),
                 send_invitations: false,
                 truncate_tail_overrides: false,
+                accepts_exception_loss: false,
+                deletions_not_restored: Vec::new(),
                 created_at: at,
                 updated_at: at,
                 etag: None,

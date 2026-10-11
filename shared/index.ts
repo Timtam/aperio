@@ -32,6 +32,7 @@ export * from './tailExceptions';
 export * from './recurrenceSummary';
 export * from './intlNames';
 export * from './eventWriteError';
+export * from './exceptionsLoss';
 export * from './seriesClock';
 export * from './zoneList';
 export * from './links';

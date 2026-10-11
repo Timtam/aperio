@@ -94,6 +94,8 @@ mod tests {
             attendees: vec!["bob@example.com".into()],
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
             etag: Some("\"e1\"".into()),

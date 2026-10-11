@@ -3030,22 +3030,30 @@ Siehe DESIGN §4.2.
   Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
   Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
   neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
-  Anzahl allein nicht (M4, M5): Ein Zonenwechsel, der sie nur deshalb
-  schreibt, wird abgelehnt (245). Ganztägig bekommt Uhrzeit: Beginn und Ende
+  Anzahl allein nicht (M4, M5): Vor einem Zonenwechsel, der sie nur
+  deshalb schreibt, fragt Aperio (245, seit 247 eine Frage). Ganztägig bekommt
+  Uhrzeit: Beginn und Ende
   vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
   Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
   (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
   Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
   behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
   bekommen 10:00 richtig, täglich und samstags (O1, O2).
-  🚩 **Warnen und fragen** (243): eigener PR direkt nach dem Zonen-PR. Bevor
-  Aperio Beginn und Ende einer Exchange-Serie mit geänderten oder gelöschten
-  Vorkommen neu schreibt, beim Verschieben wie beim Zonenwechsel, sagt es das
-  und fragt.
+  ↻ **Warnen und fragen** (243, PR A, Entscheidungen 246-253): Schreibt ein
+  Ändern Beginn und Ende, die Zone oder das Muster einer Exchange-Serie neu,
+  fragt der Editor vorher, was dabei verloren ginge — einzeln geänderte
+  Vorkommen und gelöschte, die Aperio nicht wieder zuordnen kann —, auf dem
+  Desktop und auf dem Handy, mit der Zahl vom Server; die übrigen gelöschten
+  löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
+  Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
+  Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
+  🚩 **Warnen und fragen, PR B** (250, 251): Ziehen fragt in einem eigenen
+  Bestätigen-Dialog; Übertragen an Kopien fragt einmal nach der Schleife und
+  schickt nur die betroffenen noch einmal. Bis dahin sagen beide den Satz.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
-  neu und lehnt an einer Serie mit Ausnahmen ab (245). Vor dem Picker messen,
+  neu und fragt an einer Serie mit Ausnahmen vorher (247). Vor dem Picker messen,
   ob eine andere Windows-Zone allein die Ausnahmen behält; dann Uhren nach
   ihrem Versatz vergleichen statt nach ihrer Kennung.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und

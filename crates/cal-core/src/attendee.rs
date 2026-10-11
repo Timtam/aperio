@@ -381,6 +381,8 @@ mod tests {
                 attendees: attendees.iter().map(|a| a.to_string()).collect(),
                 send_invitations: true,
                 truncate_tail_overrides: false,
+                accepts_exception_loss: false,
+                deletions_not_restored: Vec::new(),
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,

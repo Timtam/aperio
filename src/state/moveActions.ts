@@ -369,8 +369,9 @@ export async function moveEventToDay(
   targetDayKey: string,
   scope: MoveCopyScope = 'series',
   sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
+  onSeriesSaved?: (saved: CalendarEvent) => void,
 ): Promise<boolean> {
-  return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar);
+  return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar, onSeriesSaved);
 }
 
 /**
@@ -396,6 +397,10 @@ export async function moveEventToSlot(
   minuteOfDay: number | null,
   scope: MoveCopyScope = 'series',
   sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
+  /** The series as the provider saved it, when the whole series moved: it
+   *  names deleted occurrences that came back and could not be deleted again
+   *  (decision 253), for the caller to say. */
+  onSeriesSaved?: (saved: CalendarEvent) => void,
 ): Promise<boolean> {
   // 77a: only the organizer moves their meeting. This is the only place that
   // can say so for a dragged OCCURRENCE — carving one out writes a new event
@@ -499,7 +504,7 @@ export async function moveEventToSlot(
     });
     return true;
   }
-  return moveSeries(event, newStart, delta, minute);
+  return moveSeries(event, newStart, delta, minute, onSeriesSaved);
 }
 
 export type { ShiftRefusal };
@@ -567,6 +572,7 @@ async function moveSeries(
   dropped: string,
   delta: number,
   minute: number | null,
+  onSaved?: (saved: CalendarEvent) => void,
 ): Promise<boolean> {
   const seriesId = seriesIdOf(event);
   const master =
@@ -621,7 +627,7 @@ async function moveSeries(
   if (answer.outcome === 'refused') {
     throw new SeriesShiftRefusedError(answer.reason);
   }
-  await apiUpdateEvent({
+  const saved = await apiUpdateEvent({
     ...master,
     start,
     end,
@@ -642,5 +648,6 @@ async function moveSeries(
       ),
     },
   });
+  onSaved?.(saved);
   return true;
 }

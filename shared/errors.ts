@@ -1,4 +1,4 @@
-import { eventWriteRefusal } from './eventWriteError';
+import { eventWriteErrorMessage, eventWriteRefusal, exceptionsLossOf } from './eventWriteError';
 
 /**
  * The message to put in front of a person when something failed.
@@ -28,6 +28,9 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
  * comes out exactly as before.
  */
 export function writeErrorMessage(err: unknown, t: Translate): string {
+  // A save that would drop occurrences of a series says what and how many, as
+  // the event editors do (decisions 243-253).
+  if (exceptionsLossOf(err)) return eventWriteErrorMessage(err, t);
   const refusal = eventWriteRefusal(err);
   return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
 }

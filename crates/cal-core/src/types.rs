@@ -167,6 +167,22 @@ pub struct Event {
     /// skip…)]` keeps it `false` and off the wire except on the split's update.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncate_tail_overrides: bool,
+    /// Transient write-only consent: the user was told that this update makes
+    /// the provider drop the series' changed occurrences, and agreed (decisions
+    /// 243, 246). An adapter whose provider drops them when a series' start,
+    /// end, zone or pattern is written again refuses such an update without it
+    /// ([`crate::WriteRefusal::ExceptionsWouldBeLost`], nothing sent), and the
+    /// surfaces ask and send it again with this set — on that one write only.
+    /// NOT persisted and meaningless on a read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub accepts_exception_loss: bool,
+    /// Transient read-only result of an update: occurrences of the series the
+    /// user had deleted, which the provider brought back when the update wrote
+    /// the series again, and which the adapter could not delete again (decision
+    /// 253). Set only on the event an adapter's update returns, so the surfaces
+    /// name them; empty everywhere else. NOT persisted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deletions_not_restored: Vec<DateTime<Utc>>,
     /// Transient write-only signal: the edit did not change who is invited, so
     /// the adapter leaves the provider's attendee list exactly as it is
     /// (decision 71a). The host sets it (`attendee::guard_update`) by comparing

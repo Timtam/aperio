@@ -62,12 +62,70 @@ pub enum WriteRefusal {
     /// write needs it, so nothing was sent: a retry may well work. The detail
     /// is the read's own error, for the log.
     CopyUnreadable,
-    /// The write would make the provider drop a series' changed and deleted
-    /// occurrences, so nothing was sent (decision 245): Exchange drops them
-    /// whenever a series' start and end are written again, and switching its
-    /// time zone has to write them. The detail is a machine token for the
-    /// log: `zone`.
+    /// The write would make the provider drop occurrences of a series the user
+    /// changed on their own — and deleted ones the adapter cannot delete again
+    /// afterwards —, and the user has not agreed ([`crate::Event`]'s
+    /// `accepts_exception_loss`), so nothing was sent (decisions 245-253).
+    /// Exchange drops them whenever a series' start and end, the clock of its
+    /// zone or its pattern are written again. The detail is
+    /// [`SeriesRewrite::detail`]: what the update rewrites, and how many
+    /// changed and how many deleted occurrences would be lost, `slot:2:1`;
+    /// the surfaces ask with it and send the write again with the consent.
     ExceptionsWouldBeLost,
+}
+
+/// What an update writes again that makes a provider drop a series' changed
+/// and deleted occurrences (decisions 243-253): its start and end — a move, a
+/// new length, all-day on or off —, only the clock its zone names (245), or
+/// its pattern: its frequency, the days, the interval it repeats on (the
+/// days and the interval measured in live round 6). Its range, how many times
+/// or until when it runs, keeps them (the zone-first live test, M5; round 8,
+/// U1-U3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum SeriesRewrite {
+    /// Start and end: a move, a new length, all-day on or off.
+    Slot,
+    /// Only the zone, whose clock is another than the stored one.
+    Zone,
+    /// The pattern: its frequency, the days, the interval it repeats on.
+    Pattern,
+}
+
+impl SeriesRewrite {
+    /// The token the detail starts with.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Slot => "slot",
+            Self::Zone => "zone",
+            Self::Pattern => "pattern",
+        }
+    }
+
+    /// The detail of [`WriteRefusal::ExceptionsWouldBeLost`]: this rewrite,
+    /// and how many occurrences changed on their own and how many deleted ones
+    /// it would lose — a changed one takes the series' details again, a
+    /// deleted one comes back: `slot:2:1` (decision 252).
+    pub fn detail(self, changed: usize, deleted: usize) -> String {
+        format!("{}:{changed}:{deleted}", self.token())
+    }
+
+    /// The rewrite and the counts a detail names, as [`Self::detail`] writes
+    /// it; `None` for anything else.
+    pub fn parse_detail(detail: &str) -> Option<(Self, usize, usize)> {
+        let mut parts = detail.trim().split(':');
+        let token = parts.next()?;
+        let rewrite = [Self::Slot, Self::Zone, Self::Pattern]
+            .into_iter()
+            .find(|r| r.token() == token)?;
+        let changed = parts.next()?.parse().ok()?;
+        let deleted = parts.next()?.parse().ok()?;
+        parts
+            .next()
+            .is_none()
+            .then_some((rewrite, changed, deleted))
+    }
 }
 
 impl WriteRefusal {
@@ -217,6 +275,34 @@ mod tests {
         for status in [200, 401, 403, 404, 409, 412, 500, 502, 503, 504] {
             assert!(!WriteRefusal::refused_status(status), "{status}");
         }
+    }
+
+    #[test]
+    fn a_series_rewrite_detail_comes_back() {
+        for rewrite in [
+            SeriesRewrite::Slot,
+            SeriesRewrite::Zone,
+            SeriesRewrite::Pattern,
+        ] {
+            let detail = rewrite.detail(2, 1);
+            assert_eq!(SeriesRewrite::parse_detail(&detail), Some((rewrite, 2, 1)));
+            // The token is the serialized name the surfaces read.
+            assert_eq!(
+                serde_json::to_value(rewrite).unwrap(),
+                serde_json::json!(rewrite.token()),
+            );
+        }
+        // The wire shape the surfaces parse (shared/exceptionsLoss.ts).
+        assert_eq!(SeriesRewrite::Slot.detail(2, 1), "slot:2:1");
+        assert_eq!(
+            WriteRefusal::ExceptionsWouldBeLost.message(&SeriesRewrite::Zone.detail(1, 0)),
+            "exceptions-would-be-lost: zone:1:0"
+        );
+        assert_eq!(SeriesRewrite::parse_detail("slot"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:3"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:many:0"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:1:0:9"), None);
+        assert_eq!(SeriesRewrite::parse_detail("moved:3:0"), None);
     }
 
     #[test]
