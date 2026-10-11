@@ -422,6 +422,21 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     });
   });
 
+  it('says, not asks, when cutting the old one would drop its occurrences (246, 247)', async () => {
+    // Saying yes would create the new series a second time: the cut's
+    // refusal is the sentence, and the new series is taken back as for any
+    // refusal.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateFails = { code: 'forbidden', message: 'exceptions-would-be-lost: zone:1:0' };
+    await open(JULY);
+    save();
+    await screen.findByText(/andere Zeitzone .* Es wurde nichts geändert/);
+    expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull();
+    expect(calls('delete_event')).toHaveLength(1);
+    expect(calls('create_event')).toHaveLength(1);
+  });
+
   it('keeps both, counts the change written and says so on screen when the cut may have landed (144-146)', async () => {
     // The answer was lost: the old series may already end at the cutoff, and
     // deleting the new one would lose everything from there. The new series

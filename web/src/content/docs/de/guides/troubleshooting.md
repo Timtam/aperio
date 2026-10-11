@@ -230,6 +230,9 @@ aktualisiert hat.
 Ziehst du eine Serie mit der Maus oder überträgst du eine Änderung an Kopien in
 anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es
 denselben Satz und „Es wurde nichts geändert.“ Ändere die Serie dann im Editor.
+Änderst oder löschst du eine solche Serie ab einem ihrer Termine, fragt Aperio
+ebenfalls nicht, denn dabei entstünde die neue Serie zweimal: Es sagt den Satz
+und ändert nichts. Das geht dann in Outlook.
 
 Kann Aperio den aktuellen Stand einer Serie nicht vom Server lesen, ändert es
 sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:

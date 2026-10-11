@@ -203,27 +203,34 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   243-253). Exchange drops every changed and deleted occurrence of a series
   when an update writes its Start and End (the zone-first live test: L3a,
   L3b, M3, M6) or its pattern, the days or the interval it repeats on (round
-  6, P1, P2). Its range — the COUNT (M5), an UNTIL cut (the 8a live test) —,
-  a title (M4) and the same zone written again (N3) keep them. The update
+  6, P1, P2). Its range — the COUNT (M5), an end date instead, no end, an
+  earlier end (round 8, U1-U3) —, a title (M4) and the same zone written
+  again (N3) keep them. The update
   builder plans what it rewrites (`UpdatePlan::rewrite`: slot, zone,
   pattern) and where a deleted occurrence stands afterwards (`Placement`):
   moved as the first occurrence moved, so it keeps its place in the pattern,
   which is how Exchange numbers occurrences (a move, a zone switch, a rule
   shifted with its start by `cal_core::shift_series`; R1-R3); at its own
   instant under a new pattern; or nowhere it can tell, where the pattern and
-  the slot change together. The write path counts from the copy just read
+  the slot change together, or where a clock it needs cannot be read. The
+  write path counts from the copy just read
   what would be lost: the changed occurrences, and the deleted ones it cannot
   place. Without the user's consent (`Event::accepts_exception_loss`) it
   sends nothing and refuses `exceptions-would-be-lost:
   {rewrite}:{changed}:{deleted}`; both editors ask and send the same save
-  again with the consent (`shared/exceptionsLoss.ts`). Afterwards it deletes
-  each placeable deleted occurrence again: the index the new rule gives,
-  that index and its neighbours read back, and only the one whose start is
-  exactly where it should stand is deleted, without a cancellation. One it
-  cannot confirm or delete is named on the event that comes back
-  (`Event::deletions_not_restored`), and the editors say its day. Dragging a
-  series and the carry dialogs do not ask yet: they say the refusal's
-  sentence. Paris for a Berlin series counts as another clock (another
+  again with the consent (`shared/exceptionsLoss.ts`) — only on the series'
+  own save: a split's cut refused this way says the sentence, as a yes
+  would write the new series twice. Afterwards it deletes each placeable
+  deleted occurrence again: the index the new rule gives, that index and
+  its neighbours read back, and only the one whose start is exactly where
+  it should stand is deleted — with a cancellation where the update told
+  the attendees, whose series has it again. An index Exchange answers as
+  deleted or past the end brought nothing back. One it cannot confirm,
+  read or delete is named on the event that comes back
+  (`Event::deletions_not_restored`), where it now stands, and the editors,
+  the drag and the carry dialogs say its day. Dragging a series and the
+  carry dialogs do not ask yet: they say the refusal's sentence. Paris for a
+  Berlin series counts as another clock (another
   Windows id). No editor picks a series' zone yet, so today the zone
   question meets only a rule change — the repeat edited, or a series changed
   or deleted from one of its occurrences on, which cuts the old rule — where

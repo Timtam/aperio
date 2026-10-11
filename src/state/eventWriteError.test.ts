@@ -289,5 +289,14 @@ describe('any write on the phone, not only the event editor', () => {
     const other = new Error('network down');
     expect(writeErrorMessage(other, t)).toBe('network down');
     expect(writeErrorMessage('plain', t)).toBe('plain');
+    // A copy whose series would lose occurrences says what and how many, as
+    // the desktop does (decisions 243-253).
+    const loss = new Error(
+      "Calling the 'updateEventJson' function has failed\n→ Caused by: exceptions-would-be-lost: slot:2:0",
+    );
+    expect(writeErrorMessage(loss, t)).toBe(
+      'Diese Änderung schreibt Beginn und Ende der Serie neu. Exchange verwirft dabei 2 Vorkommen, ' +
+        'die einzeln geändert wurden: Sie nehmen wieder die Angaben der Serie an. Es wurde nichts geändert.',
+    );
   });
 });

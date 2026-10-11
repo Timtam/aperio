@@ -7,8 +7,10 @@
 // sends nothing and refuses with
 // `exceptions-would-be-lost: {rewrite}:{changed}:{deleted}`
 // (`cal_core::SeriesRewrite::detail`). Both editors ask with the sentence
-// built here and send the same save again with `accepts_exception_loss`; a
-// path that does not ask yet says the same sentence as a refusal.
+// built here, on the series' own save, and send that save again with
+// `accepts_exception_loss`; a path that does not ask — a drag, the carry, a
+// split's cut, where a yes would write the new series twice — says the same
+// sentence as a refusal.
 
 import type { SeriesRewrite } from './generated/SeriesRewrite';
 import { localDateKey } from './dateKey';

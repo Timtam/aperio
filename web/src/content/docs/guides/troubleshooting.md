@@ -211,7 +211,10 @@ once Aperio has refreshed the calendar.
 
 If you drag a series with the mouse or carry a change to copies in other
 calendars, Aperio does not ask yet in this version. There it says the same
-sentence and "Nothing was changed." Change the series in the editor then.
+sentence and "Nothing was changed." Change the series in the editor then. If
+you change or delete such a series from one of its appointments on, Aperio does
+not ask either, because the new series would be created twice: it says the
+sentence and changes nothing. Do that in Outlook then.
 
 If Aperio cannot read a series' current state from the server, it does not
 change it, because it would not know what would be lost. Aperio then says:

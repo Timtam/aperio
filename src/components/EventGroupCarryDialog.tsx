@@ -20,6 +20,7 @@ import {
   type CarryScope,
   type EventGroup,
   eventWriteErrorMessage,
+  deletionsNotRestoredSentence,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -207,6 +208,18 @@ export function EventGroupCarryDialog({
     const failed: CarryTarget[] = [];
     // Copies whose series may now show twice from the cut, said in words.
     const unsure: string[] = [];
+    // A copy whose series got deleted occurrences back that could not be
+    // deleted again (decision 253): saved, and said with this pass's doubts,
+    // by its calendar.
+    const noteBack = (saved: CalendarEvent, calendarId: string) => {
+      const sentence = deletionsNotRestoredSentence(
+        saved.deletions_not_restored,
+        saved.title,
+        i18n.language,
+        t,
+      );
+      if (sentence) unsure.push(`${calendarName(calendarId)}: ${sentence}`);
+    };
     // Copies somebody else organizes: among the ones that did not change, and
     // the report says why (77a).
     const lockedOut: CarryTarget[] = [];
@@ -364,7 +377,7 @@ export function EventGroupCarryDialog({
             // views and still ringing. It is rewritten in place instead — its
             // id, and everything kept under it, stay — and like a single it
             // leaves the group of heads for the new one.
-            await updateEvent(
+            const savedWhole = await updateEvent(
               {
                 ...row,
                 // What the copy repeats by from its cut on — its rule moved
@@ -382,6 +395,7 @@ export function EventGroupCarryDialog({
               },
               target.calendar_id,
             );
+            noteBack(savedWhole, target.calendar_id);
             await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
             );
@@ -489,7 +503,7 @@ export function EventGroupCarryDialog({
                   (await readSeriesRows(current, current.start, getSeriesRows)).rows,
                 )
               : null;
-          await updateEvent(
+          const savedSeries = await updateEvent(
             wholePlan?.kind === 'whole'
               ? {
                   ...next,
@@ -505,6 +519,7 @@ export function EventGroupCarryDialog({
               : next,
             target.calendar_id,
           );
+          noteBack(savedSeries, target.calendar_id);
         }
         done += 1;
       } catch (err) {

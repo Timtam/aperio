@@ -3518,6 +3518,128 @@ mod server_zone_tests {
         }
     }
 
+    /// The update told the attendees, and the series they were sent has the
+    /// deleted occurrence again: deleting it again cancels it for them too.
+    #[tokio::test]
+    async fn a_notified_move_cancels_the_deleted_occurrence_again() {
+        let stored = stored_with_occurrences(false, true);
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace("2026-11-02T09:00:00Z", "2026-11-02T11:00:00Z")
+            .replace("2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z");
+        let mut server = Server::new_async().await;
+        let (stored_answer, after_answer) = (stored.clone(), after.clone());
+        let requests = serve_routed(&mut server, move |body, was_updated| {
+            if body.contains("<m:UpdateItem") {
+                updated("CK2")
+            } else if body.contains("<m:DeleteItem") {
+                deleted_answer()
+            } else if let Some(index) = instance_index(body) {
+                occurrence(&format!("2026-11-{:02}T11:00:00Z", 2 + 7 * (index - 1)))
+            } else if was_updated {
+                after_answer.clone()
+            } else {
+                stored_answer.clone()
+            }
+        })
+        .await;
+        let adapter = EwsAdapter::new(server.url(), alice());
+        let edit = opened_and_edited(&stored, |e| {
+            e.start += chrono::Duration::hours(2);
+            e.end += chrono::Duration::hours(2);
+            e.attendees = vec!["bob@example.com".into()];
+            e.send_invitations = true;
+        });
+        let saved = adapter.update_event(edit).await.expect("update");
+        assert!(saved.deletions_not_restored.is_empty());
+        let requests = requests.lock().unwrap();
+        let delete = requests
+            .iter()
+            .find(|b| b.contains("<m:DeleteItem"))
+            .expect("the third deleted again");
+        assert!(
+            delete.contains(r#"SendMeetingCancellations="SendToAllAndSaveCopy""#),
+            "{delete}"
+        );
+    }
+
+    /// Decision 253 under a new pattern (round 6, P1): Mondays become Mondays
+    /// and Wednesdays, four times. A deleted Monday the new pattern still has
+    /// is deleted again at its own instant; one it no longer reaches — past the
+    /// new end — brought nothing back and is not named; and one whose place
+    /// cannot be read is named, as nothing proves it stayed away.
+    #[tokio::test]
+    async fn a_new_pattern_deletes_again_only_what_it_still_has() {
+        // After the update: Mondays and Wednesdays, four times from the 2nd —
+        // the 2nd, 4th, 9th and 11th.
+        let after = STORED_WEEKLY_W_EUROPE
+            .replace(
+                "<t:DaysOfWeek>Monday</t:DaysOfWeek>",
+                "<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>",
+            )
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        let starts = ["2026-11-02", "2026-11-04", "2026-11-09", "2026-11-11"];
+        // (deleted day, whether the probe of its index answers, expected
+        // re-deletes, expected named)
+        let cases: [(&str, bool, Vec<Option<u32>>, Vec<&str>); 3] = [
+            ("2026-11-09T09:00:00Z", true, vec![Some(3)], vec![]),
+            ("2026-11-16T09:00:00Z", true, vec![], vec![]),
+            (
+                "2026-11-09T09:00:00Z",
+                false,
+                vec![],
+                vec!["2026-11-09T09:00:00Z"],
+            ),
+        ];
+        for (gone, answers, deletes_expected, named) in cases {
+            let stored = stored_with_occurrences(false, true).replace(
+                "<t:Start>2026-11-16T09:00:00Z</t:Start>",
+                &format!("<t:Start>{gone}</t:Start>"),
+            );
+            let mut server = Server::new_async().await;
+            let (stored_answer, after_answer) = (stored.clone(), after.clone());
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    match starts.get(index as usize - 1) {
+                        // The probe of the 9th's place fails to read.
+                        Some(&"2026-11-09") if !answers => "not a SOAP answer".into(),
+                        Some(day) => occurrence(&format!("{day}T09:00:00Z")),
+                        // Past the end of the series.
+                        None => envelope(
+                            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange</m:ResponseCode>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+                        ),
+                    }
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4".into();
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            let named: Vec<DateTime<Utc>> = named.iter().map(|s| s.parse().unwrap()).collect();
+            assert_eq!(saved.deletions_not_restored, named, "{gone}, {answers}");
+            let requests = requests.lock().unwrap();
+            let deletes: Vec<Option<u32>> = requests
+                .iter()
+                .filter(|b| b.contains("<m:DeleteItem"))
+                .map(|b| instance_index(b))
+                .collect();
+            assert_eq!(deletes, deletes_expected, "{gone}, {answers}");
+        }
+    }
+
     /// Decision 248 through the adapter: a series whose copy cannot be read is
     /// not written blind — what it holds, and so what a rewrite drops, is
     /// unknown. Nothing is sent, and the refusal says so.

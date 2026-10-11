@@ -2317,6 +2317,9 @@ pub(crate) struct UpdatePlan {
     /// Where the series' deleted occurrences stand once the update has
     /// written it again, so they can be deleted again (decision 253).
     pub(crate) placement: Placement,
+    /// The first start the update writes, as it goes on the wire; `None`
+    /// where it writes no slot.
+    pub(crate) written_start: Option<DateTime<Utc>>,
 }
 
 /// Where a deleted occurrence of a series stands after an update that made
@@ -2339,8 +2342,9 @@ pub(crate) enum Placement {
 /// The pattern part of a built Exchange rule: everything before its range
 /// (`NumberedRecurrence`, `EndDateRecurrence`, `NoEndRecurrence`). How often
 /// and until when a series runs is its range, and changing that keeps its
-/// exceptions (the zone-first live test, M5; the 8a live test's cut); the
-/// pattern is the days and the interval it repeats on.
+/// changed and deleted occurrences (the zone-first live test, M5; round 8,
+/// U1-U3; the 8a live test's cut kept a deleted one); the pattern is the days
+/// and the interval it repeats on, and a new one drops them (round 6, P1, P2).
 fn pattern_of(rule_xml: &str) -> &str {
     [
         "<t:NumberedRecurrence",
@@ -2503,6 +2507,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // rule (M7, M8). The rule always: without it Exchange moves the range's
     // StartDate, read from the all-day day stored in UTC, a day later (M1, M2).
     let leaves_all_day = zone_written && before.is_some_and(|b| b.all_day) && !landed.all_day;
+    let mut written_start = None;
     if slot_changed || clock_moves {
         // A slot written only because the clock moves is the server's.
         let slot = landed;
@@ -2517,6 +2522,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
             (slot.start, slot.end)
         };
         push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
+        written_start = Some(wire_start);
         push_set_datetime(&mut set, "calendar:End", "End", wire_end);
         // Leaving all-day, the flag went ahead of the zone, once, as measured.
         if !leaves_all_day {
@@ -2596,10 +2602,10 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // survives. A zone change writes no rule while the rule's first day and
     // weekday stay the same on the new clock, and rewrites it where the switch
     // moves them; an all-day series given a time always rewrites it
-    // (`leaves_all_day`). A rule that only changes its COUNT keeps the
-    // series' exceptions (the zone-first live test, M5), and the UNTIL cut of
-    // a split kept a deleted occurrence (the 8a live test); other rewrites,
-    // and changed occurrences under a cut, are unmeasured. The slot never
+    // (`leaves_all_day`). A rule that only changes its range keeps the
+    // series' exceptions (the zone-first live test, M5; round 8, U1-U3; the 8a
+    // cut kept a deleted one), and a new pattern drops them (round 6, P1, P2):
+    // see the plan's `rewrite` below. The slot never
     // deletes a rule: an edit without one says nothing about the server's. A
     // missing copy's rule is unknown, not equal: a blind write writes the
     // edit's rule, or deletes the server's. And an edited rule that no longer
@@ -2683,7 +2689,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // What the update writes again that makes Exchange drop the series'
     // changed and deleted occurrences: its start and end (L3a, M3, M6), only
     // its zone's clock (245), or its pattern under the same slot (round 6, P1,
-    // P2). Its range alone keeps them (M5, the 8a cut). Only a series the
+    // P2). Its range alone keeps them (M5; round 8, U1-U3). Only a series the
     // server holds, written as a series again, and never an exception.
     let server_rule = before.and_then(|b| b.recurrence.as_ref());
     let stays_a_series =
@@ -2739,7 +2745,12 @@ pub(crate) fn plan_update_in<D: TimeZone>(
                     }
                     cal_core::SeriesShift::Refused { .. } => false,
                 };
-            if shifted {
+            // The restore finds them by the wall clock the first occurrence
+            // moved on, so both clocks have to say it; where one cannot, they
+            // cannot be placed and the question counts them.
+            let walls_known = wall_time(server.start, old_clock).is_some()
+                && wall_time(landed.start, rule_clock).is_some();
+            if shifted && walls_known {
                 Placement::Shifted
             } else {
                 Placement::Unknown
@@ -2753,6 +2764,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         del,
         rewrite,
         placement,
+        written_start,
     })
 }
 
@@ -10487,7 +10499,7 @@ mod tests {
     /// the slot and keep every occurrence's place; a day move that keeps the
     /// old weekday cannot be placed. The days or the interval alone rewrite
     /// the pattern, and a deleted occurrence stays at its instant (round 6,
-    /// P1, P2). How often or until when (M5, the 8a cut), the title, a rule
+    /// P1, P2). How often or until when (M5; round 8, U1-U3), the title, a rule
     /// removed, an exception and a single made a series rewrite nothing.
     #[test]
     fn each_save_says_what_it_rewrites_and_where_deleted_ones_stand() {
@@ -10603,6 +10615,17 @@ mod tests {
         single.recurrence = None;
         let plan = planned(&before, &single, &w_europe_zones(), EventIdKind::Single);
         assert_eq!(plan.rewrite, None);
+
+        // A stored zone Aperio cannot read gives no wall clock to find a
+        // deleted occurrence by: it cannot be placed, so the question counts
+        // it rather than the restore missing it.
+        let plan = planned(
+            &moved,
+            &before,
+            &StoredZones::default(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!((plan.rewrite, plan.placement), (Some(Slot), Placement::Unknown));
     }
 
     /// The zone picker on a stored series keeps the instant (DESIGN, "Die Zone

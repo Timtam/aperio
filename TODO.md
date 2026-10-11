@@ -3030,8 +3030,9 @@ Siehe DESIGN §4.2.
   Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
   Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
   neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
-  Anzahl allein nicht (M4, M5): Ein Zonenwechsel, der sie nur deshalb
-  schreibt, wird abgelehnt (245). Ganztägig bekommt Uhrzeit: Beginn und Ende
+  Anzahl allein nicht (M4, M5): Vor einem Zonenwechsel, der sie nur
+  deshalb schreibt, fragt Aperio (245, seit 247 eine Frage). Ganztägig bekommt
+  Uhrzeit: Beginn und Ende
   vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
   Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
   (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
@@ -3043,8 +3044,8 @@ Siehe DESIGN §4.2.
   geänderten oder gelöschten Vorkommen neu, fragt der Editor vorher, auf dem
   Desktop und auf dem Handy, mit der Zahl vom Server; gelöschte löscht
   Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag. Eine
-  Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test mit
-  Aperios eigener Anfrage vor dem Zusammenführen.
+  Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test Runde 7
+  mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
   🚩 **Warnen und fragen, PR B** (250, 251): Ziehen fragt in einem eigenen
   Bestätigen-Dialog; Übertragen an Kopien fragt einmal nach der Schleife und
   schickt nur die betroffenen noch einmal. Bis dahin sagen beide den Satz.

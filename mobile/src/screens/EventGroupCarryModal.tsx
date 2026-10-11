@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { writeErrorMessage,
+  deletionsNotRestoredSentence,
+} from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -192,6 +194,18 @@ export default function EventGroupCarryModal({
     const failed: CarryTarget[] = [];
     // Copies whose series may now show twice from the cut, said in words.
     const unsure: string[] = [];
+    // A copy whose series got deleted occurrences back that could not be
+    // deleted again (decision 253): saved, and said with this pass's doubts,
+    // by its calendar.
+    const noteBack = (saved: CalendarEvent, calendarId: string) => {
+      const sentence = deletionsNotRestoredSentence(
+        saved.deletions_not_restored,
+        saved.title,
+        i18n.language,
+        t,
+      );
+      if (sentence) unsure.push(`${calendarName(calendarId)}: ${sentence}`);
+    };
     // The last failure said on screen, which the outcome line reads too.
     let lastError = '';
     // The rows created so far, to be joined into a group of their own — the
@@ -333,7 +347,7 @@ export default function EventGroupCarryModal({
             // views and still ringing. It is rewritten in place instead — its
             // id, and everything kept under it, stay — and like a single it
             // leaves the group of heads for the new one. Mirrors the desktop.
-            await updateEvent(
+            const savedWhole = await updateEvent(
               {
                 ...row,
                 // What the copy repeats by from its cut on — its rule moved
@@ -351,6 +365,7 @@ export default function EventGroupCarryModal({
               },
               target.calendar_id,
             );
+            noteBack(savedWhole, target.calendar_id);
             await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
             );
@@ -458,7 +473,7 @@ export default function EventGroupCarryModal({
                   (await readSeriesRows(current, current.start, getSeriesRows)).rows,
                 )
               : null;
-          await updateEvent(
+          const savedSeries = await updateEvent(
             wholePlan?.kind === 'whole'
               ? {
                   ...next,
@@ -474,6 +489,7 @@ export default function EventGroupCarryModal({
               : next,
             target.calendar_id,
           );
+          noteBack(savedSeries, target.calendar_id);
         }
         done += 1;
       } catch (err) {

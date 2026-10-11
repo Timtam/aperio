@@ -1120,6 +1120,10 @@ export default function EventEditorModal({
     const recurrenceToSend = editedRecurrence(recurrence, original?.recurrence, allDay);
     setError(null);
     setSaving(true);
+    // Only the series' own write asks (decisions 246, 247): a split's cut
+    // refused the same way shows the sentence, because saying yes there would
+    // write the new series a second time. Mirrors the desktop.
+    let lossAskable = false;
     try {
       // 77a: a locked invitation writes its own reminders and nothing else.
       // The row goes back as the provider has it, so no form value — and no
@@ -1611,10 +1615,12 @@ export default function EventEditorModal({
         };
         // The consent the question gave (decisions 243-253) rides this one
         // write and nothing else; what comes back never carries it.
+        lossAskable = true;
         const updated = await updateEvent(
           acceptsLossRef.current ? { ...sent, accepts_exception_loss: true } : sent,
           original.calendar_id,
         );
+        lossAskable = false;
         await savePrivate(updated);
         // External calendar: a capable provider now stores the colour natively
         // (clear any stale override so the native value wins); a non-capable one
@@ -1710,7 +1716,7 @@ export default function EventEditorModal({
       // A save that would drop occurrences of the series asks first
       // (decisions 243-253); nothing was sent.
       const loss = exceptionsLossOf(err);
-      if (loss != null && !acceptsLossRef.current && shown.current) {
+      if (loss != null && lossAskable && !acceptsLossRef.current && shown.current) {
         const question = exceptionsLossQuestion(loss, trimmedTitle, t);
         showEventScopeDialog({
           title: question.title,

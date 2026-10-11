@@ -1248,6 +1248,10 @@ export function EventDialog({
       );
 
       setSubmitting(true);
+      // Only the series' own write asks (decisions 246, 247): a split's cut or
+      // the copies' writes refused the same way show the sentence, because
+      // saying yes there would write the new series a second time.
+      let lossAskable = false;
       try {
         // The reminders list to send to the server. When
         // `keepRemindersAsDefault` is still true, the editor was never
@@ -1908,10 +1912,12 @@ export function EventDialog({
           // The consent the question gave (decisions 243-253) rides this one
           // write and nothing else: `updated` goes on to the carry offer, and
           // what comes back never carries it.
+          lossAskable = true;
           const saved = await apiUpdateEvent(
             acceptsLossRef.current ? { ...updated, accepts_exception_loss: true } : updated,
             event.calendar_id,
           );
+          lossAskable = false;
           // A calendar-picker move is rerouted as create-on-target +
           // delete-from-source, so the appointment comes back with the id and
           // calendar it has NOW. The private row and the colour are keyed by
@@ -2015,7 +2021,7 @@ export function EventDialog({
         // A save that would drop occurrences of the series asks first
         // (decisions 243-253), in a dialog over the form; nothing was sent.
         const loss = exceptionsLossOf(err);
-        if (loss && !acceptsLossRef.current && shownRef.current) {
+        if (loss && lossAskable && !acceptsLossRef.current && shownRef.current) {
           setLossAsk(loss);
           return;
         }
