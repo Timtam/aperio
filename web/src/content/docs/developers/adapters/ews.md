@@ -210,7 +210,8 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   deleted occurrence stands afterwards (`Placement`): moved as the first
   occurrence moved, so it keeps its place in the pattern, which is how
   Exchange numbers occurrences (a move, a zone switch, a rule shifted with its
-  start by `cal_core::shift_series`; R1-R3); at its own instant under a new
+  start by `cal_core::shift_series`, with or without a week start that changes
+  no day, as the editor leaves it out; R1-R3); at its own instant under a new
   pattern; or nowhere it can tell, where the pattern and the slot change
   together, where `cal_core::shift_series` would not shift the rule, or where
   a clock it needs cannot be read. The write path counts from the copy just
@@ -238,12 +239,13 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   Dragging a series and the carry dialogs do not ask yet: they say the
   refusal's sentence. Paris for a Berlin series counts as another clock
   (another Windows id). No editor picks a series' zone yet, so today the zone
-  question meets only a rule change — the repeat edited, or a series changed
-  or deleted from one of its occurrences on, which cuts the old rule — where
-  Aperio itself would write another zone: a series whose stored end zone is
-  not its start zone, or a copy whose zone is stale. A copy that differs from
-  the server's only in its exceptions changes no rule: an update never writes
-  them, so it opens neither the zone nor the slot.
+  rewrite meets only a rule change where Aperio itself would write another
+  zone — the repeat edited, which asks, or the old rule cut when a series is
+  changed or deleted from a later occurrence on, which is refused with the
+  sentence —: a series whose stored end zone is not its start zone, or a copy
+  whose zone is stale. A copy that differs from the server's only in its
+  exceptions changes no rule: an update never writes them, so it opens neither
+  the zone nor the slot.
 - **A series is never written blind** (decision 248). Without its copy, what
   a series holds, and so what a rewrite would drop, is unknown: an update of
   a series head whose copy cannot be read sends nothing and is refused as

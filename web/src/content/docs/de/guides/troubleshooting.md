@@ -226,12 +226,12 @@ es dann einzeln.
 Die Zeitzone einer Serie kannst du in dieser Version nicht selbst wählen. Nach
 einer anderen Zeitzone fragt Aperio deshalb nur bei einer Serie aus einem
 anderen Programm, deren Ende in einer anderen Zeitzone steht als ihr Beginn,
-oder wenn die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie zuletzt
-gelesen hat; im zweiten Fall öffne die Serie neu, sobald Aperio den Kalender
-aktualisiert hat. Bei einer solchen Serie kommt die Frage, sobald Aperio ihre
-Wiederholung neu schreibt: wenn du die Wiederholung änderst, auch nur die Anzahl
-der Termine oder ihr Ende, und wenn du die Serie ab einem ihrer Termine änderst
-oder löschst.
+oder wenn die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie
+zuletzt gelesen hat; im zweiten Fall öffne die Serie neu, sobald Aperio den
+Kalender aktualisiert hat. Bei einer solchen Serie kommt die Frage, sobald du
+ihre Wiederholung änderst, auch nur die Anzahl der Termine oder ihr Ende. Sie ab
+einem späteren Termin zu ändern oder zu löschen lehnt Aperio stattdessen mit dem
+Satz ab (unten).
 
 Ziehst du eine Serie mit der Maus oder überträgst du eine Änderung an Kopien in
 anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es

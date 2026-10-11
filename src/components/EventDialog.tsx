@@ -657,11 +657,9 @@ export function EventDialog({
    * A save of a series that would make the provider drop occurrences the user
    * changed or deleted on their own (decisions 243-253): the adapter sent
    * nothing and said what would be lost, and this asks. Yes submits the same
-   * form again with the consent, on that one write only.
+   * form again with the consent, handed to that one submit only.
    */
   const [lossAsk, setLossAsk] = useState<ExceptionsLoss | null>(null);
-  const acceptsLossRef = useRef(false);
-  const formElementRef = useRef<HTMLFormElement>(null);
   const lossQuestion = lossAsk && exceptionsLossQuestion(lossAsk, form.title.trim(), t);
   // Closing the notice goes on — once. It stays until the dialog closes or the
   // carry replaces it, so the form never comes back in between with a live
@@ -1204,13 +1202,12 @@ export function EventDialog({
     t,
   ]);
 
+  // `acceptsLoss` is the loss question's yes, handed to the one submit it
+  // starts (decisions 243-253); the form's own submit never carries it, so no
+  // later save can.
   const onSubmit = useCallback(
-    async (e: FormEvent) => {
-      e.preventDefault();
-      // The consent the loss question gave is for the one submit it starts:
-      // read here, at once, because the question withdraws it as soon as that
-      // submit has begun (see its `onConfirm`).
-      const acceptsLoss = acceptsLossRef.current;
+    async (e: FormEvent | null, acceptsLoss = false) => {
+      e?.preventDefault();
       if (submitting) return; // re-entry guard while a slow PUT is in flight
       setError(null);
 
@@ -2064,6 +2061,9 @@ export function EventDialog({
       i18n.language,
     ],
   );
+  // The loss question's yes submits again through the latest render's submit.
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
 
   // A meeting you organize (with attendees) offers "cancel + notify" vs
   // "remove silently"; everything else is a plain delete. The same choice is
@@ -2369,7 +2369,7 @@ export function EventDialog({
       className="modal--form"
       dismissOnBackdrop={false}
     >
-      <form ref={formElementRef} onSubmit={onSubmit} className="form">
+      <form onSubmit={onSubmit} className="form">
         {/* Why the fields below cannot be changed, before the first of them,
             and the first stop in the dialog. */}
         {locked && (
@@ -2956,13 +2956,10 @@ export function EventDialog({
         confirmLabel={lossQuestion.confirm}
         onConfirm={() => {
           // The same save again, now with the consent; the form is what it
-          // was when the question came. The submit reads the consent before
-          // its first await, and one the form's own validation stops never
-          // starts, so it is withdrawn right after either way: no later save
-          // can carry it.
-          acceptsLossRef.current = true;
-          formElementRef.current?.requestSubmit();
-          acceptsLossRef.current = false;
+          // was when the question came. Called directly, not through the
+          // form's submit: the consent goes to this one submit and nowhere
+          // else, and no web view API it may lack stands in between.
+          void submitRef.current(null, true);
         }}
       />
     )}

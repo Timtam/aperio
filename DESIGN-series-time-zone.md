@@ -271,30 +271,31 @@ keinen, dort ist die Wahl Tonis Sache.
   löscht Aperio jedes gelöschte Vorkommen wieder, wo es jetzt steht:
   verschoben wie das erste Vorkommen, also an seinem Platz im Muster, nach dem
   Exchange zählt (eine Verschiebung, ein Zonenwechsel, eine mit dem Beginn
-  verschobene Regel, `cal_core::shift_series`; Runde 6, R1 bis R3); unter
-  einem neuen Muster an seinem eigenen Zeitpunkt, wenn das Muster ihn noch
-  hat. Ändern sich Muster und Beginn zugleich, verschöbe `shift_series` die
-  Regel nicht, oder ist eine der beiden Uhren nicht lesbar, lässt es sich
-  nicht zuordnen: Es zählt in der Frage als verloren. Gelöscht wird nur das
-  Vorkommen, dessen Beginn genau stimmt; hat das Speichern die Teilnehmer
-  benachrichtigt, bekommen sie die Absage, denn ihre Serie hat es wieder,
-  sonst geht es ohne Absage. Nichts kam zurück, wo die Serie, Index für Index
-  gelesen, über den Platz springt: von einem Vorkommen davor, oder ihrem
-  Beginn, zu einem danach, oder ihrem Ende — sie beginnt oder endet jetzt
-  jenseits davon, oder ein neues Muster hat ihn nicht mehr —, und wo der
-  Index, den die Regel gibt, eine Löschung ist, die Exchange behielt. Ein
-  Index, den Aperio eben wieder gelöscht hat, steht für sein Vorkommen, nicht
-  für den Platz. Ein Vorkommen keinen halben Tag vom Platz, das nicht das
-  erwartete ist, kam unbestätigt zurück. Eines, das sich nicht bestätigen oder
-  löschen lässt, nennen beide Editoren, das Ziehen und das Übertragen nach dem
-  Speichern mit seinem Tag (`deletions_not_restored`); lässt sich die Serie
-  danach nicht lesen, dort, wohin das Speichern sie verschob, als Tag, wenn es
-  sie ganztägig ließ. Verschoben verspricht Aperio nur, wo es beide Uhren
-  lesen kann; sonst zählt die Frage die gelöschten mit. Die Frage nennt
-  deshalb nur, was wirklich verloren geht. Mit Aperios eigener Anfrage
-  gemessen (Runde 7): Verschieben und neues Muster fragen und schicken nichts
-  (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und das
-  gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
+  verschobene Regel, `cal_core::shift_series`, ob mit oder ohne einen
+  Wochenbeginn, der keinen Tag ändert — der Editor lässt ihn weg, das Ziehen
+  nimmt ihn mit; Runde 6, R1 bis R3); unter einem neuen Muster an seinem
+  eigenen Zeitpunkt, wenn das Muster ihn noch hat. Ändern sich Muster und
+  Beginn zugleich, verschöbe `shift_series` die Regel nicht, oder ist eine der
+  beiden Uhren nicht lesbar, lässt es sich nicht zuordnen: Es zählt in der
+  Frage als verloren. Gelöscht wird nur das Vorkommen, dessen Beginn genau
+  stimmt; hat das Speichern die Teilnehmer benachrichtigt, bekommen sie die
+  Absage, denn ihre Serie hat es wieder, sonst geht es ohne Absage. Nichts kam
+  zurück, wo die Serie, Index für Index gelesen, über den Platz springt: von
+  einem Vorkommen davor, oder ihrem Beginn, zu einem danach, oder ihrem Ende —
+  sie beginnt oder endet jetzt jenseits davon, oder ein neues Muster hat ihn
+  nicht mehr —, und wo der Index, den die Regel gibt, eine Löschung ist, die
+  Exchange behielt. Ein Index, den Aperio eben wieder gelöscht hat, steht für
+  sein Vorkommen, nicht für den Platz. Ein Vorkommen keinen halben Tag vom
+  Platz, das nicht das erwartete ist, kam unbestätigt zurück. Eines, das sich
+  nicht bestätigen oder löschen lässt, nennen beide Editoren, das Ziehen und
+  das Übertragen nach dem Speichern mit seinem Tag (`deletions_not_restored`);
+  lässt sich die Serie danach nicht lesen, dort, wohin das Speichern sie
+  verschob, als Tag, wenn es sie ganztägig ließ. Verschoben verspricht Aperio
+  nur, wo es beide Uhren lesen kann; sonst zählt die Frage die gelöschten mit.
+  Die Frage nennt deshalb nur, was wirklich verloren geht. Mit Aperios eigener
+  Anfrage gemessen (Runde 7): Verschieben und neues Muster fragen und schicken
+  nichts (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und
+  das gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
   fragen nicht und bleiben gelöscht, einen Tag später wie unter einem neuen
   Muster (Q3, Q4); der Titel allein schreibt nur den Titel (Q6).
 

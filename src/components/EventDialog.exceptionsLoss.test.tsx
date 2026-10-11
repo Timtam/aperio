@@ -196,6 +196,24 @@ describe('EventDialog → a save that would drop occurrences of the series', () 
     await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
   });
 
+  it('saves anyway where the web view has no requestSubmit', async () => {
+    // WebKit before Safari 16 (macOS Catalina's web view) has none.
+    const requestSubmit = HTMLFormElement.prototype.requestSubmit;
+    HTMLFormElement.prototype.requestSubmit = () => {
+      throw new TypeError('requestSubmit is not a function');
+    };
+    try {
+      answers.push(refusal('slot:1:0'));
+      await openAndSave();
+      const dialog = await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+      fireEvent.click(within(dialog).getByRole('button', { name: /trotzdem speichern/i }));
+      await waitFor(() => expect(updatesSent().length).toBe(2));
+      expect(updatesSent()[1].accepts_exception_loss).toBe(true);
+    } finally {
+      HTMLFormElement.prototype.requestSubmit = requestSubmit;
+    }
+  });
+
   it('names the days of deleted occurrences that came back, and the save stands', async () => {
     answers.push((event) =>
       Promise.resolve({

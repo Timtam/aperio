@@ -212,9 +212,9 @@ about another time zone only for a series from another program whose end is in
 another time zone than its start, or when the series' time zone was changed
 elsewhere since Aperio last read it; in the second case, open the series again
 once Aperio has refreshed the calendar. On such a series the question comes
-whenever Aperio writes its repeat again: when you change the repeat, even only
-the number of appointments or the end, and when you change or delete the series
-from one of its appointments on.
+whenever you change its repeat, even only the number of appointments or the end.
+Changing or deleting it from a later appointment on is refused with the sentence
+instead (below).
 
 If you drag a series with the mouse or carry a change to copies in other
 calendars, Aperio does not ask yet in this version. There it says the same

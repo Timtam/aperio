@@ -2333,8 +2333,9 @@ pub(crate) struct UpdatePlan {
 pub(crate) enum Placement {
     /// Every occurrence moved as the first one did, the same distance on the
     /// series' clock: a move, a zone switch, a rule shifted with its start
-    /// (`cal_core::shift_series`). An occurrence keeps its place in the
-    /// pattern, which is how Exchange numbers them (round 6, R1-R3).
+    /// (`cal_core::shift_series`), with or without a week start that changes
+    /// no day. An occurrence keeps its place in the pattern, which is how
+    /// Exchange numbers them (round 6, R1-R3).
     Shifted,
     /// The pattern changed under the same slot: a deleted occurrence stands
     /// where it stood, if the new pattern has it at all.
@@ -2362,6 +2363,25 @@ fn pattern_of(rule_xml: &str) -> &str {
     .filter_map(|range| rule_xml.find(range))
     .min()
     .map_or(rule_xml, |at| &rule_xml[..at])
+}
+
+/// [`pattern_of`] without its `FirstDayOfWeek` where `rrule`'s week start
+/// changes no day it repeats on from `day`
+/// (`cal_core::series_shift::week_start_matters`): every other Tuesday from a
+/// Tuesday, or weekly with weeks from Sunday, is the same series whichever
+/// day its weeks begin on.
+fn pattern_on_its_days(rule_xml: &str, rrule: &str, day: chrono::NaiveDate) -> String {
+    let pattern = pattern_of(rule_xml);
+    if cal_core::series_shift::week_start_matters(rrule, day) {
+        return pattern.to_string();
+    }
+    const CLOSE: &str = "</t:FirstDayOfWeek>";
+    match (pattern.find("<t:FirstDayOfWeek>"), pattern.find(CLOSE)) {
+        (Some(open), Some(close)) if open < close => {
+            format!("{}{}", &pattern[..open], &pattern[close + CLOSE.len()..])
+        }
+        _ => pattern.to_string(),
+    }
 }
 
 /// [`event_to_update_field_xml_in`], with what the update rewrites.
@@ -2723,8 +2743,9 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     };
     // Where the deleted ones stand again (decision 253). A move keeps every
     // occurrence's place in the pattern where the written rule is the
-    // server's, shifted with its first day as a drag shifts it; a new pattern
-    // under the same slot keeps every instant; anything else cannot be told.
+    // server's, shifted with its first day as a drag shifts it, or as the
+    // editor writes it without a needless week start; a new pattern under the
+    // same slot keeps every instant; anything else cannot be told.
     let placement = match (rewrite, before, server_rule) {
         (Some(cal_core::SeriesRewrite::Pattern), _, _) => Placement::Same,
         (Some(_), Some(server), Some(server_rule)) => {
@@ -2739,6 +2760,17 @@ pub(crate) fn plan_update_in<D: TimeZone>(
                 || (!landed.all_day
                     && wall_time(server.start, old_clock) != wall_time(landed.start, rule_clock));
             let days = i32::try_from((new_day - old_day).num_days()).unwrap_or(i32::MAX);
+            // The rule as it stays on the server, on the days it repeats on:
+            // the editor leaves out a week start that changes no day, where a
+            // drag moves it along (`cal_core::begin_series_anew`), and either
+            // way every occurrence keeps its place.
+            let staying = match (written_rule.as_ref(), rule_of.recurrence.as_ref()) {
+                (Some(Some(xml)), Some(rec)) => Some(pattern_on_its_days(xml, &rec.rrule, new_day)),
+                _ => before
+                    .and_then(built_rule)
+                    .flatten()
+                    .map(|xml| pattern_on_its_days(&xml, &server_rule.rrule, old_day)),
+            };
             let shifted =
                 match cal_core::shift_series(&server_rule.rrule, old_day, days, time_changes, None)
                 {
@@ -2746,8 +2778,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
                         rrule_to_ews_recurrence(&rrule, new_day)
                             .ok()
                             .is_some_and(|xml| {
-                                Some(pattern_of(&xml))
-                                    == written_pattern.or(server_pattern.as_deref())
+                                Some(pattern_on_its_days(&xml, &rrule, new_day)) == staying
                             })
                     }
                     cal_core::SeriesShift::Refused { .. } => false,
@@ -10610,6 +10641,51 @@ mod tests {
                 (plan.rewrite, plan.placement),
                 (rewrite, placement),
                 "{name}"
+            );
+        }
+
+        // A day move of a series whose week start the editor leaves out where
+        // it changes no day (`begin_series_anew`), and a drag moves along:
+        // the same occurrences on the same places either way. Where the week
+        // start does change a day, the rule without it is another series.
+        let week_starts = [
+            (
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=4",
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;COUNT=4",
+                Placement::Shifted,
+            ),
+            (
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=4",
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;COUNT=4;WKST=TU",
+                Placement::Shifted,
+            ),
+            (
+                "FREQ=WEEKLY;BYDAY=MO;COUNT=4;WKST=SU",
+                "FREQ=WEEKLY;BYDAY=TU;COUNT=4",
+                Placement::Shifted,
+            ),
+            (
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,SU;COUNT=4",
+                "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,MO;COUNT=4",
+                Placement::Unknown,
+            ),
+        ];
+        for (from, to, placement) in week_starts {
+            let before = timed_series("2026-11-02T09:00:00Z", from, "Europe/Berlin");
+            let mut edit = before.clone();
+            edit.start += chrono::Duration::days(1);
+            edit.end += chrono::Duration::days(1);
+            edit.recurrence.as_mut().unwrap().rrule = to.into();
+            let plan = planned(
+                &edit,
+                &before,
+                &w_europe_zones(),
+                EventIdKind::RecurringMaster,
+            );
+            assert_eq!(
+                (plan.rewrite, plan.placement),
+                (Some(Slot), placement),
+                "{from} -> {to}"
             );
         }
 
