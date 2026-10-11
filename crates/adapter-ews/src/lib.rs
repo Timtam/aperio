@@ -3411,7 +3411,7 @@ mod server_zone_tests {
         };
         assert_eq!(
             cal_core::WriteRefusal::parse(&message),
-            Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone:1"))
+            Some((cal_core::WriteRefusal::ExceptionsWouldBeLost, "zone:1:0"))
         );
         assert!(
             !requests

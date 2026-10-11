@@ -102,6 +102,7 @@ import {
   type PositionedSpan,
   type PriorityScale,
   type TimedSpan,
+  eventWriteErrorMessage,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -983,11 +984,9 @@ export function WeekView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        // In words, a provider's refusal included (decisions 243-253: a move
+        // that would drop occurrences of the series says what and how many).
+        announce(eventWriteErrorMessage(err, t));
       }
     },
     [announce, t, fmt, invalidateData, clockAt, calendarById],

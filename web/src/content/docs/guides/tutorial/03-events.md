@@ -219,12 +219,16 @@ the editor opens. On the desktop the form repeats it as the read-only field
 > **Single changed or deleted occurrences:** When a whole series moves to
 > another day or time, by dragging it or in the dialog, some single occurrences
 > stay tied to their old date: occurrences changed on their own in an external
-> calendar (iCloud, Google, Exchange), and occurrences deleted in a Google
-> calendar, also when you deleted them in Aperio (possibly in Exchange too).
-> After the move a deleted occurrence can come back, a changed one can show up
-> twice, and another occurrence can be missing where the old one was. Aperio
-> cannot repair this. Check the series afterwards in the calendar's own app,
-> where such single changes can be undone.
+> calendar (iCloud, Google), and occurrences deleted in a Google calendar, also
+> when you deleted them in Aperio. After the move a deleted occurrence can come
+> back, a changed one can show up twice, and another occurrence can be missing
+> where the old one was. Aperio cannot repair this. Check the series afterwards
+> in the calendar's own app, where such single changes can be undone. On
+> Exchange, Aperio asks first in the editor: Exchange drops every occurrence
+> changed on its own when the series moves, so it takes the series' details
+> again, and deleted occurrences Aperio deletes again itself afterwards. When
+> you drag such a series with changed occurrences, Aperio does not ask there
+> yet; it changes nothing and says why.
 
 > **Changing an occurrence that was already changed:** An occurrence changed
 > on its own in the calendar's own app (iCloud, Google, Exchange) stays part of

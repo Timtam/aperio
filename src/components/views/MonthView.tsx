@@ -27,6 +27,7 @@ import {
   groupBadge,
   eventInstanceKey,
   type CollapsedRow,
+  eventWriteErrorMessage,
 } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -535,9 +536,9 @@ export function MonthView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
+        // In words, a provider's refusal included (decisions 243-253: a move
+        // that would drop occurrences of the series says what and how many).
+        announce(eventWriteErrorMessage(err, t));
       }
     },
     [announce, t, fmt, invalidateData, calendarById],

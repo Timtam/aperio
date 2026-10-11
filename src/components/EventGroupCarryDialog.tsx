@@ -19,6 +19,7 @@ import {
   type CarryableFields,
   type CarryScope,
   type EventGroup,
+  eventWriteErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -31,7 +32,6 @@ import {
   getEventById,
   getSeriesRows,
   groupEvents,
-  isCommandError,
   ungroupEvent,
   updateEvent,
   type NewGroupMember,
@@ -531,8 +531,10 @@ export function EventGroupCarryDialog({
               reason: t(`dialogs.moveScope.refusal.${err.reason}`),
             }),
           );
-        } else if (isCommandError(err)) {
-          setError(err.message);
+        } else {
+          // In words, a provider's refusal included: a copy whose series would
+          // lose occurrences says what and how many (decisions 243-253).
+          setError(eventWriteErrorMessage(err, t));
         }
       }
     }

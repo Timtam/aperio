@@ -1688,6 +1688,31 @@
         "allDayValue": "{{date}}, all day",
         "moveRefused": "\"{{title}}\" is organized by someone else, so only the organizer can move it to another day or time. Nothing was moved."
       },
+      "exceptionsLoss": {
+        "title": "Occurrences will be lost",
+        "message": "\"{{title}}\": {{what}} {{lost}} Save anyway?",
+        "confirm": "Save anyway",
+        "rewrite": {
+          "slot": "This change writes the series' start and end again.",
+          "zone": "This change gives the series another time zone and writes its start and end again for it.",
+          "pattern": "This change writes the series' repeat pattern again."
+        },
+        "lost": {
+          "changed_one": "Exchange then drops one occurrence that was changed on its own: it takes the series' details again.",
+          "changed_other": "Exchange then drops {{count}} occurrences that were changed on their own: they take the series' details again.",
+          "deleted_one": "Exchange then drops one deleted occurrence: it comes back.",
+          "deleted_other": "Exchange then drops {{count}} deleted occurrences: they come back.",
+          "both": "Exchange then drops {{changed}} and {{deleted}}: changed ones take the series' details again, deleted ones come back."
+        },
+        "count": {
+          "changed_one": "one occurrence changed on its own",
+          "changed_other": "{{count}} occurrences changed on their own",
+          "deleted_one": "one deleted occurrence",
+          "deleted_other": "{{count}} deleted occurrences"
+        }
+      },
+      "deletionsNotRestored_one": "\"{{title}}\" is saved. Exchange brought back one deleted occurrence, and Aperio could not delete it again: {{days}}. Please delete it on its own.",
+      "deletionsNotRestored_other": "\"{{title}}\" is saved. Exchange brought back {{count}} deleted occurrences, and Aperio could not delete them again: {{days}}. Please delete them one by one.",
       "writeError": {
         "replyOnly": "Only the organizer can change this meeting. Nothing was changed.",
         "serverRefused": "The calendar server refused this change ({{detail}}). Nothing was changed.",
@@ -1697,7 +1722,8 @@
         "accessNotGranted": "Aperio has no access to this device's calendars and reminders. Allow it for Aperio in the Settings app. Nothing was changed.",
         "dayZoneUnreadable": "Exchange stores this appointment in a time zone Aperio cannot read, so its day cannot be changed here; its title and the rest can. Nothing was changed.",
         "copyUnreadable": "Aperio could not read this appointment's current state from the server, so it did not change it. Try again in a moment.",
-        "exceptionsWouldBeLost": "This change would switch the series' time zone, and Exchange then drops its changed and deleted occurrences. Nothing was changed.",
+        "exceptionsWouldBeLost": "This change would write the series again, and Exchange then drops its occurrences that were changed or deleted on their own. Nothing was changed.",
+        "exceptionsWouldBeLostDetail": "{{what}} {{lost}} Nothing was changed.",
         "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
         "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
         "reason": {

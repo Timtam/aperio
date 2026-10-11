@@ -903,21 +903,24 @@ pub async fn update_event(
     // it can tell where they stand (253); the changed ones, and deleted ones it
     // cannot place, are lost, and that is asked first: without the user's
     // consent nothing is sent, and the refusal says what would be rewritten
-    // and how many would be lost, counted from the copy just read (252).
+    // and how many changed and deleted ones would be lost, counted from the
+    // copy just read (252).
     let restore = match (plan.rewrite, series.as_ref()) {
         (Some(rewrite), Some(shape)) if shape.changed > 0 || !shape.deleted.is_empty() => {
             let placeable = plan.placement != crate::mapping::Placement::Unknown;
-            let lost = shape.changed + if placeable { 0 } else { shape.deleted.len() };
-            if lost > 0 && !event.accepts_exception_loss {
+            let deleted_lost = if placeable { 0 } else { shape.deleted.len() };
+            if shape.changed + deleted_lost > 0 && !event.accepts_exception_loss {
                 tracing::info!(
                     target: "adapter_ews::write",
                     event_id = %event.id,
                     rewrite = rewrite.token(),
-                    lost,
+                    changed = shape.changed,
+                    deleted = deleted_lost,
                     "the update would drop occurrences of the series; asking first",
                 );
                 return Err(EwsError::Protocol(
-                    cal_core::WriteRefusal::ExceptionsWouldBeLost.message(&rewrite.detail(lost)),
+                    cal_core::WriteRefusal::ExceptionsWouldBeLost
+                        .message(&rewrite.detail(shape.changed, deleted_lost)),
                 ));
             }
             if placeable {

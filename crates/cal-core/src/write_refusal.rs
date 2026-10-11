@@ -68,9 +68,9 @@ pub enum WriteRefusal {
     /// `accepts_exception_loss`), so nothing was sent (decisions 245-253).
     /// Exchange drops them whenever a series' start and end, the clock of its
     /// zone or its pattern are written again. The detail is
-    /// [`SeriesRewrite::detail`]: what the update rewrites and how many
-    /// occurrences would be lost, `slot:3`; the surfaces ask with it and send
-    /// the write again with the consent.
+    /// [`SeriesRewrite::detail`]: what the update rewrites, and how many
+    /// changed and how many deleted occurrences would be lost, `slot:2:1`;
+    /// the surfaces ask with it and send the write again with the consent.
     ExceptionsWouldBeLost,
 }
 
@@ -101,20 +101,28 @@ impl SeriesRewrite {
         }
     }
 
-    /// The detail of [`WriteRefusal::ExceptionsWouldBeLost`]: this rewrite and
-    /// how many occurrences it would lose, `slot:3`.
-    pub fn detail(self, lost: usize) -> String {
-        format!("{}:{lost}", self.token())
+    /// The detail of [`WriteRefusal::ExceptionsWouldBeLost`]: this rewrite,
+    /// and how many occurrences changed on their own and how many deleted ones
+    /// it would lose — a changed one takes the series' details again, a
+    /// deleted one comes back: `slot:2:1` (decision 252).
+    pub fn detail(self, changed: usize, deleted: usize) -> String {
+        format!("{}:{changed}:{deleted}", self.token())
     }
 
-    /// The rewrite and the count a detail names, as [`Self::detail`] writes
+    /// The rewrite and the counts a detail names, as [`Self::detail`] writes
     /// it; `None` for anything else.
-    pub fn parse_detail(detail: &str) -> Option<(Self, usize)> {
-        let (token, count) = detail.trim().split_once(':')?;
+    pub fn parse_detail(detail: &str) -> Option<(Self, usize, usize)> {
+        let mut parts = detail.trim().split(':');
+        let token = parts.next()?;
         let rewrite = [Self::Slot, Self::Zone, Self::Pattern]
             .into_iter()
             .find(|r| r.token() == token)?;
-        Some((rewrite, count.parse().ok()?))
+        let changed = parts.next()?.parse().ok()?;
+        let deleted = parts.next()?.parse().ok()?;
+        parts
+            .next()
+            .is_none()
+            .then_some((rewrite, changed, deleted))
     }
 }
 
@@ -274,8 +282,8 @@ mod tests {
             SeriesRewrite::Zone,
             SeriesRewrite::Pattern,
         ] {
-            let detail = rewrite.detail(3);
-            assert_eq!(SeriesRewrite::parse_detail(&detail), Some((rewrite, 3)));
+            let detail = rewrite.detail(2, 1);
+            assert_eq!(SeriesRewrite::parse_detail(&detail), Some((rewrite, 2, 1)));
             // The token is the serialized name the surfaces read.
             assert_eq!(
                 serde_json::to_value(rewrite).unwrap(),
@@ -283,14 +291,16 @@ mod tests {
             );
         }
         // The wire shape the surfaces parse (shared/exceptionsLoss.ts).
-        assert_eq!(SeriesRewrite::Slot.detail(3), "slot:3");
+        assert_eq!(SeriesRewrite::Slot.detail(2, 1), "slot:2:1");
         assert_eq!(
-            WriteRefusal::ExceptionsWouldBeLost.message(&SeriesRewrite::Zone.detail(1)),
-            "exceptions-would-be-lost: zone:1"
+            WriteRefusal::ExceptionsWouldBeLost.message(&SeriesRewrite::Zone.detail(1, 0)),
+            "exceptions-would-be-lost: zone:1:0"
         );
         assert_eq!(SeriesRewrite::parse_detail("slot"), None);
-        assert_eq!(SeriesRewrite::parse_detail("slot:many"), None);
-        assert_eq!(SeriesRewrite::parse_detail("moved:3"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:3"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:many:0"), None);
+        assert_eq!(SeriesRewrite::parse_detail("slot:1:0:9"), None);
+        assert_eq!(SeriesRewrite::parse_detail("moved:3:0"), None);
     }
 
     #[test]

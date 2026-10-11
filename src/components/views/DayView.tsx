@@ -105,6 +105,7 @@ import {
   compactDaySummary,
   spokenDaySummary,
   type DayLog,
+  eventWriteErrorMessage,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -825,9 +826,9 @@ export function DayView() {
         announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
         return;
       }
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      // In words, a provider's refusal included (decisions 243-253: a move
+      // that would drop occurrences of the series says what and how many).
+      announce(eventWriteErrorMessage(err, t));
     }
   };
 

@@ -1688,6 +1688,31 @@
         "allDayValue": "{{date}}, ganztägig",
         "moveRefused": "„{{title}}“ organisiert jemand anderes, deshalb kann nur der Organisator ihn auf einen anderen Tag oder eine andere Zeit verschieben. Es wurde nichts verschoben."
       },
+      "exceptionsLoss": {
+        "title": "Vorkommen gehen verloren",
+        "message": "„{{title}}“: {{what}} {{lost}} Trotzdem speichern?",
+        "confirm": "Trotzdem speichern",
+        "rewrite": {
+          "slot": "Diese Änderung schreibt Beginn und Ende der Serie neu.",
+          "zone": "Diese Änderung gibt der Serie eine andere Zeitzone und schreibt dafür Beginn und Ende neu.",
+          "pattern": "Diese Änderung schreibt das Muster der Wiederholung neu."
+        },
+        "lost": {
+          "changed_one": "Exchange verwirft dabei ein Vorkommen, das einzeln geändert wurde: Es nimmt wieder die Angaben der Serie an.",
+          "changed_other": "Exchange verwirft dabei {{count}} Vorkommen, die einzeln geändert wurden: Sie nehmen wieder die Angaben der Serie an.",
+          "deleted_one": "Exchange verwirft dabei ein gelöschtes Vorkommen: Es erscheint wieder.",
+          "deleted_other": "Exchange verwirft dabei {{count}} gelöschte Vorkommen: Sie erscheinen wieder.",
+          "both": "Exchange verwirft dabei {{changed}} und {{deleted}}: Geänderte nehmen wieder die Angaben der Serie an, gelöschte erscheinen wieder."
+        },
+        "count": {
+          "changed_one": "ein einzeln geändertes Vorkommen",
+          "changed_other": "{{count}} einzeln geänderte Vorkommen",
+          "deleted_one": "ein gelöschtes Vorkommen",
+          "deleted_other": "{{count}} gelöschte Vorkommen"
+        }
+      },
+      "deletionsNotRestored_one": "„{{title}}“ ist gespeichert. Ein gelöschtes Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte es nicht wieder löschen: {{days}}. Lösche es bitte einzeln.",
+      "deletionsNotRestored_other": "„{{title}}“ ist gespeichert. {{count}} gelöschte Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte sie nicht wieder löschen: {{days}}. Lösche sie bitte einzeln.",
       "writeError": {
         "replyOnly": "Nur der Organisator kann diese Besprechung ändern. Es wurde nichts geändert.",
         "serverRefused": "Der Kalenderserver hat diese Änderung abgelehnt ({{detail}}). Es wurde nichts geändert.",
@@ -1697,7 +1722,8 @@
         "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio. Es wurde nichts geändert.",
         "dayZoneUnreadable": "Exchange speichert diesen Termin in einer Zeitzone, die Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern; den Titel und anderes schon. Es wurde nichts geändert.",
         "copyUnreadable": "Aperio konnte den aktuellen Stand dieses Termins nicht vom Server lesen und hat ihn deshalb nicht geändert. Versuche es gleich noch einmal.",
-        "exceptionsWouldBeLost": "Diese Änderung würde die Zeitzone der Serie wechseln, und dabei verwirft Exchange ihre geänderten und gelöschten Vorkommen. Es wurde nichts geändert.",
+        "exceptionsWouldBeLost": "Diese Änderung würde die Serie neu schreiben, und dabei verwirft Exchange ihre einzeln geänderten und gelöschten Vorkommen. Es wurde nichts geändert.",
+        "exceptionsWouldBeLostDetail": "{{what}} {{lost}} Es wurde nichts geändert.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "reason": {

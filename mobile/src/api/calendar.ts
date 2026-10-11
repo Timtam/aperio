@@ -77,6 +77,13 @@ export interface CalendarEvent {
    *  RECURRENCE-ID override in the dropped tail so it doesn't ghost. Not
    *  persisted; only the split's update sets it. */
   truncate_tail_overrides?: boolean;
+  /** Transient consent on one update: the user agreed that the provider drops
+   *  the series' changed occurrences (decisions 243, 246). Set only on the
+   *  write sent again after the question; never on a row that is kept. */
+  accepts_exception_loss?: boolean;
+  /** Transient result of an update: deleted occurrences of the series that
+   *  came back and could not be deleted again (decision 253), as instants. */
+  deletions_not_restored?: string[];
   created_at: string;
   updated_at: string;
   etag: string | null;

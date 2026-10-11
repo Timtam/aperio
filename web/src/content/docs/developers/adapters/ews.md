@@ -199,23 +199,43 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   in UTC (M1, M2). With it, it lands right (M7, M8), and so does Aperio's
   own request, at 10:00 and at 00:30 (N1, N1b), also on an all-day series
   Outlook stored in W. Europe, where the zone stays (O1 daily, O2 weekly).
-- **Exchange drops a series' exceptions** — every changed and deleted
-  occurrence — when an update writes the master's Start and End (the
-  zone-first live test: L3a, L3b, M3, M6). A title (M4) or a changed COUNT
-  (M5) keeps them. A zone switch that writes them only because the clock
-  moves is refused, and nothing is sent: `exceptions-would-be-lost: zone`
-  (decision 245). A save that moves the series writes them as it always did.
-  The refusal sends nothing, and the series keeps its exceptions (N2). A
-  zone Exchange stores under the same id (Vienna for a W. Europe series)
-  goes out alone and keeps them (N3); another id on the same time of day
-  (Paris) counts as another clock and is refused, and that id alone is not
-  measured. No editor picks a series' zone yet, so today the refusal meets only a rule
-  change — the repeat edited, or a series changed or deleted from one of its
-  occurrences on, which cuts the old rule — where Aperio itself would write
-  another zone: a series whose stored end zone is not its start zone, or a
-  copy whose zone is stale. A copy that differs from the server's only in
-  its exceptions changes no rule: an update never writes them, so it opens
-  neither the zone nor the slot.
+- **A save that would drop a series' exceptions asks first** (decisions
+  243-253). Exchange drops every changed and deleted occurrence of a series
+  when an update writes its Start and End (the zone-first live test: L3a,
+  L3b, M3, M6) or its pattern, the days or the interval it repeats on (round
+  6, P1, P2). Its range — the COUNT (M5), an UNTIL cut (the 8a live test) —,
+  a title (M4) and the same zone written again (N3) keep them. The update
+  builder plans what it rewrites (`UpdatePlan::rewrite`: slot, zone,
+  pattern) and where a deleted occurrence stands afterwards (`Placement`):
+  moved as the first occurrence moved, so it keeps its place in the pattern,
+  which is how Exchange numbers occurrences (a move, a zone switch, a rule
+  shifted with its start by `cal_core::shift_series`; R1-R3); at its own
+  instant under a new pattern; or nowhere it can tell, where the pattern and
+  the slot change together. The write path counts from the copy just read
+  what would be lost: the changed occurrences, and the deleted ones it cannot
+  place. Without the user's consent (`Event::accepts_exception_loss`) it
+  sends nothing and refuses `exceptions-would-be-lost:
+  {rewrite}:{changed}:{deleted}`; both editors ask and send the same save
+  again with the consent (`shared/exceptionsLoss.ts`). Afterwards it deletes
+  each placeable deleted occurrence again: the index the new rule gives,
+  that index and its neighbours read back, and only the one whose start is
+  exactly where it should stand is deleted, without a cancellation. One it
+  cannot confirm or delete is named on the event that comes back
+  (`Event::deletions_not_restored`), and the editors say its day. Dragging a
+  series and the carry dialogs do not ask yet: they say the refusal's
+  sentence. Paris for a Berlin series counts as another clock (another
+  Windows id). No editor picks a series' zone yet, so today the zone
+  question meets only a rule change — the repeat edited, or a series changed
+  or deleted from one of its occurrences on, which cuts the old rule — where
+  Aperio itself would write another zone: a series whose stored end zone is
+  not its start zone, or a copy whose zone is stale. A copy that differs
+  from the server's only in its exceptions changes no rule: an update never
+  writes them, so it opens neither the zone nor the slot.
+- **A series is never written blind** (decision 248). Without its copy, what
+  a series holds, and so what a rewrite would drop, is unknown: an update of
+  a series head whose copy cannot be read sends nothing and is refused as
+  `copy-unreadable`, as an all-day day is (below). A single is still written
+  without a comparison.
 - **A series starts on its first day** (PR 8a). `rrule_to_ews_recurrence`
   takes the day the series starts on, on the clock Exchange repeats it on
   (`rule_first_day`): the device's day for an all-day series, the written
