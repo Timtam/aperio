@@ -3561,6 +3561,36 @@ Tag-nach-Ende)`), mit TZ-agnostischen Tests:
 - [ ] Visual Design / Farbpalette / Theming / Icon-Set — wird vom Auftraggeber nachgeliefert (§25)
 - [ ] Mobile Companion App (Szenario A) — strategisch verschoben (§25.1)
 - [ ] Thunderbird-Integration — optional, via CalDAV möglich (§25)
+- [ ] 🚩 **iCloud-Erinnerungen als Aufgabenadapter** (Recherche 2026-10-15,
+      Toni): Home Assistant 2026.10 (2026-10-07) zeigt iCloud-Kalender und
+      -Erinnerungen, über die Python-Bibliothek pyicloud (timlaing/pyicloud;
+      home-assistant/core#180735, #181058). Das ist keine neue offizielle
+      Apple-Schnittstelle, sondern die private Webseite iCloud.com:
+      Erinnerungen über CloudKit (Container `com.apple.reminders`, Zone
+      „Reminders“, Titel und Notizen als protobuf-CRDT-Dokument), die
+      Anmeldung wie im Browser (SRP-6a bei idmsa.apple.com mit dem
+      Hauptpasswort der Apple-ID, kein app-spezifisches; dann ein 2FA-Code und
+      ein Vertrauens-Token; mit erweitertem Datenschutz zusätzlich eine
+      Freigabe auf einem Apple-Gerät). Die Kalender brächten nichts Neues,
+      CalDAV geht.
+
+      Gewinn: Erinnerungen auf Windows und Android — auf dem iPhone gehen sie
+      schon über das Gerätekonto (EventKit) —, dazu Unteraufgaben,
+      Markierungen, Tags und Abgleich per Sync-Token. Aufwand groß: ein
+      SRP-Client, ein barrierefreier 2FA-Schritt auf Desktop und Handy (gibt
+      es noch nicht; `interactive_auth` ist einmalig, die Formulare kennen
+      keinen Code-Schritt), ein CloudKit-Client, der CRDT-Codec, die Sitzung
+      als gerätelokales Geheimnis (die Windows-Anmeldeinformationen fassen nur
+      rund 1.280 Zeichen). Vorlagen: pyicloud (Python) und kei (Rust, MIT) für
+      die Anmeldung.
+
+      Risiken: inoffiziell; Apples iCloud-Bedingungen nennen automatisierten
+      Zugriff unter den verbotenen Störungen (V.B Nr. 10); die Anmeldung brach
+      2023, 2024 (SRP-6a) und 2026 mehrfach; die Erinnerungen-Unterstützung
+      gibt es in pyicloud erst seit 2.5.0 (April 2026) und ist noch unreif
+      (Titeländerungen kommen nicht an, Fälligkeiten erscheinen in UTC).
+      Nächster Schritt, wenn es dran ist: ein Spike mit Tonis Konto —
+      anmelden, Listen und Erinnerungen lesen —, dann entscheiden.
 
 ---
 
