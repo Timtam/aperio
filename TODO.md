@@ -3526,6 +3526,256 @@ Vordergrund vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene
 Durchlauf zu Ende (um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in
 dieser Zeit darauf, danach nur noch der Durchlauf.
 
+### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden `[ ]`
+
+Folgeaufgaben aus Prüfungen und Nebenbefunden. Bis 2026-10-15 lagen sie als
+Vorschläge in Claude Code, die mit dem Screenreader kaum erreichbar sind und
+von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
+2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
+Vorschläge sind nicht aufgenommen.
+
+- [ ] **Kopierknopf im Konflikt-Bildschirm des Handys.** Der
+      Konflikt-Bildschirm auf dem Handy
+      (mobile/src/screens/ConflictsScreen.tsx) hat keinen Knopf 'Konflikte in
+      die Zwischenablage kopieren'. Der Desktop hat ihn
+      (src/components/SyncConflictsDialog.tsx, conflictsToText über die
+      gruppierten Konflikte). Zu tun: expo-clipboard aufnehmen (braucht einen
+      neuen EAS-/Dev-Client-Build), den Knopf mit accessibilityRole=button
+      einbauen, denselben Text wie conflictsToText erzeugen (über
+      groupSyncConflicts) und Erfolg oder Fehler mit
+      dialogs.syncConflicts.copied/copyFailed ansagen. Vorschlag vom
+      2026-06-30, aus der Vorschlagsliste gefallen.
+- [ ] **Fehler beim Ändern von Aufgaben am Desktop ansagen.** Abhaken meldet
+      Fehler jetzt (1fd68102). Andere Aufgaben-Änderungen am Desktop schreiben
+      bei Fehlern aber weiterhin nur console.warn und sagen nichts an, teils
+      ohne die Ansicht neu zu laden. Betroffen:
+      src/components/DayStartReviewDialog.tsx (delete_task, update_task,
+      Sammel-Updates an 7 Stellen), DeadlinePinChecker.tsx:126,
+      views/DayView.tsx:923 (Ziehen auf eine Uhrzeit), TaskDialog.tsx:787/819
+      (Abschnitte), views/TaskView.tsx:261 (Abschnittsfarbe) und
+      Sidebar.tsx:486/523 (Liste löschen oder umhängen). Jede Stelle soll den
+      Fehler ansagen, wie es mobile tut (neuer Desktop-Fehlerschlüssel EN+DE),
+      und nach einem Teilerfolg neu laden. Optional die Teilzählung
+      (cascadePartial) auch mobil nachziehen. Vorschlag vom 2026-09-09, aus
+      der Vorschlagsliste gefallen; das Abhaken selbst ist erledigt.
+- [ ] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Der
+      Desktop-Mitzieh-Dialog (src/components/EventGroupCarryDialog.tsx:535)
+      sagt auf main eine Schreib-Ablehnung als rohes englisches Token an. Die
+      Korrektur über eventWriteErrorMessage steckt in PR #123 (Commit
+      9a1d34de) und ist erst nach dessen Merge auf main. Danach fehlt noch ein
+      Vitest, dass ein Ablehnungs-Token (z. B. 'exceptions-would-be-lost') in
+      diesem Dialog als deutscher Satz erscheint. Das Handy übersetzt bereits
+      über writeErrorMessage. Vorschlag vom 2026-10-10, aus der
+      Vorschlagsliste gefallen.
+- [ ] **Schlüsselbund-Test gelegentlich rot (Ursache unklar).** Der Test
+      secrets::tests::round_trip_when_keychain_is_reachable
+      (src-tauri/src/secrets.rs:155-177) ist laut Meldung gelegentlich rot:
+      Nach dem Überschreiben liest er wieder 'hunter2' statt 'hunter3'. Die
+      vermutete Ursache (zwei Tests teilen einen Schlüssel) stimmt nicht:
+      Jeder Test nutzt schon eine eigene UUID. Prüfen, ob der Fehler noch
+      auftritt (cargo test -p aperio --lib secrets mehrfach unter Last). Wenn
+      ja, die echte Ursache in keyring 2.3.3 bzw. im Windows Credential
+      Manager suchen, also ein Lesen unmittelbar nach dem Schreiben, das noch
+      den alten Wert liefert. Vorschlag vom 2026-09-08; am 2026-10-15 als
+      erster aus der vollen Vorschlagsliste gefallen.
+- [ ] **YYYY-MM-DD-Schlüssel überall über parseDayKey.** Mehrere Stellen
+      zerlegen YYYY-MM-DD-Schlüssel noch von Hand mit split('-').map(Number)
+      und prüfen nicht: shared/eventDateTime.ts, multiDay.ts, taskDay.ts,
+      widgetSnapshot.ts, src/state/moveActions.ts,
+      src/components/dayStart.contractSupport.ts und mobile
+      (dayStartSchedule.ts, PlanTaskModal, QuickAddTaskModal,
+      TaskEditorModal). Besonders src/components/BacklogRail.tsx:55 hat einen
+      eigenen, nicht prüfenden parseDayKey für deadline_date aus gespeicherten
+      Daten. Das ist derselbe latente Fehler, den shared/dateKey.ts
+      parseDayKey behebt. Stelle für Stelle entscheiden: Kommt der Schlüssel
+      aus Daten, auf parseDayKey umstellen und null behandeln; kommt er aus
+      localDateKey, begründet so lassen. Außerdem prüfen, ob parseDayKey in
+      shared überhaupt noch einen Aufrufer hat.
+- [ ] **Sync-Engine-Tests warten nur eine Sekunde auf die Logdatei.** Der Test
+      filename_matches_sync_core_log_file_name_format in
+      crates/sync-engine/src/writer.rs:339 wartet nur 1 s (50 x 20 ms) auf die
+      Logdatei und war auf windows-latest in CI schon einmal rot. Dieselbe
+      1-s-Schleife steht in writer.rs:311, 389, 429 und compactor.rs:1224. Am
+      besten ein deterministisches Signal einbauen (EventLogWriter bekommt ein
+      awaitbares flush oder shutdown). Sonst die Frist auf mehrere Sekunden
+      anheben und den frühen Ausstieg behalten, an allen Stellen gleich. Am
+      2026-10-11 schlug compactor.rs:1230
+      (compact_now_rotates_writer_and_drops_the_pre_compaction_log) auf
+      windows-latest für #123 fehl (Lauf 38102479699).
+- [ ] **act()-Warnungen in Dialogtests.** Der volle Desktop-Lauf (npx vitest
+      run) gab auf d92649c1 sechs Warnungen 'not wrapped in act(...)' aus (5x
+      EventDialog, 1x QuickAddDialog), und seither hat sie niemand behoben.
+      Wahrscheinliche Quelle sind nackte .click()-Aufrufe in
+      src/components/EventDialog.reminderDefaults.test.tsx (inzwischen 12) und
+      QuickAddDialog.defaults.test.tsx:67. Durch fireEvent.click ersetzen und
+      asynchrone Updates mit findBy oder waitFor abwarten, ohne das Verhalten
+      der Komponenten zu ändern. Danach mit 'npx vitest run 2>&1 | grep -c
+      "not wrapped in act"' belegen, dass die Zahl 0 ist.
+- [ ] **Eigene Zone eines Einzeltermins beim Speichern behalten.** Ein
+      einmaliger Termin mit Uhrzeit verliert beim Speichern die Zeitzone, die
+      der Kalenderdienst geschickt hat. Google schreibt `Etc/UTC`
+      (crates/adapter-google/src/mapping.rs, range_to_write), Graph `UTC`
+      (crates/adapter-microsoft-graph/src/mapping.rs, write_datetime), CalDAV
+      `Z`, Android `UTC`, EWS gar keine Zone. Der Kern-`Event`
+      (crates/cal-core/src/types.rs) kennt nur `recurrence.tzid`. Zu tun nach
+      Entscheidung 18a, ohne Auswahl-UI: ein optionales Feld (etwa
+      `start_tzid`) beim Lesen merken, durch Kern, ts-rs-Typen, DB-Migration,
+      Sync und Cache tragen und von jedem Schreiber zurückschicken. Ein
+      zurückgelesenes UTC gilt dabei nicht als Absicht, und ganztägige Termine
+      bekommen keine Zone.
+- [ ] **Veraltete Verweise auf coreRules.parity.test.ts.** Vier Stellen
+      verweisen noch auf das gelöschte `src/wasm/coreRules.parity.test.ts`:
+      crates/cal-core-wasm/src/lib.rs:39,
+      crates/cal-core-wasm/src/rules.rs:366, .gitignore:69 und DESIGN.md:538.
+      Ersetzt wurde der Test durch src/intl/taskPriority.test.ts,
+      src/intl/collation.test.ts und die src/intl/*.contract.test.ts. Jeden
+      Kommentar so umschreiben, dass er den echten Wächter nennt, oder den
+      veralteten Satz streichen. Die Verlaufseinträge in TODO.md bleiben
+      stehen.
+- [ ] **Zonennamen in CalDAV und Microsoft 365 über den Kern auflösen.**
+      CalDAV und Microsoft 365 geben gespeicherte Zonennamen weiter direkt an
+      chrono-tz, das Groß- und Kleinschreibung unterscheidet. Betroffen sind
+      crates/adapter-caldav/src/mapping.rs (resolve_with_tzid ~874,
+      RECURRENCE-ID ~1347, zoned_datetime ~1375), tasks.rs ~1063, vtimezone.rs
+      ~43 und crates/adapter-microsoft-graph/src/mapping.rs (write_datetime
+      ~1033). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
+      Berlin, wird aber als UTC gelesen bzw. geschrieben. Wie bei Google und
+      EWS über `cal_core::series_clock_zone`/`canonical_zone` auflösen, mit
+      der kanonischen Zone rechnen und die gespeicherte Schreibweise senden.
+      Dazu Tests mit Kleinschreibung, dann DESIGN-series-time-zone.md
+      („Risiken“) und den TODO.md-Eintrag (~2004) nachziehen.
+- [ ] **Zeitzonendaten (tzdata) aktuell halten — Recherche.** Aperio baut
+      weiter mit chrono-tz 0.10.4 (tzdata 2025b, Cargo.lock), ohne Patch oder
+      Ersatz. Damit fehlen Marokko (dauerhaft +00 seit 20.09.2026), Vancouver,
+      Edmonton und Inuvik (ab 01.11.2026) sowie Chisinau, und die Erinnerungen
+      in crates/host-core/src/reminders.rs klingeln dort eine Stunde daneben.
+      Zu tun (32a, TODO.md ~2037): drei Wege untersuchen, nämlich chrono-tz
+      mit neuerem tz-Verzeichnis oder [patch], jiff/jiff-tzdb und die
+      OS-Datenbank zur Laufzeit. Für jeden Aufwand, Binärgröße, Folgen für
+      `cargo xtask tz-list --check` und eine CI-Prüfung gegen die neueste
+      IANA-Version ermitteln, dann Toni mit a/b-Fragen entscheiden lassen.
+- [ ] **EWS-Ordnerzustand bei einem Fehler behalten.** In
+      crates/adapter-ews/src/lib.rs nehmen `refresh_and_read_events` (~410)
+      und `refresh_events_delta` (~610) den Ordnerzustand mit
+      `guard.remove(calendar_id)` heraus. Bei einem Fehler (`Err(err) =>
+      return Err(err)` oder `?` beim Neu-Drain) legen sie ihn nicht zurück.
+      Der nächste Persist eines anderen Ordners überschreibt dann
+      events_sync.json ohne diesen Ordner, und es folgt ein voller Neu-Drain
+      mit GetItem für jedes Element. Auf jedem Fehlerpfad den vorigen Zustand
+      wieder einsetzen (vor dem Drain klonen, weil `prior` in `seed`
+      verschoben wird) und die Erholung bei ungültigem Cookie behalten. Dazu
+      mockito-Tests: Ein Serverfehler lässt den Zustand stehen, und der
+      folgende Delta ist inkrementell.
+- [ ] **Undefiniertes --color-bg-subtle in styles.css.** `--color-bg-subtle`
+      ist in src/styles.css weder im hellen noch im dunklen Themenblock
+      definiert. Ohne Fallback benutzt wird es in den Zeilen 573 und 577
+      (.settings__tab Hover/aktiv), 812 (Log-Block) und 5253
+      (.contacts-list__group-badge), mit `transparent` in 2305 und 2462. Diese
+      Flächen haben deshalb keinen Hintergrund. Das Token in beiden Themen
+      definieren (eine Stufe neben --color-bg, passend zu elevated/panel) oder
+      die Stellen auf `--color-bg-elevated` umstellen.
+- [ ] **rustdoc-Linkwarnungen in host-core.** Öffentliche Doku in
+      crates/host-core verlinkt weiter auf private Elemente:
+      account_setup.rs:237 → `resolve_oauth_client`, cache/swr.rs:48 →
+      `COVERAGE_REFRESH_COOLDOWN_SECS`, logging.rs:40 → `log_files`, db.rs:131
+      → `ReadPool` und settings_backfill.rs:14 → `SETTINGS_BACKFILL_VERSION`.
+      Dazu kommen ungeklärte Links wie wire.rs:20
+      (`PluginManifest::recurrence`) und registry.rs:8 (`Adapter`). Zuletzt
+      meldete `cargo doc -p host-core --no-deps` 18 Warnungen. Links auf
+      private Ziele zu Codetext machen und ungeklärte Pfade qualifizieren,
+      danach die übrigen Crates einzeln mit `cargo doc` prüfen.
+- [ ] **quickAddOfferCalendar-Test wackelt unter Last.** Der Test
+      src/components/quickAddOfferCalendar.test.tsx ist seit 15ebdff2
+      (2026-10-02) unverändert, ein Fix fehlt. Am 2026-10-03 schlugen 9 Tests
+      im Block „quick-add → accept an offer → the editor“ in zwei von drei
+      vollen vitest-Läufen fehl, einzeln liefen sie immer durch. Die Tests
+      warten nur mit findByRole (Standard-Timeout 1 s). Ursache unter Volllast
+      suchen (Timeouts, Timer, geteilter Mock- oder i18n-Zustand aus anderen
+      Dateien) und den Test deterministisch machen, ohne die Aussagen
+      abzuschwächen. Am 2026-10-11 wieder: neben einem laufenden cargo test 11
+      Fehlschläge in quickAddOfferCalendar, EventDialog.prefillRelease und
+      TaskDialog.assignees, einzeln alle grün.
+- [ ] **Ältere „ab hier“-Tests zonenunabhängig machen.** Einige ältere
+      Editor-Tests schlagen auf Rechnern westlich von UTC-8 fehl (Anchorage,
+      Honolulu). Sie tippen feste Daten ('2026-07-07') oder erwarten Tage, die
+      in Berlin berechnet sind. Betroffen sind
+      src/components/EventDialog.thisAndFuture.test.tsx (Tests in den Zeilen
+      250, 425, 535, 579) und
+      src/components/EventGroupCarryDialog.future.test.tsx:290. Sie sollen wie
+      die neueren Tests auf dayOn() bzw. die Uhr der Maschine umgestellt und
+      per PowerShell in sechs Zonen grün geprüft werden. Produktcode bleibt
+      unverändert.
+- [ ] **Tests zum Verschieben ganzer Serien zonenunabhängig machen.** Zwei
+      Tests in src/state/moveActions.test.ts schlagen je nach Zeitzone fehl,
+      auch auf main: 'a new time of day keeps the days…' (Anchorage, Honolulu,
+      Auckland) und 'moves a UTC end bound with a new time of day'
+      (Anchorage). Ihre Erwartungen an BYDAY und UNTIL gehen davon aus, dass
+      der lokale Tag von 07:00Z gleich dem UTC-Tag ist. Erst mit moveSeries
+      (src/state/moveActions.ts) und moveSeriesInstant/movedSeriesUntil
+      (shared/recurrence.ts) klären, ob Test oder Code falsch ist. Dann die
+      Erwartungen auf die Geräte- bzw. Serienuhr umstellen und die Datei per
+      PowerShell in sieben Zonen prüfen.
+- [ ] **„Wiederholt sich nicht“ erreicht Google und Microsoft 365 nicht.**
+      Setzt man eine Google- oder Microsoft-365-Serie auf „wiederholt sich
+      nicht“, erreicht das den Server nie. Die Serie kommt beim nächsten
+      Abgleich zurück, obwohl „aktualisiert“ angesagt wurde. Ursache:
+      event_to_body in crates/adapter-google/src/mapping.rs und
+      crates/adapter-microsoft-graph/src/mapping.rs lässt recurrence bei None
+      weg (skip_serializing_if). Erst recherchieren, welchen Löschwert jede
+      API braucht (Google: [] oder null? Graph: null?). Diesen Wert dann nur
+      auf Master/Einzeltermin senden (nie beim PATCH eines Vorkommens), wie
+      clear_attendees, mit mockito-Tests und Doku.
+- [ ] **Gerätekalender: ein einzelnes Vorkommen bearbeiten oder löschen.** Im
+      Gerätekalender des Handys trifft das Bearbeiten oder Löschen eines
+      einzelnen Vorkommens vermutlich das falsche Ziel. iOS
+      (mobile/modules/cal-ffi/ios/IosDeviceEventStore.swift ~405-436) sucht
+      per event(withIdentifier:) und bekommt damit das erste Vorkommen.
+      Android (AndroidDeviceCalendar.kt ~201-221) ändert oder löscht die
+      Basiszeile, also die ganze Serie, und erzwingt EVENT_TIMEZONE=UTC. Gegen
+      Apple- und Android-Doku bestätigen, dann reparieren: iOS das Vorkommen
+      über seinen Beginn suchen, Android eine Ausnahmezeile über
+      CONTENT_EXCEPTION_URI mit ORIGINAL_INSTANCE_TIME bzw. STATUS_CANCELED.
+      Toni muss auf dem Gerät testen.
+- [ ] **CalDAV-Ausnahmen beim Verschieben einer Serie mitziehen.** Verschiebt
+      Aperio den Beginn, das Ende oder den Ganztags-Status eines
+      CalDAV-Serienmasters, werden alle RECURRENCE-ID-Overrides mit ihrer
+      alten RECURRENCE-ID zurückgeschrieben. Das geschieht in update_master
+      und merge_with_overrides in crates/adapter-caldav/src/events.rs
+      (~323-404, ~944-967). Geänderte Vorkommen erscheinen dann doppelt,
+      abgesagte verbergen ihren Platz nicht mehr. Die RECURRENCE-ID jedes
+      Overrides um dieselbe Verschiebung neu setzen, die der Host auf EXDATEs
+      anwendet (moveSeriesInstant / cal_core::tail_exceptions). Fremde
+      iCal-Teile bleiben ganz. Ob auch DTSTART/DTEND mitwandern, mit Toni
+      klären.
+- [ ] **Farbmenü am Termin-Chip bei einem Vorkommen.** Das Farbmenü am
+      Termin-Chip (src/state/useChipContextMenu.ts ~319-336) schreibt bei
+      einem Serienvorkommen dessen Zeile samt Beginn und Ende unter der Id des
+      Masters. Bei lokalen und farbfähigen CalDAV-Kalendern verschiebt eine
+      Farbwahl so die ganze Serie auf das Vorkommen. Korrigieren, sodass nur
+      die Farbe geschrieben wird: den Master laden und dessen eigenen Platz
+      senden, oder Start/End/AllDay/Recurrence als behalten markieren. Dazu
+      ein Vitest, dass eine Farbänderung am Vorkommen den Beginn des Masters
+      sendet.
+- [ ] **Eine nie gesetzte Aufgabenpriorität bleibt ungesetzt.** Zwei Adapter
+      ändern eine nie gesetzte Aufgabenpriorität.
+      crates/adapter-caldav/src/tasks.rs (~672-679) liest PRIORITY:0 (laut RFC
+      „undefiniert“) als Hoch und schreibt immer eine PRIORITY.
+      crates/adapter-device-calendar/src/lib.rs liest in map_priority (~451)
+      EventKit 0 als Mittel und schreibt sie in priority_to_ek (~575) als 5
+      zurück. Mit Toni klären, wie „keine Priorität“ dargestellt wird (z. B.
+      Mittel anzeigen, aber nichts zurückschreiben, solange der Nutzer sie
+      nicht ändert). Dann beide Adapter mit Lese- und Round-trip-Tests
+      anpassen.
+- [ ] **Was die Anleitung für iCloud-Aufgaben verspricht.** Das Tutorial
+      verspricht für iCloud über CalDAV auch Aufgaben. Gemeint sind
+      web/src/content/docs/de/guides/tutorial/02-connecting-accounts.md:19 und
+      der englische Zwilling. Apple-Erinnerungen laufen seit iOS 13 aber über
+      CloudKit und sind per CalDAV nicht erreichbar; auf dem iPhone kommen sie
+      über das Gerätekonto. Den Text in beiden Sprachen korrigieren und auch
+      Troubleshooting/FAQ sowie den Kontoformular-Text (plugin.json von
+      adapter-caldav-plugin, Locales) prüfen. Danach Docs-Build und
+      check:links.
+
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
 ### C1 · Task-Recurrence in EWS & Todoist (§9.1)
