@@ -197,9 +197,10 @@ keinen, dort ist die Wahl Tonis Sache.
   mit der Regel dazu (M6), und beim Verschieben ohne Zone (M3); ebenso ein
   neues Muster, andere Wochentage oder ein anderer Abstand, bei gleichem
   Beginn (Runde 6, P1, P2). Nur den Titel (M4), die Anzahl (M5) oder das Ende
-  (ein Enddatum statt der Anzahl, kein Ende, ein früheres Ende; Runde 8, U1
-  bis U3) zu ändern, behält sie. Bevor Aperio so
-  schreibt, sagt es das und fragt; wie, steht in 246 bis 253.
+  (ein Enddatum statt der Anzahl, kein Ende; Runde 8, U1 bis U3), auch so,
+  dass Vorkommen wegfallen (ein früheres Ende oder eine kleinere Anzahl; Runde
+  9, V1, V2), zu ändern, behält sie. Bevor Aperio so schreibt, sagt es das und
+  fragt; wie, steht in 246 bis 253.
 - **244 — ganztägig bekommt Uhrzeit.** *(gebaut, Zonen-PR)* Die Zone zuerst
   lehnt Exchange an einer ganztägigen täglichen Serie ab
   (`ErrorOccurrenceTimeSpanTooBig`, L2): Es legt deren Tage auf die
@@ -215,26 +216,26 @@ keinen, dort ist die Wahl Tonis Sache.
   W. Europe gespeichert hat, wo die Zone also bleibt, landet so richtig,
   täglich und samstags (O1, O2).
 - **245 — kein Zonenwechsel, der Vorkommen verwirft.** *(gebaut, Zonen-PR;
-  seit 247 eine Frage)* Schreibt ein Ändern Beginn und Ende nur, weil die
-  neue Zone eine andere Uhr nennt (240), und hat die Serie geänderte oder
-  gelöschte Vorkommen, lehnte Aperio es im Zonen-PR ab und schickte nichts.
-  Seit 247 fragt es wie bei jedem anderen Neuschreiben (243).
-  Eine Zone, die Exchange unter derselben Windows-Zone speichert (Wien statt
-  Berlin: beide „W. Europe Standard Time“), schreibt nur die Zone, fragt
-  nicht, und Exchange behält die Vorkommen (N3). Paris statt Berlin heißt
-  „Romance Standard Time“ und zählt als andere Uhr (240), obwohl beide heute
-  dieselbe Uhrzeit zeigen: Aperio fragt. Kein Editor wählt in diesem Stand
-  die Zone einer Serie (Stufen 11 und 12). Die Frage nach der Zone trifft
-  deshalb nur ein Ändern der Regel, bei dem Aperio selbst eine andere Zone
-  schreiben würde,
-  etwa an einer Serie, deren gespeicherte Endzone eine andere als ihre
-  Startzone ist, oder aus einer Kopie mit veralteter Zone. Eine Kopie, die
-  sich vom Server nur in den Ausnahmen unterscheidet, ändert keine Regel:
-  Ein Update schreibt sie nie, deshalb schreibt sie weder Zone noch Beginn
-  und Ende (sechste Prüfung des Zonen-PRs). Gemessen mit Aperios
-  Anfrage: Die Ablehnung schickt nichts, und die Serie bleibt mit ihren
-  Vorkommen, wie sie war (N2). Eine ganztägige Serie bekommt 10:00 und 00:30
-  richtig, ab ihrem ersten Tag (N1, N1b).
+  seit 247 eine Frage)* Schreibt ein Ändern Beginn und Ende nur, weil die neue
+  Zone eine andere Uhr nennt (240), und hat die Serie geänderte oder gelöschte
+  Vorkommen, lehnte Aperio es im Zonen-PR ab und schickte nichts. Seit 247
+  fragt es wie bei jedem anderen Neuschreiben (243). Eine Zone, die Exchange
+  unter derselben Windows-Zone speichert (Wien statt Berlin: beide „W. Europe
+  Standard Time“), schreibt nur die Zone, fragt nicht, und Exchange behält die
+  Vorkommen (N3). Paris statt Berlin heißt „Romance Standard Time“ und zählt
+  als andere Uhr (240), obwohl beide heute dieselbe Uhrzeit zeigen: An einer
+  Serie mit einzeln geänderten Vorkommen fragt Aperio (gelöschte löscht es
+  danach wieder). Kein Editor wählt in diesem Stand die Zone einer Serie
+  (Stufen 11 und 12). Die Frage nach der Zone trifft deshalb nur ein Ändern
+  der Regel, bei dem Aperio selbst eine andere Zone schreiben würde, etwa an
+  einer Serie, deren gespeicherte Endzone eine andere als ihre Startzone ist,
+  oder aus einer Kopie mit veralteter Zone. Eine Kopie, die sich vom Server
+  nur in den Ausnahmen unterscheidet, ändert keine Regel: Ein Update schreibt
+  sie nie, deshalb schreibt sie weder Zone noch Beginn und Ende (sechste
+  Prüfung des Zonen-PRs). Gemessen mit Aperios Anfrage: Die Ablehnung schickt
+  nichts, und die Serie bleibt mit ihren Vorkommen, wie sie war (N2). Eine
+  ganztägige Serie bekommt 10:00 und 00:30 richtig, ab ihrem ersten Tag (N1,
+  N1b).
 - **246 — der Adapter erkennt, der Editor fragt.** *(gebaut, PR A)* Nur der
   Adapter sieht am frischen Stand vom Server, ob die Serie geänderte oder
   gelöschte Vorkommen hat und ob die Zone die Uhr wechselt. Er plant, was
@@ -255,7 +256,7 @@ keinen, dort ist die Wahl Tonis Sache.
   gleichem Beginn, montags und mittwochs statt montags (P1) oder alle zwei
   Wochen (P2), verwirft alle Ausnahmen (Runde 6). Aperio fragt deshalb auch
   dort; Anzahl und Ende fragen nicht, denn Exchange behält dabei beide Arten
-  (M5; Runde 8, U1 bis U3).
+  (M5; Runde 8, U1 bis U3; Runde 9, V1, V2).
 - **250 — Ziehen fragt in einem eigenen Dialog.** *(beschlossen, PR B)* Nach
   der Umfang-Wahl ein zweiter Bestätigen-Dialog. Bis dahin sagt das Ziehen
   den übersetzten Satz der Ablehnung an. Auch ein Teilen „ab hier“ fragt
@@ -1244,8 +1245,8 @@ Handy im selben PR.
     wie UTC−11;
   - ob eine andere Windows-Zone allein, mit derselben Uhrzeit (Paris statt
     Berlin), die Ausnahmen einer Serie stehen lässt. Heute zählt sie als
-    andere Uhr, und an einer Serie mit Ausnahmen fragt Aperio vorher (247);
-    vor dem Zonen-Picker (Stufen 11 und 12) messen;
+    andere Uhr, und an einer Serie mit einzeln geänderten Vorkommen fragt
+    Aperio vorher (247); vor dem Zonen-Picker (Stufen 11 und 12) messen;
   - wie ganztägige Termine mit Teilnehmern angezeigt werden; für sie gilt die
     Regel „schwebend“ nicht;
   - welche Namen Kerio Connect und Zimbra kennen und was sie mit einem
@@ -1263,7 +1264,8 @@ Handy im selben PR.
   seit dem Zonen-PR ohne Bedeutung: Die Regel kommt immer nach der Zone.
   Ungeprüft ist auch, was ein Wechsel der Häufigkeit (täglich
   statt wöchentlich) mit den Ausnahmen tut (gemessen: Anzahl und Ende
-  behalten beide Arten, M5, Runde 8; Beginn und Ende neu verwerfen sie, 243,
+  behalten beide Arten, auch wenn sie Vorkommen abschneiden, M5, Runden 8
+  und 9; Beginn und Ende neu verwerfen sie, 243,
   ein neues Muster ebenso, Runde 6); ein Termin mit
   eigener Zone vom iPhone oder aus einer Einladung und
   die Ablehnung nach 237 am echten Server; ob Exchange ein Ende in der Endzone

@@ -2350,7 +2350,7 @@ pub(crate) enum Placement {
 /// (`NumberedRecurrence`, `EndDateRecurrence`, `NoEndRecurrence`). How many
 /// times and until when a series runs is its range, and changing that keeps
 /// its changed and deleted occurrences (the zone-first live test, M5; round 8,
-/// U1-U3; the 8a live test's cut kept a deleted one); the pattern is the
+/// U1-U3; round 9, V1 and V2, cuts by UNTIL and by COUNT); the pattern is the
 /// frequency, the days and the interval it repeats on, and a new one drops
 /// them (round 6, P1, P2).
 fn pattern_of(rule_xml: &str) -> &str {
@@ -2630,8 +2630,8 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // weekday stay the same on the new clock, and rewrites it where the switch
     // moves them; an all-day series given a time always rewrites it
     // (`leaves_all_day`). A rule that only changes its range keeps the
-    // series' exceptions (the zone-first live test, M5; round 8, U1-U3; the 8a
-    // cut kept a deleted one), and a new pattern drops them (round 6, P1, P2):
+    // series' exceptions (the zone-first live test, M5; round 8, U1-U3; round
+    // 9, V1, V2: a cut), and a new pattern drops them (round 6, P1, P2):
     // see the plan's `rewrite` below. The slot never
     // deletes a rule: an edit without one says nothing about the server's. A
     // missing copy's rule is unknown, not equal: a blind write writes the
@@ -2716,8 +2716,9 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // What the update writes again that makes Exchange drop the series'
     // changed and deleted occurrences: its start and end (L3a, M3, M6), only
     // its zone's clock (245), or its pattern under the same slot (round 6, P1,
-    // P2). Its range alone keeps them (M5; round 8, U1-U3). Only a series the
-    // server holds, written as a series again, and never an exception.
+    // P2). Its range alone keeps them (M5; round 8, U1-U3; round 9, V1, V2).
+    // Only a series the server holds, written as a series again, and never an
+    // exception.
     let server_rule = before.and_then(|b| b.recurrence.as_ref());
     let stays_a_series =
         server_rule.is_some() && rule_of.recurrence.is_some() && target != EventIdKind::Exception;
@@ -10539,7 +10540,8 @@ mod tests {
     /// the slot and keep every occurrence's place; a day move that keeps the
     /// old weekday cannot be placed. The days or the interval alone rewrite
     /// the pattern, and a deleted occurrence stays at its instant (round 6,
-    /// P1, P2). How many times or until when (M5; round 8, U1-U3), the title,
+    /// P1, P2). How many times or until when (M5; round 8, U1-U3; round 9,
+    /// V1, V2), the title,
     /// a rule removed, an exception and a single made a series rewrite
     /// nothing.
     #[test]

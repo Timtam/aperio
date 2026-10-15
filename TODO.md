@@ -3031,7 +3031,8 @@ Siehe DESIGN §4.2.
   Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
   neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
   Anzahl allein nicht (M4, M5): Vor einem Zonenwechsel, der sie nur
-  deshalb schreibt, fragt Aperio (245, seit 247 eine Frage). Ganztägig bekommt
+  deshalb schreibt, fragt Aperio, wenn dabei einzeln geänderte Vorkommen
+  verloren gingen (245, seit 247 eine Frage). Ganztägig bekommt
   Uhrzeit: Beginn und Ende
   vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
   Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
@@ -3053,9 +3054,9 @@ Siehe DESIGN §4.2.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
-  neu und fragt an einer Serie mit Ausnahmen vorher (247). Vor dem Picker messen,
-  ob eine andere Windows-Zone allein die Ausnahmen behält; dann Uhren nach
-  ihrem Versatz vergleichen statt nach ihrer Kennung.
+  neu und fragt an einer Serie mit einzeln geänderten Vorkommen vorher (247).
+  Vor dem Picker messen, ob eine andere Windows-Zone allein die Ausnahmen
+  behält; dann Uhren nach ihrem Versatz vergleichen statt nach ihrer Kennung.
   🚩 **Open-Source-Hinweise** in der Desktop- und der Handy-App (40a): CLDR und
   die eingebauten ICU4X-Bibliotheken nennen.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die

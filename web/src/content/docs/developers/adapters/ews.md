@@ -204,20 +204,21 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   when an update writes its Start and End (the zone-first live test: L3a, L3b,
   M3, M6) or its pattern — its frequency, the days or the interval it repeats
   on (the days and the interval: round 6, P1, P2). Its range — the COUNT (M5),
-  an end date instead, no end, an earlier end (round 8, U1-U3) —, a title (M4)
-  and the same zone written again (N3) keep them. The update builder plans
-  what it rewrites (`UpdatePlan::rewrite`: slot, zone, pattern) and where a
-  deleted occurrence stands afterwards (`Placement`): moved as the first
-  occurrence moved, so it keeps its place in the pattern, which is how
-  Exchange numbers occurrences (a move, a zone switch, a rule shifted with its
-  start by `cal_core::shift_series`, with or without a week start that changes
-  no day, as the editor leaves it out; R1-R3); at its own instant under a new
-  pattern; or nowhere it can tell, where the pattern and the slot change
-  together, where `cal_core::shift_series` would not shift the rule, or where
-  a clock it needs cannot be read. The write path counts from the copy just
-  read what would be lost: the changed occurrences, and the deleted ones it
-  cannot place. Without the user's consent (`Event::accepts_exception_loss`)
-  it sends nothing and refuses `exceptions-would-be-lost:
+  an end date instead or no end (round 8, U1-U3), an earlier end or a smaller
+  COUNT that cuts occurrences off (round 9, V1, V2) —, a title (M4) and the
+  same zone written again (N3) keep them. The update builder plans what it
+  rewrites (`UpdatePlan::rewrite`: slot, zone, pattern) and where a deleted
+  occurrence stands afterwards (`Placement`): moved as the first occurrence
+  moved, so it keeps its place in the pattern, which is how Exchange numbers
+  occurrences (a move, a zone switch, a rule shifted with its start by
+  `cal_core::shift_series`, with or without a week start that changes no day,
+  as the editor leaves it out; R1-R3); at its own instant under a new pattern;
+  or nowhere it can tell, where the pattern and the slot change together,
+  where `cal_core::shift_series` would not shift the rule, or where a clock it
+  needs cannot be read. The write path counts from the copy just read what
+  would be lost: the changed occurrences, and the deleted ones it cannot
+  place. Without the user's consent (`Event::accepts_exception_loss`) it sends
+  nothing and refuses `exceptions-would-be-lost:
   {rewrite}:{changed}:{deleted}`; both editors ask and send the same save
   again with the consent (`shared/exceptionsLoss.ts`) — only on the series'
   own save: a split's cut refused this way says the sentence, as a yes would

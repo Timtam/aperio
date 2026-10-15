@@ -79,8 +79,8 @@ pub enum WriteRefusal {
 /// new length, all-day on or off —, only the clock its zone names (245), or
 /// its pattern: its frequency, the days, the interval it repeats on (the
 /// days and the interval measured in live round 6). Its range, how many times
-/// or until when it runs, keeps them (the zone-first live test, M5; round 8,
-/// U1-U3).
+/// or until when it runs, keeps them, also where it cuts occurrences off (the
+/// zone-first live test, M5; round 8, U1-U3; round 9, V1, V2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]

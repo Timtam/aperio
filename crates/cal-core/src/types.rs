@@ -168,8 +168,9 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncate_tail_overrides: bool,
     /// Transient write-only consent: the user was told that this update makes
-    /// the provider drop the series' changed occurrences, and agreed (decisions
-    /// 243, 246). An adapter whose provider drops them when a series' start,
+    /// the provider drop the series' changed occurrences, and deleted ones the
+    /// adapter cannot delete again afterwards, and agreed (decisions 243, 246,
+    /// 252, 253). An adapter whose provider drops them when a series' start,
     /// end, zone or pattern is written again refuses such an update without it
     /// ([`crate::WriteRefusal::ExceptionsWouldBeLost`], nothing sent), and the
     /// surfaces ask and send it again with this set — on that one write only.

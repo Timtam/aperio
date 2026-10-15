@@ -238,11 +238,11 @@ anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es
 denselben Satz und „Es wurde nichts geändert.“ Ändere die Serie dann im Editor.
 
 Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
-Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur bei
-einer Serie, deren Zeitzone Aperio dabei neu schriebe (siehe oben), fragt Aperio
-dort nicht: Es sagt den Satz und ändert nichts. Das geht dann in Outlook. Ab
-ihrem ersten Termin geändert, wird die ganze Serie neu geschrieben, und Aperio
-fragt wie im Editor.
+Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur eine
+Serie, deren Zeitzone Aperio dabei neu schriebe (siehe oben), lässt sich so
+nicht kürzen: Aperio fragt dort nicht, sondern sagt den Satz und ändert nichts.
+Das geht dann in Outlook. Ab ihrem ersten Termin geändert, wird die ganze Serie
+neu geschrieben, und Aperio fragt wie im Editor.
 
 Kann Aperio den aktuellen Stand einer Serie nicht vom Server lesen, ändert es
 sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:

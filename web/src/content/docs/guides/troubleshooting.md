@@ -221,11 +221,11 @@ calendars, Aperio does not ask yet in this version. There it says the same
 sentence and "Nothing was changed." Change the series in the editor then.
 
 Changing or deleting a series from one of its appointments on only shortens the
-old series, and that keeps its changed and deleted occurrences. Only on a series
-whose time zone Aperio would write again with it (see above) does Aperio not ask
-there: it says the sentence and changes nothing. Do that in Outlook then.
-Changed from its first appointment on, the whole series is written again, and
-Aperio asks as in the editor.
+old series, and that keeps its changed and deleted occurrences. Only a series
+whose time zone Aperio would write again with it (see above) cannot be shortened
+this way: Aperio does not ask there, it says the sentence and changes nothing.
+Do that in Outlook then. Changed from its first appointment on, the whole series
+is written again, and Aperio asks as in the editor.
 
 If Aperio cannot read a series' current state from the server, it does not
 change it, because it would not know what would be lost. Aperio then says:
