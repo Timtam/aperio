@@ -211,21 +211,24 @@ In this version you cannot choose a series' time zone yourself. So Aperio asks
 about another time zone only for a series from another program whose end is in
 another time zone than its start, or when the series' time zone was changed
 elsewhere since Aperio last read it; in the second case, open the series again
-once Aperio has refreshed the calendar. On such a series the question comes
-whenever you change its repeat, even only the number of appointments or the end.
-Changing or deleting it from a later appointment on is refused with the sentence
-instead (below).
+once Aperio has refreshed the calendar. On such a series, if something would be
+lost — occurrences changed on their own, or deleted ones Aperio cannot place —,
+the question comes whenever you change its repeat, even only the number of
+appointments or the end; changing or deleting it from a later appointment on is
+then refused with the sentence instead (below). Otherwise Aperio saves and
+deletes the deleted ones again.
 
 If you drag a series with the mouse or carry a change to copies in other
 calendars, Aperio does not ask yet in this version. There it says the same
 sentence and "Nothing was changed." Change the series in the editor then.
 
 Changing or deleting a series from one of its appointments on only shortens the
-old series, and that keeps its changed and deleted occurrences. Only a series
-whose time zone Aperio would write again with it (see above) cannot be shortened
-this way: Aperio does not ask there, it says the sentence and changes nothing.
-Do that in Outlook then. Changed from its first appointment on, the whole series
-is written again, and Aperio asks as in the editor.
+old series, and that keeps its changed and deleted occurrences. Only where
+Aperio would write the time zone again with it (see above) and something would
+be lost is the series not shortened: Aperio does not ask there, it says the
+sentence and changes nothing. Do that in Outlook then. Changed from its first
+appointment on, the whole series is written again, and Aperio asks as in the
+editor.
 
 If Aperio cannot read a series' current state from the server, it does not
 change it, because it would not know what would be lost. Aperio then says:

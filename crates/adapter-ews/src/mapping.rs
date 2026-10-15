@@ -10770,8 +10770,9 @@ mod tests {
     /// 10:00 in Berlin is 04:00 in New York, the same Monday: the zone and the
     /// slot on the new clock, and no rule (decision 241). A series' exceptions
     /// do not survive the slot written again (the zone-first live test, L3a):
-    /// one that has any is refused instead
-    /// (`a_zone_switch_that_would_drop_exceptions_is_refused`).
+    /// the plan names the zone rewrite, so changed occurrences are asked about
+    /// first (247) and deleted ones keep their place, to be deleted again
+    /// (253; `a_zone_switch_rewrites_the_zone_and_keeps_every_place`).
     #[test]
     fn a_zone_switch_on_the_same_day_writes_no_rule() {
         let before = timed_series(

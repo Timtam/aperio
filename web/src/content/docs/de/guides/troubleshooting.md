@@ -228,21 +228,23 @@ einer anderen Zeitzone fragt Aperio deshalb nur bei einer Serie aus einem
 anderen Programm, deren Ende in einer anderen Zeitzone steht als ihr Beginn,
 oder wenn die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie
 zuletzt gelesen hat; im zweiten Fall öffne die Serie neu, sobald Aperio den
-Kalender aktualisiert hat. Bei einer solchen Serie kommt die Frage, sobald du
-ihre Wiederholung änderst, auch nur die Anzahl der Termine oder ihr Ende. Sie ab
-einem späteren Termin zu ändern oder zu löschen lehnt Aperio stattdessen mit dem
-Satz ab (unten).
+Kalender aktualisiert hat. Würde bei einer solchen Serie etwas verloren gehen —
+einzeln geänderte Vorkommen oder gelöschte, die Aperio nicht zuordnen kann —,
+kommt die Frage, sobald du ihre Wiederholung änderst, auch nur die Anzahl der
+Termine oder ihr Ende; sie ab einem späteren Termin zu ändern oder zu löschen
+lehnt Aperio dann mit dem Satz ab (unten). Sonst speichert Aperio und löscht die
+gelöschten wieder.
 
 Ziehst du eine Serie mit der Maus oder überträgst du eine Änderung an Kopien in
 anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es
 denselben Satz und „Es wurde nichts geändert.“ Ändere die Serie dann im Editor.
 
 Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
-Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur eine
-Serie, deren Zeitzone Aperio dabei neu schriebe (siehe oben), lässt sich so
-nicht kürzen: Aperio fragt dort nicht, sondern sagt den Satz und ändert nichts.
-Das geht dann in Outlook. Ab ihrem ersten Termin geändert, wird die ganze Serie
-neu geschrieben, und Aperio fragt wie im Editor.
+Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur wo
+Aperio dabei die Zeitzone neu schriebe (siehe oben) und etwas verloren ginge,
+kürzt es die Serie nicht: Aperio fragt dort nicht, sondern sagt den Satz und
+ändert nichts. Das geht dann in Outlook. Ab ihrem ersten Termin geändert, wird
+die ganze Serie neu geschrieben, und Aperio fragt wie im Editor.
 
 Kann Aperio den aktuellen Stand einer Serie nicht vom Server lesen, ändert es
 sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:
