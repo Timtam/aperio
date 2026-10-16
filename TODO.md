@@ -1470,15 +1470,6 @@ Vorschläge sind nicht aufgenommen.
       und nach einem Teilerfolg neu laden. Optional die Teilzählung
       (cascadePartial) auch mobil nachziehen. Vorschlag vom 2026-09-09, aus
       der Vorschlagsliste gefallen; das Abhaken selbst ist erledigt.
-- [ ] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Der
-      Desktop-Mitzieh-Dialog (src/components/EventGroupCarryDialog.tsx:535)
-      sagt auf main eine Schreib-Ablehnung als rohes englisches Token an. Die
-      Korrektur über eventWriteErrorMessage steckt in PR #123 (Commit
-      9a1d34de) und ist erst nach dessen Merge auf main. Danach fehlt noch ein
-      Vitest, dass ein Ablehnungs-Token (z. B. 'exceptions-would-be-lost') in
-      diesem Dialog als deutscher Satz erscheint. Das Handy übersetzt bereits
-      über writeErrorMessage. Vorschlag vom 2026-10-10, aus der
-      Vorschlagsliste gefallen.
 - [ ] **Schlüsselbund-Test gelegentlich rot (Ursache unklar).** Der Test
       secrets::tests::round_trip_when_keychain_is_reachable
       (src-tauri/src/secrets.rs:155-177) ist laut Meldung gelegentlich rot:
@@ -3868,6 +3859,15 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Synchronisieren), ohne zusätzlich auf einen bis zu 5 Minuten alten Speicher
   zu warten. Der Preis: im Protokoll etwa 6 volle Durchläufe in einer Minute
   Benutzung; nach 218 halten sie nichts mehr auf.
+
+#### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
+
+- [x] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Mit #123
+      sagt der Desktop-Mitzieh-Dialog eine Schreib-Ablehnung über
+      eventWriteErrorMessage als Satz; #124 prüft es: Lehnt Exchange das
+      Übertragen auch nach dem Ja noch einmal ab ('exceptions-would-be-lost'),
+      steht der deutsche Satz im Fehlerhinweis, nicht das Token, und Aperio
+      fragt kein zweites Mal. Das Handy übersetzt über writeErrorMessage.
 
 ### 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität) — erledigt
 

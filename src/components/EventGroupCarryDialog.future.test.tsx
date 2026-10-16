@@ -569,6 +569,20 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
     expect(document.activeElement).toBe(note);
   });
 
+  it('says a refusal the yes meets again as a sentence, and does not ask twice', async () => {
+    const question = await carrySeries();
+    // Exchange refuses the write with the consent too: what it would lose
+    // changed since the question counted it.
+    truncateFails.current = { code: 'forbidden', message: 'exceptions-would-be-lost: slot:2:0' };
+    fireEvent.click(within(question).getByRole('button', { name: /trotzdem übertragen|carry over anyway/i }));
+    await waitFor(() => expect(calls('update_event')).toHaveLength(2));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/Beginn und Ende der Serie neu/);
+    expect(alert.textContent).toMatch(/2 Vorkommen, die einzeln geändert wurden/);
+    expect(alert.textContent).not.toMatch(/exceptions-would-be-lost/);
+    expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull();
+  });
+
   it('says the report the question held on Cancel: why a copy somebody else organizes was not changed', async () => {
     otherCopy.current = {
       event: { ...COPY, id: 'ev-c', calendar_id: 'team', recurrence: weekly, organized_elsewhere: true },
