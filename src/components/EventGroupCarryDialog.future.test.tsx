@@ -530,6 +530,12 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
       expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull(),
     );
     expect(calls('update_event')).toHaveLength(1);
-    expect(screen.getByText(/Nicht geändert: Privat|Not changed: Privat/)).toBeTruthy();
+    const note = screen.getByText(/Nicht geändert: Privat|Not changed: Privat/);
+    // The note takes the cursor once the question is answered, and keeps it:
+    // the question's dialog gives the focus back to the button it came from,
+    // which said nothing about the copy left out.
+    await waitFor(() => expect(document.activeElement).toBe(note));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.activeElement).toBe(note);
   });
 });

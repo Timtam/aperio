@@ -206,10 +206,12 @@ export function EventGroupCarryDialog({
   // it from inside `carry` could not work: the note does not exist yet at that
   // point, so the call found nothing and the report went unread.
   // While the question about lost occurrences is open, it has the focus; the
-  // note takes it once the question is answered.
+  // note takes it once the question is answered with Cancel — after the
+  // question's dialog gave the focus back, a microtask on. A yes starts a
+  // pass, whose own note takes it when that pass ends.
   useEffect(() => {
-    if (outcome && !lossAsk) outcomeRef.current?.focus();
-  }, [outcome, lossAsk]);
+    if (outcome && !lossAsk && !busy) queueMicrotask(() => outcomeRef.current?.focus());
+  }, [outcome, lossAsk, busy]);
 
   // After a partial carry, only what is still outstanding.
   const targets = pending ?? plan.targets;
