@@ -2365,6 +2365,37 @@ fn pattern_of(rule_xml: &str) -> &str {
     .map_or(rule_xml, |at| &rule_xml[..at])
 }
 
+/// A rule as Exchange keeps it, to tell whether an edit changes it: its parts
+/// in one order, and each `BY…` list as the set it is — the editor puts a
+/// weekday ticked off and on again last, and Exchange keeps the days as a set
+/// ([`rrule_byday_to_ews_days`]). Text the parts do not hold stays as it is.
+fn rule_as_kept(rrule: &str) -> String {
+    let body = rrule.trim();
+    let body = body.strip_prefix("RRULE:").unwrap_or(body);
+    let mut parts: Vec<String> = body
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let Some((key, value)) = part.split_once('=') else {
+                return part.to_string();
+            };
+            let key = key.trim().to_ascii_uppercase();
+            let mut values: Vec<String> = value
+                .split(',')
+                .map(|v| v.trim().to_ascii_uppercase())
+                .collect();
+            if key.starts_with("BY") {
+                values.sort();
+                values.dedup();
+            }
+            format!("{key}={}", values.join(","))
+        })
+        .collect();
+    parts.sort();
+    parts.join(";")
+}
+
 /// [`pattern_of`] without its `FirstDayOfWeek` where `rrule`'s week start
 /// changes no day it repeats on from `day`
 /// (`cal_core::series_shift::week_start_matters`): every other Tuesday from a
@@ -2454,10 +2485,10 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // once another occurrence was deleted, changes no rule here and opens
     // neither the zone nor the slot below (the sixth check of the zone PR: a
     // title-only save from such a copy was refused under 245).
-    fn written_rule_of(ev: &Event) -> Option<(&str, Option<&str>)> {
+    fn written_rule_of(ev: &Event) -> Option<(String, Option<&str>)> {
         ev.recurrence
             .as_ref()
-            .map(|rec| (rec.rrule.as_str(), rec.tzid.as_deref()))
+            .map(|rec| (rule_as_kept(&rec.rrule), rec.tzid.as_deref()))
     }
     let rule_changed = touches(EventField::Recurrence)
         && before.is_none_or(|server| written_rule_of(event) != written_rule_of(server));
@@ -10726,14 +10757,31 @@ mod tests {
         );
         let mut reordered = both_days.clone();
         reordered.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=WE,MO;COUNT=4".into();
-        let plan = planned(
-            &reordered,
-            &both_days,
-            &w_europe_zones(),
-            EventIdKind::RecurringMaster,
-        );
-        assert_eq!((plan.rewrite, plan.placement), (None, Placement::Unknown));
-        assert!(!plan.set.contains("calendar:Recurrence"), "{}", plan.set);
+        // Also where writing the rule would open the zone: an end stored in
+        // another zone (the zone-rewrite shape) and a zone Aperio cannot read.
+        // The rule is unchanged, so nothing is written but the title.
+        let end_in_utc = StoredZones {
+            start: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
+            end: Some(DayZone::Tz(chrono_tz::UTC)),
+        };
+        for zones in [w_europe_zones(), end_in_utc, StoredZones::default()] {
+            let mut renamed = reordered.clone();
+            renamed.title = "Renamed".into();
+            let plan = planned(&renamed, &both_days, &zones, EventIdKind::RecurringMaster);
+            assert_eq!(
+                (plan.rewrite, plan.placement),
+                (None, Placement::Unknown),
+                "{zones:?}"
+            );
+            for field in [
+                "calendar:Recurrence",
+                "calendar:StartTimeZone",
+                "calendar:Start\"",
+            ] {
+                assert!(!plan.set.contains(field), "{field} in {}", plan.set);
+            }
+            assert!(plan.set.contains("item:Subject"), "{}", plan.set);
+        }
         reordered.start += chrono::Duration::hours(1);
         reordered.end += chrono::Duration::hours(1);
         let plan = planned(
