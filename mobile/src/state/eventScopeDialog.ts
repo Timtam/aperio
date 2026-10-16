@@ -23,6 +23,9 @@ export interface EventScopeDialogConfig {
   notify?: { legend: string; notifyLabel: string; silentLabel: string };
   options: EventScopeOption[];
   cancelLabel: string;
+  /** Run once the dialog is gone after Cancel (or the system back), as an
+   *  option's run is: for a caller that puts the cursor somewhere then. */
+  onCancel?: () => void;
 }
 
 let emit: ((cfg: EventScopeDialogConfig) => void) | null = null;
