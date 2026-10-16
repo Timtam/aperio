@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { EventGroup } from '@aperio/shared';
 
@@ -17,7 +17,7 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
   /** The copy's own provider-kept rows, as `get_series_rows` answers. */
   const rowsOnFile: { current: unknown[] } = { current: [] };
   /** What the dialog announced, in order. */
@@ -29,6 +29,9 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, dele
   const truncateFails: { current: unknown } = { current: null };
   // Deleted occurrences the cut brought back and could not delete again.
   const truncateBack: { current: string[] | null } = { current: null };
+  /** A series write refused as one that would lose occurrences, with this
+   *  detail, unless it carries the user's yes. */
+  const lossUnlessConsent: { current: string | null } = { current: null };
   /** What deleting a copy's new part fails with, when a test says so. */
   const deleteFails: { current: unknown } = { current: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
@@ -48,6 +51,12 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, dele
     if (command === 'update_event') {
       if (truncateFails.current != null) return Promise.reject(truncateFails.current);
       const event = (payload as { event: Record<string, unknown> }).event;
+      if (lossUnlessConsent.current != null && !event.accepts_exception_loss) {
+        return Promise.reject({
+          code: 'forbidden',
+          message: `exceptions-would-be-lost: ${lossUnlessConsent.current}`,
+        });
+      }
       return Promise.resolve(
         truncateBack.current ? { ...event, deletions_not_restored: truncateBack.current } : event,
       );
@@ -60,7 +69,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, dele
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, deleteFails, announced, rowsOnFile };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -143,6 +152,7 @@ afterEach(() => {
   copyOnFile.current = null;
   truncateFails.current = null;
   truncateBack.current = null;
+  lossUnlessConsent.current = null;
   deleteFails.current = null;
   announced.length = 0;
   rowsOnFile.current = [];
@@ -466,5 +476,60 @@ describe('EventGroupCarryDialog → a whole series moved to another day (198)', 
       exceptions: ['2026-09-08T08:00:00.000Z'],
       tzid: null,
     });
+  });
+});
+
+describe('EventGroupCarryDialog → a copy whose series would lose occurrences (251)', () => {
+  const nextDay = { ...STOOD, start: '2026-08-25T08:00:00.000Z', end: '2026-08-25T09:00:00.000Z' };
+  async function carrySeries(onClose: () => void = () => {}) {
+    copyOnFile.current = {
+      ...COPY,
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: null },
+    };
+    lossUnlessConsent.current = 'slot:1:0';
+    const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
+    render(
+      <EventGroupCarryDialog
+        isOpen
+        onClose={onClose}
+        group={GROUP}
+        anchor={ANCHOR}
+        before={STOOD}
+        after={nextDay}
+        scope="series"
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
+    return screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+  }
+
+  it('asks once after the loop, by calendar, and on yes writes that copy again with the consent', async () => {
+    const onClose = vi.fn();
+    const question = await carrySeries(onClose);
+    expect(question.textContent).toMatch(/Privat/);
+    expect(question.textContent).toMatch(/ein Vorkommen, das einzeln geändert wurde/);
+    expect(calls('update_event')).toHaveLength(1);
+    expect(
+      (calls('update_event')[0][1] as { event: { accepts_exception_loss?: boolean } }).event
+        .accepts_exception_loss,
+    ).toBeFalsy();
+    fireEvent.click(within(question).getByRole('button', { name: /trotzdem übertragen|carry over anyway/i }));
+    await waitFor(() => expect(calls('update_event')).toHaveLength(2));
+    expect(
+      (calls('update_event')[1][1] as { event: { accepts_exception_loss?: boolean } }).event
+        .accepts_exception_loss,
+    ).toBe(true);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(announced.some((line) => /Eine Kopie aktualisiert|One copy updated/.test(line))).toBe(true);
+  });
+
+  it('leaves the copy among the ones not changed on Cancel, and writes nothing more', async () => {
+    const question = await carrySeries();
+    fireEvent.click(within(question).getByRole('button', { name: /^abbrechen$|^cancel$/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull(),
+    );
+    expect(calls('update_event')).toHaveLength(1);
+    expect(screen.getByText(/Nicht geändert: Privat|Not changed: Privat/)).toBeTruthy();
   });
 });
