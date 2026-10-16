@@ -1077,10 +1077,24 @@ async fn restore_deletions(
         written_clock,
         notify,
     } = restore;
+    let wall = |when: DateTime<Utc>, clock: Option<&crate::mapping::DayZone>| {
+        clock.and_then(|zone| zone.wall(when))
+    };
     // Where a deleted occurrence stands now, as far as the update itself says:
-    // moved as the first start it wrote.
+    // moved on the clocks as the first start it wrote.
     let shifted = |gone: DateTime<Utc>| match (placement, written_start) {
-        (Placement::Shifted, Some(written)) => gone + (written - before.start),
+        (Placement::Shifted, Some(written)) => {
+            let moved = wall(written, written_clock.as_ref())
+                .zip(wall(before.start, old_clock))
+                .map(|(now, then)| now - then);
+            moved_on_clocks(
+                gone,
+                old_clock,
+                written_clock.as_ref(),
+                moved,
+                written - before.start,
+            )
+        }
         _ => gone,
     };
     // The series as Exchange holds it now: its rule, first start and zone.
@@ -1129,9 +1143,6 @@ async fn restore_deletions(
             when
         }
     };
-    let wall = |when: DateTime<Utc>, clock: Option<&crate::mapping::DayZone>| {
-        clock.and_then(|zone| zone.wall(when))
-    };
     // How far the first occurrence moved on the series' clocks.
     let first_moved = wall(first, new_clock.as_ref())
         .zip(wall(before.start, old_clock))
@@ -1141,12 +1152,19 @@ async fn restore_deletions(
     // they stood: a probe of one answers "deleted" for it.
     let mut deleted_again: Vec<(u32, DateTime<Utc>)> = Vec::new();
     for &gone in deleted {
-        // Where it is expected now, roughly — the index is read from it — and
-        // exactly, by the test its start must pass: moved on the clocks as the
-        // first occurrence moved, or at its own instant.
+        // Where it is expected now — the index is read from it, and it is
+        // named there if it cannot be confirmed — and exactly, by the test its
+        // start must pass: moved on the clocks as the first occurrence moved,
+        // or at its own instant.
         let (near, moved_by) = match (placement, first_moved) {
             (Placement::Shifted, Some(moved)) => (
-                gone + (first - before.start),
+                moved_on_clocks(
+                    gone,
+                    old_clock,
+                    new_clock.as_ref(),
+                    Some(moved),
+                    first - before.start,
+                ),
                 Some((wall(gone, old_clock), moved)),
             ),
             (Placement::Same, _) => (gone, None),
@@ -1212,7 +1230,8 @@ async fn restore_deletions(
                     Ok(_) => deleted_again.push((index, start)),
                     Err(err) => {
                         tracing::warn!(target: "adapter_ews::write", %err, index, "a deleted occurrence came back and could not be deleted again");
-                        back.push(as_seen(near));
+                        // Named where it was read to stand.
+                        back.push(as_seen(start));
                     }
                 }
             }
@@ -1224,6 +1243,25 @@ async fn restore_deletions(
         }
     }
     back
+}
+
+/// Where an occurrence at `gone` stands once its series moved by `moved` on the
+/// clocks: its wall time on `old`, moved, read on `new` — as Exchange moves
+/// every occurrence of a moved series (round 6, R1-R3), so a move across a
+/// change of daylight saving time, or into a zone that changes on other days,
+/// keeps its wall time. By `utc_moved` where a clock cannot say.
+fn moved_on_clocks(
+    gone: DateTime<Utc>,
+    old: Option<&crate::mapping::DayZone>,
+    new: Option<&crate::mapping::DayZone>,
+    moved: Option<chrono::Duration>,
+    utc_moved: chrono::Duration,
+) -> DateTime<Utc> {
+    old.and_then(|zone| zone.wall(gone))
+        .zip(moved)
+        .zip(new)
+        .and_then(|((then, moved), zone)| zone.instant_of(then + moved))
+        .unwrap_or(gone + utc_moved)
 }
 
 /// How [`restore_deletions`] places and deletes, from the update it follows.

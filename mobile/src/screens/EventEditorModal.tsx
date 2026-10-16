@@ -270,6 +270,9 @@ export default function EventEditorModal({
   // the same form again with the consent, handed to that one save only, so a
   // save its own checks stop keeps none for a later one. Mirrors the desktop.
   const saveRef = useRef<(acceptsLoss?: boolean) => Promise<void>>(async () => undefined);
+  // The save the question was asked about, as it went out: the yes answers
+  // that save and no other (the fields stay editable while it is on its way).
+  const askedSaveRef = useRef<string | null>(null);
   const closeNotice = useCallback(() => {
     if (splitNotice == null || leavingNotice.current) return;
     leavingNotice.current = true;
@@ -1123,6 +1126,8 @@ export default function EventEditorModal({
     // refused the same way shows the sentence, because saying yes there would
     // write the new series a second time. Mirrors the desktop.
     let lossAskable = false;
+    let sentSave: string | null = null;
+    let consentSent = false;
     try {
       // 77a: a locked invitation writes its own reminders and nothing else.
       // The row goes back as the provider has it, so no form value — and no
@@ -1635,9 +1640,13 @@ export default function EventEditorModal({
         };
         // The consent the question gave (decisions 243-253) rides this one
         // write and nothing else; what comes back never carries it.
+        // Only when this is the save the question was about, unchanged; a save
+        // changed in the meantime is counted and asked about again.
         lossAskable = true;
+        sentSave = JSON.stringify(sent);
+        consentSent = acceptsLoss && sentSave === askedSaveRef.current;
         const updated = await updateEvent(
-          acceptsLoss ? { ...sent, accepts_exception_loss: true } : sent,
+          consentSent ? { ...sent, accepts_exception_loss: true } : sent,
           original.calendar_id,
         );
         lossAskable = false;
@@ -1736,7 +1745,8 @@ export default function EventEditorModal({
       // A save that would drop occurrences of the series asks first
       // (decisions 243-253); nothing was sent.
       const loss = exceptionsLossOf(err);
-      if (loss != null && lossAskable && !acceptsLoss && shown.current) {
+      if (loss != null && lossAskable && !consentSent && shown.current) {
+        askedSaveRef.current = sentSave;
         const question = exceptionsLossQuestion(loss, trimmedTitle, t);
         showEventScopeDialog({
           title: question.title,

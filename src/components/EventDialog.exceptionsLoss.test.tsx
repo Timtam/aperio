@@ -196,6 +196,38 @@ describe('EventDialog → a save that would drop occurrences of the series', () 
     await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
   });
 
+  it('asks again when the save changed while it was on its way', async () => {
+    // The yes answers the save the question was about. A save changed in the
+    // meantime goes out without the consent, is counted again, and asked
+    // about again; only the yes to that question sends it.
+    let refuse = () => {};
+    answers.push(
+      () =>
+        new Promise((_, reject) => {
+          refuse = () =>
+            reject({ code: 'forbidden', message: 'exceptions-would-be-lost: slot:1:0' });
+        }),
+    );
+    answers.push(refusal('slot:1:2'));
+    await openAndSave();
+    const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
+    fireEvent.change(title, { target: { value: 'Teamrunde neu' } });
+    refuse();
+    let dialog = await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /trotzdem speichern/i }));
+    await waitFor(() => expect(updatesSent().length).toBe(2));
+    expect(updatesSent()[1].accepts_exception_loss).toBeFalsy();
+    expect(updatesSent()[1].title).toBe('Teamrunde neu');
+
+    // Asked again, with what this save loses.
+    dialog = await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
+    expect(dialog.textContent).toMatch(/2 gelöschte Vorkommen/);
+    fireEvent.click(within(dialog).getByRole('button', { name: /trotzdem speichern/i }));
+    await waitFor(() => expect(updatesSent().length).toBe(3));
+    expect(updatesSent()[2].accepts_exception_loss).toBe(true);
+    expect(updatesSent()[2].title).toBe('Teamrunde neu');
+  });
+
   it('saves anyway where the web view has no requestSubmit', async () => {
     // WebKit before Safari 16 (macOS Catalina's web view) has none.
     const requestSubmit = HTMLFormElement.prototype.requestSubmit;

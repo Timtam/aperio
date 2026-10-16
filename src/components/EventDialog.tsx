@@ -661,6 +661,9 @@ export function EventDialog({
    * form again with the consent, handed to that one submit only.
    */
   const [lossAsk, setLossAsk] = useState<ExceptionsLoss | null>(null);
+  // The save the question was asked about, as it went out: the yes answers
+  // that save and no other (the fields stay editable while it is on its way).
+  const askedSaveRef = useRef<string | null>(null);
   const lossQuestion = lossAsk && exceptionsLossQuestion(lossAsk, form.title.trim(), t);
   // Closing the notice goes on — once. It stays until the dialog closes or the
   // carry replaces it, so the form never comes back in between with a live
@@ -1255,6 +1258,8 @@ export function EventDialog({
       // write the new series a second time; the copies' writes show it too,
       // until the carry asks once for all of them (decision 251).
       let lossAskable = false;
+      let sentSave: string | null = null;
+      let consentSent = false;
       try {
         // The reminders list to send to the server. When
         // `keepRemindersAsDefault` is still true, the editor was never
@@ -1937,9 +1942,13 @@ export function EventDialog({
           // The consent the question gave (decisions 243-253) rides this one
           // write and nothing else: `updated` goes on to the carry offer, and
           // what comes back never carries it.
+          // Only when this is the save the question was about, unchanged; a
+          // save changed in the meantime is counted and asked about again.
           lossAskable = true;
+          sentSave = JSON.stringify(updated);
+          consentSent = acceptsLoss && sentSave === askedSaveRef.current;
           const saved = await apiUpdateEvent(
-            acceptsLoss ? { ...updated, accepts_exception_loss: true } : updated,
+            consentSent ? { ...updated, accepts_exception_loss: true } : updated,
             event.calendar_id,
           );
           lossAskable = false;
@@ -2046,7 +2055,8 @@ export function EventDialog({
         // A save that would drop occurrences of the series asks first
         // (decisions 243-253), in a dialog over the form; nothing was sent.
         const loss = exceptionsLossOf(err);
-        if (loss && lossAskable && !acceptsLoss && shownRef.current) {
+        if (loss && lossAskable && !consentSent && shownRef.current) {
+          askedSaveRef.current = sentSave;
           setLossAsk(loss);
           return;
         }

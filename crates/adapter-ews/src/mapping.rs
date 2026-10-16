@@ -3010,6 +3010,20 @@ impl DayZone {
             Self::Rules(rules) => rules.midnight(day),
         }
     }
+
+    /// The instant a wall time stands at: the first one where the clock
+    /// reaches it twice, and an hour later where a change skips it, as a
+    /// series' occurrence is pushed past the gap.
+    pub(crate) fn instant_of(&self, local: NaiveDateTime) -> Option<DateTime<Utc>> {
+        let at = |local: NaiveDateTime| match self {
+            Self::Tz(tz) => tz
+                .from_local_datetime(&local)
+                .earliest()
+                .map(|l| l.with_timezone(&Utc)),
+            Self::Rules(rules) => rules.instant_of(local),
+        };
+        at(local).or_else(|| at(local + chrono::Duration::hours(1)))
+    }
 }
 
 /// Midnight on `day` in a chrono zone, the first hour after it where a

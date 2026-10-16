@@ -3939,6 +3939,82 @@ mod server_zone_tests {
         }
     }
 
+    /// A deleted occurrence that cannot be deleted again is named where it
+    /// stands, on the series' clock. Mondays at 23:30 in Berlin, six times
+    /// from 19 October (summer time), with the 9 November deleted, moved a
+    /// week later — across the end of summer time, so the first start moves
+    /// seven days and an hour in UTC but seven days on the wall. The deleted
+    /// one now stands on Monday 16 November at 23:30, 22:30Z; an hour later
+    /// would be Tuesday. Named there when its delete fails, and when the
+    /// series cannot be read again.
+    #[tokio::test]
+    async fn an_occurrence_that_stays_back_is_named_on_the_series_clock() {
+        let stored = with_deleted(
+            &STORED_WEEKLY_W_EUROPE
+                .replace("2026-11-02T09:00:00Z", "2026-10-19T21:30:00Z")
+                .replace("2026-11-02T10:00:00Z", "2026-10-19T22:30:00Z")
+                .replace("2026-11-02+01:00", "2026-10-19+02:00")
+                .replace(
+                    "<t:NumberOfOccurrences>4</t:NumberOfOccurrences>",
+                    "<t:NumberOfOccurrences>6</t:NumberOfOccurrences>",
+                ),
+            &["2026-11-09T22:30:00Z"],
+        );
+        let after = stored
+            .replace("2026-10-19T21:30:00Z", "2026-10-26T22:30:00Z")
+            .replace("2026-10-19T22:30:00Z", "2026-10-26T23:30:00Z")
+            .replace("2026-10-19+02:00", "2026-10-26+01:00")
+            .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+        let refused_delete = envelope(
+            r#"<m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Error">
+      <m:MessageText>The server is busy.</m:MessageText>
+      <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse>"#,
+        );
+        for series_reads_again in [true, false] {
+            let mut server = Server::new_async().await;
+            let (stored_answer, after_answer, refused) =
+                (stored.clone(), after.clone(), refused_delete.clone());
+            serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    refused.clone()
+                } else if let Some(index) = instance_index(body) {
+                    if index > 6 {
+                        no_occurrence("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+                    } else {
+                        // Mondays at 23:30 Berlin from 26 October: 22:30Z.
+                        let start = "2026-10-26T22:30:00Z".parse::<DateTime<Utc>>().unwrap()
+                            + chrono::Duration::weeks(i64::from(index) - 1);
+                        occurrence(&start.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                    }
+                } else if was_updated && !series_reads_again {
+                    "not a SOAP answer".into()
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.start += chrono::Duration::days(7) + chrono::Duration::hours(1);
+                e.end += chrono::Duration::days(7) + chrono::Duration::hours(1);
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            let named: DateTime<Utc> = "2026-11-16T22:30:00Z".parse().unwrap();
+            assert_eq!(
+                saved.deletions_not_restored,
+                [named],
+                "series reads again: {series_reads_again}"
+            );
+        }
+    }
+
     /// Decision 248 through the adapter: a series whose copy cannot be read is
     /// not written blind — what it holds, and so what a rewrite drops, is
     /// unknown. Nothing is sent, and the refusal says so.
