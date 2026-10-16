@@ -286,7 +286,8 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   landed. A read that failed on the sign-in or found the item gone keeps its
   own error (`Authentication`, `NotFound`; `names_sign_in_or_gone`), as the
   same edit of a timed appointment reports it: a retry mends neither. A
-  save that leaves the day alone still goes out.
+  single's save that leaves the day alone still goes out; a series head
+  whose copy cannot be read is refused whatever the save changes (248).
 - **Zone definitions.** `StartTimeZone` and `EndTimeZone` carry the zone's
   full definition (periods with their bias, yearly changes, eras from
   absolute transitions). Both item parsers read it onto its own boundary
