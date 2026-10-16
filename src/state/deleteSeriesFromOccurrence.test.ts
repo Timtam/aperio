@@ -12,14 +12,14 @@ import type { CalendarEvent } from '../api/types';
  */
 
 const { invokeMock, onFile } = vi.hoisted(() => {
-  const onFile: { master: unknown; rows: unknown[] } = { master: null, rows: [] };
+  const onFile: { master: unknown; rows: unknown[]; saved?: unknown } = { master: null, rows: [] };
   const invokeMock = vi.fn((command: string, _payload?: unknown) => {
     void _payload;
     if (command === 'get_event_by_id') return Promise.resolve(onFile.master);
     if (command === 'get_series_rows') {
       return Promise.resolve({ rows: onFile.rows, reach: { kind: 'complete' } });
     }
-    if (command === 'update_event') return Promise.resolve(onFile.master);
+    if (command === 'update_event') return Promise.resolve(onFile.saved ?? onFile.master);
     return Promise.resolve(null);
   });
   return { invokeMock, onFile };
@@ -58,6 +58,7 @@ afterEach(() => {
   invokeMock.mockClear();
   onFile.master = null;
   onFile.rows = [];
+  onFile.saved = undefined;
 });
 
 describe('deleteThisAndFuture', () => {
@@ -84,6 +85,25 @@ describe('deleteThisAndFuture', () => {
     expect(sent.id).toBe('series-1');
     expect(sent.recurrence?.rrule).toBe('FREQ=WEEKLY;UNTIL=20260824T085959Z');
     expect(sent.truncate_tail_overrides).toBe(true);
+  });
+
+  it('hands the cut, as the provider saved it, to the caller (253)', async () => {
+    // Cutting the series can make Exchange bring deleted occurrences back;
+    // the ones it could not delete again ride on the saved series, for the
+    // caller to say. A delete of the whole series cuts nothing.
+    onFile.master = MASTER;
+    onFile.saved = { ...MASTER, deletions_not_restored: ['2026-08-17T09:00:00Z'] };
+    const { deleteThisAndFuture } = await import('./deleteSeriesFromOccurrence');
+    const heard: CalendarEvent[] = [];
+    const cut = '2026-08-24T09:00:00.000Z';
+    await deleteThisAndFuture(occurrenceAt(cut), cut, false, (saved) => heard.push(saved));
+    expect(heard.map((saved) => saved.deletions_not_restored)).toEqual([['2026-08-17T09:00:00Z']]);
+
+    heard.length = 0;
+    await deleteThisAndFuture(occurrenceAt(MASTER.start), MASTER.start, false, (saved) =>
+      heard.push(saved),
+    );
+    expect(heard).toEqual([]);
   });
 
   it('keeps the head when an earlier occurrence was changed elsewhere, not deleted', async () => {

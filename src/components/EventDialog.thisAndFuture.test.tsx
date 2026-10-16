@@ -30,11 +30,13 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
     series: unknown;
     groups: unknown[];
     truncateFails: unknown;
+    truncateBack: string[] | null;
     deleteFails: unknown;
   } = {
     series: null,
     groups: [],
     truncateFails: null,
+    truncateBack: null,
     deleteFails: null,
   };
   const openEventGroupCarry = vi.fn();
@@ -43,7 +45,11 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
       // The truncate of a split: the only update these tests make after a
       // create.
       if (onFile.truncateFails != null) return Promise.reject(onFile.truncateFails);
-      return Promise.resolve((payload as { event: unknown }).event);
+      const event = (payload as { event: Record<string, unknown> }).event;
+      // Deleted occurrences the cut brought back and could not delete again.
+      return Promise.resolve(
+        onFile.truncateBack ? { ...event, deletions_not_restored: onFile.truncateBack } : event,
+      );
     }
     if (command === 'create_event') {
       const request = (payload as { request: Record<string, unknown> }).request;
@@ -170,6 +176,7 @@ afterEach(() => {
   onFile.series = null;
   onFile.groups = [];
   onFile.truncateFails = null;
+  onFile.truncateBack = null;
   onFile.deleteFails = null;
   openEventGroupCarry.mockClear();
   announced.length = 0;
@@ -422,6 +429,21 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     });
   });
 
+  it('says, not asks, when cutting the old one would drop its occurrences (246, 247)', async () => {
+    // Saying yes would create the new series a second time: the cut's
+    // refusal is the sentence, and the new series is taken back as for any
+    // refusal.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateFails = { code: 'forbidden', message: 'exceptions-would-be-lost: zone:1:0' };
+    await open(JULY);
+    save();
+    await screen.findByText(/andere Zeitzone .* Es wurde nichts geändert/);
+    expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull();
+    expect(calls('delete_event')).toHaveLength(1);
+    expect(calls('create_event')).toHaveLength(1);
+  });
+
   it('keeps both, counts the change written and says so on screen when the cut may have landed (144-146)', async () => {
     // The answer was lost: the old series may already end at the cutoff, and
     // deleting the new one would lose everything from there. The new series
@@ -452,6 +474,26 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     expect(onClose).not.toHaveBeenCalled();
 
     // Closing it goes on as a save would: no copies to carry, so away.
+    fireEvent.click(screen.getByText(/^(Schließen|Close)$/, { selector: 'button.form__action' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('names the deleted occurrences the cut brought back and could not delete again (253)', async () => {
+    // Cutting the old series can make Exchange bring deleted occurrences back
+    // (a zone it writes again); the ones Aperio could not delete again are
+    // said on screen, focused, and the editor goes on once it is closed.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.truncateBack = ['2026-06-22T07:00:00Z'];
+    const onClose = vi.fn();
+    await open(JULY, onClose);
+    save();
+    const said = await screen.findByText(/zurückgebracht|brought back/);
+    expect(said.textContent).toMatch(/Teamrunde/);
+    expect(said.textContent).toMatch(/22\. Juni 2026|June 22, 2026/);
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    expect(onClose).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByText(/^(Schließen|Close)$/, { selector: 'button.form__action' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });

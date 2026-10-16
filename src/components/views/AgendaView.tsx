@@ -19,6 +19,7 @@ import {
   groupBadge,
   eventInstanceKey,
   type CollapsedRow,
+  withDeletionsNotRestored,
 } from '@aperio/shared';
 import {
   expandToDayOccurrences,
@@ -59,7 +60,7 @@ import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
  * `aria-hidden` — purely sighted-user affordance.
  */
 export function AgendaView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { anchor } = useViewState();
   const fmt = useDateFormat();
@@ -174,11 +175,21 @@ export function AgendaView() {
         } else if (scope === 'this_and_future' && occIso) {
           // At the first occurrence there is nothing to keep, and the whole
           // series goes; the sentence says which (decision 118).
-          const outcome = await deleteThisAndFuture(ev, occIso, sendCancellations);
+          // Its cut can bring deleted occurrences back too (253): any that
+          // could not be deleted again are said with it.
+          const cut: { back?: readonly string[] } = {};
+          const outcome = await deleteThisAndFuture(ev, occIso, sendCancellations, (saved) => {
+            cut.back = saved.deletions_not_restored;
+          });
           announce(
-            t(thisAndFutureDeletedKey(outcome, sendCancellations), {
-              title: ev.title,
-            }),
+            withDeletionsNotRestored(
+              t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+                title: ev.title,
+              }),
+              cut.back,
+              i18n.language,
+              t,
+            ),
           );
         } else {
           await deleteEventById(seriesIdOf(ev), ev.calendar_id, sendCancellations);
@@ -202,7 +213,7 @@ export function AgendaView() {
         }
       }
     },
-    [announce, t, invalidateData],
+    [announce, t, i18n.language, invalidateData],
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {

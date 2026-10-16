@@ -315,6 +315,8 @@ mod tests {
             attendees: vec!["Bob <bob@x>".into()],
             send_invitations: false,
             truncate_tail_overrides: false,
+            accepts_exception_loss: false,
+            deletions_not_restored: Vec::new(),
             created_at: at,
             updated_at: at,
             etag: None,

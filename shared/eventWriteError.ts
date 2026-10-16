@@ -8,6 +8,11 @@
 // read out in English whatever language the app ran in.
 
 import type { WriteRefusal } from './generated/WriteRefusal';
+import {
+  exceptionsLossSentences,
+  parseExceptionsLoss,
+  type ExceptionsLoss,
+} from './exceptionsLoss';
 
 /** The sentence each refusal reads as. Typed by the generated union, so a new
  *  refusal in the core is a compile error here and not an English sentence in
@@ -98,6 +103,17 @@ export function eventWriteRefusal(
 }
 
 /**
+ * The loss a refused save asks about (decisions 243-253): what it would
+ * rewrite and how many occurrences it would lose; `null` for any other error.
+ */
+export function exceptionsLossOf(err: unknown): ExceptionsLoss | null {
+  const refusal = eventWriteRefusal(err);
+  return refusal?.refusal === 'exceptions-would-be-lost'
+    ? parseExceptionsLoss(refusal.detail)
+    : null;
+}
+
+/**
  * The codes with which a host says a write was turned down as a whole: the
  * copy on the server moved on, the account may not, the write made no sense,
  * the event is gone, the sign-in failed, the provider cannot do it.
@@ -139,6 +155,12 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
  * swallowed.
  */
 export function eventWriteErrorMessage(err: unknown, t: Translate): string {
+  // A save that would drop occurrences of a series, on a path that does not
+  // ask: what it would rewrite and lose, and that nothing happened.
+  const loss = exceptionsLossOf(err);
+  if (loss) {
+    return t('dialogs.event.writeError.exceptionsWouldBeLostDetail', exceptionsLossSentences(loss, t));
+  }
   const refusal = eventWriteRefusal(err);
   if (refusal) {
     return t(refusal.key, { detail: refusal.detail });

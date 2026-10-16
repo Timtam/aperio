@@ -10,6 +10,7 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
   thisAndFutureDeletedKey,
+  withDeletionsNotRestored,
   type NoticeCalendar,
 } from '@aperio/shared';
 
@@ -39,13 +40,16 @@ type Tr = (key: string, vars?: Record<string, unknown>) => string;
  *  says who informs the attendees where it always does (decision 80a). An
  *  attendee's copy, a non-meeting event, or a non-scheduling provider gets a
  *  plain delete (no cancellation). Every calendar surface routes here so the
- *  logic lives in one place. */
+ *  logic lives in one place.
+ *
+ *  `opts.language` names the days of deleted occurrences a delete from one
+ *  occurrence on brought back and could not delete again (decision 253). */
 export function confirmDeleteEvent(
   ev: CalendarEvent,
   t: Tr,
   onSuccess: (message: string) => void,
   onError: (message: string) => void,
-  opts: { calendar?: NoticeCalendar | null } = {},
+  opts: { calendar?: NoticeCalendar | null; language?: string } = {},
 ): void {
   const series = seriesIdOf(ev);
   // Non-null only for an expanded occurrence of a recurring series.
@@ -92,14 +96,26 @@ export function confirmDeleteEvent(
 
   // Remove this occurrence AND all following ones: truncate the series, or
   // delete it when nothing comes before (decision 118).
-  const removeThisAndFuture = (sendCancellations: boolean) =>
+  // Its cut can bring deleted occurrences back too (253): any that could not
+  // be deleted again are said with it. Mirrors the desktop.
+  const removeThisAndFuture = (sendCancellations: boolean) => {
+    const cut: { back?: readonly string[] } = {};
     run(
-      () => deleteThisAndFuture(ev, occurrence!, sendCancellations),
-      (outcome) =>
-        t(thisAndFutureDeletedKey(outcome, sendCancellations), {
-          title: ev.title,
+      () =>
+        deleteThisAndFuture(ev, occurrence!, sendCancellations, (saved) => {
+          cut.back = saved.deletions_not_restored;
         }),
+      (outcome) =>
+        withDeletionsNotRestored(
+          t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+            title: ev.title,
+          }),
+          cut.back,
+          opts.language ?? 'en',
+          t,
+        ),
     );
+  };
 
   // Recurring-occurrence delete. Rendered as an in-app dialog (NOT Alert): the
   // organizer form pairs a notify/silent radio (default: notify) with three scope

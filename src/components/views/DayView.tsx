@@ -105,6 +105,9 @@ import {
   compactDaySummary,
   spokenDaySummary,
   type DayLog,
+  eventWriteErrorMessage,
+  deletionsNotRestoredSentence,
+  withDeletionsNotRestored,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -227,7 +230,7 @@ function OutsideBand({
  * fall back to browse mode, which would break arrow navigation.
  */
 export function DayView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor } = useViewState();
@@ -778,20 +781,27 @@ export function DayView() {
     targetDayKey: string,
   ) => {
     try {
+      let back: string[] | undefined;
       const moved = await moveEventToSlot(
         ev,
         targetDayKey,
         minute,
         scope,
         calendarById.get(ev.calendar_id),
+        (saved) => {
+          back = saved.deletions_not_restored;
+        },
       );
       if (!moved) return; // dropped back on its own time — nothing happened
+      // Deleted occurrences of the series that came back and could not be
+      // deleted again (decision 253) are said in place of the plain move.
       announce(
-        t('views.eventMovedToTime', {
-          title: ev.title,
-          date: fmt.format(new Date(`${targetDayKey}T00:00:00`), 'PPP'),
-          time: clockAt(minute),
-        }),
+        deletionsNotRestoredSentence(back, ev.title, i18n.language, t) ??
+          t('views.eventMovedToTime', {
+            title: ev.title,
+            date: fmt.format(new Date(`${targetDayKey}T00:00:00`), 'PPP'),
+            time: clockAt(minute),
+          }),
       );
       invalidateData();
     } catch (err) {
@@ -825,9 +835,9 @@ export function DayView() {
         announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
         return;
       }
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      // In words, a provider's refusal included (decisions 243-253: a move
+      // that would drop occurrences of the series says what and how many).
+      announce(eventWriteErrorMessage(err, t));
     }
   };
 
@@ -946,11 +956,21 @@ export function DayView() {
         } else if (scope === 'this_and_future' && occIso) {
           // At the first occurrence there is nothing to keep, and the whole
           // series goes; the sentence says which (decision 118).
-          const outcome = await deleteThisAndFuture(ev, occIso, sendCancellations);
+          // Its cut can bring deleted occurrences back too (253): any that
+          // could not be deleted again are said with it.
+          const cut: { back?: readonly string[] } = {};
+          const outcome = await deleteThisAndFuture(ev, occIso, sendCancellations, (saved) => {
+            cut.back = saved.deletions_not_restored;
+          });
           announce(
-            t(thisAndFutureDeletedKey(outcome, sendCancellations), {
-              title: ev.title,
-            }),
+            withDeletionsNotRestored(
+              t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+                title: ev.title,
+              }),
+              cut.back,
+              i18n.language,
+              t,
+            ),
           );
         } else {
           await deleteEventById(seriesIdOf(ev), ev.calendar_id, sendCancellations);
@@ -976,7 +996,7 @@ export function DayView() {
         }
       }
     },
-    [announce, t, invalidateData],
+    [announce, t, i18n.language, invalidateData],
   );
 
   /** Someone else's meeting does not move: said before a scope question

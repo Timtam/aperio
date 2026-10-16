@@ -202,7 +202,7 @@ pub use types::{
     RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
     TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };
-pub use write_refusal::WriteRefusal;
+pub use write_refusal::{SeriesRewrite, WriteRefusal};
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
     zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,

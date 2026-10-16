@@ -4,6 +4,7 @@ import {
   eventWriteErrorMessage,
   eventWriteFailureReason,
   eventWriteRefusal,
+  exceptionsLossOf,
   writeNeverLanded,
 } from '@aperio/shared';
 import i18n from '../i18n';
@@ -224,20 +225,23 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
   });
 });
 
-describe("a zone switch that would drop a series' exceptions", () => {
-  it('reads as its own refusal, behind the wrapper too, and as nothing written', () => {
-    // Decision 245: Exchange drops a series' changed and deleted occurrences
-    // when its start and end are written again, and a zone switch that moves
-    // the clock writes them, so nothing is sent.
-    const desktop = command('forbidden', 'exceptions-would-be-lost: zone');
+describe('a save that would drop occurrences of a series', () => {
+  it('reads as its own refusal, behind the wrapper too, says what and how many, and as nothing written', () => {
+    // Decisions 243-253: Exchange drops a series' changed and deleted
+    // occurrences when its start and end, its zone's clock or its pattern are
+    // written again. Without consent nothing is sent; a path that does not ask
+    // says what the save would rewrite and lose.
+    const desktop = command('forbidden', 'exceptions-would-be-lost: zone:1:0');
     const phone = new Error(
-      "Calling the 'updateEventJson' function has failed\n→ Caused by: exceptions-would-be-lost: zone",
+      "Calling the 'updateEventJson' function has failed\n\u2192 Caused by: exceptions-would-be-lost: zone:1:0",
     );
     for (const err of [desktop, phone]) {
       expect(eventWriteRefusal(err)?.refusal).toBe('exceptions-would-be-lost');
+      expect(exceptionsLossOf(err)).toEqual({ rewrite: 'zone', changed: 1, deleted: 0 });
       expect(eventWriteErrorMessage(err, t)).toBe(
-        'Diese Änderung würde die Zeitzone der Serie wechseln, und dabei verwirft ' +
-          'Exchange ihre geänderten und gelöschten Vorkommen. Es wurde nichts geändert.',
+        'Diese Änderung gibt der Serie eine andere Zeitzone und schreibt dafür Beginn und Ende neu. ' +
+          'Exchange verwirft dabei ein Vorkommen, das einzeln geändert wurde: Es nimmt wieder ' +
+          'die Angaben der Serie an. Es wurde nichts geändert.',
       );
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/exceptions-would-be-lost/);
     }
@@ -245,6 +249,11 @@ describe("a zone switch that would drop a series' exceptions", () => {
       'Exchange würde dabei ihre geänderten und gelöschten Vorkommen verwerfen',
     );
     expect(writeNeverLanded(desktop)).toBe(true);
+    // A detail this build cannot read keeps the plain sentence.
+    expect(eventWriteErrorMessage(command('forbidden', 'exceptions-would-be-lost: zone'), t)).toBe(
+      'Diese Änderung würde die Serie neu schreiben, und dabei verwirft Exchange ihre einzeln ' +
+        'geänderten und gelöschten Vorkommen. Es wurde nichts geändert.',
+    );
   });
 });
 
@@ -280,5 +289,14 @@ describe('any write on the phone, not only the event editor', () => {
     const other = new Error('network down');
     expect(writeErrorMessage(other, t)).toBe('network down');
     expect(writeErrorMessage('plain', t)).toBe('plain');
+    // A copy whose series would lose occurrences says what and how many, as
+    // the desktop does (decisions 243-253).
+    const loss = new Error(
+      "Calling the 'updateEventJson' function has failed\n→ Caused by: exceptions-would-be-lost: slot:2:0",
+    );
+    expect(writeErrorMessage(loss, t)).toBe(
+      'Diese Änderung schreibt Beginn und Ende der Serie neu. Exchange verwirft dabei 2 Vorkommen, ' +
+        'die einzeln geändert wurden: Sie nehmen wieder die Angaben der Serie an. Es wurde nichts geändert.',
+    );
   });
 });

@@ -273,6 +273,8 @@ fn map_event(
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
+        accepts_exception_loss: false,
+        deletions_not_restored: Vec::new(),
         id,
         calendar_id: calendar_id.to_string(),
         title: summary,

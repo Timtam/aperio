@@ -540,7 +540,27 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     ]);
   });
 
-  it('a new time of day keeps the days and moves the exceptions to that time', async () => {
+  it('hands the saved series to the caller, so it can name deleted occurrences that came back (253)', async () => {
+    invokeMock.mockImplementation((cmd: string, payload?: { event?: object }) =>
+      Promise.resolve(
+        cmd === 'get_event_by_id'
+          ? master
+          : cmd === 'update_event'
+            ? { ...payload?.event, deletions_not_restored: ['2026-07-14T07:00:00.000Z'] }
+            : {},
+      ),
+    );
+    const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
+    const saved: CalendarEvent[] = [];
+    expect(
+      await moveEventToDay(occ, localKey(occ.start, 1), 'series', null, (event) => saved.push(event)),
+    ).toBe(true);
+    expect(saved.map((event) => event.deletions_not_restored)).toEqual([
+      ['2026-07-14T07:00:00.000Z'],
+    ]);
+  });
+
+    it('a new time of day keeps the days and moves the exceptions to that time', async () => {
     const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
     expect(await moveEventToSlot(occ, localKey(occ.start), 10 * 60 + 30, 'series')).toBe(true);
     const row = written();

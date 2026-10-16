@@ -194,8 +194,10 @@ pub fn begin_series_anew(
 /// weekdays share one. So the rule is walked twice over two of its periods
 /// from the start — once with its week start, once with Monday's — and they
 /// must agree. A part this cannot read keeps the week start: by day is the
-/// side that never shifts a deletion onto an occurrence nobody deleted.
-pub(crate) fn week_start_matters(rrule: &str, start: NaiveDate) -> bool {
+/// side that never shifts a deletion onto an occurrence nobody deleted. An
+/// adapter asks it too, to tell whether a rule its provider spells with
+/// another week start is still the same series.
+pub fn week_start_matters(rrule: &str, start: NaiveDate) -> bool {
     let Ok((_, parts)) = parse_parts(rrule) else {
         return true;
     };

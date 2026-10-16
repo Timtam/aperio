@@ -47,6 +47,7 @@ export async function deleteThisAndFuture(
   ev: CalendarEvent,
   occurrenceIso: string,
   sendCancellations: boolean,
+  onSeriesSaved?: (saved: CalendarEvent) => void,
 ): Promise<SeriesDeleteOutcome> {
   const seriesId = seriesIdOf(ev);
   const master = await getEventById(seriesId, ev.calendar_id);
@@ -75,7 +76,7 @@ export async function deleteThisAndFuture(
     await deleteEventById(seriesId, ev.calendar_id, sendCancellations);
     return 'deleted';
   }
-  await updateEvent({
+  const saved = await updateEvent({
     ...master,
     recurrence: { ...master.recurrence, rrule: plan.headRule },
     send_invitations: sendCancellations,
@@ -83,5 +84,8 @@ export async function deleteThisAndFuture(
     // (CalDAV/iCloud + Google) so it doesn't survive as a ghost occurrence.
     truncate_tail_overrides: true,
   });
+  // The cut as the provider saved it: deleted occurrences it brought back and
+  // could not delete again ride on it (decision 253), for the caller to say.
+  onSeriesSaved?.(saved);
   return 'truncated';
 }

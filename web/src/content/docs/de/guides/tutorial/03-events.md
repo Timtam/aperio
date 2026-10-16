@@ -238,13 +238,17 @@ Feld mit `Tab` erreichst.
 > **Einzeln geänderte oder gelöschte Termine:** Verschiebst du eine ganze Serie
 > auf einen anderen Tag oder eine andere Uhrzeit, per Ziehen oder im Dialog,
 > bleiben manche Einzeltermine an ihrem alten Datum hängen: Termine, die in
-> einem externen Kalender (iCloud, Google, Exchange) für sich geändert wurden,
-> und Termine, die in einem Google-Kalender gelöscht wurden, auch wenn du sie
-> in Aperio gelöscht hast (womöglich auch in Exchange). Nach dem Verschieben
-> kann ein gelöschter Termin wieder auftauchen, ein geänderter doppelt
-> erscheinen, und an der alten Stelle kann ein anderer Termin fehlen. Aperio
-> kann das nicht reparieren. Sieh dir die Serie danach in der App des Kalenders
-> an; dort lassen sich solche Einzeländerungen rückgängig machen.
+> einem externen Kalender (iCloud, Google) für sich geändert wurden, und
+> Termine, die in einem Google-Kalender gelöscht wurden, auch wenn du sie in
+> Aperio gelöscht hast. Nach dem Verschieben kann ein gelöschter Termin wieder
+> auftauchen, ein geänderter doppelt erscheinen, und an der alten Stelle kann
+> ein anderer Termin fehlen. Aperio kann das nicht reparieren. Sieh dir die
+> Serie danach in der App des Kalenders an; dort lassen sich solche
+> Einzeländerungen rückgängig machen. Bei Exchange fragt Aperio im Editor
+> vorher: Exchange verwirft beim Verschieben jeden einzeln geänderten Termin,
+> er nimmt wieder die Angaben der Serie an, und gelöschte Termine löscht Aperio
+> danach selbst wieder. Ziehst du eine solche Serie mit geänderten Terminen,
+> fragt Aperio dort noch nicht; es ändert dann nichts und sagt, warum.
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,

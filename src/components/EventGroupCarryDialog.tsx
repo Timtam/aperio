@@ -19,6 +19,8 @@ import {
   type CarryableFields,
   type CarryScope,
   type EventGroup,
+  eventWriteErrorMessage,
+  deletionsNotRestoredSentence,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -31,7 +33,6 @@ import {
   getEventById,
   getSeriesRows,
   groupEvents,
-  isCommandError,
   ungroupEvent,
   updateEvent,
   type NewGroupMember,
@@ -207,6 +208,18 @@ export function EventGroupCarryDialog({
     const failed: CarryTarget[] = [];
     // Copies whose series may now show twice from the cut, said in words.
     const unsure: string[] = [];
+    // A copy whose series got deleted occurrences back that could not be
+    // deleted again (decision 253): saved, and said with this pass's doubts,
+    // by its calendar.
+    const noteBack = (saved: CalendarEvent, calendarId: string) => {
+      const sentence = deletionsNotRestoredSentence(
+        saved.deletions_not_restored,
+        saved.title,
+        i18n.language,
+        t,
+      );
+      if (sentence) unsure.push(`${calendarName(calendarId)}: ${sentence}`);
+    };
     // Copies somebody else organizes: among the ones that did not change, and
     // the report says why (77a).
     const lockedOut: CarryTarget[] = [];
@@ -364,7 +377,7 @@ export function EventGroupCarryDialog({
             // views and still ringing. It is rewritten in place instead — its
             // id, and everything kept under it, stay — and like a single it
             // leaves the group of heads for the new one.
-            await updateEvent(
+            const savedWhole = await updateEvent(
               {
                 ...row,
                 // What the copy repeats by from its cut on — its rule moved
@@ -382,6 +395,7 @@ export function EventGroupCarryDialog({
               },
               target.calendar_id,
             );
+            noteBack(savedWhole, target.calendar_id);
             await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
             );
@@ -430,8 +444,11 @@ export function EventGroupCarryDialog({
                     // verbatim so both halves expand alike.
                     { preserveRecurrenceZone: true },
                   ),
-                truncate: (headRule) =>
-                  updateEvent(
+                // The cut can make the provider bring deleted occurrences
+                // back as well (a zone it writes again, 247); any it could not
+                // delete again are said with this pass's doubts (253).
+                truncate: async (headRule) => {
+                  const cut = await updateEvent(
                     {
                       ...current,
                       recurrence: { ...currentRecurrence, rrule: headRule },
@@ -442,7 +459,9 @@ export function EventGroupCarryDialog({
                       truncate_tail_overrides: true,
                     },
                     target.calendar_id,
-                  ),
+                  );
+                  noteBack(cut, target.calendar_id);
+                },
                 removeTail: (tail) =>
                   deleteEventById(tail.id, tail.calendar_id, false),
               },
@@ -489,7 +508,7 @@ export function EventGroupCarryDialog({
                   (await readSeriesRows(current, current.start, getSeriesRows)).rows,
                 )
               : null;
-          await updateEvent(
+          const savedSeries = await updateEvent(
             wholePlan?.kind === 'whole'
               ? {
                   ...next,
@@ -505,6 +524,7 @@ export function EventGroupCarryDialog({
               : next,
             target.calendar_id,
           );
+          noteBack(savedSeries, target.calendar_id);
         }
         done += 1;
       } catch (err) {
@@ -531,8 +551,10 @@ export function EventGroupCarryDialog({
               reason: t(`dialogs.moveScope.refusal.${err.reason}`),
             }),
           );
-        } else if (isCommandError(err)) {
-          setError(err.message);
+        } else {
+          // In words, a provider's refusal included: a copy whose series would
+          // lose occurrences says what and how many (decisions 243-253).
+          setError(eventWriteErrorMessage(err, t));
         }
       }
     }

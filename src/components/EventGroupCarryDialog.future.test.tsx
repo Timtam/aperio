@@ -17,7 +17,7 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
   /** The copy's own provider-kept rows, as `get_series_rows` answers. */
   const rowsOnFile: { current: unknown[] } = { current: [] };
   /** What the dialog announced, in order. */
@@ -27,6 +27,8 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, annou
   const copyOnFile: { current: unknown } = { current: null };
   /** What cutting a copy's series short fails with, when a test says so. */
   const truncateFails: { current: unknown } = { current: null };
+  // Deleted occurrences the cut brought back and could not delete again.
+  const truncateBack: { current: string[] | null } = { current: null };
   /** What deleting a copy's new part fails with, when a test says so. */
   const deleteFails: { current: unknown } = { current: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
@@ -45,7 +47,10 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, annou
     }
     if (command === 'update_event') {
       if (truncateFails.current != null) return Promise.reject(truncateFails.current);
-      return Promise.resolve((payload as { event: unknown }).event);
+      const event = (payload as { event: Record<string, unknown> }).event;
+      return Promise.resolve(
+        truncateBack.current ? { ...event, deletions_not_restored: truncateBack.current } : event,
+      );
     }
     if (command === 'event_groups_for_events') {
       return Promise.resolve(groupOfAnchor.current);
@@ -55,7 +60,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, annou
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, deleteFails, announced, rowsOnFile };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, deleteFails, announced, rowsOnFile };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -137,6 +142,7 @@ afterEach(() => {
   groupOfAnchor.current = [];
   copyOnFile.current = null;
   truncateFails.current = null;
+  truncateBack.current = null;
   deleteFails.current = null;
   announced.length = 0;
   rowsOnFile.current = [];
@@ -304,6 +310,15 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     expect(doubt).toHaveLength(1);
     expect(doubt[0]).toMatch(/Eine Kopie aktualisiert|One copy updated/);
     expect(doubt[0]).toMatch(/Privat/);
+  });
+
+  it("names a copy's deleted occurrences its cut brought back and could not delete again (253)", async () => {
+    copyOnFile.current = SPLIT_COPY;
+    truncateBack.current = ['2026-08-17T08:00:00Z'];
+    await carry();
+    const said = await screen.findByText(/zurückgebracht|brought back/);
+    expect(said.textContent).toMatch(/Privat/);
+    expect(said.textContent).toMatch(/17\. August 2026|August 17, 2026/);
   });
 
   it('does not offer a copy again whose new part could not be deleted', async () => {
