@@ -226,15 +226,16 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   write the new series twice. Afterwards it deletes each placeable deleted
   occurrence again: the index the new rule gives, that index and its
   neighbours read back, and only the one whose start is exactly where it
-  should stand is deleted — with a cancellation where the update told the
-  attendees, whose series has it again. Nothing came back where the series,
-  read index by index, steps over the place — from an occurrence before it, or
-  the series' start, to one after it, or its end: it now begins or ends beyond
-  it, or a new pattern no longer has it — or where the index the rule gives is
-  a deletion Exchange kept; an index the restore has just deleted again stands
-  for the occurrence it held. An occurrence within half a day of the place
-  that is not the one expected came back unconfirmed. One it cannot confirm,
-  read or delete is named on the event that comes back
+  should stand is deleted (its schedule moved on the clocks, pushed past a gap
+  of the clock as Exchange pushes it) — with a cancellation where the update
+  told the attendees, whose series has it again. Nothing came back where the
+  series, read index by index, steps over the place — from an occurrence
+  before it, or the series' start, to one after it, or its end: it now begins
+  or ends beyond it, or a new pattern no longer has it — or where the index
+  the rule gives is a deletion Exchange kept; an index the restore has just
+  deleted again stands for the occurrence it held. An occurrence within half a
+  day of the place that is not the one expected came back unconfirmed. One it
+  cannot confirm, read or delete is named on the event that comes back
   (`Event::deletions_not_restored`), where it now stands — where the series
   cannot be read again, as the update moved it, a day if it left the series
   all-day —, and the editors, the drag and the carry dialogs say its day —

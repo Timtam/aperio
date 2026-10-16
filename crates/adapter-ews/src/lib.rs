@@ -4015,6 +4015,101 @@ mod server_zone_tests {
         }
     }
 
+    /// A move into the gap of a change of the clock. A daily Berlin series,
+    /// ten times from Monday 22 March 2027, with Sunday 28 March deleted — the
+    /// day summer time begins, when 02:00 to 03:00 does not exist — moved an
+    /// hour later. At 01:30 it lands on 02:30, which Exchange pushes to 03:30
+    /// summer time; at 02:30 (its 28 March already pushed to 03:30) it lands on
+    /// 03:30. Either way the occurrence that came back stands where it is
+    /// expected and is deleted again.
+    #[tokio::test]
+    async fn a_move_into_the_gap_of_a_clock_change_deletes_again() {
+        use chrono::TimeZone as _;
+        // The instant of `local` on day `index` (1 = 22 March) in Berlin, as
+        // Exchange places it: a skipped wall time an hour later.
+        fn on_day(index: u32, local: &str) -> DateTime<Utc> {
+            let berlin = chrono_tz::Europe::Berlin;
+            let day = chrono::NaiveDate::from_ymd_opt(2027, 3, 22).unwrap()
+                + chrono::Duration::days(i64::from(index) - 1);
+            let naive = day.and_time(chrono::NaiveTime::parse_from_str(local, "%H:%M").unwrap());
+            berlin
+                .from_local_datetime(&naive)
+                .earliest()
+                .or_else(|| {
+                    berlin
+                        .from_local_datetime(&(naive + chrono::Duration::hours(1)))
+                        .earliest()
+                })
+                .unwrap()
+                .with_timezone(&Utc)
+        }
+        let iso = |at: DateTime<Utc>| at.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        for (before, after) in [("01:30", "02:30"), ("02:30", "03:30")] {
+            let first = on_day(1, before);
+            let daily = STORED_WEEKLY_W_EUROPE
+                .replace("WeeklyRecurrence", "DailyRecurrence")
+                .replace("<t:DaysOfWeek>Monday</t:DaysOfWeek>", "")
+                .replace("<t:FirstDayOfWeek>Monday</t:FirstDayOfWeek>", "")
+                .replace("2026-11-02+01:00", "2027-03-22+01:00")
+                .replace(
+                    "<t:NumberOfOccurrences>4</t:NumberOfOccurrences>",
+                    "<t:NumberOfOccurrences>10</t:NumberOfOccurrences>",
+                )
+                .replace("2026-11-02T09:00:00Z", &iso(first))
+                .replace(
+                    "2026-11-02T10:00:00Z",
+                    &iso(first + chrono::Duration::hours(1)),
+                );
+            let stored = with_deleted(&daily, &[&iso(on_day(7, before))]);
+            let moved_first = on_day(1, after);
+            let after_answer = daily
+                .replace(
+                    &iso(first + chrono::Duration::hours(1)),
+                    &iso(moved_first + chrono::Duration::hours(1)),
+                )
+                .replace(&iso(first), &iso(moved_first))
+                .replace("ChangeKey=\"CK\"", "ChangeKey=\"CK3\"");
+            let mut server = Server::new_async().await;
+            let stored_answer = stored.clone();
+            let deleted_again = Arc::new(StdMutex::new(Vec::<u32>::new()));
+            let after_local = after.to_string();
+            let requests = serve_routed(&mut server, move |body, was_updated| {
+                if body.contains("<m:UpdateItem") {
+                    updated("CK2")
+                } else if body.contains("<m:DeleteItem") {
+                    deleted_again.lock().unwrap().extend(instance_index(body));
+                    deleted_answer()
+                } else if let Some(index) = instance_index(body) {
+                    if index > 10 {
+                        no_occurrence("ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+                    } else if deleted_again.lock().unwrap().contains(&index) {
+                        no_occurrence("ErrorCalendarOccurrenceIsDeletedFromRecurrence")
+                    } else {
+                        let at = on_day(index, &after_local);
+                        occurrence(&at.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                    }
+                } else if was_updated {
+                    after_answer.clone()
+                } else {
+                    stored_answer.clone()
+                }
+            })
+            .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let edit = opened_and_edited(&stored, |e| {
+                e.start = moved_first;
+                e.end = moved_first + chrono::Duration::hours(1);
+            });
+            let saved = adapter.update_event(edit).await.expect("update");
+            assert!(
+                saved.deletions_not_restored.is_empty(),
+                "{before}: {:?}",
+                saved.deletions_not_restored
+            );
+            assert_eq!(deleted_indexes(&requests), [Some(7)], "{before}");
+        }
+    }
+
     /// Decision 248 through the adapter: a series whose copy cannot be read is
     /// not written blind — what it holds, and so what a rewrite drops, is
     /// unknown. Nothing is sent, and the refusal says so.

@@ -1039,8 +1039,9 @@ pub async fn update_event(
 /// update brought back (decision 253), where they now stand: each moved as
 /// the series' first occurrence moved, on the clocks before and after
 /// ([`Placement::Shifted`](crate::mapping::Placement::Shifted)), or at its
-/// own instant under a new pattern ([`Placement::Same`]
-/// (crate::mapping::Placement::Same)), where that pattern still has it.
+/// own instant under a new pattern
+/// ([`Placement::Same`](crate::mapping::Placement::Same)), where that pattern
+/// still has it.
 ///
 /// Each is found as `delete_series_occurrence` finds one: the index the
 /// series' rule gives, then that index and its neighbours read from the
@@ -1080,6 +1081,17 @@ async fn restore_deletions(
     let wall = |when: DateTime<Utc>, clock: Option<&crate::mapping::DayZone>| {
         clock.and_then(|zone| zone.wall(when))
     };
+    // The wall time a deleted occurrence was scheduled at on the old clock: its
+    // day at the series' own time of day. One a change of the clock pushed
+    // past its gap was still scheduled at that time, and that schedule is what
+    // a move moves.
+    let series_time = wall(before.start, old_clock).map(|first| first.time());
+    let scheduled = |gone: DateTime<Utc>| {
+        wall(gone, old_clock).map(|at| match series_time {
+            Some(time) => at.date().and_time(time),
+            None => at,
+        })
+    };
     // Where a deleted occurrence stands now, as far as the update itself says:
     // moved on the clocks as the first start it wrote.
     let shifted = |gone: DateTime<Utc>| match (placement, written_start) {
@@ -1089,7 +1101,7 @@ async fn restore_deletions(
                 .map(|(now, then)| now - then);
             moved_on_clocks(
                 gone,
-                old_clock,
+                scheduled(gone),
                 written_clock.as_ref(),
                 moved,
                 written - before.start,
@@ -1160,12 +1172,12 @@ async fn restore_deletions(
             (Placement::Shifted, Some(moved)) => (
                 moved_on_clocks(
                     gone,
-                    old_clock,
+                    scheduled(gone),
                     new_clock.as_ref(),
                     Some(moved),
                     first - before.start,
                 ),
-                Some((wall(gone, old_clock), moved)),
+                Some((scheduled(gone), moved)),
             ),
             (Placement::Same, _) => (gone, None),
             _ => {
@@ -1173,10 +1185,15 @@ async fn restore_deletions(
                 continue;
             }
         };
+        // A moved schedule that falls into a gap of the new clock has no wall
+        // time to match: the occurrence stands where the gap pushes it, which
+        // is `near`.
         let matches = |start: DateTime<Utc>| match moved_by {
-            Some((then, moved)) => then
-                .zip(wall(start, new_clock.as_ref()))
-                .is_some_and(|(then, now)| now - then == moved),
+            Some((then, moved)) => {
+                then.zip(wall(start, new_clock.as_ref()))
+                    .is_some_and(|(then, now)| now - then == moved)
+                    || start == near
+            }
             None => start == gone,
         };
         let side_of = |start: DateTime<Utc>| {
@@ -1245,20 +1262,20 @@ async fn restore_deletions(
     back
 }
 
-/// Where an occurrence at `gone` stands once its series moved by `moved` on the
-/// clocks: its wall time on `old`, moved, read on `new` — as Exchange moves
-/// every occurrence of a moved series (round 6, R1-R3), so a move across a
-/// change of daylight saving time, or into a zone that changes on other days,
-/// keeps its wall time. By `utc_moved` where a clock cannot say.
+/// Where an occurrence at `gone`, scheduled at the wall time `then` on the old
+/// clock, stands once its series moved by `moved` on the clocks: `then`
+/// moved, read on `new` — as Exchange moves every occurrence of a moved series
+/// (round 6, R1-R3), so a move across a change of daylight saving time, or
+/// into a zone that changes on other days, keeps its wall time, and one that
+/// lands in a gap is pushed past it. By `utc_moved` where a clock cannot say.
 fn moved_on_clocks(
     gone: DateTime<Utc>,
-    old: Option<&crate::mapping::DayZone>,
+    then: Option<chrono::NaiveDateTime>,
     new: Option<&crate::mapping::DayZone>,
     moved: Option<chrono::Duration>,
     utc_moved: chrono::Duration,
 ) -> DateTime<Utc> {
-    old.and_then(|zone| zone.wall(gone))
-        .zip(moved)
+    then.zip(moved)
         .zip(new)
         .and_then(|((then, moved), zone)| zone.instant_of(then + moved))
         .unwrap_or(gone + utc_moved)

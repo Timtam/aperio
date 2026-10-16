@@ -2478,9 +2478,10 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // Whether the start this update would put on the server is not the one
     // already there. Without a copy to compare with, it may be.
     let start_moves = before.is_none_or(|b| b.start != event.start);
-    // Whether the edit changes the series' rule as an update writes it: its
-    // text or its zone. Its exceptions are not part of that — an update never
-    // writes them, a deleted or changed occurrence is an item of its own — so
+    // Whether the edit changes the series' rule as an update writes it: the
+    // rule as Exchange keeps it (`rule_as_kept`) or its zone. Its exceptions
+    // are not part of that — an update never writes them, a deleted or
+    // changed occurrence is an item of its own — so
     // a copy that differs from the server's only in them, as a stale one does
     // once another occurrence was deleted, changes no rule here and opens
     // neither the zone nor the slot below (the sixth check of the zone PR: a
