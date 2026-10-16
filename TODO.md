@@ -991,9 +991,11 @@ Siehe DESIGN §4.2.
   löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
   Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
   Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
-  🚩 **Warnen und fragen, PR B** (250, 251): Ziehen fragt in einem eigenen
-  Bestätigen-Dialog; Übertragen an Kopien fragt einmal nach der Schleife und
-  schickt nur die betroffenen noch einmal. Bis dahin sagen beide den Satz.
+  ↻ **Warnen und fragen, PR B** (250, 251): Ziehen fragt nach der Umfang-Wahl
+  in einem eigenen Bestätigen-Dialog und verschiebt bei Ja noch einmal, mit
+  der Zustimmung nur am Schreiben der Serie; Übertragen an Kopien fragt
+  einmal nach der Schleife, jede Kopie mit ihrem Kalender, und schickt nur die
+  betroffenen noch einmal, auf dem Desktop und auf dem Handy.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende

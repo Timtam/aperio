@@ -240,8 +240,10 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   cannot be read again, as the update moved it, a day if it left the series
   all-day —, and the editors, the drag and the carry dialogs say its day —
   also after the cut of a split or of a delete from one occurrence on.
-  Dragging a series and the carry dialogs do not ask yet: they say the
-  refusal's sentence. Paris for a Berlin series counts as another clock
+  Dragging a series asks too, in a confirm dialog of its own after the scope
+  choice, and on a yes moves it again with the consent on the series' write
+  only; the carry dialogs write every other copy first, ask once about the
+  refused ones by calendar, and send only those again with the consent. Paris for a Berlin series counts as another clock
   (another Windows id). No editor picks a series' zone yet, so today the zone
   rewrite meets only a rule change where Aperio itself would write another
   zone — the repeat edited, which asks, or the old rule cut when a series is

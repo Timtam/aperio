@@ -218,9 +218,13 @@ appointments or the end; changing or deleting it from a later appointment on is
 then refused with the sentence instead (below). Otherwise Aperio saves and
 deletes the deleted ones again.
 
-If you drag a series with the mouse or carry a change to copies in other
-calendars, Aperio does not ask yet in this version. There it says the same
-sentence and "Nothing was changed." Change the series in the editor then.
+If you drag a series with the mouse and choose "Whole series", Aperio asks the
+same question afterwards, in a dialog of its own; "Save anyway" moves the
+series, "Cancel" leaves it where it was. If you carry a change to copies in
+other calendars, Aperio first carries it to all the other copies, then asks
+once about the copies whose series would lose occurrences, each named by its
+calendar: "Carry over anyway" carries the change to them too, "Cancel" leaves
+them among the copies not changed.
 
 Changing or deleting a series from one of its appointments on only shortens the
 old series, and that keeps its changed and deleted occurrences. Only where

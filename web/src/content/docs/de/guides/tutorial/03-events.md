@@ -244,11 +244,10 @@ Feld mit `Tab` erreichst.
 > auftauchen, ein geänderter doppelt erscheinen, und an der alten Stelle kann
 > ein anderer Termin fehlen. Aperio kann das nicht reparieren. Sieh dir die
 > Serie danach in der App des Kalenders an; dort lassen sich solche
-> Einzeländerungen rückgängig machen. Bei Exchange fragt Aperio im Editor
-> vorher: Exchange verwirft beim Verschieben jeden einzeln geänderten Termin,
-> er nimmt wieder die Angaben der Serie an, und gelöschte Termine löscht Aperio
-> danach selbst wieder. Ziehst du eine solche Serie mit geänderten Terminen,
-> fragt Aperio dort noch nicht; es ändert dann nichts und sagt, warum.
+> Einzeländerungen rückgängig machen. Bei Exchange fragt Aperio vorher, im
+> Editor und wenn du die Serie mit der Maus ziehst: Exchange verwirft beim
+> Verschieben jeden einzeln geänderten Termin, er nimmt wieder die Angaben der
+> Serie an, und gelöschte Termine löscht Aperio danach selbst wieder.
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,
@@ -340,6 +339,13 @@ eine Kopie, deren Serie ab dem Schnitt möglicherweise doppelt steht: Ihr neuer
 Teil ist angelegt, deshalb wird sie nicht noch einmal angeboten, und ein Hinweis
 nennt stattdessen ihren Kalender und den Tag. Bleiben nur solche Hinweise, bleibt
 der Dialog mit ihnen offen, ohne **Rest erneut versuchen**.
+
+Bei Exchange kann das Mitziehen an die ganze Serie einer Kopie dazu führen, dass
+Exchange deren einzeln geänderte oder gelöschte Vorkommen verwirft, wie im
+Editor. Aperio zieht die Änderung dann zuerst bei allen übrigen Kopien mit und
+fragt danach einmal, mit dem Kalender jeder solchen Kopie und dem, was sie
+verlöre: **Trotzdem übertragen** zieht die Änderung auch dort mit,
+**Abbrechen** lässt sie bei den Kopien, die nicht geändert wurden.
 
 Mitgezogen wird nur, was der Termin IST: Titel, wann, wo, Beschreibung.
 **Erinnerungen bleiben bei jeder Kopie** — die Privatkopie gibt es meist genau

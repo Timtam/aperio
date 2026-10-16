@@ -191,7 +191,7 @@ keinen, dort ist die Wahl Tonis Sache.
   Aperios eigene Anfrage nach 244 und 245 bestand die vierte und die fünfte
   Runde (N1, N1b, N2, N3; O1, O2).
 - **243 — warnen und fragen.** *(PR A gebaut: Kern, Exchange-Adapter, beide
-  Editoren; PR B offen: Ziehen und Übertragen)* Exchange verwirft alle
+  Editoren; PR B gebaut: Ziehen und Übertragen)* Exchange verwirft alle
   geänderten und gelöschten Vorkommen einer Serie, sobald ein Ändern Beginn
   und Ende des Serienkopfs neu schreibt: beim Zonenwechsel (L3a, L3b), auch
   mit der Regel dazu (M6), und beim Verschieben ohne Zone (M3); ebenso ein
@@ -257,14 +257,18 @@ keinen, dort ist die Wahl Tonis Sache.
   Wochen (P2), verwirft alle Ausnahmen (Runde 6). Aperio fragt deshalb auch
   dort; Anzahl und Ende fragen nicht, denn Exchange behält dabei beide Arten
   (M5; Runde 8, U1 bis U3; Runde 9, V1, V2).
-- **250 — Ziehen fragt in einem eigenen Dialog.** *(beschlossen, PR B)* Nach
-  der Umfang-Wahl ein zweiter Bestätigen-Dialog. Bis dahin sagt das Ziehen
-  den übersetzten Satz der Ablehnung an. Auch ein Teilen „ab hier“ fragt
-  nicht: Ein Ja schriebe die neue Serie ein zweites Mal; lehnt Exchange das
-  Kürzen der alten ab, sagt Aperio den Satz und nimmt die neue zurück.
-- **251 — Übertragen fragt einmal danach.** *(beschlossen, PR B)* Die übrigen
-  Kopien werden übertragen, die betroffenen gesammelt und nach einer Frage
-  noch einmal geschickt. Bis dahin nennt der Dialog den übersetzten Satz.
+- **250 — Ziehen fragt in einem eigenen Dialog.** *(gebaut, PR B)* Nach der
+  Umfang-Wahl ein zweiter Bestätigen-Dialog mit den Worten der Editoren; ein
+  Ja verschiebt noch einmal, die Zustimmung nur am Schreiben der Serie.
+  Abbrechen lässt die Serie, wo sie war. Ein Teilen „ab hier“ fragt nicht:
+  Ein Ja schriebe die neue Serie ein zweites Mal; lehnt Exchange das Kürzen
+  der alten ab, sagt Aperio den Satz und nimmt die neue zurück.
+- **251 — Übertragen fragt einmal danach.** *(gebaut, PR B, Desktop und
+  Handy)* Die übrigen Kopien werden übertragen, die betroffenen gesammelt und
+  nach einer Frage, jede mit ihrem Kalender und dem, was sie verlöre, noch
+  einmal geschickt: nur sie, mit der Zustimmung. Abbrechen lässt sie bei den
+  nicht geänderten, und die Ergebniszeile bekommt den Fokus. Das Kürzen beim
+  Teilen einer Kopie fragt nicht, wie im Editor; es sagt den Satz.
 - **252 — die Frage nennt, wie viele.** *(gebaut, PR A)* Gezählt am frischen
   Stand: einzeln geänderte Vorkommen nehmen wieder die Angaben der Serie an,
   gelöschte erscheinen wieder.
