@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { ExceptionsLoss } from '@aperio/shared';
 
@@ -41,6 +41,35 @@ describe('the question a refused drag asks', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull(),
     );
+  });
+
+  it('cannot ask once the view that asks is gone, so the caller says the sentence', () => {
+    let ask: ReturnType<typeof useExceptionsLossQuestion>['ask'] | null = null;
+    function Probe() {
+      const question = useExceptionsLossQuestion();
+      ask = question.ask;
+      return <>{question.dialog}</>;
+    }
+    const view = render(<Probe />);
+    const asked = ask!;
+    view.unmount();
+    expect(asked({ rewrite: 'slot', changed: 1, deleted: 0 }, 'Teamrunde', vi.fn())).toBe(false);
+  });
+
+  it('asks while the view is there', async () => {
+    let ask: ReturnType<typeof useExceptionsLossQuestion>['ask'] | null = null;
+    function Probe() {
+      const question = useExceptionsLossQuestion();
+      ask = question.ask;
+      return <>{question.dialog}</>;
+    }
+    render(<Probe />);
+    let could = false;
+    act(() => {
+      could = ask!({ rewrite: 'slot', changed: 1, deleted: 0 }, 'Teamrunde', vi.fn());
+    });
+    expect(could).toBe(true);
+    expect(await screen.findByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeTruthy();
   });
 
   it('moves nothing on Cancel', async () => {

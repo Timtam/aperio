@@ -844,12 +844,16 @@ export function DayView() {
       }
       // A move that would drop occurrences of the series asks, after the
       // scope question, in a dialog of its own (decision 250); yes moves it
-      // again with the consent, on that write only.
+      // again with the consent, on that write only. A view the user has
+      // left cannot ask, and says the sentence below.
       const loss = exceptionsLossOf(err);
-      if (loss && !acceptsLoss) {
+      if (
+        loss &&
+        !acceptsLoss &&
         askLoss(loss, ev.title, () => {
           void performEventTimeDrop(ev, minute, scope, targetDayKey, true);
-        });
+        })
+      ) {
         return;
       }
       // In words, a provider's refusal included (decisions 243-253: a move

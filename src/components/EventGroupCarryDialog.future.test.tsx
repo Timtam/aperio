@@ -17,7 +17,7 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile, otherCopy } = vi.hoisted(() => {
   /** The copy's own provider-kept rows, as `get_series_rows` answers. */
   const rowsOnFile: { current: unknown[] } = { current: [] };
   /** What the dialog announced, in order. */
@@ -34,11 +34,21 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
   const lossUnlessConsent: { current: string | null } = { current: null };
   /** What deleting a copy's new part fails with, when a test says so. */
   const deleteFails: { current: unknown } = { current: null };
+  /** A third copy, in its own calendar, and what writing it fails with. */
+  const otherCopy: {
+    current: { event: Record<string, unknown> & { calendar_id: string }; fails: unknown } | null;
+  } = {
+    current: null,
+  };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'delete_event' && deleteFails.current != null) {
       return Promise.reject(deleteFails.current);
     }
     if (command === 'get_event_by_id') {
+      const { calendarId } = payload as { calendarId: string | null };
+      if (otherCopy.current && calendarId === otherCopy.current.event.calendar_id) {
+        return Promise.resolve(otherCopy.current.event);
+      }
       return Promise.resolve(copyOnFile.current ?? COPY);
     }
     if (command === 'get_series_rows') {
@@ -51,6 +61,9 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
     if (command === 'update_event') {
       if (truncateFails.current != null) return Promise.reject(truncateFails.current);
       const event = (payload as { event: Record<string, unknown> }).event;
+      if (otherCopy.current && event.calendar_id === otherCopy.current.event.calendar_id) {
+        return Promise.reject(otherCopy.current.fails);
+      }
       if (lossUnlessConsent.current != null && !event.accepts_exception_loss) {
         return Promise.reject({
           code: 'forbidden',
@@ -69,7 +82,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile, otherCopy };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -80,6 +93,10 @@ vi.mock('@tauri-apps/api/event', () => ({
 const CALENDARS = [
   { id: 'work', name: 'Arbeit', read_only: false, account_id: 'acc-a' },
   { id: 'private', name: 'Privat', read_only: false, account_id: 'acc-b' },
+  { id: 'family', name: 'Familie', read_only: false, account_id: 'acc-c' },
+  // Takes only its attendee's own changes: a copy somebody else organizes
+  // there is not written (77a).
+  { id: 'team', name: 'Team', read_only: false, account_id: 'acc-d', invitations_reply_only: true },
 ] as unknown as Calendar[];
 const STORE = { calendars: CALENDARS, colorLabels: [], selectedCalendarIds: new Set(['work']) };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
@@ -156,6 +173,7 @@ afterEach(() => {
   deleteFails.current = null;
   announced.length = 0;
   rowsOnFile.current = [];
+  otherCopy.current = null;
 });
 
 async function carry() {
@@ -481,18 +499,30 @@ describe('EventGroupCarryDialog → a whole series moved to another day (198)', 
 
 describe('EventGroupCarryDialog → a copy whose series would lose occurrences (251)', () => {
   const nextDay = { ...STOOD, start: '2026-08-25T08:00:00.000Z', end: '2026-08-25T09:00:00.000Z' };
-  async function carrySeries(onClose: () => void = () => {}) {
-    copyOnFile.current = {
-      ...COPY,
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: null },
-    };
+  const weekly = { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: null };
+  /** The group with a third copy, in the calendar `other` names. */
+  const withThird = (calendarId: string): EventGroup => ({
+    ...GROUP,
+    members: [
+      ...GROUP.members,
+      {
+        calendar_id: calendarId,
+        event_id: 'ev-c',
+        title: 'Wochenplanung',
+        starts_at: CUT,
+        added_at: '2026-08-09T12:00:02Z',
+      },
+    ],
+  });
+  async function carrySeries(onClose: () => void = () => {}, group: EventGroup = GROUP) {
+    copyOnFile.current = { ...COPY, recurrence: weekly };
     lossUnlessConsent.current = 'slot:1:0';
     const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
     render(
       <EventGroupCarryDialog
         isOpen
         onClose={onClose}
-        group={GROUP}
+        group={group}
         anchor={ANCHOR}
         before={STOOD}
         after={nextDay}
@@ -537,5 +567,39 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
     await waitFor(() => expect(document.activeElement).toBe(note));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(document.activeElement).toBe(note);
+  });
+
+  it('says the report the question held on Cancel: why a copy somebody else organizes was not changed', async () => {
+    otherCopy.current = {
+      event: { ...COPY, id: 'ev-c', calendar_id: 'team', recurrence: weekly, organized_elsewhere: true },
+      fails: new Error('not reached'),
+    };
+    const question = await carrySeries(undefined, withThird('team'));
+    // Nothing said while the question is open: it has the cursor.
+    expect(announced).toHaveLength(0);
+    fireEvent.click(within(question).getByRole('button', { name: /^abbrechen$|^cancel$/i }));
+    await waitFor(() => expect(announced).toHaveLength(1));
+    expect(announced[0]).toMatch(/Nicht geändert: Privat, Team|Not changed: Privat, Team/);
+    expect(announced[0]).toMatch(/Die Kopie in Team wurde nicht geändert|The copy in Team was not changed/);
+  });
+
+  it("keeps a copy's failure on a yes, and says it with the outcome, though that copy is not written again", async () => {
+    otherCopy.current = {
+      event: { ...COPY, id: 'ev-c', calendar_id: 'family', recurrence: weekly },
+      fails: new Error('Der Server antwortet nicht'),
+    };
+    const question = await carrySeries(undefined, withThird('family'));
+    expect(screen.getByRole('alert').textContent).toMatch(/Der Server antwortet nicht/);
+    const writes = calls('update_event').length;
+    fireEvent.click(within(question).getByRole('button', { name: /trotzdem übertragen|carry over anyway/i }));
+    await waitFor(() => expect(announced).toHaveLength(1));
+    // Only the copy the question was about went out again.
+    expect(calls('update_event')).toHaveLength(writes + 1);
+    expect(
+      (calls('update_event').at(-1)?.[1] as { event: { calendar_id: string } }).event.calendar_id,
+    ).toBe('private');
+    expect(announced[0]).toMatch(/Nicht geändert: Familie\.|Not changed: Familie\./);
+    expect(announced[0]).toMatch(/Der Server antwortet nicht/);
+    expect(screen.getByRole('alert').textContent).toMatch(/Der Server antwortet nicht/);
   });
 });

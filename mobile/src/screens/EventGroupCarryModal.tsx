@@ -128,7 +128,7 @@ export default function EventGroupCarryModal({
   const outcomeRef = useRef<Text>(null);
   const [outcomeSaid, setOutcomeSaid] = useState('');
   const carryRef = useRef<
-    (only?: CarryTarget[], consent?: ReadonlySet<string>) => Promise<void>
+    (only?: CarryTarget[], consent?: ReadonlySet<string>, earlier?: string) => Promise<void>
   >(async () => undefined);
   /**
    * Whether this screen is still here.
@@ -199,13 +199,21 @@ export default function EventGroupCarryModal({
 
   /**
    * `only`: the copies to write this pass, the ones the question was about;
-   * `consent`: the copies whose series' write carries the user's yes. Every
-   * other outstanding copy stays outstanding. Mirrors the desktop.
+   * `consent`: the copies whose series' write carries the user's yes;
+   * `earlier`: what the pass that asked did not get to say, said with this
+   * pass's outcome. Every other outstanding copy stays outstanding. Mirrors
+   * the desktop.
    */
-  const carry = useCallback(async (only?: CarryTarget[], consent?: ReadonlySet<string>) => {
+  const carry = useCallback(async (
+    only?: CarryTarget[],
+    consent?: ReadonlySet<string>,
+    earlier = '',
+  ) => {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    // The failure on screen belongs to a copy a pass of the yes does not
+    // write again: it stays.
+    if (!only) setError(null);
     const list = only ?? targets;
     const kept = only
       ? (pending ?? []).filter((target) => !only.some((o) => sameTarget(o, target)))
@@ -622,14 +630,20 @@ export default function EventGroupCarryModal({
       // the same title — that is what made them a group — so a list of titles
       // said nothing about which copy is now out of step.
       const names = outstanding.map((target) => calendarName(target.calendar_id));
+      // The earlier pass's rest first, as its copies come first among the
+      // ones not changed.
       setOutcomeSaid(
-        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${failure}${doubtful}`,
+        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${earlier}${failure}${doubtful}`,
       );
       setOutcome({ kind: 'partly', done, failed: outstanding });
       setPending(outstanding);
       // The question comes now, once, for every copy that would lose
-      // occurrences; the outcome line says the rest when it is answered.
+      // occurrences, and the outcome line waits for its answer: after Cancel
+      // it takes the cursor and says the pass's report; a yes says its rest
+      // — why the copies it does not write again were not changed, and this
+      // pass's doubts — with the next pass's outcome.
       if (asked.length > 0) {
+        const rest = `${earlier}${failure}${doubtful}`;
         setAsking(true);
         showEventScopeDialog({
           title: t('dialogs.event.exceptionsLoss.title'),
@@ -654,7 +668,7 @@ export default function EventGroupCarryModal({
                 // the carry of the latest render, which knows what is pending.
                 const these = asked.map(({ target }) => target);
                 setAsking(false);
-                void carryRef.current(these, new Set(these.map(targetKey)));
+                void carryRef.current(these, new Set(these.map(targetKey)), rest);
               },
             },
           ],
@@ -669,7 +683,9 @@ export default function EventGroupCarryModal({
       // Every copy was written; only the new rows are not tied together yet.
       // Said, and left on screen, because "the appointment is one row again" is
       // what the user was promised.
-      setOutcomeSaid(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`);
+      setOutcomeSaid(
+        `${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${earlier}${doubtful}`,
+      );
       setOutcome({ kind: 'regroup', done });
       setPending([]);
       return;
@@ -677,13 +693,13 @@ export default function EventGroupCarryModal({
     if (allDoubts.length > 0) {
       // No copy is left to offer again, but some may show twice: leaving would
       // take the only words that say which ones.
-      setOutcomeSaid(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
+      setOutcomeSaid(`${t('dialogs.eventGroupCarry.done', { count: done })}${earlier}${doubtful}`);
       setOutcome({ kind: 'written', done });
       setPending([]);
       return;
     }
     AccessibilityInfo.announceForAccessibility(
-      t('dialogs.eventGroupCarry.done', { count: done }),
+      `${t('dialogs.eventGroupCarry.done', { count: done })}${earlier}`,
     );
     navigation.goBack();
   }, [

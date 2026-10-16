@@ -260,15 +260,19 @@ keinen, dort ist die Wahl Tonis Sache.
 - **250 — Ziehen fragt in einem eigenen Dialog.** *(gebaut, PR B)* Nach der
   Umfang-Wahl ein zweiter Bestätigen-Dialog mit den Worten der Editoren; ein
   Ja verschiebt noch einmal, die Zustimmung nur am Schreiben der Serie.
-  Abbrechen lässt die Serie, wo sie war. Ein Teilen „ab hier“ fragt nicht:
-  Ein Ja schriebe die neue Serie ein zweites Mal; lehnt Exchange das Kürzen
-  der alten ab, sagt Aperio den Satz und nimmt die neue zurück.
+  Abbrechen lässt die Serie, wo sie war. Hat der Nutzer die Ansicht schon
+  verlassen, kann sie nicht fragen und sagt den Satz. Ein Teilen „ab hier“
+  fragt nicht: Ein Ja schriebe die neue Serie ein zweites Mal; lehnt Exchange
+  das Kürzen der alten ab, sagt Aperio den Satz und nimmt die neue zurück.
 - **251 — Übertragen fragt einmal danach.** *(gebaut, PR B, Desktop und
   Handy)* Die übrigen Kopien werden übertragen, die betroffenen gesammelt und
   nach einer Frage, jede mit ihrem Kalender und dem, was sie verlöre, noch
   einmal geschickt: nur sie, mit der Zustimmung. Abbrechen lässt sie bei den
-  nicht geänderten, und die Ergebniszeile bekommt den Fokus. Das Kürzen beim
-  Teilen einer Kopie fragt nicht, wie im Editor; es sagt den Satz.
+  nicht geänderten, und die Ergebniszeile bekommt den Fokus. Der Bericht des
+  fragenden Durchlaufs wartet auf die Antwort: Abbrechen sagt ihn; ein Ja sagt
+  mit dem nächsten Durchlauf, warum die übrigen Kopien nicht geändert wurden,
+  und lässt ihren Fehler stehen. Das Kürzen beim Teilen einer Kopie fragt
+  nicht, wie im Editor; es sagt den Satz.
 - **252 — die Frage nennt, wie viele.** *(gebaut, PR A)* Gezählt am frischen
   Stand: einzeln geänderte Vorkommen nehmen wieder die Angaben der Serie an,
   gelöschte erscheinen wieder.

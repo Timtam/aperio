@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { exceptionsLossQuestion, type ExceptionsLoss } from '@aperio/shared';
@@ -11,9 +11,14 @@ import { ConfirmDialog } from './ConfirmDialog';
  * scope question, with the same words the editors use (what the move rewrites
  * and how many occurrences that loses). Yes runs `yes` — the same move again
  * with the consent — and Cancel leaves the series as it was.
+ *
+ * `ask` says whether it could ask: not once the view that asks is gone — the
+ * user switched views while the move was on its way — and the caller then
+ * says the refusal's sentence instead, so the move is never refused in
+ * silence.
  */
 export function useExceptionsLossQuestion(): {
-  ask: (loss: ExceptionsLoss, title: string, yes: () => void) => void;
+  ask: (loss: ExceptionsLoss, title: string, yes: () => void) => boolean;
   dialog: ReactNode;
 } {
   const { t } = useTranslation();
@@ -22,10 +27,18 @@ export function useExceptionsLossQuestion(): {
     title: string;
     yes: () => void;
   } | null>(null);
-  const ask = useCallback(
-    (loss: ExceptionsLoss, title: string, yes: () => void) => setAsked({ loss, title, yes }),
-    [],
-  );
+  const shown = useRef(false);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
+  const ask = useCallback((loss: ExceptionsLoss, title: string, yes: () => void) => {
+    if (!shown.current) return false;
+    setAsked({ loss, title, yes });
+    return true;
+  }, []);
   const question = asked && exceptionsLossQuestion(asked.loss, asked.title, t);
   const dialog =
     asked && question ? (
