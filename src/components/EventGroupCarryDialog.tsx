@@ -444,8 +444,11 @@ export function EventGroupCarryDialog({
                     // verbatim so both halves expand alike.
                     { preserveRecurrenceZone: true },
                   ),
-                truncate: (headRule) =>
-                  updateEvent(
+                // The cut can make the provider bring deleted occurrences
+                // back as well (a zone it writes again, 247); any it could not
+                // delete again are said with this pass's doubts (253).
+                truncate: async (headRule) => {
+                  const cut = await updateEvent(
                     {
                       ...current,
                       recurrence: { ...currentRecurrence, rrule: headRule },
@@ -456,7 +459,9 @@ export function EventGroupCarryDialog({
                       truncate_tail_overrides: true,
                     },
                     target.calendar_id,
-                  ),
+                  );
+                  noteBack(cut, target.calendar_id);
+                },
                 removeTail: (tail) =>
                   deleteEventById(tail.id, tail.calendar_id, false),
               },

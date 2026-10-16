@@ -1713,6 +1713,8 @@
       },
       "deletionsNotRestored_one": "„{{title}}“ ist gespeichert. Ein gelöschtes Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte es nicht wieder löschen: {{days}}. Lösche es bitte einzeln.",
       "deletionsNotRestored_other": "„{{title}}“ ist gespeichert. {{count}} gelöschte Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte sie nicht wieder löschen: {{days}}. Lösche sie bitte einzeln.",
+      "deletionsNotRestoredAfter_one": "Ein gelöschtes Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte es nicht wieder löschen: {{days}}. Lösche es bitte einzeln.",
+      "deletionsNotRestoredAfter_other": "{{count}} gelöschte Vorkommen hat Exchange dabei zurückgebracht, und Aperio konnte sie nicht wieder löschen: {{days}}. Lösche sie bitte einzeln.",
       "writeError": {
         "replyOnly": "Nur der Organisator kann diese Besprechung ändern. Es wurde nichts geändert.",
         "serverRefused": "Der Kalenderserver hat diese Änderung abgelehnt ({{detail}}). Es wurde nichts geändert.",

@@ -1393,6 +1393,9 @@ export default function EventEditorModal({
             { from: occurrence, refused: 'thisAndFuture' },
           );
           const masterRecurrence = original.recurrence;
+          // The cut as the provider saved it: deleted occurrences it brought
+          // back and that could not be deleted again ride on it (253).
+          const head: { saved?: CalendarEvent } = {};
           const written = await writeSeriesSplit(
             {
               createTail: () =>
@@ -1421,8 +1424,8 @@ export default function EventEditorModal({
               // delete-this-and-following): on notify-flag providers attendees
               // must learn the original series now ends before the cutoff, else
               // they keep the old occurrences AND receive the new tail invite.
-              truncate: (headRule) =>
-                updateEvent(
+              truncate: async (headRule) => {
+                head.saved = await updateEvent(
                   {
                     ...original,
                     recurrence: { ...masterRecurrence, rrule: headRule },
@@ -1430,7 +1433,8 @@ export default function EventEditorModal({
                     truncate_tail_overrides: true,
                   },
                   original.calendar_id,
-                ),
+                );
+              },
               // The undo of the create, told as the create was.
               removeTail: (tail) =>
                 deleteEvent(tail.id, tail.calendar_id, sendInvitations),
@@ -1491,6 +1495,23 @@ export default function EventEditorModal({
               return;
             }
             setSplitNotice({ sentence, proceed: goOn });
+            return;
+          }
+          // Cutting the old series can make Exchange bring its deleted
+          // occurrences back too (a zone it writes again, 247); any it could
+          // not delete again are said the same way (253). Mirrors the desktop.
+          const back = deletionsNotRestoredSentence(
+            head.saved?.deletions_not_restored,
+            trimmedTitle,
+            i18n.language,
+            t,
+          );
+          if (back != null) {
+            if (!shown.current) {
+              AccessibilityInfo.announceForAccessibility(back);
+              return;
+            }
+            setSplitNotice({ sentence: back, proceed: goOn });
             return;
           }
           AccessibilityInfo.announceForAccessibility(
@@ -1804,9 +1825,9 @@ export default function EventEditorModal({
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       },
-      { calendar: cal },
+      { calendar: cal, language: i18n.language },
     );
-  }, [calendars, isOccurrence, navigation, occurrence, original, t]);
+  }, [calendars, isOccurrence, navigation, occurrence, original, t, i18n.language]);
 
   // "Notify attendees", or the sentence that says who informs them: the rule
   // the desktop shares (decisions 70a, 74a, 76a).

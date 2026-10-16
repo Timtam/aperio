@@ -4,6 +4,7 @@ import {
   deletionsNotRestoredSentence,
   exceptionsLossQuestion,
   parseExceptionsLoss,
+  withDeletionsNotRestored,
 } from '@aperio/shared';
 import i18n from '../i18n';
 
@@ -77,5 +78,25 @@ describe('deleted occurrences that came back', () => {
         de,
       ),
     ).toMatch(/2 gelöschte Vorkommen .*: 16\. November 2026 und 23\. November 2026\./);
+  });
+
+  it('follows what a delete from one occurrence on did, as one announcement', () => {
+    const said = '„Teamrunde“ ist ab dem 30. November gelöscht.';
+    // Nothing came back: the delete's own sentence, unchanged.
+    expect(withDeletionsNotRestored(said, undefined, 'de', de)).toBe(said);
+    expect(withDeletionsNotRestored(said, [], 'de', de)).toBe(said);
+    // Something came back: said after it, without "is saved".
+    expect(withDeletionsNotRestored(said, ['2026-11-16T09:00:00Z'], 'de', de)).toBe(
+      `${said} Ein gelöschtes Vorkommen hat Exchange dabei zurückgebracht, und Aperio ` +
+        'konnte es nicht wieder löschen: 16. November 2026. Lösche es bitte einzeln.',
+    );
+    expect(
+      withDeletionsNotRestored(
+        'Deleted.',
+        ['2026-11-16T09:00:00Z', '2026-11-23T09:00:00Z'],
+        'en',
+        en,
+      ),
+    ).toMatch(/^Deleted\. Exchange brought back 2 deleted occurrences, .*one by one\.$/);
   });
 });

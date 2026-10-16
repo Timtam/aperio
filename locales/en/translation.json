@@ -1713,6 +1713,8 @@
       },
       "deletionsNotRestored_one": "\"{{title}}\" is saved. Exchange brought back one deleted occurrence, and Aperio could not delete it again: {{days}}. Please delete it on its own.",
       "deletionsNotRestored_other": "\"{{title}}\" is saved. Exchange brought back {{count}} deleted occurrences, and Aperio could not delete them again: {{days}}. Please delete them one by one.",
+      "deletionsNotRestoredAfter_one": "Exchange brought back one deleted occurrence, and Aperio could not delete it again: {{days}}. Please delete it on its own.",
+      "deletionsNotRestoredAfter_other": "Exchange brought back {{count}} deleted occurrences, and Aperio could not delete them again: {{days}}. Please delete them one by one.",
       "writeError": {
         "replyOnly": "Only the organizer can change this meeting. Nothing was changed.",
         "serverRefused": "The calendar server refused this change ({{detail}}). Nothing was changed.",

@@ -1169,9 +1169,12 @@ export function CalendarDayList({
           setError(message);
           announce(t('mobile.error', { message }));
         },
-        { calendar: calendars.find((c) => c.id === ev.calendar_id) },
+        {
+          calendar: calendars.find((c) => c.id === ev.calendar_id),
+          language: i18n.language,
+        },
       ),
-    [announce, calendars, load, t],
+    [announce, calendars, load, t, i18n.language],
   );
 
   const openTask = useCallback(

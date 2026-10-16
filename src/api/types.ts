@@ -61,7 +61,8 @@ export interface CalendarEvent {
    *  persisted; only the split's update sets it. */
   truncate_tail_overrides?: boolean;
   /** Transient consent on one update: the user agreed that the provider drops
-   *  the series' changed occurrences (decisions 243, 246). Set only on the
+   *  the series' changed occurrences, and deleted ones the adapter cannot
+   *  delete again afterwards (decisions 243, 246, 252, 253). Set only on the
    *  write sent again after the question; never on a row that is kept. */
   accepts_exception_loss?: boolean;
   /** Transient result of an update: deleted occurrences of the series that

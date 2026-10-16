@@ -71,6 +71,7 @@ import {
   offerUsable,
   prefillTarget,
   deletionsNotRestoredSentence,
+  withDeletionsNotRestored,
   eventWriteErrorMessage,
   eventWriteFailureReason,
   exceptionsLossOf,
@@ -1687,6 +1688,9 @@ export function EventDialog({
               // `planSeriesSplit`; the order and the undo in
               // `writeSeriesSplit`. See shared/seriesSplit.ts for why each of
               // those details decides whether the two halves line up.
+              // The cut as the provider saved it: deleted occurrences it brought
+              // back and that could not be deleted again ride on it (253).
+              const head: { saved?: CalendarEvent } = {};
               const written = await writeSeriesSplit(
                 {
                   createTail: () =>
@@ -1715,8 +1719,8 @@ export function EventDialog({
                   // following): on notify-flag providers attendees must be told
                   // the original series now ends before the cutoff, or they keep
                   // the old occurrences AND get the new tail invite.
-                  truncate: (headRule) =>
-                    apiUpdateEvent(
+                  truncate: async (headRule) => {
+                    head.saved = await apiUpdateEvent(
                       {
                         ...master,
                         recurrence: { ...masterRecurrence, rrule: headRule },
@@ -1724,7 +1728,8 @@ export function EventDialog({
                         truncate_tail_overrides: true,
                       },
                       master.calendar_id,
-                    ),
+                    );
+                  },
                   // The undo of the create, told as the create was.
                   removeTail: (tail) =>
                     deleteEventById(tail.id, tail.calendar_id, sendInvitations),
@@ -1784,6 +1789,24 @@ export function EventDialog({
                 }
                 leavingNotice.current = false;
                 setSplitNotice({ sentence, proceed: goOn });
+                return;
+              }
+              // Cutting the old series can make Exchange bring its deleted
+              // occurrences back too (a zone it writes again, 247); any it
+              // could not delete again are said the same way (253).
+              const back = deletionsNotRestoredSentence(
+                head.saved?.deletions_not_restored,
+                trimmedTitle,
+                i18n.language,
+                t,
+              );
+              if (back) {
+                if (!shownRef.current) {
+                  announce(back);
+                  return;
+                }
+                leavingNotice.current = false;
+                setSplitNotice({ sentence: back, proceed: goOn });
                 return;
               }
               announce(
@@ -2162,15 +2185,26 @@ export function EventDialog({
       try {
         // At the first occurrence there is nothing to keep, and the whole
         // series goes; the sentence says which (decision 118).
+        // Its cut can bring deleted occurrences back too (253): any that could
+        // not be deleted again are said with it.
+        const cut: { back?: readonly string[] } = {};
         const outcome = await deleteThisAndFuture(
           event,
           occIso,
           sendCancellations,
+          (saved) => {
+            cut.back = saved.deletions_not_restored;
+          },
         );
         announce(
-          t(thisAndFutureDeletedKey(outcome, sendCancellations), {
-            title: event.title,
-          }),
+          withDeletionsNotRestored(
+            t(thisAndFutureDeletedKey(outcome, sendCancellations), {
+              title: event.title,
+            }),
+            cut.back,
+            i18n.language,
+            t,
+          ),
         );
         onClose();
       } catch (err) {
@@ -2181,7 +2215,7 @@ export function EventDialog({
         setSubmitting(false);
       }
     },
-    [event, announce, onClose, t],
+    [event, announce, onClose, t, i18n.language],
   );
 
   // "Notify attendees" or the sentence that says who informs them: the rule

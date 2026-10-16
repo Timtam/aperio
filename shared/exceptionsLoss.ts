@@ -85,13 +85,37 @@ export function deletionsNotRestoredSentence(
   t: Translate,
 ): string | null {
   if (!instants || instants.length === 0) return null;
+  return t('dialogs.event.deletionsNotRestored', {
+    title,
+    count: instants.length,
+    days: namedDays(instants, language, t),
+  });
+}
+
+/**
+ * `said` — what a delete from one occurrence on did — followed by the deleted
+ * occurrences its cut brought back and that could not be deleted again, as one
+ * announcement (two in the same frame, only the last is heard).
+ */
+export function withDeletionsNotRestored(
+  said: string,
+  instants: readonly string[] | undefined,
+  language: string,
+  t: Translate,
+): string {
+  if (!instants || instants.length === 0) return said;
+  const after = t('dialogs.event.deletionsNotRestoredAfter', {
+    count: instants.length,
+    days: namedDays(instants, language, t),
+  });
+  return `${said} ${after}`;
+}
+
+/** The days of `instants` as the user reads them, joined. */
+function namedDays(instants: readonly string[], language: string, t: Translate): string {
   const days = instants.map((iso) => {
     const at = new Date(iso);
     return Number.isNaN(at.getTime()) ? iso : formatLongDay(localDateKey(at), language);
   });
-  return t('dialogs.event.deletionsNotRestored', {
-    title,
-    count: instants.length,
-    days: joinNames(days, t),
-  });
+  return joinNames(days, t);
 }

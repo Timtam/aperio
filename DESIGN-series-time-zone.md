@@ -289,14 +289,15 @@ keinen, dort ist die Wahl Tonis Sache.
   sein Vorkommen, nicht für den Platz. Ein Vorkommen keinen halben Tag vom
   Platz, das nicht das erwartete ist, kam unbestätigt zurück. Eines, das sich
   nicht bestätigen oder löschen lässt, nennen beide Editoren, das Ziehen und
-  das Übertragen nach dem Speichern mit seinem Tag (`deletions_not_restored`);
-  lässt sich die Serie danach nicht lesen, dort, wohin das Speichern sie
-  verschob, als Tag, wenn es sie ganztägig ließ. Verschoben verspricht Aperio
-  nur, wo es beide Uhren lesen kann; sonst zählt die Frage die gelöschten mit.
-  Die Frage nennt deshalb nur, was wirklich verloren geht. Mit Aperios eigener
-  Anfrage gemessen (Runde 7): Verschieben und neues Muster fragen und schicken
-  nichts (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und
-  das gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
+  das Übertragen nach dem Speichern mit seinem Tag, auch nach dem Kürzen beim
+  Teilen oder beim Löschen ab einem Termin (`deletions_not_restored`); lässt
+  sich die Serie danach nicht lesen, dort, wohin das Speichern sie verschob,
+  als Tag, wenn es sie ganztägig ließ. Verschoben verspricht Aperio nur, wo es
+  beide Uhren lesen kann; sonst zählt die Frage die gelöschten mit. Die Frage
+  nennt deshalb nur, was wirklich verloren geht. Mit Aperios eigener Anfrage
+  gemessen (Runde 7): Verschieben und neues Muster fragen und schicken nichts
+  (Q1, Q5); mit Zustimmung geht das geänderte Vorkommen verloren und das
+  gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
   fragen nicht und bleiben gelöscht, einen Tag später wie unter einem neuen
   Muster (Q3, Q4); der Titel allein schreibt nur den Titel (Q6).
 

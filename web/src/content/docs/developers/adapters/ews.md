@@ -236,17 +236,19 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
   read or delete is named on the event that comes back
   (`Event::deletions_not_restored`), where it now stands — where the series
   cannot be read again, as the update moved it, a day if it left the series
-  all-day —, and the editors, the drag and the carry dialogs say its day.
+  all-day —, and the editors, the drag and the carry dialogs say its day —
+  also after the cut of a split or of a delete from one occurrence on.
   Dragging a series and the carry dialogs do not ask yet: they say the
   refusal's sentence. Paris for a Berlin series counts as another clock
   (another Windows id). No editor picks a series' zone yet, so today the zone
   rewrite meets only a rule change where Aperio itself would write another
   zone — the repeat edited, which asks, or the old rule cut when a series is
   changed or deleted from a later occurrence on, which is refused with the
-  sentence —: a series whose stored end zone is not its start zone, or a copy
-  whose zone is stale. A copy that differs from the server's only in its
-  exceptions changes no rule: an update never writes them, so it opens neither
-  the zone nor the slot.
+  sentence; both only where something would be lost, otherwise the update goes
+  out and the deleted ones are deleted again —: a series whose stored end zone
+  is not its start zone, or a copy whose zone is stale. A copy that differs
+  from the server's only in its exceptions changes no rule: an update never
+  writes them, so it opens neither the zone nor the slot.
 - **A series is never written blind** (decision 248). Without its copy, what
   a series holds, and so what a rewrite would drop, is unknown: an update of
   a series head whose copy cannot be read sends nothing and is refused as
