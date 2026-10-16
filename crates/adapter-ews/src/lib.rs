@@ -3681,10 +3681,12 @@ mod server_zone_tests {
 
     /// Decision 253, where an occurrence does not stand exactly where it is
     /// expected. The series of four Mondays moved two hours later: where
-    /// Exchange gives an occurrence another time (as it does in a gap of the
-    /// clock), it came back unconfirmed and is named — also next to one just
-    /// deleted again, and as the last of the series. Where Exchange kept the
-    /// deletion at the index the rule gives, nothing came back.
+    /// Exchange answers an occurrence at another time — here an hour off — it
+    /// came back unconfirmed and is named, also next to one just deleted
+    /// again, and as the last of the series. Where Exchange kept the deletion
+    /// at the index the rule gives, nothing came back. (One a gap of the clock
+    /// pushed stands at the expected, pushed place and is deleted again:
+    /// `a_move_into_the_gap_of_a_clock_change_deletes_again`.)
     #[tokio::test]
     async fn a_deleted_occurrence_is_named_unless_the_series_shows_it_stayed_away() {
         let after = STORED_WEEKLY_W_EUROPE
