@@ -37,6 +37,7 @@ import {
   type ShiftRefusal,
 } from '../../state/moveActions';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
+import { useExceptionsLossQuestion } from '../ExceptionsLossQuestion';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useEventGroups } from '../../state/useEventGroups';
@@ -106,6 +107,7 @@ import {
   spokenDaySummary,
   type DayLog,
   eventWriteErrorMessage,
+  exceptionsLossOf,
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
 } from '@aperio/shared';
@@ -233,6 +235,7 @@ export function DayView() {
   const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
+  const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
   const { anchor, setAnchor } = useViewState();
   const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData } =
     useDialogState();
@@ -779,6 +782,7 @@ export function DayView() {
     minute: number,
     scope: MoveCopyScope,
     targetDayKey: string,
+    acceptsLoss = false,
   ) => {
     try {
       let back: string[] | undefined;
@@ -788,8 +792,11 @@ export function DayView() {
         minute,
         scope,
         calendarById.get(ev.calendar_id),
-        (saved) => {
-          back = saved.deletions_not_restored;
+        {
+          onSeriesSaved: (saved) => {
+            back = saved.deletions_not_restored;
+          },
+          acceptsLoss,
         },
       );
       if (!moved) return; // dropped back on its own time — nothing happened
@@ -833,6 +840,16 @@ export function DayView() {
       }
       if (err instanceof SeriesNotLoadedError) {
         announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
+        return;
+      }
+      // A move that would drop occurrences of the series asks, after the
+      // scope question, in a dialog of its own (decision 250); yes moves it
+      // again with the consent, on that write only.
+      const loss = exceptionsLossOf(err);
+      if (loss && !acceptsLoss) {
+        askLoss(loss, ev.title, () => {
+          void performEventTimeDrop(ev, minute, scope, targetDayKey, true);
+        });
         return;
       }
       // In words, a provider's refusal included (decisions 243-253: a move
@@ -1726,6 +1743,7 @@ export function DayView() {
           }
         }}
       />
+      {lossDialog}
 
       <DayLogDialog
         isOpen={dayLogOpen}
