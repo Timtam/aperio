@@ -3439,7 +3439,11 @@ fn parse_rrule(rrule: &str) -> std::collections::BTreeMap<String, String> {
 }
 
 /// Translate RRULE's BYDAY (MO,WE,FR) to EWS's space-separated
-/// full day names (Monday Wednesday Friday).
+/// full day names (Monday Wednesday Friday), in week order from Monday and
+/// each once. Exchange keeps the days as a set, so their order says nothing;
+/// a fixed one lets two spellings of one rule build alike — a weekday
+/// ticked off and on again comes last in the editor's rule — so a save that
+/// keeps the days is no new pattern (decisions 243, 249).
 fn rrule_byday_to_ews_days(byday: &str) -> EwsResult<String> {
     let mut out = Vec::new();
     for raw in byday.split(',') {
@@ -3450,26 +3454,32 @@ fn rrule_byday_to_ews_days(byday: &str) -> EwsResult<String> {
         // off so a stray prefix doesn't crash the day-name lookup.
         let stripped: &str =
             tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '+');
-        let name = match stripped {
-            "MO" => "Monday",
-            "TU" => "Tuesday",
-            "WE" => "Wednesday",
-            "TH" => "Thursday",
-            "FR" => "Friday",
-            "SA" => "Saturday",
-            "SU" => "Sunday",
+        let day = match stripped {
+            "MO" => (0, "Monday"),
+            "TU" => (1, "Tuesday"),
+            "WE" => (2, "Wednesday"),
+            "TH" => (3, "Thursday"),
+            "FR" => (4, "Friday"),
+            "SA" => (5, "Saturday"),
+            "SU" => (6, "Sunday"),
             other => {
                 return Err(EwsError::Protocol(format!(
                     "RRULE BYDAY token not recognised: {other}"
                 )));
             }
         };
-        out.push(name);
+        out.push(day);
     }
     if out.is_empty() {
         return Err(EwsError::Protocol("RRULE BYDAY is empty".into()));
     }
-    Ok(out.join(" "))
+    out.sort_unstable();
+    out.dedup();
+    Ok(out
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect::<Vec<_>>()
+        .join(" "))
 }
 
 /// Translate the BYDAY (+ optional BYSETPOS) of a *relative*
@@ -10704,6 +10714,38 @@ mod tests {
                 "{from} -> {to}"
             );
         }
+
+        // The same weekdays in another order — a day ticked off and on again
+        // comes last — are the same days to Exchange, which keeps them as a
+        // set: no new pattern and no rule written, and a move keeps every
+        // place.
+        let both_days = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4",
+            "Europe/Berlin",
+        );
+        let mut reordered = both_days.clone();
+        reordered.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=WE,MO;COUNT=4".into();
+        let plan = planned(
+            &reordered,
+            &both_days,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!((plan.rewrite, plan.placement), (None, Placement::Unknown));
+        assert!(!plan.set.contains("calendar:Recurrence"), "{}", plan.set);
+        reordered.start += chrono::Duration::hours(1);
+        reordered.end += chrono::Duration::hours(1);
+        let plan = planned(
+            &reordered,
+            &both_days,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(
+            (plan.rewrite, plan.placement),
+            (Some(Slot), Placement::Shifted)
+        );
 
         // An exception never rewrites its series.
         let mut moved = before.clone();
