@@ -771,6 +771,51 @@ export function tailRecurrenceFor(input: {
 }
 
 /**
+ * A plan for a NEW series (decision 224): it owns no rows, so no exception
+ * stays because a row stands in for it. An occurrence changed elsewhere comes
+ * back at its usual time, with the new series' content.
+ */
+export function asNewSeries<P extends SeriesSplitPlan>(plan: P): P {
+  return { ...plan, standing: [] };
+}
+
+/**
+ * The recurrence a whole series is written with as a NEW series: moved to
+ * another calendar, copied or duplicated (decisions 224, 259). Its rule and its
+ * zone stay as they are stored. Its exceptions are exactly its real deletions —
+ * an exception no row of it stands in for, every cancelled row
+ * (`deletedSlots`) — each on the occurrence it names, so an exception off the
+ * rule goes (`tailRecurrenceFor`, read from the series' own start). Past ones
+ * too: a provider that writes deletions one by one limits them itself (259).
+ *
+ * `master` is the series' own row and `rows` its rows besides it
+ * (`readSeriesRows`). An expanded occurrence or a provider's row for one
+ * occurrence is not the series: its id names none of the rows, and every
+ * occurrence changed elsewhere would read as deleted. Throws then, before
+ * anything is written.
+ */
+export function newSeriesRecurrence<E extends SplittableEvent>(
+  master: E,
+  rows: readonly RecurringEventLike[],
+): E['recurrence'] {
+  const recurrence = master.recurrence;
+  if (!recurrence?.rrule) return recurrence;
+  if (isExpandedOccurrence(master) || overrideSeriesId(master) !== null) {
+    throw new Error(`newSeriesRecurrence needs the series' own row, not ${master.id}`);
+  }
+  const plan = planSeriesSplit(master, master.start, rows);
+  if (plan === null) return recurrence;
+  const written = tailRecurrenceFor({
+    master,
+    cutoffIso: master.start,
+    plan: asNewSeries(plan),
+    tail: { start: master.start, all_day: master.all_day },
+    whole: true,
+  });
+  return written === null ? recurrence : { ...recurrence, exceptions: written.exceptions };
+}
+
+/**
  * The series as it stands from the cutoff on, for a plan with no head.
  *
  * It starts at the cutoff and repeats by the plan's `tail`: the same pattern,
