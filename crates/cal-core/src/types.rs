@@ -155,16 +155,21 @@ pub struct Event {
     /// it rides the `Event` JSON across the plugin FFI.
     #[serde(default, skip_serializing_if = "is_false")]
     pub send_invitations: bool,
-    /// Transient write-only signal for a "this and all following" split: when
-    /// `true` on an update of a recurring MASTER whose rule now carries an
-    /// earlier `UNTIL`, the adapter drops any RECURRENCE-ID override instance
-    /// that falls after that `UNTIL` (the deleted / edited-away tail) so a
-    /// provider-modified occurrence there doesn't survive as a ghost. Only
-    /// providers that store overrides as SEPARATE entities act on it
-    /// (CalDAV/iCloud single-resource overrides, Google instance events); EWS
-    /// keeps modified occurrences inline and local expansion has none, so they
-    /// ignore it. NOT persisted and meaningless on a read — `#[serde(default,
-    /// skip…)]` keeps it `false` and off the wire except on the split's update.
+    /// Transient write-only signal for a cut — "this and all following" in
+    /// the editors and the carry dialogs, and a delete from one occurrence
+    /// on: `true` on an update of a recurring MASTER whose rule now carries an
+    /// earlier `UNTIL`, one second before the occurrence it is cut at.
+    /// Providers that store overrides as SEPARATE entities (CalDAV/iCloud
+    /// single-resource overrides, Google instance events) drop any
+    /// RECURRENCE-ID override instance after that `UNTIL` (the deleted /
+    /// edited-away tail), so a provider-modified occurrence there doesn't
+    /// survive as a ghost. EWS keeps modified occurrences inline, but ends a
+    /// series on a date it counts as a whole day on the series' clock, so a
+    /// cut of a timed series ends there on the day before the cut's day
+    /// (decision 254), where an end the user typed keeps its date. Local
+    /// expansion ignores it. NOT persisted and meaningless on a read —
+    /// `#[serde(default, skip…)]` keeps it `false` and off the wire except on
+    /// the cut's update.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncate_tail_overrides: bool,
     /// Transient write-only consent: the user was told that this update makes

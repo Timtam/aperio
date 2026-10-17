@@ -111,6 +111,24 @@ The endpoint is discovered or user-supplied.
   does, failed with "could not compute the InstanceIndex"; it reads a fresh
   GetItem, so the parse side alone mends it. EWS tasks
   share the reader, but their cached rows are not re-emitted (see TODO).
+- **A series' end date is a whole day on its own clock.** Exchange keeps
+  every occurrence on `EndDate`, counted on the clock the series repeats on:
+  a daily 00:30 Berlin series ending on 3.11. keeps the 3.11. and not the
+  4.11. (still the 3.11. in UTC), and a daily 20:00 New York series ending on
+  5.11. keeps the 5.11. there (live round 10a, M1, M2, 2026-10-17). The
+  writer takes an `UNTIL`'s own date, which is right for an end the user
+  typed and for the `…T235959Z` the reader writes back. A cut, though,
+  writes `UNTIL` one second before the occurrence it is cut at, an instant,
+  and its UTC date kept the cut's own day in both series (the 8a live test;
+  round 10a, M5 for a delete from one occurrence on). So an update marked as
+  a cut (`truncate_tail_overrides`) of a timed series ends on the last day
+  whose occurrence, at the master's wall time on the clock the rule is
+  written on, starts at or before the `UNTIL` (`cut_end_day`,
+  `cal_core::last_day_through`, decision 254): a weekly Monday series cut
+  on a Monday ends on the Sunday before, and Exchange keeps such a date
+  (M3). A deleted occurrence on the end day stays deleted (M4). An all-day
+  cut already sends the day before as a date (M6). A clock Aperio cannot
+  read refuses the cut with the unreadable-zone sentence (256).
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by

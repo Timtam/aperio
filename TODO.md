@@ -686,7 +686,8 @@ Siehe DESIGN §4.2.
       das erste Vorkommen. Ungemessen.
     - Exchange: `EndDate` ist inklusive (Live-Test 8a, 2026-10-10). Ein
       Kürzen mit Uhrzeit lässt den Schnitttag deshalb doppelt stehen; die
-      Korrektur ist ein eigener PR (235). Graph: ungemessen.
+      Korrektur ist gebaut (254, unten „Schnitttag doppelt“). Graph:
+      ungemessen.
     - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
       Serie, dann die Kopie (dieselbe Reihenfolge, die #92 in den Editoren
       umgedreht hat).
@@ -947,19 +948,24 @@ Siehe DESIGN §4.2.
   Ungemessen bleiben ein Termin mit eigener Zone vom iPhone oder aus einer
   Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
   DESIGN, Stufe 4, „Gemessen“).
-  🚩 **Schnitttag doppelt** (235, gemessen im Live-Test 8a): Ein Schnitt „dieser
-  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigt den Schnitttag
-  in beiden Serien. Die alte Serie endet mit `UNTIL` eine Sekunde vor dem
-  Schnitt, das Enddatum ist dessen Datum, und Exchange zählt es mit. Das
-  Enddatum muss der Tag des letzten Vorkommens vor dem Schnitt sein. Eigener
-  PR, nach der Zonen-Reihenfolge und vor 8b. Ein vor dem Schnitt gelöschtes
-  Vorkommen bleibt gelöscht.
+  ↻ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
+  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit, auch das Löschen ab
+  einem Termin, zeigte den Schnitttag in beiden Serien, weil Exchange das
+  Enddatum als ganzen Tag auf der Uhr der Serie zählt (Live-Runde 10a). Jetzt
+  endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
+  selbst gewähltes Ende bleibt, wie es ist. Gebaut im Exchange-Adapter, also
+  für Desktop und Handy zugleich; Live-Runde 10b mit dem neuen Build vor dem
+  Merge. Ungemessen: ein Schnitt am Tag einer Zeitumstellung.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
-  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
+  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR. Dazu gehört
+  das Enddatum eines Schnitts: Graph schreibt die Ziffern des `UNTIL` und
+  liest `…T235959Z` zurück wie Exchange; `cal_core::last_day_through` (257)
+  ist dafür da. Ob Graph das Enddatum inklusive und auf welcher Uhr zählt,
+  ist ungemessen.
   ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
   neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
   Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein

@@ -41,7 +41,9 @@ import {
  * truncation as a ghost; the `truncate_tail_overrides` flag on the update asks
  * the adapter to drop the overrides in the dropped tail (CalDAV re-writes the
  * resource without them; Google cancels the tail instance events). EWS keeps
- * modified occurrences inline, so its truncation drops them for free.
+ * modified occurrences inline, so its truncation drops them for free; it reads
+ * the flag to end the series on the day before the cut, on the series' clock
+ * (decision 254).
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,
