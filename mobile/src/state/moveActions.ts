@@ -5,8 +5,10 @@
 import type { Task } from '@aperio/shared';
 import {
   isSeriesOccurrence,
+  newSeriesRecurrence,
   occurrenceIsoOf,
   organizerOf,
+  readSeriesRows,
   seriesIdOf,
 } from '@aperio/shared';
 
@@ -14,6 +16,7 @@ import {
   addEventExdate,
   createEvent,
   getEventById,
+  getSeriesRows,
   updateEvent,
   type CalendarEvent,
 } from '../api/calendar';
@@ -159,7 +162,7 @@ export async function moveOrCopyEvent(
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
 
   if (mode === 'move' && !asOccurrence) {
-    const series = await seriesRowOf(event);
+    const series = await newSeriesRowOf(event);
     await updateEvent(
       { ...series, calendar_id: targetCalendarId },
       series.calendar_id,
@@ -167,22 +170,27 @@ export async function moveOrCopyEvent(
     return;
   }
 
-  const source = asOccurrence ? event : await seriesRowOf(event);
-  await createEvent({
-    calendar_id: targetCalendarId,
-    title: source.title,
-    description: source.description,
-    location: source.location,
-    start: source.start,
-    end: source.end,
-    all_day: source.all_day,
-    recurrence: asOccurrence ? null : source.recurrence,
-    color_label: source.color_label,
-    reminders: source.reminders,
-    sound: source.sound,
-    attendees: source.attendees,
-    ...organizerOf(source),
-  });
+  const source = asOccurrence ? event : await newSeriesRowOf(event);
+  await createEvent(
+    {
+      calendar_id: targetCalendarId,
+      title: source.title,
+      description: source.description,
+      location: source.location,
+      start: source.start,
+      end: source.end,
+      all_day: source.all_day,
+      recurrence: asOccurrence ? null : source.recurrence,
+      color_label: source.color_label,
+      reminders: source.reminders,
+      sound: source.sound,
+      attendees: source.attendees,
+      ...organizerOf(source),
+    },
+    // A copy keeps the series' zone, or none, as the source has it
+    // (decision 262): its deletions are instants on that clock.
+    { preserveRecurrenceZone: true },
+  );
 
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
@@ -190,6 +198,26 @@ export async function moveOrCopyEvent(
       await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
     }
   }
+}
+
+/**
+ * The whole series `event` belongs to, as the NEW series a move or a copy
+ * writes (decisions 224, 259): the master (`seriesRowOf`), its rows read by its
+ * id, and as exceptions exactly its real deletions (`newSeriesRecurrence`). An
+ * occurrence changed elsewhere is no deletion: the new series shows it at its
+ * usual time. A single event is itself. A read that fails is a series that
+ * could not be loaded, and nothing is written. Mirrors the desktop.
+ */
+async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+  const series = await seriesRowOf(event);
+  if (!series.recurrence?.rrule) return series;
+  let rows: CalendarEvent[];
+  try {
+    rows = (await readSeriesRows(series, series.start, getSeriesRows)).rows;
+  } catch {
+    throw new SeriesNotLoadedError(series.id);
+  }
+  return { ...series, recurrence: newSeriesRecurrence(series, rows) };
 }
 
 /** The row that stands for the whole series `event` belongs to: `event` itself
