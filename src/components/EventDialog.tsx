@@ -64,6 +64,7 @@ import {
   cutoffDay,
 } from '../intl/recurrence';
 import {
+  asNewSeries,
   describeRecurrence,
   eventPrefillFrom,
   findOffer,
@@ -1866,12 +1867,17 @@ export function EventDialog({
           // its zone follows the kind (191, 195). Its start stays where the
           // edit put it, off its own rule too, as providers show such a start.
           // Untouched, the recurrence stays as it is: a new title respells no
-          // exception.
+          // exception. Another calendar writes the series there as a NEW one
+          // (224, 259): read from its own start too, with its real deletions
+          // only, so an occurrence changed elsewhere comes back at its usual
+          // time instead of travelling as a deletion.
+          const movesCalendar = form.calendarId !== event.calendar_id;
           const wholePlan =
             !wholeFromCut &&
             series.recurrence?.rrule &&
             (Date.parse(times.start) !== Date.parse(series.start) ||
               form.allDay !== series.all_day ||
+              movesCalendar ||
               // A rule the user set at another start moves to this one.
               (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start)))
               ? planSeriesSplit(
@@ -1901,7 +1907,7 @@ export function EventDialog({
                   {
                     master: wholeFromCut.master,
                     cutoffIso: wholeFromCut.occIso,
-                    plan: wholeFromCut.plan,
+                    plan: movesCalendar ? asNewSeries(wholeFromCut.plan) : wholeFromCut.plan,
                     tail: { start: times.start, all_day: form.allDay },
                   },
                   // Read as a change to the series from its cut, as its start is.
@@ -1913,7 +1919,7 @@ export function EventDialog({
                     {
                       master: series,
                       cutoffIso: series.start,
-                      plan: wholePlan,
+                      plan: movesCalendar ? asNewSeries(wholePlan) : wholePlan,
                       tail: { start: times.start, all_day: form.allDay },
                     },
                     series.start,

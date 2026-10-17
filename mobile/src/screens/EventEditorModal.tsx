@@ -50,6 +50,7 @@ import {
   defaultNewEventTimes,
   isBirthdayEventId,
   planSeriesSplit,
+  asNewSeries,
   recurrenceStartDate,
   selectableEventCalendars,
   writeSeriesSplit,
@@ -1568,12 +1569,17 @@ export default function EventEditorModal({
         // deleted occurrences keep their place, its bound the length and its
         // zone follows the kind (191, 195). Its start stays where the edit put
         // it, off its own rule too. Untouched, the recurrence stays as it is.
-        // Mirrors the desktop.
+        // Another calendar writes the series there as a NEW one (224, 259):
+        // read from its own start too, with its real deletions only, so an
+        // occurrence changed elsewhere comes back at its usual time instead of
+        // travelling as a deletion. Mirrors the desktop.
+        const movesCalendar = calId !== original.calendar_id;
         const wholePlan =
           !wholeCut &&
           base.recurrence?.rrule &&
           (Date.parse(times.start) !== Date.parse(base.start) ||
             allDay !== base.all_day ||
+            movesCalendar ||
             // A rule the user set at another start moves to this one.
             (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start)))
             ? planSeriesSplit(
@@ -1594,7 +1600,7 @@ export default function EventEditorModal({
               {
                 master: original,
                 cutoffIso: wholeCut.occIso,
-                plan: wholeCut.plan,
+                plan: movesCalendar ? asNewSeries(wholeCut.plan) : wholeCut.plan,
                 tail: { start: times.start, all_day: allDay },
               },
               // Read as a change to the series from its cut, as its start is.
@@ -1606,7 +1612,7 @@ export default function EventEditorModal({
                 {
                   master: base,
                   cutoffIso: base.start,
-                  plan: wholePlan,
+                  plan: movesCalendar ? asNewSeries(wholePlan) : wholePlan,
                   tail: { start: times.start, all_day: allDay },
                 },
                 base.start,
