@@ -258,7 +258,7 @@ sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:
 „Aperio konnte den aktuellen Stand dieses Termins nicht vom Server lesen und hat
 ihn deshalb nicht geändert. Versuche es gleich noch einmal.“
 
-## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
+## Exchange speichert einen Termin in einer Zeitzone, die Aperio nicht lesen kann
 
 Aperio sagt dann: „Exchange speichert diesen Termin in einer Zeitzone, die
 Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern; den

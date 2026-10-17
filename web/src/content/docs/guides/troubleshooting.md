@@ -240,7 +240,7 @@ change it, because it would not know what would be lost. Aperio then says:
 "Aperio could not read this appointment's current state from the server, so it
 did not change it. Try again in a moment."
 
-## The day of an all-day Exchange appointment cannot be changed
+## Exchange stores an appointment in a time zone Aperio cannot read
 
 Aperio then says: "Exchange stores this appointment in a time zone Aperio
 cannot read, so its day cannot be changed here; its title and the rest can.

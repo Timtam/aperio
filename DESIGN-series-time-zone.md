@@ -335,8 +335,9 @@ keinen, dort ist die Wahl Tonis Sache.
   `…T235959Z` behalten ihr Datum. Aperios eigene Anzeige liest dieses
   `UNTIL` weiter als Zeitpunkt und irrt in zwei Fenstern um einen Tag: Eine
   Serie in Berlin zwischen 00:00 und 00:59 (im Sommer bis 01:59) zeigt den
-  Schnitttag in Aperio doppelt, eine in New York ab 19:00 lässt dort den
-  letzten Tag weg. Das gehört zu Stufe 8 (Risiko „Altes UNTIL im Osten“).
+  Schnitttag in Aperio doppelt, eine in New York ab 19:00 (im Sommer ab
+  20:00) lässt dort den letzten Tag weg. Das gehört zu Stufe 8 (Risiko
+  „Altes UNTIL nahe Mitternacht UTC“).
 - **256 — ohne Uhr wird abgelehnt.** Kann Aperio die Uhr der Serie nicht
   lesen, lehnt es den Schnitt mit dem Satz zur unlesbaren Zone ab (237),
   statt den Schnitttag doppelt stehen zu lassen; die neue Serie wird
@@ -1245,11 +1246,12 @@ Handy im selben PR.
 - **Lücken werden abgelehnt.** Serien auf der Gerätezone, die eine
   Frühjahrs-Uhrzeit bisher still gerundet haben, lassen sich so nicht mehr
   speichern.
-- **Altes UNTIL im Osten.** Zonen-Serien östlich von UTC mit einem UNTIL als
-  `{Datum}T235959Z` zeigen ihr Ende einen Tag später. Roh bleibt es, solange es
-  unberührt ist; wer das angezeigte Datum neu tippt, verlängert die Serie um
-  einen Tag. Nach einem Schnitt bei Exchange liest Aperio das Enddatum so
-  zurück und irrt in zwei Fenstern um einen Tag (255).
+- **Altes UNTIL nahe Mitternacht UTC.** Zonen-Serien östlich von UTC mit
+  einem UNTIL als `{Datum}T235959Z` zeigen ihr Ende einen Tag später. Roh
+  bleibt es, solange es unberührt ist; wer das angezeigte Datum neu tippt,
+  verlängert die Serie um einen Tag. Westlich von UTC fehlt am Abend
+  umgekehrt der letzte Tag. Nach einem Schnitt bei Exchange liest Aperio das
+  Enddatum so zurück und irrt in zwei Fenstern um einen Tag (255).
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
   Wischen verbergen; alle 313 Zeilen zu zeichnen kann auf alten Android-Geräten
   langsam sein.

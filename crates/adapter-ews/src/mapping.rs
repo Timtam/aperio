@@ -10682,9 +10682,10 @@ mod tests {
 
     /// Decision 235: a cut of a timed series ends the old series on the day
     /// before the cut on its clock. Exchange counts EndDate as a whole day
-    /// there (live round 10a, M1, M2), and the UNTIL's UTC date kept the cut's
-    /// own day in both series (the 8a live test, step 8; round 10a, M5), west
-    /// of UTC in the evening the day after it too. A weekly cut on a Monday
+    /// there (live round 10a, M1, M2), and the UNTIL's UTC date mostly kept
+    /// the cut's own day: in both series after a split (the 8a live test, step
+    /// 8), in the only one after a delete from one occurrence on (round 10a,
+    /// M5), and west of UTC in the evening the day after it too. A weekly cut on a Monday
     /// ends on the Sunday before, the same occurrences (round 10a, M3). Still
     /// only a new range: no question, the exceptions stay.
     #[test]

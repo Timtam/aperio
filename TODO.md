@@ -694,7 +694,9 @@ Siehe DESIGN §4.2.
     - Das Handy überspringt beim Mitziehen keine Kopie einer fremden
       Einladung (`invitationLocked`, am Desktop schon).
     - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
-      Worten.
+      Worten. Beim Löschen von Terminen sagen Tag, Woche, Monat und Agenda
+      sie seit #125 in Worten; offen sind Aufgaben (MonthView beim Ziehen
+      auf einen Tag, TaskView) und Kontakte (ContactsView).
     - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
       Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche
@@ -2231,6 +2233,10 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Domänen-Kiste — auf eins käme man nur, wenn auch der reine HTTP-Client das
   FFI-SDK einbindet.
 #### A11 · Kern und Oberflächen trennen `[~]` — erledigte Punkte
+
+- [x] **Nebenfunde aus dem Entwurf zu 118, erledigter Teil:** Tag, Woche,
+  Monat und Agenda sagen eine abgelehnte Termin-Löschung in Worten an, wie die
+  Editoren, nicht als `code: message` (#125, zweite Prüfrunde).
 
 - [x] **Schritt 1: die Domänentypen werden erzeugt, nicht abgeschrieben.**
   ↳ `shared/types.ts` war 285 Zeilen Handschrift mit dem Satz „die Kiste
