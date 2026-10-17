@@ -256,11 +256,11 @@ Feld mit `Tab` erreichst.
 > Termine der alten mit, sonst nichts: Ein einzeln geänderter Termin, etwa in
 > Outlook, ist zu seiner üblichen Zeit mit den Angaben der Serie wieder da.
 > `Strg+D` auf einem Termin einer Serie dupliziert die ganze Serie ab ihrem
-> ersten Termin, im selben Kalender. Eine Kopie behält die Zeitzone der Serie.
-> Nach Exchange oder Microsoft 365 verschoben oder kopiert, zeigt die neue
-> Serie gelöschte Termine vorerst wieder. Aus einem Google-Kalender kennt
-> Aperio gelöschte Termine von etwa drei Monaten vor heute bis ein Jahr danach
-> (siehe Fehlerbehebung).
+> ersten Termin, im selben Kalender. Eine Kopie oder ein Duplikat behält die
+> Zeitzone der Serie. Nach Exchange oder Microsoft 365 verschoben oder kopiert,
+> oder dort dupliziert, zeigt die neue Serie gelöschte Termine vorerst wieder.
+> Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
+> Monaten vor heute bis ein Jahr danach (siehe Fehlerbehebung).
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,

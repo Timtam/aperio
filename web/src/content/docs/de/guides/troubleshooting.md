@@ -291,7 +291,7 @@ liest Aperio den Termin vor dem Speichern vom Server. Gelingt das nicht, etwa
 weil der Server gerade nicht antwortet, schickt Aperio nichts. Versuche es
 nach einem Moment noch einmal.
 
-## Nach dem Verschieben oder Kopieren einer Serie ist ein Termin wieder da
+## Nach dem Verschieben, Kopieren oder Duplizieren einer Serie ist ein Termin wieder da
 
 Verschiebst du eine ganze Serie in einen anderen Kalender, kopierst sie,
 duplizierst sie mit `Strg+D` oder wählst im Editor einen anderen Kalender für
@@ -302,9 +302,9 @@ der alten Serie mit, sonst nichts:
   wieder da, mit Titel, Ort und Uhrzeit der Serie. Nach dem Verschieben ist
   seine eigene Änderung mit der alten Serie weg; nach dem Kopieren oder
   Duplizieren bleibt sie in der alten.
-- Nach Exchange oder Microsoft 365 verschoben oder kopiert, zeigt die neue
-  Serie gelöschte Termine vorerst wieder: Sie nehmen beim Anlegen einer Serie
-  keine Löschungen an.
+- Nach Exchange oder Microsoft 365 verschoben oder kopiert, oder dort
+  dupliziert, zeigt die neue Serie gelöschte Termine vorerst wieder: Exchange
+  und Microsoft 365 nehmen beim Anlegen einer Serie keine Löschungen an.
 - Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
   Monaten vor heute bis ein Jahr danach. Ein weiter entfernt gelöschter ist in
   der neuen Serie wieder da.

@@ -1871,26 +1871,27 @@ export function EventDialog({
           // exception. Another calendar writes the series there as a NEW one
           // (224, 259), with its real deletions only, so an occurrence changed
           // elsewhere comes back at its usual time instead of travelling as a
-          // deletion: moved as well, the plan says so (`asNewSeries`); only
-          // moved there, each deletion stays where it is (`newSeriesRecurrence`).
+          // deletion: moved by the plan, the plan says so (`asNewSeries`);
+          // otherwise its real deletions (`newSeriesRecurrence`) go the way the
+          // exceptions go, where they are or at a new time of day.
           const movesCalendar = form.calendarId !== event.calendar_id;
           const rewritesFromStart =
             Date.parse(times.start) !== Date.parse(series.start) ||
             form.allDay !== series.all_day ||
             // A rule the user set at another start moves to this one.
             (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
-          const wholePlan =
-            !wholeFromCut && series.recurrence?.rrule && rewritesFromStart
-              ? planSeriesSplit(
-                  series,
-                  series.start,
-                  (await readSeriesRows(series, series.start, getSeriesRows)).rows,
-                )
-              : null;
-          const newSeriesRows =
-            !wholeFromCut && series.recurrence?.rrule && movesCalendar && !rewritesFromStart
+          const seriesRows =
+            !wholeFromCut && series.recurrence?.rrule && (rewritesFromStart || movesCalendar)
               ? (await readSeriesRows(series, series.start, getSeriesRows)).rows
               : null;
+          const wholePlan =
+            seriesRows && rewritesFromStart
+              ? planSeriesSplit(series, series.start, seriesRows)
+              : null;
+          const keptRecurrence =
+            movesCalendar && seriesRows
+              ? newSeriesRecurrence({ ...series, recurrence: seriesRecurrence }, seriesRows)
+              : seriesRecurrence;
           const updated: CalendarEvent = {
             ...series,
             id: seriesId,
@@ -1930,14 +1931,12 @@ export function EventDialog({
                     series.start,
                     { from: series.start, refused: 'series', whole: true },
                   )
-                : newSeriesRows
-                  ? newSeriesRecurrence({ ...series, recurrence: seriesRecurrence }, newSeriesRows)
-                  : exceptionsAtSeriesTime(
-                      seriesRecurrence,
-                      series.start,
-                      times.start,
-                      form.allDay || series.all_day,
-                    ),
+                : exceptionsAtSeriesTime(
+                    keptRecurrence,
+                    series.start,
+                    times.start,
+                    form.allDay || series.all_day,
+                  ),
             color_label: form.colorLabel,
             reminders: remindersForWire,
             attendees: form.attendees,

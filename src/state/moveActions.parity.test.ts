@@ -17,7 +17,27 @@ vi.mock('../../mobile/src/api/calendar', () => phone);
 vi.mock('../../mobile/src/api/client', () => ({ createTask: vi.fn(), updateTask: vi.fn() }));
 
 import { moveOrCopyEvent as desktopMoveOrCopy } from './moveActions';
-import { moveOrCopyEvent as phoneMoveOrCopy } from '../../mobile/src/state/moveActions';
+
+/**
+ * The phone's module, loaded through a path the type checker does not follow,
+ * as `taskSettings.contractSupport.ts` does: a static import pulls the mobile
+ * sources — and through them the Expo bridge — into the desktop's `tsc`, which
+ * runs without the mobile packages installed. The test runner resolves it next
+ * to this file at run time.
+ */
+const PHONE_MOVE_ACTIONS = '../../mobile/src/state/moveActions';
+type MoveOrCopy = (
+  event: CalendarEvent,
+  targetCalendarId: string,
+  mode: 'move' | 'copy',
+  scope: 'occurrence' | 'series',
+) => Promise<void>;
+async function phoneMoveOrCopy(...args: Parameters<MoveOrCopy>): Promise<void> {
+  const phoneModule = (await import(/* @vite-ignore */ PHONE_MOVE_ACTIONS)) as {
+    moveOrCopyEvent: MoveOrCopy;
+  };
+  await phoneModule.moveOrCopyEvent(...args);
+}
 
 /**
  * Moving and copying a whole series, on both surfaces (decisions 224, 259,

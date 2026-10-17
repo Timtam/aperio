@@ -1573,27 +1573,25 @@ export default function EventEditorModal({
         // Another calendar writes the series there as a NEW one (224, 259),
         // with its real deletions only, so an occurrence changed elsewhere
         // comes back at its usual time instead of travelling as a deletion:
-        // moved as well, the plan says so (`asNewSeries`); only moved there,
-        // each deletion stays where it is (`newSeriesRecurrence`). Mirrors the
-        // desktop.
+        // moved by the plan, the plan says so (`asNewSeries`); otherwise its
+        // real deletions (`newSeriesRecurrence`) go the way the exceptions go,
+        // where they are or at a new time of day. Mirrors the desktop.
         const movesCalendar = calId !== original.calendar_id;
         const rewritesFromStart =
           Date.parse(times.start) !== Date.parse(base.start) ||
           allDay !== base.all_day ||
           // A rule the user set at another start moves to this one.
           (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
-        const wholePlan =
-          !wholeCut && base.recurrence?.rrule && rewritesFromStart
-            ? planSeriesSplit(
-                base,
-                base.start,
-                (await readSeriesRows(base, base.start, getSeriesRows)).rows,
-              )
-            : null;
-        const newSeriesRows =
-          !wholeCut && base.recurrence?.rrule && movesCalendar && !rewritesFromStart
+        const seriesRows =
+          !wholeCut && base.recurrence?.rrule && (rewritesFromStart || movesCalendar)
             ? (await readSeriesRows(base, base.start, getSeriesRows)).rows
             : null;
+        const wholePlan =
+          seriesRows && rewritesFromStart ? planSeriesSplit(base, base.start, seriesRows) : null;
+        const keptRecurrence =
+          movesCalendar && seriesRows
+            ? newSeriesRecurrence({ ...base, recurrence: recurrenceToSend }, seriesRows)
+            : recurrenceToSend;
         // "This and all following" from the series' first occurrence on keeps
         // the rule the repeat field shows — its own from the cut on, moved
         // with a new date, unless the field changed — and takes the deleted
@@ -1624,14 +1622,12 @@ export default function EventEditorModal({
                 base.start,
                 { from: base.start, refused: 'series', whole: true },
               )
-            : newSeriesRows
-              ? newSeriesRecurrence({ ...base, recurrence: recurrenceToSend }, newSeriesRows)
-              : exceptionsAtSeriesTime(
-                  recurrenceToSend,
-                  base.start,
-                  times.start,
-                  allDay || base.all_day,
-                );
+            : exceptionsAtSeriesTime(
+                keptRecurrence,
+                base.start,
+                times.start,
+                allDay || base.all_day,
+              );
         // What the user saved. The row that comes back is the provider's,
         // and a provider that keeps what the edit left alone (Google leaves
         // a kept start out of the write, decision 205) answers with its own,
