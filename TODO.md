@@ -696,7 +696,8 @@ Siehe DESIGN §4.2.
     - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
       Worten. Beim Löschen von Terminen sagen Tag, Woche, Monat und Agenda
       sie seit #125 in Worten; offen sind Aufgaben (MonthView beim Ziehen
-      auf einen Tag, TaskView) und Kontakte (ContactsView).
+      auf einen Tag, BacklogRail beim Ziehen in den Rückstand, TaskView) und
+      Kontakte (ContactsView).
     - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
       Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche

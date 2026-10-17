@@ -8,11 +8,14 @@
 //! with a series at 00:30 Berlin, M2 at 20:00 New York). Written as the
 //! `UNTIL`'s UTC date, the end kept the cut's own day, so it stood in the old
 //! series and in the new one (a delete from one occurrence on kept it in the
-//! only one, M5). Only east of UTC, for a time of day before the zone's
-//! offset from UTC (in Berlin before 01:00, in summer 02:00; M1), was the UTC
-//! date the day before already; west of UTC, from 24:00 minus the offset on
-//! (in New York from 19:00, in summer 20:00; M2), it was the day after the
-//! cut's day, and two days stood twice.
+//! only one, M5). Only east of UTC, for a time of day up to and including
+//! the zone's distance from UTC (in Berlin up to 01:00, in summer 02:00; M1),
+//! was the UTC date the day before already; west of UTC, for a time of day
+//! after 24:00 less the zone's distance from UTC (in New York after 19:00, in
+//! summer after 20:00; M2), it was the day after the cut's day, and two days
+//! stood twice — at 19:00 itself only the cut's day. The bounds sit a second
+//! off those of a read-back end (`…T235959Z`), because a cut's `UNTIL` is one
+//! second before the occurrence.
 //!
 //! Every occurrence of such a series stands at the same wall time on its
 //! clock. So the end is the day of the `UNTIL` on that clock where that day's
@@ -133,6 +136,22 @@ mod tests {
         // Daily 00:30 Berlin, cut on Wed 4.11. (round 10a, M1): 3.11. either way.
         assert_eq!(
             end("2026-11-03T23:29:59Z", hm(0, 30), 1),
+            Some(day(2026, 11, 3))
+        );
+    }
+
+    #[test]
+    fn up_to_the_zones_distance_from_utc_the_day_before_is_kept() {
+        // Daily 01:00 Berlin: the occurrence is 00:00Z, the UNTIL the day
+        // before in UTC too.
+        assert_eq!(
+            end("2026-11-03T23:59:59Z", hm(1, 0), 1),
+            Some(day(2026, 11, 3))
+        );
+        // Daily 19:00 New York: the UNTIL is 23:59:59Z of the cut's day, the
+        // very text of an end typed for that day; still the day before.
+        assert_eq!(
+            end("2026-11-04T23:59:59Z", hm(19, 0), -5),
             Some(day(2026, 11, 3))
         );
     }

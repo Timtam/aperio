@@ -10685,16 +10685,18 @@ mod tests {
     /// there (live round 10a, M1, M2), and the UNTIL's UTC date mostly kept
     /// the cut's own day: in both series after a split (the 8a live test, step
     /// 8), in the only one after a delete from one occurrence on (round 10a,
-    /// M5), and west of UTC, from 24:00 minus the zone's offset on (New York
-    /// from 19:00, M2), the day after it too. A weekly cut on a Monday ends on
-    /// the Sunday before, the same occurrences (round 10a, M3). Still only a
-    /// new range: no question, the exceptions stay.
+    /// M5), and west of UTC, after 24:00 less the zone's distance from UTC
+    /// (New York after 19:00, M2), the day after it too. A weekly cut on a
+    /// Monday ends on the Sunday before, the same occurrences (round 10a, M3).
+    /// At 19:00 New York the cut's UNTIL is the very text of an end typed for
+    /// the cut's day: only the flag tells them apart. Still only a new range:
+    /// no question, the exceptions stay.
     #[test]
     fn a_cut_ends_the_old_series_on_the_day_before_the_cut() {
         let berlin = w_europe_zones();
         let new_york = new_york_zones();
         let daily = "FREQ=DAILY;COUNT=10";
-        let cases: [(&str, &str, &str, &str, &StoredZones, &str, &str); 8] = [
+        let cases: [(&str, &str, &str, &str, &StoredZones, &str, &str); 10] = [
             (
                 "daily 08:00 Berlin, cut on Thu 5.11.",
                 "2026-11-02T07:00:00Z",
@@ -10723,12 +10725,30 @@ mod tests {
                 "2026-11-03",
             ),
             (
-                "00:30 Berlin, cut on Wed 4.11. (round 10a, M1)",
+                "00:30 Berlin, cut on Wed 4.11. (round 10a, M1; right on main too)",
                 "2026-11-01T23:30:00Z",
                 daily,
                 "Europe/Berlin",
                 &berlin,
                 "20261103T232959Z",
+                "2026-11-03",
+            ),
+            (
+                "01:00 Berlin, cut on Wed 4.11. (right on main too)",
+                "2026-11-02T00:00:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261103T235959Z",
+                "2026-11-03",
+            ),
+            (
+                "19:00 New York, cut on Wed 4.11.: the UNTIL a typed end has",
+                "2026-11-03T00:00:00Z",
+                daily,
+                "America/New_York",
+                &new_york,
+                "20261104T235959Z",
                 "2026-11-03",
             ),
             (
@@ -10788,7 +10808,7 @@ mod tests {
     fn an_end_that_is_no_cut_keeps_its_own_date() {
         let berlin = w_europe_zones();
         let new_york = new_york_zones();
-        let typed: [(&str, &str, &str, &StoredZones); 3] = [
+        let typed: [(&str, &str, &str, &StoredZones); 4] = [
             (
                 "08:00 Berlin",
                 "2026-11-02T07:00:00Z",
@@ -10804,6 +10824,12 @@ mod tests {
             (
                 "20:00 New York",
                 "2026-11-03T01:00:00Z",
+                "America/New_York",
+                &new_york,
+            ),
+            (
+                "19:00 New York, the text a cut there writes too",
+                "2026-11-03T00:00:00Z",
                 "America/New_York",
                 &new_york,
             ),

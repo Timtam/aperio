@@ -315,10 +315,13 @@ keinen, dort ist die Wahl Tonis Sache.
   Sekunde vor dem Schnitt. Dessen UTC-Datum behielt meist den Schnitttag: Er
   stand in beiden Serien (Live-Test 8a, Schritt 8), und beim Löschen ab einem
   Termin blieb er stehen (M5). Richtig war das UTC-Datum nur östlich von UTC,
-  für eine Uhrzeit vor dem Versatz der Zone zu UTC (in Berlin vor 01:00, im
-  Sommer vor 02:00; M1). Westlich von UTC kam ab 24 Uhr minus dem Versatz
-  der Tag danach hinzu (in New York ab 19:00, im Sommer ab 20:00; M2). Ein
-  Schnitt einer Serie mit Uhrzeit
+  für eine Uhrzeit bis einschließlich dem Abstand der Zone zu UTC (in Berlin
+  bis 01:00, im Sommer bis 02:00; M1). Westlich von UTC kam für eine Uhrzeit
+  nach 24 Uhr weniger dem Abstand zu UTC der Tag danach hinzu (in New York
+  nach 19:00, im Sommer nach 20:00; M2); um 19:00 selbst stand nur der
+  Schnitttag doppelt. Die Grenzen in 255 liegen eine Sekunde anders, weil
+  dort das zurückgelesene `…T235959Z` zählt und nicht ein Zeitpunkt eine
+  Sekunde vor dem Termin. Ein Schnitt einer Serie mit Uhrzeit
   endet deshalb am letzten Tag, dessen Vorkommen, zur Uhrzeit der Serie auf
   ihrer Uhr, bis zum `UNTIL` beginnt: am Tag vor dem Schnitttag. Eine
   wöchentliche Serie, an einem Montag geschnitten, endet am Sonntag davor,
@@ -1251,9 +1254,11 @@ Handy im selben PR.
 - **Altes UNTIL nahe Mitternacht UTC.** Zonen-Serien östlich von UTC mit
   einem UNTIL als `{Datum}T235959Z` zeigen ihr Ende einen Tag später. Roh
   bleibt es, solange es unberührt ist; wer das angezeigte Datum neu tippt,
-  verlängert die Serie um einen Tag. Westlich von UTC fehlt am Abend
-  umgekehrt der letzte Tag. Nach einem Schnitt bei Exchange liest Aperio das
-  Enddatum so zurück und irrt in zwei Fenstern um einen Tag (255).
+  verlängert die Serie um einen Tag. Westlich von UTC fehlt dagegen der
+  letzte Termin, für eine Uhrzeit ab 24 Uhr weniger dem Abstand der Zone zu
+  UTC (New York ab 19:00, im Sommer ab 20:00; Los Angeles ab 16:00). Nach
+  einem Schnitt bei Exchange liest Aperio das Enddatum so zurück und irrt in
+  zwei Fenstern um einen Tag (255).
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
   Wischen verbergen; alle 313 Zeilen zu zeichnen kann auf alten Android-Geräten
   langsam sein.
