@@ -227,12 +227,13 @@ calendar: "Carry over anyway" carries the change to them too, "Cancel" leaves
 them among the copies not changed.
 
 Changing or deleting a series from one of its appointments on only shortens the
-old series, and that keeps its changed and deleted occurrences. Only where
-Aperio would write the time zone again with it (see above) and something would
-be lost is the series not shortened: Aperio does not ask there, it says the
-sentence and changes nothing. Do that in Outlook then. Changed from its first
-appointment on, the whole series is written again, and Aperio asks as in the
-editor.
+old series, and that keeps its changed and deleted occurrences. Where Aperio
+would write the time zone again with it (see above) and something would be
+lost, the series is not shortened: Aperio does not ask there, it says the
+sentence and changes nothing. Do that in Outlook then. Nor is a series with a
+time of day shortened when Exchange stores it in a time zone Aperio cannot read
+(see the next section). Changed from its first appointment on, the whole series
+is written again, and Aperio asks as in the editor.
 
 If Aperio cannot read a series' current state from the server, it does not
 change it, because it would not know what would be lost. Aperio then says:
@@ -257,6 +258,13 @@ guess: the appointment would otherwise stretch over two days in Outlook.
 What you can do: change the day in Outlook. Everything else, such as the
 title, the place or the reminder, you can still change in Aperio, as long as
 you do not move the day with it.
+
+The same sentence comes when you change or delete a series with a time of day
+from one of its appointments on, and Exchange stores it in such a time zone.
+Exchange counts the day a shortened series ends on in that time zone, so
+Aperio could not tell which day to end it on, and changes nothing. Change or
+delete that series from the appointment on in Outlook. Its title, place and
+reminder you can still change in Aperio.
 
 A similar message is: "Aperio could not read this appointment's current state
 from the server, so it did not change it." To know the time zone,

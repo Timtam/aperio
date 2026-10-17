@@ -7,8 +7,10 @@
 //! series repeats on: Exchange does (live test 8a, step 8; live round 10a, M1
 //! with a series at 00:30 Berlin, M2 at 20:00 New York). Written as the
 //! `UNTIL`'s UTC date, the end kept the cut's own day, so it stood in the old
-//! series and in the new one, and west of UTC in the evening the day after it
-//! too.
+//! series and in the new one (a delete from one occurrence on kept it in the
+//! only one, M5), and west of UTC in the evening the day after it too. Only
+//! east of UTC just after midnight was the UTC date the day before already
+//! (M1).
 //!
 //! Every occurrence of such a series stands at the same wall time on its
 //! clock. So the end is the day of the `UNTIL` on that clock where that day's
@@ -115,7 +117,9 @@ mod tests {
             end("2026-11-04T08:59:59Z", hm(10, 0), 1),
             Some(day(2026, 11, 3))
         );
-        // 23:30 Berlin, cut on Wed 4.11.: the UTC date was right by luck.
+        // 23:30 Berlin, cut on Wed 4.11.: the UNTIL is the 4.11. on the clock
+        // as in UTC, and that day's occurrence starts after it, so the day
+        // before; the UTC date kept the 4.11.
         assert_eq!(
             end("2026-11-04T22:29:59Z", hm(23, 30), 1),
             Some(day(2026, 11, 3))

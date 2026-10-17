@@ -119,8 +119,10 @@ The endpoint is discovered or user-supplied.
   writer takes an `UNTIL`'s own date, which is right for an end the user
   typed and for the `…T235959Z` the reader writes back. A cut, though,
   writes `UNTIL` one second before the occurrence it is cut at, an instant,
-  and its UTC date kept the cut's own day in both series (the 8a live test;
-  round 10a, M5 for a delete from one occurrence on). So an update marked as
+  and its UTC date mostly kept the cut's own day: it stood in both series
+  (the 8a live test), and a delete from one occurrence on left it standing
+  (round 10a, M5); only east of UTC just after midnight was the UTC date the
+  day before already (M1). So an update marked as
   a cut (`truncate_tail_overrides`) of a timed series ends on the last day
   whose occurrence, at the master's wall time on the clock the rule is
   written on, starts at or before the `UNTIL` (`cut_end_day`,

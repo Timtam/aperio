@@ -851,7 +851,7 @@ pub async fn update_event(
                 target: "adapter_ews::write",
                 event_id = %event.id,
                 %message,
-                "an all-day day in a zone Aperio cannot read; nothing is written",
+                "a day counted on a zone Aperio cannot read (an all-day day, 237, or a cut's end, 256); nothing is written",
             );
             return Err(EwsError::Protocol(message));
         }

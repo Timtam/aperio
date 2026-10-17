@@ -1440,8 +1440,9 @@ fn to_update_error(err: EwsError) -> CoreError {
             tracing::warn!(%code, %message, "Exchange refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(code))
         }
-        // Nothing was sent: an all-day day in a zone Aperio cannot read
-        // (decision 237), an item or series whose copy could not be read
+        // Nothing was sent: an all-day day, or a cut's end, counted on a zone
+        // Aperio cannot read (decisions 237, 256), an item or series whose
+        // copy could not be read
         // (248), or a rewrite of start and end, zone or pattern that would
         // drop occurrences of the series without the user's consent
         // (246-253). Forbidden, so the phone keeps the message and a split

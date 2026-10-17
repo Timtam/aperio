@@ -949,11 +949,13 @@ Siehe DESIGN §4.2.
   Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
   DESIGN, Stufe 4, „Gemessen“).
   ↻ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
-  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit, auch das Löschen ab
-  einem Termin, zeigte den Schnitttag in beiden Serien, weil Exchange das
-  Enddatum als ganzen Tag auf der Uhr der Serie zählt (Live-Runde 10a). Jetzt
-  endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
-  selbst gewähltes Ende bleibt, wie es ist. Gebaut im Exchange-Adapter, also
+  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte den
+  Schnitttag in beiden Serien, und das Löschen ab einem Termin ließ ihn
+  stehen, weil Exchange das Enddatum als ganzen Tag auf der Uhr der Serie
+  zählt (Live-Runde 10a). Jetzt endet die alte Serie am Tag vor dem
+  Schnitttag, auf dieser Uhr; ein selbst gewähltes Ende bleibt, wie es ist.
+  Aperios eigene Anzeige liest das zurückgelesene Enddatum weiter als
+  Zeitpunkt und irrt in zwei Fenstern um einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also
   für Desktop und Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn
   Schritte, auch ein Schnitt am Tag der Umstellung auf Sommerzeit).
   Ungemessen: ein Schnitt am Tag der Umstellung auf Winterzeit.
@@ -1453,6 +1455,31 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
+      in Aperio auf UTC.** Kennt die Windows-Zonentabelle die
+      StartTimeZone-Id nicht (eine tzdata-Id wie „Europe/Berlin“, 236, oder
+      „Customized Time Zone“ mit Definition, 232), liest Aperio die Serie ohne
+      Zone (`recurrence.tzid = None`, mapping.rs, `WindowsZoneRead::Unknown`)
+      und zeigt sie auf UTC, im Sommer also eine Stunde daneben. Exchange
+      wiederholt sie auf der gespeicherten Zone. Ein Schnitt dort (254) zählt
+      das Ende auf dieser Zone, den Schnitt aber aus Aperios UTC-Ansicht: Im
+      Sommer bleibt der Schnitttag dann doppelt, wie vor #125. Abhilfe: solche
+      Serien beim Lesen auf ihrer gespeicherten Uhr führen (eine tzdata-Id als
+      tzid, eine eigene Zone über ihre Definition), dazu ein Adaptertest
+      (tzid ohne Zone, gespeichert Berlin oder `w_europe()`, im Winter
+      angelegt, im Sommer geschnitten). Gefunden in der ersten Prüfrunde von
+      #125 (2026-10-17), älter als #125.
+- [ ] **Schnitt ab einem geänderten letzten Termin westlich von UTC schreibt
+      nichts.** Eine Serie täglich 20:00 New York mit Ende 5.11. liest Aperio
+      als `UNTIL=20261105T235959Z` zurück und zeigt den 5.11. nicht (255).
+      Wurde der 5.11. in Outlook geändert, steht er als eigene Zeile; ein
+      Schnitt oder Löschen ab dieser Zeile behält das frühere `UNTIL`
+      (`truncateRRuleBefore`), die Regel gilt als unverändert, und der Adapter
+      schickt nichts: Der 5.11. bleibt in der alten Serie, ein Teilen legt ihn
+      in der neuen ein zweites Mal an. Löst sich mit Stufe 8 (das
+      zurückgelesene Enddatum auf der Uhr der Serie lesen); sonst den Schnitt
+      sein Ende auch bei behaltener Regel schreiben lassen. Gefunden in der
+      ersten Prüfrunde von #125 (2026-10-17), älter als #125.
 - [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
       den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
       wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den

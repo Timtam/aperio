@@ -2851,9 +2851,10 @@ pub(crate) fn plan_update_in<D: TimeZone>(
 /// delete from one occurrence on, all of which set `truncate_tail_overrides`
 /// — ends the old series with an `UNTIL` one second before the occurrence it
 /// is cut at. Exchange counts a series' `EndDate` as a whole day on the
-/// series' clock (live round 10a, M1, M2), so the `UNTIL`'s UTC date kept the
-/// cut's own day, and it stood in both series (the 8a live test, step 8;
-/// round 10a, M5 for a delete). A timed series therefore ends on the last day
+/// series' clock (live round 10a, M1, M2), so the `UNTIL`'s UTC date mostly
+/// kept the cut's own day: it stood in both series (the 8a live test, step
+/// 8), and a delete from one occurrence on left it standing (round 10a, M5).
+/// A timed series therefore ends on the last day
 /// whose occurrence, at the master's wall time on `clock`, starts at or before
 /// the `UNTIL` ([`cal_core::last_day_through`]). An all-day cut already names
 /// the day before as a date (round 10a, M6), and an end the user typed keeps

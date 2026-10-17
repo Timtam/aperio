@@ -312,9 +312,11 @@ keinen, dort ist die Wahl Tonis Sache.
   PR zu 235)* Exchange zählt das Enddatum einer Serie als ganzen Tag auf der
   Uhr der Serie (Live-Runde 10a am 17.10.2026: M1, täglich 00:30 Berlin; M2,
   täglich 20:00 New York). Aperio kürzt die alte Serie mit `UNTIL` eine
-  Sekunde vor dem Schnitt; dessen UTC-Datum behielt den Schnitttag in beiden
-  Serien (Live-Test 8a, Schritt 8; M5 beim Löschen ab einem Termin), westlich
-  von UTC abends auch den Tag danach. Ein Schnitt einer Serie mit Uhrzeit
+  Sekunde vor dem Schnitt. Dessen UTC-Datum behielt meist den Schnitttag: Er
+  stand in beiden Serien (Live-Test 8a, Schritt 8), und beim Löschen ab einem
+  Termin blieb er stehen (M5); westlich von UTC abends kam der Tag danach
+  hinzu. Nur östlich von UTC kurz nach Mitternacht war das UTC-Datum schon
+  der Tag davor (M1). Ein Schnitt einer Serie mit Uhrzeit
   endet deshalb am letzten Tag, dessen Vorkommen, zur Uhrzeit der Serie auf
   ihrer Uhr, bis zum `UNTIL` beginnt: am Tag vor dem Schnitttag. Eine
   wöchentliche Serie, an einem Montag geschnitten, endet am Sonntag davor,
@@ -322,12 +324,13 @@ keinen, dort ist die Wahl Tonis Sache.
   gelöschtes Vorkommen am Endtag bleibt gelöscht (M4). Ein ganztägiger
   Schnitt nennt den Tag davor schon als Datum und war richtig (M6). Mit dem
   gebauten Adapter bestand die Live-Runde 10b am 17.10.2026 alle zehn
-  Schritte: Schnitte in Berlin um 08:00, 23:30 und 00:30, in New York um
-  20:00, montags (Ende am Sonntag) und nach einem gelöschten Vorkommen, das
-  Löschen ab einem Termin, ein gewähltes Ende um 08:00 und um 00:30 und ein
-  ganztägiger Schnitt (unverändert), und ein Schnitt am 28.3.2027: Exchange
-  legt 02:30 an diesem Tag auf 03:30 Sommerzeit, wie Aperio, und die Serie
-  endet am 27.3.
+  Schritte. S1: täglich 08:00 Berlin, Schnitt nach einem gelöschten
+  Vorkommen. S2: montags, Ende am Sonntag. S4: 23:30 Berlin. S6: 20:00 New
+  York. S8: Löschen ab einem Termin. Unverändert blieben die Gegenproben S3
+  (ganztägiger Schnitt), S5 (Schnitt um 00:30 Berlin) und S7, S7b (ein
+  gewähltes Ende um 08:00 und um 00:30). S10: ein Schnitt am 28.3.2027;
+  Exchange legt 02:30 an diesem Tag auf 03:30 Sommerzeit, wie Aperio, und
+  die Serie endet am 27.3.
 - **255 — nur Schnitte.** Ein selbst gewähltes Ende und das zurückgelesene
   `…T235959Z` behalten ihr Datum. Aperios eigene Anzeige liest dieses
   `UNTIL` weiter als Zeitpunkt und irrt in zwei Fenstern um einen Tag: Eine
