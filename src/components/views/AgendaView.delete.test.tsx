@@ -57,10 +57,14 @@ const STORE = {
   selectedCalendarIds: new Set([ICLOUD.id]),
 };
 const VIEW_STATE = { anchor: new Date(2026, 5, 15) };
+/** How often the view asked for its data to be read again. */
+let invalidations = 0;
 const DIALOG_STATE = {
   openEventDialog: () => {},
   openMoveCopy: () => {},
-  invalidateData: () => {},
+  invalidateData: () => {
+    invalidations += 1;
+  },
   dataVersion: 0,
 };
 const MENU = { openForEvent: () => {} };
@@ -131,6 +135,20 @@ describe('AgendaView → the Delete key on a meeting the provider always cancels
       /Zeitzone, die Aperio nicht lesen kann|time zone Aperio cannot read/,
     );
     expect(announced.join(' ')).not.toMatch(/day-zone-unreadable|forbidden:/);
+  });
+});
+
+describe('AgendaView → Ctrl+D', () => {
+  it('says the duplicate and reads the calendar again, so it shows', async () => {
+    invalidations = 0;
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(announced.at(-1)).toMatch(/„Planung" wurde dupliziert|"Planung" duplicated/);
+    expect(invalidations).toBeGreaterThan(0);
   });
 });
 

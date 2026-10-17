@@ -464,14 +464,19 @@ Siehe DESIGN §4.2.
       Editor in einen anderen Kalender gespeichert, bekommt genau ihre echten
       Löschungen mit (`newSeriesRecurrence`, dieselbe Regel wie beim Teilen).
       Ein einzeln geänderter Termin, etwa in Outlook, kommt zu seiner üblichen
-      Zeit zurück, statt in der neuen Serie gelöscht zu sein; eine Ausnahme
-      neben der Regel fällt weg. Auch vergangene Löschungen (259): Die Grenze
-      „ab heute“ kommt mit PR 8, wo Exchange Löschungen einzeln schreibt.
-      Strg+D auf einem Termin einer Serie dupliziert die ganze Serie ab ihrem
-      Beginn (260) und sagt ein Scheitern an (261). Kopieren und Duplizieren
-      behalten die Zone der Quelle (262). Exchange und Microsoft 365 nehmen
-      beim Anlegen noch keine Löschungen (140): Dort erscheinen gelöschte
-      Termine in der neuen Serie vorerst wieder. Das Handy hat keinen
+      Zeit zurück, statt in der neuen Serie gelöscht zu sein. Jede Löschung
+      bleibt an ihrem Platz, wie sie geschrieben war, weil sich Beginn und
+      Regel nicht ändern; nur wenn der Editor zugleich Beginn, Ganztägig oder
+      Regel ändert, gehen sie den Weg von 198. Auch vergangene Löschungen
+      (259): Die Grenze „ab heute“ kommt mit PR 8, wo Exchange Löschungen
+      einzeln schreibt. Strg+D auf einem Termin einer Serie dupliziert die
+      ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
+      (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
+      (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
+      Exchange und Microsoft 365 nehmen beim Anlegen noch keine Löschungen
+      (140): Dort erscheinen gelöschte Termine in der neuen Serie vorerst
+      wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine etwa
+      drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
       Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
       Test.
     - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein

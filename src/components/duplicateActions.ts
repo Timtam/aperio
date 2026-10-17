@@ -18,8 +18,9 @@ import { newSeriesRowOf, SeriesNotLoadedError } from '../state/moveActions';
  * into the same calendar does: with its real deletions only and its zone as
  * the source has it (`newSeriesRowOf`, decisions 259, 262). Written from the
  * occurrence, it started there and its COUNT ran on past the series' end.
+ * Answers with what it wrote from, so the sentence names that.
  */
-export async function duplicateEvent(event: CalendarEvent): Promise<void> {
+export async function duplicateEvent(event: CalendarEvent): Promise<CalendarEvent> {
   const source = await newSeriesRowOf(event);
   await apiCreateEvent(
     {
@@ -39,6 +40,21 @@ export async function duplicateEvent(event: CalendarEvent): Promise<void> {
     },
     { preserveRecurrenceZone: true },
   );
+  return source;
+}
+
+/**
+ * What a duplicate says: the appointment written, by its own title — a
+ * changed occurrence's row may carry another — and, for a series, that the
+ * whole series was duplicated (decision 260).
+ */
+export function duplicatedSentence(
+  source: CalendarEvent,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
+  return t(source.recurrence?.rrule ? 'actions.duplicatedSeries' : 'actions.duplicated', {
+    title: source.title,
+  });
 }
 
 /**

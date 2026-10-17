@@ -299,13 +299,15 @@ sie, schreibt Aperio sie dort als neue Serie. Sie nimmt die gelöschten Termine
 der alten Serie mit, sonst nichts:
 
 - Ein einzeln geänderter Termin, etwa in Outlook, ist zu seiner üblichen Zeit
-  wieder da, mit Titel, Ort und Uhrzeit der Serie. Seine eigene Änderung
-  bleibt zurück.
-- Bei Exchange und Microsoft 365 zeigt die neue Serie gelöschte Termine
-  vorerst wieder: Sie nehmen beim Anlegen einer Serie keine Löschungen an.
-- Bei Google kennt Aperio gelöschte Termine etwa drei Monate zurück und ein
-  Jahr voraus. Ein weiter entfernt gelöschter ist in der neuen Serie wieder
-  da.
+  wieder da, mit Titel, Ort und Uhrzeit der Serie. Nach dem Verschieben ist
+  seine eigene Änderung mit der alten Serie weg; nach dem Kopieren oder
+  Duplizieren bleibt sie in der alten.
+- Nach Exchange oder Microsoft 365 verschoben oder kopiert, zeigt die neue
+  Serie gelöschte Termine vorerst wieder: Sie nehmen beim Anlegen einer Serie
+  keine Löschungen an.
+- Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
+  Monaten vor heute bis ein Jahr danach. Ein weiter entfernt gelöschter ist in
+  der neuen Serie wieder da.
 
 Was du tun kannst: Lösche oder ändere den wieder aufgetauchten Termin im neuen
 Kalender.

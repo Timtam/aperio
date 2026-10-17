@@ -66,7 +66,7 @@ const SHAPES = {
       },
     }),
     rows: [rowAt('2026-06-05T09:00:00Z', { start: '2026-06-05T11:00:00.000Z' })],
-    carried: ['2026-06-03T09:00:00.000Z'],
+    carried: ['2026-06-03T09:00:00Z'],
   },
   // Google keeps the deleted 7 June as a cancelled row, with no exception.
   google: {

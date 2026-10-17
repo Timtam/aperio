@@ -325,7 +325,7 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
     serving(withDeletions(), [changedRow()]);
     await moveOrCopyEvent(occurrence(), 'c2', 'move', 'series');
     const { event } = callsTo('update_event')[0][1];
-    expect(event.recurrence.exceptions).toEqual(['2026-06-03T09:00:00.000Z']);
+    expect(event.recurrence.exceptions).toEqual(['2026-06-03T09:00:00Z']);
     expect(callsTo('get_series_rows')[0][1].request).toMatchObject({
       calendar_id: 'c1',
       series_id: 'e1',
@@ -344,7 +344,7 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
       zone.mockRestore();
     }
     const { request } = callsTo('create_event')[0][1];
-    expect(request.recurrence.exceptions).toEqual(['2026-06-03T09:00:00.000Z']);
+    expect(request.recurrence.exceptions).toEqual(['2026-06-03T09:00:00Z']);
     expect(request.recurrence.tzid).toBeNull();
   });
 

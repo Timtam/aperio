@@ -34,7 +34,11 @@ import { useEventGroups } from '../../state/useEventGroups';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { DayCheckInButton } from '../DayCheckInButton';
-import { duplicateEvent, duplicateFailedSentence } from '../duplicateActions';
+import {
+  duplicateEvent,
+  duplicatedSentence,
+  duplicateFailedSentence,
+} from '../duplicateActions';
 import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -238,7 +242,11 @@ export function AgendaView() {
           e.preventDefault();
           if (ev) {
             void duplicateEvent(ev).then(
-              () => announce(t('actions.duplicated', { title: ev.title })),
+              (source) => {
+                // Written outside the view's own dialogs: re-read explicitly.
+                invalidateData();
+                announce(duplicatedSentence(source, t));
+              },
               (err: unknown) => announce(duplicateFailedSentence(err, ev.title, t)),
             );
           }
@@ -305,6 +313,7 @@ export function AgendaView() {
     [
       occurrences,
       focusIndex,
+      invalidateData,
       openEventDialog,
       openMoveCopy,
       announce,

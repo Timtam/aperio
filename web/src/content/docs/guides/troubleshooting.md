@@ -280,12 +280,14 @@ there as a new series. It takes along the occurrences deleted from the old
 series, and nothing else:
 
 - An occurrence changed on its own, for example in Outlook, is back at its
-  usual time, with the series' title, place and time. Its own change stays
-  behind.
-- On Exchange and Microsoft 365 the new series shows deleted occurrences again
-  for now: they take no deletions when a series is created.
-- On Google, Aperio knows deleted occurrences about three months back and a
-  year ahead. One deleted further away is back in the new series.
+  usual time, with the series' title, place and time. After a move its own
+  change is gone with the old series; after a copy or a duplicate it stays in
+  the old one.
+- Moved or copied into Exchange or Microsoft 365, the new series shows deleted
+  occurrences again for now: they take no deletions when a series is created.
+- From a Google calendar, Aperio knows deleted occurrences from about three
+  months before today to a year after. One deleted further away is back in the
+  new series.
 
 What you can do: delete or change the occurrence that came back, in the new
 calendar.

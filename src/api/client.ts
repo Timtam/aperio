@@ -129,6 +129,8 @@ export const createEvent = (
     // The truncated head (updateEvent, never stamped) and this tail then expand
     // identically, so untouched occurrences never drift an hour across a DST
     // boundary; stamping only the tail would diverge the two halves.
+    // A copy or a duplicate of a series passes it too: it keeps the source's
+    // zone, or none (decision 262).
     request: {
       ...request,
       recurrence: opts.preserveRecurrenceZone

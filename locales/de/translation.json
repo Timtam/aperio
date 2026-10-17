@@ -204,6 +204,7 @@
   },
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert.",
+    "duplicatedSeries": "Die ganze Serie „{{title}}“ wurde dupliziert.",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."
   },
   "toast": {

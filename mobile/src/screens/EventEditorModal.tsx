@@ -51,6 +51,7 @@ import {
   isBirthdayEventId,
   planSeriesSplit,
   asNewSeries,
+  newSeriesRecurrence,
   recurrenceStartDate,
   selectableEventCalendars,
   writeSeriesSplit,
@@ -1569,24 +1570,29 @@ export default function EventEditorModal({
         // deleted occurrences keep their place, its bound the length and its
         // zone follows the kind (191, 195). Its start stays where the edit put
         // it, off its own rule too. Untouched, the recurrence stays as it is.
-        // Another calendar writes the series there as a NEW one (224, 259):
-        // read from its own start too, with its real deletions only, so an
-        // occurrence changed elsewhere comes back at its usual time instead of
-        // travelling as a deletion. Mirrors the desktop.
+        // Another calendar writes the series there as a NEW one (224, 259),
+        // with its real deletions only, so an occurrence changed elsewhere
+        // comes back at its usual time instead of travelling as a deletion:
+        // moved as well, the plan says so (`asNewSeries`); only moved there,
+        // each deletion stays where it is (`newSeriesRecurrence`). Mirrors the
+        // desktop.
         const movesCalendar = calId !== original.calendar_id;
+        const rewritesFromStart =
+          Date.parse(times.start) !== Date.parse(base.start) ||
+          allDay !== base.all_day ||
+          // A rule the user set at another start moves to this one.
+          (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
         const wholePlan =
-          !wholeCut &&
-          base.recurrence?.rrule &&
-          (Date.parse(times.start) !== Date.parse(base.start) ||
-            allDay !== base.all_day ||
-            movesCalendar ||
-            // A rule the user set at another start moves to this one.
-            (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start)))
+          !wholeCut && base.recurrence?.rrule && rewritesFromStart
             ? planSeriesSplit(
                 base,
                 base.start,
                 (await readSeriesRows(base, base.start, getSeriesRows)).rows,
               )
+            : null;
+        const newSeriesRows =
+          !wholeCut && base.recurrence?.rrule && movesCalendar && !rewritesFromStart
+            ? (await readSeriesRows(base, base.start, getSeriesRows)).rows
             : null;
         // "This and all following" from the series' first occurrence on keeps
         // the rule the repeat field shows — its own from the cut on, moved
@@ -1618,12 +1624,14 @@ export default function EventEditorModal({
                 base.start,
                 { from: base.start, refused: 'series', whole: true },
               )
-            : exceptionsAtSeriesTime(
-                recurrenceToSend,
-                base.start,
-                times.start,
-                allDay || base.all_day,
-              );
+            : newSeriesRows
+              ? newSeriesRecurrence({ ...base, recurrence: recurrenceToSend }, newSeriesRows)
+              : exceptionsAtSeriesTime(
+                  recurrenceToSend,
+                  base.start,
+                  times.start,
+                  allDay || base.all_day,
+                );
         // What the user saved. The row that comes back is the provider's,
         // and a provider that keeps what the edit left alone (Google leaves
         // a kept start out of the write, decision 205) answers with its own,

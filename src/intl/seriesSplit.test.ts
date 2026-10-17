@@ -480,10 +480,10 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
     end: '2026-08-17T11:00:00.000Z',
   });
 
-  it('carries the deleted occurrences, and brings a changed one back at its time', () => {
+  it('carries the deleted occurrences as spelled, and brings a changed one back at its time', () => {
     expect(newSeriesRecurrence(exchange, [changed])).toEqual({
       ...exchange.recurrence,
-      exceptions: ['2026-08-10T08:00:00.000Z', '2026-09-07T08:00:00.000Z'],
+      exceptions: ['2026-08-10T08:00:00Z', '2026-09-07T08:00:00Z'],
     });
   });
 
@@ -495,12 +495,60 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
     ]);
   });
 
-  it('drops an exception that names no occurrence of the rule', () => {
+  it('keeps an exception that names no occurrence of the rule, as before: it deletes nothing', () => {
     const stray = {
       ...weekly,
       recurrence: { ...weekly.recurrence, exceptions: ['2026-08-12T08:00:00Z'] },
     };
-    expect(newSeriesRecurrence(stray, [])?.exceptions).toEqual([]);
+    expect(newSeriesRecurrence(stray, [])?.exceptions).toEqual(['2026-08-12T08:00:00Z']);
+  });
+
+  it('keeps every deletion of a rule the expander cannot read', () => {
+    // RFC 7529's RSCALE, kept verbatim from a CalDAV calendar.
+    const unread = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        rrule: 'RSCALE=GREGORIAN;FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-08-10T08:00:00Z', '2026-08-17T08:00:00Z'],
+      },
+    };
+    expect(newSeriesRecurrence(unread, [])?.exceptions).toEqual([
+      '2026-08-10T08:00:00Z',
+      '2026-08-17T08:00:00Z',
+    ]);
+  });
+
+  it("keeps a deleted first occurrence beside a row of the series' before its start", () => {
+    // Another client moved the series' start later and left a row behind.
+    const deletedFirst = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-03T08:00:00Z', '2026-08-10T08:00:00Z'],
+      },
+    };
+    const before = rowOf('2026-07-27T08:00:00Z');
+    expect(newSeriesRecurrence(deletedFirst, [before])?.exceptions).toEqual([
+      '2026-08-03T08:00:00Z',
+      '2026-08-10T08:00:00Z',
+    ]);
+  });
+
+  it('keeps the deleted first occurrence of a series that starts off its own rule', () => {
+    // Made on a Monday, repeating on Wednesdays: providers show the Monday too.
+    const offRule = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        rrule: 'FREQ=WEEKLY;BYDAY=WE;COUNT=5',
+        exceptions: ['2026-08-03T08:00:00Z', '2026-08-12T08:00:00Z'],
+      },
+    };
+    expect(newSeriesRecurrence(offRule, [])?.exceptions).toEqual([
+      '2026-08-03T08:00:00Z',
+      '2026-08-12T08:00:00Z',
+    ]);
   });
 
   it('keeps the rule as written and the zone as stored', () => {

@@ -781,12 +781,17 @@ export function asNewSeries<P extends SeriesSplitPlan>(plan: P): P {
 
 /**
  * The recurrence a whole series is written with as a NEW series: moved to
- * another calendar, copied or duplicated (decisions 224, 259). Its rule and its
- * zone stay as they are stored. Its exceptions are exactly its real deletions —
- * an exception no row of it stands in for, every cancelled row
- * (`deletedSlots`) — each on the occurrence it names, so an exception off the
- * rule goes (`tailRecurrenceFor`, read from the series' own start). Past ones
- * too: a provider that writes deletions one by one limits them itself (259).
+ * another calendar, copied or duplicated with its rule and its start as they
+ * are (decisions 224, 259). Its rule and its zone stay as they are stored. Its
+ * exceptions are exactly its real deletions (`deletedSlots`): an exception no
+ * row of it stands in for, every cancelled row's slot. An occurrence changed
+ * elsewhere is no deletion and comes back at its usual time. Past ones too: a
+ * provider that writes deletions one by one limits them itself (259).
+ *
+ * Nothing moves, so each deletion stays where it is, as spelled: placed anew
+ * through the split's expansion, a deletion of a first occurrence off the rule,
+ * or every deletion of a rule the expander cannot read, was lost. An exception
+ * that names no occurrence of the rule stays as before; it deletes nothing.
  *
  * `master` is the series' own row and `rows` its rows besides it
  * (`readSeriesRows`). An expanded occurrence or a provider's row for one
@@ -803,16 +808,7 @@ export function newSeriesRecurrence<E extends SplittableEvent>(
   if (isExpandedOccurrence(master) || overrideSeriesId(master) !== null) {
     throw new Error(`newSeriesRecurrence needs the series' own row, not ${master.id}`);
   }
-  const plan = planSeriesSplit(master, master.start, rows);
-  if (plan === null) return recurrence;
-  const written = tailRecurrenceFor({
-    master,
-    cutoffIso: master.start,
-    plan: asNewSeries(plan),
-    tail: { start: master.start, all_day: master.all_day },
-    whole: true,
-  });
-  return written === null ? recurrence : { ...recurrence, exceptions: written.exceptions };
+  return { ...recurrence, exceptions: deletedSlots(master, rows) };
 }
 
 /**

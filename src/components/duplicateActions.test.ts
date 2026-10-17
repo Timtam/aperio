@@ -5,7 +5,7 @@ import type { CalendarEvent } from '../api/types';
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
-import { duplicateEvent, duplicateFailedSentence } from './duplicateActions';
+import { duplicateEvent, duplicatedSentence, duplicateFailedSentence } from './duplicateActions';
 import { SeriesNotLoadedError } from '../state/moveActions';
 
 /**
@@ -78,7 +78,7 @@ describe('duplicateEvent', () => {
     expect(request.start).toBe('2026-06-01T09:00:00.000Z');
     expect(request.recurrence.rrule).toBe('FREQ=DAILY;COUNT=10');
     // The changed occurrence comes back at its time; the deleted one stays away.
-    expect(request.recurrence.exceptions).toEqual(['2026-06-03T09:00:00.000Z']);
+    expect(request.recurrence.exceptions).toEqual(['2026-06-03T09:00:00Z']);
   });
 
   it("keeps the series without a zone, as the source has it, on a device with one", async () => {
@@ -94,12 +94,22 @@ describe('duplicateEvent', () => {
     expect(callsTo('create_event')[0][1].request.recurrence.tzid).toBeNull();
   });
 
-  it('duplicates the whole series from the row of a changed occurrence too', async () => {
+  it('duplicates the whole series from the row of a changed occurrence too, and says the series', async () => {
     serving(MASTER);
-    await duplicateEvent(CHANGED);
+    // The row's own title differs from the series'.
+    const written = await duplicateEvent({ ...CHANGED, title: 'Standup (verlegt)' } as CalendarEvent);
     const { request } = callsTo('create_event')[0][1];
     expect(request.start).toBe('2026-06-01T09:00:00.000Z');
     expect(request.recurrence).not.toBeNull();
+    expect(request.title).toBe('Standup');
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    expect(duplicatedSentence(written, t)).toBe('actions.duplicatedSeries {"title":"Standup"}');
+  });
+
+  it('says a single appointment as itself', () => {
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    const single = { ...MASTER, recurrence: null } as CalendarEvent;
+    expect(duplicatedSentence(single, t)).toBe('actions.duplicated {"title":"Standup"}');
   });
 
   it('writes nothing when the series cannot be loaded, and says so', async () => {

@@ -229,16 +229,17 @@ the editor opens. On the desktop the form repeats it as the read-only field
 > moves, so it takes the series' details again, and deleted occurrences Aperio
 > deletes again itself afterwards.
 
-> **A series in another calendar, copied or duplicated:** Moved to another
-> calendar, copied, duplicated with `Ctrl+D` or given another calendar in the
-> editor, a whole series is written there as a new series. It takes along the
-> occurrences deleted from the old one, and nothing else: an occurrence changed
-> on its own, for example in Outlook, is back at its usual time with the
-> series' details. `Ctrl+D` on any appointment of a series duplicates the
-> whole series from its first appointment, in the same calendar. A copy keeps
-> the series' time zone. On Exchange and Microsoft 365 the new series shows
-> deleted occurrences again for now, and on Google Aperio knows them about a
-> year ahead (see Troubleshooting).
+> **A series in another calendar, copied or duplicated:** When you move a
+> whole series to another calendar, copy it, duplicate it with `Ctrl+D` or give
+> it another calendar in the editor, Aperio writes it there as a new series. It
+> takes along the occurrences deleted from the old one, and nothing else: an
+> occurrence changed on its own, for example in Outlook, is back at its usual
+> time with the series' details. `Ctrl+D` on any appointment of a series
+> duplicates the whole series from its first appointment, in the same calendar.
+> A copy keeps the series' time zone. Moved or copied into Exchange or
+> Microsoft 365, the new series shows deleted occurrences again for now. From a
+> Google calendar, Aperio knows deleted occurrences from about three months
+> before today to a year after (see Troubleshooting).
 
 > **Changing an occurrence that was already changed:** An occurrence changed
 > on its own in the calendar's own app (iCloud, Google, Exchange) stays part of
