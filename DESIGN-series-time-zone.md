@@ -320,7 +320,14 @@ keinen, dort ist die Wahl Tonis Sache.
   wöchentliche Serie, an einem Montag geschnitten, endet am Sonntag davor,
   mit denselben Terminen, und Exchange behält so ein Datum (M3). Ein
   gelöschtes Vorkommen am Endtag bleibt gelöscht (M4). Ein ganztägiger
-  Schnitt nennt den Tag davor schon als Datum und war richtig (M6).
+  Schnitt nennt den Tag davor schon als Datum und war richtig (M6). Mit dem
+  gebauten Adapter bestand die Live-Runde 10b am 17.10.2026 alle zehn
+  Schritte: Schnitte in Berlin um 08:00, 23:30 und 00:30, in New York um
+  20:00, montags (Ende am Sonntag) und nach einem gelöschten Vorkommen, das
+  Löschen ab einem Termin, ein gewähltes Ende um 08:00 und um 00:30 und ein
+  ganztägiger Schnitt (unverändert), und ein Schnitt am 28.3.2027: Exchange
+  legt 02:30 an diesem Tag auf 03:30 Sommerzeit, wie Aperio, und die Serie
+  endet am 27.3.
 - **255 — nur Schnitte.** Ein selbst gewähltes Ende und das zurückgelesene
   `…T235959Z` behalten ihr Datum. Aperios eigene Anzeige liest dieses
   `UNTIL` weiter als Zeitpunkt und irrt in zwei Fenstern um einen Tag: Eine

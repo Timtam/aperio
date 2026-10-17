@@ -954,8 +954,9 @@ Siehe DESIGN §4.2.
   Enddatum als ganzen Tag auf der Uhr der Serie zählt (Live-Runde 10a). Jetzt
   endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
   selbst gewähltes Ende bleibt, wie es ist. Gebaut im Exchange-Adapter, also
-  für Desktop und Handy zugleich; Live-Runde 10b mit dem neuen Build vor dem
-  Merge. Ungemessen: ein Schnitt am Tag einer Zeitumstellung.
+  für Desktop und Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn
+  Schritte, auch ein Schnitt am Tag der Umstellung auf Sommerzeit).
+  Ungemessen: ein Schnitt am Tag der Umstellung auf Winterzeit.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
