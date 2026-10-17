@@ -1255,8 +1255,8 @@ export function EventDialog({
       setSubmitting(true);
       // Only the series' own write asks (decisions 246, 247). A split's cut
       // refused the same way shows the sentence, because a yes there would
-      // write the new series a second time; the copies' writes show it too,
-      // until the carry asks once for all of them (decision 251).
+      // write the new series a second time. The carry asks on its own, once
+      // after its loop, for its copies' series writes (decision 251).
       let lossAskable = false;
       let sentSave: string | null = null;
       let consentSent = false;
