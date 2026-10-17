@@ -183,6 +183,12 @@ mod tests {
             end("2026-11-05T07:00:00Z", hm(8, 0), 1),
             Some(day(2026, 11, 5))
         );
+        // On the series' clock, not on UTC's: 20:00 New York on 4.11. is the
+        // 5.11. in UTC, and the day kept is the 4.11.
+        assert_eq!(
+            end("2026-11-05T01:00:00Z", hm(20, 0), -5),
+            Some(day(2026, 11, 4))
+        );
     }
 
     #[test]
