@@ -231,10 +231,22 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
       start: '2026-06-01T09:00:00.000Z',
       end: '2026-06-01T09:30:00.000Z',
     }) as unknown as CalendarEvent;
-  const serving = (series: CalendarEvent | null) =>
-    invokeMock.mockImplementation((cmd: string) =>
-      Promise.resolve(cmd === 'get_event_by_id' ? series : {}),
-    );
+  /** The master `get_event_by_id` answers, and the series' rows besides it
+   *  `get_series_rows` answers, or a read that fails. */
+  const serving = (
+    series: CalendarEvent | null,
+    rows: CalendarEvent[] = [],
+    rowsFail = false,
+  ) =>
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'get_event_by_id') return Promise.resolve(series);
+      if (cmd === 'get_series_rows') {
+        return rowsFail
+          ? Promise.reject({ code: 'network', message: 'offline' })
+          : Promise.resolve({ rows, reach: { kind: 'complete' } });
+      }
+      return Promise.resolve({});
+    });
   const callsTo = (cmd: string) => invokeMock.mock.calls.filter((call) => call[0] === cmd);
 
   it('copy + series → copies the series from its own start with its rule, no EXDATE', async () => {
@@ -284,6 +296,65 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
     );
     await expect(moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series')).rejects.toThrow(
       /could not be loaded/,
+    );
+    expect(callsTo('update_event')).toHaveLength(0);
+    expect(callsTo('create_event')).toHaveLength(0);
+  });
+
+  /** The series from 1 June with the 3 June deleted and the 5 June changed
+   *  elsewhere: Exchange lists the changed slot too, and keeps its row. */
+  const withDeletions = () =>
+    ({
+      ...seriesMaster(),
+      recurrence: {
+        rrule: 'FREQ=DAILY',
+        exceptions: ['2026-06-03T09:00:00Z', '2026-06-05T09:00:00Z'],
+        tzid: null,
+      },
+    }) as unknown as CalendarEvent;
+  const changedRow = () =>
+    ({
+      ...seriesMaster(),
+      id: 'e1::rid::2026-06-05T09:00:00Z',
+      start: '2026-06-05T11:00:00.000Z',
+      end: '2026-06-05T11:30:00.000Z',
+      recurrence: null,
+    }) as unknown as CalendarEvent;
+
+  it('move + series carries only the real deletions: the changed occurrence comes back (224, 259)', async () => {
+    serving(withDeletions(), [changedRow()]);
+    await moveOrCopyEvent(occurrence(), 'c2', 'move', 'series');
+    const { event } = callsTo('update_event')[0][1];
+    expect(event.recurrence.exceptions).toEqual(['2026-06-03T09:00:00.000Z']);
+    expect(callsTo('get_series_rows')[0][1].request).toMatchObject({
+      calendar_id: 'c1',
+      series_id: 'e1',
+    });
+  });
+
+  it('copy + series carries only the real deletions, and keeps the series without a zone (262)', async () => {
+    serving(withDeletions(), [changedRow()]);
+    // On a Berlin device a create would otherwise stamp Berlin on the copy.
+    const zone = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'Europe/Berlin' } as Intl.ResolvedDateTimeFormatOptions);
+    try {
+      await moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series');
+    } finally {
+      zone.mockRestore();
+    }
+    const { request } = callsTo('create_event')[0][1];
+    expect(request.recurrence.exceptions).toEqual(['2026-06-03T09:00:00.000Z']);
+    expect(request.recurrence.tzid).toBeNull();
+  });
+
+  it('writes nothing when the series rows cannot be read', async () => {
+    serving(withDeletions(), [], true);
+    await expect(moveOrCopyEvent(occurrence(), 'c2', 'move', 'series')).rejects.toBeInstanceOf(
+      SeriesNotLoadedError,
+    );
+    await expect(moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series')).rejects.toBeInstanceOf(
+      SeriesNotLoadedError,
     );
     expect(callsTo('update_event')).toHaveLength(0);
     expect(callsTo('create_event')).toHaveLength(0);

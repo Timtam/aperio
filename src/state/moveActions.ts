@@ -9,8 +9,10 @@ import {
   invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
+  newSeriesRecurrence,
   occurrenceWrite,
   organizerOf,
+  readSeriesRows,
   seriesDayKey,
   shiftSeriesRule,
   type ExceptionCalendar,
@@ -22,6 +24,7 @@ import {
   addEventExdate,
   createEvent as apiCreateEvent,
   getEventById,
+  getSeriesRows,
   setEventColor,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
@@ -257,17 +260,38 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
  * A row of a series (an expanded occurrence, or a provider override) is not the
  * master: its start is that occurrence's, and an override carries no rule.
  * Written as the series it moved the series start to that occurrence, and could
- * drop the rule, so the master is loaded and moved as it is.
+ * drop the rule, so the master is loaded and moved as it is, with its real
+ * deletions only (`newSeriesRowOf`).
  */
 export async function moveEventToCalendar(
   event: CalendarEvent,
   targetCalendarId: string,
 ): Promise<void> {
-  const series = await seriesRowOf(event);
+  const series = await newSeriesRowOf(event);
   await apiUpdateEvent(
     { ...series, calendar_id: targetCalendarId },
     series.calendar_id,
   );
+}
+
+/**
+ * The whole series `event` belongs to, as the NEW series a move, a copy or a
+ * duplicate writes (decisions 224, 259): the master (`seriesRowOf`), its rows
+ * read by its id, and as exceptions exactly its real deletions
+ * (`newSeriesRecurrence`). An occurrence changed elsewhere is no deletion: the
+ * new series shows it at its usual time. A single event is itself. A read that
+ * fails is a series that could not be loaded, and nothing is written.
+ */
+export async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+  const series = await seriesRowOf(event);
+  if (!series.recurrence?.rrule) return series;
+  let rows: CalendarEvent[];
+  try {
+    rows = (await readSeriesRows(series, series.start, getSeriesRows)).rows;
+  } catch {
+    throw new SeriesNotLoadedError(series.id);
+  }
+  return { ...series, recurrence: newSeriesRecurrence(series, rows) };
 }
 
 /** The row that stands for the whole series `event` belongs to: `event` itself
@@ -319,23 +343,28 @@ export async function moveOrCopyEvent(
     return;
   }
 
-  const source = asOccurrence ? event : await seriesRowOf(event);
-  await apiCreateEvent({
-    calendar_id: targetCalendarId,
-    title: source.title,
-    description: source.description,
-    location: source.location,
-    start: source.start,
-    end: source.end,
-    all_day: source.all_day,
-    // Occurrence scope detaches into a single event; series keeps the rule.
-    recurrence: asOccurrence ? null : source.recurrence,
-    color_label: source.color_label,
-    reminders: source.reminders,
-    sound: source.sound,
-    attendees: source.attendees,
-    ...organizerOf(source),
-  });
+  const source = asOccurrence ? event : await newSeriesRowOf(event);
+  await apiCreateEvent(
+    {
+      calendar_id: targetCalendarId,
+      title: source.title,
+      description: source.description,
+      location: source.location,
+      start: source.start,
+      end: source.end,
+      all_day: source.all_day,
+      // Occurrence scope detaches into a single event; series keeps the rule.
+      recurrence: asOccurrence ? null : source.recurrence,
+      color_label: source.color_label,
+      reminders: source.reminders,
+      sound: source.sound,
+      attendees: source.attendees,
+      ...organizerOf(source),
+    },
+    // A copy keeps the series' zone, or none, as the source has it
+    // (decision 262): its deletions are instants on that clock.
+    { preserveRecurrenceZone: true },
+  );
 
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);

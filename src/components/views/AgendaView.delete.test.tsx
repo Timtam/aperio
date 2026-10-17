@@ -133,3 +133,21 @@ describe('AgendaView → the Delete key on a meeting the provider always cancels
     expect(announced.join(' ')).not.toMatch(/day-zone-unreadable|forbidden:/);
   });
 });
+
+describe('AgendaView → Ctrl+D that fails', () => {
+  it('says it in words, with the reason (decision 261)', async () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === 'create_event'
+        ? Promise.reject(new Error('Der Server antwortet nicht'))
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(announced.at(-1)).toMatch(/konnte nicht dupliziert werden|could not be duplicated/);
+    expect(announced.at(-1)).toMatch(/Der Server antwortet nicht/);
+  });
+});

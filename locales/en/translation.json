@@ -203,7 +203,8 @@
     }
   },
   "actions": {
-    "duplicated": "\"{{title}}\" duplicated."
+    "duplicated": "\"{{title}}\" duplicated.",
+    "duplicateFailed": "\"{{title}}\" could not be duplicated: {{reason}}."
   },
   "toast": {
     "regionLabel": "Notifications",

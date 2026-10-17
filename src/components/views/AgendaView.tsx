@@ -34,7 +34,7 @@ import { useEventGroups } from '../../state/useEventGroups';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { DayCheckInButton } from '../DayCheckInButton';
-import { duplicateEvent } from '../duplicateActions';
+import { duplicateEvent, duplicateFailedSentence } from '../duplicateActions';
 import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -237,8 +237,9 @@ export function AgendaView() {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
           if (ev) {
-            void duplicateEvent(ev).then(() =>
-              announce(t('actions.duplicated', { title: ev.title })),
+            void duplicateEvent(ev).then(
+              () => announce(t('actions.duplicated', { title: ev.title })),
+              (err: unknown) => announce(duplicateFailedSentence(err, ev.title, t)),
             );
           }
         }
