@@ -6,11 +6,11 @@
 // rewrites and how many occurrences that loses. Without the user's consent it
 // sends nothing and refuses with
 // `exceptions-would-be-lost: {rewrite}:{changed}:{deleted}`
-// (`cal_core::SeriesRewrite::detail`). Both editors ask with the sentence
-// built here, on the series' own save, and send that save again with
-// `accepts_exception_loss`; a path that does not ask — a drag, the carry, a
-// split's cut, where a yes would write the new series twice — says the same
-// sentence as a refusal.
+// (`cal_core::SeriesRewrite::detail`). Both editors, a drag of a series
+// (decision 250) and the carry dialogs (251) ask with the sentence built here,
+// on the series' own write, and send that write again with
+// `accepts_exception_loss`. A split's cut does not ask — a yes would write the
+// new series twice — and says the same sentence as a refusal.
 
 import type { SeriesRewrite } from './generated/SeriesRewrite';
 import { localDateKey } from './dateKey';
@@ -59,7 +59,8 @@ export function exceptionsLossSentences(
   return { what, lost };
 }
 
-/** The question both editors ask before saving anyway. */
+/** The question both editors ask before saving anyway, and a drag of a
+ *  series before moving it again (decision 250). */
 export function exceptionsLossQuestion(
   loss: ExceptionsLoss,
   title: string,

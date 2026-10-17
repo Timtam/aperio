@@ -47,6 +47,7 @@ import {
   thisAndFutureDeletedKey,
 } from '../../intl/recurrence';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
+import { useExceptionsLossQuestion } from '../ExceptionsLossQuestion';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useEventGroups } from '../../state/useEventGroups';
@@ -103,6 +104,7 @@ import {
   type PriorityScale,
   type TimedSpan,
   eventWriteErrorMessage,
+  exceptionsLossOf,
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
 } from '@aperio/shared';
@@ -255,6 +257,7 @@ export function WeekView() {
   const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
+  const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
@@ -937,6 +940,8 @@ export function WeekView() {
       /** Minute of day the drop landed on, or null for a day-only move (the
        *  all-day lane, and the list mode that has no hour geometry). */
       minute: number | null = null,
+      /** The yes to the question a refused move asked (decision 250). */
+      acceptsLoss = false,
     ) => {
       try {
         let back: string[] | undefined;
@@ -946,8 +951,11 @@ export function WeekView() {
           minute,
           scope,
           calendarById.get(ev.calendar_id),
-          (saved) => {
-            back = saved.deletions_not_restored;
+          {
+            onSeriesSaved: (saved) => {
+              back = saved.deletions_not_restored;
+            },
+            acceptsLoss,
           },
         );
         if (!moved) return; // nothing changed — nothing to announce
@@ -993,12 +1001,26 @@ export function WeekView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
+        // A move that would drop occurrences of the series asks, after the
+        // scope question, in a dialog of its own (decision 250); yes moves it
+        // again with the consent, on that write only. A view the user has
+        // left cannot ask, and says the sentence below.
+        const loss = exceptionsLossOf(err);
+        if (
+          loss &&
+          !acceptsLoss &&
+          askLoss(loss, ev.title, () => {
+            void performEventDrop(ev, dayKey, scope, minute, true);
+          })
+        ) {
+          return;
+        }
         // In words, a provider's refusal included (decisions 243-253: a move
         // that would drop occurrences of the series says what and how many).
         announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById],
+    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById, askLoss],
   );
   /** Someone else's meeting does not move: said before a scope question
    *  nothing could answer (77a). */
@@ -2273,6 +2295,7 @@ export function WeekView() {
           }
         }}
       />
+      {lossDialog}
     </section>
   );
 }

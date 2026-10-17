@@ -65,7 +65,7 @@ export function EventScopeDialogHost() {
     if (Platform.OS !== 'ios') setTimeout(finish, 0);
   };
   const cancel = () => {
-    pending.current = null;
+    pending.current = cfg.onCancel ?? null;
     dismiss();
   };
   const select = (opt: EventScopeOption) => {

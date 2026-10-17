@@ -28,6 +28,7 @@ import {
   eventInstanceKey,
   type CollapsedRow,
   eventWriteErrorMessage,
+  exceptionsLossOf,
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
 } from '@aperio/shared';
@@ -100,6 +101,7 @@ import {
   type ShiftRefusal,
 } from '../../state/moveActions';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
+import { useExceptionsLossQuestion } from '../ExceptionsLossQuestion';
 
 /**
  * Month view — six-week calendar grid (DESIGN.md section 3.3,
@@ -128,6 +130,7 @@ export function MonthView() {
   const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
+  const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
@@ -506,7 +509,13 @@ export function MonthView() {
     refused?: ShiftRefusal;
   } | null>(null);
   const performEventDrop = useCallback(
-    async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
+    async (
+      ev: CalendarEvent,
+      dayKey: string,
+      scope: MoveCopyScope,
+      /** The yes to the question a refused move asked (decision 250). */
+      acceptsLoss = false,
+    ) => {
       try {
         let back: string[] | undefined;
         const moved = await moveEventToDay(
@@ -514,8 +523,11 @@ export function MonthView() {
           dayKey,
           scope,
           calendarById.get(ev.calendar_id),
-          (saved) => {
-            back = saved.deletions_not_restored;
+          {
+            onSeriesSaved: (saved) => {
+              back = saved.deletions_not_restored;
+            },
+            acceptsLoss,
           },
         );
         if (!moved) return; // same-day drop — nothing to announce
@@ -555,12 +567,26 @@ export function MonthView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
+        // A move that would drop occurrences of the series asks, after the
+        // scope question, in a dialog of its own (decision 250); yes moves it
+        // again with the consent, on that write only. A view the user has
+        // left cannot ask, and says the sentence below.
+        const loss = exceptionsLossOf(err);
+        if (
+          loss &&
+          !acceptsLoss &&
+          askLoss(loss, ev.title, () => {
+            void performEventDrop(ev, dayKey, scope, true);
+          })
+        ) {
+          return;
+        }
         // In words, a provider's refusal included (decisions 243-253: a move
         // that would drop occurrences of the series says what and how many).
         announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, i18n.language, fmt, invalidateData, calendarById],
+    [announce, t, i18n.language, fmt, invalidateData, calendarById, askLoss],
   );
 
   // Drag-and-drop: a task dropped on a day cell is scheduled on that day
@@ -1412,6 +1438,7 @@ export function MonthView() {
           }
         }}
       />
+      {lossDialog}
     </section>
   );
 }

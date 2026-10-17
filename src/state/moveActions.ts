@@ -369,9 +369,21 @@ export async function moveEventToDay(
   targetDayKey: string,
   scope: MoveCopyScope = 'series',
   sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
-  onSeriesSaved?: (saved: CalendarEvent) => void,
+  options: MoveOptions = {},
 ): Promise<boolean> {
-  return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar, onSeriesSaved);
+  return moveEventToSlot(event, targetDayKey, null, scope, sourceCalendar, options);
+}
+
+/** How a move of a whole series goes out, and what the caller hears back. */
+export interface MoveOptions {
+  /** The series as the provider saved it, when the whole series moved: it
+   *  names deleted occurrences that came back and could not be deleted again
+   *  (decision 253), for the caller to say. */
+  onSeriesSaved?: (saved: CalendarEvent) => void;
+  /** The user's yes to the question a refused move asked (decision 250): the
+   *  whole series' write goes out with `accepts_exception_loss`, on that one
+   *  write only. */
+  acceptsLoss?: boolean;
 }
 
 /**
@@ -397,10 +409,7 @@ export async function moveEventToSlot(
   minuteOfDay: number | null,
   scope: MoveCopyScope = 'series',
   sourceCalendar?: (NoticeCalendar & ExceptionCalendar) | null,
-  /** The series as the provider saved it, when the whole series moved: it
-   *  names deleted occurrences that came back and could not be deleted again
-   *  (decision 253), for the caller to say. */
-  onSeriesSaved?: (saved: CalendarEvent) => void,
+  options: MoveOptions = {},
 ): Promise<boolean> {
   // 77a: only the organizer moves their meeting. This is the only place that
   // can say so for a dragged OCCURRENCE — carving one out writes a new event
@@ -504,7 +513,7 @@ export async function moveEventToSlot(
     });
     return true;
   }
-  return moveSeries(event, newStart, delta, minute, onSeriesSaved);
+  return moveSeries(event, newStart, delta, minute, options);
 }
 
 export type { ShiftRefusal };
@@ -572,7 +581,7 @@ async function moveSeries(
   dropped: string,
   delta: number,
   minute: number | null,
-  onSaved?: (saved: CalendarEvent) => void,
+  { onSeriesSaved, acceptsLoss }: MoveOptions,
 ): Promise<boolean> {
   const seriesId = seriesIdOf(event);
   const master =
@@ -647,7 +656,9 @@ async function moveSeries(
         ),
       ),
     },
+    // The consent the question gave rides this one write (decision 250).
+    ...(acceptsLoss ? { accepts_exception_loss: true } : {}),
   });
-  onSaved?.(saved);
+  onSeriesSaved?.(saved);
   return true;
 }

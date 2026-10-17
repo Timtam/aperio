@@ -21,6 +21,9 @@ import {
   type EventGroup,
   eventWriteErrorMessage,
   deletionsNotRestoredSentence,
+  exceptionsLossOf,
+  exceptionsLossSentences,
+  type ExceptionsLoss,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -39,6 +42,7 @@ import {
 } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 
 /**
@@ -135,6 +139,23 @@ export function EventGroupCarryDialog({
    *  across a retry: they are written and not offered again, so this is the
    *  only place they are still named. */
   const [doubts, setDoubts] = useState<string[]>([]);
+  /**
+   * Copies whose series would lose occurrences the user changed or deleted
+   * on their own (decisions 243-253), asked about once, after every other
+   * copy is written (decision 251). Yes writes only these again, with the
+   * consent; Cancel leaves them among the ones not changed. `said` is what the
+   * pass that asked would have announced, said on Cancel; `rest` is what of
+   * it the pass of the yes says along: why the copies it does not write again
+   * were not changed, and the asking pass's doubts.
+   */
+  const [lossAsk, setLossAsk] = useState<{
+    asked: { target: CarryTarget; loss: ExceptionsLoss }[];
+    said: string;
+    rest: string;
+  } | null>(null);
+  /** Whether the question was answered with yes: the confirm dialog closes
+   *  after its yes as after Cancel, and only Cancel says the pass's report. */
+  const lossYes = useRef(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const outcomeRef = useRef<HTMLParagraphElement>(null);
   /**
@@ -185,15 +206,20 @@ export function EventGroupCarryDialog({
     setPending(null);
     setCreatedRows([]);
     setDoubts([]);
+    setLossAsk(null);
     queueMicrotask(() => closeRef.current?.focus());
   }, [isOpen]);
 
   // The outcome note takes focus once React has actually rendered it. Focusing
   // it from inside `carry` could not work: the note does not exist yet at that
   // point, so the call found nothing and the report went unread.
+  // While the question about lost occurrences is open, it has the focus; the
+  // note takes it once the question is answered with Cancel — after the
+  // question's dialog gave the focus back, a microtask on. A yes starts a
+  // pass, whose own note takes it when that pass ends.
   useEffect(() => {
-    if (outcome) outcomeRef.current?.focus();
-  }, [outcome]);
+    if (outcome && !lossAsk && !busy) queueMicrotask(() => outcomeRef.current?.focus());
+  }, [outcome, lossAsk, busy]);
 
   // After a partial carry, only what is still outstanding.
   const targets = pending ?? plan.targets;
@@ -201,11 +227,29 @@ export function EventGroupCarryDialog({
   // write, and the button must not look like it does nothing.
   const canRetry = targets.length > 0 || outcome?.kind === 'regroup';
 
-  const carry = async () => {
+  /**
+   * `only`: the copies to write this pass, the ones the question was about;
+   * `consent`: the copies whose series' write carries the user's yes;
+   * `earlier`: what the pass that asked did not get to say, said with this
+   * pass's report. Every other outstanding copy stays outstanding.
+   */
+  const carry = async (
+    only?: CarryTarget[],
+    consent?: ReadonlySet<string>,
+    earlier = '',
+  ) => {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    // The failure on screen belongs to a copy a pass of the yes does not
+    // write again: it stays.
+    if (!only) setError(null);
+    const list = only ?? targets;
+    const kept = only
+      ? (pending ?? []).filter((target) => !only.some((o) => sameTarget(o, target)))
+      : [];
     const failed: CarryTarget[] = [];
+    // Copies whose series would lose occurrences: asked about after the loop.
+    const asked: { target: CarryTarget; loss: ExceptionsLoss }[] = [];
     // Copies whose series may now show twice from the cut, said in words.
     const unsure: string[] = [];
     // A copy whose series got deleted occurrences back that could not be
@@ -223,13 +267,21 @@ export function EventGroupCarryDialog({
     // Copies somebody else organizes: among the ones that did not change, and
     // the report says why (77a).
     const lockedOut: CarryTarget[] = [];
+    // The last failure shown, which a question asked after the loop would
+    // otherwise cut off: said again with the report the question holds.
+    let lastError = '';
     // The rows created so far, to be joined into a group of their own — the
     // earlier passes' included, so a retry ties the whole set together.
     const created: NewGroupMember[] = [...createdRows];
     let done = outcome?.done ?? 0;
-    for (const target of targets) {
+    for (const target of list) {
       // The user closed it. Stop writing copies into a dialog that is gone.
       if (!open.current) return;
+      // The question's yes, for this copy's series (decision 251).
+      const agreed = consent?.has(targetKey(target)) ?? false;
+      // Only a write of the copy's whole series asks; a split's cut says the
+      // sentence, as in the editor (a yes would write its new series again).
+      let askable = false;
       // Where this copy's series is split, once it is: a failure after that
       // names the day.
       let splitAt: string | null = null;
@@ -377,6 +429,7 @@ export function EventGroupCarryDialog({
             // views and still ringing. It is rewritten in place instead — its
             // id, and everything kept under it, stay — and like a single it
             // leaves the group of heads for the new one.
+            askable = true;
             const savedWhole = await updateEvent(
               {
                 ...row,
@@ -392,9 +445,11 @@ export function EventGroupCarryDialog({
                   opened: anchorIso,
                 }),
                 send_invitations: false,
+                ...(agreed ? { accepts_exception_loss: true } : {}),
               },
               target.calendar_id,
             );
+            askable = false;
             noteBack(savedWhole, target.calendar_id);
             await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
@@ -508,7 +563,7 @@ export function EventGroupCarryDialog({
                   (await readSeriesRows(current, current.start, getSeriesRows)).rows,
                 )
               : null;
-          const savedSeries = await updateEvent(
+          const seriesWrite =
             wholePlan?.kind === 'whole'
               ? {
                   ...next,
@@ -521,9 +576,13 @@ export function EventGroupCarryDialog({
                     whole: true,
                   }),
                 }
-              : next,
+              : next;
+          askable = true;
+          const savedSeries = await updateEvent(
+            agreed ? { ...seriesWrite, accepts_exception_loss: true } : seriesWrite,
             target.calendar_id,
           );
+          askable = false;
           noteBack(savedSeries, target.calendar_id);
         }
         done += 1;
@@ -542,20 +601,25 @@ export function EventGroupCarryDialog({
           continue;
         }
         failed.push(target);
-        if (err instanceof TailShiftRefusedError) {
-          // Nothing was written for this copy: its rule cannot move with the
-          // new date (decision 193), and the user learns why.
-          setError(
-            t('dialogs.eventGroupCarry.shiftRefused', {
-              calendar: calendarName(target.calendar_id),
-              reason: t(`dialogs.moveScope.refusal.${err.reason}`),
-            }),
-          );
-        } else {
-          // In words, a provider's refusal included: a copy whose series would
-          // lose occurrences says what and how many (decisions 243-253).
-          setError(eventWriteErrorMessage(err, t));
+        // A copy whose series would lose occurrences is asked about once,
+        // after every other copy is written (decision 251): the question says
+        // what and how many.
+        const loss = exceptionsLossOf(err);
+        if (loss && askable && !agreed) {
+          asked.push({ target, loss });
+          continue;
         }
+        // Nothing was written for this copy: a rule that cannot move with the
+        // new date says so (decision 193), anything else in words, a
+        // provider's refusal included (decisions 243-253).
+        lastError =
+          err instanceof TailShiftRefusedError
+            ? t('dialogs.eventGroupCarry.shiftRefused', {
+                calendar: calendarName(target.calendar_id),
+                reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+              })
+            : eventWriteErrorMessage(err, t);
+        setError(lastError);
       }
     }
     // The rows this carry created are copies of each other exactly as the ones
@@ -600,31 +664,46 @@ export function EventGroupCarryDialog({
     // Said once, with whatever else this pass reports: the live region keeps
     // only the last of two announcements in the same frame.
     const doubtful = unsure.length === 0 ? '' : ` ${unsure.join(' ')}`;
+    // Why the copies somebody else organizes were not changed (77a).
+    const why = lockedOut
+      .map((target) =>
+        t('dialogs.eventGroupCarry.skippedInvitation', {
+          calendar: calendarName(target.calendar_id),
+        }),
+      )
+      .join(' ');
+    // What this pass says after its first sentence: the earlier pass's rest
+    // first, as its copies come first among the ones not changed.
+    const reportTail = `${earlier}${why === '' ? '' : ` ${why}`}${doubtful}`;
     setBusy(false);
     onChanged?.();
     // The whole point of the dialog: say what actually happened, including
     // what did not.
-    if (failed.length > 0) {
+    // The copies a pass before this one left outstanding stay so.
+    const outstanding = [...kept, ...failed];
+    if (outstanding.length > 0) {
       // Named by CALENDAR, not by title: every copy of an appointment carries
       // the same title — that is what made them a group — so a list of titles
       // told the user nothing about which copy is now out of step.
-      const names = failed.map((target) => calendarName(target.calendar_id));
-      setOutcome({ kind: 'partly', done, failed });
-      setPending(failed);
+      const names = outstanding.map((target) => calendarName(target.calendar_id));
+      setOutcome({ kind: 'partly', done, failed: outstanding });
+      setPending(outstanding);
+      const partly = t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') });
+      // The question comes now, once, for every copy that would lose
+      // occurrences, and the report waits for its answer: Cancel says it,
+      // with the last failure the question cut off; a yes says its rest with
+      // the next pass's report.
+      if (asked.length > 0) {
+        const rest = `${earlier}${lastError === '' ? '' : ` ${lastError}`}${
+          why === '' ? '' : ` ${why}`
+        }${doubtful}`;
+        lossYes.current = false;
+        setLossAsk({ asked, said: `${partly}${rest}`, rest });
+        return;
+      }
       // One announcement, not two: the live region keeps only the last of
       // two in the same frame.
-      const why = lockedOut
-        .map((target) =>
-          t('dialogs.eventGroupCarry.skippedInvitation', {
-            calendar: calendarName(target.calendar_id),
-          }),
-        )
-        .join(' ');
-      announce(
-        `${t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') })}${
-          why === '' ? '' : ` ${why}`
-        }${doubtful}`,
-      );
+      announce(`${partly}${reportTail}`);
       // Stays open. A half-carried group is exactly the state this feature
       // exists to prevent, so the user has to see it and can retry the rest.
       // (The focus happens in the effect below — at this point React has not
@@ -637,7 +716,7 @@ export function EventGroupCarryDialog({
       // what the user was promised.
       setOutcome({ kind: 'regroup', done });
       setPending([]);
-      announce(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${doubtful}`);
+      announce(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${reportTail}`);
       return;
     }
     if (allDoubts.length > 0) {
@@ -645,14 +724,15 @@ export function EventGroupCarryDialog({
       // would take the only words that say which ones.
       setOutcome({ kind: 'written', done });
       setPending([]);
-      announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${doubtful}`);
+      announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${reportTail}`);
       return;
     }
-    announce(t('dialogs.eventGroupCarry.done', { count: done }));
+    announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${reportTail}`);
     onClose();
   };
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -771,5 +851,44 @@ export function EventGroupCarryDialog({
         )}
       </div>
     </Modal>
+    {lossAsk && (
+      <ConfirmDialog
+        isOpen
+        onClose={() => {
+          // Cancel: the pass's report, which waited for the answer. The
+          // confirm dialog closes after its yes too, and then says nothing.
+          if (!lossYes.current) announce(lossAsk.said);
+          setLossAsk(null);
+        }}
+        title={t('dialogs.event.exceptionsLoss.title')}
+        message={t('dialogs.eventGroupCarry.lossMessage', {
+          count: lossAsk.asked.length,
+          copies: lossAsk.asked
+            .map(({ target, loss }) => {
+              const { what, lost } = exceptionsLossSentences(loss, t);
+              return `${calendarName(target.calendar_id)}: ${what} ${lost}`;
+            })
+            .join(' '),
+        })}
+        confirmLabel={t('dialogs.eventGroupCarry.lossConfirm')}
+        onConfirm={() => {
+          // Only these copies, now with the consent for each.
+          lossYes.current = true;
+          const only = lossAsk.asked.map(({ target }) => target);
+          setLossAsk(null);
+          void carry(only, new Set(only.map(targetKey)), lossAsk.rest);
+        }}
+      />
+    )}
+    </>
   );
+}
+
+/** One copy, as a key: its calendar and its id. */
+function targetKey(target: CarryTarget): string {
+  return `${target.calendar_id}\u0000${target.event_id}`;
+}
+
+function sameTarget(a: CarryTarget, b: CarryTarget): boolean {
+  return a.calendar_id === b.calendar_id && a.event_id === b.event_id;
 }

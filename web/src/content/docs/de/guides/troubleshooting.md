@@ -235,9 +235,14 @@ Termine oder ihr Ende; sie ab einem späteren Termin zu ändern oder zu löschen
 lehnt Aperio dann mit dem Satz ab (unten). Sonst speichert Aperio und löscht die
 gelöschten wieder.
 
-Ziehst du eine Serie mit der Maus oder überträgst du eine Änderung an Kopien in
-anderen Kalendern, fragt Aperio in dieser Version noch nicht. Dort sagt es
-denselben Satz und „Es wurde nichts geändert.“ Ändere die Serie dann im Editor.
+Ziehst du eine Serie mit der Maus und wählst „Ganze Serie“, stellt Aperio
+danach dieselbe Frage in einem eigenen Dialog; „Trotzdem speichern“ verschiebt
+die Serie, „Abbrechen“ lässt sie, wo sie war. Überträgst du eine Änderung an
+Kopien in anderen Kalendern, überträgt Aperio sie zuerst an alle übrigen Kopien
+und fragt dann einmal nach den Kopien, deren Serie Vorkommen verlöre, jede mit
+ihrem Kalender: „Trotzdem übertragen“ überträgt die Änderung auch dorthin;
+„Abbrechen“ lässt diese Kopien unverändert, und Aperio nennt sie unter „Nicht
+geändert“.
 
 Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
 Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur wo

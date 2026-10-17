@@ -224,11 +224,10 @@ the editor opens. On the desktop the form repeats it as the read-only field
 > back, a changed one can show up twice, and another occurrence can be missing
 > where the old one was. Aperio cannot repair this. Check the series afterwards
 > in the calendar's own app, where such single changes can be undone. On
-> Exchange, Aperio asks first in the editor: Exchange drops every occurrence
-> changed on its own when the series moves, so it takes the series' details
-> again, and deleted occurrences Aperio deletes again itself afterwards. When
-> you drag such a series with changed occurrences, Aperio does not ask there
-> yet; it changes nothing and says why.
+> Exchange, Aperio asks first, in the editor and when you drag the series with
+> the mouse: Exchange drops every occurrence changed on its own when the series
+> moves, so it takes the series' details again, and deleted occurrences Aperio
+> deletes again itself afterwards.
 
 > **Changing an occurrence that was already changed:** An occurrence changed
 > on its own in the calendar's own app (iCloud, Google, Exchange) stays part of
@@ -313,6 +312,13 @@ Half-carried is the one state you have to see. A copy whose series may now show
 twice from the cut is different: its new part was created, so it is not offered
 again, and a note names its calendar and the day instead. When only such notes
 are left, the dialog stays open with them and without **Try the rest again**.
+
+On Exchange, carrying a change to a copy's whole series can make Exchange drop
+that series' occurrences changed or deleted on their own, as in the editor.
+Aperio then carries the change to every other copy first and asks once
+afterwards, naming each such copy by its calendar and what it would lose:
+**Carry over anyway** carries the change to them too, **Cancel** leaves them
+among the copies not changed.
 
 Only what the appointment IS travels: title, when, where, and the description.
 Reminders stay with each copy — the private copy usually exists precisely

@@ -991,9 +991,11 @@ Siehe DESIGN §4.2.
   löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
   Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
   Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
-  🚩 **Warnen und fragen, PR B** (250, 251): Ziehen fragt in einem eigenen
-  Bestätigen-Dialog; Übertragen an Kopien fragt einmal nach der Schleife und
-  schickt nur die betroffenen noch einmal. Bis dahin sagen beide den Satz.
+  ↻ **Warnen und fragen, PR B** (250, 251): Ziehen fragt nach der Umfang-Wahl
+  in einem eigenen Bestätigen-Dialog und verschiebt bei Ja noch einmal, mit
+  der Zustimmung nur am Schreiben der Serie; Übertragen an Kopien fragt
+  einmal nach der Schleife, jede Kopie mit ihrem Kalender, und schickt nur die
+  betroffenen noch einmal, auf dem Desktop und auf dem Handy.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
@@ -1444,6 +1446,21 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
+      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
+      wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den
+      Dialog aber immer mit `isOpen` an und entfernt ihn beim Schließen. Die
+      Prüfungen `if (!open.current) return;` greifen deshalb nie. Ein
+      Durchlauf, der nach dem Schließen weiterläuft, schreibt weiter Kopien.
+      Gelingt alles, ruft er `onClose()` auf. Das nimmt den obersten Dialog
+      vom Stapel, etwa einen inzwischen geöffneten neuen Termin mit schon
+      getipptem Titel. Das gilt für jeden Durchlauf: den ersten, „Rest erneut
+      versuchen“ und das Ja auf die Frage (251). Abhilfe wie auf dem Handy
+      (`alive`): `open.current` beim Aushängen auf false setzen. Dazu ein
+      Test, der den Dialog mitten im Durchlauf schließt und erwartet, dass
+      `onClose` nicht gerufen wird. Älter als #124 (705e154a, 72fac533),
+      gefunden in dessen fünfter Prüfrunde (2026-10-17).
+
 - [ ] **Kopierknopf im Konflikt-Bildschirm des Handys.** Der
       Konflikt-Bildschirm auf dem Handy
       (mobile/src/screens/ConflictsScreen.tsx) hat keinen Knopf 'Konflikte in
@@ -1468,15 +1485,6 @@ Vorschläge sind nicht aufgenommen.
       und nach einem Teilerfolg neu laden. Optional die Teilzählung
       (cascadePartial) auch mobil nachziehen. Vorschlag vom 2026-09-09, aus
       der Vorschlagsliste gefallen; das Abhaken selbst ist erledigt.
-- [ ] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Der
-      Desktop-Mitzieh-Dialog (src/components/EventGroupCarryDialog.tsx:535)
-      sagt auf main eine Schreib-Ablehnung als rohes englisches Token an. Die
-      Korrektur über eventWriteErrorMessage steckt in PR #123 (Commit
-      9a1d34de) und ist erst nach dessen Merge auf main. Danach fehlt noch ein
-      Vitest, dass ein Ablehnungs-Token (z. B. 'exceptions-would-be-lost') in
-      diesem Dialog als deutscher Satz erscheint. Das Handy übersetzt bereits
-      über writeErrorMessage. Vorschlag vom 2026-10-10, aus der
-      Vorschlagsliste gefallen.
 - [ ] **Schlüsselbund-Test gelegentlich rot (Ursache unklar).** Der Test
       secrets::tests::round_trip_when_keychain_is_reachable
       (src-tauri/src/secrets.rs:155-177) ist laut Meldung gelegentlich rot:
@@ -3866,6 +3874,17 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Synchronisieren), ohne zusätzlich auf einen bis zu 5 Minuten alten Speicher
   zu warten. Der Preis: im Protokoll etwa 6 volle Durchläufe in einer Minute
   Benutzung; nach 218 halten sie nichts mehr auf.
+
+#### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
+
+- [x] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Mit #123
+      sagt der Desktop-Mitzieh-Dialog eine Schreib-Ablehnung über
+      eventWriteErrorMessage als Satz; #124 prüft es: Lehnt Exchange das
+      Kürzen beim Teilen einer Kopie ab, weil Vorkommen verloren gingen
+      ('exceptions-would-be-lost'), steht der deutsche Satz im Fehlerhinweis,
+      nicht das Token, und Aperio fragt nicht. Ein zweiter Test sichert ab,
+      dass eine Ablehnung nach dem Ja ein Satz bleibt und nicht noch einmal
+      fragt. Das Handy übersetzt über writeErrorMessage.
 
 ### 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität) — erledigt
 

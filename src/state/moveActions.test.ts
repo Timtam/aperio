@@ -553,11 +553,37 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
     const saved: CalendarEvent[] = [];
     expect(
-      await moveEventToDay(occ, localKey(occ.start, 1), 'series', null, (event) => saved.push(event)),
+      await moveEventToDay(occ, localKey(occ.start, 1), 'series', null, {
+        onSeriesSaved: (event) => saved.push(event),
+      }),
     ).toBe(true);
     expect(saved.map((event) => event.deletions_not_restored)).toEqual([
       ['2026-07-14T07:00:00.000Z'],
     ]);
+  });
+
+  it("sends the question's yes with the series' write only (250)", async () => {
+    const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
+    // Without it, a move asks nothing of the provider.
+    expect(await moveEventToDay(occ, localKey(occ.start, 1), 'series')).toBe(true);
+    expect(written().accepts_exception_loss).toBeUndefined();
+    invokeMock.mockClear();
+    serving(master);
+    expect(
+      await moveEventToDay(occ, localKey(occ.start, 1), 'series', null, { acceptsLoss: true }),
+    ).toBe(true);
+    expect(written().accepts_exception_loss).toBe(true);
+    // One occurrence moved on its own rewrites no series: nothing to agree to.
+    invokeMock.mockClear();
+    serving(master);
+    expect(
+      await moveEventToDay(occ, localKey(occ.start, 1), 'occurrence', null, { acceptsLoss: true }),
+    ).toBe(true);
+    expect(
+      invokeMock.mock.calls.some(
+        (call) => (call[1] as { event?: { accepts_exception_loss?: boolean } })?.event?.accepts_exception_loss,
+      ),
+    ).toBe(false);
   });
 
     it('a new time of day keeps the days and moves the exceptions to that time', async () => {
