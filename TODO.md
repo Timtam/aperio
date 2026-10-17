@@ -3865,9 +3865,11 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 - [x] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Mit #123
       sagt der Desktop-Mitzieh-Dialog eine Schreib-Ablehnung über
       eventWriteErrorMessage als Satz; #124 prüft es: Lehnt Exchange das
-      Übertragen auch nach dem Ja noch einmal ab ('exceptions-would-be-lost'),
-      steht der deutsche Satz im Fehlerhinweis, nicht das Token, und Aperio
-      fragt kein zweites Mal. Das Handy übersetzt über writeErrorMessage.
+      Kürzen beim Teilen einer Kopie ab, weil Vorkommen verloren gingen
+      ('exceptions-would-be-lost'), steht der deutsche Satz im Fehlerhinweis,
+      nicht das Token, und Aperio fragt nicht. Ein zweiter Test sichert ab,
+      dass eine Ablehnung nach dem Ja ein Satz bleibt und nicht noch einmal
+      fragt. Das Handy übersetzt über writeErrorMessage.
 
 ### 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität) — erledigt
 

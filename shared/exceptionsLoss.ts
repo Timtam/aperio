@@ -59,7 +59,8 @@ export function exceptionsLossSentences(
   return { what, lost };
 }
 
-/** The question both editors ask before saving anyway. */
+/** The question both editors ask before saving anyway, and a drag of a
+ *  series before moving it again (decision 250). */
 export function exceptionsLossQuestion(
   loss: ExceptionsLoss,
   title: string,

@@ -240,8 +240,9 @@ danach dieselbe Frage in einem eigenen Dialog; „Trotzdem speichern“ verschie
 die Serie, „Abbrechen“ lässt sie, wo sie war. Überträgst du eine Änderung an
 Kopien in anderen Kalendern, überträgt Aperio sie zuerst an alle übrigen Kopien
 und fragt dann einmal nach den Kopien, deren Serie Vorkommen verlöre, jede mit
-ihrem Kalender: „Trotzdem übertragen“ überträgt die Änderung auch dorthin,
-„Abbrechen“ lässt sie bei den Kopien, die nicht geändert wurden.
+ihrem Kalender: „Trotzdem übertragen“ überträgt die Änderung auch dorthin;
+„Abbrechen“ lässt diese Kopien unverändert, und Aperio nennt sie unter „Nicht
+geändert“.
 
 Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
 Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur wo

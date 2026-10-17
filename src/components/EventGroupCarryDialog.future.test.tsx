@@ -293,6 +293,21 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
   }
 
+  it('says, not asks, when cutting the copy short would drop its occurrences (251)', async () => {
+    // A yes would write the new part a second time: the cut is refused with
+    // the sentence, the new part is taken back, and nothing is asked.
+    await carryWhileTheCutFailsWith({
+      code: 'forbidden',
+      message: 'exceptions-would-be-lost: zone:1:0',
+    });
+    await waitFor(() => expect(calls('delete_event')).toHaveLength(1));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/eine andere Zeitzone/);
+    expect(alert.textContent).not.toMatch(/exceptions-would-be-lost/);
+    expect(screen.queryByRole('dialog', { name: /vorkommen gehen verloren/i })).toBeNull();
+    expect(screen.getByText(/Nicht geändert: Privat|Not changed: Privat/)).toBeTruthy();
+  });
+
   it('creates the new part first, then cuts the copy short (136)', async () => {
     copyOnFile.current = SPLIT_COPY;
     await carry();
@@ -571,8 +586,9 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
 
   it('says a refusal the yes meets again as a sentence, and does not ask twice', async () => {
     const question = await carrySeries();
-    // Exchange refuses the write with the consent too: what it would lose
-    // changed since the question counted it.
+    // A guard: the adapter does not refuse a write that carries the consent
+    // (decision 246), but should one be refused anyway, the dialog says the
+    // sentence instead of asking again in a loop.
     truncateFails.current = { code: 'forbidden', message: 'exceptions-would-be-lost: slot:2:0' };
     fireEvent.click(within(question).getByRole('button', { name: /trotzdem übertragen|carry over anyway/i }));
     await waitFor(() => expect(calls('update_event')).toHaveLength(2));

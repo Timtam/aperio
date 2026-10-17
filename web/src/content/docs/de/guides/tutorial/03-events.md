@@ -344,8 +344,9 @@ Bei Exchange kann das Mitziehen an die ganze Serie einer Kopie dazu führen, das
 Exchange deren einzeln geänderte oder gelöschte Vorkommen verwirft, wie im
 Editor. Aperio zieht die Änderung dann zuerst bei allen übrigen Kopien mit und
 fragt danach einmal, mit dem Kalender jeder solchen Kopie und dem, was sie
-verlöre: **Trotzdem übertragen** zieht die Änderung auch dort mit,
-**Abbrechen** lässt sie bei den Kopien, die nicht geändert wurden.
+verlöre: **Trotzdem übertragen** zieht die Änderung auch dort mit;
+**Abbrechen** lässt diese Kopien unverändert, und Aperio nennt sie unter „Nicht
+geändert“.
 
 Mitgezogen wird nur, was der Termin IST: Titel, wann, wo, Beschreibung.
 **Erinnerungen bleiben bei jeder Kopie** — die Privatkopie gibt es meist genau
