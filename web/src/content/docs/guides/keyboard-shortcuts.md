@@ -30,6 +30,8 @@ always authoritative.
 | Edit entry | `Enter` |
 | Check off / reopen task | `Space` |
 | Delete entry | `Delete` |
+| Move or copy to another calendar or list (day, agenda and task view) | `Shift+M` |
+| Duplicate entry; on a series, the whole series (day, agenda and task view) | `Ctrl+D` |
 
 ## Contacts
 

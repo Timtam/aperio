@@ -772,9 +772,9 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   Gerätezone so, wie das Gerät sie schreibt, etwa `Asia/Calcutta` (26a). Stufe 10
   entscheidet, ob die Vorbelegung kanonisch gespeichert wird.
 - **Kopieren und Duplizieren** behalten die Zonen-Entscheidung der Quelle: Eine
-  Serie auf „UTC (ohne Sommerzeit)“ bleibt als Kopie auf UTC, statt wie heute die
-  Gerätezone zu bekommen. Das Verschieben einer ganzen Serie ändert die Zone
-  ohnehin nicht.
+  Serie auf „UTC (ohne Sommerzeit)“ bleibt als Kopie auf UTC, statt die
+  Gerätezone zu bekommen (gebaut mit PR 8b, 262). Das Verschieben einer ganzen
+  Serie ändert die Zone ohnehin nicht.
 - **UNTIL:** Ein unberührtes Ende bleibt roh. Ein geändertes Enddatum wird als
   23:59:59 dieses Datums auf der Uhr der Serie gespeichert, als UTC-Zeitpunkt. Ein
   UTC-UNTIL wandert nur über den Zonenwechsel. WKST bleibt erhalten.

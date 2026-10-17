@@ -272,6 +272,24 @@ Aperio reads the appointment from the server before saving. When that fails,
 for instance because the server is not answering right now, Aperio sends
 nothing. Try again in a moment.
 
+## An occurrence is back after a series was moved or copied
+
+When you move a whole series to another calendar, copy it, duplicate it with
+`Ctrl+D` or choose another calendar for it in the editor, Aperio writes it
+there as a new series. It takes along the occurrences deleted from the old
+series, and nothing else:
+
+- An occurrence changed on its own, for example in Outlook, is back at its
+  usual time, with the series' title, place and time. Its own change stays
+  behind.
+- On Exchange and Microsoft 365 the new series shows deleted occurrences again
+  for now: they take no deletions when a series is created.
+- On Google, Aperio knows deleted occurrences about three months back and a
+  year ahead. One deleted further away is back in the new series.
+
+What you can do: delete or change the occurrence that came back, in the new
+calendar.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.

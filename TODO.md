@@ -458,6 +458,22 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
+      weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
+      anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
+      Editor in einen anderen Kalender gespeichert, bekommt genau ihre echten
+      Löschungen mit (`newSeriesRecurrence`, dieselbe Regel wie beim Teilen).
+      Ein einzeln geänderter Termin, etwa in Outlook, kommt zu seiner üblichen
+      Zeit zurück, statt in der neuen Serie gelöscht zu sein; eine Ausnahme
+      neben der Regel fällt weg. Auch vergangene Löschungen (259): Die Grenze
+      „ab heute“ kommt mit PR 8, wo Exchange Löschungen einzeln schreibt.
+      Strg+D auf einem Termin einer Serie dupliziert die ganze Serie ab ihrem
+      Beginn (260) und sagt ein Scheitern an (261). Kopieren und Duplizieren
+      behalten die Zone der Quelle (262). Exchange und Microsoft 365 nehmen
+      beim Anlegen noch keine Löschungen (140): Dort erscheinen gelöschte
+      Termine in der neuen Serie vorerst wieder. Das Handy hat keinen
+      Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
+      Test.
     - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein
       gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
       ein abgesagtes RECURRENCE-ID: beim Teilen kam es in der neuen Serie
