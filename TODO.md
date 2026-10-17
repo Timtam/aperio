@@ -685,7 +685,7 @@ Siehe DESIGN §4.2.
       .thisEvent` (`IosDeviceEventStore.swift`), trifft bei einer Serie also nur
       das erste Vorkommen. Ungemessen.
     - Exchange: `EndDate` ist inklusive (Live-Test 8a, 2026-10-10). Ein
-      Kürzen mit Uhrzeit lässt den Schnitttag deshalb doppelt stehen; die
+      Kürzen mit Uhrzeit ließ den Schnitttag deshalb doppelt stehen; die
       Korrektur ist gebaut (254, unten „Schnitttag doppelt“). Graph:
       ungemessen.
     - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
@@ -952,16 +952,18 @@ Siehe DESIGN §4.2.
   Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
   DESIGN, Stufe 4, „Gemessen“).
   ↻ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
-  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte den
+  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte meist den
   Schnitttag in beiden Serien, und das Löschen ab einem Termin ließ ihn
-  stehen, weil Exchange das Enddatum als ganzen Tag auf der Uhr der Serie
-  zählt (Live-Runde 10a). Jetzt endet die alte Serie am Tag vor dem
-  Schnitttag, auf dieser Uhr; ein selbst gewähltes Ende bleibt, wie es ist.
-  Aperios eigene Anzeige liest das zurückgelesene Enddatum weiter als
-  Zeitpunkt und irrt in zwei Fenstern um einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also
-  für Desktop und Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn
-  Schritte, auch ein Schnitt am Tag der Umstellung auf Sommerzeit).
-  Ungemessen: ein Schnitt am Tag der Umstellung auf Winterzeit.
+  stehen: Aperio schrieb das UTC-Datum des `UNTIL` als Enddatum, und Exchange
+  zählt es als ganzen Tag auf der Uhr der Serie (Live-Runde 10a). Richtig
+  war das nur östlich von UTC für eine Uhrzeit bis zum Abstand zu UTC (M1).
+  Jetzt endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
+  selbst gewähltes Ende bleibt, wie es ist. Aperios eigene Anzeige liest das
+  zurückgelesene Enddatum weiter als Zeitpunkt und irrt in zwei Fenstern um
+  einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also für Desktop und
+  Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn Schritte, auch
+  ein Schnitt am Tag der Umstellung auf Sommerzeit). Ungemessen: ein Schnitt
+  am Tag der Umstellung auf Winterzeit.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der

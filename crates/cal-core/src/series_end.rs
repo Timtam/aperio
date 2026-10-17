@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn east_of_utc_after_midnight_the_utc_date_is_already_the_day_before() {
+    fn east_of_utc_up_to_its_distance_from_utc_the_utc_date_was_already_the_day_before() {
         // Daily 00:30 Berlin, cut on Wed 4.11. (round 10a, M1): 3.11. either way.
         assert_eq!(
             end("2026-11-03T23:29:59Z", hm(0, 30), 1),
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn west_of_utc_in_the_evening_the_utc_date_was_the_day_after() {
+    fn west_of_utc_after_24_less_its_distance_the_utc_date_was_the_day_after() {
         // Daily 20:00 New York (UTC-5), cut on Wed 4.11. (round 10a, M2): the
         // UTC date 5.11. kept the 4.11. and the 5.11. both.
         assert_eq!(
