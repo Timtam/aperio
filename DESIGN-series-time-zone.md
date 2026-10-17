@@ -314,9 +314,11 @@ keinen, dort ist die Wahl Tonis Sache.
   täglich 20:00 New York). Aperio kürzt die alte Serie mit `UNTIL` eine
   Sekunde vor dem Schnitt. Dessen UTC-Datum behielt meist den Schnitttag: Er
   stand in beiden Serien (Live-Test 8a, Schritt 8), und beim Löschen ab einem
-  Termin blieb er stehen (M5); westlich von UTC abends kam der Tag danach
-  hinzu. Nur östlich von UTC kurz nach Mitternacht war das UTC-Datum schon
-  der Tag davor (M1). Ein Schnitt einer Serie mit Uhrzeit
+  Termin blieb er stehen (M5). Richtig war das UTC-Datum nur östlich von UTC,
+  für eine Uhrzeit vor dem Versatz der Zone zu UTC (in Berlin vor 01:00, im
+  Sommer vor 02:00; M1). Westlich von UTC kam ab 24 Uhr minus dem Versatz
+  der Tag danach hinzu (in New York ab 19:00, im Sommer ab 20:00; M2). Ein
+  Schnitt einer Serie mit Uhrzeit
   endet deshalb am letzten Tag, dessen Vorkommen, zur Uhrzeit der Serie auf
   ihrer Uhr, bis zum `UNTIL` beginnt: am Tag vor dem Schnitttag. Eine
   wöchentliche Serie, an einem Montag geschnitten, endet am Sonntag davor,

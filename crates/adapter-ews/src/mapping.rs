@@ -10685,9 +10685,10 @@ mod tests {
     /// there (live round 10a, M1, M2), and the UNTIL's UTC date mostly kept
     /// the cut's own day: in both series after a split (the 8a live test, step
     /// 8), in the only one after a delete from one occurrence on (round 10a,
-    /// M5), and west of UTC in the evening the day after it too. A weekly cut on a Monday
-    /// ends on the Sunday before, the same occurrences (round 10a, M3). Still
-    /// only a new range: no question, the exceptions stay.
+    /// M5), and west of UTC, from 24:00 minus the zone's offset on (New York
+    /// from 19:00, M2), the day after it too. A weekly cut on a Monday ends on
+    /// the Sunday before, the same occurrences (round 10a, M3). Still only a
+    /// new range: no question, the exceptions stay.
     #[test]
     fn a_cut_ends_the_old_series_on_the_day_before_the_cut() {
         let berlin = w_europe_zones();

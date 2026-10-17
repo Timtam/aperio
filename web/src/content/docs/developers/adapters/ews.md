@@ -121,8 +121,11 @@ The endpoint is discovered or user-supplied.
   writes `UNTIL` one second before the occurrence it is cut at, an instant,
   and its UTC date mostly kept the cut's own day: it stood in both series
   (the 8a live test), and a delete from one occurrence on left it standing
-  (round 10a, M5); only east of UTC just after midnight was the UTC date the
-  day before already (M1). So an update marked as
+  (round 10a, M5). Only east of UTC, for a time of day before the zone's
+  offset from UTC (in Berlin before 01:00, in summer 02:00), was the UTC date
+  the day before already (M1); west of UTC, from 24:00 minus the offset on
+  (in New York from 19:00, in summer 20:00), it was the day after, and two
+  days stood twice (M2). So an update marked as
   a cut (`truncate_tail_overrides`) of a timed series ends on the last day
   whose occurrence, at the master's wall time on the clock the rule is
   written on, starts at or before the `UNTIL` (`cut_end_day`,

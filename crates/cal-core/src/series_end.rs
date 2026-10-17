@@ -8,9 +8,11 @@
 //! with a series at 00:30 Berlin, M2 at 20:00 New York). Written as the
 //! `UNTIL`'s UTC date, the end kept the cut's own day, so it stood in the old
 //! series and in the new one (a delete from one occurrence on kept it in the
-//! only one, M5), and west of UTC in the evening the day after it too. Only
-//! east of UTC just after midnight was the UTC date the day before already
-//! (M1).
+//! only one, M5). Only east of UTC, for a time of day before the zone's
+//! offset from UTC (in Berlin before 01:00, in summer 02:00; M1), was the UTC
+//! date the day before already; west of UTC, from 24:00 minus the offset on
+//! (in New York from 19:00, in summer 20:00; M2), it was the day after the
+//! cut's day, and two days stood twice.
 //!
 //! Every occurrence of such a series stands at the same wall time on its
 //! clock. So the end is the day of the `UNTIL` on that clock where that day's
