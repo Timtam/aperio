@@ -1446,6 +1446,21 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
+      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
+      wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den
+      Dialog aber immer mit `isOpen` an und entfernt ihn beim Schließen. Die
+      Prüfungen `if (!open.current) return;` greifen deshalb nie. Ein
+      Durchlauf, der nach dem Schließen weiterläuft, schreibt weiter Kopien.
+      Gelingt alles, ruft er `onClose()` auf. Das nimmt den obersten Dialog
+      vom Stapel, etwa einen inzwischen geöffneten neuen Termin mit schon
+      getipptem Titel. Das gilt für jeden Durchlauf: den ersten, „Rest erneut
+      versuchen“ und das Ja auf die Frage (251). Abhilfe wie auf dem Handy
+      (`alive`): `open.current` beim Aushängen auf false setzen. Dazu ein
+      Test, der den Dialog mitten im Durchlauf schließt und erwartet, dass
+      `onClose` nicht gerufen wird. Älter als #124 (705e154a, 72fac533),
+      gefunden in dessen fünfter Prüfrunde (2026-10-17).
+
 - [ ] **Kopierknopf im Konflikt-Bildschirm des Handys.** Der
       Konflikt-Bildschirm auf dem Handy
       (mobile/src/screens/ConflictsScreen.tsx) hat keinen Knopf 'Konflikte in
