@@ -64,7 +64,11 @@ const DIALOG_STATE = {
   dataVersion: 0,
 };
 const MENU = { openForEvent: () => {} };
-const announce = () => {};
+/** What the view announced, in order. */
+const announced: string[] = [];
+const announce = (message: string) => {
+  announced.push(message);
+};
 
 vi.mock('../../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
 vi.mock('../../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
@@ -82,6 +86,8 @@ vi.mock('../DayCheckInButton', () => ({ DayCheckInButton: () => null }));
 afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
+  invokeMock.mockImplementation(() => Promise.resolve([] as unknown));
+  announced.length = 0;
 });
 
 describe('AgendaView → the Delete key on a meeting the provider always cancels', () => {
@@ -102,5 +108,28 @@ describe('AgendaView → the Delete key on a meeting the provider always cancels
     );
     const del = invokeMock.mock.calls.find((call) => call[0] === 'delete_event');
     expect(del?.[1]).toMatchObject({ id: 'ev-1', sendCancellations: true });
+  });
+
+  it('says a refused delete in words, as the editors do, not as its token', async () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === 'delete_event'
+        ? Promise.reject({ code: 'forbidden', message: 'day-zone-unreadable: no-zone' })
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'Delete' });
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i,
+      }),
+    );
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(announced.at(-1)).toMatch(
+      /Zeitzone, die Aperio nicht lesen kann|time zone Aperio cannot read/,
+    );
+    expect(announced.join(' ')).not.toMatch(/day-zone-unreadable|forbidden:/);
   });
 });

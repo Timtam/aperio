@@ -245,18 +245,20 @@ ihrem Kalender: „Trotzdem übertragen“ überträgt die Änderung auch dorthi
 geändert“.
 
 Eine Serie ab einem ihrer Termine zu ändern oder zu löschen kürzt nur die alte
-Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Nur wo
+Serie, und das behält ihre einzeln geänderten und gelöschten Vorkommen. Wo
 Aperio dabei die Zeitzone neu schriebe (siehe oben) und etwas verloren ginge,
 kürzt es die Serie nicht: Aperio fragt dort nicht, sondern sagt den Satz und
-ändert nichts. Das geht dann in Outlook. Ab ihrem ersten Termin geändert, wird
-die ganze Serie neu geschrieben, und Aperio fragt wie im Editor.
+ändert nichts. Das geht dann in Outlook. Auch eine Serie mit Uhrzeit, die
+Exchange in einer Zeitzone speichert, die Aperio nicht lesen kann, kürzt Aperio
+nicht (siehe den nächsten Abschnitt). Ab ihrem ersten Termin geändert, wird die
+ganze Serie neu geschrieben, und Aperio fragt wie im Editor.
 
 Kann Aperio den aktuellen Stand einer Serie nicht vom Server lesen, ändert es
 sie nicht, denn dann weiß es nicht, was verloren ginge. Aperio sagt dann:
 „Aperio konnte den aktuellen Stand dieses Termins nicht vom Server lesen und hat
 ihn deshalb nicht geändert. Versuche es gleich noch einmal.“
 
-## Der Tag eines ganztägigen Exchange-Termins lässt sich nicht ändern
+## Exchange speichert einen Termin in einer Zeitzone, die Aperio nicht lesen kann
 
 Aperio sagt dann: „Exchange speichert diesen Termin in einer Zeitzone, die
 Aperio nicht lesen kann. Seinen Tag kannst du deshalb hier nicht ändern; den
@@ -275,6 +277,13 @@ ohne ihre Regeln, rät Aperio nicht: Sonst stünde der Termin danach in Outlook
 Was du tun kannst: Ändere den Tag in Outlook. Alles andere, etwa Titel, Ort
 oder Erinnerung, kannst du in Aperio weiter ändern, solange du den Tag dabei
 nicht verschiebst.
+
+Derselbe Satz kommt, wenn du eine Serie mit Uhrzeit ab einem ihrer Termine
+änderst oder löschst und Exchange sie in so einer Zeitzone speichert. Den Tag,
+an dem die gekürzte Serie endet, zählt Exchange in dieser Zeitzone; Aperio
+wüsste also nicht, an welchem Tag es sie enden lassen soll, und ändert nichts.
+Ändere oder lösche diese Serie ab dem Termin in Outlook. Titel, Ort und
+Erinnerung der Serie kannst du in Aperio weiter ändern.
 
 Ähnlich klingt: „Aperio konnte den aktuellen Stand dieses Termins nicht vom
 Server lesen und hat ihn deshalb nicht geändert.“ Um die Zeitzone zu kennen,

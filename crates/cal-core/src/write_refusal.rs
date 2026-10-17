@@ -54,9 +54,12 @@ pub enum WriteRefusal {
     AccessNotGranted,
     /// An all-day appointment's day could not be changed, because the provider
     /// stores it in a time zone Aperio cannot read, so its midnights are
-    /// unknown (decision 237). Its title and the rest still save. The detail
-    /// is a machine token for the log: `no-zone` (no zone, or an id with no
-    /// definition), `no-midnight` (the zone has no midnight that day).
+    /// unknown (decision 237); or a timed series could not be cut, because the
+    /// day it ends on is counted on that zone (decision 256). Its title and
+    /// the rest still save. The detail is a machine token for the log:
+    /// `no-zone` (no zone, or an id with no definition), `no-midnight` (the
+    /// zone has no midnight that day), `no-wall` (the zone cannot place the
+    /// series' time of day).
     DayZoneUnreadable,
     /// The provider's current copy of the item could not be read, and the
     /// write needs it, so nothing was sent: a retry may well work. The detail

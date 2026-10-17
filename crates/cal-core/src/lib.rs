@@ -61,6 +61,7 @@ mod task_grouping_gate {
 }
 pub mod read_refusal;
 pub mod series_clock;
+pub mod series_end;
 pub mod series_shift;
 pub mod tail_exceptions;
 pub mod task_occurrences;
@@ -141,6 +142,7 @@ pub use series_clock::{
     canonical_zone, expansion_clock, listed_zones, series_clock_zone, written_series_zone,
     ExpansionClock, NameKind, TZDATA_VERSION,
 };
+pub use series_end::{last_day_through, utc_until};
 pub use series_shift::{
     series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,
 };

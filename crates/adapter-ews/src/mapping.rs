@@ -2683,10 +2683,12 @@ pub(crate) fn plan_update_in<D: TimeZone>(
             .as_ref()
             .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day_before(ev)).ok())
     };
-    let written_rule = rule_of
-        .recurrence
-        .as_ref()
-        .map(|rec| rrule_to_ews_recurrence(&rec.rrule, first_day_written(landed)).ok());
+    // The day a cut ends the old series on, on the clock the rule is written
+    // on (decision 235).
+    let cut_end = cut_end_day(event, rule_of, landed, rule_clock)?;
+    let written_rule = rule_of.recurrence.as_ref().map(|rec| {
+        rrule_to_ews_recurrence_ending(&rec.rrule, first_day_written(landed), cut_end).ok()
+    });
     // A written slot takes a kept rule along when it moves the rule's first
     // day: when the start moves, and also when only the all-day flag flips
     // under the same instant or the clock moves, because the two read the day
@@ -2707,7 +2709,8 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // pointless `DeleteItemField calendar:Recurrence` every time.
     if rule_written {
         if let Some(rec) = &rule_of.recurrence {
-            let rec_xml = rrule_to_ews_recurrence(&rec.rrule, first_day_written(landed))?;
+            let rec_xml =
+                rrule_to_ews_recurrence_ending(&rec.rrule, first_day_written(landed), cut_end)?;
             // Wrap the recurrence element in a SetItemField against
             // calendar:Recurrence. EWS expects the body's inner shape to
             // start with `<t:CalendarItem>` containing the recurrence.
@@ -2839,6 +2842,53 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         written_all_day: landed.all_day,
         written_clock: rule_clock.cloned(),
     })
+}
+
+/// The day a cut ends the old series on (decision 235), or `None` where the
+/// rule's own `UNTIL` date stands.
+///
+/// A cut — "this and all following", in the editors, the carry dialogs and a
+/// delete from one occurrence on, all of which set `truncate_tail_overrides`
+/// — ends the old series with an `UNTIL` one second before the occurrence it
+/// is cut at. Exchange counts a series' `EndDate` as a whole day on the
+/// series' clock (live round 10a, M1, M2), so the `UNTIL`'s UTC date mostly
+/// kept the cut's own day: it stood in both series (the 8a live test, step
+/// 8), and a delete from one occurrence on left it standing (round 10a, M5).
+/// A timed series therefore ends on the last day
+/// whose occurrence, at the master's wall time on `clock`, starts at or before
+/// the `UNTIL` ([`cal_core::last_day_through`]). An all-day cut already names
+/// the day before as a date (round 10a, M6), and an end the user typed keeps
+/// the day typed: neither is a cut of a timed series. A clock that cannot say
+/// refuses the cut (237), rather than keep the day twice.
+fn cut_end_day(
+    event: &Event,
+    rule_of: &Event,
+    landed: &Event,
+    clock: Option<&DayZone>,
+) -> EwsResult<Option<chrono::NaiveDate>> {
+    if !event.truncate_tail_overrides || landed.all_day {
+        return Ok(None);
+    }
+    let Some(until) = rule_of
+        .recurrence
+        .as_ref()
+        .and_then(|rec| cal_core::utc_until(&rec.rrule))
+    else {
+        return Ok(None);
+    };
+    let clock = clock.ok_or_else(|| day_zone_refusal("no-zone"))?;
+    let time = clock
+        .wall(landed.start)
+        .ok_or_else(|| day_zone_refusal("no-wall"))?
+        .time();
+    cal_core::last_day_through(
+        until,
+        time,
+        |when| clock.wall(when),
+        |wall| clock.instant_of(wall),
+    )
+    .map(Some)
+    .ok_or_else(|| day_zone_refusal("no-wall"))
 }
 
 fn first_relative_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
@@ -3319,7 +3369,9 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 //
 //   - default (no UNTIL/COUNT)    → NoEndRecurrence
 //   - COUNT=N                     → NumberedRecurrence
-//   - UNTIL=YYYYMMDD[THHMMSSZ]    → EndDateRecurrence
+//   - UNTIL=YYYYMMDD[THHMMSSZ]    → EndDateRecurrence, on the UNTIL's date;
+//                                   a cut's on the day before the cut on
+//                                   the series' clock (decision 254)
 //
 // Relative monthly / yearly ("third Wednesday of the month",
 // "last weekday of the month") are covered too: a single ordinal
@@ -3337,6 +3389,17 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 /// before PR 8a, it named the day before for an all-day series east of UTC,
 /// and a series really started there (live round 3, R3-6).
 pub fn rrule_to_ews_recurrence(rrule: &str, first_day: chrono::NaiveDate) -> EwsResult<String> {
+    rrule_to_ews_recurrence_ending(rrule, first_day, None)
+}
+
+/// [`rrule_to_ews_recurrence`], ending on `end` where the rule has an `UNTIL`:
+/// the day a cut ends on ([`cut_end_day`], decision 235). Without one the
+/// `EndDate` is the `UNTIL`'s own date.
+fn rrule_to_ews_recurrence_ending(
+    rrule: &str,
+    first_day: chrono::NaiveDate,
+    end: Option<chrono::NaiveDate>,
+) -> EwsResult<String> {
     let parts = parse_rrule(rrule);
     let freq = parts
         .get("FREQ")
@@ -3438,8 +3501,12 @@ pub fn rrule_to_ews_recurrence(rrule: &str, first_day: chrono::NaiveDate) -> Ews
             "<t:NumberedRecurrence><t:StartDate>{start_date}</t:StartDate><t:NumberOfOccurrences>{count}</t:NumberOfOccurrences></t:NumberedRecurrence>",
         )
     } else if let Some(until_str) = parts.get("UNTIL") {
-        let end_date = parse_until_date(until_str)
-            .ok_or_else(|| EwsError::Protocol(format!("RRULE UNTIL not parseable: {until_str}")))?;
+        let end_date = match end {
+            Some(day) => day.format("%Y-%m-%d").to_string(),
+            None => parse_until_date(until_str).ok_or_else(|| {
+                EwsError::Protocol(format!("RRULE UNTIL not parseable: {until_str}"))
+            })?,
+        };
         format!(
             "<t:EndDateRecurrence><t:StartDate>{start_date}</t:StartDate><t:EndDate>{end_date}</t:EndDate></t:EndDateRecurrence>",
         )
@@ -3702,7 +3769,9 @@ fn month_number_to_name(n: u32) -> Option<&'static str> {
 
 /// RRULE UNTIL comes in three shapes: `YYYYMMDD`, `YYYYMMDDTHHMMSS`,
 /// `YYYYMMDDTHHMMSSZ`. EWS's EndDate wants `YYYY-MM-DD` — we trim
-/// time/timezone and reformat.
+/// time/timezone and reformat: the day an end the user typed names, and
+/// the one the reader's `…T235959Z` names. A cut's `UNTIL` is an instant,
+/// read on the series' clock instead ([`cut_end_day`]).
 fn parse_until_date(until: &str) -> Option<String> {
     let trimmed = until.trim().trim_end_matches('Z');
     let date_part = trimmed.split('T').next()?;
@@ -10587,6 +10656,249 @@ mod tests {
             &chrono_tz::Europe::Berlin,
         )
         .unwrap()
+    }
+
+    /// `before`'s rule with its COUNT replaced by `until`, as a cut writes it
+    /// (`truncate_tail_overrides`) or as an end the user typed.
+    fn ended(before: &Event, until: &str, cut: bool) -> Event {
+        let mut edit = before.clone();
+        let rec = edit.recurrence.as_mut().unwrap();
+        let kept: Vec<&str> = rec
+            .rrule
+            .split(';')
+            .filter(|p| !p.starts_with("COUNT="))
+            .collect();
+        rec.rrule = format!("{};UNTIL={until}", kept.join(";"));
+        edit.truncate_tail_overrides = cut;
+        edit
+    }
+
+    fn new_york_zones() -> StoredZones {
+        StoredZones {
+            start: Some(DayZone::Tz(chrono_tz::America::New_York)),
+            end: Some(DayZone::Tz(chrono_tz::America::New_York)),
+        }
+    }
+
+    /// Decision 235: a cut of a timed series ends the old series on the day
+    /// before the cut on its clock. Exchange counts EndDate as a whole day
+    /// there (live round 10a, M1, M2), and the UNTIL's UTC date mostly kept
+    /// the cut's own day: in both series after a split (the 8a live test, step
+    /// 8), in the only one after a delete from one occurrence on (round 10a,
+    /// M5), and west of UTC, after 24:00 less the zone's distance from UTC
+    /// (New York after 19:00, M2), the day after it too. A weekly cut on a
+    /// Monday ends on the Sunday before, the same occurrences (round 10a, M3).
+    /// At 19:00 New York the cut's UNTIL is the very text of an end typed for
+    /// the cut's day: only the flag tells them apart. Still only a new range:
+    /// no question, the exceptions stay.
+    #[test]
+    fn a_cut_ends_the_old_series_on_the_day_before_the_cut() {
+        let berlin = w_europe_zones();
+        let new_york = new_york_zones();
+        let daily = "FREQ=DAILY;COUNT=10";
+        let cases: [(&str, &str, &str, &str, &StoredZones, &str, &str); 10] = [
+            (
+                "daily 08:00 Berlin, cut on Thu 5.11.",
+                "2026-11-02T07:00:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261105T065959Z",
+                "2026-11-04",
+            ),
+            (
+                "the 8a shape, 10:00 Berlin, cut on Wed 4.11.",
+                "2026-11-02T09:00:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261104T085959Z",
+                "2026-11-03",
+            ),
+            (
+                "23:30 Berlin, cut on Wed 4.11.",
+                "2026-11-02T22:30:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261104T222959Z",
+                "2026-11-03",
+            ),
+            (
+                "00:30 Berlin, cut on Wed 4.11. (round 10a, M1; right on main too)",
+                "2026-11-01T23:30:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261103T232959Z",
+                "2026-11-03",
+            ),
+            (
+                "01:00 Berlin, cut on Wed 4.11. (right on main too)",
+                "2026-11-02T00:00:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261103T235959Z",
+                "2026-11-03",
+            ),
+            (
+                "19:00 New York, cut on Wed 4.11.: the UNTIL a typed end has",
+                "2026-11-03T00:00:00Z",
+                daily,
+                "America/New_York",
+                &new_york,
+                "20261104T235959Z",
+                "2026-11-03",
+            ),
+            (
+                "Mondays 08:00 Berlin, cut on Mon 16.11.",
+                "2026-11-02T07:00:00Z",
+                "FREQ=WEEKLY;BYDAY=MO;COUNT=5",
+                "Europe/Berlin",
+                &berlin,
+                "20261116T065959Z",
+                "2026-11-15",
+            ),
+            (
+                "20:00 New York, cut on Wed 4.11. (round 10a, M2)",
+                "2026-11-03T01:00:00Z",
+                daily,
+                "America/New_York",
+                &new_york,
+                "20261105T005959Z",
+                "2026-11-03",
+            ),
+            (
+                "02:30 Berlin, cut on 29.3.2026, where the clock skips 02:30",
+                "2026-03-25T01:30:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20260329T012959Z",
+                "2026-03-28",
+            ),
+            (
+                "02:30 Berlin, cut on 25.10.2026, where the clock reads 02:30 twice",
+                "2026-10-20T00:30:00Z",
+                daily,
+                "Europe/Berlin",
+                &berlin,
+                "20261025T002959Z",
+                "2026-10-24",
+            ),
+        ];
+        for (label, start, rule, tzid, stored, until, end) in cases {
+            let before = timed_series(start, rule, tzid);
+            let edit = ended(&before, until, true);
+            let (set, _) = saved(&edit, &before, stored, EventIdKind::RecurringMaster);
+            assert_eq!(element(&set, "EndDate"), end, "{label}: {set}");
+            assert_eq!(
+                planned(&edit, &before, stored, EventIdKind::RecurringMaster).rewrite,
+                None,
+                "{label}: a cut is a new range only"
+            );
+        }
+    }
+
+    /// An end the user typed is no cut, and keeps the day typed, whatever the
+    /// series' time of day; an all-day cut already names the day before as a
+    /// date (round 10a, M6).
+    #[test]
+    fn an_end_that_is_no_cut_keeps_its_own_date() {
+        let berlin = w_europe_zones();
+        let new_york = new_york_zones();
+        let typed: [(&str, &str, &str, &StoredZones); 4] = [
+            (
+                "08:00 Berlin",
+                "2026-11-02T07:00:00Z",
+                "Europe/Berlin",
+                &berlin,
+            ),
+            (
+                "00:30 Berlin",
+                "2026-11-01T23:30:00Z",
+                "Europe/Berlin",
+                &berlin,
+            ),
+            (
+                "20:00 New York",
+                "2026-11-03T01:00:00Z",
+                "America/New_York",
+                &new_york,
+            ),
+            (
+                "19:00 New York, the text a cut there writes too",
+                "2026-11-03T00:00:00Z",
+                "America/New_York",
+                &new_york,
+            ),
+        ];
+        for (label, start, tzid, stored) in typed {
+            let before = timed_series(start, "FREQ=DAILY;COUNT=10", tzid);
+            let edit = ended(&before, "20261104T235959Z", false);
+            let (set, _) = saved(&edit, &before, stored, EventIdKind::RecurringMaster);
+            assert_eq!(element(&set, "EndDate"), "2026-11-04", "{label}: {set}");
+        }
+        let device = chrono_tz::Europe::Berlin;
+        let before = all_day_master(&device, "FREQ=DAILY;COUNT=6");
+        let edit = ended(&before, "20261021", true);
+        let (set, _) = saved(&edit, &before, &berlin, EventIdKind::RecurringMaster);
+        assert_eq!(
+            element(&set, "EndDate"),
+            "2026-10-21",
+            "an all-day cut: {set}"
+        );
+    }
+
+    /// A cut whose update writes the series' zone anew is counted on the new
+    /// clock, the one the rule is written on (decision 241), and still asked
+    /// about as a new zone.
+    #[test]
+    fn a_cut_that_moves_the_clock_ends_on_the_new_clock() {
+        let before = timed_series(
+            "2026-11-02T07:00:00Z",
+            "FREQ=DAILY;COUNT=10",
+            "Europe/Berlin",
+        );
+        let edit = ended(&before, "20261105T065959Z", true);
+        let plan = planned(
+            &edit,
+            &before,
+            &StoredZones::default(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(element(&plan.set, "EndDate"), "2026-11-04", "{}", plan.set);
+        assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Zone));
+    }
+
+    /// A cut of a series whose clock Aperio cannot read is refused (decision
+    /// 237) rather than keep the cut's day twice.
+    #[test]
+    fn a_cut_on_a_clock_aperio_cannot_read_is_refused() {
+        let before = timed_series(
+            "2026-11-02T07:00:00Z",
+            "FREQ=DAILY;COUNT=10",
+            "Mars/Olympus",
+        );
+        let mut edit = ended(&before, "20261105T065959Z", true);
+        edit.keep_fields = cal_core::event_diff::kept_fields(&edit, Some(&before), true);
+        let err = event_to_update_field_xml_in(
+            &edit,
+            Some(&before),
+            &StoredZones::default(),
+            None,
+            EventIdKind::RecurringMaster,
+            &chrono_tz::Europe::Berlin,
+        )
+        .unwrap_err();
+        let EwsError::Protocol(message) = err else {
+            panic!("expected a refusal, got {err:?}");
+        };
+        assert_eq!(
+            cal_core::WriteRefusal::parse(&message),
+            Some((cal_core::WriteRefusal::DayZoneUnreadable, "no-zone"))
+        );
     }
 
     /// What each kind of save rewrites that makes Exchange drop a series'

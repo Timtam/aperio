@@ -85,7 +85,6 @@ import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
   addEventExdate,
   deleteEventById,
-  isCommandError,
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
@@ -1122,11 +1121,9 @@ export function WeekView() {
         // so the dataVersion bump has to be explicit here.
         invalidateData();
       } catch (err) {
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        // In words, as the editors say it: a provider's refusal included, such
+        // as a cut on a clock Aperio cannot read (decision 256).
+        announce(eventWriteErrorMessage(err, t));
       }
     },
     [announce, t, i18n.language, invalidateData],

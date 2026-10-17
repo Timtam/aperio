@@ -39,7 +39,9 @@ import {
  * A cross-client single-occurrence change synced in as a SEPARATE RECURRENCE-ID
  * override (CalDAV/iCloud + Google) is dropped by the adapter via the
  * `truncate_tail_overrides` flag on the update, so it doesn't survive as a ghost.
- * EWS keeps modified occurrences inline, so its truncation drops them for free.
+ * EWS keeps modified occurrences inline, so its truncation drops them for free;
+ * it reads the flag to end the series on the day before the cut, on the series'
+ * clock (decision 254).
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,

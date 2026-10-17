@@ -308,6 +308,52 @@ keinen, dort ist die Wahl Tonis Sache.
   gelöschte steht an der neuen Stelle wieder gelöscht (Q2); nur gelöschte
   fragen nicht und bleiben gelöscht, einen Tag später wie unter einem neuen
   Muster (Q3, Q4); der Titel allein schreibt nur den Titel (Q6).
+- **254 — der Schnitt endet am Tag davor, auf der Uhr der Serie.** *(gebaut,
+  PR zu 235)* Exchange zählt das Enddatum einer Serie als ganzen Tag auf der
+  Uhr der Serie (Live-Runde 10a am 17.10.2026: M1, täglich 00:30 Berlin; M2,
+  täglich 20:00 New York). Aperio kürzt die alte Serie mit `UNTIL` eine
+  Sekunde vor dem Schnitt. Dessen UTC-Datum behielt meist den Schnitttag: Er
+  stand in beiden Serien (Live-Test 8a, Schritt 8), und beim Löschen ab einem
+  Termin blieb er stehen (M5). Richtig war das UTC-Datum nur östlich von UTC,
+  für eine Uhrzeit bis einschließlich dem Abstand der Zone zu UTC (in Berlin
+  bis 01:00, im Sommer bis 02:00; M1). Westlich von UTC kam für eine Uhrzeit
+  nach 24 Uhr weniger dem Abstand zu UTC der Tag danach hinzu (in New York
+  nach 19:00, im Sommer nach 20:00; M2); um 19:00 selbst stand nur der
+  Schnitttag doppelt. Die Grenzen in 255 liegen eine Sekunde anders, weil
+  dort das zurückgelesene `…T235959Z` zählt und nicht ein Zeitpunkt eine
+  Sekunde vor dem Termin. Ein Schnitt einer Serie mit Uhrzeit
+  endet deshalb am letzten Tag, dessen Vorkommen, zur Uhrzeit der Serie auf
+  ihrer Uhr, bis zum `UNTIL` beginnt: am Tag vor dem Schnitttag. Eine
+  wöchentliche Serie, an einem Montag geschnitten, endet am Sonntag davor,
+  mit denselben Terminen, und Exchange behält so ein Datum (M3). Ein
+  gelöschtes Vorkommen am Endtag bleibt gelöscht (M4). Ein ganztägiger
+  Schnitt nennt den Tag davor schon als Datum und war richtig (M6). Mit dem
+  gebauten Adapter bestand die Live-Runde 10b am 17.10.2026 alle zehn
+  Schritte. S1: täglich 08:00 Berlin, Schnitt nach einem gelöschten
+  Vorkommen. S2: montags, Ende am Sonntag. S4: 23:30 Berlin. S6: 20:00 New
+  York. S8: Löschen ab einem Termin. Unverändert blieben die Gegenproben S3
+  (ganztägiger Schnitt), S5 (Schnitt um 00:30 Berlin) und S7, S7b (ein
+  gewähltes Ende um 08:00 und um 00:30). S10: ein Schnitt am 28.3.2027;
+  Exchange legt 02:30 an diesem Tag auf 03:30 Sommerzeit, wie Aperio, und
+  die Serie endet am 27.3.
+- **255 — nur Schnitte.** Ein selbst gewähltes Ende und das zurückgelesene
+  `…T235959Z` behalten ihr Datum. Aperios eigene Anzeige liest dieses
+  `UNTIL` weiter als Zeitpunkt und irrt in zwei Fenstern um einen Tag: Eine
+  Serie in Berlin zwischen 00:00 und 00:59 (im Sommer bis 01:59) zeigt den
+  Schnitttag in Aperio doppelt, eine in New York ab 19:00 (im Sommer ab
+  20:00) lässt dort den letzten Tag weg. Das gehört zu Stufe 8 (Risiko
+  „Altes UNTIL nahe Mitternacht UTC“).
+- **256 — ohne Uhr wird abgelehnt.** Kann Aperio die Uhr der Serie nicht
+  lesen, lehnt es den Schnitt mit dem Satz zur unlesbaren Zone ab (237),
+  statt den Schnitttag doppelt stehen zu lassen; die neue Serie wird
+  zurückgenommen.
+- **257 — die Rechnung im Kern.** `cal_core::last_day_through` bekommt die
+  Uhr als zwei Funktionen und nennt keinen Anbieter; Microsoft 365 nutzt sie
+  in seinem eigenen PR.
+- **258 — die vorhandene Markierung.** `truncate_tail_overrides` kennzeichnet
+  einen Schnitt. Alle sechs Wege setzen es schon: die Editoren, das
+  Übertragen und das Löschen ab einem Termin, je auf dem Desktop und auf dem
+  Handy.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -1070,7 +1116,8 @@ Handy im selben PR.
      `UNTIL` eine Sekunde vor dem Schnitt, das Enddatum ist dessen Datum, und
      Exchange zählt das Enddatum mit (235). Ein vor dem Schnitt gelöschtes
      Vorkommen bleibt gelöscht. Nach dem Schreibcode von main wäre es dort
-     genauso.
+     genauso. Behoben durch 254: Der Schnitt endet am Tag davor, auf der Uhr
+     der Serie (Live-Runde 10a).
    - Ein in Aperio angelegter Einzeltermin, Montag 00:30, in einem Speichern
      wöchentlich gemacht, steht danach sonntags um 23:30. Die Änderung schrieb
      die Regel (ab Sonntag, dem Tag der gespeicherten Zone UTC, 234) und danach
@@ -1204,10 +1251,14 @@ Handy im selben PR.
 - **Lücken werden abgelehnt.** Serien auf der Gerätezone, die eine
   Frühjahrs-Uhrzeit bisher still gerundet haben, lassen sich so nicht mehr
   speichern.
-- **Altes UNTIL im Osten.** Zonen-Serien östlich von UTC mit einem UNTIL als
-  `{Datum}T235959Z` zeigen ihr Ende einen Tag später. Roh bleibt es, solange es
-  unberührt ist; wer das angezeigte Datum neu tippt, verlängert die Serie um
-  einen Tag.
+- **Altes UNTIL nahe Mitternacht UTC.** Zonen-Serien östlich von UTC mit einem
+  UNTIL als `{Datum}T235959Z` zeigen ihr Ende einen Tag später. Roh bleibt es,
+  solange es unberührt ist; wer das angezeigte Datum neu tippt, verlängert die
+  Serie um einen Tag. Westlich von UTC fehlt dagegen der letzte Termin, für eine
+  Uhrzeit ab 24 Uhr weniger dem Abstand der Zone zu UTC (New York ab 19:00, im
+  Sommer ab 20:00; Los Angeles ab 16:00, im Sommer ab 17:00). Nach einem Schnitt
+  bei Exchange liest Aperio das Enddatum so zurück und irrt in zwei Fenstern um
+  einen Tag (255).
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
   Wischen verbergen; alle 313 Zeilen zu zeichnen kann auf alten Android-Geräten
   langsam sein.
@@ -1281,7 +1332,8 @@ Handy im selben PR.
   rundet, wenn Beginn und Ende verschiedene Zonen tragen (233, R3-2 legt es
   nahe); was Exchange an einem Tag speichert, dessen Mitternacht die
   gespeicherte Zone überspringt. Gemessen hat der Live-Test 8a, dass `EndDate`
-  inklusive ist (235) und dass eine neue Zone ohne Beginn und Ende die
+  inklusive ist (235), die Live-Runde 10a, dass es auf der Uhr der Serie
+  zählt (254), und der Live-Test 8a, dass eine neue Zone ohne Beginn und Ende die
   gespeicherte Uhrzeit behält (siehe Stufe 4, „Gemessen“). Ungeprüft ist auch, ob Exchanges eigene
   Zeitzonen-Regeln denen von Windows gleichen, an denen der Uhr-Wächter über die
   Standardzonen gemessen ist.

@@ -685,15 +685,19 @@ Siehe DESIGN §4.2.
       .thisEvent` (`IosDeviceEventStore.swift`), trifft bei einer Serie also nur
       das erste Vorkommen. Ungemessen.
     - Exchange: `EndDate` ist inklusive (Live-Test 8a, 2026-10-10). Ein
-      Kürzen mit Uhrzeit lässt den Schnitttag deshalb doppelt stehen; die
-      Korrektur ist ein eigener PR (235). Graph: ungemessen.
+      Kürzen mit Uhrzeit ließ den Schnitttag deshalb doppelt stehen; die
+      Korrektur ist gebaut (254, unten „Schnitttag doppelt“). Graph:
+      ungemessen.
     - Mitziehen „nur dieses Vorkommen“ an Kopien: erst der Platz in der
       Serie, dann die Kopie (dieselbe Reihenfolge, die #92 in den Editoren
       umgedreht hat).
     - Das Handy überspringt beim Mitziehen keine Kopie einer fremden
       Einladung (`invitationLocked`, am Desktop schon).
     - Die Ansichten sagen Fehler roh an (`code: message`), der Editor in
-      Worten.
+      Worten. Beim Löschen von Terminen sagen Tag, Woche, Monat und Agenda
+      sie seit #125 in Worten; offen sind Aufgaben (MonthView beim Ziehen
+      auf einen Tag, BacklogRail beim Ziehen in den Rückstand, TaskView) und
+      Kontakte (ContactsView).
     - Das Löschen im Desktop-Editor fragt `event.recurrence` ab, das eine
       Einzeländerung des Anbieters nicht hat.
   - 🚩 **Exchange-Ids ohne Änderungsmarke?** (119: als Recherche
@@ -947,19 +951,29 @@ Siehe DESIGN §4.2.
   Ungemessen bleiben ein Termin mit eigener Zone vom iPhone oder aus einer
   Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
   DESIGN, Stufe 4, „Gemessen“).
-  🚩 **Schnitttag doppelt** (235, gemessen im Live-Test 8a): Ein Schnitt „dieser
-  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigt den Schnitttag
-  in beiden Serien. Die alte Serie endet mit `UNTIL` eine Sekunde vor dem
-  Schnitt, das Enddatum ist dessen Datum, und Exchange zählt es mit. Das
-  Enddatum muss der Tag des letzten Vorkommens vor dem Schnitt sein. Eigener
-  PR, nach der Zonen-Reihenfolge und vor 8b. Ein vor dem Schnitt gelöschtes
-  Vorkommen bleibt gelöscht.
+  ↻ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
+  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte meist den
+  Schnitttag in beiden Serien, und das Löschen ab einem Termin ließ ihn
+  stehen: Aperio schrieb das UTC-Datum des `UNTIL` als Enddatum, und Exchange
+  zählt es als ganzen Tag auf der Uhr der Serie (Live-Runde 10a). Richtig
+  war das nur östlich von UTC für eine Uhrzeit bis zum Abstand zu UTC (M1).
+  Jetzt endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
+  selbst gewähltes Ende bleibt, wie es ist. Aperios eigene Anzeige liest das
+  zurückgelesene Enddatum weiter als Zeitpunkt und irrt in zwei Fenstern um
+  einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also für Desktop und
+  Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn Schritte, auch
+  ein Schnitt am Tag der Umstellung auf Sommerzeit). Ungemessen: ein Schnitt
+  am Tag der Umstellung auf Winterzeit.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
-  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR.
+  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR. Dazu gehört
+  das Enddatum eines Schnitts: Graph schreibt die Ziffern des `UNTIL` und
+  liest `…T235959Z` zurück wie Exchange; `cal_core::last_day_through` (257)
+  ist dafür da. Ob Graph das Enddatum inklusive und auf welcher Uhr zählt,
+  ist ungemessen.
   ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
   neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
   Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
@@ -1446,6 +1460,31 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
+      in Aperio auf UTC.** Kennt die Windows-Zonentabelle die
+      StartTimeZone-Id nicht (eine tzdata-Id wie „Europe/Berlin“, 236, oder
+      „Customized Time Zone“ mit Definition, 232), liest Aperio die Serie ohne
+      Zone (`recurrence.tzid = None`, mapping.rs, `WindowsZoneRead::Unknown`)
+      und zeigt sie auf UTC, im Sommer also eine Stunde daneben. Exchange
+      wiederholt sie auf der gespeicherten Zone. Ein Schnitt dort (254) zählt
+      das Ende auf dieser Zone, den Schnitt aber aus Aperios UTC-Ansicht: Im
+      Sommer bleibt der Schnitttag dann doppelt, wie vor #125. Abhilfe: solche
+      Serien beim Lesen auf ihrer gespeicherten Uhr führen (eine tzdata-Id als
+      tzid, eine eigene Zone über ihre Definition), dazu ein Adaptertest
+      (tzid ohne Zone, gespeichert Berlin oder `w_europe()`, im Winter
+      angelegt, im Sommer geschnitten). Gefunden in der ersten Prüfrunde von
+      #125 (2026-10-17), älter als #125.
+- [ ] **Schnitt ab einem geänderten letzten Termin westlich von UTC schreibt
+      nichts.** Eine Serie täglich 20:00 New York mit Ende 5.11. liest Aperio
+      als `UNTIL=20261105T235959Z` zurück und zeigt den 5.11. nicht (255).
+      Wurde der 5.11. in Outlook geändert, steht er als eigene Zeile; ein
+      Schnitt oder Löschen ab dieser Zeile behält das frühere `UNTIL`
+      (`truncateRRuleBefore`), die Regel gilt als unverändert, und der Adapter
+      schickt nichts: Der 5.11. bleibt in der alten Serie, ein Teilen legt ihn
+      in der neuen ein zweites Mal an. Löst sich mit Stufe 8 (das
+      zurückgelesene Enddatum auf der Uhr der Serie lesen); sonst den Schnitt
+      sein Ende auch bei behaltener Regel schreiben lassen. Gefunden in der
+      ersten Prüfrunde von #125 (2026-10-17), älter als #125.
 - [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
       den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
       wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den
@@ -2197,6 +2236,10 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Domänen-Kiste — auf eins käme man nur, wenn auch der reine HTTP-Client das
   FFI-SDK einbindet.
 #### A11 · Kern und Oberflächen trennen `[~]` — erledigte Punkte
+
+- [x] **Nebenfunde aus dem Entwurf zu 118, erledigter Teil:** Tag, Woche,
+  Monat und Agenda sagen eine abgelehnte Termin-Löschung in Worten an, wie die
+  Editoren, nicht als `code: message` (#125, zweite Prüfrunde).
 
 - [x] **Schritt 1: die Domänentypen werden erzeugt, nicht abgeschrieben.**
   ↳ `shared/types.ts` war 285 Zeilen Handschrift mit dem Satz „die Kiste
