@@ -17,7 +17,7 @@ import type { Calendar } from '../api/types';
  * pulled into it.
  */
 
-const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile, otherCopy } = vi.hoisted(() => {
+const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, createFails, readGate, announced, rowsOnFile, otherCopy } = vi.hoisted(() => {
   /** The copy's own provider-kept rows, as `get_series_rows` answers. */
   const rowsOnFile: { current: unknown[] } = { current: [] };
   /** What the dialog announced, in order. */
@@ -34,6 +34,10 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
   const lossUnlessConsent: { current: string | null } = { current: null };
   /** What deleting a copy's new part fails with, when a test says so. */
   const deleteFails: { current: unknown } = { current: null };
+  /** What creating a copy's new part fails with, when a test says so. */
+  const createFails: { current: unknown } = { current: null };
+  /** Holds the next copy's read until it opens, when a test says so. */
+  const readGate: { current: Promise<void> | null } = { current: null };
   /** A third copy, in its own calendar, and what writing it fails with. */
   const otherCopy: {
     current: { event: Record<string, unknown> & { calendar_id: string }; fails: unknown } | null;
@@ -43,6 +47,11 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'delete_event' && deleteFails.current != null) {
       return Promise.reject(deleteFails.current);
+    }
+    if (command === 'get_event_by_id' && readGate.current) {
+      const gate = readGate.current;
+      readGate.current = null;
+      return gate.then(() => copyOnFile.current ?? COPY);
     }
     if (command === 'get_event_by_id') {
       const { calendarId } = payload as { calendarId: string | null };
@@ -55,6 +64,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
       return Promise.resolve({ rows: rowsOnFile.current, reach: { kind: 'complete' } });
     }
     if (command === 'create_event') {
+      if (createFails.current != null) return Promise.reject(createFails.current);
       const request = (payload as { request: Record<string, unknown> }).request;
       return Promise.resolve({ ...request, id: 'ev-b-tail' });
     }
@@ -82,7 +92,7 @@ const { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, loss
     }
     return Promise.resolve(null);
   });
-  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, announced, rowsOnFile, otherCopy };
+  return { invokeMock, groupOfAnchor, copyOnFile, truncateFails, truncateBack, lossUnlessConsent, deleteFails, createFails, readGate, announced, rowsOnFile, otherCopy };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -171,6 +181,8 @@ afterEach(() => {
   truncateBack.current = null;
   lossUnlessConsent.current = null;
   deleteFails.current = null;
+  createFails.current = null;
+  readGate.current = null;
   announced.length = 0;
   rowsOnFile.current = [];
   otherCopy.current = null;
@@ -373,6 +385,19 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     expect(calls('delete_event')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
   });
+
+  it('does not offer a copy again whose new part may stand, and cuts nothing (203, 210)', async () => {
+    // Created in steps, its deletions failed, and it could not be deleted
+    // again: the copy's old series runs on uncut.
+    createFails.current = { code: 'network', message: 'created-may-stand: no-occurrence' };
+    await carryWhileTheCutFailsWith(null);
+    const said = await screen.findByText(/neuer Teil ließ sich weder|new part could neither/);
+
+    expect(said.textContent).toMatch(/Privat/);
+    expect(calls('update_event')).toHaveLength(0);
+    expect(calls('delete_event')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
+  });
 });
 
 describe('EventGroupCarryDialog → where a copy with rows of its own is cut (141)', () => {
@@ -547,6 +572,47 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
     fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
     return screen.findByRole('dialog', { name: /vorkommen gehen verloren/i });
   }
+
+  it('stops writing copies once the dialog is gone, and closes nothing opened after it', async () => {
+    let release = () => {};
+    readGate.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    copyOnFile.current = { ...COPY, recurrence: weekly };
+    otherCopy.current = {
+      event: { ...COPY, id: 'ev-c', calendar_id: 'family', recurrence: weekly },
+      fails: new Error('not reached'),
+    };
+    const onClose = vi.fn();
+    const onChanged = vi.fn();
+    const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
+    const view = render(
+      <EventGroupCarryDialog
+        isOpen
+        onClose={onClose}
+        onChanged={onChanged}
+        group={withThird('family')}
+        anchor={ANCHOR}
+        before={STOOD}
+        after={nextDay}
+        scope="series"
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mitziehen|carry over/i }));
+    await waitFor(() => expect(calls('get_event_by_id')).toHaveLength(1));
+    // The dialog host takes it away, as Escape does, while the first copy is
+    // read.
+    view.unmount();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The copy read before is written; the one after it is not read at all.
+    expect(calls('get_event_by_id')).toHaveLength(1);
+    expect(calls('update_event')).toHaveLength(1);
+    expect(onClose).not.toHaveBeenCalled();
+    // The views read again once that copy is written: the close made them
+    // read before.
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
 
   it('asks once after the loop, by calendar, and on yes writes that copy again with the consent', async () => {
     const onClose = vi.fn();

@@ -1,4 +1,9 @@
-import { eventWriteErrorMessage, eventWriteRefusal, exceptionsLossOf } from './eventWriteError';
+import {
+  eventWriteErrorMessage,
+  eventWriteLeftover,
+  eventWriteRefusal,
+  exceptionsLossOf,
+} from './eventWriteError';
 
 /**
  * The message to put in front of a person when something failed.
@@ -18,19 +23,25 @@ export function errorMessage(err: unknown): string {
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
 /**
- * {@link errorMessage} for a failed write: a refusal reads as its sentence.
+ * {@link errorMessage} for a failed write: a refusal reads as its sentence, and
+ * so does a leftover (`cal_core::WriteLeftover`: a new series that may stand,
+ * decisions 203, 210).
  *
  * A refusal crosses the native module as a token at the start of the message
  * (`cal_core::WriteRefusal`), and only the event editor and deletes looked it
  * up; every other write said it raw, in English, with Expo's wrapper in
  * front — "Calling the 'updateTaskJson' function has failed → Caused by:
- * access-not-granted: reminders: Denied". Anything that is not a refusal
- * comes out exactly as before.
+ * access-not-granted: reminders: Denied". Anything that is neither a refusal
+ * nor a leftover comes out exactly as before.
  */
 export function writeErrorMessage(err: unknown, t: Translate): string {
   // A save that would drop occurrences of a series says what and how many, as
   // the event editors do (decisions 243-253).
   if (exceptionsLossOf(err)) return eventWriteErrorMessage(err, t);
+  // A new series that could be neither completed nor removed again, and one
+  // that was removed again, say so as the editors do (decisions 203, 210).
+  if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
   const refusal = eventWriteRefusal(err);
+  if (refusal?.refusal === 'deletions-not-kept') return eventWriteErrorMessage(err, t);
   return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
 }

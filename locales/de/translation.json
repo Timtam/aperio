@@ -205,6 +205,8 @@
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert.",
     "duplicatedSeries": "Die ganze Serie „{{title}}“ wurde dupliziert.",
+    "copyMayStand": "„{{title}}“ steht möglicherweise doppelt im Kalender: Die neue Kopie ließ sich weder fertigstellen noch wieder entfernen. Bitte prüfe den Kalender und wiederhole es nicht.",
+    "moveMayStand": "„{{title}}“ steht möglicherweise im Zielkalender und noch in seinem eigenen: Die verschobene Serie ließ sich dort weder fertigstellen noch wieder entfernen. Bitte prüfe beide Kalender und wiederhole es nicht.",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."
   },
   "toast": {
@@ -453,6 +455,11 @@
     "clientSecretHint": "Derselbe Wert wie beim ersten Verbinden des Kontos — aus der Konsole deines Anbieters, z. B. in der Google Cloud Console direkt unter der Client-ID."
   },
   "dialogs": {
+    "stepWrite": {
+      "failedTitle": "Nicht abgeschlossen",
+      "title": "Vorgang läuft, bitte warten …",
+      "body": "Aperio legt die Serie an und entfernt dort ihre gelöschten Termine einzeln. Das kann bis zu einer halben Minute dauern."
+    },
     "firstLaunchWizard": {
       "title": "Willkommen bei Aperio",
       "stepIndicator": "Schritt {{current}} von {{total}}",
@@ -1383,6 +1390,7 @@
       "scopeFuture": "Betrifft dieses und alle folgenden Vorkommen. Jede Kopie ändert sich ab derselben Stelle; ihre früheren Vorkommen bleiben, wie sie sind.",
       "regroupFailed_one": "Die Kopie wurde geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
+      "newPartMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ließ sich weder fertigstellen noch wieder löschen, und der alte läuft weiter. Bitte dort prüfen.",
       "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
@@ -1543,7 +1551,8 @@
       "thisAndFutureNotRepeating": "„{{title}}\" wiederholt sich nicht mehr; es wurde anderswo geändert. Hier wurde nichts geändert. Öffne den Termin neu, um ihn zu bearbeiten.",
       "thisAndFutureShiftRefused": "„{{title}}\" lässt sich ab hier nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu, oder bearbeite nur diesen Termin.",
       "seriesShiftRefused": "„{{title}}\" lässt sich als ganze Serie nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu.",
-      "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender, bevor du erneut speicherst.",
+      "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender.",
+      "thisAndFutureNewMayStand": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die neue Serie ließ sich weder fertigstellen noch wieder löschen, und die alte läuft weiter. Bitte prüfe den Kalender.",
       "thisAndFutureUpdatedMaybeTwice": "„{{title}}\" wurde ab diesem Termin geändert. Ob die alte Serie jetzt davor endet, ist aber unklar ({{detail}}): Ab {{date}} steht sie möglicherweise doppelt. Bitte prüfen.",
       "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {
@@ -1733,6 +1742,11 @@
         "exceptionsWouldBeLostDetail": "{{what}} {{lost}} Es wurde nichts geändert.",
         "forbidden": "Der Anbieter erlaubt diese Änderung nicht ({{detail}}). Es wurde nichts geändert.",
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
+        "deletionsNotKept": "Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat Aperio sie wieder entfernt. Es wurde nichts geändert.",
+        "deletionsNotKeptTime": "Die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert, deshalb hat Aperio die Serie wieder entfernt. Es wurde nichts geändert.",
+        "invitationsCancelledToo": "Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.",
+        "createdMayStand": "Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den Kalender.",
+        "invitationsMayHaveGone": "Möglicherweise haben die Eingeladenen eine Einladung bekommen.",
         "reason": {
           "replyOnly": "nur der Organisator kann diese Besprechung ändern",
           "serverRefused": "der Kalenderserver hat es abgelehnt ({{detail}})",
@@ -1744,7 +1758,10 @@
           "copyUnreadable": "Aperio konnte ihren aktuellen Stand nicht vom Server lesen",
           "exceptionsWouldBeLost": "Exchange würde dabei ihre geänderten und gelöschten Vorkommen verwerfen",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
-          "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast"
+          "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
+          "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
+          "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
+          "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
         }
       },
       "deleteAndDecline": "Löschen und absagen"

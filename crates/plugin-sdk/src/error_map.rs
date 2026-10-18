@@ -120,6 +120,34 @@ mod tests {
         unsafe { p.free_in_place() };
     }
 
+    /// A new series taken back is a refusal and one that may stand a network
+    /// error (decisions 203, 210): both cross the plugin boundary with their
+    /// status and their message byte for byte, token first, so the host reads
+    /// the same outcome the adapter wrote.
+    #[test]
+    fn a_series_taken_back_or_left_standing_keeps_its_status_and_token() {
+        use plugin_core::ffi::{PLUGIN_CALL_ERR_FORBIDDEN, PLUGIN_CALL_ERR_NETWORK};
+        for (err, status, message) in [
+            (
+                CalError::Forbidden("deletions-not-kept: invited after-control".into()),
+                PLUGIN_CALL_ERR_FORBIDDEN,
+                "deletions-not-kept: invited after-control",
+            ),
+            (
+                CalError::Network("created-may-stand: create-answer-lost".into()),
+                PLUGIN_CALL_ERR_NETWORK,
+                "created-may-stand: create-answer-lost",
+            ),
+        ] {
+            let r = cal_error_to_response(err);
+            assert_eq!(r.status, status);
+            let slice = unsafe { r.payload.as_slice() };
+            assert_eq!(slice, message.as_bytes());
+            let mut p = r.payload;
+            unsafe { p.free_in_place() };
+        }
+    }
+
     #[test]
     fn cal_not_found_maps_to_not_found_status() {
         let r = cal_error_to_response(CalError::NotFound("x".into()));

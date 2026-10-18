@@ -63,12 +63,14 @@ pub mod read_refusal;
 pub mod series_clock;
 pub mod series_end;
 pub mod series_shift;
+pub mod step_write;
 pub mod tail_exceptions;
 pub mod task_occurrences;
 pub mod task_priority;
 pub mod task_settings;
 pub mod task_status;
 pub mod types;
+pub mod write_leftover;
 pub mod write_refusal;
 // The names and the search are in every build; the offsets are behind the
 // `zones` feature, which pulls in chrono-tz.
@@ -102,7 +104,8 @@ pub use day_start::{
 };
 pub use error::{Error, Result};
 pub use event_anchor::{
-    plan_repairs, series_master_id, split_override_id, Anchored, Repair, OVERRIDE_ID_MARKER,
+    all_day_slot_day, plan_repairs, series_master_id, split_override_id, Anchored, Repair,
+    OVERRIDE_ID_MARKER,
 };
 pub use event_group::{normalized_title, EventGroup, EventGroupMember};
 pub use event_group_fold::{
@@ -151,6 +154,10 @@ pub use signatures::{
     strip_signature_json, ApplySignatureInput, SignatureTextInput, SIGNATURE_MARKER,
 };
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
+pub use step_write::{
+    all_day_deletion_day, deletions_from_today, may_send, step_detail, step_detail_invited,
+    step_detail_why, DeletionsFromToday, SettleBudget, INVITED, OUT_OF_TIME, SERIES_WITH_DELETIONS,
+};
 pub use suggestion_decline::SuggestionDecline;
 pub use tail_exceptions::{
     tail_exceptions, tail_exceptions_json, TailCarry, TailExceptions, TailExceptionsQuestion,
@@ -204,6 +211,7 @@ pub use types::{
     RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
     TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };
+pub use write_leftover::WriteLeftover;
 pub use write_refusal::{SeriesRewrite, WriteRefusal};
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,

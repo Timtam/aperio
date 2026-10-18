@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import Foundation
+import UIKit
 
 // Calls the Rust `cal_ffi::parse_attendee` through the UniFFI-generated Swift
 // bindings (cal_ffi.swift, compiled into this module) backed by
@@ -150,6 +151,31 @@ public class CalFfiModule: Module {
     } catch let StoreError.Network(detail) {
       throw EventCodedError(code: "network", detail: detail)
     }
+  }
+
+  /// Run an event write as an iOS background task (decision 229): a new
+  /// Exchange series deletes its deleted occurrences again one by one and can
+  /// take up to half a minute, and a write the system suspends halfway leaves
+  /// a series that may stand. iOS grants about half a minute after the app
+  /// leaves the foreground, and does not promise it; the task ends with the
+  /// write, or when the grant runs out. Both may come from different threads,
+  /// so the identifier is ended once, under a lock.
+  private func inBackgroundTask<T>(_ name: String, _ block: () throws -> T) throws -> T {
+    let lock = NSLock()
+    var task = UIBackgroundTaskIdentifier.invalid
+    let end = {
+      lock.lock()
+      defer { lock.unlock() }
+      if task != .invalid {
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
+      }
+    }
+    lock.lock()
+    task = UIApplication.shared.beginBackgroundTask(withName: name) { end() }
+    lock.unlock()
+    defer { end() }
+    return try block()
   }
 
   /// Re-throw a refused task write with its code — only a refusal: unlike an
@@ -607,12 +633,16 @@ public class CalFfiModule: Module {
     }.runOnQueue(slowQueue)
 
     AsyncFunction("createEventJson") { (requestJson: String) -> String in
-      try self.eventCoded { try self.host.createEventJson(requestJson: requestJson) }
+      try self.inBackgroundTask("createEventJson") {
+        try self.eventCoded { try self.host.createEventJson(requestJson: requestJson) }
+      }
     }
 
     AsyncFunction("updateEventJson") { (eventJson: String, previousCalendarId: String?) -> String in
-      try self.eventCoded {
-        try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
+      try self.inBackgroundTask("updateEventJson") {
+        try self.eventCoded {
+          try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
+        }
       }
     }
 

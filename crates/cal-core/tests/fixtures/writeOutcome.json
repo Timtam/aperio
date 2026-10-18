@@ -1,0 +1,68 @@
+{
+  "_doc": "How a failed write's message reads on both sides: the refusal or the leftover its token names, whether its detail says the invitees may have heard of it (cal_core::step_write::INVITED), and the reason it names without that word. Read by crates/cal-core/src/write_leftover.rs and src/state/eventWriteError.test.ts.",
+  "rows": [
+    {
+      "message": "deletions-not-kept: no-occurrence",
+      "refusal": "deletions-not-kept",
+      "leftover": null,
+      "invited": false,
+      "why": "no-occurrence"
+    },
+    {
+      "message": "deletions-not-kept: invited after-control",
+      "refusal": "deletions-not-kept",
+      "leftover": null,
+      "invited": true,
+      "why": "after-control"
+    },
+    {
+      "message": "deletions-not-kept: invitation",
+      "refusal": "deletions-not-kept",
+      "leftover": null,
+      "invited": false,
+      "why": "invitation"
+    },
+    {
+      "message": "created-may-stand: invited time",
+      "refusal": null,
+      "leftover": "created-may-stand",
+      "invited": true,
+      "why": "time"
+    },
+    {
+      "message": "created-may-stand: create-answer-lost",
+      "refusal": null,
+      "leftover": "created-may-stand",
+      "invited": false,
+      "why": "create-answer-lost"
+    },
+    {
+      "message": "created-may-stand",
+      "refusal": null,
+      "leftover": "created-may-stand",
+      "invited": false,
+      "why": ""
+    },
+    {
+      "message": "created-may-stand-elsewhere: invited x",
+      "refusal": null,
+      "leftover": null,
+      "invited": false,
+      "why": null
+    },
+    {
+      "message": "server-refused: ErrorServerBusy",
+      "refusal": "server-refused",
+      "leftover": null,
+      "invited": false,
+      "why": "ErrorServerBusy"
+    },
+    {
+      "message": "deletions-not-kept: invited time",
+      "refusal": "deletions-not-kept",
+      "leftover": null,
+      "invited": true,
+      "why": "time"
+    }
+  ]
+}

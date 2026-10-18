@@ -1280,6 +1280,7 @@ dependencies = [
  "adapter-device-calendar",
  "adapter-local",
  "aperio-db",
+ "async-trait",
  "base64 0.22.1",
  "cal-core",
  "chrono",

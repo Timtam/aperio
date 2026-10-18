@@ -34,6 +34,7 @@ pub mod autodiscover;
 pub mod contacts;
 pub mod error;
 pub mod mapping;
+mod series_create;
 pub mod soap;
 pub mod tasks;
 pub mod windows_tz;
@@ -1005,7 +1006,7 @@ impl CalendarFeature for EwsAdapter {
         };
         api::create_event(&self.client, calendar_id, event, zones.as_ref())
             .await
-            .map_err(to_core_error)
+            .map_err(to_create_error)
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
@@ -1464,9 +1465,53 @@ fn to_update_error(err: EwsError) -> CoreError {
     }
 }
 
+/// [`to_core_error`] for a create, and for a new series' deletions written
+/// in steps (decisions 202-213): the series taken back is a refusal — nothing
+/// stands —, one that may stand is a network error naming the leftover, so no
+/// caller undoes the rest of a write whose new part stands. A `CreateItem`
+/// Exchange turned down whole is a refusal as for an update
+/// ([`to_update_error`]): it saved nothing. This changes plain creates too —
+/// a create refused while Exchange throttles says the server refused it,
+/// where it said a protocol error.
+fn to_create_error(err: EwsError) -> CoreError {
+    match err {
+        EwsError::Protocol(message)
+            if matches!(
+                cal_core::WriteRefusal::parse(&message),
+                Some((cal_core::WriteRefusal::DayZoneUnreadable, _))
+            ) =>
+        {
+            CoreError::Forbidden(message)
+        }
+        err @ EwsError::NotKept { .. } => to_core_error(err),
+        err if turned_down_whole(&err) => to_update_error(err),
+        other => to_core_error(other),
+    }
+}
+
+/// Whether Exchange turned a write down whole, so nothing was saved or sent:
+/// a refused HTTP status ([`cal_core::WriteRefusal::refused_status`]) or a
+/// code of [`REFUSED_UPDATE_CODES`], in a SOAP answer or a fault sent with
+/// HTTP 500.
+pub(crate) fn turned_down_whole(err: &EwsError) -> bool {
+    match err {
+        EwsError::Http { status, .. } if cal_core::WriteRefusal::refused_status(*status) => true,
+        EwsError::Http {
+            status: 500,
+            message,
+        } => matches!(
+            soap::check_for_fault(message),
+            Err(EwsError::Soap { code, .. }) if refused_update_code(&code).is_some()
+        ),
+        EwsError::Soap { code, .. } => refused_update_code(code).is_some(),
+        _ => false,
+    }
+}
+
 /// The SOAP codes with which Exchange turns an `UpdateItem` down before it
 /// saves anything: the request does not validate, or the server throttles.
-/// See [`to_update_error`]. The update is sent with `AlwaysOverwrite`, so no
+/// A `CreateItem` too ([`to_create_error`]), where `ErrorInvalidChangeKey`
+/// names the folder's key. See [`to_update_error`]. The update is sent with `AlwaysOverwrite`, so no
 /// ChangeKey is checked before the save, and a conflict code
 /// (`ErrorIrresolvableConflict`, `ErrorStaleObject`) comes from somewhere
 /// else: it is not on this list and stays unsure.
@@ -1515,14 +1560,29 @@ pub(crate) fn names_sign_in_or_gone(err: &EwsError) -> bool {
             SIGN_IN_SOAP_CODES.contains(&code.as_str()) || GONE_SOAP_CODES.contains(&code.as_str())
         }
         EwsError::DiscoveryFailed(_) => true,
-        EwsError::Network(_) | EwsError::Protocol(_) | EwsError::Config(_) => false,
+        EwsError::Network(_)
+        | EwsError::Unreached(_)
+        | EwsError::Protocol(_)
+        | EwsError::Config(_)
+        | EwsError::NotKept { .. } => false,
     }
 }
 
 fn to_core_error(err: EwsError) -> CoreError {
     use EwsError::*;
     match err {
-        Network(m) => CoreError::Network(m),
+        Network(m) | Unreached(m) => CoreError::Network(m),
+        // Taken back, nothing stands: a refusal (203). Not taken back, the
+        // series may stand: a network error naming the leftover, which no
+        // surface reads as "never landed" (210).
+        NotKept {
+            undone: true,
+            detail,
+        } => CoreError::Forbidden(cal_core::WriteRefusal::DeletionsNotKept.message(&detail)),
+        NotKept {
+            undone: false,
+            detail,
+        } => CoreError::Network(cal_core::WriteLeftover::CreatedMayStand.message(&detail)),
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -1543,6 +1603,112 @@ fn to_core_error(err: EwsError) -> CoreError {
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
         DiscoveryFailed(m) => CoreError::NotFound(m),
+    }
+}
+
+#[cfg(test)]
+mod create_error_tests {
+    //! How a create reports what stands (decisions 202-213, critique 13).
+    use super::*;
+
+    fn soap(code: &str) -> EwsError {
+        EwsError::Soap {
+            code: code.into(),
+            message: "no".into(),
+        }
+    }
+
+    /// A new series deleted again after its deletions failed: nothing
+    /// stands, a refusal the surfaces read back (203).
+    #[test]
+    fn a_series_taken_back_is_a_refusal() {
+        match to_create_error(EwsError::NotKept {
+            undone: true,
+            detail: "invited after-control".into(),
+        }) {
+            CoreError::Forbidden(msg) => assert_eq!(
+                cal_core::WriteRefusal::parse(&msg),
+                Some((
+                    cal_core::WriteRefusal::DeletionsNotKept,
+                    "invited after-control"
+                ))
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// One that could not be deleted again may stand: never a refusing
+    /// error — the surfaces would read it as never landed and undo the rest
+    /// of the split — but a network error naming the leftover (210).
+    #[test]
+    fn a_series_that_may_stand_is_never_a_refusal() {
+        for err in [
+            EwsError::NotKept {
+                undone: false,
+                detail: "no-occurrence".into(),
+            },
+            EwsError::NotKept {
+                undone: false,
+                detail: "create-answer-lost".into(),
+            },
+        ] {
+            match to_create_error(err) {
+                CoreError::Network(msg) => {
+                    assert!(cal_core::WriteRefusal::parse(&msg).is_none(), "{msg}");
+                    assert_eq!(
+                        cal_core::WriteLeftover::parse(&msg).map(|(l, _)| l),
+                        Some(cal_core::WriteLeftover::CreatedMayStand),
+                        "{msg}"
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    /// A create Exchange turned down whole saved nothing: a refusal, as for
+    /// an update — plain creates too, which said a protocol error before.
+    #[test]
+    fn a_create_turned_down_whole_is_a_server_refusal() {
+        for err in [
+            soap("ErrorServerBusy"),
+            soap("ErrorCalendarInvalidRecurrence"),
+            EwsError::Http {
+                status: 429,
+                message: "slow down".into(),
+            },
+            EwsError::Http {
+                status: 500,
+                message: r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#.into(),
+            },
+        ] {
+            match to_create_error(err) {
+                CoreError::Forbidden(msg) => assert!(
+                    matches!(
+                        cal_core::WriteRefusal::parse(&msg),
+                        Some((cal_core::WriteRefusal::ServerRefused, _))
+                    ),
+                    "{msg}"
+                ),
+                other => panic!("{other:?}"),
+            }
+        }
+        // Never sent: a plain network error, nothing that may stand.
+        match to_create_error(EwsError::Unreached("refused".into())) {
+            CoreError::Network(msg) => {
+                assert!(cal_core::WriteLeftover::parse(&msg).is_none(), "{msg}")
+            }
+            other => panic!("{other:?}"),
+        }
+        // The sign-in and a gone folder keep their errors.
+        assert!(matches!(
+            to_create_error(soap("ErrorAccessDenied")),
+            CoreError::Authentication(_)
+        ));
+        assert!(matches!(
+            to_create_error(soap("ErrorFolderNotFound")),
+            CoreError::NotFound(_)
+        ));
     }
 }
 

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   StyleSheet,
   Text,
@@ -23,6 +24,7 @@ import {
 import { FormScrollView } from '../components/FormScrollView';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   moveOrCopyEvent,
@@ -36,6 +38,7 @@ import {
   useShowHiddenTaskListTargets,
 } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import { stepWriteWait } from '../state/stepWriteWait';
 import { canAssignSection } from '../state/taskBehaviour';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -50,7 +53,22 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // current container marked.
 
 
-export default function MoveCopyModal({
+/**
+ * Move/Copy, and beside it the wait of a write in steps (decisions 227, 265):
+ * on iOS a dialog presents from the screen it is rendered in, and one at the
+ * app root could not present over this sheet. Beside the screen's content, not
+ * in it, so it stays mounted whichever view the content shows.
+ */
+export default function MoveCopyModal(props: RootStackScreenProps<'MoveCopy'>) {
+  return (
+    <>
+      <MoveCopyScreen {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function MoveCopyScreen({
   route,
   navigation,
 }: RootStackScreenProps<'MoveCopy'>) {
@@ -61,13 +79,36 @@ export default function MoveCopyModal({
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
-  useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
   const [children, setChildren] = useState<Task[]>([]);
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [mode, setMode] = useState<MoveCopyMode>('move');
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
+  // A new series that may stand (decisions 203, 210): said in place of the
+  // form, focused, with only Close — doing it again would create another.
+  const [mayStand, setMayStand] = useState<string | null>(null);
+  // Whether the screen is still there: one left while its write runs gets no
+  // notice, so what may stand is said instead.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
+  const mayStandRef = useRef<Text | null>(null);
+  useEffect(() => {
+    if (mayStand == null) return;
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(mayStandRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, [mayStand]);
+  // Every way out of the notice is its Close, as in the editor's: the header
+  // button says Close, not Cancel — nothing is cancelled any more — and the
+  // swipe is off (set with the header, below).
+  const closeMayStand = useCallback(() => navigation.goBack(), [navigation]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -78,6 +119,14 @@ export default function MoveCopyModal({
   const [sectionDraft, setSectionDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The header: Cancel; Close while the notice is up; and while a move or
+  // copy runs the screen is not left (210), as the desktop's dialog is not
+  // closed: a write left behind would run unseen, and a series it left that
+  // may stand would never be said on screen.
+  useCancelHeader(navigation, 'mobile.cancel', {
+    writing: submitting,
+    close: mayStand != null ? closeMayStand : undefined,
+  });
 
   const initialContainerId =
     params.kind === 'task' ? params.listId : params.event.calendar_id;
@@ -244,6 +293,9 @@ export default function MoveCopyModal({
   );
 
   const submit = useCallback(async () => {
+    // One write at a time: a second press while a copy is on its way would
+    // write it twice.
+    if (submitting) return;
     setError(null);
     if (!targetContainerId) {
       setError(t('dialogs.moveCopy.targetRequired'));
@@ -257,7 +309,10 @@ export default function MoveCopyModal({
     setSubmitting(true);
     try {
       if (params.kind === 'event') {
-        await moveOrCopyEvent(params.event, targetContainerId, mode, scope);
+        await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
+          wait: stepWriteWait,
+          target: calendars.find((c) => c.id === targetContainerId),
+        });
       } else if (task != null) {
         await moveOrCopyTask(
           task,
@@ -275,10 +330,21 @@ export default function MoveCopyModal({
       );
       navigation.goBack();
     } catch (err) {
+      // A failed move or copy may still have written at the target: it shows
+      // on the next read.
+      if (params.kind === 'event') invalidateData();
       const message =
         err instanceof SeriesNotLoadedError
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
           : writeErrorMessage(err, t);
+      if (params.kind === 'event' && eventWriteLeftover(err)) {
+        if (!shown.current) {
+          AccessibilityInfo.announceForAccessibility(message);
+          return;
+        }
+        setMayStand(message);
+        return;
+      }
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {
@@ -298,10 +364,34 @@ export default function MoveCopyModal({
     t,
     sectionsEnabled,
     targetSectionId,
+    submitting,
+    calendars,
   ]);
 
   // A task move/copy isn't actionable until its row has loaded.
   const blocked = submitting || (params.kind === 'task' && task == null);
+
+  if (mayStand != null) {
+    return (
+      <FormScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        accessibilityViewIsModal
+      >
+        <Text ref={mayStandRef} style={styles.error} accessibilityRole="text">
+          {mayStand}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.close')}
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.buttonText}>{t('dialogs.close')}</Text>
+        </Pressable>
+      </FormScrollView>
+    );
+  }
 
   return (
     <FormScrollView
@@ -448,11 +538,18 @@ export default function MoveCopyModal({
               : t('dialogs.moveCopy.submitCopy')}
           </Text>
         </Pressable>
+        {/* Held while the write runs, as the header's (210). */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('dialogs.cancel')}
+          accessibilityState={{ disabled: submitting }}
+          disabled={submitting}
           onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+          style={({ pressed }) => [
+            styles.ghostButton,
+            pressed && styles.ghostPressed,
+            submitting && styles.buttonDisabled,
+          ]}
         >
           <Text style={styles.ghostButtonText}>{t('dialogs.cancel')}</Text>
         </Pressable>

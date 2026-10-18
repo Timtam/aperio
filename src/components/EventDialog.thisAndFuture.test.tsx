@@ -32,12 +32,16 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
     truncateFails: unknown;
     truncateBack: string[] | null;
     deleteFails: unknown;
+    createFails: unknown;
+    createGate: Promise<void> | null;
   } = {
     series: null,
     groups: [],
     truncateFails: null,
     truncateBack: null,
     deleteFails: null,
+    createFails: null,
+    createGate: null,
   };
   const openEventGroupCarry = vi.fn();
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
@@ -53,6 +57,8 @@ const { invokeMock, onFile, announced, announce, openEventGroupCarry } = vi.hois
     }
     if (command === 'create_event') {
       const request = (payload as { request: Record<string, unknown> }).request;
+      if (onFile.createFails != null) return Promise.reject(onFile.createFails);
+      if (onFile.createGate) return onFile.createGate.then(() => ({ ...request, id: 'tail-1' }));
       return Promise.resolve({ ...request, id: 'tail-1' });
     }
     if (command === 'get_event_by_id') {
@@ -178,6 +184,9 @@ afterEach(() => {
   onFile.truncateFails = null;
   onFile.truncateBack = null;
   onFile.deleteFails = null;
+  onFile.createFails = null;
+  onFile.createGate = null;
+  delete (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities;
   openEventGroupCarry.mockClear();
   announced.length = 0;
   vi.restoreAllMocks();
@@ -567,11 +576,100 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
 
     expect(calls('delete_event')).toHaveLength(1);
     expect(said.textContent).toMatch(/Teamrunde/);
-    expect(said.textContent).toMatch(/bevor du erneut speicherst|before saving again/);
     // The reason, and not the refusal's own "nothing was changed": something
     // was.
     expect(said.textContent).toMatch(/auf dem Server geändert|changed on the server/);
     expect(said.textContent).not.toMatch(/nichts geändert|Nothing was changed/);
+    // On screen, focused, and only closed: saving again would write the new
+    // series once more (210).
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    expect(screen.queryByRole('button', { name: /^speichern$|^save$/i })).toBeNull();
+    // The notice's own Close (the header's × is named in English).
+    expect(screen.getByRole('button', { name: /^schließen$/i })).toBeTruthy();
+  });
+
+  it('says a new series that may stand beside the old one, on screen and only closed (203, 210)', async () => {
+    // Created in steps, its deletions failed, and it could not be deleted
+    // again: the old series runs on uncut, nothing here touches either.
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.createFails = { code: 'network', message: 'created-may-stand: invited no-occurrence' };
+    await open(JULY);
+    save();
+    const said = await screen.findByText(/neue Serie ließ sich weder|new series could neither/);
+
+    expect(said.textContent).toMatch(/Teamrunde/);
+    // The invitees may have heard of it (228).
+    expect(said.textContent).toMatch(/Eingeladenen eine Einladung|invitees may have received/);
+    expect(calls('update_event')).toHaveLength(0);
+    expect(calls('delete_event')).toHaveLength(0);
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    expect(screen.queryByRole('button', { name: /^speichern$|^save$/i })).toBeNull();
+  });
+
+  it('says a new series taken back again as nothing changed, with Save live', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.createFails = { code: 'forbidden', message: 'deletions-not-kept: no-occurrence' };
+    await open(JULY);
+    save();
+    await screen.findByText(/nicht mit ihren gelöschten Terminen übernommen|together with its deleted occurrences/);
+    expect(calls('update_event')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^speichern$|^save$/i })).toBeTruthy();
+  });
+
+  it('does not close while it saves: Escape waits for the outcome', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.createGate = new Promise<void>(() => {});
+    const onClose = vi.fn();
+    await open(JULY, onClose);
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /kalender/i }), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('waits without a dialog where the calendar takes the deletions with the series (265)', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    let release = () => {};
+    onFile.createGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await open(JULY);
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    expect(screen.queryByRole('dialog', { name: /Vorgang läuft|please wait/i })).toBeNull();
+    release();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+  });
+
+  it('waits in a dialog while the new series is created in steps (227, 265)', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    // A calendar that deletes them in steps after creating it (Exchange).
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    let release = () => {};
+    onFile.createGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await open(JULY);
+    save();
+    const waiting = await screen.findByRole('dialog', { name: /Vorgang läuft|please wait/i });
+    // Its sentence is its one stop, focused; nothing closes it.
+    const note = await screen.findByText(/gelöschten Termine einzeln|deleted occurrences there one by one/);
+    await waitFor(() => expect(document.activeElement).toBe(note));
+    expect(waiting.querySelectorAll('button')).toHaveLength(0);
+    fireEvent.keyDown(note, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: /Vorgang läuft|please wait/i })).toBeTruthy();
+    release();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /Vorgang läuft|please wait/i })).toBeNull(),
+    );
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
   });
 
   it("moves the new series' exceptions to its new time", async () => {

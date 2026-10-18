@@ -458,6 +458,48 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
+      Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
+      ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
+      jede Löschung ab dem heutigen Tag des Geräts einzeln wieder (263),
+      gefunden über ihren Platz und nicht über die geschätzte Nummer; eine
+      Stelle, an der Exchanges Regel keinen Termin erzeugt (vor Beginn, nach
+      Ende, neben dem Muster), wird übersprungen (207, 266). Danach liest er
+      die Serie nach: Ihre Löschungen müssen genau die gemachten sein (208,
+      230). Mit Eingeladenen schickt er dann EINE Einladung (225; nur die
+      Teilnehmer neu gesetzt) und liest noch einmal nach. 15 s ab dem
+      bestätigten Anlegen, 15 s fürs Zurücknehmen (213, 226); „beschäftigt“
+      wird ausgewartet. Scheitert ein Schritt, löscht er die Serie wieder
+      (203), mit Absage, wo eine Einladung raus sein kann (212, 264):
+      `deletions-not-kept`, „nichts geändert“. Gelingt auch das nicht:
+      `created-may-stand`, ein Hinweis, der sich nur schließen lässt (210),
+      mit dem Satz zu den Eingeladenen (228). Alle Wege, die eine Serie mit
+      Löschungen anlegen (Teilen, Übertragen, Verschieben, Kopieren, Strg+D,
+      Seitenleiste, Kalenderwechsel im Editor), zeigen solange „Vorgang
+      läuft, bitte warten …“ (227, 265), gesteuert vom Manifest
+      (`deletions_in_steps`), Desktop und Handy. Auch der bestehende Fall
+      „weder gekürzt noch gelöscht“ lässt sich nur noch schließen (210). Ein
+      gescheitertes Anlegen liest neu ein (beide Hosts), iOS gibt dem
+      Schreiben Hintergrundzeit (229). Ein Anlegen, das Exchange ganz
+      ablehnt, heißt jetzt auch bei einfachen Terminen „Server lehnt ab“.
+      Live-Runde 11 bestanden (2026-10-18, zwei Läufe): T1 bis T6 wie
+      gemeint; die Einladung trägt beide Löschungen als EXDATE, und GMX
+      bekam genau eine Einladung und beim Aufräumen eine Absage (225 hält);
+      60 Löschungen in 10,7 s. Handy offen — ↻ im Test.
+    - [ ] **Warten auch beim Ändern an Ort und Stelle** (aus 265): Ändert ein
+      Speichern Beginn, Zone oder Muster einer ganzen Exchange-Serie, löscht
+      `restore_deletions` (253) danach jede Löschung einzeln, ohne Uhr und ohne
+      Warte-Dialog. Die Oberfläche weiß vorher nicht sicher, ob das passiert.
+      Zu entscheiden: Dialog bei jeder solchen Änderung, oder der Adapter
+      meldet die Schritte.
+    - [ ] **Geänderte Vorkommen in die neue Serie mitnehmen** (D8 der
+      PR-8-Planung, eigener PR): Ein einzeln geänderter Termin kommt in der
+      neuen Serie zu seiner üblichen Zeit zurück; seine Änderung bleibt in
+      der alten (oder geht mit ihr beim Verschieben).
+    - [ ] **Abgebrochene App mitten in den Löschungen**: Wird die App beendet
+      oder von iOS angehalten, bevor die Löschungen fertig sind, steht die
+      halb fertige neue Serie neben der ungekürzten alten, und keine
+      Oberfläche weiß davon. Braucht ein Schreib-Journal.
     - ↻ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
       weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
       anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
@@ -473,9 +515,10 @@ Siehe DESIGN §4.2.
       ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
       (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
       (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
-      Exchange und Microsoft 365 nehmen beim Anlegen noch keine Löschungen
-      (140): Dort erscheinen gelöschte Termine in der neuen Serie vorerst
-      wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine etwa
+      Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
+      erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
+      löscht sie seit PR 8 ab heute einzeln wieder. Aus einem Google-Kalender
+      kennt Aperio gelöschte Termine etwa
       drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
       Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
       Test.
@@ -492,8 +535,8 @@ Siehe DESIGN §4.2.
       ganztägig). Offen: Google kennt die Zeilen nur so weit, wie der
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
-      nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
-      nicht (140). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
+      nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
+      wieder, ab heute (202, 263). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
       (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
       Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
       legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
@@ -1481,6 +1524,47 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **iPhone: Dialoge an der App-Wurzel über einem Blatt.** Ein RN-Modal
+      erscheint auf iOS über dem Bildschirm, in dem es steht
+      (`reactViewController`). Die Editoren, Verschieben/Kopieren und das
+      Mitziehen sind Blätter (`presentation: 'modal'`), die die Wurzel
+      bereits zeigt. Ein Modal an der Wurzel erscheint darüber vermutlich
+      gar nicht: UIKit lehnt ein zweites Zeigen ab. Betroffen sind zwei
+      Stellen. `EventScopeDialogHost` (mobile/src/App.tsx) stellt die
+      Bereichsfrage beim Löschen im Termin-Editor (seit 16928a03) und die
+      Verlust-Frage beim Teilen und Mitziehen (251, #123, #124). Und das
+      Deckblatt der App-Sperre (`AppLockGate`) erscheint dann nicht über
+      einem offenen Editor, sodass dessen Inhalt sichtbar bliebe. Zuerst am
+      Gerät prüfen: Erscheint im Editor eines Serientermins beim Löschen die
+      Frage „Nur dieses / dieses und alle folgenden / alle“? Wenn nicht, wie
+      den Wartedialog in #127 im Bildschirm selbst zeigen (ein Host je
+      Bildschirm, der oberste gewinnt); für das Deckblatt vom obersten
+      gezeigten Controller aus. Gefunden in der sechsten Prüfrunde von #127
+      (2026-10-18), älter als #127.
+- [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
+      `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
+      vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die
+      Ansicht des ersten blieb stehen); allein und beim nächsten vollen Lauf
+      grün. Gesehen in der ersten Prüfrunde von #127 (2026-10-18), älter.
+- [ ] **Anlegen und Ändern halten die Handy-Warteschlange.** `createEventJson`
+      und `updateEventJson` laufen auf beiden Plattformen auf Expos einer
+      Standard-Warteschlange (`CalFfiModule.swift`, `CalFfiModule.kt`, kein
+      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange sie bis zu etwa
+      einer halben Minute belegen; jedes Lesen dahinter wartet. Eigene
+      Warteschlange (nicht `slowQueue`, die die Abgleich-Runden teilen), wie
+      218 für die Erinnerungen fordert. Aus der Planung von PR 8 (2026-10-18).
+- [ ] **Veraltete Kopien der erzeugten Typen.** `crates/cal-core/bindings`,
+      `crates/host-core/bindings` und `crates/plugin-core/bindings` liegen im
+      Repo, werden von `cargo xtask ts-types` nicht geschrieben und von der CI
+      nicht geprüft; 14 Typen fehlen dort schon. Entfernen oder in die Prüfung
+      nehmen. Gefunden bei der Planung von PR 8 (2026-10-18).
+- [ ] **Das Ablegen in der Seitenleiste hat keinen eigenen Test.** Es teilt
+      den Warte-Dialog des Dialog-Stapels mit Strg+D und den Weg des
+      Verschiebens einer ganzen Serie mit dem Verschieben-Dialog (beides
+      getestet), aber das Ablegen selbst, seine Sperre gegen ein zweites
+      Ablegen und sein Satz `moveMayStand` sind ungetestet. Aus PR 8
+      (2026-10-18).
+
 - [ ] **Neuer Beginn verliert die Löschung eines ersten Termins neben der
       Regel.** Eine Serie, deren Beginn nicht auf ihrer eigenen Regel liegt
       (an einem Montag angelegt, wiederholt mittwochs; Anbieter zeigen den
@@ -1522,20 +1606,6 @@ Vorschläge sind nicht aufgenommen.
       zurückgelesene Enddatum auf der Uhr der Serie lesen); sonst den Schnitt
       sein Ende auch bei behaltener Regel schreiben lassen. Gefunden in der
       ersten Prüfrunde von #125 (2026-10-17), älter als #125.
-- [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
-      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
-      wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den
-      Dialog aber immer mit `isOpen` an und entfernt ihn beim Schließen. Die
-      Prüfungen `if (!open.current) return;` greifen deshalb nie. Ein
-      Durchlauf, der nach dem Schließen weiterläuft, schreibt weiter Kopien.
-      Gelingt alles, ruft er `onClose()` auf. Das nimmt den obersten Dialog
-      vom Stapel, etwa einen inzwischen geöffneten neuen Termin mit schon
-      getipptem Titel. Das gilt für jeden Durchlauf: den ersten, „Rest erneut
-      versuchen“ und das Ja auf die Frage (251). Abhilfe wie auf dem Handy
-      (`alive`): `open.current` beim Aushängen auf false setzen. Dazu ein
-      Test, der den Dialog mitten im Durchlauf schließt und erwartet, dass
-      `onClose` nicht gerufen wird. Älter als #124 (705e154a, 72fac533),
-      gefunden in dessen fünfter Prüfrunde (2026-10-17).
 
 - [ ] **Kopierknopf im Konflikt-Bildschirm des Handys.** Der
       Konflikt-Bildschirm auf dem Handy
@@ -3956,6 +4026,17 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Benutzung; nach 218 halten sie nichts mehr auf.
 
 #### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
+
+- [x] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
+      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
+      wurde `open.current` nur aus `isOpen` gesetzt, DialogHost entfernt den
+      Dialog aber beim Schließen, ohne `isOpen` auf false zu setzen. Ein
+      weiterlaufender Durchlauf schrieb weiter Kopien und rief am Ende
+      `onClose()` auf, das den inzwischen obersten Dialog schloss. Behoben in
+      #127 (dritte Prüfrunde, 34edc8fb): `open.current` wird beim Aushängen
+      false, der Durchlauf hört nach der laufenden Kopie auf, sagt eine
+      womöglich doppelte Kopie noch an und ruft `onClose` nicht. Ein Test
+      schließt den Dialog mitten im Durchlauf.
 
 - [x] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Mit #123
       sagt der Desktop-Mitzieh-Dialog eine Schreib-Ablehnung über

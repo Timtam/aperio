@@ -25,6 +25,7 @@ export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
   monthly_day_of_month: true,
   count: true,
   until: true,
+  deletions_in_steps: false,
 };
 
 /** Mirrors `plugin_core::TaskCapabilities::default()` — flat lists,

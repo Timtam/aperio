@@ -1,4 +1,11 @@
-import { eventWriteFailureReason, organizerOf } from '@aperio/shared';
+import {
+  createsInSteps,
+  eventWriteFailureReason,
+  eventWriteLeftover,
+  organizerOf,
+  writeWithoutWaiting,
+  type StepWriteOptions,
+} from '@aperio/shared';
 
 import {
   createEvent as apiCreateEvent,
@@ -20,25 +27,34 @@ import { newSeriesRowOf, SeriesNotLoadedError } from '../state/moveActions';
  * occurrence, it started there and its COUNT ran on past the series' end.
  * Answers with what it wrote from, so the sentence names that.
  */
-export async function duplicateEvent(event: CalendarEvent): Promise<CalendarEvent> {
+export async function duplicateEvent(
+  event: CalendarEvent,
+  steps: StepWriteOptions = {},
+): Promise<CalendarEvent> {
   const source = await newSeriesRowOf(event);
-  await apiCreateEvent(
-    {
-      calendar_id: source.calendar_id,
-      title: source.title,
-      description: source.description,
-      location: source.location,
-      start: source.start,
-      end: source.end,
-      all_day: source.all_day,
-      recurrence: source.recurrence,
-      color_label: source.color_label,
-      reminders: source.reminders,
-      sound: source.sound,
-      attendees: source.attendees,
-      ...organizerOf(source),
-    },
-    { preserveRecurrenceZone: true },
+  // A series whose calendar writes a new series' deletions in steps is
+  // waited for (decisions 227, 265).
+  await (steps.wait ?? writeWithoutWaiting)(
+    createsInSteps(steps.target, source.recurrence),
+    () =>
+      apiCreateEvent(
+        {
+          calendar_id: source.calendar_id,
+          title: source.title,
+          description: source.description,
+          location: source.location,
+          start: source.start,
+          end: source.end,
+          all_day: source.all_day,
+          recurrence: source.recurrence,
+          color_label: source.color_label,
+          reminders: source.reminders,
+          sound: source.sound,
+          attendees: source.attendees,
+          ...organizerOf(source),
+        },
+        { preserveRecurrenceZone: true },
+      ),
   );
   return source;
 }
@@ -69,6 +85,8 @@ export function duplicateFailedSentence(
   if (err instanceof SeriesNotLoadedError) {
     return t('dialogs.event.seriesLoadFailed', { title });
   }
+  // A new series that may stand: said so, and not to be done again (210).
+  if (eventWriteLeftover(err)) return t('actions.copyMayStand', { title });
   return t('actions.duplicateFailed', { title, reason: eventWriteFailureReason(err, t) });
 }
 

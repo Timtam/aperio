@@ -20,6 +20,7 @@ import {
   eventInstanceKey,
   type CollapsedRow,
   eventWriteErrorMessage,
+  shownInNotice,
   withDeletionsNotRestored,
 } from '@aperio/shared';
 import {
@@ -68,7 +69,9 @@ export function AgendaView() {
   const announce = useAnnouncer();
   const { anchor } = useViewState();
   const fmt = useDateFormat();
-  const { openEventDialog, openMoveCopy, invalidateData } = useDialogState();
+  const { openEventDialog, openMoveCopy, invalidateData, stepWriteWait } = useDialogState();
+  // A Ctrl+D on its way (see the handler).
+  const duplicating = useRef(false);
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events: allEvents, calendarById, loading } = useEvents(range);
@@ -83,7 +86,7 @@ export function AgendaView() {
   const { openForEvent: openEventMenu } = useChipContextMenu({
     requestDelete: requestDeleteFromMenu,
   });
-  const { colorLabels } = useCalendarStore();
+  const { colorLabels, calendars } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   // The range as well as the events: with both in hand the hook can also
@@ -241,14 +244,30 @@ export function AgendaView() {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
           if (ev) {
-            void duplicateEvent(ev).then(
-              (source) => {
-                // Written outside the view's own dialogs: re-read explicitly.
-                invalidateData();
-                announce(duplicatedSentence(source, t));
-              },
-              (err: unknown) => announce(duplicateFailedSentence(err, ev.title, t)),
-            );
+            // One at a time: a second Ctrl+D while the first still reads or
+            // writes would write the series twice.
+            if (duplicating.current) return;
+            duplicating.current = true;
+            void duplicateEvent(ev, {
+              wait: stepWriteWait((err) => duplicateFailedSentence(err, ev.title, t)),
+              target: calendars.find((c) => c.id === ev.calendar_id),
+            })
+              .then(
+                (source) => {
+                  // Written outside the view's own dialogs: re-read explicitly.
+                  invalidateData();
+                  announce(duplicatedSentence(source, t));
+                },
+                (err: unknown) => {
+                  // A failure may have written: what may stand shows on the next read.
+                  invalidateData();
+                  // Said in the dialog already where it waited (210).
+                  if (!shownInNotice(err)) announce(duplicateFailedSentence(err, ev.title, t));
+                },
+              )
+              .finally(() => {
+                duplicating.current = false;
+              });
           }
         }
         return;
@@ -321,6 +340,8 @@ export function AgendaView() {
       requestDelete,
       openEventMenu,
       itemId,
+      stepWriteWait,
+      calendars,
     ],
   );
 

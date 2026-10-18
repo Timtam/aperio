@@ -120,6 +120,16 @@ pub struct RecurrenceCapabilities {
     /// UNTIL end mode ("until a date").
     #[serde(default = "yes")]
     pub until: bool,
+    /// The provider creates a series without its deleted occurrences, and the
+    /// adapter deletes them again one by one after it, in steps that can take
+    /// up to half a minute (decisions 202, 227): Exchange. The surfaces show a
+    /// "please wait" dialog while such a series is created (265).
+    ///
+    /// The one axis that defaults to `false`: it says how a write behaves, not
+    /// a shape the source restricts, and a provider that takes every deletion
+    /// with the series itself — RFC 5545 — writes it in one request.
+    #[serde(default)]
+    pub deletions_in_steps: bool,
 }
 
 impl Default for RecurrenceCapabilities {
@@ -133,6 +143,7 @@ impl Default for RecurrenceCapabilities {
             monthly_day_of_month: true,
             count: true,
             until: true,
+            deletions_in_steps: false,
         }
     }
 }
@@ -1180,6 +1191,28 @@ mod tests {
         assert!(r.weekly_byday);
         assert!(r.count);
         assert!(r.until);
+        // A series' deletions go with it, in one request.
+        assert!(!r.deletions_in_steps);
+    }
+
+    #[test]
+    fn deletions_in_steps_is_read_when_declared() {
+        let json = format!(
+            r#"{{
+                "id": "x.y",
+                "name": "X",
+                "version": "1.0.0",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar"],
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "1.0.0",
+                "recurrence": {{ "deletions_in_steps": true }}
+            }}"#
+        );
+        let m = PluginManifest::from_bytes(json.as_bytes()).expect("parses");
+        assert!(m.recurrence.deletions_in_steps);
+        // The task block's recurrence is its own and says nothing of it.
+        assert!(!m.tasks.recurrence.deletions_in_steps);
     }
 
     #[test]

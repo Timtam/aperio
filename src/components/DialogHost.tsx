@@ -15,6 +15,7 @@ import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { SectionDialog } from './SectionDialog';
 import { SettingsDialog } from './SettingsDialog';
+import { StepWriteDialog } from './StepWriteWait';
 import { SyncAccountsConnectDialog } from './SyncAccountsConnectDialog';
 import { SyncConflictsDialog } from './SyncConflictsDialog';
 import { SyncSchemaTooOldDialog } from './SyncSchemaTooOldDialog';
@@ -109,6 +110,8 @@ export function DialogHost() {
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />
       );
+    case 'stepWrite':
+      return <StepWriteDialog notice={mode.notice} onClose={close} />;
     case 'eventGroup':
       return (
         <EventGroupDialog

@@ -69,7 +69,7 @@
 // Google only a window around today.
 
 import { localDateKey } from './dateKey';
-import { writeNeverLanded } from './eventWriteError';
+import { eventWriteLeftover, writeNeverLanded } from './eventWriteError';
 import { formatLongDay } from './intlNames';
 import type { SeriesReach } from './generated/SeriesReach';
 import type { RecurringEventLike } from './recurrence';
@@ -785,8 +785,11 @@ export function asNewSeries<P extends SeriesSplitPlan>(plan: P): P {
  * are (decisions 224, 259). Its rule and its zone stay as they are stored. Its
  * exceptions are exactly its real deletions (`deletedSlots`): an exception no
  * row of it stands in for, every cancelled row's slot. An occurrence changed
- * elsewhere is no deletion and comes back at its usual time. Past ones too: a
- * provider that writes deletions one by one limits them itself (259).
+ * elsewhere is no deletion and comes back at its usual time. Past ones too
+ * (259): a provider that takes them with the series — CalDAV, the local store —
+ * keeps every one, and one that deletes them one by one after creating it
+ * (Exchange) writes those from today on (`cal_core::deletions_from_today`,
+ * 263). Google (until PR 7) and Microsoft 365 still show them again.
  *
  * Nothing moves, so each deletion stays where it is, as spelled: placed anew
  * through the split's expansion, a deletion of a first occurrence off the rule,
@@ -998,6 +1001,9 @@ export type SeriesSplitWritten<Created> =
 /** Marks a thrown error after which the series may show twice. */
 const MAYBE_SHOWN_TWICE = Symbol.for('aperio.seriesSplit.maybeShownTwice');
 
+/** Marks a refused cut after which the new series was deleted again. */
+const TAIL_REMOVED = Symbol.for('aperio.seriesSplit.tailRemoved');
+
 /**
  * Whether this failure may have left the series showing TWICE from the cutoff.
  *
@@ -1016,11 +1022,39 @@ export function seriesMaybeShownTwice(err: unknown): boolean {
   );
 }
 
+/**
+ * Whether this failure left the new series standing beside the old one because
+ * the provider created it and could neither complete it nor delete it again
+ * (decisions 203, 210): a series created in steps whose deletions failed. A
+ * case of {@link seriesMaybeShownTwice}, with its own sentence: it is the new
+ * part that may stand, not a cut that may not have landed.
+ */
+export function seriesTailMayStand(err: unknown): boolean {
+  return seriesMaybeShownTwice(err) && eventWriteLeftover(err) !== null;
+}
+
+/**
+ * Whether this failure came after the new series was created and deleted
+ * again, because cutting the old one was refused. Where the new series invited
+ * its attendees, they got its cancellation too, which the sentence says (212).
+ */
+export function seriesTailRemoved(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[TAIL_REMOVED] === true
+  );
+}
+
 /** The failure as thrown, marked: an object carries the mark itself. */
 function markedShownTwice(err: unknown): unknown {
+  return marked(err, MAYBE_SHOWN_TWICE);
+}
+
+function marked(err: unknown, mark: symbol): unknown {
   const carrier =
     typeof err === 'object' && err !== null ? err : new Error(String(err));
-  (carrier as Record<symbol, unknown>)[MAYBE_SHOWN_TWICE] = true;
+  (carrier as Record<symbol, unknown>)[mark] = true;
   return carrier;
 }
 
@@ -1040,7 +1074,13 @@ function markedShownTwice(err: unknown): unknown {
  * A refused truncate throws its ORIGINAL failure — it is what the caller is
  * waiting for, and a second message about a failed repair would bury it. When
  * the tail could not be deleted either, that is marked on it, so the caller
- * can say the series may show twice (`seriesMaybeShownTwice`).
+ * can say the series may show twice (`seriesMaybeShownTwice`); when it was,
+ * that is marked too (`seriesTailRemoved`).
+ *
+ * A tail the provider created and could neither complete nor delete again (a
+ * series created in steps, decisions 203, 210) is marked the same way and
+ * nothing else is done: the old series stays uncut, and the adapter already
+ * tried to delete the new one (`seriesTailMayStand`).
  */
 export async function writeSeriesSplit<Created>(
   io: SeriesSplitIo<Created>,
@@ -1054,7 +1094,13 @@ export async function writeSeriesSplit<Created>(
       'A series with nothing before the cutoff is not split: it is written whole.',
     );
   }
-  const tail = await io.createTail(plan.tail);
+  let tail: Created;
+  try {
+    tail = await io.createTail(plan.tail);
+  } catch (err) {
+    if (eventWriteLeftover(err)) throw markedShownTwice(err);
+    throw err;
+  }
   try {
     await io.truncate(plan.headRule);
   } catch (err) {
@@ -1064,7 +1110,7 @@ export async function writeSeriesSplit<Created>(
     } catch {
       throw markedShownTwice(err);
     }
-    throw err;
+    throw marked(err, TAIL_REMOVED);
   }
   return { tail, headCut: 'done' };
 }

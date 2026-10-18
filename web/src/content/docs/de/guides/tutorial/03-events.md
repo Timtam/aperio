@@ -197,8 +197,9 @@ geändert. Ist unklar, ob die alte schon beendet wurde, etwa nach einer
 abgerissenen Verbindung, bleiben beide stehen: Deine Änderung gilt als
 gespeichert, und der Editor bleibt mit einem Hinweis offen, der den Tag nennt,
 ab dem die Serie möglicherweise doppelt steht, bis du ihn schließt. Scheitert
-auch das Löschen der neuen, sagt Aperio auch das und bittet dich, den Kalender
-zu prüfen, bevor du erneut speicherst. Gelöschte Termine lässt Aperio in der
+auch das Löschen der neuen, sagt Aperio auch das; dieser Hinweis lässt sich nur
+schließen, damit du den Kalender prüfst, statt noch einmal zu speichern.
+Gelöschte Termine lässt Aperio in der
 neuen Serie weg, und in einer anderen Kalender-App geänderte bleiben darin, zur
 üblichen Uhrzeit und mit dem Inhalt der neuen Serie. Gelöschte Termine gehen
 mit deiner Änderung mit: Verschiebst du den Termin auf einen anderen Tag, wandert
@@ -212,11 +213,14 @@ eingestellt. Überspringt eine monatliche oder
 jährliche Serie durch das neue Datum andere Monate oder Jahre, etwa vom 31. auf
 den 30. verschoben, wandern ihre Löschungen nur so weit nach ihrem Platz mit,
 wie beide Fassungen noch übereinstimmen; liegt eine Löschung dahinter, bleiben
-alle auf ihrem Tag, und ein gelöschter Termin kann wieder erscheinen. Noch
-behält nicht jeder Kalender diese Löschungen: CalDAV-Kalender tun es, bei
-Exchange und bei Google kann ein gelöschter Termin vorerst wiederkommen. Bei Google kennt Aperio gelöschte Termine außerdem
-nur etwa ein Jahr voraus, ein weiter vorn gelöschter kommt in der neuen Serie
-wieder. Und in einer ganztägigen Serie bei Google oder CalDAV bleibt ein in
+alle auf ihrem Tag, und ein gelöschter Termin kann wieder erscheinen.
+CalDAV-Kalender behalten diese Löschungen, und Exchange behält sie ab heute:
+Es nimmt eine neue Serie ohne sie an, deshalb löscht Aperio sie dort einzeln
+wieder (siehe den Kasten unten); die vor heute erscheinen wieder, auch in
+einer Serie, die du an einem früheren Termin teilst. Bei Google kann ein
+gelöschter Termin vorerst wiederkommen, und Aperio kennt gelöschte Termine
+dort nur etwa ein Jahr voraus, ein weiter vorn gelöschter kommt in der neuen
+Serie wieder. Und in einer ganztägigen Serie bei Google oder CalDAV bleibt ein in
 einer anderen App geänderter Termin vorerst auch in der alten Serie, dieser Tag
 steht dann doppelt.
 **Die ganze Serie** öffnet die Serie selbst, mit ihrem eigenen Beginn und Ende,
@@ -257,11 +261,26 @@ Feld mit `Tab` erreichst.
 > Outlook, ist zu seiner üblichen Zeit mit den Angaben der Serie wieder da.
 > `Strg+D` auf einem Termin einer Serie dupliziert die ganze Serie ab ihrem
 > ersten Termin, im selben Kalender. Eine Kopie oder ein Duplikat behält die
-> Zeitzone der Serie. Nach Exchange oder Microsoft 365 verschoben oder kopiert,
-> oder in Exchange dupliziert, zeigt die neue Serie gelöschte Termine vorerst
-> wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa
-> drei Monaten vor heute bis ein Jahr danach (siehe
+> Zeitzone der Serie. Nach Exchange verschoben oder kopiert, oder dort
+> dupliziert, behält die neue Serie die Löschungen ab heute (siehe den nächsten
+> Kasten); nach Microsoft 365 zeigt sie gelöschte Termine vorerst wieder. Aus
+> einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei Monaten
+> vor heute bis ein Jahr danach (siehe
 > [Fehlersuche & Protokolle](/de/guides/troubleshooting/#nach-dem-verschieben-kopieren-oder-duplizieren-einer-serie-ist-ein-termin-wieder-da)).
+
+> **Eine neue Serie bei Exchange, und das Warten:** Exchange nimmt eine neue
+> Serie ohne ihre gelöschten Termine an. Deshalb legt Aperio sie zuerst an,
+> löscht die gelöschten Termine dort danach einzeln wieder, ab heute, und
+> prüft das Ergebnis, bevor es jemanden einlädt. Das kann bis zu einer halben
+> Minute dauern. Solange zeigt Aperio den Dialog **Vorgang läuft, bitte warten
+> …**, am Desktop wie in der Handy-App, ohne Knopf; `Escape` und die
+> Zurück-Taste schließen ihn nicht, er schließt sich selbst, wenn die Arbeit
+> getan ist. Lassen sich nicht alle Löschungen machen, entfernt Aperio die
+> neue Serie wieder und sagt, dass nichts geändert wurde. Gelingt auch das
+> nicht, sagt es, dass die neue Serie jetzt möglicherweise zusätzlich im
+> Kalender steht; diese Meldung lässt sich nur schließen, damit du den
+> Kalender prüfst, statt noch einmal zu speichern (siehe
+> [Fehlersuche & Protokolle](/de/guides/troubleshooting/#eine-neue-serie-steht-möglicherweise-zusätzlich-im-kalender)).
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,

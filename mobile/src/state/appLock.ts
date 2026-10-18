@@ -113,8 +113,28 @@ export async function whileOsSheetOpen<T>(show: () => Promise<T>): Promise<T> {
  *  can refuse to act on the content behind it. */
 let coverVisible = false;
 
+const coverGoneWaiters = new Set<() => void>();
+
 export function setAppLockCoverVisible(visible: boolean): void {
   coverVisible = visible;
+  if (!visible && coverGoneWaiters.size > 0) {
+    const waiting = [...coverGoneWaiters];
+    coverGoneWaiters.clear();
+    waiting.forEach((cb) => cb());
+  }
+}
+
+/**
+ * Settles once the lock's cover is off the screen — at once where it is not
+ * up. A modal presented or dismissed under the cover would act above or
+ * behind it, so a dialog that opens or closes on its own (the "please wait"
+ * dialog of a write in steps) waits for this first.
+ */
+export function whenAppLockCoverGone(): Promise<void> {
+  if (!coverVisible) return Promise.resolve();
+  return new Promise((resolve) => {
+    coverGoneWaiters.add(resolve);
+  });
 }
 
 export function isAppLockCoverVisible(): boolean {

@@ -10,6 +10,8 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
+  eventWriteErrorMessage,
+  eventWriteLeftover,
   invitationLocked,
   selectableEventCalendars,
   selectableTaskLists,
@@ -33,9 +35,11 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { canAssignSection } from '../state/taskMoves';
 import type { MoveCopyTarget } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import { useTasks } from '../state/useTasks';
 import { useViewState } from '../state/viewStateContext';
 import { Modal } from './Modal';
+import { useStepWriteWait } from './useStepWriteWait';
 
 /**
  * Move / copy a single event or task to a different container.
@@ -72,6 +76,15 @@ export function MoveCopyDialog({
 }: MoveCopyDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const { invalidateData } = useDialogState();
+  // The "please wait" dialog while a series is created in steps (decisions
+  // 227, 265), and the sentence that a new series may stand (210).
+  const { waitDialog, wait } = useStepWriteWait();
+  const [mayStand, setMayStand] = useState<string | null>(null);
+  const mayStandRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (mayStand) mayStandRef.current?.focus();
+  }, [mayStand]);
   const {
     calendars,
     taskLists,
@@ -219,6 +232,9 @@ export function MoveCopyDialog({
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      // One write at a time: a second Enter while a copy is on its way would
+      // write it twice.
+      if (submitting) return;
       setError(null);
 
       if (!targetContainerId) {
@@ -236,7 +252,10 @@ export function MoveCopyDialog({
       setSubmitting(true);
       try {
         if (target.kind === 'event') {
-          await moveOrCopyEvent(target.event, targetContainerId, mode, scope);
+          await moveOrCopyEvent(target.event, targetContainerId, mode, scope, {
+            wait,
+            target: calendars.find((c) => c.id === targetContainerId),
+          });
         } else {
           await moveOrCopyTask(
             target.task,
@@ -256,8 +275,20 @@ export function MoveCopyDialog({
         );
         onClose();
       } catch (err) {
+        if (target.kind === 'event') {
+          // A failed move or copy may still have written at the target: it
+          // shows on the next read.
+          invalidateData();
+        }
         if (err instanceof SeriesNotLoadedError) {
           setError(t('dialogs.event.seriesLoadFailed', { title: itemTitle }));
+        } else if (target.kind === 'event' && eventWriteLeftover(err)) {
+          // A new series that may stand: said on screen, focused, and only
+          // closed — doing it again would create another (210).
+          setMayStand(eventWriteErrorMessage(err, t));
+        } else if (target.kind === 'event') {
+          // In words, a provider's refusal included.
+          setError(eventWriteErrorMessage(err, t));
         } else if (isCommandError(err)) {
           setError(`${err.code}: ${err.message}`);
         } else {
@@ -280,6 +311,10 @@ export function MoveCopyDialog({
       children,
       sectionsEnabled,
       targetSectionId,
+      submitting,
+      wait,
+      calendars,
+      invalidateData,
     ],
   );
 
@@ -290,10 +325,44 @@ export function MoveCopyDialog({
     { title: itemTitle },
   );
 
+  if (mayStand) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title={title}
+        className="modal--form modal--narrow"
+        dismissOnBackdrop={false}
+      >
+        <div className="form">
+          <FocusableNote ref={mayStandRef} className="form__hint form__hint--warning">
+            {mayStand}
+          </FocusableNote>
+          <div className="form__actions">
+            <button
+              type="button"
+              className="form__action form__action--primary"
+              onClick={onClose}
+            >
+              {t('dialogs.close')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  // Not while it writes: closed then, a write in steps would run unseen and
+  // what it left would never be said (210).
+  const closeUnlessWriting = () => {
+    if (!submitting) onClose();
+  };
+
   return (
+    <>
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={closeUnlessWriting}
       title={title}
       className="modal--form modal--narrow"
       dismissOnBackdrop={false}
@@ -493,7 +562,7 @@ export function MoveCopyDialog({
         <div className="form__actions">
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeUnlessWriting}
             aria-disabled={submitting || undefined}
             className="form__action"
           >
@@ -511,6 +580,8 @@ export function MoveCopyDialog({
         </div>
       </form>
     </Modal>
+    {waitDialog}
+    </>
   );
 }
 

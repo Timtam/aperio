@@ -15,6 +15,8 @@ import {
   cutoffDay,
   readSeriesRows,
   seriesMaybeShownTwice,
+  seriesTailMayStand,
+  createsInSteps,
   writeSeriesSplit,
   type CarryableFields,
   type CarryScope,
@@ -44,6 +46,7 @@ import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { useStepWriteWait } from './useStepWriteWait';
 
 /**
  * "Carry this change to the other copies?" (`DESIGN-event-groups.md`, Stufe 2).
@@ -118,6 +121,10 @@ export function EventGroupCarryDialog({
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { calendars } = useCalendarStore();
+  // The "please wait" dialog while a copy's new series is created in steps
+  // (decisions 227, 265): opened at the first copy that needs it, and held
+  // until the pass is done.
+  const { waitDialog, wait, hold } = useStepWriteWait();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -170,6 +177,11 @@ export function EventGroupCarryDialog({
   const open = useRef(isOpen);
   useEffect(() => {
     open.current = isOpen;
+    // Gone from the screen: the dialog host unmounts it without ever passing
+    // `isOpen` false.
+    return () => {
+      open.current = false;
+    };
   }, [isOpen]);
   const messageId = useId();
 
@@ -274,353 +286,377 @@ export function EventGroupCarryDialog({
     // earlier passes' included, so a retry ties the whole set together.
     const created: NewGroupMember[] = [...createdRows];
     let done = outcome?.done ?? 0;
-    for (const target of list) {
-      // The user closed it. Stop writing copies into a dialog that is gone.
-      if (!open.current) return;
-      // The question's yes, for this copy's series (decision 251).
-      const agreed = consent?.has(targetKey(target)) ?? false;
-      // Only a write of the copy's whole series asks; a split's cut says the
-      // sentence, as in the editor (a yes would write its new series again).
-      let askable = false;
-      // Where this copy's series is split, once it is: a failure after that
-      // names the day.
-      let splitAt: string | null = null;
-      try {
-        const current = await getEventById(target.event_id, target.calendar_id);
-        if (current == null) {
-          // The copy is gone from under us. Reported, not silently counted.
-          failed.push(target);
-          continue;
-        }
-        // A copy on a calendar that takes only its attendee's own changes is
-        // not written: the provider would refuse it, and half a carry is the
-        // state this dialog exists to prevent.
-        if (
-          invitationLocked(
-            calendars.find((c) => c.id === target.calendar_id),
-            current,
-          )
-        ) {
-          failed.push(target);
-          lockedOut.push(target);
-          continue;
-        }
-        if (scope === 'occurrence' && occurrence) {
-          // What the edit did to the anchor, done to this copy: carve the
-          // occurrence out of its series and put a standalone event there.
-          // Updating the row instead would move EVERY occurrence of the copy
-          // because one of them was edited — the outcome the scope prompt
-          // exists to prevent.
-          const row = occurrenceCarryRow(
-            current as CalendarEvent & CarryableFields,
-            occurrence,
-            after,
-            plan.changed,
-          );
-          if (row == null) {
-            // The instant this copy is cut at cannot be read, so there is no
-            // row to write — and inventing one would put an appointment where
-            // nobody put it. Reported, not counted as done, exactly like a copy
-            // with nothing left after the cutoff.
+    const releaseWait = hold();
+    try {
+      for (const target of list) {
+        // The user closed it. Stop writing copies into a dialog that is gone;
+        // what the ones written left is still tied together and said below.
+        if (!open.current) break;
+        // The question's yes, for this copy's series (decision 251).
+        const agreed = consent?.has(targetKey(target)) ?? false;
+        // Only a write of the copy's whole series asks; a split's cut says the
+        // sentence, as in the editor (a yes would write its new series again).
+        let askable = false;
+        // Where this copy's series is split, once it is: a failure after that
+        // names the day.
+        let splitAt: string | null = null;
+        try {
+          const current = await getEventById(target.event_id, target.calendar_id);
+          if (current == null) {
+            // The copy is gone from under us. Reported, not silently counted.
             failed.push(target);
             continue;
           }
-          await addEventExdate(target.event_id, occurrence, target.calendar_id);
-          const standalone = await createEvent({
-            calendar_id: target.calendar_id,
-            title: row.title,
-            description: row.description,
-            location: row.location,
-            start: row.start,
-            end: row.end,
-            all_day: row.all_day,
-            recurrence: null,
-            // The copy keeps its own: what travels is what the appointment IS.
-            color_label: current.color_label,
-            reminders: current.reminders,
-            sound: null,
-            attendees: current.attendees,
-            send_invitations: false,
-            ...organizerOf(current),
-          });
-          created.push({
-            calendar_id: standalone.calendar_id,
-            event_id: standalone.id,
-            title: standalone.title,
-            starts_at: standalone.start,
-          });
-        } else if (scope === 'future' && occurrence) {
-          // What the edit did to the anchor: its series was cut in two at the
-          // occurrence, and a new one took over from there. Each copy has a
-          // series of its OWN, so the same cut is made in it — an update would
-          // move every occurrence of the copy because one of them was edited.
-          //
-          // The copy's own next occurrence at or after the cutoff is the point
-          // it is cut at. Usually that is the cutoff itself; a copy patterned
-          // differently (fortnightly against weekly) is cut at ITS next one,
-          // which is what "and all following" means over there.
-          // The copy's own provider-kept occurrences, read first and once: they
-          // decide where it is cut as much as how. An occurrence changed
-          // elsewhere is there, one deleted as a cancelled row is not
-          // (decisions 125, 141). A copy without a rule has none and is not
-          // read.
-          const rows = (await readSeriesRows(current, occurrence, getSeriesRows)).rows;
-          const anchorIso = firstOccurrenceFrom(
-            current as CalendarEvent & CarryableFields,
-            occurrence,
-            rows,
-          );
-          if (anchorIso == null) {
-            // This copy has nothing left at or after the cutoff. Reported, not
-            // counted as done: a copy that silently kept its old shape is the
-            // contradiction the group exists to prevent.
+          // A copy on a calendar that takes only its attendee's own changes is
+          // not written: the provider would refuse it, and half a carry is the
+          // state this dialog exists to prevent.
+          if (
+            invitationLocked(
+              calendars.find((c) => c.id === target.calendar_id),
+              current,
+            )
+          ) {
             failed.push(target);
+            lockedOut.push(target);
             continue;
           }
-          // The MOVE, applied to this copy's own cut point — not the
-          // anchor's instant. See `futureCarryRow`: writing the anchor's
-          // instant onto a copy cut somewhere else left the two halves not
-          // meeting, and could even put the end before the start.
-          const row = futureCarryRow(
-            current as CalendarEvent & CarryableFields,
-            anchorIso,
-            before,
-            after,
-            plan.changed,
-          );
-          if (row == null) {
-            // The instant this copy is cut at cannot be read, so there is no
-            // row to write — and inventing one would put an appointment where
-            // nobody put it. Reported, not counted as done, exactly like a copy
-            // with nothing left after the cutoff.
-            failed.push(target);
-            continue;
-          }
-          // With the same rows: one changed elsewhere is still there before
-          // the cut, though its master lists it among the exceptions
-          // (decision 125), and the new part leaves out what they delete.
-          const splitPlan = planSeriesSplit(
-            current as CalendarEvent & CarryableFields,
-            anchorIso,
-            rows,
-          );
-          const currentRecurrence = current.recurrence;
-          if (splitPlan == null || currentRecurrence == null) {
-            // The copy is a single event: it has one occurrence, and "this and
-            // all following" is that one — so the whole copy IS the tail. It
-            // leaves the group of heads and joins the new rows, or the split
-            // would strand it with a group it no longer belongs to.
-            await updateEvent(row, target.calendar_id);
-            // Bookkeeping, not a refusal: this copy is on its way straight
-            // back into the new group two steps down.
-            await ungroupEvent(target.calendar_id, target.event_id, true).catch(
-              () => undefined,
+          if (scope === 'occurrence' && occurrence) {
+            // What the edit did to the anchor, done to this copy: carve the
+            // occurrence out of its series and put a standalone event there.
+            // Updating the row instead would move EVERY occurrence of the copy
+            // because one of them was edited — the outcome the scope prompt
+            // exists to prevent.
+            const row = occurrenceCarryRow(
+              current as CalendarEvent & CarryableFields,
+              occurrence,
+              after,
+              plan.changed,
             );
-            created.push({
+            if (row == null) {
+              // The instant this copy is cut at cannot be read, so there is no
+              // row to write — and inventing one would put an appointment where
+              // nobody put it. Reported, not counted as done, exactly like a copy
+              // with nothing left after the cutoff.
+              failed.push(target);
+              continue;
+            }
+            await addEventExdate(target.event_id, occurrence, target.calendar_id);
+            const standalone = await createEvent({
               calendar_id: target.calendar_id,
-              event_id: target.event_id,
               title: row.title,
-              starts_at: row.start,
+              description: row.description,
+              location: row.location,
+              start: row.start,
+              end: row.end,
+              all_day: row.all_day,
+              recurrence: null,
+              // The copy keeps its own: what travels is what the appointment IS.
+              color_label: current.color_label,
+              reminders: current.reminders,
+              sound: null,
+              attendees: current.attendees,
+              send_invitations: false,
+              ...organizerOf(current),
             });
-          } else if (splitPlan.kind === 'whole') {
-            // Nothing of this copy comes before its cut point, so "this and
-            // all following" is the whole copy (decision 118): cutting it
-            // would leave a head that ends before it starts, hidden from the
-            // views and still ringing. It is rewritten in place instead — its
-            // id, and everything kept under it, stay — and like a single it
-            // leaves the group of heads for the new one.
+            created.push({
+              calendar_id: standalone.calendar_id,
+              event_id: standalone.id,
+              title: standalone.title,
+              starts_at: standalone.start,
+            });
+          } else if (scope === 'future' && occurrence) {
+            // What the edit did to the anchor: its series was cut in two at the
+            // occurrence, and a new one took over from there. Each copy has a
+            // series of its OWN, so the same cut is made in it — an update would
+            // move every occurrence of the copy because one of them was edited.
+            //
+            // The copy's own next occurrence at or after the cutoff is the point
+            // it is cut at. Usually that is the cutoff itself; a copy patterned
+            // differently (fortnightly against weekly) is cut at ITS next one,
+            // which is what "and all following" means over there.
+            // The copy's own provider-kept occurrences, read first and once: they
+            // decide where it is cut as much as how. An occurrence changed
+            // elsewhere is there, one deleted as a cancelled row is not
+            // (decisions 125, 141). A copy without a rule has none and is not
+            // read.
+            const rows = (await readSeriesRows(current, occurrence, getSeriesRows)).rows;
+            const anchorIso = firstOccurrenceFrom(
+              current as CalendarEvent & CarryableFields,
+              occurrence,
+              rows,
+            );
+            if (anchorIso == null) {
+              // This copy has nothing left at or after the cutoff. Reported, not
+              // counted as done: a copy that silently kept its old shape is the
+              // contradiction the group exists to prevent.
+              failed.push(target);
+              continue;
+            }
+            // The MOVE, applied to this copy's own cut point — not the
+            // anchor's instant. See `futureCarryRow`: writing the anchor's
+            // instant onto a copy cut somewhere else left the two halves not
+            // meeting, and could even put the end before the start.
+            const row = futureCarryRow(
+              current as CalendarEvent & CarryableFields,
+              anchorIso,
+              before,
+              after,
+              plan.changed,
+            );
+            if (row == null) {
+              // The instant this copy is cut at cannot be read, so there is no
+              // row to write — and inventing one would put an appointment where
+              // nobody put it. Reported, not counted as done, exactly like a copy
+              // with nothing left after the cutoff.
+              failed.push(target);
+              continue;
+            }
+            // With the same rows: one changed elsewhere is still there before
+            // the cut, though its master lists it among the exceptions
+            // (decision 125), and the new part leaves out what they delete.
+            const splitPlan = planSeriesSplit(
+              current as CalendarEvent & CarryableFields,
+              anchorIso,
+              rows,
+            );
+            const currentRecurrence = current.recurrence;
+            if (splitPlan == null || currentRecurrence == null) {
+              // The copy is a single event: it has one occurrence, and "this and
+              // all following" is that one — so the whole copy IS the tail. It
+              // leaves the group of heads and joins the new rows, or the split
+              // would strand it with a group it no longer belongs to.
+              await updateEvent(row, target.calendar_id);
+              // Bookkeeping, not a refusal: this copy is on its way straight
+              // back into the new group two steps down.
+              await ungroupEvent(target.calendar_id, target.event_id, true).catch(
+                () => undefined,
+              );
+              created.push({
+                calendar_id: target.calendar_id,
+                event_id: target.event_id,
+                title: row.title,
+                starts_at: row.start,
+              });
+            } else if (splitPlan.kind === 'whole') {
+              // Nothing of this copy comes before its cut point, so "this and
+              // all following" is the whole copy (decision 118): cutting it
+              // would leave a head that ends before it starts, hidden from the
+              // views and still ringing. It is rewritten in place instead — its
+              // id, and everything kept under it, stay — and like a single it
+              // leaves the group of heads for the new one.
+              askable = true;
+              const savedWhole = await updateEvent(
+                {
+                  ...row,
+                  // What the copy repeats by from its cut on — its rule moved
+                  // with a new date (decision 189) — and its deleted
+                  // occurrences, carried along with a new date, time or kind
+                  // as the anchor's are (decision 152).
+                  recurrence: tailRecurrenceFor({
+                    master: current,
+                    cutoffIso: anchorIso,
+                    plan: splitPlan,
+                    tail: { start: row.start, all_day: row.all_day },
+                    opened: anchorIso,
+                  }),
+                  send_invitations: false,
+                  ...(agreed ? { accepts_exception_loss: true } : {}),
+                },
+                target.calendar_id,
+              );
+              askable = false;
+              noteBack(savedWhole, target.calendar_id);
+              await ungroupEvent(target.calendar_id, target.event_id, true).catch(
+                () => undefined,
+              );
+              created.push({
+                calendar_id: target.calendar_id,
+                event_id: target.event_id,
+                title: row.title,
+                starts_at: row.start,
+              });
+            } else {
+              splitAt = anchorIso;
+              // Decided before anything is written: the copy's rule, moved
+              // with a new date (decision 189), and its deleted occurrences,
+              // carried along with a new date, time or kind as the anchor's
+              // are (decision 152).
+              const tailRecurrence = tailRecurrenceFor({
+                master: current,
+                cutoffIso: anchorIso,
+                plan: splitPlan,
+                tail: { start: row.start, all_day: row.all_day },
+                opened: anchorIso,
+              });
+              const written = await wait(
+                createsInSteps(
+                  calendars.find((c) => c.id === target.calendar_id),
+                  tailRecurrence,
+                ),
+                () => writeSeriesSplit(
+                  {
+                    createTail: () =>
+                      createEvent(
+                        {
+                          calendar_id: target.calendar_id,
+                          title: row.title,
+                          description: row.description,
+                          location: row.location,
+                          start: row.start,
+                          end: row.end,
+                          all_day: row.all_day,
+                          recurrence: tailRecurrence,
+                          // The copy keeps its own: what travels is what the
+                          // appointment IS.
+                          color_label: current.color_label,
+                          reminders: current.reminders,
+                          sound: null,
+                          attendees: current.attendees,
+                          send_invitations: false,
+                          ...organizerOf(current),
+                        },
+                        // A continuation of the copy's own series — its zone stays
+                        // verbatim so both halves expand alike.
+                        { preserveRecurrenceZone: true },
+                      ),
+                    // The cut can make the provider bring deleted occurrences
+                    // back as well (a zone it writes again, 247); any it could not
+                    // delete again are said with this pass's doubts (253).
+                    truncate: async (headRule) => {
+                      const cut = await updateEvent(
+                        {
+                          ...current,
+                          recurrence: { ...currentRecurrence, rrule: headRule },
+                          // The copies are the user's own bookkeeping — the invite
+                          // went out from the anchor, and telling every copy's
+                          // attendees again would mail them twice.
+                          send_invitations: false,
+                          truncate_tail_overrides: true,
+                        },
+                        target.calendar_id,
+                      );
+                      noteBack(cut, target.calendar_id);
+                    },
+                    removeTail: (tail) =>
+                      deleteEventById(tail.id, tail.calendar_id, false),
+                  },
+                  splitPlan,
+                ),
+              );
+              const tail = written.tail;
+              // Written, but the copy's old series may still run through the
+              // cut (145): the new row is real, so it counts and is grouped, and
+              // the doubt is said instead of offering to write it again.
+              if (written.headCut === 'unsure') {
+                unsure.push(
+                  t('dialogs.eventGroupCarry.unsureCut', {
+                    calendar: calendarName(target.calendar_id),
+                    date: cutoffDay(anchorIso, i18n.language),
+                  }),
+                );
+              }
+              created.push({
+                calendar_id: tail.calendar_id,
+                event_id: tail.id,
+                title: tail.title,
+                starts_at: tail.start,
+              });
+            }
+          } else {
+            const next = carryOnto(
+              current as CalendarEvent & CarryableFields,
+              after,
+              plan.changed,
+            );
+            // A copy that is a series moves as the anchor did when its start
+            // moved or it switched between all-day and a time of day: its rule,
+            // its deleted occurrences and its zone go along, as from its own
+            // start (decision 198). Moved only in its start, it repeated on its
+            // old days next to the anchor's new ones. A rule that cannot move
+            // reports the copy, with the reason (193).
+            const wholePlan =
+              current.recurrence?.rrule &&
+              (Date.parse(next.start) !== Date.parse(current.start) ||
+                next.all_day !== current.all_day)
+                ? planSeriesSplit(
+                    current,
+                    current.start,
+                    (await readSeriesRows(current, current.start, getSeriesRows)).rows,
+                  )
+                : null;
+            const seriesWrite =
+              wholePlan?.kind === 'whole'
+                ? {
+                    ...next,
+                    recurrence: tailRecurrenceFor({
+                      master: current,
+                      cutoffIso: current.start,
+                      plan: wholePlan,
+                      tail: { start: next.start, all_day: next.all_day },
+                      opened: current.start,
+                      whole: true,
+                    }),
+                  }
+                : next;
             askable = true;
-            const savedWhole = await updateEvent(
-              {
-                ...row,
-                // What the copy repeats by from its cut on — its rule moved
-                // with a new date (decision 189) — and its deleted
-                // occurrences, carried along with a new date, time or kind
-                // as the anchor's are (decision 152).
-                recurrence: tailRecurrenceFor({
-                  master: current,
-                  cutoffIso: anchorIso,
-                  plan: splitPlan,
-                  tail: { start: row.start, all_day: row.all_day },
-                  opened: anchorIso,
-                }),
-                send_invitations: false,
-                ...(agreed ? { accepts_exception_loss: true } : {}),
-              },
+            const savedSeries = await updateEvent(
+              agreed ? { ...seriesWrite, accepts_exception_loss: true } : seriesWrite,
               target.calendar_id,
             );
             askable = false;
-            noteBack(savedWhole, target.calendar_id);
-            await ungroupEvent(target.calendar_id, target.event_id, true).catch(
-              () => undefined,
-            );
-            created.push({
-              calendar_id: target.calendar_id,
-              event_id: target.event_id,
-              title: row.title,
-              starts_at: row.start,
-            });
-          } else {
-            splitAt = anchorIso;
-            // Decided before anything is written: the copy's rule, moved
-            // with a new date (decision 189), and its deleted occurrences,
-            // carried along with a new date, time or kind as the anchor's
-            // are (decision 152).
-            const tailRecurrence = tailRecurrenceFor({
-              master: current,
-              cutoffIso: anchorIso,
-              plan: splitPlan,
-              tail: { start: row.start, all_day: row.all_day },
-              opened: anchorIso,
-            });
-            const written = await writeSeriesSplit(
-              {
-                createTail: () =>
-                  createEvent(
-                    {
-                      calendar_id: target.calendar_id,
-                      title: row.title,
-                      description: row.description,
-                      location: row.location,
-                      start: row.start,
-                      end: row.end,
-                      all_day: row.all_day,
-                      recurrence: tailRecurrence,
-                      // The copy keeps its own: what travels is what the
-                      // appointment IS.
-                      color_label: current.color_label,
-                      reminders: current.reminders,
-                      sound: null,
-                      attendees: current.attendees,
-                      send_invitations: false,
-                      ...organizerOf(current),
-                    },
-                    // A continuation of the copy's own series — its zone stays
-                    // verbatim so both halves expand alike.
-                    { preserveRecurrenceZone: true },
-                  ),
-                // The cut can make the provider bring deleted occurrences
-                // back as well (a zone it writes again, 247); any it could not
-                // delete again are said with this pass's doubts (253).
-                truncate: async (headRule) => {
-                  const cut = await updateEvent(
-                    {
-                      ...current,
-                      recurrence: { ...currentRecurrence, rrule: headRule },
-                      // The copies are the user's own bookkeeping — the invite
-                      // went out from the anchor, and telling every copy's
-                      // attendees again would mail them twice.
-                      send_invitations: false,
-                      truncate_tail_overrides: true,
-                    },
-                    target.calendar_id,
-                  );
-                  noteBack(cut, target.calendar_id);
-                },
-                removeTail: (tail) =>
-                  deleteEventById(tail.id, tail.calendar_id, false),
-              },
-              splitPlan,
-            );
-            const tail = written.tail;
-            // Written, but the copy's old series may still run through the
-            // cut (145): the new row is real, so it counts and is grouped, and
-            // the doubt is said instead of offering to write it again.
-            if (written.headCut === 'unsure') {
-              unsure.push(
-                t('dialogs.eventGroupCarry.unsureCut', {
-                  calendar: calendarName(target.calendar_id),
-                  date: cutoffDay(anchorIso, i18n.language),
-                }),
-              );
-            }
-            created.push({
-              calendar_id: tail.calendar_id,
-              event_id: tail.id,
-              title: tail.title,
-              starts_at: tail.start,
-            });
+            noteBack(savedSeries, target.calendar_id);
           }
-        } else {
-          const next = carryOnto(
-            current as CalendarEvent & CarryableFields,
-            after,
-            plan.changed,
-          );
-          // A copy that is a series moves as the anchor did when its start
-          // moved or it switched between all-day and a time of day: its rule,
-          // its deleted occurrences and its zone go along, as from its own
-          // start (decision 198). Moved only in its start, it repeated on its
-          // old days next to the anchor's new ones. A rule that cannot move
-          // reports the copy, with the reason (193).
-          const wholePlan =
-            current.recurrence?.rrule &&
-            (Date.parse(next.start) !== Date.parse(current.start) ||
-              next.all_day !== current.all_day)
-              ? planSeriesSplit(
-                  current,
-                  current.start,
-                  (await readSeriesRows(current, current.start, getSeriesRows)).rows,
-                )
-              : null;
-          const seriesWrite =
-            wholePlan?.kind === 'whole'
-              ? {
-                  ...next,
-                  recurrence: tailRecurrenceFor({
-                    master: current,
-                    cutoffIso: current.start,
-                    plan: wholePlan,
-                    tail: { start: next.start, all_day: next.all_day },
-                    opened: current.start,
-                    whole: true,
-                  }),
-                }
-              : next;
-          askable = true;
-          const savedSeries = await updateEvent(
-            agreed ? { ...seriesWrite, accepts_exception_loss: true } : seriesWrite,
-            target.calendar_id,
-          );
-          askable = false;
-          noteBack(savedSeries, target.calendar_id);
-        }
-        done += 1;
-      } catch (err) {
-        // A split whose new series could not be taken back may show this copy
-        // twice from the cut. Reporting that as "not changed" would be the
-        // opposite of true, and trying again would write the new series a
-        // second time: it is said in its own words, and not offered again.
-        if (seriesMaybeShownTwice(err) && splitAt != null) {
-          unsure.push(
-            t('dialogs.eventGroupCarry.maybeShownTwice', {
-              calendar: calendarName(target.calendar_id),
-              date: cutoffDay(splitAt, i18n.language),
-            }),
-          );
-          continue;
-        }
-        failed.push(target);
-        // A copy whose series would lose occurrences is asked about once,
-        // after every other copy is written (decision 251): the question says
-        // what and how many.
-        const loss = exceptionsLossOf(err);
-        if (loss && askable && !agreed) {
-          asked.push({ target, loss });
-          continue;
-        }
-        // Nothing was written for this copy: a rule that cannot move with the
-        // new date says so (decision 193), anything else in words, a
-        // provider's refusal included (decisions 243-253).
-        lastError =
-          err instanceof TailShiftRefusedError
-            ? t('dialogs.eventGroupCarry.shiftRefused', {
+          done += 1;
+        } catch (err) {
+          // A split whose new series could not be taken back may show this copy
+          // twice from the cut. Reporting that as "not changed" would be the
+          // opposite of true, and trying again would write the new series a
+          // second time: it is said in its own words, and not offered again.
+          // So is a new part the provider created and could neither complete
+          // nor delete again (decisions 203, 210): the old series runs on uncut.
+          if (seriesTailMayStand(err) && splitAt != null) {
+            unsure.push(
+              t('dialogs.eventGroupCarry.newPartMayStand', {
                 calendar: calendarName(target.calendar_id),
-                reason: t(`dialogs.moveScope.refusal.${err.reason}`),
-              })
-            : eventWriteErrorMessage(err, t);
-        setError(lastError);
+                date: cutoffDay(splitAt, i18n.language),
+              }),
+            );
+            continue;
+          }
+          if (seriesMaybeShownTwice(err) && splitAt != null) {
+            unsure.push(
+              t('dialogs.eventGroupCarry.maybeShownTwice', {
+                calendar: calendarName(target.calendar_id),
+                date: cutoffDay(splitAt, i18n.language),
+              }),
+            );
+            continue;
+          }
+          failed.push(target);
+          // A copy whose series would lose occurrences is asked about once,
+          // after every other copy is written (decision 251): the question says
+          // what and how many.
+          const loss = exceptionsLossOf(err);
+          if (loss && askable && !agreed) {
+            asked.push({ target, loss });
+            continue;
+          }
+          // Nothing was written for this copy: a rule that cannot move with the
+          // new date says so (decision 193), anything else in words, a
+          // provider's refusal included (decisions 243-253).
+          lastError =
+            err instanceof TailShiftRefusedError
+              ? t('dialogs.eventGroupCarry.shiftRefused', {
+                  calendar: calendarName(target.calendar_id),
+                  reason: t(`dialogs.moveScope.refusal.${err.reason}`),
+                })
+              : eventWriteErrorMessage(err, t);
+          setError(lastError);
+        }
       }
+    } finally {
+      // Closed before the report: what it says comes after the dialog is gone.
+      await releaseWait();
     }
     // The rows this carry created are copies of each other exactly as the ones
     // it came from were — so they are told so. Without this, an occurrence or
@@ -657,7 +693,15 @@ export function EventGroupCarryDialog({
         regroupFailed = true;
       }
     }
-    if (!open.current) return;
+    if (!open.current) {
+      // Gone before the pass ended: a copy that may now show twice is still
+      // said (210), as nothing else will. And the views read again: closing
+      // the dialog made them read before the last copy and the grouping were
+      // written.
+      if (unsure.length > 0) announce(unsure.join(' '));
+      onChanged?.();
+      return;
+    }
     setCreatedRows(created);
     const allDoubts = [...doubts, ...unsure];
     setDoubts(allDoubts);
@@ -851,6 +895,7 @@ export function EventGroupCarryDialog({
         )}
       </div>
     </Modal>
+    {waitDialog}
     {lossAsk && (
       <ConfirmDialog
         isOpen

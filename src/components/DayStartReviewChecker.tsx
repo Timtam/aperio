@@ -64,6 +64,19 @@ export function DayStartReviewChecker() {
   } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
+  // What the dialog stack shows now, for the review a silent batch defers:
+  // a dialog may have opened while the batch ran.
+  const dialogKind = useRef(dialogMode.kind);
+  useEffect(() => {
+    dialogKind.current = dialogMode.kind;
+  }, [dialogMode.kind]);
+  // The review a silent batch could not open: a dialog was open when it ended.
+  const reviewWaits = useRef(false);
+  useEffect(() => {
+    if (!reviewWaits.current || dialogMode.kind !== 'none') return;
+    reviewWaits.current = false;
+    openDayStartReview();
+  }, [dialogMode.kind, openDayStartReview]);
   const {
     effectiveForList,
     dayStartTrigger,
@@ -225,9 +238,11 @@ export function DayStartReviewChecker() {
         // Dialog opens iff there's still something to talk about —
         // an overdue row, a slipped row whose list voted 'ask', or any
         // reminder (the reminders section is informational but still a
-        // reason to surface the dialog).
+        // reason to surface the dialog). Not on top of a dialog that opened
+        // meanwhile — a write's wait, a sync prompt —: then once it closes.
         if (surfaced > 0) {
-          openDayStartReview();
+          if (dialogKind.current === 'none') openDayStartReview();
+          else reviewWaits.current = true;
         }
       })();
       return;

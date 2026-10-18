@@ -205,6 +205,8 @@
   "actions": {
     "duplicated": "\"{{title}}\" duplicated.",
     "duplicatedSeries": "The whole series \"{{title}}\" was duplicated.",
+    "copyMayStand": "\"{{title}}\" may now be in the calendar twice: its new copy could neither be completed nor removed again. Please check the calendar and do not repeat this.",
+    "moveMayStand": "\"{{title}}\" may now be in the target calendar as well as in its own: the moved series could neither be completed nor removed again there. Please check both calendars and do not repeat this.",
     "duplicateFailed": "\"{{title}}\" could not be duplicated: {{reason}}."
   },
   "toast": {
@@ -453,6 +455,11 @@
     "clientSecretHint": "The same value you entered when the account was first connected — from your provider's console, e.g. the Google Cloud Console entry right under the client ID."
   },
   "dialogs": {
+    "stepWrite": {
+      "failedTitle": "Not completed",
+      "title": "Working, please wait …",
+      "body": "Aperio is creating the series and removing its deleted occurrences there one by one. This can take up to half a minute."
+    },
     "firstLaunchWizard": {
       "title": "Welcome to Aperio",
       "stepIndicator": "Step {{current}} of {{total}}",
@@ -1386,6 +1393,7 @@
       "scopeFuture": "This applies to this occurrence and all following ones. Each copy changes from the same point on; its earlier occurrences stay as they are.",
       "regroupFailed_one": "The copy was updated, but the new entries could not be tied together as one appointment again.",
       "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again.",
+      "newPartMayStand": "In {{calendar}}, the series may now show twice from {{date}}: its new part could neither be completed nor deleted again, and the old one still runs on. Please check it there.",
       "maybeShownTwice": "In {{calendar}}, the series may now show twice from {{date}}: the old one could not be cut short, nor its new part deleted again. Please check it there.",
       "shiftRefused": "In {{calendar}}, the repeat cannot move with the new date or time: {{reason}}.",
       "unsureCut": "In {{calendar}}, the series may show twice from {{date}}: its new part was created, but whether the old one now ends before it is unclear. Please check it there.",
@@ -1543,7 +1551,8 @@
       "thisAndFutureNotRepeating": "\"{{title}}\" no longer repeats; it was changed elsewhere. Nothing was changed here. Open it again to edit it.",
       "thisAndFutureShiftRefused": "\"{{title}}\" cannot move to the new date or time from here on: {{reason}}. Choose the repeat yourself, or edit just this occurrence.",
       "seriesShiftRefused": "\"{{title}}\" cannot move to the new date or time as a whole series: {{reason}}. Choose the repeat yourself.",
-      "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar before saving again.",
+      "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar.",
+      "thisAndFutureNewMayStand": "\"{{title}}\" may now show twice from {{date}}: the new series could neither be completed nor deleted again, and the old one still runs on. Please check the calendar.",
       "thisAndFutureUpdatedMaybeTwice": "\"{{title}}\" was changed from this occurrence on. But whether the old series now ends before it is unclear ({{detail}}): from {{date}} it may show twice. Please check it.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {
@@ -1733,6 +1742,11 @@
         "exceptionsWouldBeLostDetail": "{{what}} {{lost}} Nothing was changed.",
         "forbidden": "The provider does not allow this change ({{detail}}). Nothing was changed.",
         "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
+        "deletionsNotKept": "The calendar did not take the new series together with its deleted occurrences, so Aperio removed it again. Nothing was changed.",
+        "deletionsNotKeptTime": "Deleting the new series' deleted occurrences again one by one took too long, so Aperio removed the series again. Nothing was changed.",
+        "invitationsCancelledToo": "If invitations were sent, the invitees also received its cancellation.",
+        "createdMayStand": "A new series was created in the calendar but could not be completed, and Aperio could not remove it again. It may now stand there as well. Please check the calendar.",
+        "invitationsMayHaveGone": "The invitees may have received an invitation.",
         "reason": {
           "replyOnly": "only the organizer can change this meeting",
           "serverRefused": "the calendar server refused it ({{detail}})",
@@ -1744,7 +1758,10 @@
           "copyUnreadable": "Aperio could not read its current state from the server",
           "exceptionsWouldBeLost": "Exchange would drop its changed and deleted occurrences",
           "forbidden": "the provider does not allow it ({{detail}})",
-          "changedOnServer": "it changed on the server since you opened it"
+          "changedOnServer": "it changed on the server since you opened it",
+          "deletionsNotKeptTime": "deleting its deleted occurrences again one by one took too long",
+          "deletionsNotKept": "the calendar did not take its deleted occurrences",
+          "createdMayStand": "a new series was created but could neither be completed nor removed again"
         }
       },
       "deleteAndDecline": "Delete and decline"

@@ -109,7 +109,7 @@ import {
   type EditableReminder,
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
-import { HeaderCancelButton } from '../components/HeaderCancelButton';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
@@ -133,6 +133,10 @@ import {
   worthCarrying,
   type CarryableFields,
   type CarryScope,
+  createsInSteps,
+  eventWriteLeftover,
+  seriesTailMayStand,
+  seriesTailRemoved,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -140,6 +144,7 @@ import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { showEventScopeDialog } from '../state/eventScopeDialog';
+import { stepWriteWait } from '../state/stepWriteWait';
 import { writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useSoundPref } from '../state/useSoundPref';
@@ -185,7 +190,29 @@ const SCOPE_TITLE_KEY = {
   series: 'dialogs.event.editTitleScope.series',
 } as const;
 
-export default function EventEditorModal({
+/**
+ * A failure that is said on screen, focused, with only Close (decision 210):
+ * a new series may stand, and saving again would create another. Mirrors the
+ * desktop.
+ */
+class CloseOnlyNotice extends Error {}
+
+/**
+ * The event editor, and beside it the wait of a write in steps (decisions 227,
+ * 265): on iOS a dialog presents from the screen it is rendered in, and one at
+ * the app root could not present over this sheet. Beside the screen's content,
+ * not in it, so it stays mounted whichever view the content shows.
+ */
+export default function EventEditorModal(props: RootStackScreenProps<'EventEditor'>) {
+  return (
+    <>
+      <EventEditorScreen {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function EventEditorScreen({
   route,
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
@@ -194,7 +221,6 @@ export default function EventEditorModal({
   const { colors } = useTheme();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
-  useCancelHeader(navigation);
   const {
     eventId,
     calendarId,
@@ -286,18 +312,20 @@ export default function EventEditorModal({
   useEffect(() => {
     if (splitNotice == null) return;
     leavingNotice.current = false;
-    navigation.setOptions({
-      headerLeft: () => (
-        <HeaderCancelButton label={t('dialogs.close')} onPress={closeNotice} />
-      ),
-      gestureEnabled: false,
-    });
     return navigation.addListener('beforeRemove', (event) => {
       if (leavingNotice.current) return;
       event.preventDefault();
       closeNotice();
     });
-  }, [splitNotice, navigation, t, closeNotice]);
+  }, [splitNotice, navigation, closeNotice]);
+  // The header: Cancel; Close while the notice is up; and while a save runs
+  // the editor is not left (210), as the desktop's is not closed: a save left
+  // behind would run unseen, and a series it left that may stand would never
+  // be said on screen.
+  useCancelHeader(navigation, 'mobile.cancel', {
+    writing: saving,
+    close: splitNotice != null ? closeNotice : undefined,
+  });
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   // Accounts whose calendars never store a reminder Aperio writes: the device
@@ -1403,63 +1431,95 @@ export default function EventEditorModal({
           // The cut as the provider saved it: deleted occurrences it brought
           // back and that could not be deleted again ride on it (253).
           const head: { saved?: CalendarEvent } = {};
-          const written = await writeSeriesSplit(
-            {
-              createTail: () =>
-                createEvent(
-                  {
-                    calendar_id: calId,
-                    title: trimmedTitle,
-                    description: description.trim() || null,
-                    location: location.trim() || null,
-                    start,
-                    end,
-                    all_day: allDay,
-                    recurrence: tailRecurrence,
-                    color_label: colorToSend,
-                    reminders: remindersForWire,
-                    sound: null,
-                    attendees,
-                    send_invitations: sendInvitations,
-                    ...organizerOf(original),
-                  },
-                  // Continuation of the master — keep its zone verbatim (incl.
-                  // floating) so head and tail expand identically.
-                  { preserveRecurrenceZone: true },
-                ),
-              // Notify on the truncate too (symmetric with
-              // delete-this-and-following): on notify-flag providers attendees
-              // must learn the original series now ends before the cutoff, else
-              // they keep the old occurrences AND receive the new tail invite.
-              truncate: async (headRule) => {
-                head.saved = await updateEvent(
-                  {
-                    ...original,
-                    recurrence: { ...masterRecurrence, rrule: headRule },
-                    send_invitations: sendInvitations,
-                    truncate_tail_overrides: true,
-                  },
-                  original.calendar_id,
-                );
+          const written = await stepWriteWait(
+            createsInSteps(
+              calendars.find((c) => c.id === calId),
+              tailRecurrence,
+            ),
+            () => writeSeriesSplit(
+              {
+                createTail: () =>
+                  createEvent(
+                    {
+                      calendar_id: calId,
+                      title: trimmedTitle,
+                      description: description.trim() || null,
+                      location: location.trim() || null,
+                      start,
+                      end,
+                      all_day: allDay,
+                      recurrence: tailRecurrence,
+                      color_label: colorToSend,
+                      reminders: remindersForWire,
+                      sound: null,
+                      attendees,
+                      send_invitations: sendInvitations,
+                      ...organizerOf(original),
+                    },
+                    // Continuation of the master — keep its zone verbatim (incl.
+                    // floating) so head and tail expand identically.
+                    { preserveRecurrenceZone: true },
+                  ),
+                // Notify on the truncate too (symmetric with
+                // delete-this-and-following): on notify-flag providers attendees
+                // must learn the original series now ends before the cutoff, else
+                // they keep the old occurrences AND receive the new tail invite.
+                truncate: async (headRule) => {
+                  head.saved = await updateEvent(
+                    {
+                      ...original,
+                      recurrence: { ...masterRecurrence, rrule: headRule },
+                      send_invitations: sendInvitations,
+                      truncate_tail_overrides: true,
+                    },
+                    original.calendar_id,
+                  );
+                },
+                // The undo of the create, told as the create was.
+                removeTail: (tail) =>
+                  deleteEvent(tail.id, tail.calendar_id, sendInvitations),
               },
-              // The undo of the create, told as the create was.
-              removeTail: (tail) =>
-                deleteEvent(tail.id, tail.calendar_id, sendInvitations),
-            },
-            plan,
+              plan,
+            ),
           ).catch((err: unknown) => {
+            const date = cutoffDay(occurrence, i18n.language);
+            // The new series was created and could neither be completed nor
+            // deleted again (decisions 203, 210): it may stand beside the old
+            // one, which runs on uncut. Said on screen, and only closed.
+            // Mirrors the desktop.
+            const leftover = eventWriteLeftover(err);
+            if (seriesTailMayStand(err) && leftover) {
+              const sentence = t('dialogs.event.thisAndFutureNewMayStand', {
+                title: trimmedTitle,
+                date,
+              });
+              throw new CloseOnlyNotice(
+                leftover.invited
+                  ? `${sentence} ${t('dialogs.event.writeError.invitationsMayHaveGone')}`
+                  : sentence,
+              );
+            }
             // The old series was not cut, and the new one could not be deleted
             // again: it may stand twice. That is said first, with what went
-            // wrong. Mirrors the desktop.
-            throw seriesMaybeShownTwice(err)
-              ? new Error(
-                  t('dialogs.event.thisAndFutureMaybeTwice', {
-                    title: trimmedTitle,
-                    date: cutoffDay(occurrence, i18n.language),
-                    detail: eventWriteFailureReason(err, t),
-                  }),
-                )
-              : err;
+            // wrong — and only closed, as above (210).
+            if (seriesMaybeShownTwice(err)) {
+              throw new CloseOnlyNotice(
+                t('dialogs.event.thisAndFutureMaybeTwice', {
+                  title: trimmedTitle,
+                  date,
+                  detail: eventWriteFailureReason(err, t),
+                }),
+              );
+            }
+            // Cutting the old series was refused and the new one deleted
+            // again: nothing changed, but invitees it invited got its
+            // cancellation too (212).
+            if (seriesTailRemoved(err) && sendInvitations) {
+              throw new Error(
+                `${eventWriteErrorMessage(err, t)} ${t('dialogs.event.writeError.invitationsCancelledToo')}`,
+              );
+            }
+            throw err;
           });
           const created = written.tail;
           // The tail is a continuation of the same appointment, so it gets the
@@ -1655,9 +1715,19 @@ export default function EventEditorModal({
         lossAskable = true;
         sentSave = JSON.stringify(sent);
         consentSent = acceptsLoss && sentSave === askedSaveRef.current;
-        const updated = await updateEvent(
-          consentSent ? { ...sent, accepts_exception_loss: true } : sent,
-          original.calendar_id,
+        // Another calendar creates the series anew there: in steps where the
+        // target writes its deletions so (decisions 227, 265).
+        const updated = await stepWriteWait(
+          calId !== original.calendar_id &&
+            createsInSteps(
+              calendars.find((c) => c.id === calId),
+              sent.recurrence,
+            ),
+          () =>
+            updateEvent(
+              consentSent ? { ...sent, accepts_exception_loss: true } : sent,
+              original.calendar_id,
+            ),
         );
         lossAskable = false;
         await savePrivate(updated);
@@ -1752,6 +1822,29 @@ export default function EventEditorModal({
       }
       navigation.goBack();
     } catch (err) {
+      // A new series that may stand, beside the old one or in the other
+      // calendar (decisions 203, 210): said on screen and only closed —
+      // saving again would create another. Mirrors the desktop.
+      const mayStand =
+        err instanceof CloseOnlyNotice
+          ? err.message
+          : eventWriteLeftover(err)
+            ? eventWriteErrorMessage(err, t)
+            : null;
+      if (mayStand != null) {
+        if (!shown.current) {
+          AccessibilityInfo.announceForAccessibility(mayStand);
+          return;
+        }
+        leavingNotice.current = false;
+        setSplitNotice({
+          sentence: mayStand,
+          proceed: async () => {
+            navigation.goBack();
+          },
+        });
+        return;
+      }
       // A save that would drop occurrences of the series asks first
       // (decisions 243-253); nothing was sent.
       const loss = exceptionsLossOf(err);

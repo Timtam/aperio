@@ -2184,7 +2184,7 @@ fn series_windows_zone(
 /// string when there are no usable entries, so callers can splice it in
 /// unconditionally. EWS is order-sensitive: inside `<t:CalendarItem>` this
 /// belongs after `Location` and before `Recurrence`.
-fn required_attendees_xml(attendees: &[String]) -> String {
+pub(crate) fn required_attendees_xml(attendees: &[String]) -> String {
     let mut inner = String::new();
     for entry in attendees {
         let (name, email) = cal_core::attendee::parse(entry);

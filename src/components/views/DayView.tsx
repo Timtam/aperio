@@ -110,6 +110,7 @@ import {
   spokenDaySummary,
   type DayLog,
   eventWriteErrorMessage,
+  shownInNotice,
   exceptionsLossOf,
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
@@ -240,8 +241,10 @@ export function DayView() {
   const announce = useAnnouncer();
   const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
   const { anchor, setAnchor } = useViewState();
-  const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData } =
+  const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData, stepWriteWait } =
     useDialogState();
+  // A Ctrl+D on its way (see the handler).
+  const duplicating = useRef(false);
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
@@ -320,7 +323,7 @@ export function DayView() {
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
   } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
-  const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
+  const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists, calendars } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -1059,14 +1062,30 @@ export function DayView() {
           e.preventDefault();
           if (focusedItem?.kind === 'event') {
             const ev = focusedItem.event;
-            void duplicateEvent(ev).then(
-              (source) => {
-                // Written outside the view's own dialogs: re-read explicitly.
-                invalidateData();
-                announce(duplicatedSentence(source, t));
-              },
-              (err: unknown) => announce(duplicateFailedSentence(err, ev.title, t)),
-            );
+            // One at a time: a second Ctrl+D while the first still reads or
+            // writes would write the series twice.
+            if (duplicating.current) return;
+            duplicating.current = true;
+            void duplicateEvent(ev, {
+              wait: stepWriteWait((err) => duplicateFailedSentence(err, ev.title, t)),
+              target: calendars.find((c) => c.id === ev.calendar_id),
+            })
+              .then(
+                (source) => {
+                  // Written outside the view's own dialogs: re-read explicitly.
+                  invalidateData();
+                  announce(duplicatedSentence(source, t));
+                },
+                (err: unknown) => {
+                  // A failure may have written: what may stand shows on the next read.
+                  invalidateData();
+                  // Said in the dialog already where it waited (210).
+                  if (!shownInNotice(err)) announce(duplicateFailedSentence(err, ev.title, t));
+                },
+              )
+              .finally(() => {
+                duplicating.current = false;
+              });
           }
         }
         return;
@@ -1180,6 +1199,8 @@ export function DayView() {
       openEventMenu,
       openAnyTaskMenu,
       itemId,
+      stepWriteWait,
+      calendars,
     ],
   );
 
