@@ -736,6 +736,16 @@ mod tests {
     }
 
     #[test]
+    fn a_new_series_deletes_its_occurrences_in_steps_and_tasks_do_not() {
+        // Exchange creates a series without its deleted occurrences, and the
+        // adapter deletes them again one by one (decisions 202, 227): the
+        // surfaces wait for it with a dialog. A task's recurrence never does.
+        let manifest = manifest();
+        assert!(manifest.recurrence.deletions_in_steps);
+        assert!(!manifest.tasks.recurrence.deletions_in_steps);
+    }
+
+    #[test]
     fn every_schema_field_is_a_key_the_init_config_actually_reads() {
         // The schema and `InitConfig` are two descriptions of the same thing,
         // in two languages, and nothing but this test connects them. A field

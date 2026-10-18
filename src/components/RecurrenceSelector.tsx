@@ -61,6 +61,7 @@ const FULL_CAPS: RecurrenceCapabilities = {
   monthly_day_of_month: true,
   count: true,
   until: true,
+  deletions_in_steps: false,
 };
 
 /** Lowercase the selector's `Freq` to the wire `RecurrenceFreq`.

@@ -35,6 +35,7 @@ const FULL_CAPS: RecurrenceCapabilities = {
   monthly_day_of_month: true,
   count: true,
   until: true,
+  deletions_in_steps: false,
 };
 
 type EndMode = TaskRecurrenceValue['endMode'];

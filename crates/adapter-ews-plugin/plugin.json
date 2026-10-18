@@ -27,7 +27,8 @@
       "daily",
       "weekly",
       "monthly"
-    ]
+    ],
+    "deletions_in_steps": true
   },
   "tasks": {
     "task_time_of_day": false,
