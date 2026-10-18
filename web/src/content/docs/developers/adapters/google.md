@@ -44,7 +44,8 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   or a date for an all-day series, and the answer is compared as a parsed
   instant, because Google replies in the event's own zone. An empty slot is
   an error: nothing is cancelled or written, and a neighbouring occurrence
-  is never touched.
+  is never touched. A new series' deletions are matched otherwise, by a
+  listing of its occurrences (see below).
 - **The organizer is flagged among the attendees.** Google marks the
   organizer's row with `organizer: true`; the adapter drops it by that flag,
   which also holds when the address is spelled otherwise (gmail.com and
@@ -78,11 +79,12 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   only a wall clock on a timed series. A line the
   adapter does not keep (`RDATE`, `EXRULE`, an earlier of two rules, an
   unknown zone's wall clock) is logged as a warning once per run.
-- **Deletions are written as Google spells them.** The wall clock in the
-  series' zone with `TZID`, a date (`VALUE=DATE`) on a series of days (the
-  only form Google's documentation allows there), and the UTC instant on a
-  series without a zone or for the second pass of an hour the clock shows
-  twice. One value per line.
+- **Deletions are written as Google spells them, on an update.** The wall
+  clock in the series' zone with `TZID`, a date (`VALUE=DATE`) on a series
+  of days (the only form Google's documentation allows there), and the UTC
+  instant on a series without a zone or for the second pass of an hour the
+  clock shows twice. One value per line. A create writes none: a new
+  series' deletions are cancelled once it stands (see below).
 - **A kept start, end and repeat stay out of the PATCH, together.** A PATCH
   replaces the whole `recurrence` array, so an update that kept the start,
   the end, the all-day flag and the repeat (`keep_fields`) leaves all four
@@ -107,10 +109,85 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   Edmonton and Inuvik each March from 2027; Chișinău's spring hour),
   Google reads it an hour later, and the deletion meets no occurrence.
 
+## A new series keeps its deleted occurrences
+
+Google takes `EXDATE` lines with a new series, but whether it heeds them
+was never measured (decision 137), and Google itself deletes an occurrence
+as a cancelled instance. So a series created with deletions — a split's new
+part, a move, a copy, a duplicate, the editor's calendar change — goes
+through `series_create` (decisions 202-213, 263-269):
+
+- Deletions before the device's day are not written again
+  (`cal_core::deletions_from_today`); with none left it is one create of
+  the series, without a deletion line.
+- The series is created without a deletion line, under an id Aperio gives
+  it (32 lowercase hex digits, within Google's base32hex), and the create
+  follows the notify switch (`sendUpdates`): the invitees get their
+  invitation with the series (204, 267). A create Google turns down whole
+  is that error. One asked to slow down (429, or 403 `rateLimitExceeded` or
+  `userRateLimitExceeded`) made nothing and is sent again, a few times; one
+  refused with 400 is sent once more without Aperio's id. A create whose
+  answer was lost — none came, a 5xx, one no reader takes — is read back by
+  its id and never sent again, as Google does not promise to catch the
+  duplicate; not found, it may stand (`created-may-stand:
+  create-answer-lost`).
+- The series Google stored must carry its one rule and no deletion line of
+  its own.
+- From the confirmed create there are 15 s (`cal_core::SERIES_WITH_DELETIONS`).
+  The occurrences in the deletions' window are listed
+  (`events/{id}/instances?showDeleted=true`, every page), and each deletion
+  is matched to the occurrence starting there, else to one at most an hour
+  off and never past half the way to its neighbours — the hour an outdated
+  zone table can put between Aperio's slot and Google's (see Zone data). An
+  all-day deletion is matched by the day it names on the device. A deletion
+  without a match is listed for once more; still without one, Google's rule
+  makes no occurrence there, and it is skipped and logged (207, 266, 269).
+- Each match is cancelled with `PATCH {"status":"cancelled"}` on the id
+  Google listed, `sendUpdates` as the switch says (204). Its answer is the
+  proof (208): this occurrence, cancelled, of this series, at this slot,
+  where the answer names them. A lost answer is decided by reading the
+  occurrence, and one not cancelled is cancelled once more.
+- The occurrences are listed again: each one that stood before and was not
+  cancelled here still stands, and each one cancelled here is cancelled or
+  gone. Someone else's cancel takes everything back.
+- A rate limit is waited out by `Retry-After`, or 1 s, 2 s, 4 s, while it
+  fits (`cal_core::may_send` counts the slowest request so far); a quota
+  used up for the day is not. Every request is cut at the deadline.
+- Any failure deletes the series again inside the 15 s kept for that,
+  telling the invitees exactly when the create told them (212, 264):
+  `deletions-not-kept` when it is gone, `created-may-stand` when it may
+  stand, the detail starting with `invited` where the invitees may have
+  heard of it. With notify on they may also have got a cancellation for
+  each occurrence cancelled before.
+- On `adapter_google::write`, never with an id: one INFO line per skipped
+  slot; on success one INFO line with the counts, the time and every slot;
+  on failure one WARN with the counts, the time, the step that failed and
+  why (`http-<status>`, `google-<reason>`, `network`, `unreadable`,
+  `control`, `after-control`, `foreign-deletion`, `time`). A lost create
+  answer has that WARN too.
+- The manifest declares it (`recurrence.deletions_in_steps`), and the
+  surfaces show a "please wait" dialog while such a series is created.
+- Aperio reads Google's cancelled occurrences only as far as its cache
+  window reaches, about a year ahead (150): a deletion further ahead is
+  cancelled at Google too, but once Aperio reads the series afresh it no
+  longer sees it, and a later copy of the series shows that occurrence
+  again.
+
 ## Testing
 
 `mockito` with canned Calendar/Tasks/People JSON. Tests cover the
 full-list vs. incremental (`syncToken`) paths, the `410 → full resync`
-fallback, and the recurrence/colour mapping. A live check needs a Google
-account and an OAuth client configured for the Calendar/Tasks/People
-scopes.
+fallback, and the recurrence/colour mapping. A new series written in steps
+runs against a scripted Google series instead: its occurrences, the
+requests in order, and faults injected by request kind and turn (a rate
+limit, a lost or unreadable answer, a cancel that did nothing, someone
+else's cancel, a listing that lags); one test runs every fault at every
+request and checks that each outcome says what stands.
+
+None of that was run against Google: there is no live test of it. The model
+pins Aperio's reading of Google's documentation where Google promises
+little — a cancel's answer may name only its id and status, a listing right
+after a write may lag once, Google may spell the rule otherwise, a 400 may
+refuse Aperio's id — so a different answer from Google fails a named test.
+A live check needs a Google account and an OAuth client configured for the
+Calendar/Tasks/People scopes.

@@ -283,10 +283,10 @@ series, and nothing else:
   usual time, with the series' title, place and time. After a move its own
   change is gone with the old series; after a copy or a duplicate it stays in
   the old one.
-- Moved or copied into Exchange, or duplicated there, the new series keeps
-  the deletions from today on: Exchange takes none when a series is created,
-  so Aperio deletes them again one by one afterwards. The ones before today
-  show again.
+- Moved or copied into Exchange or Google, or duplicated there, the new
+  series keeps the deletions from today on: Exchange takes none when a series
+  is created, and Google deletes an occurrence by cancelling it, so Aperio
+  removes them one by one afterwards. The ones before today show again.
 - Moved or copied into Microsoft 365, the new series shows deleted
   occurrences again for now: Microsoft 365 takes no deletions when a series
   is created.
@@ -299,16 +299,19 @@ calendar.
 
 ## Aperio removed a new series again
 
-Exchange takes a new series without its deleted occurrences, so Aperio
-creates it first and deletes them there again one by one, while the dialog
-**Working, please wait …** is shown. When that cannot be done completely —
-Exchange does not find an occurrence, answers too slowly, or the series
+On Exchange and Google, Aperio creates a new series first and then removes
+its deleted occurrences there one by one, while the dialog **Working, please
+wait …** is shown: Exchange takes a new series without them, and Google
+deletes an occurrence by cancelling it. When that cannot be done completely —
+the calendar does not find an occurrence, answers too slowly, or the series
 afterwards does not hold exactly the deletions Aperio made —, Aperio removes
 the new series again and says so: nothing was changed, the old series is as
-it was. The removed series is in Exchange's Deleted Items. If the series
-invited people, they got its cancellation too, and the message says so. When
-it says it took too long, Exchange answered slowly or asked Aperio to wait, or
-the series has very many deleted occurrences from today on.
+it was. On Exchange the removed series is in the Deleted Items. If the series
+invited people, they got its cancellation too, and the message says so; on
+Google, when you notified them, they may also have got a cancellation for each
+occurrence Aperio had cancelled before. When it says it took too long, the
+calendar answered slowly or asked Aperio to wait, or the series has very many
+deleted occurrences from today on.
 
 What you can do: try again later. If it keeps failing, send the log with the
 report (see below): it names the step that failed and why, without any
@@ -316,14 +319,14 @@ appointment or calendar id.
 
 ## A new series may stand in the calendar as well
 
-If Aperio could neither complete a new series on Exchange nor remove it
-again, it says the series may now stand in the calendar as well — next to the
+If Aperio could neither complete a new series on Exchange or Google nor
+remove it again, it says the series may now stand in the calendar as well — next to the
 old one, from the day you split it, or in the other calendar after a move or
 a copy. This message only closes: saving again would create yet another
 series. If invitations may have gone out, the message says that too.
 
-What you can do: open the calendar, in Aperio or in Outlook, and delete the
-series that is there twice.
+What you can do: open the calendar, in Aperio or in the calendar's own app
+(Outlook, Google Calendar), and delete the series that is there twice.
 
 ## Reporting a bug
 

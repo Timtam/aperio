@@ -1413,10 +1413,13 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     Gerätekonto ohne vollen Zugriff (`cal_core::Error::AccessNotGranted`) und
     reist als `forbidden`. Eine Marke heißt auch: Es wurde sicher
     nichts geschrieben (`writeNeverLanded`); beim Ändern eines Termins melden
-    alle Adapter eine Ablehnung des Servers so (147). `deletions-not-kept`
-    heißt: geschrieben und wieder entfernt — es steht nichts, aber die Serie
-    liegt in den gelöschten Elementen, und mit `invited` im Detail haben
-    Eingeladene Einladung und Absage bekommen (202-213). `CACHE_GENERATION` 4,
+    alle Adapter eine Ablehnung des Servers so (147), beim Anlegen Exchange und
+    Google. `deletions-not-kept` heißt: geschrieben und wieder entfernt — es
+    steht nichts, der Anbieter hat die Serie gelöscht wie jede andere (bei
+    Exchange liegt sie in den gelöschten Elementen), und mit `invited` im
+    Detail können Eingeladene von ihr gehört und ihre Absage bekommen haben
+    (202-213); bei Google mit Benachrichtigen auch je abgesagtem Termin eine
+    Absage (204, 267). `CACHE_GENERATION` 4,
     damit eine gespeicherte Kalenderliste ohne das Merkmal
     `invitations_reply_only` neu gelesen wird.
   - Das Gegenteil einer Ablehnung ist ein Rest (`cal_core::WriteLeftover`:
@@ -1513,7 +1516,7 @@ Beide Operationen werden atomar in der lokalen Sync-Queue eingetragen, sodass be
 
 | Fall | Verhalten |
 |---|---|
-| **Innerhalb desselben Kontos (Verschieben)** | Direktes Verschieben via API (z.B. Google `calendarId`-Patch), kein Neu-Anlegen nötig |
+| **Innerhalb desselben Kontos (Verschieben)** | Anlegen am Ziel, dann Löschen am Ursprung, wie zwischen Konten; eine Serie mit Löschungen schreibt Google dabei in Schritten (202). Googles eigenes `events.move` würde die Löschungen mitnehmen, ist aber nicht gebaut (TODO). |
 | **Zwischen verschiedenen Konten (Verschieben)** | Zweistufig: CREATE + DELETE (siehe oben) |
 | **Kopieren** | Immer CREATE im Ziel; keine native API-Optimierung |
 | **Wiederkehrende Terminserie** | Nutzer wird gefragt: "Nur diesen Termin" oder "Gesamte Serie" (gilt für Verschieben und Kopieren) |

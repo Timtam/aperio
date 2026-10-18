@@ -458,6 +458,41 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Eine neue Google-Serie behält ihre gelöschten Termine** (PR 7,
+      Entscheidungen 202-213, 263-270): Ob Google eine Löschzeile mit einer
+      neuen Serie beachtet, ist ungemessen (137), und Google selbst löscht
+      einen Termin, indem es ihn absagt. Der Adapter legt die Serie ohne
+      Löschzeile an, unter einer eigenen Kennung (268), mit dem
+      Benachrichtigen-Schalter (204, 267: die Einladung kommt mit der Serie).
+      Dann listet er Googles Termine im Fenster der Löschungen und sagt jede
+      Löschung ab heute einzeln ab (263), per PATCH auf die Kennung, die
+      Google listet; ein Termin zählt, wenn er dort beginnt oder höchstens
+      eine Stunde daneben (veraltete Zeitzonendaten) und nie über die halbe
+      Lücke zu den Nachbarn. Fehlt einer, liest er einmal nach; dann wird
+      die Stelle übersprungen und geloggt (207, 266, 269). Die Antwort jeder
+      Absage ist der Beweis (208), eine zweite Liste prüft, dass sonst alles
+      steht. Eine verlorene Antwort aufs Anlegen wird über die Kennung
+      nachgelesen, nie neu angelegt (268). Drosselung wird nach Retry-After
+      oder 1-2-4 s ausgewartet, ein aufgebrauchtes Kontingent nicht. Scheitert
+      ein Schritt, löscht er die Serie wieder (203), mit Absage, wo die
+      Eingeladenen von ihr gehört haben (212). Das Manifest schaltet den
+      Warte-Dialog an. Ohne Live-Test (Toni nutzt kein Google): Ein
+      nachgebautes Google mit Fehlern je Anfrage und eine Fehlermatrix sichern
+      ab, wie Aperio Googles Dokumentation liest — ↻ im Test.
+      - [ ] **Ungemessen bei Google**, für einen späteren Test mit einem
+        Google-Konto: welche Felder die Antwort einer Absage trägt (Aperio
+        verlangt nur Kennung und Status), ob die Liste direkt nach dem
+        Schreiben schon stimmt (Aperio liest einmal nach), ob Google Aperios
+        Kennung mit 400 ablehnt, ob Google die Regel anders schreibt, wo eine
+        gelöschte Serie landet.
+      - [ ] **Eigene Kennung auch für einfache Google-Anlagen**: Eine
+        verlorene Antwort aufs Anlegen eines einzelnen Termins ist dort
+        heute ein Fehler, obwohl der Termin stehen kann.
+      - [ ] **Verschieben innerhalb eines Google-Kontos per `events.move`**:
+        nähme die Löschungen ohne Schritte mit; heute legt Aperio am Ziel an
+        und löscht am Ursprung.
+      - [ ] **Gemeinsamer getakteter Sender**, sobald Microsoft 365 (140)
+        dasselbe braucht: EWS und Google haben je ihre eigene Sende-Schleife.
     - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
       Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
       ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
@@ -517,7 +552,8 @@ Siehe DESIGN §4.2.
       (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
       Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
       erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
-      löscht sie seit PR 8 ab heute einzeln wieder. Aus einem Google-Kalender
+      löscht sie seit PR 8 ab heute einzeln wieder, Google sagt sie seit PR 7
+      ab heute einzeln ab. Aus einem Google-Kalender
       kennt Aperio gelöschte Termine etwa
       drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
       Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
@@ -536,14 +572,11 @@ Siehe DESIGN §4.2.
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
-      wieder, ab heute (202, 263). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
-      (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
-      Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
-      legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
-      gelöschten Vorkommen danach einzeln ab, wie Google selbst löscht (202:
-      anlegen, dann absagen, nachgelesen; 203: scheitert eine Absage, wird
-      alles zurückgenommen; 204: Absagen folgen dem Benachrichtigen-Schalter).
-      CalDAV schreibt sie seit PR 5 als Datum.
+      wieder, ab heute (202, 263); Google sagt sie seit PR 7 nach dem Anlegen
+      einzeln ab, ab heute (202, 263, 267). Aperios eigene Absagen weiter als
+      das Fenster voraus sieht es nach einem neuen Einlesen nicht mehr, eine
+      spätere Kopie der Serie zeigt sie wieder (150). CalDAV schreibt sie
+      seit PR 5 als Datum.
     - ✅ **Die Regel wandert mit dem Datum** (PR 3c, 189, 192-197): Verschiebt
       „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
       nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
@@ -1549,8 +1582,9 @@ Vorschläge sind nicht aufgenommen.
 - [ ] **Anlegen und Ändern halten die Handy-Warteschlange.** `createEventJson`
       und `updateEventJson` laufen auf beiden Plattformen auf Expos einer
       Standard-Warteschlange (`CalFfiModule.swift`, `CalFfiModule.kt`, kein
-      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange sie bis zu etwa
-      einer halben Minute belegen; jedes Lesen dahinter wartet. Eigene
+      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange, seit PR 7 bei
+      Google sie bis zu etwa einer halben Minute belegen; jedes Lesen dahinter
+      wartet. Eigene
       Warteschlange (nicht `slowQueue`, die die Abgleich-Runden teilen), wie
       218 für die Erinnerungen fordert. Aus der Planung von PR 8 (2026-10-18).
 - [ ] **Veraltete Kopien der erzeugten Typen.** `crates/cal-core/bindings`,
@@ -1713,6 +1747,8 @@ Vorschläge sind nicht aufgenommen.
       Ersatz. Damit fehlen Marokko (dauerhaft +00 seit 20.09.2026), Vancouver,
       Edmonton und Inuvik (ab 01.11.2026) sowie Chisinau, und die Erinnerungen
       in crates/host-core/src/reminders.rs klingeln dort eine Stunde daneben.
+      Deshalb lässt Googles Neuanlage einer Serie eine Stunde zwischen
+      Aperios Stelle und Googles Termin zu (269).
       Zu tun (32a, TODO.md ~2037): drei Wege untersuchen, nämlich chrono-tz
       mit neuerem tz-Verzeichnis oder [patch], jiff/jiff-tzdb und die
       OS-Datenbank zur Laufzeit. Für jeden Aufwand, Binärgröße, Folgen für
