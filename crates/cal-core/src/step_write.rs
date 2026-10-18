@@ -81,8 +81,9 @@ pub fn step_detail_why(detail: &str) -> &str {
 }
 
 /// The reason a step-wise write gives when its steps did not fit the budget
-/// ([`SERIES_WITH_DELETIONS`]): the surfaces say that it took too long, which
-/// a retry with as many deletions will likely meet again.
+/// ([`SERIES_WITH_DELETIONS`]): the surfaces say that it took too long. The
+/// provider answered slowly or asked to wait, or there are very many deletions
+/// to write; a later retry may well fit.
 pub const OUT_OF_TIME: &str = "time";
 
 /// A new series' deleted occurrences, parted by [`deletions_from_today`].

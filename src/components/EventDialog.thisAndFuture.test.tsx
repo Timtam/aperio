@@ -618,6 +618,18 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     expect(screen.getByRole('button', { name: /^speichern$|^save$/i })).toBeTruthy();
   });
 
+  it('does not close while it saves: Escape waits for the outcome', async () => {
+    deviceInBerlin();
+    onFile.series = SERIES;
+    onFile.createGate = new Promise<void>(() => {});
+    const onClose = vi.fn();
+    await open(JULY, onClose);
+    save();
+    await waitFor(() => expect(calls('create_event')).toHaveLength(1));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /kalender/i }), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('waits without a dialog where the calendar takes the deletions with the series (265)', async () => {
     deviceInBerlin();
     onFile.series = SERIES;

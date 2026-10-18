@@ -96,13 +96,13 @@ afterEach(() => {
   announced.length = 0;
 });
 
-async function copyTo(calendarName: RegExp) {
+async function copyTo(calendarName: RegExp, onClose: () => void = () => {}) {
   const { MoveCopyDialog } = await import('./MoveCopyDialog');
   render(
     <div id="app-root">
       <MoveCopyDialog
         isOpen
-        onClose={() => {}}
+        onClose={onClose}
         target={{ kind: 'event', event: SERIES, defaultMode: 'copy' }}
       />
     </div>,
@@ -163,5 +163,18 @@ describe('MoveCopyDialog → a series into a calendar that creates it in steps',
     );
     expect(said.textContent).not.toMatch(/forbidden|deletions-not-kept/);
     expect(screen.getByRole('button', { name: /^kopieren$|^copy$/i })).toBeTruthy();
+  });
+
+  it('does not close while it writes: Escape and Cancel wait for the outcome', async () => {
+    onFile.createGate = new Promise<void>(() => {});
+    const onClose = vi.fn();
+    await copyTo(/Privat/, onClose);
+    submit();
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_event')).toHaveLength(1),
+    );
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: /^abbrechen$|^cancel$/i }));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

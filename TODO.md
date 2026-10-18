@@ -1526,13 +1526,13 @@ Vorschläge sind nicht aufgenommen.
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die
       Ansicht des ersten blieb stehen); allein und beim nächsten vollen Lauf
       grün. Gesehen in der ersten Prüfrunde von #127 (2026-10-18), älter.
-- [ ] **Der Desktop-Editor schließt mitten im Speichern.** Escape und das ×
-      des Editors schließen ihn, während ein Speichern läuft (nur Abbrechen
-      ist gesperrt); ein Ergebnis, das danach kommt, hat keinen Dialog mehr.
-      Beim Anlegen in Schritten fängt der Warte-Dialog Escape ab, bei allen
-      anderen Speichervorgängen nicht. Eine Sperre allein ließe den Editor
-      bei einem hängenden Speichern nie mehr los. Gefunden bei der Planung
-      von PR 8 (2026-10-18), älter.
+- [ ] **Anlegen und Ändern halten die Handy-Warteschlange.** `createEventJson`
+      und `updateEventJson` laufen auf beiden Plattformen auf Expos einer
+      Standard-Warteschlange (`CalFfiModule.swift`, `CalFfiModule.kt`, kein
+      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange sie bis zu etwa
+      einer halben Minute belegen; jedes Lesen dahinter wartet. Eigene
+      Warteschlange (nicht `slowQueue`, die die Abgleich-Runden teilen), wie
+      218 für die Erinnerungen fordert. Aus der Planung von PR 8 (2026-10-18).
 - [ ] **Veraltete Kopien der erzeugten Typen.** `crates/cal-core/bindings`,
       `crates/host-core/bindings` und `crates/plugin-core/bindings` liegen im
       Repo, werden von `cargo xtask ts-types` nicht geschrieben und von der CI

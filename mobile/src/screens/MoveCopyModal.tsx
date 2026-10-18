@@ -74,6 +74,15 @@ export default function MoveCopyModal({
   // A new series that may stand (decisions 203, 210): said in place of the
   // form, focused, with only Close — doing it again would create another.
   const [mayStand, setMayStand] = useState<string | null>(null);
+  // Whether the screen is still there: one left while its write runs gets no
+  // notice, so what may stand is said instead.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
   const mayStandRef = useRef<Text | null>(null);
   useEffect(() => {
     if (mayStand == null) return;
@@ -315,6 +324,10 @@ export default function MoveCopyModal({
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
           : writeErrorMessage(err, t);
       if (params.kind === 'event' && eventWriteLeftover(err)) {
+        if (!shown.current) {
+          AccessibilityInfo.announceForAccessibility(message);
+          return;
+        }
         setMayStand(message);
         return;
       }

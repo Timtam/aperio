@@ -82,10 +82,12 @@ pub enum WriteRefusal {
     /// the provider's deleted items, and where the detail says
     /// [`crate::step_write::INVITED`] its invitees were invited and got its
     /// cancellation too (212). The detail is
-    /// [`crate::step_write::step_detail`]: a machine token for the log —
-    /// `no-occurrence`, `foreign-deletion`, `control`, `after-control`, `time`,
-    /// `invitation`, or the provider's own code —, marked when the invitees
-    /// may have heard of it.
+    /// [`crate::step_write::step_detail`]: a machine token for the log, marked
+    /// when the invitees may have heard of it — `no-occurrence` (no occurrence
+    /// found where the provider's rule makes one), `foreign-deletion`,
+    /// `unreadable`, `control` and `after-control` (the series read before and
+    /// after), `time`, `invitation`, `network`, `http-<status>` or
+    /// `ews-<code>` (the provider's own).
     DeletionsNotKept,
 }
 

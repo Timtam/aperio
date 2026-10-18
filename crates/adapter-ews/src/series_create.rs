@@ -528,6 +528,12 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                     self.log_lost("create");
                     Err(lost("create-answer-lost"))
                 }
+                // An answer that came but cannot be read: its id never
+                // arrived, and the series may have been saved.
+                EwsError::Protocol(_) => {
+                    self.log_lost("create");
+                    Err(lost("create-answer-lost"))
+                }
                 _ => Err(err),
             };
         }
@@ -591,6 +597,9 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                         .await?
                 }
                 Found::NotMade(where_) => self.skip(wanted, where_),
+                // A slot this close to one deleted already: the same
+                // occurrence, spelled apart.
+                Found::Already => {}
             }
         }
         // The proof (208, 230): the series' deletions are exactly the ones
@@ -718,9 +727,13 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         slot_of: &impl Fn(DateTime<Utc>) -> DateTime<Utc>,
         until: Instant,
     ) -> Result<Found, Failure> {
-        /// How far the walk goes from the candidate, either way: the UTC
-        /// guess is at most a day off, so one or two steps find it.
-        const REACH: u32 = 3;
+        /// How far the walk goes from the candidate, either way. The UTC guess
+        /// is usually a step off at most, but runs further where Exchange's
+        /// own pattern counts occurrences the RFC expansion skips — a series
+        /// on the 31st has one on the last day of each shorter month in
+        /// Exchange and none in the expansion, one more step a short month.
+        /// The budget bounds the requests either way.
+        const REACH: u32 = 24;
         let low = candidate.saturating_sub(REACH).max(1);
         let high = candidate + REACH;
         let mut index = candidate.max(1);
@@ -736,6 +749,11 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                     stood < slot
                 }
                 Answer::Deleted => match self.deleted.get(&index) {
+                    // Deleted by this run already, for a slot this close to
+                    // this one: there is nothing left to do.
+                    Some(done) if (slot_of(done.stood) - slot).abs() <= SLOT_TOLERANCE => {
+                        return Ok(Found::Already)
+                    }
                     // Deleted by this run: it stood where Exchange said.
                     Some(done) => slot_of(done.stood) < slot,
                     // A fresh series has no deletion this run did not make.
@@ -755,12 +773,20 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             // The neighbour on the other side was read already: no occurrence
             // stands between the two, so the rule makes none at the slot.
             let bracketed = match self.answers.get(&neighbour) {
+                // The neighbour, read for another slot, stands at this one: it
+                // is the occurrence, not a bound.
+                Some(Answer::At(start)) if (slot_of(*start) - slot).abs() <= SLOT_TOLERANCE => {
+                    return Ok(Found::At(neighbour, *start));
+                }
                 Some(Answer::At(start)) => (slot_of(*start) < slot) != before,
                 Some(Answer::PastEnd) => before,
-                Some(Answer::Deleted) => self
-                    .deleted
-                    .get(&neighbour)
-                    .is_some_and(|done| (slot_of(done.stood) < slot) != before),
+                Some(Answer::Deleted) => match self.deleted.get(&neighbour) {
+                    Some(done) if (slot_of(done.stood) - slot).abs() <= SLOT_TOLERANCE => {
+                        return Ok(Found::Already);
+                    }
+                    Some(done) => (slot_of(done.stood) < slot) != before,
+                    None => false,
+                },
                 _ => false,
             };
             if bracketed {
@@ -1023,6 +1049,8 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
 enum Found {
     At(u32, DateTime<Utc>),
     NotMade(&'static str),
+    /// Deleted already in this run, for another slot as close.
+    Already,
 }
 
 /// A slot as the log names it: an instant, or a day for an all-day series. No
@@ -1067,6 +1095,9 @@ mod tests {
         /// Answer HTTP 200 with an empty body, without making the change: a
         /// body lost on the way.
         Empty,
+        /// Make the change, then answer HTTP 200 with a body no XML reader
+        /// takes: a proxy's page.
+        Garbled,
         /// Delete this index instead of the one asked.
         Other(u32),
     }
@@ -1424,6 +1455,10 @@ mod tests {
                         Some(delay),
                     ),
                     Some(Fault::Empty) => (Ok(String::new()), None),
+                    Some(Fault::Garbled) => {
+                        Fake::apply(&mut state, kind, &body, None, false);
+                        (Ok("<html><body>gateway</head></html>".to_string()), None)
+                    }
                     Some(Fault::Pretend) => {
                         (Ok(Fake::apply(&mut state, kind, &body, None, true)), None)
                     }
@@ -1647,6 +1682,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_occurrence_read_for_a_stray_slot_is_still_found_for_its_own() {
+        // Mondays and Wednesdays at 00:30 in Berlin. A stray Tuesday 00:30 is
+        // bracketed by the Sunday and Tuesday UTC occurrences, which the walk
+        // reads and keeps; the real Wednesday's walk then meets the Tuesday
+        // UTC occurrence as its neighbour. It is the occurrence, not a bound.
+        let first = at("2026-11-01T23:30:00Z");
+        let shape = Shape {
+            slots: [0i64, 2, 7, 9, 14, 16]
+                .iter()
+                .map(|days| first + chrono::Duration::days(*days))
+                .collect(),
+            pattern: "<t:WeeklyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence>",
+            ..mondays()
+        };
+        let stray = at("2026-11-02T23:30:00Z");
+        let wednesday = shape.slots[1];
+        let fake = Fake::new(shape, Vec::new());
+        let mut event = series(vec![stray, wednesday], false);
+        event.start = first;
+        event.end = first + chrono::Duration::hours(1);
+        event.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6".into();
+        let created = run(&fake, event).await.unwrap();
+        assert_eq!(fake.deleted(), vec![2]);
+        assert_eq!(created.recurrence.unwrap().exceptions, vec![wednesday]);
+    }
+
+    #[tokio::test]
+    async fn a_series_on_the_31st_is_walked_past_its_short_months() {
+        // Exchange puts a 31st series' occurrence on the last day of each
+        // shorter month; the RFC expansion has none there, so its guess for
+        // December is five occurrences short.
+        let days = [
+            "2027-01-31",
+            "2027-02-28",
+            "2027-03-31",
+            "2027-04-30",
+            "2027-05-31",
+            "2027-06-30",
+            "2027-07-31",
+            "2027-08-31",
+            "2027-09-30",
+            "2027-10-31",
+            "2027-11-30",
+            "2027-12-31",
+        ];
+        let shape = Shape {
+            slots: days.iter().map(|d| at(&format!("{d}T09:00:00Z"))).collect(),
+            pattern: "<t:AbsoluteMonthlyRecurrence><t:Interval>1</t:Interval><t:DayOfMonth>31</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+            start_date: "2027-01-31+01:00",
+            ..mondays()
+        };
+        let december = shape.slots[11];
+        let fake = Fake::new(shape, Vec::new());
+        let mut event = series(vec![december], false);
+        event.start = at("2027-01-31T09:00:00Z");
+        event.end = at("2027-01-31T10:00:00Z");
+        event.recurrence.as_mut().unwrap().rrule = "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=12".into();
+        run(&fake, event).await.unwrap();
+        assert_eq!(fake.deleted(), vec![12]);
+    }
+
+    #[tokio::test]
     async fn a_slot_the_stored_rule_makes_no_occurrence_at_is_skipped() {
         let shape = mondays();
         let second = shape.slots[1];
@@ -1757,6 +1854,7 @@ mod tests {
             Fault::LostAfter,
             Fault::Http(502),
             Fault::Soap("ErrorInternalServerError"),
+            Fault::Garbled,
         ] {
             let fake = Fake::new(shape.clone(), vec![(Create, 0, fault.clone())]);
             let (undone, detail) = not_kept(run(&fake, series(vec![second], false)).await);

@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
+
 import type { Calendar, CalendarEvent } from '../api/types';
 
 /**
@@ -12,13 +14,18 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * The same save in its own calendar leaves the exceptions as they are.
  */
 
-const { invokeMock, rowsFail, rowsOnFile } = vi.hoisted(() => {
+const { invokeMock, rowsFail, rowsOnFile, onUpdate } = vi.hoisted(() => {
   const rowsFail = { current: false };
+  /** How the update answers: held until a gate opens, or refused. */
+  const onUpdate: { gate: Promise<void> | null; fails: unknown } = { gate: null, fails: null };
   /** The series' rows besides its master; the changed 16 November unless a test says otherwise. */
   const rowsOnFile: { current: unknown[] | null } = { current: null };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'update_event') {
-      return Promise.resolve((payload as { event: unknown }).event);
+      const event = (payload as { event: unknown }).event;
+      if (onUpdate.fails != null) return Promise.reject(onUpdate.fails);
+      if (onUpdate.gate) return onUpdate.gate.then(() => event);
+      return Promise.resolve(event);
     }
     if (command === 'get_series_rows') {
       if (rowsFail.current) return Promise.reject({ code: 'network', message: 'offline' });
@@ -29,7 +36,7 @@ const { invokeMock, rowsFail, rowsOnFile } = vi.hoisted(() => {
     }
     return Promise.resolve([]);
   });
-  return { invokeMock, rowsFail, rowsOnFile };
+  return { invokeMock, rowsFail, rowsOnFile, onUpdate };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -100,6 +107,11 @@ afterEach(() => {
   invokeMock.mockClear();
   rowsFail.current = false;
   rowsOnFile.current = null;
+  onUpdate.gate = null;
+  onUpdate.fails = null;
+  for (const calendar of CALENDARS) {
+    delete (calendar as { recurrence_capabilities?: unknown }).recurrence_capabilities;
+  }
   vi.restoreAllMocks();
 });
 
@@ -204,5 +216,52 @@ describe('EventDialog → a whole series saved into another calendar (224, 259)'
       '2026-11-09T09:00:00.000Z',
       '2026-11-16T09:00:00.000Z',
     ]);
+  });
+});
+
+describe('EventDialog → a whole series into a calendar that creates it in steps (227, 265)', () => {
+  const inSteps = (id: string) => {
+    (CALENDARS.find((c) => c.id === id) as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      ...DEFAULT_RECURRENCE_CAPABILITIES,
+      deletions_in_steps: true,
+    };
+  };
+  const waiting = () => screen.queryByRole('dialog', { name: /Vorgang läuft|please wait/i });
+
+  it('waits in its dialog while the series is created in the other calendar', async () => {
+    inSteps('cal-home');
+    let release = () => {};
+    onUpdate.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const picker = await open();
+    fireEvent.change(picker, { target: { value: 'cal-home' } });
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
+    await screen.findByRole('dialog', { name: /Vorgang läuft|please wait/i });
+    release();
+    await waitFor(() => expect(waiting()).toBeNull());
+  });
+
+  it('does not wait for a save in its own calendar, even one that creates in steps', async () => {
+    inSteps('cal-work');
+    onUpdate.gate = new Promise<void>(() => {});
+    await open();
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$|^title$/i }), {
+      target: { value: 'Teamrunde neu' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
+    await waitFor(() => expect(updatesSent()).toHaveLength(1));
+    expect(waiting()).toBeNull();
+  });
+
+  it('says a series that may stand in the other calendar, focused and only closed (210)', async () => {
+    inSteps('cal-home');
+    onUpdate.fails = { code: 'network', message: 'created-may-stand: no-occurrence' };
+    const picker = await open();
+    fireEvent.change(picker, { target: { value: 'cal-home' } });
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
+    const said = await screen.findByText(/möglicherweise zusätzlich|may now stand there as well/);
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    expect(screen.queryByRole('button', { name: /^speichern$|^save$/i })).toBeNull();
   });
 });

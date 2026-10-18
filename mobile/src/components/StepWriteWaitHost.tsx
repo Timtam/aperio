@@ -11,7 +11,11 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { whenAppLockCoverGone, whenAppLockReleased } from '../state/appLock';
+import {
+  isAppLockCoverVisible,
+  whenAppLockCoverGone,
+  whenAppLockReleased,
+} from '../state/appLock';
 import { registerStepWriteWaitHost } from '../state/stepWriteWait';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -73,7 +77,11 @@ export function StepWriteWaitHost() {
         },
         close: async () => {
           wanted.current = false;
+          // The unlock lifts the lock before the cover goes, so a cover that
+          // was up says by itself that what follows must wait a moment.
+          const covered = isAppLockCoverVisible();
           await whenAppLockCoverGone();
+          if (covered && !presented.current) await delay(ANNOUNCE_DELAY_MS);
           if (presented.current) {
             presented.current = false;
             const showing = shown.current?.promise ?? Promise.resolve();

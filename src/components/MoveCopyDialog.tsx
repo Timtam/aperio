@@ -352,11 +352,17 @@ export function MoveCopyDialog({
     );
   }
 
+  // Not while it writes: closed then, a write in steps would run unseen and
+  // what it left would never be said (210).
+  const closeUnlessWriting = () => {
+    if (!submitting) onClose();
+  };
+
   return (
     <>
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={closeUnlessWriting}
       title={title}
       className="modal--form modal--narrow"
       dismissOnBackdrop={false}
@@ -556,7 +562,7 @@ export function MoveCopyDialog({
         <div className="form__actions">
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeUnlessWriting}
             aria-disabled={submitting || undefined}
             className="form__action"
           >

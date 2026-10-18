@@ -2500,7 +2500,11 @@ export function EventDialog({
     <>
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      // Not while it saves: Escape or the × would leave a write running with
+      // nowhere to say how it ended (210). Cancel is held the same way.
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
       title={title}
       className="modal--form"
       dismissOnBackdrop={false}
