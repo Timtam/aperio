@@ -764,6 +764,10 @@ fn reminder_from_override(o: ReminderOverride) -> Option<Reminder> {
 /// silently on read and rejects them on write, so we keep it tight.
 #[derive(Debug, Serialize)]
 pub struct EventWriteBody {
+    /// The id Aperio gives a new series it writes in steps (decision 268);
+    /// `None` everywhere else, where Google chooses it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -843,6 +847,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
         new.all_day,
     );
     EventWriteBody {
+        id: None,
         summary: Some(new.title.clone()),
         description: new.description.clone(),
         location: new.location.clone(),
@@ -855,6 +860,38 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
         reminders: reminders_to_write(&new.reminders),
         attendees: Some(attendees_to_write(&new.attendees)).filter(|list| !list.is_empty()),
     }
+}
+
+/// The body of a new series that keeps its deletions in steps (decision
+/// 202): the series as [`new_event_to_body`] writes it, without a deletion
+/// line — each is cancelled once the series stands — and with the id Aperio
+/// gives it, where it does, so a create whose answer was lost can be read
+/// back by it (268).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn bare_series_body(new: &NewEvent, id: Option<&str>) -> EventWriteBody {
+    let mut bare = new.clone();
+    if let Some(recurrence) = bare.recurrence.as_mut() {
+        recurrence.exceptions.clear();
+    }
+    EventWriteBody {
+        id: id.map(str::to_string),
+        ..new_event_to_body(&bare)
+    }
+}
+
+/// An id Google takes for a new event (base32hex, 5 to 1024 characters):
+/// 128 random bits as 32 lowercase hex digits, an alphabet within Google's.
+/// Fresh for every create, as a deleted event keeps its id (268).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn fresh_event_id<R: rand::Rng + ?Sized>(rng: &mut R) -> String {
+    format!("{:032x}", rng.gen::<u128>())
+}
+
+/// Whether a create invites anyone: by the invitees it writes, not the
+/// entries it was given, as one without an address is dropped.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn written_attendees(new: &NewEvent) -> bool {
+    !attendees_to_write(&new.attendees).is_empty()
 }
 
 /// Convert an existing `Event` into a PATCH body: every mutable field, but
@@ -883,6 +920,7 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
     .iter()
     .all(|field| ev.keep_fields.contains(field));
     EventWriteBody {
+        id: None,
         summary: Some(ev.title.clone()),
         description: ev.description.clone(),
         location: ev.location.clone(),
@@ -1488,6 +1526,97 @@ mod tests {
         assert_eq!(json["reminders"]["useDefault"], false);
         assert_eq!(json["reminders"]["overrides"][0]["method"], "popup");
         assert_eq!(json["reminders"]["overrides"][0]["minutes"], 5);
+    }
+
+    /// A weekly series with two deletions, timed in Berlin or of days.
+    fn series_new(all_day: bool) -> NewEvent {
+        let start = if all_day {
+            local_midnight(NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
+        } else {
+            Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap()
+        };
+        let week = chrono::Duration::days(7);
+        NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start,
+            end: if all_day {
+                start + chrono::Duration::days(1)
+            } else {
+                start + chrono::Duration::hours(1)
+            },
+            all_day,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=6".into(),
+                exceptions: vec![start + week, start + week * 3],
+                tzid: (!all_day).then(|| "Europe/Berlin".to_string()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["Lea <lea@example.com>".into()],
+            send_invitations: true,
+        }
+    }
+
+    #[test]
+    fn a_bare_series_body_writes_its_rule_and_no_deletion() {
+        for all_day in [false, true] {
+            let new = series_new(all_day);
+            let bare = serde_json::to_value(bare_series_body(
+                &new,
+                Some("0123456789abcdef0123456789abcdef"),
+            ))
+            .unwrap();
+            let full = serde_json::to_value(new_event_to_body(&new)).unwrap();
+            assert_eq!(
+                bare["recurrence"],
+                serde_json::json!(["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=6"]),
+                "{all_day}"
+            );
+            assert!(!bare.to_string().contains("EXDATE"), "{all_day}");
+            assert_eq!(bare["id"], "0123456789abcdef0123456789abcdef");
+            // Everything else as any create writes it.
+            for field in ["summary", "start", "end", "attendees", "reminders"] {
+                assert_eq!(bare[field], full[field], "{field} {all_day}");
+            }
+            // The plain create has no id of Aperio's, and writes its deletions.
+            assert!(full.get("id").is_none());
+            assert!(full["recurrence"].to_string().contains("EXDATE"));
+        }
+        // Without an id of Aperio's, Google chooses it.
+        let plain = serde_json::to_value(bare_series_body(&series_new(false), None)).unwrap();
+        assert!(plain.get("id").is_none());
+    }
+
+    #[test]
+    fn a_fresh_event_id_is_googles_base32hex() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let ids: std::collections::HashSet<String> =
+            (0..1000).map(|_| fresh_event_id(&mut rng)).collect();
+        assert_eq!(ids.len(), 1000);
+        for id in &ids {
+            assert_eq!(id.len(), 32, "{id}");
+            assert!(
+                id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='v')),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_invitee_without_an_address_invites_nobody() {
+        let mut new = series_new(false);
+        assert!(written_attendees(&new));
+        new.attendees = vec!["   ".into()];
+        assert!(!written_attendees(&new));
+        new.attendees.clear();
+        assert!(!written_attendees(&new));
     }
 
     #[test]
