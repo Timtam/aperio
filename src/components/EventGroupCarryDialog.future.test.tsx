@@ -584,11 +584,13 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
       fails: new Error('not reached'),
     };
     const onClose = vi.fn();
+    const onChanged = vi.fn();
     const { EventGroupCarryDialog } = await import('./EventGroupCarryDialog');
     const view = render(
       <EventGroupCarryDialog
         isOpen
         onClose={onClose}
+        onChanged={onChanged}
         group={withThird('family')}
         anchor={ANCHOR}
         before={STOOD}
@@ -605,7 +607,11 @@ describe('EventGroupCarryDialog → a copy whose series would lose occurrences (
     await new Promise((resolve) => setTimeout(resolve, 50));
     // The copy read before is written; the one after it is not read at all.
     expect(calls('get_event_by_id')).toHaveLength(1);
+    expect(calls('update_event')).toHaveLength(1);
     expect(onClose).not.toHaveBeenCalled();
+    // The views read again once that copy is written: the close made them
+    // read before.
+    expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
   it('asks once after the loop, by calendar, and on yes writes that copy again with the consent', async () => {

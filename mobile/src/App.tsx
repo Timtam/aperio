@@ -26,7 +26,6 @@ import { useSyncTriggers } from './api/syncTriggers';
 import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
-import { StepWriteWaitHost } from './components/StepWriteWaitHost';
 import { DeviceAccessGate } from './components/DeviceAccessGate';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
 import { SyncStatusButton } from './components/SyncStatusButton';
@@ -740,10 +739,6 @@ function AppContent() {
               all following / whole series"). App-global so the row handlers can
               open it imperatively; overlays whatever tab/editor is focused. */}
           <EventScopeDialogHost />
-          {/* The "please wait" dialog while a series is created in steps
-              (decisions 227, 265), opened by the editor, the carry and
-              Move/Copy. */}
-          <StepWriteWaitHost />
           {/* The root sync-status poll feeds the per-screen header indicator
               (the native tab bar has no slot for an extra custom control). */}
           <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>

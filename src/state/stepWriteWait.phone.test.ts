@@ -102,4 +102,43 @@ describe("the phone's step-write wait", () => {
     expect(log).toEqual(['open', 'close asked', 'gone']);
     unregister();
   });
+
+  it('opens in the screen on top, and in the one below once that screen is gone', async () => {
+    const { stepWriteWait, registerStepWriteWaitHost } = await bridge();
+    // The editor, and the carry it opened above it: each renders its own.
+    const below = recordingHost();
+    const above = recordingHost();
+    const unregisterBelow = registerStepWriteWaitHost(below.host);
+    const unregisterAbove = registerStepWriteWaitHost(above.host);
+    const first = stepWriteWait(true, async () => 1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    above.gone();
+    await expect(first).resolves.toBe(1);
+    expect(above.log).toEqual(['open', 'close asked', 'gone']);
+    expect(below.log).toEqual([]);
+    unregisterAbove();
+    const second = stepWriteWait(true, async () => 2);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    below.gone();
+    await expect(second).resolves.toBe(2);
+    expect(below.log).toEqual(['open', 'close asked', 'gone']);
+    unregisterBelow();
+  });
+
+  it('asks nothing more of a screen that went while its dialog was up', async () => {
+    const { stepWriteWait, registerStepWriteWaitHost, holdStepWriteWait } = await bridge();
+    const below = recordingHost();
+    const above = recordingHost();
+    const unregisterBelow = registerStepWriteWaitHost(below.host);
+    const unregisterAbove = registerStepWriteWaitHost(above.host);
+    const release = holdStepWriteWait();
+    await stepWriteWait(true, async () => undefined);
+    expect(above.log).toEqual(['open']);
+    // The carry is left mid-pass: its screen, and its dialog with it, are gone.
+    unregisterAbove();
+    await release();
+    expect(above.log).toEqual(['open']);
+    expect(below.log).toEqual([]);
+    unregisterBelow();
+  });
 });

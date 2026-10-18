@@ -51,6 +51,7 @@ import {
   type NewGroupMember,
 } from '../api/eventGroups';
 import { FormScrollView } from '../components/FormScrollView';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { showEventScopeDialog } from '../state/eventScopeDialog';
@@ -83,7 +84,23 @@ type CarryOutcome =
    *  was refused. Said, and left on screen, with nothing to try again. */
   | { kind: 'written'; done: number };
 
-export default function EventGroupCarryModal({
+/**
+ * The carry to the copies, and beside it the wait of a write in steps
+ * (decisions 227, 265): on iOS a dialog presents from the screen it is
+ * rendered in, and one at the app root could not present over this sheet.
+ * Beside the screen's content, not in it, so it stays mounted whichever view
+ * the content shows.
+ */
+export default function EventGroupCarryModal(props: RootStackScreenProps<'EventGroupCarry'>) {
+  return (
+    <>
+      <EventGroupCarryScreen {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function EventGroupCarryScreen({
   route,
   navigation,
 }: RootStackScreenProps<'EventGroupCarry'>) {

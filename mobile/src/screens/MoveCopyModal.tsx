@@ -25,6 +25,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   moveOrCopyEvent,
@@ -53,7 +54,22 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // current container marked.
 
 
-export default function MoveCopyModal({
+/**
+ * Move/Copy, and beside it the wait of a write in steps (decisions 227, 265):
+ * on iOS a dialog presents from the screen it is rendered in, and one at the
+ * app root could not present over this sheet. Beside the screen's content, not
+ * in it, so it stays mounted whichever view the content shows.
+ */
+export default function MoveCopyModal(props: RootStackScreenProps<'MoveCopy'>) {
+  return (
+    <>
+      <MoveCopyScreen {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function MoveCopyScreen({
   route,
   navigation,
 }: RootStackScreenProps<'MoveCopy'>) {

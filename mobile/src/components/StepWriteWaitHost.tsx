@@ -24,7 +24,10 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // 265). It has no button, and neither the back button nor a tap outside closes
 // it: the write it waits for cannot be left halfway. Screen-reader focus lands
 // on its sentence when it shows. The imperative opener lives in
-// ../state/stepWriteWait; this is the render host, mounted once at the app root.
+// ../state/stepWriteWait; this is the render host. Each screen that writes in
+// steps renders one beside its content: on iOS a dialog presents from the
+// screen it is rendered in, and one at the app root could not present over a
+// screen shown as a sheet.
 //
 // Its close settles only once it is gone: on iOS after the Modal's onDismiss —
 // iOS refuses to present or dismiss while a dismissal is still running, and

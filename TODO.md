@@ -1521,6 +1521,23 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **iPhone: Dialoge an der App-Wurzel über einem Blatt.** Ein RN-Modal
+      erscheint auf iOS über dem Bildschirm, in dem es steht
+      (`reactViewController`). Die Editoren, Verschieben/Kopieren und das
+      Mitziehen sind Blätter (`presentation: 'modal'`), die die Wurzel
+      bereits zeigt. Ein Modal an der Wurzel erscheint darüber vermutlich
+      gar nicht: UIKit lehnt ein zweites Zeigen ab. Betroffen sind zwei
+      Stellen. `EventScopeDialogHost` (mobile/src/App.tsx) stellt die
+      Bereichsfrage beim Löschen im Termin-Editor (seit 16928a03) und die
+      Verlust-Frage beim Teilen und Mitziehen (251, #123, #124). Und das
+      Deckblatt der App-Sperre (`AppLockGate`) erscheint dann nicht über
+      einem offenen Editor, sodass dessen Inhalt sichtbar bliebe. Zuerst am
+      Gerät prüfen: Erscheint im Editor eines Serientermins beim Löschen die
+      Frage „Nur dieses / dieses und alle folgenden / alle“? Wenn nicht, wie
+      den Wartedialog in #127 im Bildschirm selbst zeigen (ein Host je
+      Bildschirm, der oberste gewinnt); für das Deckblatt vom obersten
+      gezeigten Controller aus. Gefunden in der sechsten Prüfrunde von #127
+      (2026-10-18), älter als #127.
 - [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
       `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die

@@ -695,8 +695,11 @@ export function EventGroupCarryDialog({
     }
     if (!open.current) {
       // Gone before the pass ended: a copy that may now show twice is still
-      // said (210), as nothing else will.
+      // said (210), as nothing else will. And the views read again: closing
+      // the dialog made them read before the last copy and the grouping were
+      // written.
       if (unsure.length > 0) announce(unsure.join(' '));
+      onChanged?.();
       return;
     }
     setCreatedRows(created);

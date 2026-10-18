@@ -2,9 +2,11 @@
 // steps (decisions 227, 265): Exchange takes a new series without its deleted
 // occurrences, and the adapter deletes them again one by one, which can take up
 // to half a minute. The editor, the carry and Move/Copy call `stepWriteWait`
-// around such a write; the single <StepWriteWaitHost /> mounted at the app root
-// renders the dialog. Kept apart from the host COMPONENT so that file only
-// exports a component (Fast Refresh). Mirrors the desktop's useStepWriteWait.
+// around such a write, and each renders its own <StepWriteWaitHost /> inside
+// its screen: on iOS a dialog presents from the screen it is rendered in, and
+// one rendered at the app root could not present over a screen shown as a
+// sheet. Kept apart from the host COMPONENT so that file only exports a
+// component (Fast Refresh). Mirrors the desktop's useStepWriteWait.
 
 import type { StepWriteWait } from '@aperio/shared';
 
@@ -16,22 +18,30 @@ export interface StepWriteWaitHost {
   close: () => Promise<void>;
 }
 
-let host: StepWriteWaitHost | null = null;
-let opened = false;
+// Every mounted host, in the order they mounted. A screen opens above the one
+// that opened it and mounts after it, so the last is the screen on top: the
+// one whose write this is.
+const hosts: StepWriteWaitHost[] = [];
+/** The host the dialog is open in, until it is closed. */
+let openIn: StepWriteWaitHost | null = null;
 let held = 0;
 
-/** The host registers itself here; returns an unsubscribe. */
+/** A host registers itself here; returns an unsubscribe. */
 export function registerStepWriteWaitHost(next: StepWriteWaitHost): () => void {
-  host = next;
+  hosts.push(next);
   return () => {
-    if (host === next) host = null;
+    const at = hosts.lastIndexOf(next);
+    if (at !== -1) hosts.splice(at, 1);
+    // Gone with its screen, and its dialog with it: nothing is left to close.
+    if (openIn === next) openIn = null;
   };
 }
 
 async function closeIfOpen(): Promise<void> {
-  if (!opened) return;
-  opened = false;
-  await host?.close();
+  const host = openIn;
+  if (host == null) return;
+  openIn = null;
+  await host.close();
 }
 
 /**
@@ -40,10 +50,11 @@ async function closeIfOpen(): Promise<void> {
  * a mounted host the write just runs.
  */
 export const stepWriteWait: StepWriteWait = async (inSteps, write) => {
-  if (!inSteps || host == null) return write();
-  if (!opened) {
-    opened = true;
-    host.open();
+  const top = hosts[hosts.length - 1];
+  if (!inSteps || (openIn == null && top == null)) return write();
+  if (openIn == null && top != null) {
+    openIn = top;
+    top.open();
   }
   if (held > 0) return write();
   try {

@@ -110,6 +110,7 @@ import {
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import { HeaderCancelButton } from '../components/HeaderCancelButton';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
@@ -197,7 +198,22 @@ const SCOPE_TITLE_KEY = {
  */
 class CloseOnlyNotice extends Error {}
 
-export default function EventEditorModal({
+/**
+ * The event editor, and beside it the wait of a write in steps (decisions 227,
+ * 265): on iOS a dialog presents from the screen it is rendered in, and one at
+ * the app root could not present over this sheet. Beside the screen's content,
+ * not in it, so it stays mounted whichever view the content shows.
+ */
+export default function EventEditorModal(props: RootStackScreenProps<'EventEditor'>) {
+  return (
+    <>
+      <EventEditorScreen {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function EventEditorScreen({
   route,
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
