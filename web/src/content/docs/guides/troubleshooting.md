@@ -283,9 +283,9 @@ series, and nothing else:
   usual time, with the series' title, place and time. After a move its own
   change is gone with the old series; after a copy or a duplicate it stays in
   the old one.
-- Moved or copied into Exchange or Microsoft 365, or duplicated there, the new
-  series shows deleted occurrences again for now: Exchange and Microsoft 365
-  take no deletions when a series is created.
+- Moved or copied into Exchange or Microsoft 365, or duplicated in Exchange,
+  the new series shows deleted occurrences again for now: Exchange and
+  Microsoft 365 take no deletions when a series is created.
 - From a Google calendar, Aperio knows deleted occurrences from about three
   months before today to a year after. One deleted further away is back in the
   new series.

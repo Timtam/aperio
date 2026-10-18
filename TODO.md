@@ -1481,6 +1481,22 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Neuer Beginn verliert die Löschung eines ersten Termins neben der
+      Regel.** Eine Serie, deren Beginn nicht auf ihrer eigenen Regel liegt
+      (an einem Montag angelegt, wiederholt mittwochs; Anbieter zeigen den
+      Montag), deren erster Termin gelöscht ist, verliert diese Löschung,
+      wenn der Editor sie mit neuem Beginn, neuer Ganztägig-Wahl oder einer
+      Regel von einem anderen Beginn schreibt (198), mit oder ohne
+      Kalenderwechsel: `tailRecurrenceFor` platziert die Löschungen über die
+      Plätze, die `expandEvent` (rrule.js) erzeugt, und rrule.js erzeugt
+      einen Beginn neben der Regel nicht; `cal_core::tail_exceptions` lässt
+      eine Löschung ohne alten Platz fallen. Im neuen Kalender oder nach dem
+      Speichern ist der gelöschte Montag wieder da. Abhilfe: beim Ganzen ab
+      dem eigenen Beginn (`whole`) den Beginn als ersten Platz beider Serien
+      mitgeben. Verschieben, Kopieren und Duplizieren betrifft es nicht
+      (#126: dort bleibt jede Löschung, wo sie ist). Gefunden in der dritten
+      Prüfrunde von #126 (2026-10-18), älter als #126.
+
 - [ ] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
       in Aperio auf UTC.** Kennt die Windows-Zonentabelle die
       StartTimeZone-Id nicht (eine tzdata-Id wie „Europe/Berlin“, 236, oder

@@ -250,7 +250,7 @@ Feld mit `Tab` erreichst.
 > Serie an, und gelöschte Termine löscht Aperio danach selbst wieder.
 
 > **Eine Serie in einem anderen Kalender, kopiert oder dupliziert:**
-> Verschiebst du eine ganze Serie in einen anderen Kalender, kopierst oder
+> Verschiebst du eine ganze Serie in einen anderen Kalender, kopierst du sie,
 > duplizierst du sie mit `Strg+D` oder gibst ihr im Editor einen anderen
 > Kalender, schreibt Aperio sie dort als neue Serie. Sie nimmt die gelöschten
 > Termine der alten mit, sonst nichts: Ein einzeln geänderter Termin, etwa in
@@ -258,9 +258,10 @@ Feld mit `Tab` erreichst.
 > `Strg+D` auf einem Termin einer Serie dupliziert die ganze Serie ab ihrem
 > ersten Termin, im selben Kalender. Eine Kopie oder ein Duplikat behält die
 > Zeitzone der Serie. Nach Exchange oder Microsoft 365 verschoben oder kopiert,
-> oder dort dupliziert, zeigt die neue Serie gelöschte Termine vorerst wieder.
-> Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
-> Monaten vor heute bis ein Jahr danach (siehe Fehlerbehebung).
+> oder in Exchange dupliziert, zeigt die neue Serie gelöschte Termine vorerst
+> wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa
+> drei Monaten vor heute bis ein Jahr danach (siehe
+> [Fehlersuche & Protokolle](/de/guides/troubleshooting/#nach-dem-verschieben-kopieren-oder-duplizieren-einer-serie-ist-ein-termin-wieder-da)).
 
 > **Einen schon geänderten Termin wieder ändern:** Ein Termin einer Serie, der
 > in der App des Kalenders (iCloud, Google, Exchange) für sich geändert wurde,

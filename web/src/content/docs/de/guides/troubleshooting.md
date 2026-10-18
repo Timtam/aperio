@@ -302,7 +302,7 @@ der alten Serie mit, sonst nichts:
   wieder da, mit Titel, Ort und Uhrzeit der Serie. Nach dem Verschieben ist
   seine eigene Änderung mit der alten Serie weg; nach dem Kopieren oder
   Duplizieren bleibt sie in der alten.
-- Nach Exchange oder Microsoft 365 verschoben oder kopiert, oder dort
+- Nach Exchange oder Microsoft 365 verschoben oder kopiert, oder in Exchange
   dupliziert, zeigt die neue Serie gelöschte Termine vorerst wieder: Exchange
   und Microsoft 365 nehmen beim Anlegen einer Serie keine Löschungen an.
 - Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
