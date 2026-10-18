@@ -12,6 +12,13 @@ pub enum GoogleError {
     #[error("network error: {0}")]
     Network(String),
 
+    /// A request that never left: no connection could be made, or the
+    /// request could not be built. Nothing reached Google, unlike
+    /// [`GoogleError::Network`], where an answer was lost and the request
+    /// may have been carried out.
+    #[error("network error: {0}")]
+    Unreached(String),
+
     /// Unexpected HTTP status from a Google API call. Carries the
     /// status code so the trait-impl mapping can route 401 to
     /// re-authentication and 404 to "calendar gone".
@@ -50,13 +57,25 @@ pub enum GoogleError {
     /// invalid — empty client_id, malformed URL, etc.
     #[error("invalid configuration: {0}")]
     Config(String),
+
+    /// A new series was created, its deleted occurrences could not all be
+    /// cancelled (decisions 202, 203), and it was deleted again (`undone`) or
+    /// could not be (`!undone`, it may stand). `detail` is
+    /// [`cal_core::step_detail`]. Mapped to a refusal or a leftover, never to
+    /// an error a caller reads as "never landed" when something may stand.
+    #[error("the new series kept not its deleted occurrences ({detail})")]
+    NotKept { undone: bool, detail: String },
 }
 
 pub type GoogleResult<T> = std::result::Result<T, GoogleError>;
 
 impl From<reqwest::Error> for GoogleError {
     fn from(err: reqwest::Error) -> Self {
-        GoogleError::Network(err.to_string())
+        if err.is_connect() || err.is_builder() {
+            GoogleError::Unreached(err.to_string())
+        } else {
+            GoogleError::Network(err.to_string())
+        }
     }
 }
 

@@ -1191,6 +1191,18 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_server_that_cannot_be_reached_got_nothing() {
+        // Nothing listens on port 1: the connection is refused, so the
+        // request never left.
+        let state = fixture_state("http://127.0.0.1:1");
+        let err = state
+            .get_json::<serde_json::Value>("/calendars/primary/events")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GoogleError::Unreached(_)), "{err:?}");
+    }
+
     fn fixture_state(server_url: &str) -> ApiState {
         ApiState {
             tokens: Arc::new(Mutex::new(TokenSet {

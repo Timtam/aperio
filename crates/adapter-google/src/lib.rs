@@ -781,7 +781,15 @@ fn server_reason(body: &str) -> Option<String> {
 fn to_core_error(err: GoogleError) -> CoreError {
     use GoogleError::*;
     match err {
-        Network(m) => CoreError::Network(m),
+        Network(m) | Unreached(m) => CoreError::Network(m),
+        NotKept {
+            undone: true,
+            detail,
+        } => CoreError::Forbidden(cal_core::WriteRefusal::DeletionsNotKept.message(&detail)),
+        NotKept {
+            undone: false,
+            detail,
+        } => CoreError::Network(cal_core::WriteLeftover::CreatedMayStand.message(&detail)),
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -875,6 +883,40 @@ mod delta_tests {
 
     /// The error keeps only the first 300 characters of an answer, so a
     /// realistic envelope arrives cut: its reason is still read.
+    #[test]
+    fn a_series_not_kept_is_a_refusal_or_a_leftover() {
+        // Deleted again: nothing stands, a refusal the shells read as such.
+        match to_core_error(GoogleError::NotKept {
+            undone: true,
+            detail: "invited time".into(),
+        }) {
+            CoreError::Forbidden(msg) => assert_eq!(
+                cal_core::WriteRefusal::parse(&msg),
+                Some((cal_core::WriteRefusal::DeletionsNotKept, "invited time"))
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // Not deleted again: it may stand, never a refusal.
+        match to_core_error(GoogleError::NotKept {
+            undone: false,
+            detail: "create-answer-lost".into(),
+        }) {
+            CoreError::Network(msg) => assert_eq!(
+                cal_core::WriteLeftover::parse(&msg),
+                Some((
+                    cal_core::WriteLeftover::CreatedMayStand,
+                    "create-answer-lost"
+                ))
+            ),
+            other => panic!("expected a leftover, got {other:?}"),
+        }
+        // A request that never left is a plain network error.
+        assert!(matches!(
+            to_core_error(GoogleError::Unreached("refused".into())),
+            CoreError::Network(_)
+        ));
+    }
+
     #[test]
     fn the_reason_is_read_from_a_cut_answer() {
         let long = "The recurrence rule does not generate an occurrence on the start date \
