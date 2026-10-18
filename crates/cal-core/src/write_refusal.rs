@@ -75,6 +75,18 @@ pub enum WriteRefusal {
     /// changed and how many deleted occurrences would be lost, `slot:2:1`;
     /// the surfaces ask with it and send the write again with the consent.
     ExceptionsWouldBeLost,
+    /// A new series was written, its deleted occurrences could not all be
+    /// deleted from it again one by one, and it was deleted itself, so nothing
+    /// stands and the old series is as it was (decisions 202, 203). Unlike the
+    /// other refusals something was written for a moment: the series sits in
+    /// the provider's deleted items, and where the detail says
+    /// [`crate::step_write::INVITED`] its invitees were invited and got its
+    /// cancellation too (212). The detail is
+    /// [`crate::step_write::step_detail`]: a machine token for the log —
+    /// `no-occurrence`, `foreign-deletion`, `control`, `after-control`, `time`,
+    /// `invitation`, or the provider's own code —, marked when the invitees
+    /// may have heard of it.
+    DeletionsNotKept,
 }
 
 /// What an update writes again that makes a provider drop a series' changed
@@ -144,6 +156,7 @@ impl WriteRefusal {
             Self::DayZoneUnreadable => "day-zone-unreadable",
             Self::CopyUnreadable => "copy-unreadable",
             Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
+            Self::DeletionsNotKept => "deletions-not-kept",
         }
     }
 
@@ -189,6 +202,7 @@ impl WriteRefusal {
             Self::DayZoneUnreadable,
             Self::CopyUnreadable,
             Self::ExceptionsWouldBeLost,
+            Self::DeletionsNotKept,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -254,6 +268,7 @@ mod tests {
             WriteRefusal::DayZoneUnreadable,
             WriteRefusal::CopyUnreadable,
             WriteRefusal::ExceptionsWouldBeLost,
+            WriteRefusal::DeletionsNotKept,
         ] {
             let msg = refusal.message("detail");
             assert_eq!(

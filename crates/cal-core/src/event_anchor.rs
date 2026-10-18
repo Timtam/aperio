@@ -275,31 +275,34 @@ pub fn plan_repairs(
 /// half this was ported from carries the same limit, written down the same
 /// way.
 ///
-/// **The day is read 13:45 into the stored instant, without a zone.** A local
-/// midnight in any zone in (−10:15, +13:45] gets its own date that way, so a
-/// row signed on one device and read on another, or after the device moved,
-/// finds its day; outside the window a device's rows and events still agree,
-/// one day off on both sides. Deriving the calendar day the user sees exactly
+/// **The day is read 13:45 into the stored instant, without a zone**
+/// ([`all_day_slot_day`]). Deriving the calendar day the user sees exactly
 /// would need the device's timezone, which the core may never read.
 fn starts_the_same(ev: &Event, wanted: DateTime<Utc>) -> bool {
     if ev.all_day {
-        // An all-day start is a local midnight, and a device in another zone
-        // writes the same day as another instant: Berlin's 2 June is 22:00 UTC
-        // on 1 June, New York's 04:00 UTC on 2 June. Both name their day 13:45
-        // into it, as does a midnight of any zone in (−10:15, +13:45] (decision
-        // 217) — New Zealand's and the Chatham Islands' both offsets, Hawaii
-        // and Adak, London's both, so no zone that keeps summer time sees its
-        // last winter day and first summer day under one key. Read by its UTC
-        // date, Berlin's named 1 June, and a row signed in Berlin missed its
-        // day in New York or found the day before; read 12 hours in, New
-        // Zealand's summer named the day before. Outside the window (Niue,
-        // Pago Pago, Kiritimati, none with summer time) a device's own rows
-        // still agree with its events, one day off on both sides.
-        let day = |at: DateTime<Utc>| (at + chrono::Duration::minutes(13 * 60 + 45)).date_naive();
-        day(ev.start) == day(wanted)
+        all_day_slot_day(ev.start) == all_day_slot_day(wanted)
     } else {
         ev.start == wanted
     }
+}
+
+/// The day an all-day instant names, whichever zone's midnight spells it: the
+/// UTC date 13:45 into it.
+///
+/// An all-day start is a local midnight, and a device in another zone writes
+/// the same day as another instant: Berlin's 2 June is 22:00 UTC on 1 June,
+/// New York's 04:00 UTC on 2 June, a provider's UTC midnight 00:00 on 2 June.
+/// All name their day 13:45 into it, as does a midnight of any zone in
+/// (−10:15, +13:45] (decision 217) — New Zealand's and the Chatham Islands'
+/// both offsets, Hawaii and Adak, London's both, so no zone that keeps summer
+/// time sees its last winter day and first summer day under one key. Read by
+/// its UTC date, Berlin's named 1 June, and a row signed in Berlin missed its
+/// day in New York or found the day before; read 12 hours in, New Zealand's
+/// summer named the day before. Outside the window (Niue, Pago Pago,
+/// Kiritimati, none with summer time) a device's own instants still agree with
+/// each other, one day off on both sides.
+pub fn all_day_slot_day(at: DateTime<Utc>) -> chrono::NaiveDate {
+    (at + chrono::Duration::minutes(13 * 60 + 45)).date_naive()
 }
 
 #[cfg(test)]

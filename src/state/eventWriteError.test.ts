@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   eventWriteErrorMessage,
   eventWriteFailureReason,
+  eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
+  stepDetail,
+  writeErrorMessage,
   writeNeverLanded,
 } from '@aperio/shared';
+import outcome from '../../crates/cal-core/tests/fixtures/writeOutcome.json';
 import i18n from '../i18n';
 
 /**
@@ -298,5 +302,90 @@ describe('any write on the phone, not only the event editor', () => {
       'Diese Änderung schreibt Beginn und Ende der Serie neu. Exchange verwirft dabei 2 Vorkommen, ' +
         'die einzeln geändert wurden: Sie nehmen wieder die Angaben der Serie an. Es wurde nichts geändert.',
     );
+  });
+});
+
+describe('a new series written in steps (decisions 202-213, 263-266)', () => {
+  const de = i18n.getFixedT('de');
+  const en = i18n.getFixedT('en');
+
+  it('reads the shared rows as the core does', () => {
+    expect(outcome.rows.length).toBeGreaterThanOrEqual(8);
+    for (const row of outcome.rows) {
+      const refusal = eventWriteRefusal(command('network', row.message));
+      const leftover = eventWriteLeftover(command('network', row.message));
+      expect(refusal?.refusal ?? null, row.message).toBe(row.refusal);
+      expect(leftover?.leftover ?? null, row.message).toBe(row.leftover);
+      const detail = refusal?.detail ?? leftover?.detail;
+      expect(detail === undefined ? null : stepDetail(detail).why, row.message).toBe(row.why);
+      expect(detail !== undefined && stepDetail(detail).invited, row.message).toBe(row.invited);
+    }
+  });
+
+  it('says a series taken back in words, with the cancellation where invitees were invited', () => {
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: no-occurrence'), t)).toBe(
+      'Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat ' +
+        'Aperio sie wieder entfernt. Es wurde nichts geändert.',
+    );
+    expect(
+      eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: invited after-control'), t),
+    ).toBe(
+      'Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat ' +
+        'Aperio sie wieder entfernt. Es wurde nichts geändert. Falls Einladungen verschickt wurden, ' +
+        'haben die Eingeladenen auch die Absage bekommen.',
+    );
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: time'), t)).toMatch(
+      /^Die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert/,
+    );
+    // A machine word never reaches the reader.
+    const message = eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: invited time'), t);
+    expect(message).not.toMatch(/deletions|invited|time\b/);
+    expect(writeNeverLanded(command('forbidden', 'deletions-not-kept: x'))).toBe(true);
+    expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: x'), t)).toBe(
+      'der Kalender hat ihre gelöschten Termine nicht übernommen',
+    );
+  });
+
+  it('says a series that may stand, behind the wrapper too, and never as nothing written', () => {
+    const phone = new Error(
+      "Calling the 'createEventJson' function has failed\n→ Caused by: created-may-stand: invited time",
+    );
+    const desktop = command('network', 'created-may-stand: create-answer-lost');
+    expect(eventWriteLeftover(phone)).toEqual({
+      leftover: 'created-may-stand',
+      key: 'dialogs.event.writeError.createdMayStand',
+      detail: 'invited time',
+      invited: true,
+    });
+    expect(eventWriteErrorMessage(phone, t)).toBe(
+      'Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio ' +
+        'konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den ' +
+        'Kalender. Möglicherweise haben die Eingeladenen eine Einladung bekommen.',
+    );
+    expect(eventWriteErrorMessage(desktop, t)).not.toMatch(/Eingeladenen/);
+    expect(writeErrorMessage(phone, t)).toBe(eventWriteErrorMessage(phone, t));
+    expect(eventWriteFailureReason(desktop, t)).toBe(
+      'eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen',
+    );
+    // Whatever code carried it: what may stand was written.
+    for (const code of ['network', 'forbidden', 'conflict', 'not_found']) {
+      expect(writeNeverLanded(command(code, 'created-may-stand: x')), code).toBe(false);
+    }
+  });
+
+  it('has every sentence in both languages', () => {
+    for (const key of [
+      'dialogs.event.writeError.deletionsNotKept',
+      'dialogs.event.writeError.deletionsNotKeptTime',
+      'dialogs.event.writeError.invitationsCancelledToo',
+      'dialogs.event.writeError.createdMayStand',
+      'dialogs.event.writeError.invitationsMayHaveGone',
+      'dialogs.event.writeError.reason.deletionsNotKept',
+      'dialogs.event.writeError.reason.createdMayStand',
+    ]) {
+      expect(i18n.exists(key, { lng: 'de' }), key).toBe(true);
+      expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
+      expect(de(key)).not.toBe(en(key));
+    }
   });
 });

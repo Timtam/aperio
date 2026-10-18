@@ -1,4 +1,9 @@
-import { eventWriteErrorMessage, eventWriteRefusal, exceptionsLossOf } from './eventWriteError';
+import {
+  eventWriteErrorMessage,
+  eventWriteLeftover,
+  eventWriteRefusal,
+  exceptionsLossOf,
+} from './eventWriteError';
 
 /**
  * The message to put in front of a person when something failed.
@@ -31,6 +36,10 @@ export function writeErrorMessage(err: unknown, t: Translate): string {
   // A save that would drop occurrences of a series says what and how many, as
   // the event editors do (decisions 243-253).
   if (exceptionsLossOf(err)) return eventWriteErrorMessage(err, t);
+  // A new series that could be neither completed nor removed again, and one
+  // that was removed again, say so as the editors do (decisions 203, 210).
+  if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
   const refusal = eventWriteRefusal(err);
+  if (refusal?.refusal === 'deletions-not-kept') return eventWriteErrorMessage(err, t);
   return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
 }

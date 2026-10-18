@@ -7,6 +7,7 @@
 // Before this, a blind user heard "forbidden: reply-only-invitation: title"
 // read out in English whatever language the app ran in.
 
+import type { WriteLeftover } from './generated/WriteLeftover';
 import type { WriteRefusal } from './generated/WriteRefusal';
 import {
   exceptionsLossSentences,
@@ -27,6 +28,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'day-zone-unreadable': 'dialogs.event.writeError.dayZoneUnreadable',
   'copy-unreadable': 'dialogs.event.writeError.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.exceptionsWouldBeLost',
+  'deletions-not-kept': 'dialogs.event.writeError.deletionsNotKept',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -43,7 +45,41 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'day-zone-unreadable': 'dialogs.event.writeError.reason.dayZoneUnreadable',
   'copy-unreadable': 'dialogs.event.writeError.reason.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.reason.exceptionsWouldBeLost',
+  'deletions-not-kept': 'dialogs.event.writeError.reason.deletionsNotKept',
 };
+
+/** The sentence each leftover reads as (`cal_core::WriteLeftover`): something
+ *  was written and may still stand. Typed by the generated union, as above. */
+const LEFTOVER_KEYS: Record<WriteLeftover, string> = {
+  'created-may-stand': 'dialogs.event.writeError.createdMayStand',
+};
+
+/** The same leftovers as a reason alone. */
+const LEFTOVER_REASON_KEYS: Record<WriteLeftover, string> = {
+  'created-may-stand': 'dialogs.event.writeError.reason.createdMayStand',
+};
+
+const LEFTOVER_TOKENS = Object.keys(LEFTOVER_KEYS) as WriteLeftover[];
+
+/** The word a step-wise write's detail starts with when the invitees may have
+ *  heard of it (`cal_core::step_write::INVITED`). */
+const INVITED = 'invited';
+
+/** The reason a step-wise write gives when its steps took too long
+ *  (`cal_core::step_write::OUT_OF_TIME`). */
+const OUT_OF_TIME = 'time';
+
+/**
+ * The detail of a write that settles in steps (`cal_core::step_detail`): its
+ * reason, a machine word for the log, and whether the invitees may have heard
+ * of it — an invitation went out, so a take-back sent its cancellation too
+ * (decisions 212, 264), or what may stand may stand in their calendars (228).
+ */
+export function stepDetail(detail: string): { invited: boolean; why: string } {
+  const words = detail.trim().split(/\s+/).filter(Boolean);
+  const invited = words[0] === INVITED;
+  return { invited, why: (invited ? words.slice(1) : words).join(' ') };
+}
 
 /** An error as the hosts hand it over: a code and a message. */
 export interface CodedError {
@@ -103,6 +139,32 @@ export function eventWriteRefusal(
 }
 
 /**
+ * What a failed write may have left behind, whatever error carried it: a new
+ * series that could neither be completed nor removed again (decisions 203,
+ * 210). It always travels as a network error, never as a refusal — a caller
+ * that read it as "nothing landed" would undo the rest of a write whose new
+ * part stands.
+ */
+export function eventWriteLeftover(
+  err: unknown,
+): { leftover: WriteLeftover; key: string; detail: string; invited: boolean } | null {
+  const message = errorMessageText(err).trim();
+  for (const leftover of LEFTOVER_TOKENS) {
+    if (!message.startsWith(leftover)) continue;
+    const rest = message.slice(leftover.length);
+    if (rest !== '' && !rest.startsWith(':')) continue;
+    const detail = rest.slice(1).trim();
+    return {
+      leftover,
+      key: LEFTOVER_KEYS[leftover],
+      detail,
+      invited: stepDetail(detail).invited,
+    };
+  }
+  return null;
+}
+
+/**
  * The loss a refused save asks about (decisions 243-253): what it would
  * rewrite and how many occurrences it would lose; `null` for any other error.
  */
@@ -139,6 +201,8 @@ const REFUSED_CODES = new Set([
  * write that went through.
  */
 export function writeNeverLanded(err: unknown): boolean {
+  // Something stands that could not be taken back, whatever code carried it.
+  if (eventWriteLeftover(err)) return false;
   if (eventWriteRefusal(err)) return true;
   const code = codedError(err)?.code;
   return code != null && REFUSED_CODES.has(code);
@@ -161,10 +225,10 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
   if (loss) {
     return t('dialogs.event.writeError.exceptionsWouldBeLostDetail', exceptionsLossSentences(loss, t));
   }
+  const leftover = eventWriteLeftover(err);
+  if (leftover) return leftoverSentence(leftover, t);
   const refusal = eventWriteRefusal(err);
-  if (refusal) {
-    return t(refusal.key, { detail: refusal.detail });
-  }
+  if (refusal) return refusalSentence(refusal, t);
   const known = codedError(err);
   if (known?.code === 'forbidden') {
     return t('dialogs.event.writeError.forbidden', { detail: errorMessageText(err) });
@@ -185,6 +249,8 @@ export function eventWriteErrorMessage(err: unknown, t: Translate): string {
  * the sentence that says so must not say the opposite in the middle.
  */
 export function eventWriteFailureReason(err: unknown, t: Translate): string {
+  const leftover = eventWriteLeftover(err);
+  if (leftover) return t(LEFTOVER_REASON_KEYS[leftover.leftover]);
   const refusal = eventWriteRefusal(err);
   if (refusal) {
     return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
@@ -197,4 +263,35 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
     return t('dialogs.event.writeError.reason.changedOnServer');
   }
   return eventWriteErrorMessage(err, t);
+}
+
+/**
+ * A refusal's sentence. A new series taken back after its deleted occurrences
+ * could not all be deleted again (decision 203) says why in words — a machine
+ * reason never reaches the reader — and, where an invitation may have gone
+ * out, that its cancellation went too (212).
+ */
+function refusalSentence(
+  refusal: { refusal: WriteRefusal; key: string; detail: string },
+  t: Translate,
+): string {
+  if (refusal.refusal !== 'deletions-not-kept') {
+    return t(refusal.key, { detail: refusal.detail });
+  }
+  const { invited, why } = stepDetail(refusal.detail);
+  const sentence =
+    why === OUT_OF_TIME ? t('dialogs.event.writeError.deletionsNotKeptTime') : t(refusal.key);
+  return invited ? `${sentence} ${t('dialogs.event.writeError.invitationsCancelledToo')}` : sentence;
+}
+
+/** A leftover's sentence, and where the invitees may have heard of the write,
+ *  that they may hold an invitation (228). */
+function leftoverSentence(
+  leftover: { key: string; invited: boolean },
+  t: Translate,
+): string {
+  const sentence = t(leftover.key);
+  return leftover.invited
+    ? `${sentence} ${t('dialogs.event.writeError.invitationsMayHaveGone')}`
+    : sentence;
 }
