@@ -64,6 +64,8 @@ import {
   cutoffDay,
 } from '../intl/recurrence';
 import {
+  asNewSeries,
+  newSeriesRecurrence,
   describeRecurrence,
   eventPrefillFrom,
   findOffer,
@@ -1866,20 +1868,30 @@ export function EventDialog({
           // its zone follows the kind (191, 195). Its start stays where the
           // edit put it, off its own rule too, as providers show such a start.
           // Untouched, the recurrence stays as it is: a new title respells no
-          // exception.
-          const wholePlan =
-            !wholeFromCut &&
-            series.recurrence?.rrule &&
-            (Date.parse(times.start) !== Date.parse(series.start) ||
-              form.allDay !== series.all_day ||
-              // A rule the user set at another start moves to this one.
-              (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start)))
-              ? planSeriesSplit(
-                  series,
-                  series.start,
-                  (await readSeriesRows(series, series.start, getSeriesRows)).rows,
-                )
+          // exception. Another calendar writes the series there as a NEW one
+          // (224, 259), with its real deletions only, so an occurrence changed
+          // elsewhere comes back at its usual time instead of travelling as a
+          // deletion: moved by the plan, the plan says so (`asNewSeries`);
+          // otherwise its real deletions (`newSeriesRecurrence`) go the way the
+          // exceptions go, where they are or at a new time of day.
+          const movesCalendar = form.calendarId !== event.calendar_id;
+          const rewritesFromStart =
+            Date.parse(times.start) !== Date.parse(series.start) ||
+            form.allDay !== series.all_day ||
+            // A rule the user set at another start moves to this one.
+            (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
+          const seriesRows =
+            !wholeFromCut && series.recurrence?.rrule && (rewritesFromStart || movesCalendar)
+              ? (await readSeriesRows(series, series.start, getSeriesRows)).rows
               : null;
+          const wholePlan =
+            seriesRows && rewritesFromStart
+              ? planSeriesSplit(series, series.start, seriesRows)
+              : null;
+          const keptRecurrence =
+            movesCalendar && seriesRows
+              ? newSeriesRecurrence({ ...series, recurrence: seriesRecurrence }, seriesRows)
+              : seriesRecurrence;
           const updated: CalendarEvent = {
             ...series,
             id: seriesId,
@@ -1901,7 +1913,7 @@ export function EventDialog({
                   {
                     master: wholeFromCut.master,
                     cutoffIso: wholeFromCut.occIso,
-                    plan: wholeFromCut.plan,
+                    plan: movesCalendar ? asNewSeries(wholeFromCut.plan) : wholeFromCut.plan,
                     tail: { start: times.start, all_day: form.allDay },
                   },
                   // Read as a change to the series from its cut, as its start is.
@@ -1913,14 +1925,14 @@ export function EventDialog({
                     {
                       master: series,
                       cutoffIso: series.start,
-                      plan: wholePlan,
+                      plan: movesCalendar ? asNewSeries(wholePlan) : wholePlan,
                       tail: { start: times.start, all_day: form.allDay },
                     },
                     series.start,
                     { from: series.start, refused: 'series', whole: true },
                   )
                 : exceptionsAtSeriesTime(
-                    seriesRecurrence,
+                    keptRecurrence,
                     series.start,
                     times.start,
                     form.allDay || series.all_day,

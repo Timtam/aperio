@@ -458,6 +458,27 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
+      weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
+      anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
+      Editor in einen anderen Kalender gespeichert, bekommt genau ihre echten
+      Löschungen mit (`newSeriesRecurrence`, dieselbe Regel wie beim Teilen).
+      Ein einzeln geänderter Termin, etwa in Outlook, kommt zu seiner üblichen
+      Zeit zurück, statt in der neuen Serie gelöscht zu sein. Jede Löschung
+      bleibt an ihrem Platz, wie sie geschrieben war, weil sich Beginn und
+      Regel nicht ändern; nur wenn der Editor zugleich Beginn, Ganztägig oder
+      Regel ändert, gehen sie den Weg von 198. Auch vergangene Löschungen
+      (259): Die Grenze „ab heute“ kommt mit PR 8, wo Exchange Löschungen
+      einzeln schreibt. Strg+D auf einem Termin einer Serie dupliziert die
+      ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
+      (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
+      (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
+      Exchange und Microsoft 365 nehmen beim Anlegen noch keine Löschungen
+      (140): Dort erscheinen gelöschte Termine in der neuen Serie vorerst
+      wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine etwa
+      drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
+      Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
+      Test.
     - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein
       gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
       ein abgesagtes RECURRENCE-ID: beim Teilen kam es in der neuen Serie
@@ -1459,6 +1480,22 @@ Vorschläge in Claude Code, die mit dem Screenreader kaum erreichbar sind und
 von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
+
+- [ ] **Neuer Beginn verliert die Löschung eines ersten Termins neben der
+      Regel.** Eine Serie, deren Beginn nicht auf ihrer eigenen Regel liegt
+      (an einem Montag angelegt, wiederholt mittwochs; Anbieter zeigen den
+      Montag), deren erster Termin gelöscht ist, verliert diese Löschung,
+      wenn der Editor sie mit neuem Beginn, neuer Ganztägig-Wahl oder einer
+      Regel von einem anderen Beginn schreibt (198), mit oder ohne
+      Kalenderwechsel: `tailRecurrenceFor` platziert die Löschungen über die
+      Plätze, die `expandEvent` (rrule.js) erzeugt, und rrule.js erzeugt
+      einen Beginn neben der Regel nicht; `cal_core::tail_exceptions` lässt
+      eine Löschung ohne alten Platz fallen. Im neuen Kalender oder nach dem
+      Speichern ist der gelöschte Montag wieder da. Abhilfe: beim Ganzen ab
+      dem eigenen Beginn (`whole`) den Beginn als ersten Platz beider Serien
+      mitgeben. Verschieben, Kopieren und Duplizieren betrifft es nicht
+      (#126: dort bleibt jede Löschung, wo sie ist). Gefunden in der dritten
+      Prüfrunde von #126 (2026-10-18), älter als #126.
 
 - [ ] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
       in Aperio auf UTC.** Kennt die Windows-Zonentabelle die

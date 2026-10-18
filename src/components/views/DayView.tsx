@@ -69,7 +69,11 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
-import { duplicateEvent } from '../duplicateActions';
+import {
+  duplicateEvent,
+  duplicatedSentence,
+  duplicateFailedSentence,
+} from '../duplicateActions';
 import { DeleteEventConfirm } from '../DeleteEventConfirm';
 import { getDayLog } from '../../api/client';
 import { useDayMarkers } from '../../state/useDayMarkers';
@@ -1055,10 +1059,13 @@ export function DayView() {
           e.preventDefault();
           if (focusedItem?.kind === 'event') {
             const ev = focusedItem.event;
-            void duplicateEvent(ev).then(() =>
-              announce(
-                t('actions.duplicated', { title: ev.title }),
-              ),
+            void duplicateEvent(ev).then(
+              (source) => {
+                // Written outside the view's own dialogs: re-read explicitly.
+                invalidateData();
+                announce(duplicatedSentence(source, t));
+              },
+              (err: unknown) => announce(duplicateFailedSentence(err, ev.title, t)),
             );
           }
         }
@@ -1161,6 +1168,7 @@ export function DayView() {
     [
       listItems,
       focusIndex,
+      invalidateData,
       openEventDialog,
       openTaskDialog,
       openMoveCopy,

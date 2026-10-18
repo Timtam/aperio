@@ -203,7 +203,9 @@
     }
   },
   "actions": {
-    "duplicated": "\"{{title}}\" duplicated."
+    "duplicated": "\"{{title}}\" duplicated.",
+    "duplicatedSeries": "The whole series \"{{title}}\" was duplicated.",
+    "duplicateFailed": "\"{{title}}\" could not be duplicated: {{reason}}."
   },
   "toast": {
     "regionLabel": "Notifications",

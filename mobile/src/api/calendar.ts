@@ -215,6 +215,8 @@ export const createEvent = async (
   // truncated head (updateEvent, never stamped) and this tail then expand
   // identically, so untouched occurrences never drift an hour across a DST
   // boundary; stamping only the tail would diverge the two halves.
+  // A copy of a series passes it too: it keeps the source's zone, or none
+  // (decision 262).
   const created = JSON.parse(
     await CalFfi.createEventJson(
       JSON.stringify({

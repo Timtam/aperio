@@ -1500,6 +1500,8 @@ Beide Operationen werden atomar in der lokalen Sync-Queue eingetragen, sodass be
 | **Zwischen verschiedenen Konten (Verschieben)** | Zweistufig: CREATE + DELETE (siehe oben) |
 | **Kopieren** | Immer CREATE im Ziel; keine native API-Optimierung |
 | **Wiederkehrende Terminserie** | Nutzer wird gefragt: "Nur diesen Termin" oder "Gesamte Serie" (gilt für Verschieben und Kopieren) |
+| **Gelöschte und geänderte Termine der Serie** | Die ganze Serie wird im Ziel als neue Serie geschrieben und bekommt nur ihre echten Löschungen mit (Entscheidungen 224, 259; `newSeriesRecurrence`, dieselbe Regel wie beim Teilen); ein einzeln geänderter Termin erscheint zu seiner üblichen Zeit wieder. Gilt auch für den Kalenderwechsel im Editor. Kopieren behält die Zone der Quelle (262) |
+| **Duplizieren (Strg+D)** | Auf einem Termin einer Serie die ganze Serie ab ihrem Beginn, im selben Kalender (260), wie Kopieren; ein Scheitern wird angesagt (261) |
 | **Termin mit Teilnehmern** | Hinweis-Dialog: Teilnehmer erhalten ggf. eine neue Einladung vom Ziel-Konto |
 | **Termin mit Videokonferenz-Link** | Hinweis-Dialog: Bestehender Link bleibt erhalten, ist aber ggf. an das alte Konto gebunden |
 

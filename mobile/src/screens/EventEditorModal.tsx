@@ -50,6 +50,8 @@ import {
   defaultNewEventTimes,
   isBirthdayEventId,
   planSeriesSplit,
+  asNewSeries,
+  newSeriesRecurrence,
   recurrenceStartDate,
   selectableEventCalendars,
   writeSeriesSplit,
@@ -1568,20 +1570,28 @@ export default function EventEditorModal({
         // deleted occurrences keep their place, its bound the length and its
         // zone follows the kind (191, 195). Its start stays where the edit put
         // it, off its own rule too. Untouched, the recurrence stays as it is.
-        // Mirrors the desktop.
-        const wholePlan =
-          !wholeCut &&
-          base.recurrence?.rrule &&
-          (Date.parse(times.start) !== Date.parse(base.start) ||
-            allDay !== base.all_day ||
-            // A rule the user set at another start moves to this one.
-            (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start)))
-            ? planSeriesSplit(
-                base,
-                base.start,
-                (await readSeriesRows(base, base.start, getSeriesRows)).rows,
-              )
+        // Another calendar writes the series there as a NEW one (224, 259),
+        // with its real deletions only, so an occurrence changed elsewhere
+        // comes back at its usual time instead of travelling as a deletion:
+        // moved by the plan, the plan says so (`asNewSeries`); otherwise its
+        // real deletions (`newSeriesRecurrence`) go the way the exceptions go,
+        // where they are or at a new time of day. Mirrors the desktop.
+        const movesCalendar = calId !== original.calendar_id;
+        const rewritesFromStart =
+          Date.parse(times.start) !== Date.parse(base.start) ||
+          allDay !== base.all_day ||
+          // A rule the user set at another start moves to this one.
+          (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
+        const seriesRows =
+          !wholeCut && base.recurrence?.rrule && (rewritesFromStart || movesCalendar)
+            ? (await readSeriesRows(base, base.start, getSeriesRows)).rows
             : null;
+        const wholePlan =
+          seriesRows && rewritesFromStart ? planSeriesSplit(base, base.start, seriesRows) : null;
+        const keptRecurrence =
+          movesCalendar && seriesRows
+            ? newSeriesRecurrence({ ...base, recurrence: recurrenceToSend }, seriesRows)
+            : recurrenceToSend;
         // "This and all following" from the series' first occurrence on keeps
         // the rule the repeat field shows — its own from the cut on, moved
         // with a new date, unless the field changed — and takes the deleted
@@ -1594,7 +1604,7 @@ export default function EventEditorModal({
               {
                 master: original,
                 cutoffIso: wholeCut.occIso,
-                plan: wholeCut.plan,
+                plan: movesCalendar ? asNewSeries(wholeCut.plan) : wholeCut.plan,
                 tail: { start: times.start, all_day: allDay },
               },
               // Read as a change to the series from its cut, as its start is.
@@ -1606,14 +1616,14 @@ export default function EventEditorModal({
                 {
                   master: base,
                   cutoffIso: base.start,
-                  plan: wholePlan,
+                  plan: movesCalendar ? asNewSeries(wholePlan) : wholePlan,
                   tail: { start: times.start, all_day: allDay },
                 },
                 base.start,
                 { from: base.start, refused: 'series', whole: true },
               )
             : exceptionsAtSeriesTime(
-                recurrenceToSend,
+                keptRecurrence,
                 base.start,
                 times.start,
                 allDay || base.all_day,

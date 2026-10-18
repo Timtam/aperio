@@ -1,31 +1,75 @@
-import { organizerOf } from '@aperio/shared';
+import { eventWriteFailureReason, organizerOf } from '@aperio/shared';
 
 import {
   createEvent as apiCreateEvent,
   createTask as apiCreateTask,
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
+import { newSeriesRowOf, SeriesNotLoadedError } from '../state/moveActions';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Duplicate helpers — used by Ctrl+D, no dialog needed.
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function duplicateEvent(event: CalendarEvent): Promise<void> {
-  await apiCreateEvent({
-    calendar_id: event.calendar_id,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    start: event.start,
-    end: event.end,
-    all_day: event.all_day,
-    recurrence: event.recurrence,
-    color_label: event.color_label,
-    reminders: event.reminders,
-    sound: event.sound,
-    attendees: event.attendees,
-    ...organizerOf(event),
+/**
+ * Duplicate an appointment into its own calendar. Any row of a series — an
+ * expanded occurrence, a provider's row for a changed occurrence, the master —
+ * duplicates the WHOLE series from its own start (decision 260), as a copy
+ * into the same calendar does: with its real deletions only and its zone as
+ * the source has it (`newSeriesRowOf`, decisions 259, 262). Written from the
+ * occurrence, it started there and its COUNT ran on past the series' end.
+ * Answers with what it wrote from, so the sentence names that.
+ */
+export async function duplicateEvent(event: CalendarEvent): Promise<CalendarEvent> {
+  const source = await newSeriesRowOf(event);
+  await apiCreateEvent(
+    {
+      calendar_id: source.calendar_id,
+      title: source.title,
+      description: source.description,
+      location: source.location,
+      start: source.start,
+      end: source.end,
+      all_day: source.all_day,
+      recurrence: source.recurrence,
+      color_label: source.color_label,
+      reminders: source.reminders,
+      sound: source.sound,
+      attendees: source.attendees,
+      ...organizerOf(source),
+    },
+    { preserveRecurrenceZone: true },
+  );
+  return source;
+}
+
+/**
+ * What a duplicate says: the appointment written, by its own title — a
+ * changed occurrence's row may carry another — and, for a series, that the
+ * whole series was duplicated (decision 260).
+ */
+export function duplicatedSentence(
+  source: CalendarEvent,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
+  return t(source.recurrence?.rrule ? 'actions.duplicatedSeries' : 'actions.duplicated', {
+    title: source.title,
   });
+}
+
+/**
+ * What a failed duplicate says (decision 261): the series that could not be
+ * loaded, as a move says it, or the reason in words.
+ */
+export function duplicateFailedSentence(
+  err: unknown,
+  title: string,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
+  if (err instanceof SeriesNotLoadedError) {
+    return t('dialogs.event.seriesLoadFailed', { title });
+  }
+  return t('actions.duplicateFailed', { title, reason: eventWriteFailureReason(err, t) });
 }
 
 export async function duplicateTask(task: Task): Promise<void> {

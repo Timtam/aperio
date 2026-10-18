@@ -7,7 +7,9 @@ import {
 } from '../wasm/coreRules';
 
 import {
+  asNewSeries,
   firstOccurrenceFrom,
+  newSeriesRecurrence,
   futureCarryRow,
   occurrenceOfSeries,
   planSeriesSplit,
@@ -459,6 +461,132 @@ describe('planSeriesSplit: what the new series leaves out', () => {
     expect(cutOf(planSeriesSplit(master, CUT, [])).tail.exceptions).toEqual([
       '2026-09-07T08:00:00.000Z',
     ]);
+  });
+});
+
+describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', () => {
+  /** Mondays at 08:00 UTC from 3 August, ten times: the 10 August deleted, the
+   *  17 August changed in Outlook (Exchange lists its slot and keeps its row),
+   *  the 7 September deleted. */
+  const exchange = {
+    ...weekly,
+    recurrence: {
+      ...weekly.recurrence,
+      exceptions: ['2026-08-10T08:00:00Z', '2026-08-17T08:00:00Z', '2026-09-07T08:00:00Z'],
+    },
+  };
+  const changed = rowOf('2026-08-17T08:00:00Z', {
+    start: '2026-08-17T10:00:00.000Z',
+    end: '2026-08-17T11:00:00.000Z',
+  });
+
+  it('carries the deleted occurrences as spelled, and brings a changed one back at its time', () => {
+    expect(newSeriesRecurrence(exchange, [changed])).toEqual({
+      ...exchange.recurrence,
+      exceptions: ['2026-08-10T08:00:00Z', '2026-09-07T08:00:00Z'],
+    });
+  });
+
+  it("carries an occurrence Google keeps deleted as a cancelled row, and no other series' rows", () => {
+    const cancelled = rowOf('2026-08-24T08:00:00Z', undefined, { cancelled: true });
+    const elsewhere = rowOf('2026-08-31T08:00:00Z', undefined, { cancelled: true }, 'ev-2');
+    expect(newSeriesRecurrence(weekly, [cancelled, elsewhere])?.exceptions).toEqual([
+      '2026-08-24T08:00:00.000Z',
+    ]);
+  });
+
+  it('keeps an exception that names no occurrence of the rule, as before: it deletes nothing', () => {
+    const stray = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, exceptions: ['2026-08-12T08:00:00Z'] },
+    };
+    expect(newSeriesRecurrence(stray, [])?.exceptions).toEqual(['2026-08-12T08:00:00Z']);
+  });
+
+  it('keeps every deletion of a rule the expander cannot read', () => {
+    // RFC 7529's RSCALE, kept verbatim from a CalDAV calendar.
+    const unread = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        rrule: 'RSCALE=GREGORIAN;FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-08-10T08:00:00Z', '2026-08-17T08:00:00Z'],
+      },
+    };
+    expect(newSeriesRecurrence(unread, [])?.exceptions).toEqual([
+      '2026-08-10T08:00:00Z',
+      '2026-08-17T08:00:00Z',
+    ]);
+  });
+
+  it("keeps a deleted first occurrence beside a row of the series' before its start", () => {
+    // Another client moved the series' start later and left a row behind.
+    const deletedFirst = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        exceptions: ['2026-08-03T08:00:00Z', '2026-08-10T08:00:00Z'],
+      },
+    };
+    const before = rowOf('2026-07-27T08:00:00Z');
+    expect(newSeriesRecurrence(deletedFirst, [before])?.exceptions).toEqual([
+      '2026-08-03T08:00:00Z',
+      '2026-08-10T08:00:00Z',
+    ]);
+  });
+
+  it('keeps the deleted first occurrence of a series that starts off its own rule', () => {
+    // Made on a Monday, repeating on Wednesdays: providers show the Monday too.
+    const offRule = {
+      ...weekly,
+      recurrence: {
+        ...weekly.recurrence,
+        rrule: 'FREQ=WEEKLY;BYDAY=WE;COUNT=5',
+        exceptions: ['2026-08-03T08:00:00Z', '2026-08-12T08:00:00Z'],
+      },
+    };
+    expect(newSeriesRecurrence(offRule, [])?.exceptions).toEqual([
+      '2026-08-03T08:00:00Z',
+      '2026-08-12T08:00:00Z',
+    ]);
+  });
+
+  it('keeps the rule as written and the zone as stored', () => {
+    const zoned = {
+      ...exchange,
+      recurrence: {
+        ...exchange.recurrence,
+        rrule: 'RRULE:FREQ=WEEKLY;COUNT=10',
+        tzid: 'Europe/Berlin',
+      },
+    };
+    const written = newSeriesRecurrence(zoned, [changed]);
+    expect(written?.rrule).toBe('RRULE:FREQ=WEEKLY;COUNT=10');
+    expect(written?.tzid).toBe('Europe/Berlin');
+  });
+
+  it('leaves an appointment without a rule as it is', () => {
+    const single = { ...weekly, recurrence: null };
+    expect(newSeriesRecurrence(single, [])).toBeNull();
+  });
+
+  it('refuses an occurrence in place of the series, before anything is written', () => {
+    const occurrence = {
+      ...exchange,
+      id: 'ev-1@2026-08-24T08:00:00.000Z',
+      series_id: 'ev-1',
+      occurrence_start: '2026-08-24T08:00:00.000Z',
+    };
+    expect(() => newSeriesRecurrence(occurrence, [changed])).toThrow();
+    const override = { ...exchange, id: 'ev-1::rid::2026-08-17T08:00:00Z' };
+    expect(() => newSeriesRecurrence(override, [changed])).toThrow();
+  });
+
+  it('asNewSeries keeps no exception for a row: the new series owns none', () => {
+    const plan = wholeOf(planSeriesSplit(exchange, exchange.start, [changed]));
+    expect(plan.standing).toEqual(['2026-08-17T08:00:00Z']);
+    expect(asNewSeries(plan).standing).toEqual([]);
+    expect(asNewSeries(plan).deleted).toEqual(plan.deleted);
   });
 });
 

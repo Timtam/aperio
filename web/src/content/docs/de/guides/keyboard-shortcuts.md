@@ -30,6 +30,8 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 | Eintrag bearbeiten | `Eingabe` |
 | Aufgabe abhaken / wieder öffnen | `Leertaste` |
 | Eintrag löschen | `Entf` |
+| In einen anderen Kalender oder eine andere Liste verschieben oder kopieren (Tages-, Agenda- und Aufgabenansicht) | `Umschalt+M` |
+| Eintrag duplizieren, bei einer Serie die ganze Serie (Tages-, Agenda- und Aufgabenansicht) | `Strg+D` |
 
 ## Kontakte
 
