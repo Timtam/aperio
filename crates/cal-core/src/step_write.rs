@@ -118,10 +118,11 @@ pub struct DeletionsFromToday {
 /// Which of a new series' deleted occurrences an adapter deletes again one by
 /// one (decision 263), in their order: those that fall on the device's day
 /// `now` falls on, or later. A timed one falls on its date on the `device`'s
-/// clock; an all-day one on the day it names ([`all_day_slot_day`]), so the
-/// same day spelled as the device's midnight or as a provider's UTC midnight
-/// lands on the same side, east and west of UTC. An occurrence deleted earlier
-/// today is kept: it is today's.
+/// clock; an all-day one on the day it names there ([`all_day_deletion_day`]:
+/// its own date where it is the device's midnight, else the 13:45 rule), so
+/// the same day spelled as the device's midnight or as a provider's UTC
+/// midnight lands on the same side on every device. An occurrence deleted
+/// earlier today is kept: it is today's.
 ///
 /// Only an adapter that deletes a new series' occurrences one by one asks, and
 /// passes the device's zone: a provider that takes them with the series —

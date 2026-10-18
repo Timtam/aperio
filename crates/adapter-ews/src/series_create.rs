@@ -133,14 +133,17 @@ where
     let mut wanted: Vec<Wanted> = parted
         .kept
         .iter()
-        .map(|&asked| Wanted {
-            asked,
-            slot: if event.all_day {
-                let day = cal_core::all_day_deletion_day(asked, device);
-                crate::mapping::local_midnight_in(day, device).unwrap_or(asked)
-            } else {
-                asked
-            },
+        .map(|&asked| {
+            let day = event
+                .all_day
+                .then(|| cal_core::all_day_deletion_day(asked, device));
+            Wanted {
+                asked,
+                slot: day
+                    .and_then(|day| crate::mapping::local_midnight_in(day, device))
+                    .unwrap_or(asked),
+                day,
+            }
         })
         .collect();
     wanted.sort_by_key(|w| w.slot);
@@ -218,6 +221,8 @@ where
 struct Wanted {
     asked: DateTime<Utc>,
     slot: DateTime<Utc>,
+    /// The day an all-day deletion names on the device; `None` for a timed one.
+    day: Option<chrono::NaiveDate>,
 }
 
 /// An occurrence this run deleted: where it was asked for, and where Exchange
@@ -632,7 +637,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         self.skipped += 1;
         tracing::info!(
             target: "adapter_ews::write",
-            slot = %describe_slot(wanted.asked, self.event.all_day),
+            slot = %describe_slot(wanted),
             r#where = where_,
             "a deleted occurrence the stored rule makes no occurrence at is skipped",
         );
@@ -1024,7 +1029,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                 let done = self.deleted.values().any(|d| d.asked == w.asked);
                 format!(
                     "{} {}",
-                    describe_slot(w.asked, self.event.all_day),
+                    describe_slot(w),
                     if done { "deleted" } else { "skipped" }
                 )
             })
@@ -1188,23 +1193,23 @@ impl Bounds {
             }
             // The end is past and the last one before known: on by the
             // spacing, or halfway to the end.
-            (Some((lo, lo_at)), Some((hi, None))) => match self.spacing_near(lo, true) {
-                Some(spacing) => {
-                    clamp(i64::from(lo) + ((slot - lo_at).num_seconds() / spacing).max(1))
-                }
-                None => clamp(i64::from(lo + (hi - lo) / 2)),
-            },
+            // The end is past and the last one before known: halfway between
+            // them. The spacing put the read past the end in the first place,
+            // and from there it would only step back one at a time.
+            (Some((lo, _)), Some((hi, None))) => clamp(i64::from(lo + (hi - lo) / 2)),
         }
     }
 }
 
-/// A slot as the log names it: an instant, or a day for an all-day series. No
-/// id ever: the log is the user's to share.
-fn describe_slot(at: DateTime<Utc>, all_day: bool) -> String {
-    if all_day {
-        cal_core::all_day_slot_day(at).to_string()
-    } else {
-        at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+/// A slot as the log names it: an instant, or for an all-day series the day
+/// the run read it as, on the device. No id ever: the log is the user's to
+/// share.
+fn describe_slot(wanted: &Wanted) -> String {
+    match wanted.day {
+        Some(day) => day.to_string(),
+        None => wanted
+            .asked
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     }
 }
 
@@ -1930,10 +1935,58 @@ mod tests {
     async fn an_unreadable_answer_to_a_delete_is_decided_by_the_occurrence() {
         let shape = mondays();
         let second = shape.slots[1];
-        let fake = Fake::new(shape, vec![(DeleteOccurrence, 0, Fault::Garbled)]);
+        let fake = Fake::new(shape.clone(), vec![(DeleteOccurrence, 0, Fault::Garbled)]);
         run(&fake, series(vec![second], false)).await.unwrap();
+        // Read again, found deleted: no second delete.
+        assert_eq!(fake.bodies(Probe).len(), 2);
         assert_eq!(fake.bodies(DeleteOccurrence).len(), 1);
         assert_eq!(fake.deleted(), vec![2]);
+
+        // An empty answer before the delete was made: read again, it stands,
+        // and the delete goes once more.
+        let fake = Fake::new(shape, vec![(DeleteOccurrence, 0, Fault::Empty)]);
+        run(&fake, series(vec![second], false)).await.unwrap();
+        assert_eq!(fake.bodies(Probe).len(), 2);
+        assert_eq!(fake.bodies(DeleteOccurrence).len(), 2);
+        assert_eq!(fake.deleted(), vec![2]);
+    }
+
+    #[tokio::test]
+    async fn a_slot_past_the_stored_end_is_skipped_in_a_few_reads() {
+        // Monthly on the 31st, 120 times: Exchange's 120 occurrences end in
+        // December 2036, the RFC expansion's 31sts run to 2044. A deletion
+        // on its 110th, August 2042, lies past Exchange's end.
+        let mut slots = Vec::new();
+        for year in 2027..2037 {
+            for month in 1..=12u32 {
+                let last = (28..=31)
+                    .rev()
+                    .find(|d| chrono::NaiveDate::from_ymd_opt(year, month, *d).is_some())
+                    .unwrap();
+                slots.push(at(&format!("{year}-{month:02}-{last:02}T09:00:00Z")));
+            }
+        }
+        let march = slots[2];
+        let shape = Shape {
+            slots,
+            pattern: "<t:AbsoluteMonthlyRecurrence><t:Interval>1</t:Interval><t:DayOfMonth>31</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+            start_date: "2027-01-31+01:00",
+            ..mondays()
+        };
+        let fake = Fake::new(shape, Vec::new());
+        let far = at("2042-08-31T09:00:00Z");
+        let mut event = series(vec![march, far], false);
+        event.start = at("2027-01-31T09:00:00Z");
+        event.end = at("2027-01-31T10:00:00Z");
+        event.recurrence.as_mut().unwrap().rrule = "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=120".into();
+        let created = run(&fake, event).await.unwrap();
+        assert_eq!(fake.deleted(), vec![3]);
+        assert_eq!(created.recurrence.unwrap().exceptions, vec![march]);
+        assert!(
+            fake.bodies(Probe).len() < 16,
+            "{} probes",
+            fake.bodies(Probe).len()
+        );
     }
 
     #[tokio::test]
@@ -2034,7 +2087,8 @@ mod tests {
         let second = shape.slots[1];
         let fake = Fake::new(shape, vec![(DeleteOccurrence, 0, Fault::LostAfter)]);
         run(&fake, series(vec![second], false)).await.unwrap();
-        // The occurrence said it was deleted: no second delete.
+        // The occurrence, read again, said it was deleted: no second delete.
+        assert_eq!(fake.bodies(Probe).len(), 2);
         assert_eq!(fake.bodies(DeleteOccurrence).len(), 1);
         assert_eq!(fake.deleted(), vec![2]);
     }
@@ -2313,12 +2367,25 @@ mod tests {
 
     #[test]
     fn a_slot_is_logged_as_an_instant_or_a_day_never_with_an_id() {
+        let timed = at("2026-11-09T09:00:00Z");
         assert_eq!(
-            describe_slot(at("2026-11-09T09:00:00Z"), false),
+            describe_slot(&Wanted {
+                asked: timed,
+                slot: timed,
+                day: None,
+            }),
             "2026-11-09T09:00:00Z"
         );
+        // Pago Pago's midnight of the 9th, 11:00 UTC: the day the run reads.
+        let asked = at("2026-11-09T11:00:00Z");
+        let device = chrono::FixedOffset::east_opt(-11 * 3600).unwrap();
+        let day = cal_core::all_day_deletion_day(asked, &device);
         assert_eq!(
-            describe_slot(at("2026-11-08T23:00:00Z"), true),
+            describe_slot(&Wanted {
+                asked,
+                slot: asked,
+                day: Some(day),
+            }),
             "2026-11-09"
         );
     }

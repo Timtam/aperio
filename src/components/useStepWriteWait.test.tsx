@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 
 import type { StepWriteWait } from '@aperio/shared';
@@ -13,6 +13,20 @@ import { useStepWriteWait } from './useStepWriteWait';
  */
 
 let api: { wait: StepWriteWait; hold: () => () => Promise<void> } | null = null;
+
+// What is tested is the browser's own order: the close commits and focus goes
+// back before the wait settles. Inside act() React holds every update until
+// the act ends, so that order cannot be seen there, and outside it React warns.
+// So this file runs React as the browser does, without act's queue.
+const reactAct = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+let wasActEnvironment: boolean | undefined;
+beforeAll(() => {
+  wasActEnvironment = reactAct.IS_REACT_ACT_ENVIRONMENT;
+  reactAct.IS_REACT_ACT_ENVIRONMENT = false;
+});
+afterAll(() => {
+  reactAct.IS_REACT_ACT_ENVIRONMENT = wasActEnvironment;
+});
 
 function Surface() {
   const { waitDialog, wait, hold } = useStepWriteWait();

@@ -5,6 +5,7 @@ import {
   findNodeHandle,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -124,16 +125,20 @@ export function StepWriteWaitHost() {
           style={[StyleSheet.absoluteFill, styles.backdrop]}
         />
         <View accessibilityViewIsModal style={styles.card}>
-          <Text style={styles.title} accessibilityRole="header">
-            {t('dialogs.stepWrite.title')}
-          </Text>
           <ActivityIndicator
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           />
-          <Text ref={messageRef} style={styles.message} accessibilityRole="text">
-            {t('dialogs.stepWrite.body')}
-          </Text>
+          {/* Bounded and scrollable, as in AppDialog: at large accessibility
+              text sizes the card would otherwise run off the screen. */}
+          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+            <Text style={styles.title} accessibilityRole="header">
+              {t('dialogs.stepWrite.title')}
+            </Text>
+            <Text ref={messageRef} style={styles.message} accessibilityRole="text">
+              {t('dialogs.stepWrite.body')}
+            </Text>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -148,6 +153,7 @@ const makeStyles = (c: ThemeColors) =>
     card: {
       width: '100%',
       maxWidth: 480,
+      maxHeight: '85%',
       gap: 14,
       padding: 20,
       borderRadius: 14,
@@ -155,6 +161,8 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    body: { flexShrink: 1 },
+    bodyContent: { gap: 14 },
     title: { fontSize: 19, fontWeight: '700', color: c.textPrimary },
     message: { fontSize: 15, color: c.textSecondary, lineHeight: 21 },
   });
