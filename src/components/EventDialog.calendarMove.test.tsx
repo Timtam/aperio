@@ -132,25 +132,31 @@ describe('EventDialog → a whole series saved into another calendar (224, 259)'
     expect(event.recurrence?.tzid).toBe('Europe/Berlin');
   });
 
-  /** The start time an hour later than the form shows it, on this machine's clock. */
-  function anHourLater() {
+  /** The start time an hour off what the form shows, on this machine's clock,
+   *  within the same day: an hour later, or an hour earlier from 23:00 on, so
+   *  no zone wraps it past midnight. Answers the move in milliseconds. */
+  function anHourOff(): number {
     const input = screen.getByLabelText(/startzeit|start time/i) as HTMLInputElement;
     const [h, m] = input.value.split(':').map(Number);
+    const by = h >= 23 ? -1 : 1;
     fireEvent.change(input, {
-      target: { value: `${String((h + 1) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}` },
+      target: { value: `${String(h + by).padStart(2, '0')}:${String(m).padStart(2, '0')}` },
     });
+    return by * 3_600_000;
   }
   const instants = (xs: readonly string[] | undefined) => (xs ?? []).map((x) => Date.parse(x));
 
   it('with a new time as well, carries the real deletion along, and not the changed one', async () => {
     const picker = await open();
     fireEvent.change(picker, { target: { value: 'cal-home' } });
-    anHourLater();
+    const moved = anHourOff();
     fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
     await waitFor(() => expect(updatesSent()).toHaveLength(1));
     const [{ event }] = updatesSent();
     expect(event.calendar_id).toBe('cal-home');
-    expect(instants(event.recurrence?.exceptions)).toEqual([Date.parse('2026-11-09T10:00:00Z')]);
+    expect(instants(event.recurrence?.exceptions)).toEqual([
+      Date.parse('2026-11-09T09:00:00Z') + moved,
+    ]);
   });
 
   it('with a new time and a plan that cannot read the series as a whole, still only the real deletion', async () => {
@@ -166,11 +172,13 @@ describe('EventDialog → a whole series saved into another calendar (224, 259)'
     rowsOnFile.current = [CHANGED, before];
     const picker = await open();
     fireEvent.change(picker, { target: { value: 'cal-home' } });
-    anHourLater();
+    const moved = anHourOff();
     fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
     await waitFor(() => expect(updatesSent()).toHaveLength(1));
     const [{ event }] = updatesSent();
-    expect(instants(event.recurrence?.exceptions)).toEqual([Date.parse('2026-11-09T10:00:00Z')]);
+    expect(instants(event.recurrence?.exceptions)).toEqual([
+      Date.parse('2026-11-09T09:00:00Z') + moved,
+    ]);
   });
 
   it('writes nothing when the series rows cannot be read', async () => {
