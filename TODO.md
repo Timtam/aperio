@@ -458,6 +458,45 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
+      Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
+      ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
+      jede Löschung ab dem heutigen Tag des Geräts einzeln wieder (263),
+      gefunden über ihren Platz und nicht über die geschätzte Nummer; eine
+      Stelle, an der Exchanges Regel keinen Termin erzeugt (vor Beginn, nach
+      Ende, neben dem Muster), wird übersprungen (207, 266). Danach liest er
+      die Serie nach: Ihre Löschungen müssen genau die gemachten sein (208,
+      230). Mit Eingeladenen schickt er dann EINE Einladung (225; nur die
+      Teilnehmer neu gesetzt) und liest noch einmal nach. 15 s ab dem
+      bestätigten Anlegen, 15 s fürs Zurücknehmen (213, 226); „beschäftigt“
+      wird ausgewartet. Scheitert ein Schritt, löscht er die Serie wieder
+      (203), mit Absage, wo eine Einladung raus sein kann (212, 264):
+      `deletions-not-kept`, „nichts geändert“. Gelingt auch das nicht:
+      `created-may-stand`, ein Hinweis, der sich nur schließen lässt (210),
+      mit dem Satz zu den Eingeladenen (228). Alle Wege, die eine Serie mit
+      Löschungen anlegen (Teilen, Übertragen, Verschieben, Kopieren, Strg+D,
+      Seitenleiste, Kalenderwechsel im Editor), zeigen solange „Vorgang
+      läuft, bitte warten …“ (227, 265), gesteuert vom Manifest
+      (`deletions_in_steps`), Desktop und Handy. Auch der bestehende Fall
+      „weder gekürzt noch gelöscht“ lässt sich nur noch schließen (210). Ein
+      gescheitertes Anlegen liest neu ein (beide Hosts), iOS gibt dem
+      Schreiben Hintergrundzeit (229). Ein Anlegen, das Exchange ganz
+      ablehnt, heißt jetzt auch bei einfachen Terminen „Server lehnt ab“.
+      Live-Runde 11 und Handy offen — ↻ im Test.
+    - [ ] **Warten auch beim Ändern an Ort und Stelle** (aus 265): Ändert ein
+      Speichern Beginn, Zone oder Muster einer ganzen Exchange-Serie, löscht
+      `restore_deletions` (253) danach jede Löschung einzeln, ohne Uhr und ohne
+      Warte-Dialog. Die Oberfläche weiß vorher nicht sicher, ob das passiert.
+      Zu entscheiden: Dialog bei jeder solchen Änderung, oder der Adapter
+      meldet die Schritte.
+    - [ ] **Geänderte Vorkommen in die neue Serie mitnehmen** (D8 der
+      PR-8-Planung, eigener PR): Ein einzeln geänderter Termin kommt in der
+      neuen Serie zu seiner üblichen Zeit zurück; seine Änderung bleibt in
+      der alten (oder geht mit ihr beim Verschieben).
+    - [ ] **Abgebrochene App mitten in den Löschungen**: Wird die App beendet
+      oder von iOS angehalten, bevor die Löschungen fertig sind, steht die
+      halb fertige neue Serie neben der ungekürzten alten, und keine
+      Oberfläche weiß davon. Braucht ein Schreib-Journal.
     - ↻ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
       weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
       anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
@@ -473,9 +512,10 @@ Siehe DESIGN §4.2.
       ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
       (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
       (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
-      Exchange und Microsoft 365 nehmen beim Anlegen noch keine Löschungen
-      (140): Dort erscheinen gelöschte Termine in der neuen Serie vorerst
-      wieder. Aus einem Google-Kalender kennt Aperio gelöschte Termine etwa
+      Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
+      erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
+      löscht sie seit PR 8 ab heute einzeln wieder. Aus einem Google-Kalender
+      kennt Aperio gelöschte Termine etwa
       drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
       Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
       Test.
@@ -492,8 +532,8 @@ Siehe DESIGN §4.2.
       ganztägig). Offen: Google kennt die Zeilen nur so weit, wie der
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
-      nachlesen, eigener PR). EWS schreibt die Ausnahmen beim Anlegen noch gar
-      nicht (140). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
+      nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
+      wieder, ab heute (202, 263). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
       (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
       Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
       legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
@@ -1480,6 +1520,23 @@ Vorschläge in Claude Code, die mit dem Screenreader kaum erreichbar sind und
 von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
+
+- [ ] **Der Desktop-Editor schließt mitten im Speichern.** Escape und das ×
+      des Editors schließen ihn, während ein Speichern läuft (nur Abbrechen
+      ist gesperrt); ein Ergebnis, das danach kommt, hat keinen Dialog mehr.
+      Beim Anlegen in Schritten fängt der Warte-Dialog Escape ab, bei allen
+      anderen Speichervorgängen nicht. Eine Sperre allein ließe den Editor
+      bei einem hängenden Speichern nie mehr los. Gefunden bei der Planung
+      von PR 8 (2026-10-18), älter.
+- [ ] **Veraltete Kopien der erzeugten Typen.** `crates/cal-core/bindings`,
+      `crates/host-core/bindings` und `crates/plugin-core/bindings` liegen im
+      Repo, werden von `cargo xtask ts-types` nicht geschrieben und von der CI
+      nicht geprüft; 14 Typen fehlen dort schon. Entfernen oder in die Prüfung
+      nehmen. Gefunden bei der Planung von PR 8 (2026-10-18).
+- [ ] **Das Ablegen in der Seitenleiste hat keinen eigenen Test.** Es teilt
+      den Warte-Dialog des Dialog-Stapels mit Strg+D (getestet), aber das
+      Ablegen selbst, seine Sperre gegen ein zweites Ablegen und sein Satz
+      `moveMayStand` sind ungetestet. Aus PR 8 (2026-10-18).
 
 - [ ] **Neuer Beginn verliert die Löschung eines ersten Termins neben der
       Regel.** Eine Serie, deren Beginn nicht auf ihrer eigenen Regel liegt

@@ -191,9 +191,11 @@ außer die Bearbeitung hat den Termin verschoben.
 „**Dieses und alle folgenden**" zieht ebenfalls mit. Zuerst wurde die heikle
 Rechnung — COUNT-Arithmetik, EXDATE-Übergabe an den Rest, die Zone des
 Fortsetzungs-Teils, Benachrichtigung auf BEIDEN Schreibvorgängen und das
-Zurücknehmen des Kopfes, wenn der Rest nicht angelegt werden konnte — aus den
-beiden Editoren in `shared/seriesSplit.ts` gezogen (`planSeriesSplit` rechnet,
-`writeSeriesSplit` schreibt in der richtigen Reihenfolge und heilt). Sie je
+Löschen des Rests, wenn das Kürzen des Kopfes abgelehnt wurde (erst der Rest,
+dann das Kürzen, 136) — aus den beiden Editoren in `shared/seriesSplit.ts`
+gezogen (`planSeriesSplit` rechnet, `writeSeriesSplit` schreibt in der
+richtigen Reihenfolge und heilt). Die gelöschten Termine des Rests schreibt
+der Anbieter: CalDAV mit der Serie, Exchange danach einzeln (202-213). Sie je
 Mitglied zu wiederholen hätte sie sonst an vier Stellen stehen lassen.
 
 Geteilt wird jede Kopie an IHREM eigenen nächsten Vorkommen ab dem Schnitt —

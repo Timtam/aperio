@@ -302,15 +302,49 @@ der alten Serie mit, sonst nichts:
   wieder da, mit Titel, Ort und Uhrzeit der Serie. Nach dem Verschieben ist
   seine eigene Änderung mit der alten Serie weg; nach dem Kopieren oder
   Duplizieren bleibt sie in der alten.
-- Nach Exchange oder Microsoft 365 verschoben oder kopiert, oder in Exchange
-  dupliziert, zeigt die neue Serie gelöschte Termine vorerst wieder: Exchange
-  und Microsoft 365 nehmen beim Anlegen einer Serie keine Löschungen an.
+- Nach Exchange verschoben oder kopiert, oder dort dupliziert, behält die
+  neue Serie die Löschungen ab heute: Exchange nimmt beim Anlegen einer Serie
+  keine an, deshalb löscht Aperio sie danach einzeln wieder. Die vor heute
+  erscheinen wieder.
+- Nach Microsoft 365 verschoben oder kopiert, zeigt die neue Serie gelöschte
+  Termine vorerst wieder: Microsoft 365 nimmt beim Anlegen einer Serie keine
+  Löschungen an.
 - Aus einem Google-Kalender kennt Aperio gelöschte Termine von etwa drei
   Monaten vor heute bis ein Jahr danach. Ein weiter entfernt gelöschter ist in
   der neuen Serie wieder da.
 
 Was du tun kannst: Lösche oder ändere den wieder aufgetauchten Termin im neuen
 Kalender.
+
+## Aperio hat eine neue Serie wieder entfernt
+
+Exchange nimmt eine neue Serie ohne ihre gelöschten Termine an. Deshalb legt
+Aperio sie zuerst an und löscht die gelöschten Termine dort danach einzeln
+wieder, während der Dialog **Vorgang läuft, bitte warten …** zu sehen ist.
+Gelingt das nicht ganz — Exchange findet einen Termin nicht, antwortet zu
+langsam, oder die Serie hat danach nicht genau die Löschungen, die Aperio
+gemacht hat —, entfernt Aperio die neue Serie wieder und sagt das: Es wurde
+nichts geändert, die alte Serie ist, wie sie war. Die entfernte Serie liegt
+in den gelöschten Elementen von Exchange. Hatte die Serie Leute eingeladen,
+haben sie auch die Absage bekommen, und die Meldung sagt das. Sagt sie, es
+habe zu lange gedauert, hat die Serie ab heute sehr viele gelöschte Termine,
+und erneutes Speichern stößt wahrscheinlich an dieselbe Grenze.
+
+Was du tun kannst: Versuche es später noch einmal. Scheitert es weiter,
+schick das Protokoll mit der Meldung (siehe unten): Es nennt jeden Schritt,
+ohne Kennungen von Terminen oder Kalendern.
+
+## Eine neue Serie steht möglicherweise zusätzlich im Kalender
+
+Konnte Aperio eine neue Serie bei Exchange weder fertigstellen noch wieder
+entfernen, sagt es, dass sie jetzt möglicherweise zusätzlich im Kalender
+steht — neben der alten, ab dem Tag, an dem du geteilt hast, oder im anderen
+Kalender nach dem Verschieben oder Kopieren. Diese Meldung lässt sich nur
+schließen: Erneutes Speichern legte noch eine Serie an. Können schon
+Einladungen rausgegangen sein, sagt die Meldung auch das.
+
+Was du tun kannst: Öffne den Kalender, in Aperio oder in Outlook, und lösche
+die Serie, die doppelt da ist.
 
 ## Einen Fehler melden
 

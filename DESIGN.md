@@ -1405,14 +1405,27 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     Organisator ändern darf.
   - Eine Ablehnung reist als Marke (`cal_core::WriteRefusal`:
     `reply-only-invitation:`, `server-refused:`, `identity-unknown:`,
-    `occurrence-not-writable:`, `unsafe-to-write:`, `access-not-granted:`),
-    und beide Oberflächen sagen daraus einen Satz in der Sprache des Nutzers
-    (`shared/eventWriteError.ts`, am Handy bei jedem Schreiben über
-    `writeErrorMessage`). `access-not-granted` kommt vom Gerätekonto ohne
-    vollen Zugriff (`cal_core::Error::AccessNotGranted`) und reist als
-    `forbidden`. Eine Marke heißt auch: Es wurde sicher
+    `occurrence-not-writable:`, `unsafe-to-write:`, `access-not-granted:`,
+    `day-zone-unreadable:`, `copy-unreadable:`, `exceptions-would-be-lost:`,
+    `deletions-not-kept:`), und beide Oberflächen sagen daraus einen Satz in
+    der Sprache des Nutzers (`shared/eventWriteError.ts`, am Handy bei jedem
+    Schreiben über `writeErrorMessage`). `access-not-granted` kommt vom
+    Gerätekonto ohne vollen Zugriff (`cal_core::Error::AccessNotGranted`) und
+    reist als `forbidden`. Eine Marke heißt auch: Es wurde sicher
     nichts geschrieben (`writeNeverLanded`); beim Ändern eines Termins melden
-    alle Adapter eine Ablehnung des Servers so (147). `CACHE_GENERATION` 4, damit eine
+    alle Adapter eine Ablehnung des Servers so (147). `deletions-not-kept`
+    heißt: geschrieben und wieder entfernt — es steht nichts, aber die Serie
+    liegt in den gelöschten Elementen, und mit `invited` im Detail haben
+    Eingeladene Einladung und Absage bekommen (202-213).
+  - Das Gegenteil einer Ablehnung ist ein Rest (`cal_core::WriteLeftover`:
+    `created-may-stand:`): Es wurde etwas geschrieben, das sich nicht
+    zurücknehmen ließ, und steht möglicherweise. Er reist immer als
+    `network`, nie als ablehnender Code, und `writeNeverLanded` ist für ihn
+    falsch, welcher Code ihn auch trägt: Ein Teilen nähme sonst seinen neuen
+    Teil zurück, der steht. Die Oberflächen sagen ihn mit einem Hinweis, der
+    sich nur schließen lässt (210). Was ein Schreiben in Schritten darf —
+    15 s + 15 s, `may_send`, „ab heute“ — steht einmal in
+    `cal_core::step_write` (213, 263). `CACHE_GENERATION` 4, damit eine
     gespeicherte Kalenderliste ohne das neue Merkmal neu gelesen wird.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit

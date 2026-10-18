@@ -195,10 +195,13 @@ setting by hand the rule the new date gives anyway. A monthly or yearly series t
 other months or years, such as one moved from the 31st to the 30th, moves its
 deletions by their place only as far as the two versions still line up; if a
 deletion lies beyond that, they all stay on their day, where a deleted
-occurrence can show again. Not every calendar keeps those deletions yet:
-CalDAV calendars do, but on Exchange and on Google a deleted occurrence can
-still come back for now. On Google, Aperio also knows deleted occurrences only about a year
-ahead, so one deleted further out comes back in the new series. And in an
+occurrence can show again. CalDAV calendars keep those deletions, and so
+does Exchange from today on: it takes a new series without them, so Aperio
+deletes them there again one by one (see the box below); the ones before
+today show again, also in a series you split at an earlier occurrence. On
+Google a deleted occurrence can still come back for now, and Aperio knows
+deleted occurrences only about a year ahead, so one deleted further out comes
+back in the new series. And in an
 all-day series on Google or CalDAV, an occurrence changed in another app also
 stays in the old series for now, so that day shows twice.
 **The whole series** opens the series itself, with its own start and end, even
@@ -237,11 +240,24 @@ the editor opens. On the desktop the form repeats it as the read-only field
 > time with the series' details. `Ctrl+D` on any appointment of a series
 > duplicates the whole series from its first appointment, in the same calendar.
 > A copy or a duplicate keeps the series' time zone. Moved or copied into
-> Exchange or Microsoft 365, or duplicated in Exchange, the new series shows
-> deleted occurrences again for now. From a Google calendar, Aperio knows
-> deleted occurrences from about three months before today to a year after
-> (see
+> Exchange, or duplicated there, the new series keeps the deletions from today
+> on (see the next box); into Microsoft 365 it shows deleted occurrences again
+> for now. From a Google calendar, Aperio knows deleted occurrences from about
+> three months before today to a year after (see
 > [Troubleshooting & Logs](/guides/troubleshooting/#an-occurrence-is-back-after-a-series-was-moved-copied-or-duplicated)).
+
+> **A new series on Exchange, and the wait:** Exchange takes a new series
+> without its deleted occurrences, so Aperio creates it first and then deletes
+> them there again one by one, from today on, and checks the result before it
+> invites anyone. That can take up to half a minute. Meanwhile Aperio shows
+> the dialog **Working, please wait …**, on the desktop and in the mobile app,
+> with no button; `Escape` and the back button do not close it, and it closes
+> by itself when the work is done. If the deletions cannot all be made, Aperio
+> removes the new series again and says nothing was changed. If even that
+> fails, it says the new series may now stand in the calendar as well; that
+> message only closes, so that you check the calendar instead of saving once
+> more (see
+> [Troubleshooting & Logs](/guides/troubleshooting/#a-new-series-may-stand-in-the-calendar-as-well)).
 
 > **Changing an occurrence that was already changed:** An occurrence changed
 > on its own in the calendar's own app (iCloud, Google, Exchange) stays part of

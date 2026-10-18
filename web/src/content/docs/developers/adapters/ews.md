@@ -139,7 +139,55 @@ The endpoint is discovered or user-supplied.
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by
-  its `Start`, which moves when the exception is moved.
+  its `Start`, which moves when the exception is moved. A new series' deletions
+  are found the same way (next item).
+- **A new series takes its deletions one occurrence at a time.** `CreateItem`
+  takes a series' rule but not its deleted occurrences (`DeletedOccurrences`
+  is read-only), so a series created with deletions — a split's new part, a
+  move, a copy, a duplicate, the editor's calendar change — goes through
+  `series_create` (decisions 202-213, 225, 263-266):
+  - Deletions before the device's day are not written again
+    (`cal_core::deletions_from_today`); with none left it is the single
+    `CreateItem` of any series, invitations included.
+  - The series is created with `SendToNone`. A `CreateItem` turned down whole
+    is that error; a lost or unreadable answer (or `ErrorInternalServerError`
+    and its kin) may have saved it (`created-may-stand: create-answer-lost`);
+    a request that never left (`EwsError::Unreached`, a connect or build
+    failure) is a plain network error.
+  - From the confirmed create there are 15 s (`cal_core::SERIES_WITH_DELETIONS`):
+    the master is read, then each deletion is deleted again with `SendToNone`
+    and no ChangeKey, found by its slot. The `InstanceIndex` the rule's UTC
+    expansion guesses (`nominal_occurrence_index`) is only where the walk
+    starts: the occurrences Exchange answers decide, and two neighbours on
+    either side of the slot, or the series' end before it, mean the stored rule
+    makes none there, so it is skipped (207, 266). A UTC expansion is a whole
+    day off for a Monday 00:30 in Berlin; judged by it, every deletion would
+    have been skipped. An all-day slot is compared by the day it names.
+  - The master is read again: its `DeletedOccurrences` must be exactly the
+    ones deleted. With invitees, one `UpdateItem` then re-sets only
+    `calendar:RequiredAttendees` with `SendToAllAndSaveCopy` — the invitation —,
+    and a second read proves it kept the deletions (a new start, end, zone or
+    pattern would have dropped them).
+  - `ErrorServerBusy`, as a response code or an HTTP 500 fault, is waited out
+    by its `BackOffMilliseconds` while it fits (`cal_core::may_send` counts the
+    slowest request so far); a lost delete answer is decided by probing the
+    occurrence; a ChangeKey refusal reads the master's key and sends once
+    more.
+  - Any failure deletes the series again inside the 15 s kept for that,
+    cancelling only where an invitation may have gone out (every failure of
+    the invitation but one Exchange turned down whole):
+    `deletions-not-kept` (a refusal) when it is gone, `created-may-stand` (a
+    network error, never a refusal) when it may stand, the detail starting
+    with `invited` where the invitees may have heard of it.
+  - One INFO or WARN line per such create on `adapter_ews::write`, with the
+    counts, the time and the slots, never an id.
+  - The manifest declares it (`recurrence.deletions_in_steps`), and the
+    surfaces show a "please wait" dialog while such a series is created.
+- **A create turned down whole is a refusal.** `create_event` maps through
+  `to_create_error`: a refused HTTP status or a code of
+  `REFUSED_UPDATE_CODES` (also in an HTTP 500 fault) is `server-refused`, as
+  for an update. Plain creates too: a create refused while Exchange throttles
+  said a protocol error before.
 - **The organizer is listed as an attendee.** Exchange puts the organizer
   into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
   made in Outlook it is the only row. The adapter drops that row by its flag
@@ -352,7 +400,11 @@ Time`); the rest of Aperio uses tzdata names. The translation lives in
 
 ## Testing
 
-`mockito` (or fixture XML) for the SOAP envelopes. Tests cover the
+`mockito` (or fixture XML) for the SOAP envelopes. `series_create` posts
+through a `Mailbox`, and its tests post to a scripted one: a model of the
+series that answers each request as Exchange would, with faults injected by
+the kind of request and its turn (busy, a lost answer, a slow one, a delete
+that did nothing or hit another date). Tests cover the
 id-only folder-sync probe/drain, the count parsing, and the
 folder-complete emit. The zone translation is pinned by
 `fixtures/windowsZones.json`, whose rows are named in the test; the adapter
