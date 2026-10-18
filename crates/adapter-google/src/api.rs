@@ -1227,7 +1227,7 @@ pub async fn rename_calendar(
 
 /// Percent-encode for URL query / path segment use. We do this
 /// manually so we don't pull in a dedicated crate for one helper.
-fn urlencoding(s: &str) -> String {
+pub(crate) fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {

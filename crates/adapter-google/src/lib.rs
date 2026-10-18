@@ -18,6 +18,7 @@ pub mod contacts;
 pub mod drive;
 pub mod error;
 pub mod mapping;
+mod series_create;
 pub mod tasks;
 
 use std::collections::HashMap;
