@@ -1387,6 +1387,7 @@
       "scopeFuture": "Betrifft dieses und alle folgenden Vorkommen. Jede Kopie ändert sich ab derselben Stelle; ihre früheren Vorkommen bleiben, wie sie sind.",
       "regroupFailed_one": "Die Kopie wurde geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
+      "newPartMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ließ sich weder fertigstellen noch wieder löschen, und der alte läuft weiter. Bitte dort prüfen.",
       "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
