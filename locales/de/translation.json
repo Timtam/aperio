@@ -1759,6 +1759,7 @@
           "exceptionsWouldBeLost": "Exchange würde dabei ihre geänderten und gelöschten Vorkommen verwerfen",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
+          "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
           "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
           "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
         }

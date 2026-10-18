@@ -327,12 +327,12 @@ gemacht hat —, entfernt Aperio die neue Serie wieder und sagt das: Es wurde
 nichts geändert, die alte Serie ist, wie sie war. Die entfernte Serie liegt
 in den gelöschten Elementen von Exchange. Hatte die Serie Leute eingeladen,
 haben sie auch die Absage bekommen, und die Meldung sagt das. Sagt sie, es
-habe zu lange gedauert, hat die Serie ab heute sehr viele gelöschte Termine,
-und erneutes Speichern stößt wahrscheinlich an dieselbe Grenze.
+habe zu lange gedauert, hat Exchange langsam geantwortet oder Aperio warten
+lassen, oder die Serie hat ab heute sehr viele gelöschte Termine.
 
 Was du tun kannst: Versuche es später noch einmal. Scheitert es weiter,
-schick das Protokoll mit der Meldung (siehe unten): Es nennt jeden Schritt,
-ohne Kennungen von Terminen oder Kalendern.
+schick das Protokoll mit der Meldung (siehe unten): Es nennt den Schritt, der
+gescheitert ist, und warum, ohne Kennungen von Terminen oder Kalendern.
 
 ## Eine neue Serie steht möglicherweise zusätzlich im Kalender
 

@@ -253,6 +253,14 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
   if (leftover) return t(LEFTOVER_REASON_KEYS[leftover.leftover]);
   const refusal = eventWriteRefusal(err);
   if (refusal) {
+    // A series taken back because its steps took too long says so (decision
+    // 213), as its sentence does.
+    if (
+      refusal.refusal === 'deletions-not-kept' &&
+      stepDetail(refusal.detail).why === OUT_OF_TIME
+    ) {
+      return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
+    }
     return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
   }
   const known = codedError(err);

@@ -197,8 +197,9 @@ geändert. Ist unklar, ob die alte schon beendet wurde, etwa nach einer
 abgerissenen Verbindung, bleiben beide stehen: Deine Änderung gilt als
 gespeichert, und der Editor bleibt mit einem Hinweis offen, der den Tag nennt,
 ab dem die Serie möglicherweise doppelt steht, bis du ihn schließt. Scheitert
-auch das Löschen der neuen, sagt Aperio auch das und bittet dich, den Kalender
-zu prüfen, bevor du erneut speicherst. Gelöschte Termine lässt Aperio in der
+auch das Löschen der neuen, sagt Aperio auch das; dieser Hinweis lässt sich nur
+schließen, damit du den Kalender prüfst, statt noch einmal zu speichern.
+Gelöschte Termine lässt Aperio in der
 neuen Serie weg, und in einer anderen Kalender-App geänderte bleiben darin, zur
 üblichen Uhrzeit und mit dem Inhalt der neuen Serie. Gelöschte Termine gehen
 mit deiner Änderung mit: Verschiebst du den Termin auf einen anderen Tag, wandert

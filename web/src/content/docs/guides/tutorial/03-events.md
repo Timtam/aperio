@@ -182,8 +182,8 @@ the new one again, and nothing has changed. When it cannot tell whether the old
 one was already ended, for example after a lost connection, both stay: your
 change counts as saved, and the editor stays open with a note naming the day
 from which the series may show twice, until you close it. If deleting the new
-one fails as well, Aperio says so too, and asks you to check the calendar before
-saving again. Aperio leaves the occurrences you deleted out of the new series,
+one fails as well, Aperio says so too; that note only closes, so that you check
+the calendar instead of saving again. Aperio leaves the occurrences you deleted out of the new series,
 and ones changed in another calendar app stay in it, at their usual time and
 with the new series' content. Deleted occurrences follow your change: move the
 occurrence to another day and each deleted one moves with it by its place in

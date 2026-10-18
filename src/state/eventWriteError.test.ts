@@ -344,6 +344,10 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: x'), t)).toBe(
       'der Kalender hat ihre gelöschten Termine nicht übernommen',
     );
+    // Out of time, the reason alone says so too (Ctrl+D's sentence uses it).
+    expect(
+      eventWriteFailureReason(command('forbidden', 'deletions-not-kept: invited time'), t),
+    ).toBe('ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert');
   });
 
   it('says a series that may stand, behind the wrapper too, and never as nothing written', () => {
@@ -381,6 +385,7 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
       'dialogs.event.writeError.createdMayStand',
       'dialogs.event.writeError.invitationsMayHaveGone',
       'dialogs.event.writeError.reason.deletionsNotKept',
+      'dialogs.event.writeError.reason.deletionsNotKeptTime',
       'dialogs.event.writeError.reason.createdMayStand',
     ]) {
       expect(i18n.exists(key, { lng: 'de' }), key).toBe(true);

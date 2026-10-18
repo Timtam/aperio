@@ -307,12 +307,12 @@ afterwards does not hold exactly the deletions Aperio made —, Aperio removes
 the new series again and says so: nothing was changed, the old series is as
 it was. The removed series is in Exchange's Deleted Items. If the series
 invited people, they got its cancellation too, and the message says so. When
-it says it took too long, the series has very many deleted occurrences from
-today on, and saving again will likely meet the same limit.
+it says it took too long, Exchange answered slowly or asked Aperio to wait, or
+the series has very many deleted occurrences from today on.
 
 What you can do: try again later. If it keeps failing, send the log with the
-report (see below): it names each step, without any appointment or calendar
-id.
+report (see below): it names the step that failed and why, without any
+appointment or calendar id.
 
 ## A new series may stand in the calendar as well
 

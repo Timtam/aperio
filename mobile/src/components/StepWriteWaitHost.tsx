@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { whenAppLockReleased } from '../state/appLock';
+import { whenAppLockCoverGone, whenAppLockReleased } from '../state/appLock';
 import { registerStepWriteWaitHost } from '../state/stepWriteWait';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -25,12 +25,23 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // iOS refuses to present or dismiss while a dismissal is still running, and
 // what follows a save often navigates or opens a notice —, on Android right
 // after the close commits. A close asked for before the dialog has shown waits
-// for that first, briefly, so a fast save never leaves it on screen. Where the
-// app lock's cover came up meanwhile, what follows waits for the unlock: it
-// must not act above or behind the cover.
+// for that first, briefly, so a fast save never leaves it on screen. Neither
+// opening nor closing happens under the app lock's cover: a modal presented or
+// dismissed there acts above or behind it, so both wait for the cover to go,
+// and what follows a close waits for an unlock. And what follows speaks only a
+// moment after the dialog is gone: the system moves the screen reader's focus
+// back to the screen then, and a sentence said at the same moment was cut off.
 
 /** How long a close waits for a dialog that has not shown yet. */
 const SHOW_TIMEOUT_MS = 1000;
+/** How long a close waits for the dismissal it asked for, at most: one the
+ *  system never reports must not hold the save forever. */
+const DISMISS_TIMEOUT_MS = 2000;
+/** The pause before what follows may speak, as after the lock's cover
+ *  (AppLockGate): spoken at once, it loses the race against the focus move. */
+const ANNOUNCE_DELAY_MS = 400;
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function StepWriteWaitHost() {
   const { t } = useTranslation();
@@ -39,6 +50,10 @@ export function StepWriteWaitHost() {
   const messageRef = useRef<Text | null>(null);
   const shown = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
   const dismissed = useRef<(() => void) | null>(null);
+  // Whether a write wants the dialog, and whether it was put on screen: a
+  // close can come before the cover let it open.
+  const wanted = useRef(false);
+  const presented = useRef(false);
 
   useEffect(
     () =>
@@ -49,22 +64,30 @@ export function StepWriteWaitHost() {
             resolve = r;
           });
           shown.current = { promise, resolve };
-          setVisible(true);
+          wanted.current = true;
+          void whenAppLockCoverGone().then(() => {
+            if (!wanted.current) return;
+            presented.current = true;
+            setVisible(true);
+          });
         },
         close: async () => {
-          const showing = shown.current?.promise ?? Promise.resolve();
-          await Promise.race([
-            showing,
-            new Promise<void>((r) => setTimeout(r, SHOW_TIMEOUT_MS)),
-          ]);
-          const gone = new Promise<void>((r) => {
-            dismissed.current = r;
-          });
-          setVisible(false);
-          if (Platform.OS !== 'ios') setTimeout(() => dismissed.current?.(), 0);
-          await gone;
-          dismissed.current = null;
-          await whenAppLockReleased();
+          wanted.current = false;
+          await whenAppLockCoverGone();
+          if (presented.current) {
+            presented.current = false;
+            const showing = shown.current?.promise ?? Promise.resolve();
+            await Promise.race([showing, delay(SHOW_TIMEOUT_MS)]);
+            const gone = new Promise<void>((r) => {
+              dismissed.current = r;
+            });
+            setVisible(false);
+            if (Platform.OS !== 'ios') setTimeout(() => dismissed.current?.(), 0);
+            await Promise.race([gone, delay(DISMISS_TIMEOUT_MS)]);
+            dismissed.current = null;
+            await delay(ANNOUNCE_DELAY_MS);
+          }
+          if (await whenAppLockReleased()) await delay(ANNOUNCE_DELAY_MS);
         },
       }),
     [],

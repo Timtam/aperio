@@ -1759,6 +1759,7 @@
           "exceptionsWouldBeLost": "Exchange would drop its changed and deleted occurrences",
           "forbidden": "the provider does not allow it ({{detail}})",
           "changedOnServer": "it changed on the server since you opened it",
+          "deletionsNotKeptTime": "deleting its deleted occurrences again one by one took too long",
           "deletionsNotKept": "the calendar did not take its deleted occurrences",
           "createdMayStand": "a new series was created but could neither be completed nor removed again"
         }

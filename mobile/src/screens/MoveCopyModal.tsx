@@ -22,6 +22,7 @@ import {
   getTasks,
 } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
+import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { useCancelHeader } from '../components/useCancelHeader';
@@ -81,6 +82,18 @@ export default function MoveCopyModal({
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     });
   }, [mayStand]);
+  // Every way out of the notice is its Close, as in the editor's: the header
+  // button says Close, not Cancel — nothing is cancelled any more — and the
+  // swipe is off.
+  useEffect(() => {
+    if (mayStand == null) return;
+    navigation.setOptions({
+      headerLeft: () => (
+        <HeaderCancelButton label={t('dialogs.close')} onPress={() => navigation.goBack()} />
+      ),
+      gestureEnabled: false,
+    });
+  }, [mayStand, navigation, t]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -338,7 +351,7 @@ export default function MoveCopyModal({
         contentContainerStyle={styles.content}
         accessibilityViewIsModal
       >
-        <Text ref={mayStandRef} style={styles.hint} accessibilityRole="text">
+        <Text ref={mayStandRef} style={styles.error} accessibilityRole="text">
           {mayStand}
         </Text>
         <Pressable

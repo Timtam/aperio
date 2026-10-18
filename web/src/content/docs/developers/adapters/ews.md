@@ -173,14 +173,21 @@ The endpoint is discovered or user-supplied.
     slowest request so far); a lost delete answer is decided by probing the
     occurrence; a ChangeKey refusal reads the master's key and sends once
     more.
+  - The invitation is sent only inside the 15 s; the reads that prove the
+    result may borrow a few seconds past them, no write does.
   - Any failure deletes the series again inside the 15 s kept for that,
     cancelling only where an invitation may have gone out (every failure of
-    the invitation but one Exchange turned down whole):
+    the invitation but one Exchange turned down whole, one refused for the
+    sign-in or a gone item, and one that never left). A write counts as done
+    only where its answer says `Success`; an empty or unreadable 200 is read
+    as a lost answer and decided by reading the series:
     `deletions-not-kept` (a refusal) when it is gone, `created-may-stand` (a
     network error, never a refusal) when it may stand, the detail starting
     with `invited` where the invitees may have heard of it.
-  - One INFO or WARN line per such create on `adapter_ews::write`, with the
-    counts, the time and the slots, never an id.
+  - On `adapter_ews::write`, never with an id: one INFO line per skipped
+    slot; on success one INFO line with the counts, the time and every slot;
+    on failure a WARN where the proof found other deletions, and one WARN
+    with the counts, the time, the step that failed and why.
   - The manifest declares it (`recurrence.deletions_in_steps`), and the
     surfaces show a "please wait" dialog while such a series is created.
 - **A create turned down whole is a refusal.** `create_event` maps through

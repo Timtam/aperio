@@ -298,7 +298,13 @@ pub(crate) fn busy_of(answer: &EwsResult<String>) -> Option<Option<Duration>> {
 }
 
 fn busy_in(body: &str) -> Option<Option<Duration>> {
-    if !body.contains("ErrorServerBusy") {
+    // The answer's own code says so, never text somebody wrote: a subject, a
+    // place or a description may name the code as well.
+    let busy = matches!(
+        crate::soap::check_for_fault(body),
+        Err(EwsError::Soap { code, .. }) if bare_code(&code) == "ErrorServerBusy"
+    );
+    if !busy {
         return None;
     }
     let back_off = body.find("BackOffMilliseconds").and_then(|at| {
@@ -312,6 +318,20 @@ fn busy_in(body: &str) -> Option<Option<Duration>> {
         digits.parse::<u64>().ok().map(Duration::from_millis)
     });
     Some(back_off)
+}
+
+/// What a write's answer says: done only where a response message says
+/// `Success`; a fault or an error message is that error. Anything else — an
+/// empty body, a 200 whose body was lost on the way, a proxy's page — proves
+/// nothing and reads as a lost answer, which the caller decides by reading.
+fn write_outcome(answer: EwsResult<String>) -> EwsResult<()> {
+    let xml = answer?;
+    crate::soap::check_for_fault(&xml)?;
+    if xml.contains("ResponseClass=\"Success\"") {
+        Ok(())
+    } else {
+        Err(EwsError::Network("an answer that says nothing".into()))
+    }
 }
 
 /// A SOAP code without the namespace prefix a fault's `faultcode` carries.
@@ -582,7 +602,9 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         if !self.invite {
             return Ok(proved.change_key);
         }
-        self.send_invitation(attendees_xml, proof_until).await?;
+        // A write that mails the invitees: only inside the steps' own time,
+        // never in the time borrowed for the proof's read.
+        self.send_invitation(attendees_xml, settle_until).await?;
         // The invitation wrote only the invitees; read once more that it
         // kept the deletions, and for the key it left.
         let final_read = self.read_master(proof_until, "after-control").await?;
@@ -776,8 +798,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                 false,
             );
             let answer = self.send(&body, until, "delete", false).await?;
-            let outcome = answer.and_then(|xml| crate::soap::check_for_fault(&xml));
-            match outcome {
+            match write_outcome(answer) {
                 Ok(()) => break,
                 Err(EwsError::Soap { code, .. })
                     if CHANGE_KEY_CODES.contains(&bare_code(&code)) && !resent =>
@@ -866,16 +887,19 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         // Not sent in time, or only ever answered busy: Exchange processed
         // nothing, and no invitation went out.
         let answer = self.send(&body, until, "invitation", false).await?;
-        match answer.and_then(|xml| crate::soap::check_for_fault(&xml)) {
+        match write_outcome(answer) {
             Ok(()) => {
                 self.invited = true;
                 Ok(())
             }
             Err(err) => {
-                // Turned down whole, nothing went out (264); any other failure
-                // may come after the mail left — a meeting update can save,
-                // send and then fail.
-                self.invited = !crate::turned_down_whole(&err);
+                // Turned down whole, never sent, or refused for the sign-in or
+                // a gone item: nothing went out (264). Any other failure may
+                // come after the mail left — a meeting update can save, send
+                // and then fail, and a lost answer says nothing either way.
+                self.invited = !(crate::turned_down_whole(&err)
+                    || crate::names_sign_in_or_gone(&err)
+                    || matches!(err, EwsError::Unreached(_)));
                 Err(Failure::new("invitation", "invitation"))
             }
         }
@@ -903,7 +927,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                 break;
             };
             first_delete = false;
-            match answer.and_then(|xml| crate::soap::check_for_fault(&xml)) {
+            match write_outcome(answer) {
                 Ok(()) => {
                     undone = true;
                     break;
@@ -1040,6 +1064,9 @@ mod tests {
         Slow(Duration),
         /// Answer success, but delete nothing.
         Pretend,
+        /// Answer HTTP 200 with an empty body, without making the change: a
+        /// body lost on the way.
+        Empty,
         /// Delete this index instead of the one asked.
         Other(u32),
     }
@@ -1396,6 +1423,7 @@ mod tests {
                         Ok(Fake::apply(&mut state, kind, &body, None, false)),
                         Some(delay),
                     ),
+                    Some(Fault::Empty) => (Ok(String::new()), None),
                     Some(Fault::Pretend) => {
                         (Ok(Fake::apply(&mut state, kind, &body, None, true)), None)
                     }
@@ -1756,6 +1784,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_empty_answer_is_no_proof_a_series_was_deleted() {
+        // The take-back's delete is answered 200 with nothing in it: the
+        // series is read, still stands, and is deleted once more.
+        let shape = mondays();
+        let second = shape.slots[1];
+        let fake = Fake::new(
+            shape,
+            vec![
+                (Probe, 0, Fault::Soap("ErrorAccessDenied")),
+                (DeleteSeries, 0, Fault::Empty),
+            ],
+        );
+        let (undone, _) = not_kept(run(&fake, series(vec![second], false)).await);
+        assert!(undone);
+        assert_eq!(fake.bodies(DeleteSeries).len(), 2);
+        assert!(!fake.exists());
+    }
+
+    #[tokio::test]
+    async fn an_invitation_that_never_left_takes_back_silently() {
+        let shape = mondays();
+        let second = shape.slots[1];
+        let fake = Fake::new(shape, vec![(Invite, 0, Fault::Unreached)]);
+        let (undone, detail) = not_kept(run(&fake, invited(series(vec![second], false))).await);
+        assert!(undone);
+        assert_eq!(detail, "invitation");
+        assert!(fake.bodies(DeleteSeries)[0].contains(r#"SendMeetingCancellations="SendToNone""#));
+    }
+
+    #[tokio::test]
+    async fn no_invitation_goes_out_once_the_steps_time_is_spent() {
+        // The proof's read may borrow time past the budget; the invitation,
+        // which mails the invitees, may not.
+        let shape = mondays();
+        let second = shape.slots[1];
+        let fake = Fake::new(
+            shape,
+            vec![(Read, 1, Fault::Slow(Duration::from_millis(300)))],
+        );
+        let budget = SettleBudget {
+            settle: Duration::from_millis(200),
+            undo: Duration::from_secs(2),
+        };
+        let (undone, detail) = not_kept(
+            run_on(
+                &fake,
+                invited(series(vec![second], false)),
+                &Utc,
+                today(),
+                budget,
+            )
+            .await,
+        );
+        assert!(undone);
+        assert_eq!(detail, cal_core::OUT_OF_TIME);
+        assert!(!fake.kinds().contains(&Invite));
+        assert!(fake.bodies(DeleteSeries)[0].contains(r#"SendMeetingCancellations="SendToNone""#));
+    }
+
+    #[tokio::test]
     async fn the_take_back_decides_what_stands() {
         let shape = mondays();
         let second = shape.slots[1];
@@ -1788,21 +1876,22 @@ mod tests {
     async fn the_clock_counts_the_time_requests_take() {
         let shape = mondays();
         let second = shape.slots[1];
-        let fake = Fake::new(
-            shape,
-            vec![(Probe, 0, Fault::Slow(Duration::from_millis(400)))],
-        );
+        let fake = Fake::new(shape, vec![(Probe, 0, Fault::Slow(Duration::from_secs(5)))]);
         let budget = SettleBudget {
             settle: Duration::from_millis(150),
             undo: Duration::from_secs(2),
         };
+        let started = std::time::Instant::now();
         let (undone, detail) =
             not_kept(run_on(&fake, series(vec![second], false), &Utc, today(), budget).await);
         assert!(undone);
-        // The probe was cut off at the budget, read as unanswered.
+        // The probe was cut off at the budget, read as unanswered, long before
+        // its answer would have come.
+        assert_eq!(detail, "unreadable");
         assert!(
-            detail == "unreadable" || detail == cal_core::OUT_OF_TIME,
-            "{detail}"
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
         );
     }
 
@@ -1919,6 +2008,16 @@ mod tests {
             Some(None)
         );
         assert_eq!(busy_of(&Err(EwsError::Network("reset".into()))), None);
+        // A subject that names the code is no busy answer.
+        let named = success(
+            "GetItemResponse",
+            "<m:Items><t:CalendarItem><t:ItemId Id=\"NEW\"/><t:Subject>ErrorServerBusy BackOffMilliseconds 60000</t:Subject></t:CalendarItem></m:Items>",
+        );
+        assert_eq!(busy_of(&Ok(named.clone())), None);
+        assert!(matches!(
+            probe_answer(&named),
+            Answer::Unreadable | Answer::At(_)
+        ));
     }
 
     #[test]

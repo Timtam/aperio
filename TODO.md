@@ -1521,6 +1521,11 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
+      `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
+      vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die
+      Ansicht des ersten blieb stehen); allein und beim nächsten vollen Lauf
+      grün. Gesehen in der ersten Prüfrunde von #127 (2026-10-18), älter.
 - [ ] **Der Desktop-Editor schließt mitten im Speichern.** Escape und das ×
       des Editors schließen ihn, während ein Speichern läuft (nur Abbrechen
       ist gesperrt); ein Ergebnis, das danach kommt, hat keinen Dialog mehr.

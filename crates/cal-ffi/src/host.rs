@@ -10403,9 +10403,6 @@ mod tests {
         )
     }
 
-    /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits
-    /// color_hex + send_invitations (serde defaults); all other Options are
-    /// present-as-null, as `cal_core::NewEvent` requires.
     /// A calendar adapter whose every create fails with the error `fail`
     /// makes: a new series taken back, one that may stand.
     struct FailingCreates(fn() -> cal_core::Error);
@@ -10494,6 +10491,9 @@ mod tests {
         }
     }
 
+    /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits
+    /// color_hex + send_invitations (serde defaults); all other Options are
+    /// present-as-null, as `cal_core::NewEvent` requires.
     fn new_event_json(cal: &str, title: &str) -> String {
         format!(
             r#"{{"calendar_id":"{cal}","title":"{title}","description":null,"location":null,"start":"2026-06-20T09:00:00Z","end":"2026-06-20T09:30:00Z","all_day":false,"recurrence":null,"color_label":null,"reminders":[],"sound":null,"attendees":[]}}"#
