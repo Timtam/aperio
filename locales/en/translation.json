@@ -453,6 +453,10 @@
     "clientSecretHint": "The same value you entered when the account was first connected — from your provider's console, e.g. the Google Cloud Console entry right under the client ID."
   },
   "dialogs": {
+    "stepWrite": {
+      "title": "Working, please wait …",
+      "body": "Aperio is creating the series and removing its deleted occurrences there one by one. This can take up to half a minute."
+    },
     "firstLaunchWizard": {
       "title": "Welcome to Aperio",
       "stepIndicator": "Step {{current}} of {{total}}",
@@ -1543,7 +1547,8 @@
       "thisAndFutureNotRepeating": "\"{{title}}\" no longer repeats; it was changed elsewhere. Nothing was changed here. Open it again to edit it.",
       "thisAndFutureShiftRefused": "\"{{title}}\" cannot move to the new date or time from here on: {{reason}}. Choose the repeat yourself, or edit just this occurrence.",
       "seriesShiftRefused": "\"{{title}}\" cannot move to the new date or time as a whole series: {{reason}}. Choose the repeat yourself.",
-      "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar before saving again.",
+      "thisAndFutureMaybeTwice": "\"{{title}}\" may now show twice from {{date}}: the old series could not be cut short ({{detail}}), nor the new one deleted again. Please check the calendar.",
+      "thisAndFutureNewMayStand": "\"{{title}}\" may now show twice from {{date}}: the new series could neither be completed nor deleted again, and the old one still runs on. Please check the calendar.",
       "thisAndFutureUpdatedMaybeTwice": "\"{{title}}\" was changed from this occurrence on. But whether the old series now ends before it is unclear ({{detail}}): from {{date}} it may show twice. Please check it.",
       "seriesLoadFailed": "Could not load the series \"{{title}}\"; no changes were made.",
       "cancelChoice": {

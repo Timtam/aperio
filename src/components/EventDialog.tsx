@@ -90,6 +90,12 @@ import {
   type CarryScope,
   type ExceptionsLoss,
 } from '@aperio/shared';
+import {
+  createsInSteps,
+  eventWriteLeftover,
+  seriesTailMayStand,
+  seriesTailRemoved,
+} from '@aperio/shared';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
@@ -103,6 +109,7 @@ import { DeleteEventConfirm } from './DeleteEventConfirm';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { ConferenceSection } from './ConferenceSection';
 import { MeetingControls } from './MeetingControls';
+import { useStepWriteWait } from './useStepWriteWait';
 import {
   allDayFormEndDate,
   allDayWireEnd,
@@ -282,6 +289,12 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
     </label>
   );
 }
+
+/**
+ * A failure that is said on screen, focused, with only Close (decision 210):
+ * a new series may stand, and saving again would create another.
+ */
+class CloseOnlyNotice extends Error {}
 
 export function EventDialog({
   isOpen,
@@ -652,6 +665,9 @@ export function EventDialog({
     sentence: string;
     proceed: () => Promise<void>;
   } | null>(null);
+  // The "please wait" dialog over the form while a series is created in
+  // steps (decisions 227, 265).
+  const { waitDialog, wait } = useStepWriteWait();
   const splitNoticeRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (splitNotice) splitNoticeRef.current?.focus();
@@ -1698,63 +1714,95 @@ export function EventDialog({
               // The cut as the provider saved it: deleted occurrences it brought
               // back and that could not be deleted again ride on it (253).
               const head: { saved?: CalendarEvent } = {};
-              const written = await writeSeriesSplit(
-                {
-                  createTail: () =>
-                    apiCreateEvent(
-                      {
-                        calendar_id: form.calendarId,
-                        title: trimmedTitle,
-                        description: form.description.trim() || null,
-                        location: form.location.trim() || null,
-                        start,
-                        end,
-                        all_day: form.allDay,
-                        recurrence: tailRecurrence,
-                        color_label: form.colorLabel,
-                        reminders: remindersForWire,
-                        sound: null,
-                        attendees: form.attendees,
-                        send_invitations: sendInvitations,
-                        ...organizerOf(master),
-                      },
-                      // Continuation of the master — keep its zone verbatim
-                      // (incl. floating) so head and tail expand identically.
-                      { preserveRecurrenceZone: true },
-                    ),
-                  // Notify on the truncate too (symmetric with delete-this-and-
-                  // following): on notify-flag providers attendees must be told
-                  // the original series now ends before the cutoff, or they keep
-                  // the old occurrences AND get the new tail invite.
-                  truncate: async (headRule) => {
-                    head.saved = await apiUpdateEvent(
-                      {
-                        ...master,
-                        recurrence: { ...masterRecurrence, rrule: headRule },
-                        send_invitations: sendInvitations,
-                        truncate_tail_overrides: true,
-                      },
-                      master.calendar_id,
-                    );
+              const written = await wait(
+                createsInSteps(
+                  calendars.find((c) => c.id === form.calendarId),
+                  tailRecurrence,
+                ),
+                () => writeSeriesSplit(
+                  {
+                    createTail: () =>
+                      apiCreateEvent(
+                        {
+                          calendar_id: form.calendarId,
+                          title: trimmedTitle,
+                          description: form.description.trim() || null,
+                          location: form.location.trim() || null,
+                          start,
+                          end,
+                          all_day: form.allDay,
+                          recurrence: tailRecurrence,
+                          color_label: form.colorLabel,
+                          reminders: remindersForWire,
+                          sound: null,
+                          attendees: form.attendees,
+                          send_invitations: sendInvitations,
+                          ...organizerOf(master),
+                        },
+                        // Continuation of the master — keep its zone verbatim
+                        // (incl. floating) so head and tail expand identically.
+                        { preserveRecurrenceZone: true },
+                      ),
+                    // Notify on the truncate too (symmetric with delete-this-and-
+                    // following): on notify-flag providers attendees must be told
+                    // the original series now ends before the cutoff, or they keep
+                    // the old occurrences AND get the new tail invite.
+                    truncate: async (headRule) => {
+                      head.saved = await apiUpdateEvent(
+                        {
+                          ...master,
+                          recurrence: { ...masterRecurrence, rrule: headRule },
+                          send_invitations: sendInvitations,
+                          truncate_tail_overrides: true,
+                        },
+                        master.calendar_id,
+                      );
+                    },
+                    // The undo of the create, told as the create was.
+                    removeTail: (tail) =>
+                      deleteEventById(tail.id, tail.calendar_id, sendInvitations),
                   },
-                  // The undo of the create, told as the create was.
-                  removeTail: (tail) =>
-                    deleteEventById(tail.id, tail.calendar_id, sendInvitations),
-                },
-                plan,
+                  plan,
+                ),
               ).catch((err: unknown) => {
+                const date = cutoffDay(occIso, i18n.language);
+                // The new series was created and could neither be completed
+                // nor deleted again (decisions 203, 210): it may stand beside
+                // the old one, which runs on uncut. Said on screen, and only
+                // closed: saving again would create another.
+                const leftover = eventWriteLeftover(err);
+                if (seriesTailMayStand(err) && leftover) {
+                  const sentence = t('dialogs.event.thisAndFutureNewMayStand', {
+                    title: trimmedTitle,
+                    date,
+                  });
+                  throw new CloseOnlyNotice(
+                    leftover.invited
+                      ? `${sentence} ${t('dialogs.event.writeError.invitationsMayHaveGone')}`
+                      : sentence,
+                  );
+                }
                 // The old series was not cut, and the new one could not be
                 // deleted again: it may stand twice. That is said first, with
-                // what went wrong.
-                throw seriesMaybeShownTwice(err)
-                  ? new Error(
-                      t('dialogs.event.thisAndFutureMaybeTwice', {
-                        title: trimmedTitle,
-                        date: cutoffDay(occIso, i18n.language),
-                        detail: eventWriteFailureReason(err, t),
-                      }),
-                    )
-                  : err;
+                // what went wrong — and only closed, as above (210).
+                if (seriesMaybeShownTwice(err)) {
+                  throw new CloseOnlyNotice(
+                    t('dialogs.event.thisAndFutureMaybeTwice', {
+                      title: trimmedTitle,
+                      date,
+                      detail: eventWriteFailureReason(err, t),
+                    }),
+                  );
+                }
+                // Cutting the old series was refused and the new one deleted
+                // again: nothing changed, but invitees it invited got its
+                // cancellation too (212).
+                if (seriesTailRemoved(err) && sendInvitations) {
+                  throw new Error(
+                    `${eventWriteErrorMessage(err, t)} ${t('dialogs.event.writeError.invitationsCancelledToo')}`,
+                  );
+                }
+                throw err;
               });
               const created = written.tail;
               // The tail is a continuation of the same appointment, so it gets
@@ -1959,9 +2007,19 @@ export function EventDialog({
           lossAskable = true;
           sentSave = JSON.stringify(updated);
           consentSent = acceptsLoss && sentSave === askedSaveRef.current;
-          const saved = await apiUpdateEvent(
-            consentSent ? { ...updated, accepts_exception_loss: true } : updated,
-            event.calendar_id,
+          // Another calendar creates the series anew there: in steps where the
+          // target writes its deletions so (decisions 227, 265).
+          const saved = await wait(
+            form.calendarId !== event.calendar_id &&
+              createsInSteps(
+                calendars.find((c) => c.id === form.calendarId),
+                updated.recurrence,
+              ),
+            () =>
+              apiUpdateEvent(
+                consentSent ? { ...updated, accepts_exception_loss: true } : updated,
+                event.calendar_id,
+              ),
           );
           lossAskable = false;
           // A calendar-picker move is rerouted as create-on-target +
@@ -2064,6 +2122,27 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
+        // A new series that may stand, beside the old one or in the other
+        // calendar (decisions 203, 210): said on screen and only closed —
+        // saving again would create another.
+        const mayStand =
+          err instanceof CloseOnlyNotice
+            ? err.message
+            : eventWriteLeftover(err)
+              ? eventWriteErrorMessage(err, t)
+              : null;
+        if (mayStand) {
+          if (!shownRef.current) {
+            announce(mayStand);
+            return;
+          }
+          leavingNotice.current = false;
+          setSplitNotice({
+            sentence: mayStand,
+            proceed: async () => onClose(),
+          });
+          return;
+        }
         // A save that would drop occurrences of the series asks first
         // (decisions 243-253), in a dialog over the form; nothing was sent.
         const loss = exceptionsLossOf(err);
@@ -2102,6 +2181,7 @@ export function EventDialog({
       announce,
       offerToCarry,
       onClose,
+      wait,
       t,
       i18n.language,
     ],
@@ -2988,6 +3068,7 @@ export function EventDialog({
         </div>
       </form>
     </Modal>
+    {waitDialog}
     {event && (
       <DeleteEventConfirm
         event={declineOpen ? event : null}

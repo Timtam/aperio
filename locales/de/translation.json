@@ -453,6 +453,10 @@
     "clientSecretHint": "Derselbe Wert wie beim ersten Verbinden des Kontos — aus der Konsole deines Anbieters, z. B. in der Google Cloud Console direkt unter der Client-ID."
   },
   "dialogs": {
+    "stepWrite": {
+      "title": "Vorgang läuft, bitte warten …",
+      "body": "Aperio legt die Serie an und entfernt dort ihre gelöschten Termine einzeln. Das kann bis zu einer halben Minute dauern."
+    },
     "firstLaunchWizard": {
       "title": "Willkommen bei Aperio",
       "stepIndicator": "Schritt {{current}} von {{total}}",
@@ -1543,7 +1547,8 @@
       "thisAndFutureNotRepeating": "„{{title}}\" wiederholt sich nicht mehr; es wurde anderswo geändert. Hier wurde nichts geändert. Öffne den Termin neu, um ihn zu bearbeiten.",
       "thisAndFutureShiftRefused": "„{{title}}\" lässt sich ab hier nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu, oder bearbeite nur diesen Termin.",
       "seriesShiftRefused": "„{{title}}\" lässt sich als ganze Serie nicht auf das neue Datum oder die neue Uhrzeit verschieben: {{reason}}. Wähle die Wiederholung selbst neu.",
-      "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender, bevor du erneut speicherst.",
+      "thisAndFutureMaybeTwice": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die alte Serie ließ sich nicht kürzen ({{detail}}) und die neue nicht wieder löschen. Bitte prüfe den Kalender.",
+      "thisAndFutureNewMayStand": "„{{title}}\" steht ab {{date}} möglicherweise doppelt: Die neue Serie ließ sich weder fertigstellen noch wieder löschen, und die alte läuft weiter. Bitte prüfe den Kalender.",
       "thisAndFutureUpdatedMaybeTwice": "„{{title}}\" wurde ab diesem Termin geändert. Ob die alte Serie jetzt davor endet, ist aber unklar ({{detail}}): Ab {{date}} steht sie möglicherweise doppelt. Bitte prüfen.",
       "seriesLoadFailed": "Die Serie „{{title}}\" konnte nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {

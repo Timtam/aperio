@@ -69,6 +69,14 @@ export interface ModalProps {
    * a Tab stop (cf. `FocusableNote` for text that must be a stop).
    */
   describedById?: string;
+  /**
+   * A dialog that only says the app is busy (decisions 227, 265): no close
+   * button, and neither Escape nor the backdrop closes it — the work it waits
+   * for cannot be left halfway. The caller closes it when the work is done,
+   * and points `initialFocusRef` at its focusable sentence, which is then the
+   * one stop in the dialog.
+   */
+  busy?: boolean;
 }
 
 export function Modal({
@@ -80,6 +88,7 @@ export function Modal({
   dismissOnBackdrop = true,
   initialFocusRef,
   describedById,
+  busy = false,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -158,7 +167,8 @@ export function Modal({
         // custom-color picker opened from the event editor) would otherwise
         // also close its parent. Escape should close only this dialog.
         e.stopPropagation();
-        onClose();
+        // A busy dialog closes when its work is done, never before.
+        if (!busy) onClose();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -186,7 +196,7 @@ export function Modal({
         first.focus();
       }
     },
-    [onClose],
+    [onClose, busy],
   );
 
   // Focus-recovery safety net (best-effort backstop). A dialog control the user
@@ -229,19 +239,20 @@ export function Modal({
       const active = document.activeElement;
       if (active instanceof HTMLElement && d.contains(active)) return; // already recovered
       const focusables = getFocusables(d);
-      // The header close button is always present, so there is always a stop.
+      // The header close button is present but in a busy dialog, whose
+      // sentence is its stop.
       (focusables[0] ?? d).focus({ preventScroll: true });
     });
   }, []);
 
   const handleBackdrop = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
-      if (!dismissOnBackdrop) return;
+      if (!dismissOnBackdrop || busy) return;
       if (e.target === e.currentTarget) {
         onClose();
       }
     },
-    [dismissOnBackdrop, onClose],
+    [dismissOnBackdrop, busy, onClose],
   );
 
   if (!isOpen) return null;
@@ -271,14 +282,16 @@ export function Modal({
           <h2 id={titleId} className="modal__title">
             {title}
           </h2>
-          <button
-            type="button"
-            className="modal__close"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          {!busy && (
+            <button
+              type="button"
+              className="modal__close"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              ×
+            </button>
+          )}
         </header>
         <div role="application" className="modal__body">
           {children}
