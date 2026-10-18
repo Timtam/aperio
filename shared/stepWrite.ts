@@ -1,8 +1,9 @@
 // A series created in steps (decisions 202-213, 227, 265).
 //
-// Exchange creates a series without its deleted occurrences; the adapter then
-// deletes them again one by one, proves it, and only then invites — which can
-// take up to half a minute. The calendar says so on its row
+// Some calendars take a new series without its deleted occurrences, or Aperio
+// does not trust how they take them; the adapter then removes them again one
+// by one and checks the result — which can take up to half a minute. The
+// calendar says so on its row
 // (`recurrence_capabilities.deletions_in_steps`, from the adapter's manifest),
 // and every surface that creates such a series shows a "please wait" dialog
 // while it runs: decided here, once.

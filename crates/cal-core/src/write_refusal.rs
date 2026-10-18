@@ -76,18 +76,18 @@ pub enum WriteRefusal {
     /// the surfaces ask with it and send the write again with the consent.
     ExceptionsWouldBeLost,
     /// A new series was written, its deleted occurrences could not all be
-    /// deleted from it again one by one, and it was deleted itself, so nothing
+    /// removed from it again one by one, and it was deleted itself, so nothing
     /// stands and the old series is as it was (decisions 202, 203). Unlike the
-    /// other refusals something was written for a moment: the series sits in
-    /// the provider's deleted items, and where the detail says
-    /// [`crate::step_write::INVITED`] its invitees were invited and got its
-    /// cancellation too (212). The detail is
+    /// other refusals something was written for a moment: the provider deleted
+    /// the series like any other, and where the detail says
+    /// [`crate::step_write::INVITED`] its invitees may have heard of it and got
+    /// its cancellation too (212). The detail is
     /// [`crate::step_write::step_detail`]: a machine token for the log, marked
     /// when the invitees may have heard of it — `no-occurrence` (no occurrence
     /// found where the provider's rule makes one), `foreign-deletion`,
     /// `unreadable`, `control` and `after-control` (the series read before and
-    /// after), `time`, `invitation`, `network`, `http-<status>` or
-    /// `ews-<code>` (the provider's own).
+    /// after), `time`, `invitation`, `network`, `http-<status>` or a code of the
+    /// provider's own, `<provider>-<code>`.
     DeletionsNotKept,
 }
 

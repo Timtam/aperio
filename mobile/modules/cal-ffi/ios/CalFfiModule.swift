@@ -154,12 +154,12 @@ public class CalFfiModule: Module {
   }
 
   /// Run an event write as an iOS background task (decision 229): a new
-  /// Exchange series deletes its deleted occurrences again one by one and can
-  /// take up to half a minute, and a write the system suspends halfway leaves
-  /// a series that may stand. iOS grants about half a minute after the app
-  /// leaves the foreground, and does not promise it; the task ends with the
-  /// write, or when the grant runs out. Both may come from different threads,
-  /// so the identifier is ended once, under a lock.
+  /// series removes its deleted occurrences again one by one (Exchange,
+  /// Google) and can take up to half a minute, and a write the system
+  /// suspends halfway leaves a series that may stand. iOS grants about half a
+  /// minute after the app leaves the foreground, and does not promise it; the
+  /// task ends with the write, or when the grant runs out. Both may come from
+  /// different threads, so the identifier is ended once, under a lock.
   private func inBackgroundTask<T>(_ name: String, _ block: () throws -> T) throws -> T {
     let lock = NSLock()
     var task = UIBackgroundTaskIdentifier.invalid

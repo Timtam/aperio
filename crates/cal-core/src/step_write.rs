@@ -1,12 +1,13 @@
 //! A write that settles in steps: one request the provider confirms, then
 //! more that complete it — or that take it back (decisions 202-213).
 //!
-//! Exchange creates a series without its deleted occurrences (decision 140):
-//! the adapter creates it bare, deletes them again one by one and reads the
-//! series to prove it, and where that fails it deletes the series again. What
-//! such a write may take, which deletions it writes again and how its outcome
-//! names the invitees is decided once, here, for every adapter that writes a
-//! series this way. Each adapter keeps its own requests, its pacing and its
+//! A provider may not take a new series' deleted occurrences with it, or
+//! Aperio may not trust how it takes them: the adapter creates the series
+//! bare, removes them again one by one and checks the result, and where that
+//! fails it deletes the series again. A provider may invite with the series or
+//! only once it is proved. What such a write may take, which deletions it
+//! writes again and how its outcome names the invitees is decided once, here,
+//! for every adapter that writes a series this way. Each adapter keeps its own requests, its pacing and its
 //! clock: this crate reads no clock (it is compiled to WebAssembly too), so
 //! everything here takes the durations and days the adapter measured.
 
