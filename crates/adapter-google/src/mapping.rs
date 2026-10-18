@@ -867,7 +867,6 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
 /// line — each is cancelled once the series stands — and with the id Aperio
 /// gives it, where it does, so a create whose answer was lost can be read
 /// back by it (268).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn bare_series_body(new: &NewEvent, id: Option<&str>) -> EventWriteBody {
     let mut bare = new.clone();
     if let Some(recurrence) = bare.recurrence.as_mut() {
@@ -882,14 +881,12 @@ pub(crate) fn bare_series_body(new: &NewEvent, id: Option<&str>) -> EventWriteBo
 /// An id Google takes for a new event (base32hex, 5 to 1024 characters):
 /// 128 random bits as 32 lowercase hex digits, an alphabet within Google's.
 /// Fresh for every create, as a deleted event keeps its id (268).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn fresh_event_id<R: rand::Rng + ?Sized>(rng: &mut R) -> String {
     format!("{:032x}", rng.gen::<u128>())
 }
 
 /// Whether a create invites anyone: by the invitees it writes, not the
 /// entries it was given, as one without an address is dropped.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn written_attendees(new: &NewEvent) -> bool {
     !attendees_to_write(&new.attendees).is_empty()
 }

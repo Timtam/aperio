@@ -1009,6 +1009,185 @@ mod delta_tests {
         adapter
     }
 
+    /// A weekly series on Mondays 09:00 UTC from 7 January 2030, with `deleted`.
+    fn weekly_from_2030(deleted: Vec<chrono::DateTime<chrono::Utc>>) -> NewEvent {
+        NewEvent {
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2030, 1, 7, 9, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2030, 1, 7, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=4".into(),
+                exceptions: deleted,
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            send_invitations: false,
+            organizer: None,
+            organized_elsewhere: false,
+        }
+    }
+
+    /// Through the adapter: a series with a deletion ahead is created bare
+    /// under an id of Aperio's, its occurrences listed, the deleted one
+    /// cancelled, and the listing read again (decisions 202, 268).
+    #[tokio::test]
+    async fn a_new_series_with_a_deletion_ahead_is_created_bare_and_cancelled() {
+        let mut server = Server::new_async().await;
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sink = std::sync::Arc::clone(&sent);
+        let insert = server
+            .mock("POST", "/calendars/cal/events?sendUpdates=none")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body: serde_json::Value =
+                    serde_json::from_slice(request.body().unwrap()).unwrap();
+                *sink.lock().unwrap() = body.clone();
+                serde_json::json!({
+                    "id": body["id"],
+                    "status": "confirmed",
+                    "summary": body["summary"],
+                    "start": body["start"],
+                    "end": body["end"],
+                    "recurrence": body["recurrence"],
+                })
+                .to_string()
+                .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let seen = std::sync::Arc::clone(&cancelled);
+        let list = server
+            .mock(
+                "GET",
+                Matcher::Regex(
+                    r"^/calendars/cal/events/[0-9a-f]{32}/instances\?showDeleted=true&timeMin="
+                        .into(),
+                ),
+            )
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let series = request.path().split('/').nth(4).unwrap().to_string();
+                let gone = seen.load(std::sync::atomic::Ordering::SeqCst);
+                let item = |day: u32, cancelled: bool| {
+                    serde_json::json!({
+                        "id": format!("{series}_203001{day:02}T090000Z"),
+                        "status": if cancelled { "cancelled" } else { "confirmed" },
+                        "recurringEventId": series,
+                        "originalStartTime": { "dateTime": format!("2030-01-{day:02}T09:00:00Z") },
+                    })
+                };
+                serde_json::json!({ "items": [item(7, false), item(14, gone), item(21, false)] })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(2)
+            .create_async()
+            .await;
+        let done = std::sync::Arc::clone(&cancelled);
+        let patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(
+                    r"^/calendars/cal/events/[0-9a-f]{32}_20300114T090000Z\?sendUpdates=none$"
+                        .into(),
+                ),
+            )
+            .match_body(Matcher::Json(serde_json::json!({ "status": "cancelled" })))
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                let id = request.path().rsplit('/').next().unwrap().to_string();
+                serde_json::json!({ "id": id, "status": "cancelled" })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+
+        let deleted = chrono::Utc.with_ymd_and_hms(2030, 1, 14, 9, 0, 0).unwrap();
+        let created = adapter_for(&server)
+            .create_event("cal", weekly_from_2030(vec![deleted]))
+            .await
+            .unwrap();
+        insert.assert_async().await;
+        list.assert_async().await;
+        patch.assert_async().await;
+        let sent = sent.lock().unwrap().clone();
+        let id = sent["id"].as_str().unwrap();
+        assert_eq!(id.len(), 32);
+        assert_eq!(
+            sent["recurrence"],
+            serde_json::json!(["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4"])
+        );
+        assert_eq!(created.recurrence.unwrap().exceptions, [deleted]);
+    }
+
+    /// A series without deletions, or with deletions only in the past, is one
+    /// create as any (263): nothing listed, nothing cancelled.
+    #[tokio::test]
+    async fn a_new_series_with_nothing_to_cancel_is_one_create() {
+        let ahead = chrono::Utc.with_ymd_and_hms(2030, 1, 14, 9, 0, 0).unwrap();
+        let past = chrono::Utc.with_ymd_and_hms(2020, 1, 6, 9, 0, 0).unwrap();
+        // No deletion, one in the past, and one ahead without a rule: no
+        // series to write in steps, as the surfaces' wait says too.
+        for (deleted, rule) in [(vec![], true), (vec![past], true), (vec![ahead], false)] {
+            let mut server = Server::new_async().await;
+            let sent = std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+            let sink = std::sync::Arc::clone(&sent);
+            let insert = server
+                .mock("POST", "/calendars/cal/events?sendUpdates=none")
+                .with_status(200)
+                .with_body_from_request(move |request| {
+                    let body: serde_json::Value =
+                        serde_json::from_slice(request.body().unwrap()).unwrap();
+                    *sink.lock().unwrap() = body.clone();
+                    serde_json::json!({
+                        "id": "plain1",
+                        "status": "confirmed",
+                        "start": body["start"],
+                        "end": body["end"],
+                        "recurrence": body["recurrence"],
+                    })
+                    .to_string()
+                    .into_bytes()
+                })
+                .expect(1)
+                .create_async()
+                .await;
+            let elsewhere = server
+                .mock("GET", Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+            let mut event = weekly_from_2030(deleted.clone());
+            if !rule {
+                event.recurrence.as_mut().unwrap().rrule = String::new();
+            }
+            let created = adapter_for(&server)
+                .create_event("cal", event)
+                .await
+                .unwrap();
+            insert.assert_async().await;
+            elsewhere.assert_async().await;
+            let sent = sent.lock().unwrap().clone();
+            assert!(sent.get("id").is_none(), "{sent}");
+            if rule {
+                assert!(!sent.to_string().contains("EXDATE"), "{sent}");
+            }
+            assert_eq!(created.id, "plain1");
+        }
+    }
+
     fn range() -> DateRange {
         DateRange::new(
             chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),

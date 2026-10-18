@@ -23,9 +23,6 @@
 //! zone table can put between Aperio's slot and Google's (tzdata 2025b) — and
 //! never past half the way to its neighbours.
 
-// Wired into `api::create_event` in a later step of PR 7.
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 use std::future::Future;
 use std::time::Duration;

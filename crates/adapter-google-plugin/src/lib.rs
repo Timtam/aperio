@@ -1140,6 +1140,23 @@ mod tests {
     }
 
     #[test]
+    fn a_new_series_cancels_its_occurrences_in_steps_and_tasks_do_not() {
+        // Google's new series is created bare and its deleted occurrences are
+        // cancelled one by one (decisions 202, 227): the surfaces wait for it
+        // with a dialog. Every other recurrence axis keeps its default; a
+        // task's recurrence never does steps.
+        let manifest = manifest();
+        assert!(manifest.recurrence.deletions_in_steps);
+        let defaults = plugin_sdk::plugin_core::manifest::RecurrenceCapabilities::default();
+        assert_eq!(manifest.recurrence.frequencies, defaults.frequencies);
+        assert_eq!(
+            manifest.recurrence.interval_frequencies,
+            defaults.interval_frequencies
+        );
+        assert!(!manifest.tasks.recurrence.deletions_in_steps);
+    }
+
+    #[test]
     fn every_schema_field_is_a_key_the_init_config_actually_reads() {
         // The schema and `InitConfig` are two descriptions of the same thing,
         // in two languages, and nothing but this test connects them. A field

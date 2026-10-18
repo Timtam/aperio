@@ -21,6 +21,9 @@
     }
   },
   "signed": false,
+  "recurrence": {
+    "deletions_in_steps": true
+  },
   "tasks": {
     "task_time_of_day": false,
     "subtasks": true,

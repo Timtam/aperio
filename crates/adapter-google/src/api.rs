@@ -166,7 +166,6 @@ impl ApiState {
     /// answered 401 whose sign-in could not be renewed — refused, a 401 as
     /// everywhere ([`refresh_refused`]); failed otherwise, `Unreached`, as
     /// the request itself was not carried out.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn send_raw(
         &self,
         method: reqwest::Method,
@@ -289,7 +288,6 @@ impl ApiState {
 
 /// What Google answered a request of the step run ([`ApiState::send_raw`]).
 #[derive(Debug, Clone)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct Answer {
     pub status: u16,
     /// What Google asked to wait before the next request, in seconds; a
@@ -302,7 +300,6 @@ pub(crate) struct Answer {
 /// answer (`rateLimitExceeded`, `quotaExceeded`, `forbiddenForNonOrganizer`,
 /// …). Read from the whole answer: the message ahead of it can be longer
 /// than what an error keeps of it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn error_reason(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     value
@@ -725,11 +722,33 @@ pub async fn create_event(
     calendar_id: &str,
     new: NewEvent,
 ) -> GoogleResult<Event> {
+    // A series with deleted occurrences is created bare and they are
+    // cancelled one by one (decisions 202-213, 263-269): whether Google heeds
+    // a deletion line with a new series was never measured.
+    if new
+        .recurrence
+        .as_ref()
+        .is_some_and(|r| !r.rrule.trim().is_empty() && !r.exceptions.is_empty())
+    {
+        // Drawn before the steps: the generator is not to be held across them.
+        let id = crate::mapping::fresh_event_id(&mut rand::thread_rng());
+        return crate::series_create::create_keeping_deletions(
+            state,
+            calendar_id,
+            new,
+            &chrono::Local,
+            Utc::now(),
+            cal_core::SERIES_WITH_DELETIONS,
+            crate::series_create::Pacing::GOOGLE,
+            id,
+        )
+        .await;
+    }
     let cal_enc = urlencoding(calendar_id);
     // `sendUpdates=all` makes Google email the attendees; `none` stores
     // them silently. Only notify when the user opted in and there's
-    // someone to notify.
-    let su = send_updates_param(new.send_invitations && !new.attendees.is_empty());
+    // someone to notify: an invitee the create writes.
+    let su = send_updates_param(new.send_invitations && crate::mapping::written_attendees(&new));
     let path = format!("/calendars/{cal_enc}/events?sendUpdates={su}");
     let body = new_event_to_body(&new);
     let entry: EventEntry = state.post_json(&path, &body).await?;

@@ -120,10 +120,11 @@ pub struct RecurrenceCapabilities {
     /// UNTIL end mode ("until a date").
     #[serde(default = "yes")]
     pub until: bool,
-    /// The provider creates a series without its deleted occurrences, and the
-    /// adapter deletes them again one by one after it, in steps that can take
-    /// up to half a minute (decisions 202, 227): Exchange. The surfaces show a
-    /// "please wait" dialog while such a series is created (265).
+    /// The adapter creates a series with deleted occurrences without them, and
+    /// removes them again one by one after it, in steps that can take up to
+    /// half a minute (decisions 202, 227): the provider does not take them with
+    /// the series, or Aperio does not trust how it takes them. The surfaces
+    /// show a "please wait" dialog while such a series is created (265).
     ///
     /// The one axis that defaults to `false`: it says how a write behaves, not
     /// a shape the source restricts, and a provider that takes every deletion
