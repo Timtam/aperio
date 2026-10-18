@@ -195,8 +195,9 @@ Löschen des Rests, wenn das Kürzen des Kopfes abgelehnt wurde (erst der Rest,
 dann das Kürzen, 136) — aus den beiden Editoren in `shared/seriesSplit.ts`
 gezogen (`planSeriesSplit` rechnet, `writeSeriesSplit` schreibt in der
 richtigen Reihenfolge und heilt). Die gelöschten Termine des Rests schreibt
-der Anbieter: CalDAV mit der Serie, Exchange danach einzeln (202-213). Sie je
-Mitglied zu wiederholen hätte sie sonst an vier Stellen stehen lassen.
+der Anbieter: CalDAV mit der Serie, Exchange danach einzeln, und nur die ab
+heute; die davor erscheinen dort wieder (202-213, 263). Sie je Mitglied zu
+wiederholen hätte sie sonst an vier Stellen stehen lassen.
 
 Geteilt wird jede Kopie an IHREM eigenen nächsten Vorkommen ab dem Schnitt —
 meist ist das der Schnitt selbst; eine anders getaktete Kopie (zweiwöchentlich

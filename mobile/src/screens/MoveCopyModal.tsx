@@ -538,11 +538,18 @@ function MoveCopyScreen({
               : t('dialogs.moveCopy.submitCopy')}
           </Text>
         </Pressable>
+        {/* Held while the write runs, as the header's (210). */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('dialogs.cancel')}
+          accessibilityState={{ disabled: submitting }}
+          disabled={submitting}
           onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+          style={({ pressed }) => [
+            styles.ghostButton,
+            pressed && styles.ghostPressed,
+            submitting && styles.buttonDisabled,
+          ]}
         >
           <Text style={styles.ghostButtonText}>{t('dialogs.cancel')}</Text>
         </Pressable>
