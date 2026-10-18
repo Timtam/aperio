@@ -21,6 +21,8 @@ import {
   TailShiftRefusedError,
   seriesFromCut,
   seriesMaybeShownTwice,
+  seriesTailMayStand,
+  seriesTailRemoved,
   cutoffDay,
   deletedSlots,
   expandAll,
@@ -991,6 +993,75 @@ describe('writeSeriesSplit', () => {
     // The failure the user is waiting to hear about, not the repair's.
     expect(caught).toBe(refused);
     expect(seriesMaybeShownTwice(caught)).toBe(true);
+  });
+
+  it('marks a new series the provider could neither complete nor delete again, and cuts nothing (203, 210)', async () => {
+    const truncate = vi.fn(async () => undefined);
+    const removeTail = vi.fn(async () => undefined);
+    const leftover = coded('network', 'created-may-stand: invited no-occurrence');
+    let caught: unknown = null;
+    try {
+      await writeSeriesSplit(
+        {
+          createTail: async () => {
+            throw leftover;
+          },
+          truncate,
+          removeTail,
+        },
+        plan,
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBe(leftover);
+    // It may stand beside the old series, which runs on uncut; the adapter
+    // already tried to delete it, so nothing here touches either.
+    expect(seriesMaybeShownTwice(caught)).toBe(true);
+    expect(seriesTailMayStand(caught)).toBe(true);
+    expect(truncate).not.toHaveBeenCalled();
+    expect(removeTail).not.toHaveBeenCalled();
+  });
+
+  it('leaves a new series the provider took back again as nothing changed', async () => {
+    const truncate = vi.fn(async () => undefined);
+    const takenBack = coded('forbidden', 'deletions-not-kept: no-occurrence');
+    let caught: unknown = null;
+    try {
+      await writeSeriesSplit(
+        {
+          createTail: async () => {
+            throw takenBack;
+          },
+          truncate,
+          removeTail: async () => undefined,
+        },
+        plan,
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBe(takenBack);
+    expect(seriesMaybeShownTwice(caught)).toBe(false);
+    expect(seriesTailMayStand(caught)).toBe(false);
+    expect(seriesTailRemoved(caught)).toBe(false);
+    expect(truncate).not.toHaveBeenCalled();
+  });
+
+  it('marks a refused cut whose new series was deleted again, so its invitees are told (212)', async () => {
+    const refused = coded('conflict', 'the series changed on the server');
+    const { caught } = await truncateFailsWith(refused);
+    expect(caught).toBe(refused);
+    expect(seriesTailRemoved(caught)).toBe(true);
+    expect(seriesTailMayStand(caught)).toBe(false);
+    // Not deleted after all: it may show twice instead.
+    const stuck = coded('conflict', 'the series changed on the server');
+    const { caught: left } = await truncateFailsWith(stuck, async () => {
+      throw new Error('and the delete failed as well');
+    });
+    expect(seriesTailRemoved(left)).toBe(false);
+    expect(seriesMaybeShownTwice(left)).toBe(true);
+    expect(seriesTailMayStand(left)).toBe(false);
   });
 
   it('marks a refusal that is no object on an error of its own', async () => {
