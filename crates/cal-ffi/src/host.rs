@@ -3389,7 +3389,25 @@ impl Host {
                     .await
                     .map_err(map_store_err),
             }
-        })?;
+        });
+        let created = match created {
+            Ok(created) => created,
+            Err(err) => {
+                // A create that failed may still have written: a new series
+                // taken back again, or one that may stand (decisions 203,
+                // 210). The next read must show what the provider holds, and a
+                // refresh that read it halfway must not land. Mirrors the
+                // desktop.
+                let account = self
+                    .registry
+                    .account_for_calendar(&req.calendar_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                let _ = self
+                    .cache
+                    .invalidate_after_create(&account, &req.calendar_id);
+                return Err(err);
+            }
+        };
         if self.is_local_calendar(&created.calendar_id) {
             if let Ok(fields) = serde_json::to_value(&created) {
                 self.writer.append(SyncEvent::EventCreated(EventPayload {
@@ -3527,11 +3545,20 @@ impl Host {
                         .adapter
                         .create_event(&target_calendar_id, new_payload)
                         .await
-                        .map_err(map_store_err)?,
+                        .map_err(map_store_err),
                     Some(ext) => ext
                         .create_event(&target_calendar_id, new_payload)
                         .await
-                        .map_err(map_store_err)?,
+                        .map_err(map_store_err),
+                };
+                // The create may still have written at the target (decisions
+                // 203, 210); the source is untouched. Mirrors the desktop.
+                let created = match created {
+                    Ok(created) => created,
+                    Err(err) => {
+                        self.invalidate_events_cache(&target_calendar_id);
+                        return Err(err);
+                    }
                 };
                 // Delete from the source. A move is NOT a cancellation — the
                 // event still exists at the target — so never email attendees.
@@ -10379,6 +10406,94 @@ mod tests {
     /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits
     /// color_hex + send_invitations (serde defaults); all other Options are
     /// present-as-null, as `cal_core::NewEvent` requires.
+    /// A calendar adapter whose every create fails with the error `fail`
+    /// makes: a new series taken back, one that may stand.
+    struct FailingCreates(fn() -> cal_core::Error);
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for FailingCreates {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("never signed in")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[cal_core::Capability::Calendar]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CalendarFeature for FailingCreates {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<cal_core::Calendar>> {
+            Ok(Vec::new())
+        }
+        async fn get_events(
+            &self,
+            _calendar_id: &str,
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<Event>> {
+            Ok(Vec::new())
+        }
+        async fn create_event(
+            &self,
+            _calendar_id: &str,
+            _event: NewEvent,
+        ) -> cal_core::Result<Event> {
+            Err((self.0)())
+        }
+        async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
+            unreachable!("no update")
+        }
+        async fn delete_event(&self, _event_id: &str, _send: bool) -> cal_core::Result<()> {
+            Ok(())
+        }
+        async fn get_free_busy(
+            &self,
+            _emails: &[&str],
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+            Ok(Vec::new())
+        }
+        fn calendar_color(&self, _calendar_id: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    /// Decisions 203 and 210 on the phone: a create that failed may still have
+    /// written at the provider — a series taken back, one that may stand — so
+    /// its calendar's cache is invalidated on the way out, as after a create
+    /// that worked, and a refresh in flight drops its write.
+    #[test]
+    fn a_failed_external_create_still_invalidates_its_calendar() {
+        for fail in [
+            (|| cal_core::Error::Network("created-may-stand: no-occurrence".into()))
+                as fn() -> cal_core::Error,
+            || cal_core::Error::Forbidden("deletions-not-kept: after-control".into()),
+        ] {
+            let (_dir, host, _) = open_host();
+            host.registry.register_host_adapter(
+                "acc-x",
+                Some(Arc::new(FailingCreates(fail))),
+                None,
+            );
+            host.registry.note_calendar_route("cal-x", "acc-x");
+            let before = host
+                .cache
+                .refresh_generation("acc-x", SyncScope::Events, "cal-x");
+            assert!(host
+                .create_event_json(new_event_json("cal-x", "Weekly"))
+                .is_err());
+            assert!(
+                host.cache
+                    .refresh_generation("acc-x", SyncScope::Events, "cal-x")
+                    > before,
+                "{:?}",
+                fail()
+            );
+        }
+    }
+
     fn new_event_json(cal: &str, title: &str) -> String {
         format!(
             r#"{{"calendar_id":"{cal}","title":"{title}","description":null,"location":null,"start":"2026-06-20T09:00:00Z","end":"2026-06-20T09:30:00Z","all_day":false,"recurrence":null,"color_label":null,"reminders":[],"sound":null,"attendees":[]}}"#

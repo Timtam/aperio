@@ -217,16 +217,24 @@ export const createEvent = async (
   // boundary; stamping only the tail would diverge the two halves.
   // A copy of a series passes it too: it keeps the source's zone, or none
   // (decision 262).
-  const created = JSON.parse(
-    await CalFfi.createEventJson(
+  let json: string;
+  try {
+    json = await CalFfi.createEventJson(
       JSON.stringify({
         ...request,
         recurrence: opts.preserveRecurrenceZone
           ? request.recurrence
           : withCreatedRecurrenceZone(request.recurrence, request.all_day),
       }),
-    ),
-  ) as CalendarEvent;
+    );
+  } catch (err) {
+    // A create that failed may still have written: a new series taken back
+    // again, or one that may stand (decisions 203, 210). The host invalidated
+    // its calendar; the views read it again. Mirrors the desktop.
+    notifyCalendarChanged();
+    throw err;
+  }
+  const created = JSON.parse(json) as CalendarEvent;
   scheduleBackgroundPush();
   notifyCalendarChanged();
   return created;
@@ -245,9 +253,18 @@ export const updateEvent = async (
   event: CalendarEvent,
   previousCalendarId: string | null = null,
 ): Promise<CalendarEvent> => {
-  const updated = JSON.parse(
-    await CalFfi.updateEventJson(JSON.stringify(event), previousCalendarId),
-  ) as CalendarEvent;
+  let json: string;
+  try {
+    json = await CalFfi.updateEventJson(JSON.stringify(event), previousCalendarId);
+  } catch (err) {
+    // A move is a create at the target first, and one that failed may still
+    // have written there (decisions 203, 210), as in `createEvent`.
+    if (previousCalendarId !== null && previousCalendarId !== event.calendar_id) {
+      notifyCalendarChanged();
+    }
+    throw err;
+  }
+  const updated = JSON.parse(json) as CalendarEvent;
   scheduleBackgroundPush();
   notifyCalendarChanged();
   return updated;

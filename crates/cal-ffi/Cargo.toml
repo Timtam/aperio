@@ -113,6 +113,8 @@ uniffi = "0.31.1"
 # Host integration tests open a real on-disk SQLite file (the DbHandle read
 # pool needs a file, not `:memory:`).
 tempfile = "3"
+# A calendar adapter the tests script (a create that fails).
+async-trait.workspace = true
 
 [lints]
 workspace = true

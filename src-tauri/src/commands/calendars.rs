@@ -581,7 +581,16 @@ pub async fn create_event(
         if calendar_supports_event_color(&cache, &account, &request.calendar_id) {
             new_event.color_hex = resolve_color_hex(&adapter, new_event.color_label.as_ref())?;
         }
-        ext.create_event(&request.calendar_id, new_event).await?
+        let created = ext.create_event(&request.calendar_id, new_event).await;
+        if created.is_err() {
+            // A create that failed may still have written: a new series taken
+            // back again, or one that may stand (decisions 203, 210). The next
+            // read must show what the provider holds, and a refresh that read
+            // it halfway must not land.
+            let _ = cache.invalidate_after_create(&account, &request.calendar_id);
+            scheduler.invalidate();
+        }
+        created?
     };
     // Only LOCAL events flow through the event log — external
     // adapters (Google, iCloud, EWS, Graph) handle their own
@@ -756,7 +765,14 @@ pub async fn update_event(
                     message: format!("target calendar '{}' is not routable", event.calendar_id,),
                 });
             };
-            ext.create_event(&event.calendar_id, new_payload).await?
+            let created = ext.create_event(&event.calendar_id, new_payload).await;
+            if created.is_err() {
+                // The create may still have written at the target (decisions
+                // 203, 210); the source is untouched.
+                let _ = cache.invalidate_after_create(&target_account, &event.calendar_id);
+                scheduler.invalidate();
+            }
+            created?
         };
 
         // Carry the grouping over to the copy at the target. A cross-adapter
