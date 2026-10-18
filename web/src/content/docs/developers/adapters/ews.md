@@ -187,7 +187,8 @@ The endpoint is discovered or user-supplied.
   - On `adapter_ews::write`, never with an id: one INFO line per skipped
     slot; on success one INFO line with the counts, the time and every slot;
     on failure a WARN where the proof found other deletions, and one WARN
-    with the counts, the time, the step that failed and why.
+    with the counts, the time, the step that failed and why. A lost create
+    answer, which leaves nothing to take back, has that WARN too.
   - The manifest declares it (`recurrence.deletions_in_steps`), and the
     surfaces show a "please wait" dialog while such a series is created.
 - **A create turned down whole is a refusal.** `create_event` maps through

@@ -22,7 +22,6 @@ import {
   getTasks,
 } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
-import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
@@ -80,7 +79,6 @@ function MoveCopyScreen({
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
-  useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
   const [children, setChildren] = useState<Task[]>([]);
@@ -109,16 +107,8 @@ function MoveCopyScreen({
   }, [mayStand]);
   // Every way out of the notice is its Close, as in the editor's: the header
   // button says Close, not Cancel — nothing is cancelled any more — and the
-  // swipe is off.
-  useEffect(() => {
-    if (mayStand == null) return;
-    navigation.setOptions({
-      headerLeft: () => (
-        <HeaderCancelButton label={t('dialogs.close')} onPress={() => navigation.goBack()} />
-      ),
-      gestureEnabled: false,
-    });
-  }, [mayStand, navigation, t]);
+  // swipe is off (set with the header, below).
+  const closeMayStand = useCallback(() => navigation.goBack(), [navigation]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -129,6 +119,14 @@ function MoveCopyScreen({
   const [sectionDraft, setSectionDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The header: Cancel; Close while the notice is up; and while a move or
+  // copy runs the screen is not left (210), as the desktop's dialog is not
+  // closed: a write left behind would run unseen, and a series it left that
+  // may stand would never be said on screen.
+  useCancelHeader(navigation, 'mobile.cancel', {
+    writing: submitting,
+    close: mayStand != null ? closeMayStand : undefined,
+  });
 
   const initialContainerId =
     params.kind === 'task' ? params.listId : params.event.calendar_id;

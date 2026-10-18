@@ -57,9 +57,10 @@ pub(crate) struct Pacing {
     pub first_wait: Duration,
     /// …up to this.
     pub max_wait: Duration,
-    /// What the read that proves the result may take past the budget's end,
-    /// out of the time kept to take the series back (critique 9): one read,
-    /// no write, must not throw finished work away.
+    /// What the reads that prove the result may take past the budget's end,
+    /// out of the time kept to take the series back (critique 9): the proof
+    /// read, and with invitees the read after the invitation; no write. They
+    /// must not throw finished work away.
     pub proof_borrow: Duration,
     /// The least time the first request of a take-back, and the read that
     /// confirms it, are given, whatever is left (226).
@@ -524,33 +525,37 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
                         message,
                     })
                 }
-                _ => {
-                    self.log_lost("create");
+                fault => {
+                    let why = match fault {
+                        Err(err @ EwsError::Soap { .. }) => why_of(&err),
+                        _ => "http-500".to_string(),
+                    };
+                    self.log_lost(&why);
                     return Err(lost("create-answer-lost"));
                 }
             },
-            Err(_) => {
-                self.log_lost("create");
+            Err(err) => {
+                self.log_lost(&why_of(&err));
                 return Err(lost("create-answer-lost"));
             }
         };
         if let Err(err) = crate::soap::check_for_fault(&response) {
             return match &err {
                 EwsError::Soap { code, .. } if UNSURE_CREATE_CODES.contains(&bare_code(code)) => {
-                    self.log_lost("create");
+                    self.log_lost(&why_of(&err));
                     Err(lost("create-answer-lost"))
                 }
                 // An answer that came but cannot be read: its id never
                 // arrived, and the series may have been saved.
                 EwsError::Protocol(_) => {
-                    self.log_lost("create");
+                    self.log_lost("unreadable");
                     Err(lost("create-answer-lost"))
                 }
                 _ => Err(err),
             };
         }
         let Ok(item) = crate::mapping::parse_first_item_id(&response) else {
-            self.log_lost("create");
+            self.log_lost("unreadable");
             return Err(lost("create-answer-lost"));
         };
         self.confirmed = Some(Instant::now());
@@ -1012,11 +1017,19 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         EwsError::NotKept { undone, detail }
     }
 
-    fn log_lost(&self, step: &'static str) {
+    /// The create's answer was lost: nothing is taken back, so this is the
+    /// line a "may stand" is read by. `why` in the grammar of the take-back's.
+    fn log_lost(&self, why: &str) {
         tracing::warn!(
             target: "adapter_ews::write",
-            step,
+            step = "create",
+            why,
             asked = self.wanted.len(),
+            past = self.past.len(),
+            requests = self.requests,
+            retries = self.retries,
+            waited_ms = self.waited.as_millis() as u64,
+            elapsed_ms = self.started.elapsed().as_millis() as u64,
             "exchange series may stand: the answer to its creation was lost",
         );
     }

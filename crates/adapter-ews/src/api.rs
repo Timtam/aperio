@@ -694,9 +694,10 @@ async fn enrich_occurrence_details(
 /// in), so we mint the resulting `Event` locally from the request
 /// payload and only pull the freshly assigned ItemId from the
 /// response. That's one round-trip instead of two. A series with
-/// deleted occurrences goes through `series_create` instead: several
-/// requests, and the ChangeKey it returns is the one of its last read
-/// of the series.
+/// deleted occurrences from the device's today on goes through
+/// `series_create` instead: several requests, and the ChangeKey it
+/// returns is the one of its last read of the series. One whose
+/// deletions all lie in the past is this same single `CreateItem`.
 pub async fn create_event(
     client: &EwsClient,
     calendar_id: &str,

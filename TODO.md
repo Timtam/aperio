@@ -1556,9 +1556,11 @@ Vorschläge sind nicht aufgenommen.
       nicht geprüft; 14 Typen fehlen dort schon. Entfernen oder in die Prüfung
       nehmen. Gefunden bei der Planung von PR 8 (2026-10-18).
 - [ ] **Das Ablegen in der Seitenleiste hat keinen eigenen Test.** Es teilt
-      den Warte-Dialog des Dialog-Stapels mit Strg+D (getestet), aber das
-      Ablegen selbst, seine Sperre gegen ein zweites Ablegen und sein Satz
-      `moveMayStand` sind ungetestet. Aus PR 8 (2026-10-18).
+      den Warte-Dialog des Dialog-Stapels mit Strg+D und den Weg des
+      Verschiebens einer ganzen Serie mit dem Verschieben-Dialog (beides
+      getestet), aber das Ablegen selbst, seine Sperre gegen ein zweites
+      Ablegen und sein Satz `moveMayStand` sind ungetestet. Aus PR 8
+      (2026-10-18).
 
 - [ ] **Neuer Beginn verliert die Löschung eines ersten Termins neben der
       Regel.** Eine Serie, deren Beginn nicht auf ihrer eigenen Regel liegt

@@ -109,7 +109,6 @@ import {
   type EditableReminder,
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
-import { HeaderCancelButton } from '../components/HeaderCancelButton';
 import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
@@ -222,7 +221,6 @@ function EventEditorScreen({
   const { colors } = useTheme();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
-  useCancelHeader(navigation);
   const {
     eventId,
     calendarId,
@@ -314,18 +312,20 @@ function EventEditorScreen({
   useEffect(() => {
     if (splitNotice == null) return;
     leavingNotice.current = false;
-    navigation.setOptions({
-      headerLeft: () => (
-        <HeaderCancelButton label={t('dialogs.close')} onPress={closeNotice} />
-      ),
-      gestureEnabled: false,
-    });
     return navigation.addListener('beforeRemove', (event) => {
       if (leavingNotice.current) return;
       event.preventDefault();
       closeNotice();
     });
-  }, [splitNotice, navigation, t, closeNotice]);
+  }, [splitNotice, navigation, closeNotice]);
+  // The header: Cancel; Close while the notice is up; and while a save runs
+  // the editor is not left (210), as the desktop's is not closed: a save left
+  // behind would run unseen, and a series it left that may stand would never
+  // be said on screen.
+  useCancelHeader(navigation, 'mobile.cancel', {
+    writing: saving,
+    close: splitNotice != null ? closeNotice : undefined,
+  });
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   // Accounts whose calendars never store a reminder Aperio writes: the device

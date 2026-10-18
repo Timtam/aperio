@@ -4,16 +4,24 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Calendar, CalendarEvent } from '../api/types';
 
 /**
- * Copying a series into a calendar that creates a new series in steps
- * (decisions 202-213, 227, 265): the "please wait" dialog while it runs, the
- * outcome in words, and a new series that may stand said on screen with only
- * Close (210).
+ * Copying or moving a series into a calendar that creates a new series in
+ * steps (decisions 202-213, 227, 265): the "please wait" dialog while it runs,
+ * the outcome in words, and a new series that may stand said on screen with
+ * only Close (210). A whole-series move writes the series in place with its
+ * new calendar (`update_event`); the sidebar drop shares that path.
  */
 
 const { invokeMock, onFile, invalidateData, announced } = vi.hoisted(() => {
-  const onFile: { createFails: unknown; createGate: Promise<void> | null } = {
+  const onFile: {
+    createFails: unknown;
+    createGate: Promise<void> | null;
+    updateFails: unknown;
+    updateGate: Promise<void> | null;
+  } = {
     createFails: null,
     createGate: null,
+    updateFails: null,
+    updateGate: null,
   };
   const announced: string[] = [];
   const invalidateData = vi.fn();
@@ -23,6 +31,12 @@ const { invokeMock, onFile, invalidateData, announced } = vi.hoisted(() => {
       if (onFile.createFails != null) return Promise.reject(onFile.createFails);
       if (onFile.createGate) return onFile.createGate.then(() => ({ ...request, id: 'copy-1' }));
       return Promise.resolve({ ...request, id: 'copy-1' });
+    }
+    if (command === 'update_event') {
+      const event = (payload as { event: Record<string, unknown> }).event;
+      if (onFile.updateFails != null) return Promise.reject(onFile.updateFails);
+      if (onFile.updateGate) return onFile.updateGate.then(() => event);
+      return Promise.resolve(event);
     }
     if (command === 'get_series_rows') {
       return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
@@ -93,17 +107,23 @@ afterEach(() => {
   invalidateData.mockClear();
   onFile.createFails = null;
   onFile.createGate = null;
+  onFile.updateFails = null;
+  onFile.updateGate = null;
   announced.length = 0;
 });
 
-async function copyTo(calendarName: RegExp, onClose: () => void = () => {}) {
+async function copyTo(
+  calendarName: RegExp,
+  onClose: () => void = () => {},
+  defaultMode: 'copy' | 'move' = 'copy',
+) {
   const { MoveCopyDialog } = await import('./MoveCopyDialog');
   render(
     <div id="app-root">
       <MoveCopyDialog
         isOpen
         onClose={onClose}
-        target={{ kind: 'event', event: SERIES, defaultMode: 'copy' }}
+        target={{ kind: 'event', event: SERIES, defaultMode }}
       />
     </div>,
   );
@@ -113,6 +133,9 @@ async function copyTo(calendarName: RegExp, onClose: () => void = () => {}) {
 }
 
 const submit = () => fireEvent.click(screen.getByRole('button', { name: /^kopieren$|^copy$/i }));
+const submitMove = () =>
+  fireEvent.click(screen.getByRole('button', { name: /^verschieben$|^move$/i }));
+const updates = () => invokeMock.mock.calls.filter((c) => c[0] === 'update_event');
 const waiting = () => screen.queryByRole('dialog', { name: /Vorgang läuft|please wait/i });
 
 describe('MoveCopyDialog → a series into a calendar that creates it in steps', () => {
@@ -176,5 +199,37 @@ describe('MoveCopyDialog → a series into a calendar that creates it in steps',
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: /^abbrechen$|^cancel$/i }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('waits while the whole series is moved, writes it once, then says it moved', async () => {
+    let release = () => {};
+    onFile.updateGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await copyTo(/Arbeit/, () => {}, 'move');
+    submitMove();
+    await screen.findByRole('dialog', { name: /Vorgang läuft|please wait/i });
+    // The series is moved in place, into its new calendar.
+    expect(updates()).toHaveLength(1);
+    expect((updates()[0][1] as { event: { calendar_id: string } }).event.calendar_id).toBe(
+      'cal-exchange',
+    );
+    // One write at a time.
+    submitMove();
+    release();
+    await waitFor(() => expect(waiting()).toBeNull());
+    await waitFor(() => expect(announced.at(-1)).toMatch(/verschoben|moved/i));
+    expect(updates()).toHaveLength(1);
+  });
+
+  it('says a moved series that may stand on screen, focused and only closed (210)', async () => {
+    onFile.updateFails = { code: 'network', message: 'created-may-stand: no-occurrence' };
+    await copyTo(/Arbeit/, () => {}, 'move');
+    submitMove();
+    const said = await screen.findByText(/möglicherweise zusätzlich|may now stand there as well/);
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    expect(screen.queryByRole('button', { name: /^verschieben$|^move$/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /^schließen$/i })).toBeTruthy();
+    expect(invalidateData).toHaveBeenCalled();
   });
 });
