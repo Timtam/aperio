@@ -18,6 +18,13 @@ pub enum EwsError {
     #[error("network error: {0}")]
     Network(String),
 
+    /// The request never reached the server: the connection could not be
+    /// made, or the request could not be built. Unlike [`Self::Network`], which
+    /// may follow a request the server received, nothing was sent — a create
+    /// whose answer is lost may stand, one that never left cannot.
+    #[error("network error (not sent): {0}")]
+    Unreached(String),
+
     #[error("EWS returned HTTP {status}: {message}")]
     Http { status: u16, message: String },
 
@@ -39,13 +46,25 @@ pub enum EwsError {
     /// "check your internet connection".
     #[error("Autodiscover did not find an EWS endpoint for {0}")]
     DiscoveryFailed(String),
+
+    /// A new series was created, its deleted occurrences could not all be
+    /// deleted again (decisions 202, 203), and it was deleted again
+    /// (`undone`) or could not be (`!undone`, it may stand). `detail` is
+    /// [`cal_core::step_detail`]. Mapped to a refusal or a leftover, never to
+    /// an error a caller reads as "never landed" when something may stand.
+    #[error("the new series kept not its deleted occurrences ({detail})")]
+    NotKept { undone: bool, detail: String },
 }
 
 pub type EwsResult<T> = std::result::Result<T, EwsError>;
 
 impl From<reqwest::Error> for EwsError {
     fn from(err: reqwest::Error) -> Self {
-        EwsError::Network(err.to_string())
+        if err.is_connect() || err.is_builder() {
+            EwsError::Unreached(err.to_string())
+        } else {
+            EwsError::Network(err.to_string())
+        }
     }
 }
 

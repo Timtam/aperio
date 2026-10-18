@@ -700,6 +700,26 @@ pub async fn create_event(
     event: NewEvent,
     server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<Event> {
+    // Exchange takes a series' rule but not its deleted occurrences: such a
+    // series is created bare and they are deleted again one by one (decisions
+    // 202-213, 225, 263-266).
+    if event
+        .recurrence
+        .as_ref()
+        .is_some_and(|r| !r.exceptions.is_empty())
+    {
+        return crate::series_create::create_keeping_deletions(
+            client,
+            calendar_id,
+            event,
+            server_zones,
+            &chrono::Local,
+            Utc::now(),
+            cal_core::SERIES_WITH_DELETIONS,
+            crate::series_create::Pacing::EXCHANGE,
+        )
+        .await;
+    }
     let (folder_id, folder_change_key) = split_calendar_id(calendar_id);
     let item_xml = new_event_to_calendar_item_xml_on(&event, server_zones)?;
     // Only ask Exchange to send when the user opted in AND there are
@@ -1952,7 +1972,7 @@ fn truncate_for_log(body: &str) -> String {
     out
 }
 
-fn build_event_from_new(
+pub(crate) fn build_event_from_new(
     new: &NewEvent,
     calendar_id: &str,
     kind: EventIdKind,
