@@ -10,6 +10,9 @@ import {
   organizerOf,
   readSeriesRows,
   seriesIdOf,
+  createsInSteps,
+  writeWithoutWaiting,
+  type StepWriteOptions,
 } from '@aperio/shared';
 
 import {
@@ -158,38 +161,43 @@ export async function moveOrCopyEvent(
   targetCalendarId: string,
   mode: MoveCopyMode,
   scope: MoveCopyScope = 'series',
+  steps: StepWriteOptions = {},
 ): Promise<void> {
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
+  // The other calendar creates the series anew: in steps where it writes its
+  // deletions so (decisions 227, 265). Mirrors the desktop.
+  const wait = steps.wait ?? writeWithoutWaiting;
 
   if (mode === 'move' && !asOccurrence) {
     const series = await newSeriesRowOf(event);
-    await updateEvent(
-      { ...series, calendar_id: targetCalendarId },
-      series.calendar_id,
+    await wait(createsInSteps(steps.target, series.recurrence), () =>
+      updateEvent({ ...series, calendar_id: targetCalendarId }, series.calendar_id),
     );
     return;
   }
 
   const source = asOccurrence ? event : await newSeriesRowOf(event);
-  await createEvent(
-    {
-      calendar_id: targetCalendarId,
-      title: source.title,
-      description: source.description,
-      location: source.location,
-      start: source.start,
-      end: source.end,
-      all_day: source.all_day,
-      recurrence: asOccurrence ? null : source.recurrence,
-      color_label: source.color_label,
-      reminders: source.reminders,
-      sound: source.sound,
-      attendees: source.attendees,
-      ...organizerOf(source),
-    },
-    // A copy keeps the series' zone, or none, as the source has it
-    // (decision 262): its deletions are instants on that clock.
-    { preserveRecurrenceZone: true },
+  await wait(!asOccurrence && createsInSteps(steps.target, source.recurrence), () =>
+    createEvent(
+      {
+        calendar_id: targetCalendarId,
+        title: source.title,
+        description: source.description,
+        location: source.location,
+        start: source.start,
+        end: source.end,
+        all_day: source.all_day,
+        recurrence: asOccurrence ? null : source.recurrence,
+        color_label: source.color_label,
+        reminders: source.reminders,
+        sound: source.sound,
+        attendees: source.attendees,
+        ...organizerOf(source),
+      },
+      // A copy keeps the series' zone, or none, as the source has it
+      // (decision 262): its deletions are instants on that clock.
+      { preserveRecurrenceZone: true },
+    ),
   );
 
   if (mode === 'move' && asOccurrence) {

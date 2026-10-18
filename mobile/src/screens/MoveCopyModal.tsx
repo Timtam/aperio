@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   StyleSheet,
   Text,
@@ -36,6 +37,7 @@ import {
   useShowHiddenTaskListTargets,
 } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import { stepWriteWait } from '../state/stepWriteWait';
 import { canAssignSection } from '../state/taskBehaviour';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -68,6 +70,17 @@ export default function MoveCopyModal({
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [mode, setMode] = useState<MoveCopyMode>('move');
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
+  // A new series that may stand (decisions 203, 210): said in place of the
+  // form, focused, with only Close — doing it again would create another.
+  const [mayStand, setMayStand] = useState<string | null>(null);
+  const mayStandRef = useRef<Text | null>(null);
+  useEffect(() => {
+    if (mayStand == null) return;
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(mayStandRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, [mayStand]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -244,6 +257,9 @@ export default function MoveCopyModal({
   );
 
   const submit = useCallback(async () => {
+    // One write at a time: a second press while a copy is on its way would
+    // write it twice.
+    if (submitting) return;
     setError(null);
     if (!targetContainerId) {
       setError(t('dialogs.moveCopy.targetRequired'));
@@ -257,7 +273,10 @@ export default function MoveCopyModal({
     setSubmitting(true);
     try {
       if (params.kind === 'event') {
-        await moveOrCopyEvent(params.event, targetContainerId, mode, scope);
+        await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
+          wait: stepWriteWait,
+          target: calendars.find((c) => c.id === targetContainerId),
+        });
       } else if (task != null) {
         await moveOrCopyTask(
           task,
@@ -275,10 +294,17 @@ export default function MoveCopyModal({
       );
       navigation.goBack();
     } catch (err) {
+      // A failed move or copy may still have written at the target: it shows
+      // on the next read.
+      if (params.kind === 'event') invalidateData();
       const message =
         err instanceof SeriesNotLoadedError
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
           : writeErrorMessage(err, t);
+      if (params.kind === 'event' && eventWriteLeftover(err)) {
+        setMayStand(message);
+        return;
+      }
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     } finally {
@@ -298,10 +324,34 @@ export default function MoveCopyModal({
     t,
     sectionsEnabled,
     targetSectionId,
+    submitting,
+    calendars,
   ]);
 
   // A task move/copy isn't actionable until its row has loaded.
   const blocked = submitting || (params.kind === 'task' && task == null);
+
+  if (mayStand != null) {
+    return (
+      <FormScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        accessibilityViewIsModal
+      >
+        <Text ref={mayStandRef} style={styles.hint} accessibilityRole="text">
+          {mayStand}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.close')}
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.buttonText}>{t('dialogs.close')}</Text>
+        </Pressable>
+      </FormScrollView>
+    );
+  }
 
   return (
     <FormScrollView
