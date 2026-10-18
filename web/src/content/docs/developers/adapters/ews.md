@@ -157,17 +157,23 @@ The endpoint is discovered or user-supplied.
   - From the confirmed create there are 15 s (`cal_core::SERIES_WITH_DELETIONS`):
     the master is read, then each deletion is deleted again with `SendToNone`
     and no ChangeKey, found by its slot. The `InstanceIndex` the rule's UTC
-    expansion guesses (`nominal_occurrence_index`) is only where the walk
-    starts: the occurrences Exchange answers decide, and two neighbours on
-    either side of the slot, or the series' end before it, mean the stored rule
-    makes none there, so it is skipped (207, 266). A UTC expansion is a whole
-    day off for a Monday 00:30 in Berlin; judged by it, every deletion would
-    have been skipped. An all-day slot is compared by the day it names.
+    expansion guesses (`nominal_occurrence_index`) is only where the search
+    starts: the occurrences Exchange answers bound it, the spacing of those
+    read picks the next index, and a bound past the series' end is approached
+    by halving, at most 64 reads a slot. When the nearest occurrence before
+    the slot and the next one after it are neighbours, or the series ends
+    before it, the stored rule makes none there, so it is skipped (207, 266).
+    A UTC expansion is a whole day off for a Monday 00:30 in Berlin; judged by
+    it, every deletion would have been skipped. An all-day slot is compared by
+    the day it names.
   - The master is read again: its `DeletedOccurrences` must be exactly the
     ones deleted. With invitees, one `UpdateItem` then re-sets only
     `calendar:RequiredAttendees` with `SendToAllAndSaveCopy` — the invitation —,
     and a second read proves it kept the deletions (a new start, end, zone or
-    pattern would have dropped them).
+    pattern would have dropped them). Measured live (round 11, 2026-10-18):
+    the invitation's iCalendar carries the deletions as `EXDATE`, and the
+    invitee gets exactly one invitation; 60 deletions took 10.7 s in 123
+    requests.
   - `ErrorServerBusy`, as a response code or an HTTP 500 fault, is waited out
     by its `BackOffMilliseconds` while it fits (`cal_core::may_send` counts the
     slowest request so far); a lost delete answer is decided by probing the

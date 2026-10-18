@@ -482,7 +482,10 @@ Siehe DESIGN §4.2.
       gescheitertes Anlegen liest neu ein (beide Hosts), iOS gibt dem
       Schreiben Hintergrundzeit (229). Ein Anlegen, das Exchange ganz
       ablehnt, heißt jetzt auch bei einfachen Terminen „Server lehnt ab“.
-      Live-Runde 11 und Handy offen — ↻ im Test.
+      Live-Runde 11 bestanden (2026-10-18, zwei Läufe): T1 bis T6 wie
+      gemeint; die Einladung trägt beide Löschungen als EXDATE, und GMX
+      bekam genau eine Einladung und beim Aufräumen eine Absage (225 hält);
+      60 Löschungen in 10,7 s. Handy offen — ↻ im Test.
     - [ ] **Warten auch beim Ändern an Ort und Stelle** (aus 265): Ändert ein
       Speichern Beginn, Zone oder Muster einer ganzen Exchange-Serie, löscht
       `restore_deletions` (253) danach jede Löschung einzeln, ohne Uhr und ohne
