@@ -177,6 +177,11 @@ export function EventGroupCarryDialog({
   const open = useRef(isOpen);
   useEffect(() => {
     open.current = isOpen;
+    // Gone from the screen: the dialog host unmounts it without ever passing
+    // `isOpen` false.
+    return () => {
+      open.current = false;
+    };
   }, [isOpen]);
   const messageId = useId();
 
@@ -284,8 +289,9 @@ export function EventGroupCarryDialog({
     const releaseWait = hold();
     try {
       for (const target of list) {
-        // The user closed it. Stop writing copies into a dialog that is gone.
-        if (!open.current) return;
+        // The user closed it. Stop writing copies into a dialog that is gone;
+        // what the ones written left is still tied together and said below.
+        if (!open.current) break;
         // The question's yes, for this copy's series (decision 251).
         const agreed = consent?.has(targetKey(target)) ?? false;
         // Only a write of the copy's whole series asks; a split's cut says the
@@ -687,7 +693,12 @@ export function EventGroupCarryDialog({
         regroupFailed = true;
       }
     }
-    if (!open.current) return;
+    if (!open.current) {
+      // Gone before the pass ended: a copy that may now show twice is still
+      // said (210), as nothing else will.
+      if (unsure.length > 0) announce(unsure.join(' '));
+      return;
+    }
     setCreatedRows(created);
     const allDoubts = [...doubts, ...unsure];
     setDoubts(allDoubts);

@@ -1416,7 +1416,9 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     alle Adapter eine Ablehnung des Servers so (147). `deletions-not-kept`
     heißt: geschrieben und wieder entfernt — es steht nichts, aber die Serie
     liegt in den gelöschten Elementen, und mit `invited` im Detail haben
-    Eingeladene Einladung und Absage bekommen (202-213).
+    Eingeladene Einladung und Absage bekommen (202-213). `CACHE_GENERATION` 4,
+    damit eine gespeicherte Kalenderliste ohne das Merkmal
+    `invitations_reply_only` neu gelesen wird.
   - Das Gegenteil einer Ablehnung ist ein Rest (`cal_core::WriteLeftover`:
     `created-may-stand:`): Es wurde etwas geschrieben, das sich nicht
     zurücknehmen ließ, und steht möglicherweise. Er reist immer als
@@ -1425,8 +1427,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     Teil zurück, der steht. Die Oberflächen sagen ihn mit einem Hinweis, der
     sich nur schließen lässt (210). Was ein Schreiben in Schritten darf —
     15 s + 15 s, `may_send`, „ab heute“ — steht einmal in
-    `cal_core::step_write` (213, 263). `CACHE_GENERATION` 4, damit eine
-    gespeicherte Kalenderliste ohne das neue Merkmal neu gelesen wird.
+    `cal_core::step_write` (213, 263). Ob ein Kalender eine neue Serie so
+    schreibt, sagt sein Manifest (`recurrence.deletions_in_steps`); es wird
+    beim Lesen der Kalenderliste gestempelt und braucht keinen neuen
+    `CACHE_GENERATION`.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen

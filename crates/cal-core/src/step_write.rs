@@ -81,10 +81,28 @@ pub fn step_detail_why(detail: &str) -> &str {
 }
 
 /// The reason a step-wise write gives when its steps did not fit the budget
-/// ([`SERIES_WITH_DELETIONS`]): the surfaces say that it took too long. The
-/// provider answered slowly or asked to wait, or there are very many deletions
-/// to write; a later retry may well fit.
+/// ([`SERIES_WITH_DELETIONS`]). With [`crate::WriteRefusal::DeletionsNotKept`]
+/// the surfaces say that it took too long: the provider answered slowly or
+/// asked to wait, or there are very many deletions to write, and a later
+/// retry may well fit. With [`crate::WriteLeftover::CreatedMayStand`] it is
+/// for the log only: the surfaces say the series may stand, and that it must
+/// not be written again.
 pub const OUT_OF_TIME: &str = "time";
+
+/// The day an all-day deletion names on `device`: its own date where it is
+/// the device's midnight — the spelling the views and the device's own reads
+/// give —, else the day the 13:45 rule reads ([`all_day_slot_day`]), for a
+/// provider's UTC midnight or another zone's. The rule alone misreads a
+/// device's own midnight outside its window (Niue, Pago Pago at −11,
+/// Kiritimati at +14) by a day; the device's own date never does.
+pub fn all_day_deletion_day<D: TimeZone>(at: DateTime<Utc>, device: &D) -> chrono::NaiveDate {
+    let local = at.with_timezone(device);
+    if local.time() == chrono::NaiveTime::MIN {
+        local.date_naive()
+    } else {
+        all_day_slot_day(at)
+    }
+}
 
 /// A new series' deleted occurrences, parted by [`deletions_from_today`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -118,7 +136,7 @@ pub fn deletions_from_today<D: TimeZone>(
     let today = now.with_timezone(device).date_naive();
     let day_of = |at: DateTime<Utc>| {
         if all_day {
-            all_day_slot_day(at)
+            all_day_deletion_day(at, device)
         } else {
             at.with_timezone(device).date_naive()
         }
@@ -211,7 +229,7 @@ mod tests {
     fn an_all_day_deletion_is_read_by_the_day_it_names_east_and_west() {
         // The 17th and the 18th, each spelled as a UTC midnight and as the
         // device's own midnight.
-        for hours in [-8, -5, 0, 2, 9, 12] {
+        for hours in [-11, -8, -5, 0, 2, 9, 12, 14] {
             let device = zone(hours);
             let midnight = |d: &str| {
                 chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")

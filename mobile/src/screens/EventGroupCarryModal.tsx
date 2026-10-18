@@ -250,8 +250,9 @@ export default function EventGroupCarryModal({
     const releaseWait = holdStepWriteWait();
     try {
       for (const target of list) {
-        // The user left. Stop writing copies into a screen that is gone.
-        if (!alive.current) return;
+        // The user left. Stop writing copies into a screen that is gone; what
+        // the ones written left is still tied together and said below.
+        if (!alive.current) break;
         // The question's yes, for this copy's series (decision 251).
         const agreed = consent?.has(targetKey(target)) ?? false;
         // Only a write of the copy's whole series asks; a split's cut says the
@@ -595,7 +596,7 @@ export default function EventGroupCarryModal({
                   reason: t(`dialogs.moveScope.refusal.${err.reason}`),
                 })
               : writeErrorMessage(err, t);
-          if (!alive.current) return;
+          if (!alive.current) break;
           setError(message);
           // Said with the outcome, by the outcome line: announced here as well,
           // or through a live region, it cut the outcome off (Android) or was
@@ -639,7 +640,12 @@ export default function EventGroupCarryModal({
         regroupFailed = true;
       }
     }
-    if (!alive.current) return;
+    if (!alive.current) {
+      // Gone before the pass ended: a copy that may now show twice is still
+      // said (210), as nothing else will. Mirrors the desktop.
+      if (unsure.length > 0) AccessibilityInfo.announceForAccessibility(unsure.join(' '));
+      return;
+    }
     setCreatedRows(created);
     const allDoubts = [...doubts, ...unsure];
     setDoubts(allDoubts);

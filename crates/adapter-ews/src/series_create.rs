@@ -136,7 +136,8 @@ where
         .map(|&asked| Wanted {
             asked,
             slot: if event.all_day {
-                crate::mapping::all_day_anchor_in(asked, None, device)
+                let day = cal_core::all_day_deletion_day(asked, device);
+                crate::mapping::local_midnight_in(day, device).unwrap_or(asked)
             } else {
                 asked
             },
@@ -326,7 +327,13 @@ fn busy_in(body: &str) -> Option<Option<Duration>> {
 /// nothing and reads as a lost answer, which the caller decides by reading.
 fn write_outcome(answer: EwsResult<String>) -> EwsResult<()> {
     let xml = answer?;
-    crate::soap::check_for_fault(&xml)?;
+    match crate::soap::check_for_fault(&xml) {
+        // A body no XML reader takes says nothing either.
+        Err(EwsError::Protocol(_)) => {
+            return Err(EwsError::Network("an answer that says nothing".into()))
+        }
+        other => other?,
+    }
     if xml.contains("ResponseClass=\"Success\"") {
         Ok(())
     } else {
@@ -716,10 +723,16 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         Ok(answer)
     }
 
-    /// Find the occurrence at `slot`, walking from `candidate` the way the
-    /// answers point: an occurrence before the slot sends the walk on, one
-    /// after it back. Two neighbours on either side of it with none at it, or
-    /// the series' end before it, mean the stored rule makes none there (266).
+    /// Find the occurrence at `slot`. What every answer of the run says is
+    /// kept as two bounds: the last index known to stand before the slot and
+    /// the first known to stand after it, or past the series' end. The next
+    /// index read lies between them, guessed from the spacing of the
+    /// occurrences read so far: the UTC guess `candidate` can be off by a
+    /// step, or by many where Exchange's pattern counts occurrences the RFC
+    /// expansion skips (a series on the 31st has one on the last day of every
+    /// shorter month). Two bounds next to each other with none at the slot, or
+    /// the series' first occurrence after it, mean the stored rule makes none
+    /// there (207, 266).
     async fn find(
         &mut self,
         candidate: u32,
@@ -727,82 +740,72 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
         slot_of: &impl Fn(DateTime<Utc>) -> DateTime<Utc>,
         until: Instant,
     ) -> Result<Found, Failure> {
-        /// How far the walk goes from the candidate, either way. The UTC guess
-        /// is usually a step off at most, but runs further where Exchange's
-        /// own pattern counts occurrences the RFC expansion skips — a series
-        /// on the 31st has one on the last day of each shorter month in
-        /// Exchange and none in the expansion, one more step a short month.
-        /// The budget bounds the requests either way.
-        const REACH: u32 = 24;
-        let low = candidate.saturating_sub(REACH).max(1);
-        let high = candidate + REACH;
-        let mut index = candidate.max(1);
-        // The walk keeps one direction until the answers bracket the slot, so
-        // it never comes back to an index it read.
-        loop {
-            let before = match self.probe(index, until).await? {
-                Answer::At(start) => {
-                    let stood = slot_of(start);
-                    if (stood - slot).abs() <= SLOT_TOLERANCE {
-                        return Ok(Found::At(index, start));
-                    }
-                    stood < slot
-                }
-                Answer::Deleted => match self.deleted.get(&index) {
-                    // Deleted by this run already, for a slot this close to
-                    // this one: there is nothing left to do.
-                    Some(done) if (slot_of(done.stood) - slot).abs() <= SLOT_TOLERANCE => {
-                        return Ok(Found::Already)
-                    }
-                    // Deleted by this run: it stood where Exchange said.
-                    Some(done) => slot_of(done.stood) < slot,
-                    // A fresh series has no deletion this run did not make.
-                    None => return Err(Failure::new("probe", "foreign-deletion")),
-                },
-                Answer::PastEnd => false,
-                Answer::Busy(_) | Answer::Unreadable => {
-                    return Err(Failure::new("probe", "unreadable"))
-                }
-            };
-            let neighbour = if before { index + 1 } else { index - 1 };
-            // The first occurrence comes after the slot: it lies before the
-            // series' start.
-            if !before && index == 1 {
-                return Ok(Found::NotMade("before-start"));
+        /// The most occurrences one slot reads; the budget ends it sooner.
+        const MAX_PROBES: usize = 64;
+        let mut bounds = Bounds::default();
+        // What this run read already, for other slots, counts too.
+        let known: Vec<(u32, Answer)> = self.answers.iter().map(|(&i, &a)| (i, a)).collect();
+        for (index, answer) in known {
+            match self.place_of(index, answer, slot, slot_of)? {
+                Place::Match(start) => return Ok(Found::At(index, start)),
+                Place::Already => return Ok(Found::Already),
+                place => bounds.note(index, place),
             }
-            // The neighbour on the other side was read already: no occurrence
-            // stands between the two, so the rule makes none at the slot.
-            let bracketed = match self.answers.get(&neighbour) {
-                // The neighbour, read for another slot, stands at this one: it
-                // is the occurrence, not a bound.
-                Some(Answer::At(start)) if (slot_of(*start) - slot).abs() <= SLOT_TOLERANCE => {
-                    return Ok(Found::At(neighbour, *start));
-                }
-                Some(Answer::At(start)) => (slot_of(*start) < slot) != before,
-                Some(Answer::PastEnd) => before,
-                Some(Answer::Deleted) => match self.deleted.get(&neighbour) {
-                    Some(done) if (slot_of(done.stood) - slot).abs() <= SLOT_TOLERANCE => {
-                        return Ok(Found::Already);
-                    }
-                    Some(done) => (slot_of(done.stood) < slot) != before,
-                    None => false,
-                },
-                _ => false,
-            };
-            if bracketed {
-                let after = if before { neighbour } else { index };
-                let where_ = if matches!(self.answers.get(&after), Some(Answer::PastEnd)) {
-                    "after-end"
-                } else {
-                    "off-pattern"
-                };
-                return Ok(Found::NotMade(where_));
-            }
-            if (before && index >= high) || (!before && index <= low) {
-                return Err(Failure::new("probe", "no-occurrence"));
-            }
-            index = neighbour;
         }
+        for _ in 0..MAX_PROBES {
+            if let Some(found) = bounds.decided()? {
+                return Ok(found);
+            }
+            let index = bounds.next(candidate, slot);
+            let answer = self.probe(index, until).await?;
+            match self.place_of(index, answer, slot, slot_of)? {
+                Place::Match(start) => return Ok(Found::At(index, start)),
+                Place::Already => return Ok(Found::Already),
+                place => bounds.note(index, place),
+            }
+        }
+        Err(Failure::new("probe", "no-occurrence"))
+    }
+
+    /// Where the occurrence at `index` stands against `slot`, by its answer.
+    fn place_of(
+        &self,
+        index: u32,
+        answer: Answer,
+        slot: DateTime<Utc>,
+        slot_of: &impl Fn(DateTime<Utc>) -> DateTime<Utc>,
+    ) -> Result<Place, Failure> {
+        let side = |stood: DateTime<Utc>| {
+            if stood < slot {
+                Place::Before(stood)
+            } else {
+                Place::After(Some(stood))
+            }
+        };
+        Ok(match answer {
+            Answer::At(start) => {
+                let stood = slot_of(start);
+                if (stood - slot).abs() <= SLOT_TOLERANCE {
+                    Place::Match(start)
+                } else {
+                    side(stood)
+                }
+            }
+            Answer::Deleted => match self.deleted.get(&index) {
+                // Deleted by this run, for a slot this close: done already.
+                Some(done) if (slot_of(done.stood) - slot).abs() <= SLOT_TOLERANCE => {
+                    Place::Already
+                }
+                // Deleted by this run: it stood where Exchange said.
+                Some(done) => side(slot_of(done.stood)),
+                // A fresh series has no deletion this run did not make.
+                None => return Err(Failure::new("probe", "foreign-deletion")),
+            },
+            Answer::PastEnd => Place::After(None),
+            Answer::Busy(_) | Answer::Unreadable => {
+                return Err(Failure::new("probe", "unreadable"))
+            }
+        })
     }
 
     /// Delete the occurrence at `index` again, silently (225).
@@ -1051,6 +1054,148 @@ enum Found {
     NotMade(&'static str),
     /// Deleted already in this run, for another slot as close.
     Already,
+}
+
+/// Where an occurrence stands against the slot [`Run::find`] looks for.
+#[derive(Debug, Clone, Copy)]
+enum Place {
+    /// At the slot: this is it.
+    Match(DateTime<Utc>),
+    /// Deleted by this run already, for a slot as close.
+    Already,
+    Before(DateTime<Utc>),
+    /// After the slot, or past the series' end (`None`).
+    After(Option<DateTime<Utc>>),
+}
+
+/// What [`Run::find`] knows of the occurrences around a slot.
+#[derive(Debug, Default)]
+struct Bounds {
+    /// The last index known to stand before the slot, and where.
+    before: Option<(u32, DateTime<Utc>)>,
+    /// The first index known to stand after it, and where (`None`: past the
+    /// series' end).
+    after: Option<(u32, Option<DateTime<Utc>>)>,
+    /// Every occurrence read and where it stood, for the spacing.
+    points: Vec<(u32, DateTime<Utc>)>,
+    /// Every index answered, past the end included.
+    read: std::collections::BTreeSet<u32>,
+}
+
+impl Bounds {
+    fn note(&mut self, index: u32, place: Place) {
+        self.read.insert(index);
+        match place {
+            Place::Before(stood) => {
+                self.points.push((index, stood));
+                if self.before.is_none_or(|(at, _)| index > at) {
+                    self.before = Some((index, stood));
+                }
+            }
+            Place::After(stood) => {
+                if let Some(stood) = stood {
+                    self.points.push((index, stood));
+                }
+                if self.after.is_none_or(|(at, _)| index < at) {
+                    self.after = Some((index, stood));
+                }
+            }
+            Place::Match(_) | Place::Already => {}
+        }
+    }
+
+    /// The answer, where the bounds give one: next to each other with none
+    /// at the slot, the rule makes none there.
+    fn decided(&self) -> Result<Option<Found>, Failure> {
+        let low = self.before.map_or(0, |(at, _)| at);
+        let Some((high, stood)) = self.after else {
+            return Ok(None);
+        };
+        if high <= low {
+            // Answers that contradict each other: nothing can be trusted.
+            return Err(Failure::new("probe", "no-occurrence"));
+        }
+        if high != low + 1 {
+            return Ok(None);
+        }
+        Ok(Some(Found::NotMade(if low == 0 {
+            "before-start"
+        } else if stood.is_none() {
+            "after-end"
+        } else {
+            "off-pattern"
+        })))
+    }
+
+    /// The average time between occurrences around `index`, from the points
+    /// read: between the two nearest on one side of it.
+    fn spacing_near(&self, index: u32, upward: bool) -> Option<i64> {
+        let mut side: Vec<&(u32, DateTime<Utc>)> = self
+            .points
+            .iter()
+            .filter(|(at, _)| if upward { *at <= index } else { *at >= index })
+            .collect();
+        side.sort_by_key(|(at, _)| if upward { u32::MAX - *at } else { *at });
+        let [(a, sa), (b, sb), ..] = side.as_slice() else {
+            return None;
+        };
+        let steps = i64::from(a.abs_diff(*b));
+        let seconds = (*sa - *sb).num_seconds().abs();
+        (steps > 0 && seconds > 0).then(|| seconds / steps)
+    }
+
+    /// The index to read next: strictly between the bounds, guessed from the
+    /// spacing of the occurrences read; `candidate` while nothing is known.
+    fn next(&self, candidate: u32, slot: DateTime<Utc>) -> u32 {
+        let low = self.before.map_or(0, |(at, _)| at);
+        let high = self.after.map(|(at, _)| at);
+        let clamp = |index: i64| -> u32 {
+            let floor = i64::from(low) + 1;
+            let ceiling = high.map_or(i64::from(u32::MAX), |h| i64::from(h) - 1);
+            u32::try_from(index.clamp(floor, ceiling.max(floor))).unwrap_or(u32::MAX)
+        };
+        // The guess for this slot first, while it lies between the bounds and
+        // no answer said anything about it yet.
+        let candidate = candidate.max(1);
+        if candidate > low && high.is_none_or(|h| candidate < h) && !self.read.contains(&candidate)
+        {
+            return candidate;
+        }
+        match (self.before, self.after) {
+            (None, None) => candidate,
+            // Only what comes before is known: on from the last one, by as
+            // many occurrences as fit between it and the slot.
+            (Some((at, stood)), None) => {
+                let gap = self
+                    .spacing_near(at, true)
+                    .map_or(1, |spacing| ((slot - stood).num_seconds() / spacing).max(1));
+                clamp(i64::from(at) + gap)
+            }
+            // Only what comes after is known: back from the first one.
+            (None, Some((at, Some(stood)))) => {
+                let gap = self
+                    .spacing_near(at, false)
+                    .map_or(1, |spacing| ((stood - slot).num_seconds() / spacing).max(1));
+                clamp(i64::from(at) - gap)
+            }
+            // The end is past, nothing before known: halfway back.
+            (None, Some((at, None))) => clamp(i64::from(at / 2)),
+            // Both known: where the slot falls between them, by their times.
+            (Some((lo, lo_at)), Some((hi, Some(hi_at)))) => {
+                let span = (hi_at - lo_at).num_seconds().max(1);
+                let into = (slot - lo_at).num_seconds().max(0);
+                clamp(i64::from(lo) + (i64::from(hi - lo) * into / span).max(1))
+            }
+            // The end is past and the last one before known: on by the
+            // spacing, or halfway to the end.
+            (Some((lo, lo_at)), Some((hi, None))) => match self.spacing_near(lo, true) {
+                Some(spacing) => {
+                    clamp(i64::from(lo) + ((slot - lo_at).num_seconds() / spacing).max(1))
+                }
+                None => clamp(i64::from(lo + (hi - lo) / 2)),
+            },
+        }
+    }
 }
 
 /// A slot as the log names it: an instant, or a day for an all-day series. No
@@ -1744,6 +1889,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_31st_series_years_old_is_found_by_its_spacing() {
+        // Seven years of a series on the 31st: the RFC expansion's guess for
+        // its last December is about 35 occurrences short.
+        let mut slots = Vec::new();
+        for year in 2020..2027 {
+            for month in 1..=12u32 {
+                let last = (28..=31)
+                    .rev()
+                    .find(|d| chrono::NaiveDate::from_ymd_opt(year, month, *d).is_some())
+                    .unwrap();
+                slots.push(at(&format!("{year}-{month:02}-{last:02}T09:00:00Z")));
+            }
+        }
+        let december = *slots.last().unwrap();
+        let count = slots.len();
+        let shape = Shape {
+            slots,
+            pattern: "<t:AbsoluteMonthlyRecurrence><t:Interval>1</t:Interval><t:DayOfMonth>31</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+            start_date: "2020-01-31+01:00",
+            ..mondays()
+        };
+        let fake = Fake::new(shape, Vec::new());
+        let mut event = series(vec![december], false);
+        event.start = at("2020-01-31T09:00:00Z");
+        event.end = at("2020-01-31T10:00:00Z");
+        event.recurrence.as_mut().unwrap().rrule =
+            format!("FREQ=MONTHLY;BYMONTHDAY=31;COUNT={count}");
+        run(&fake, event).await.unwrap();
+        assert_eq!(fake.deleted(), vec![count as u32]);
+        // Found by its spacing, not one occurrence at a time.
+        assert!(
+            fake.bodies(Probe).len() < 10,
+            "{} probes",
+            fake.bodies(Probe).len()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_answer_to_a_delete_is_decided_by_the_occurrence() {
+        let shape = mondays();
+        let second = shape.slots[1];
+        let fake = Fake::new(shape, vec![(DeleteOccurrence, 0, Fault::Garbled)]);
+        run(&fake, series(vec![second], false)).await.unwrap();
+        assert_eq!(fake.bodies(DeleteOccurrence).len(), 1);
+        assert_eq!(fake.deleted(), vec![2]);
+    }
+
+    #[tokio::test]
     async fn a_slot_the_stored_rule_makes_no_occurrence_at_is_skipped() {
         let shape = mondays();
         let second = shape.slots[1];
@@ -2005,7 +2198,7 @@ mod tests {
             end_zone: "tzone://Microsoft/Utc",
             ..mondays()
         };
-        for hours in [-8, -5, 1, 9, 12] {
+        for hours in [-11, -8, -5, 1, 9, 12, 14] {
             let device = chrono::FixedOffset::east_opt(hours * 3600).unwrap();
             let midnight = |day: &str| {
                 chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
