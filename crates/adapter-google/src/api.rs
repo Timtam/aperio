@@ -158,6 +158,64 @@ impl ApiState {
         })
     }
 
+    /// One request as a new series written in steps sends it
+    /// ([`crate::series_create`]): whatever status Google answers comes back
+    /// as an [`Answer`], for the run to judge. Only a request that failed on
+    /// its way is an error: one that never left ([`GoogleError::Unreached`]),
+    /// one whose answer was lost ([`GoogleError::Network`]), and one Google
+    /// answered 401 whose sign-in could not be renewed — refused, a 401 as
+    /// everywhere ([`refresh_refused`]); failed otherwise, `Unreached`, as
+    /// the request itself was not carried out.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn send_raw(
+        &self,
+        method: reqwest::Method,
+        path_and_query: &str,
+        body: Option<&serde_json::Value>,
+    ) -> GoogleResult<Answer> {
+        debug!(method = %method, path = path_and_query, "google request");
+        let url = self.build_url(path_and_query)?;
+        let json = body.map(|b| b.to_string());
+        let build = |access: &str| {
+            let request = self
+                .http
+                .request(method.clone(), url.clone())
+                .bearer_auth(access);
+            match &json {
+                Some(json) => request
+                    .header("content-type", "application/json")
+                    .body(json.clone()),
+                None => request,
+            }
+        };
+        let access = self.tokens.lock().await.access_token.clone();
+        let mut response = build(&access).send().await?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Err(err) = self.refresh_access_token().await {
+                return Err(match err {
+                    refused @ GoogleError::Http { status: 401, .. } => refused,
+                    other => GoogleError::Unreached(format!("sign-in not renewed: {other}")),
+                });
+            }
+            let fresh = self.tokens.lock().await.access_token.clone();
+            response = build(&fresh).send().await?;
+        }
+        let status = response.status().as_u16();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(std::time::Duration::from_secs);
+        let body = response.text().await?;
+        debug!(method = %method, path = path_and_query, status, "google response");
+        Ok(Answer {
+            status,
+            retry_after,
+            body,
+        })
+    }
+
     fn build_url(&self, path_and_query: &str) -> GoogleResult<Url> {
         Url::parse(&format!("{}{}", self.api_base, path_and_query))
             .map_err(|e| GoogleError::Config(format!("bad url: {e}")))
@@ -227,6 +285,33 @@ impl ApiState {
         guard.expires_at = fresh.expires_at;
         Ok(())
     }
+}
+
+/// What Google answered a request of the step run ([`ApiState::send_raw`]).
+#[derive(Debug, Clone)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct Answer {
+    pub status: u16,
+    /// What Google asked to wait before the next request, in seconds; a
+    /// date in that header is not read.
+    pub retry_after: Option<std::time::Duration>,
+    pub body: String,
+}
+
+/// The reason Google names for an error: `error.errors[0].reason` of its
+/// answer (`rateLimitExceeded`, `quotaExceeded`, `forbiddenForNonOrganizer`,
+/// …). Read from the whole answer: the message ahead of it can be longer
+/// than what an error keeps of it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn error_reason(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    value
+        .get("error")?
+        .get("errors")?
+        .get(0)?
+        .get("reason")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// A token endpoint that answered the refresh with 400 or 401 — a revoked or
@@ -1189,6 +1274,119 @@ mod tests {
             tail_override_instance_ids(&items, "m", until),
             vec!["m_20260817".to_string()],
         );
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_brings_back_any_answer() {
+        let mut server = mockito::Server::new_async().await;
+        let patch = server
+            .mock("PATCH", "/calendars/cal/events/inst_1?sendUpdates=none")
+            .match_header("authorization", "Bearer initial-token")
+            .match_header("content-type", "application/json")
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({"status": "cancelled"}),
+            ))
+            .with_status(403)
+            .with_header("retry-after", "3")
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let answer = state
+            .send_raw(
+                reqwest::Method::PATCH,
+                "/calendars/cal/events/inst_1?sendUpdates=none",
+                Some(&serde_json::json!({"status": "cancelled"})),
+            )
+            .await
+            .unwrap();
+        patch.assert_async().await;
+        // Not an error: the run judges the status.
+        assert_eq!(answer.status, 403);
+        assert_eq!(answer.retry_after, Some(std::time::Duration::from_secs(3)));
+        assert_eq!(
+            error_reason(&answer.body).as_deref(),
+            Some("rateLimitExceeded")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_renews_the_sign_in_once() {
+        let mut server = mockito::Server::new_async().await;
+        let stale = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .match_header("authorization", "Bearer initial-token")
+            .with_status(401)
+            .create_async()
+            .await;
+        let token = server
+            .mock("POST", "/token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"fresh-token","expires_in":3600,"token_type":"Bearer"}"#)
+            .create_async()
+            .await;
+        let fresh = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .match_header("authorization", "Bearer fresh-token")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let answer = state
+            .send_raw(reqwest::Method::GET, "/calendars/cal/events/s1", None)
+            .await
+            .unwrap();
+        stale.assert_async().await;
+        token.assert_async().await;
+        fresh.assert_async().await;
+        assert_eq!(answer.status, 200);
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_whose_sign_in_is_refused_says_so() {
+        let mut server = mockito::Server::new_async().await;
+        let _stale = server
+            .mock("POST", "/calendars/cal/events?sendUpdates=none")
+            .with_status(401)
+            .expect(1)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = state
+            .send_raw(
+                reqwest::Method::POST,
+                "/calendars/cal/events?sendUpdates=none",
+                Some(&serde_json::json!({})),
+            )
+            .await
+            .unwrap_err();
+        // A refused sign-in, not a lost answer: nothing was carried out.
+        assert!(
+            matches!(err, GoogleError::Http { status: 401, .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_reason_is_read_from_the_whole_answer() {
+        // Google's own message ahead of the reason, longer than an error keeps.
+        let long = "x".repeat(400);
+        let body = format!(
+            r#"{{"error":{{"code":403,"message":"{long}","errors":[{{"message":"{long}","domain":"usageLimits","reason":"userRateLimitExceeded"}}]}}}}"#
+        );
+        assert_eq!(
+            error_reason(&body).as_deref(),
+            Some("userRateLimitExceeded")
+        );
+        assert_eq!(error_reason("not json"), None);
+        assert_eq!(error_reason(r#"{"error":{"code":500}}"#), None);
     }
 
     #[tokio::test]
