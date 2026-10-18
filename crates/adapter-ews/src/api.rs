@@ -688,12 +688,15 @@ async fn enrich_occurrence_details(
 /// `Event.id`, prefixed with the CalendarItemType so the next
 /// edit/delete cycle routes correctly.
 ///
-/// Implementation note: we don't issue a follow-up `GetItem` to
-/// reconstruct the full event from the server. The fields we have on
-/// the `NewEvent` are already canonical (the user just typed them
+/// Implementation note: a plain create issues no follow-up `GetItem`
+/// to reconstruct the full event from the server. The fields we have
+/// on the `NewEvent` are already canonical (the user just typed them
 /// in), so we mint the resulting `Event` locally from the request
 /// payload and only pull the freshly assigned ItemId from the
-/// response. That's one round-trip instead of two.
+/// response. That's one round-trip instead of two. A series with
+/// deleted occurrences goes through `series_create` instead: several
+/// requests, and the ChangeKey it returns is the one of its last read
+/// of the series.
 pub async fn create_event(
     client: &EwsClient,
     calendar_id: &str,

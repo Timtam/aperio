@@ -184,8 +184,9 @@ export type DialogMode =
   | { kind: 'firstLaunchWizard' }
   /** The "please wait" dialog of a surface that has none of its own — a drop
    *  in the sidebar, Ctrl+D (decisions 227, 265) —, and the notice it turns
-   *  into when the write failed (210). */
-  | { kind: 'stepWrite'; notice: string | null };
+   *  into when the write failed (210). `id` tells one wait's frame from any
+   *  other, so the wait only ever closes its own. */
+  | { kind: 'stepWrite'; id: number; notice: string | null };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -420,6 +421,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   const [dataVersion, setDataVersion] = useState(0);
   // `close`, for the wait above it to call once it is defined.
   const closeRef = useRef<() => void>(() => {});
+  // The last id a wait's frame was given.
+  const stepWriteIds = useRef(0);
   const invalidateData = useCallback(
     () => setDataVersion((v) => v + 1),
     [],
@@ -732,18 +735,39 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   );
 
   // The wait of a surface without a dialog: pushed while the write runs,
-  // replaced by its notice when it fails.
+  // replaced by its notice when it fails. Another dialog may open above it
+  // meanwhile (a sync prompt, the day-start review): the wait then changes and
+  // takes away only its own frame, never the one on top.
   const stepWriteWait = useCallback(
     (failure: (err: unknown) => string): StepWriteWait =>
       async (inSteps, write) => {
         if (!inSteps) return write();
-        push({ kind: 'stepWrite', notice: null });
+        const id = ++stepWriteIds.current;
+        const ours = (frame: DialogMode) =>
+          frame.kind === 'stepWrite' && frame.id === id;
+        push({ kind: 'stepWrite', id, notice: null });
+        // The trigger stack runs with the dialog stack and changes at once:
+        // this many entries while the wait's frame is on top.
+        const depth = triggerStackRef.current.length;
         let result;
         try {
           result = await write();
         } catch (err) {
-          replaceTop({ kind: 'stepWrite', notice: failure(err) });
+          const notice = failure(err);
+          setStack((s) =>
+            s.map((frame) =>
+              ours(frame) ? { kind: 'stepWrite', id, notice } : frame,
+            ),
+          );
           throw markShownInNotice(err);
+        }
+        if (triggerStackRef.current.length > depth) {
+          // A dialog above the wait: take the wait out from under it. The
+          // dialog above was opened from inside the wait, which is gone now,
+          // so the wait's own trigger becomes the one focus returns to.
+          triggerStackRef.current.splice(depth, 1);
+          setStack((s) => s.filter((frame) => !ours(frame)));
+          return result;
         }
         closeRef.current();
         // `close` restores focus over two frames; what the caller says next
@@ -755,7 +779,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         );
         return result;
       },
-    [push, replaceTop],
+    [push],
   );
 
   const close = useCallback(() => {

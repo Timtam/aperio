@@ -1191,8 +1191,6 @@ impl Bounds {
                 let into = (slot - lo_at).num_seconds().max(0);
                 clamp(i64::from(lo) + (i64::from(hi - lo) * into / span).max(1))
             }
-            // The end is past and the last one before known: on by the
-            // spacing, or halfway to the end.
             // The end is past and the last one before known: halfway between
             // them. The spacing put the read past the end in the first place,
             // and from there it would only step back one at a time.

@@ -1584,20 +1584,6 @@ Vorschläge sind nicht aufgenommen.
       zurückgelesene Enddatum auf der Uhr der Serie lesen); sonst den Schnitt
       sein Ende auch bei behaltener Regel schreiben lassen. Gefunden in der
       ersten Prüfrunde von #125 (2026-10-17), älter als #125.
-- [ ] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
-      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
-      wird `open.current` nur aus `isOpen` gesetzt. DialogHost zeigt den
-      Dialog aber immer mit `isOpen` an und entfernt ihn beim Schließen. Die
-      Prüfungen `if (!open.current) return;` greifen deshalb nie. Ein
-      Durchlauf, der nach dem Schließen weiterläuft, schreibt weiter Kopien.
-      Gelingt alles, ruft er `onClose()` auf. Das nimmt den obersten Dialog
-      vom Stapel, etwa einen inzwischen geöffneten neuen Termin mit schon
-      getipptem Titel. Das gilt für jeden Durchlauf: den ersten, „Rest erneut
-      versuchen“ und das Ja auf die Frage (251). Abhilfe wie auf dem Handy
-      (`alive`): `open.current` beim Aushängen auf false setzen. Dazu ein
-      Test, der den Dialog mitten im Durchlauf schließt und erwartet, dass
-      `onClose` nicht gerufen wird. Älter als #124 (705e154a, 72fac533),
-      gefunden in dessen fünfter Prüfrunde (2026-10-17).
 
 - [ ] **Kopierknopf im Konflikt-Bildschirm des Handys.** Der
       Konflikt-Bildschirm auf dem Handy
@@ -4018,6 +4004,17 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Benutzung; nach 218 halten sie nichts mehr auf.
 
 #### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
+
+- [x] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
+      den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx
+      wurde `open.current` nur aus `isOpen` gesetzt, DialogHost entfernt den
+      Dialog aber beim Schließen, ohne `isOpen` auf false zu setzen. Ein
+      weiterlaufender Durchlauf schrieb weiter Kopien und rief am Ende
+      `onClose()` auf, das den inzwischen obersten Dialog schloss. Behoben in
+      #127 (dritte Prüfrunde, 34edc8fb): `open.current` wird beim Aushängen
+      false, der Durchlauf hört nach der laufenden Kopie auf, sagt eine
+      womöglich doppelte Kopie noch an und ruft `onClose` nicht. Ein Test
+      schließt den Dialog mitten im Durchlauf.
 
 - [x] **Test: der Mitzieh-Dialog sagt eine Ablehnung als Satz.** Mit #123
       sagt der Desktop-Mitzieh-Dialog eine Schreib-Ablehnung über

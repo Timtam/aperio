@@ -106,4 +106,53 @@ describe('the dialog stack\'s wait for a write in steps', () => {
     fireEvent.click(screen.getByRole('button', { name: /^schließen$/i }));
     await waitFor(() => expect(notice.isConnected).toBe(false));
   });
+
+  it('takes only its own frame away when a dialog opened above it', async () => {
+    mount();
+    let finish = () => {};
+    const write = new Promise<string>((resolve) => {
+      finish = () => resolve('written');
+    });
+    let result: Promise<string> = Promise.resolve('');
+    act(() => {
+      result = api!.stepWriteWait(() => 'never')(true, () => write);
+    });
+    await screen.findByRole('dialog', { name: /Vorgang läuft|please wait/i });
+    act(() => api!.openSearch());
+    await waitFor(() => expect(api!.mode.kind).toBe('search'));
+    await act(async () => {
+      finish();
+      await expect(result).resolves.toBe('written');
+    });
+    // The dialog on top stays open; closing it leaves nothing behind.
+    await waitFor(() => expect(api!.mode.kind).toBe('search'));
+    act(() => api!.close());
+    await waitFor(() => expect(api!.mode.kind).toBe('none'));
+    expect(waiting()).toBeNull();
+  });
+
+  it('turns into its notice under a dialog opened above it', async () => {
+    mount();
+    let fail = () => {};
+    const write = new Promise<string>((_resolve, reject) => {
+      fail = () => reject(new Error('created-may-stand: x'));
+    });
+    let result: Promise<string> = Promise.resolve('');
+    act(() => {
+      result = api!.stepWriteWait(() => 'Steht möglicherweise doppelt.')(true, () => write);
+    });
+    await screen.findByRole('dialog', { name: /Vorgang läuft|please wait/i });
+    act(() => api!.openSearch());
+    await waitFor(() => expect(api!.mode.kind).toBe('search'));
+    await act(async () => {
+      fail();
+      await result.catch(() => {});
+    });
+    expect(api!.mode.kind).toBe('search');
+    // Closing the dialog on top shows the notice, not the wait.
+    act(() => api!.close());
+    await screen.findByRole('dialog', { name: /Nicht abgeschlossen|Not completed/ });
+    expect(screen.getByText('Steht möglicherweise doppelt.')).toBeTruthy();
+    expect(waiting()).toBeNull();
+  });
 });
