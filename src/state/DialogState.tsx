@@ -6,7 +6,13 @@ import {
   type ReactNode,
 } from 'react';
 
-import { invitationLocked, isSeriesOccurrence, seriesIdOf } from '@aperio/shared';
+import {
+  invitationLocked,
+  isSeriesOccurrence,
+  markShownInNotice,
+  seriesIdOf,
+  type StepWriteWait,
+} from '@aperio/shared';
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 
 import { getEventById, type NewGroupMember } from '../api/client';
@@ -175,7 +181,11 @@ export type DialogMode =
        *  present but rejected (refresh-error surface). */
       reason?: 'restore' | 'repair';
     }
-  | { kind: 'firstLaunchWizard' };
+  | { kind: 'firstLaunchWizard' }
+  /** The "please wait" dialog of a surface that has none of its own — a drop
+   *  in the sidebar, Ctrl+D (decisions 227, 265) —, and the notice it turns
+   *  into when the write failed (210). */
+  | { kind: 'stepWrite'; notice: string | null };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -368,6 +378,14 @@ export interface DialogStateValue {
    */
   dataVersion: number;
   invalidateData: () => void;
+  /**
+   * The wait of a surface without a dialog of its own (decisions 227, 265):
+   * while a write in steps runs, the "please wait" dialog; when it fails, the
+   * same dialog says `failure(err)`, focused, with only Close (210), and the
+   * error comes back marked as said (`shownInNotice`). Settles after the
+   * dialog is gone on success.
+   */
+  stepWriteWait: (failure: (err: unknown) => string) => StepWriteWait;
 }
 
 /**
@@ -400,6 +418,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   const { calendars } = useCalendarStore();
   const [stack, setStack] = useState<DialogMode[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
+  // `close`, for the wait above it to call once it is defined.
+  const closeRef = useRef<() => void>(() => {});
   const invalidateData = useCallback(
     () => setDataVersion((v) => v + 1),
     [],
@@ -711,6 +731,33 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
 
+  // The wait of a surface without a dialog: pushed while the write runs,
+  // replaced by its notice when it fails.
+  const stepWriteWait = useCallback(
+    (failure: (err: unknown) => string): StepWriteWait =>
+      async (inSteps, write) => {
+        if (!inSteps) return write();
+        push({ kind: 'stepWrite', notice: null });
+        let result;
+        try {
+          result = await write();
+        } catch (err) {
+          replaceTop({ kind: 'stepWrite', notice: failure(err) });
+          throw markShownInNotice(err);
+        }
+        closeRef.current();
+        // `close` restores focus over two frames; what the caller says next
+        // comes after.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+        );
+        return result;
+      },
+    [push, replaceTop],
+  );
+
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
     // The trigger stack is parallel to the dialog stack, so once we've popped
@@ -755,6 +802,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  closeRef.current = close;
+
   const value = useMemo<DialogStateValue>(
     () => ({
       mode,
@@ -786,6 +835,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       close,
       dataVersion,
       invalidateData,
+      stepWriteWait,
     }),
     [
       mode,
@@ -817,6 +867,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       close,
       dataVersion,
       invalidateData,
+      stepWriteWait,
     ],
   );
 

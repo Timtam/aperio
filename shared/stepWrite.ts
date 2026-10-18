@@ -52,3 +52,37 @@ export type StepWriteWait = <T>(inSteps: boolean, write: () => Promise<T>) => Pr
 
 /** A surface without a dialog: the write just runs. */
 export const writeWithoutWaiting: StepWriteWait = (_inSteps, write) => write();
+
+/**
+ * How a move, a copy or a duplicate waits while it creates a series in steps
+ * (decisions 227, 265): the surface's wait, and the row of the calendar it
+ * writes to. Absent, the write just runs.
+ */
+export interface StepWriteOptions {
+  wait?: StepWriteWait;
+  target?: StepWriteTarget | null;
+}
+
+/** Marks a failure a surface already said in its "please wait" dialog. */
+const SHOWN_IN_NOTICE = Symbol.for('aperio.stepWrite.shownInNotice');
+
+/**
+ * The failure as thrown, marked as said on screen: the "please wait" dialog of
+ * a surface without a dialog of its own (a drop in the sidebar, Ctrl+D) turns
+ * into the notice that says it (decision 210), and the caller does not say it
+ * a second time.
+ */
+export function markShownInNotice(err: unknown): unknown {
+  const carrier = typeof err === 'object' && err !== null ? err : new Error(String(err));
+  (carrier as Record<symbol, unknown>)[SHOWN_IN_NOTICE] = true;
+  return carrier;
+}
+
+/** Whether a surface already said this failure in its notice. */
+export function shownInNotice(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[SHOWN_IN_NOTICE] === true
+  );
+}

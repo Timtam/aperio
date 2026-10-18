@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { markShownInNotice } from '@aperio/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { Calendar, CalendarEvent } from '../../api/types';
@@ -59,6 +60,10 @@ const STORE = {
 const VIEW_STATE = { anchor: new Date(2026, 5, 15) };
 /** How often the view asked for its data to be read again. */
 let invalidations = 0;
+/** What the "please wait" dialog said where a write failed (decision 210). */
+const noticed: string[] = [];
+/** Whether the dialog's wait marks a failure as said, as DialogState does. */
+let waitSaysFailures = false;
 const DIALOG_STATE = {
   openEventDialog: () => {},
   openMoveCopy: () => {},
@@ -66,6 +71,17 @@ const DIALOG_STATE = {
     invalidations += 1;
   },
   dataVersion: 0,
+  stepWriteWait:
+    (failure: (err: unknown) => string) =>
+    async <T,>(_inSteps: boolean, write: () => Promise<T>): Promise<T> => {
+      try {
+        return await write();
+      } catch (err) {
+        if (!waitSaysFailures) throw err;
+        noticed.push(failure(err));
+        throw markShownInNotice(err);
+      }
+    },
 };
 const MENU = { openForEvent: () => {} };
 /** What the view announced, in order. */
@@ -92,6 +108,8 @@ afterEach(() => {
   invokeMock.mockClear();
   invokeMock.mockImplementation(() => Promise.resolve([] as unknown));
   announced.length = 0;
+  noticed.length = 0;
+  waitSaysFailures = false;
 });
 
 describe('AgendaView → the Delete key on a meeting the provider always cancels', () => {
@@ -167,5 +185,66 @@ describe('AgendaView → Ctrl+D that fails', () => {
     await waitFor(() => expect(announced.length).toBeGreaterThan(0));
     expect(announced.at(-1)).toMatch(/konnte nicht dupliziert werden|could not be duplicated/);
     expect(announced.at(-1)).toMatch(/Der Server antwortet nicht/);
+  });
+
+  it('says a copy that may stand, not to repeat it, and reads the calendar again (210)', async () => {
+    invalidations = 0;
+    invokeMock.mockImplementation((command: string) =>
+      command === 'create_event'
+        ? Promise.reject({ code: 'network', message: 'created-may-stand: no-occurrence' })
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(announced.at(-1)).toMatch(/möglicherweise doppelt im Kalender|may now be in the calendar twice/);
+    expect(announced.at(-1)).toMatch(/wiederhole es nicht|do not repeat/);
+    expect(invalidations).toBeGreaterThan(0);
+  });
+
+  it('says a failure once: not again where the waiting dialog said it', async () => {
+    waitSaysFailures = true;
+    invokeMock.mockImplementation((command: string) =>
+      command === 'create_event'
+        ? Promise.reject({ code: 'forbidden', message: 'deletions-not-kept: no-occurrence' })
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(noticed.length).toBe(1));
+    expect(noticed[0]).toMatch(/konnte nicht dupliziert werden|could not be duplicated/);
+    // A tick for anything the view would say after it.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(announced).toHaveLength(0);
+    waitSaysFailures = false;
+  });
+
+  it('duplicates once while a Ctrl+D is on its way', async () => {
+    let answer = () => {};
+    invokeMock.mockImplementation((command: string) =>
+      command === 'create_event'
+        ? new Promise((resolve) => {
+            answer = () => resolve({ ...MEETING, id: 'copy' });
+          })
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_event')).toHaveLength(1),
+    );
+    answer();
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_event')).toHaveLength(1);
   });
 });

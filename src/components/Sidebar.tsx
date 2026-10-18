@@ -68,6 +68,7 @@ import { useViewState } from '../state/viewStateContext';
 import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { refreshErrorRowKey } from '../intl/refreshErrorKeys';
 import { useRefreshErrors } from '../state/useRefreshErrors';
+import { eventWriteErrorMessage, eventWriteLeftover, shownInNotice } from '@aperio/shared';
 import type { AccountRefreshErrors } from '../api/types';
 
 /** Pointer drag-and-drop reparent state, threaded to the task-list
@@ -1939,8 +1940,12 @@ function LeafRow({
 }: LeafRowProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { invalidateData } = useDialogState();
+  const { invalidateData, stepWriteWait } = useDialogState();
+  const { calendars } = useCalendarStore();
   const [dropActive, setDropActive] = useState(false);
+  // A drop on its way: a second one while it reads or writes would move it
+  // twice.
+  const dropping = useRef(false);
   // Move a dropped task into this list / a dropped event onto this
   // calendar (mouse affordance; the keyboard/SR path is the Move/Copy
   // dialog). The backend decides whether a cross-provider move is allowed.
@@ -1964,21 +1969,33 @@ function LeafRow({
   const handleEventDrop = useCallback(
     async (event: CalendarEvent, calendarId: string) => {
       if (event.calendar_id === calendarId) return; // already on this calendar
+      if (dropping.current) return;
+      dropping.current = true;
+      // In words, a provider's refusal included; a new series that may stand
+      // says so, and not to do it again (210).
+      const failure = (err: unknown) =>
+        err instanceof SeriesNotLoadedError
+          ? t('dialogs.moveScope.seriesLoadFailed', { title: event.title })
+          : eventWriteLeftover(err)
+            ? t('actions.moveMayStand', { title: event.title })
+            : eventWriteErrorMessage(err, t);
       try {
-        await moveEventToCalendar(event, calendarId);
+        await moveEventToCalendar(event, calendarId, {
+          wait: stepWriteWait(failure),
+          target: calendars.find((c) => c.id === calendarId),
+        });
         invalidateData();
         announce(t('sidebar.dnd.eventMoved', { title: event.title }));
       } catch (err) {
-        if (err instanceof SeriesNotLoadedError) {
-          announce(t('dialogs.moveScope.seriesLoadFailed', { title: event.title }));
-          return;
-        }
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
+        // A failure may have written at the target: it shows on the next read.
+        invalidateData();
+        // Said in the dialog already where it waited.
+        if (!shownInNotice(err)) announce(failure(err));
+      } finally {
+        dropping.current = false;
       }
     },
-    [invalidateData, announce, t],
+    [invalidateData, announce, t, stepWriteWait, calendars],
   );
   // Only local task-list rows take part in reparent drag-and-drop.
   const dndEnabled = accountIsLocal && leaf.kind === 'tasks';

@@ -205,6 +205,8 @@
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert.",
     "duplicatedSeries": "Die ganze Serie „{{title}}“ wurde dupliziert.",
+    "copyMayStand": "„{{title}}“ steht möglicherweise doppelt im Kalender: Die neue Kopie ließ sich weder fertigstellen noch wieder entfernen. Bitte prüfe den Kalender und wiederhole es nicht.",
+    "moveMayStand": "„{{title}}“ steht möglicherweise im Zielkalender und noch in seinem eigenen: Die verschobene Serie ließ sich dort weder fertigstellen noch wieder entfernen. Bitte prüfe beide Kalender und wiederhole es nicht.",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."
   },
   "toast": {
@@ -454,6 +456,7 @@
   },
   "dialogs": {
     "stepWrite": {
+      "failedTitle": "Nicht abgeschlossen",
       "title": "Vorgang läuft, bitte warten …",
       "body": "Aperio legt die Serie an und entfernt dort ihre gelöschten Termine einzeln. Das kann bis zu einer halben Minute dauern."
     },
