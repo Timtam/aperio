@@ -310,8 +310,9 @@ it was. On Exchange the removed series is in the Deleted Items. If the series
 invited people, they got its cancellation too, and the message says so; on
 Google, when you notified them, they may also have got a cancellation for each
 occurrence Aperio had cancelled before. When it says it took too long, the
-calendar answered slowly or asked Aperio to wait, or the series has very many
-deleted occurrences from today on.
+calendar answered slowly, or the series has very many deleted occurrences
+from today on. When it says the provider was busy, the calendar kept asking
+Aperio to wait: it does that when many requests arrive in a short time.
 
 What you can do: try again later. If it keeps failing, send the log with the
 report (see below): it names the step that failed and why, without any

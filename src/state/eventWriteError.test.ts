@@ -322,6 +322,15 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     }
   });
 
+  it('decides what never landed as the core does, by code and message', () => {
+    expect(outcome.landed.length).toBeGreaterThanOrEqual(12);
+    for (const row of outcome.landed) {
+      expect(writeNeverLanded(command(row.code, row.message)), `${row.code}: ${row.message}`).toBe(
+        row.never_landed,
+      );
+    }
+  });
+
   it('says a series taken back in words, with the cancellation where invitees were invited', () => {
     expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: no-occurrence'), t)).toBe(
       'Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat ' +

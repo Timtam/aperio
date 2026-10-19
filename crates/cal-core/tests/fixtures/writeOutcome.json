@@ -99,5 +99,93 @@
       "invited": true,
       "why": "busy"
     }
+  ],
+  "_doc_landed": "Whether a failed write certainly changed nothing (cal_core::Error::never_landed, shared/eventWriteError.ts writeNeverLanded), by the code a host gives it and its message: a leftover never, a refusal token always, else a refusing code.",
+  "landed": [
+    {
+      "code": "network",
+      "message": "connection reset",
+      "never_landed": false
+    },
+    {
+      "code": "protocol",
+      "message": "unreadable answer",
+      "never_landed": false
+    },
+    {
+      "code": "internal",
+      "message": "oops",
+      "never_landed": false
+    },
+    {
+      "code": "network",
+      "message": "partly-saved: members",
+      "never_landed": false
+    },
+    {
+      "code": "network",
+      "message": "created-may-stand: time",
+      "never_landed": false
+    },
+    {
+      "code": "forbidden",
+      "message": "partly-saved: members",
+      "never_landed": false
+    },
+    {
+      "code": "network",
+      "message": "provider-busy: http-429",
+      "never_landed": true
+    },
+    {
+      "code": "forbidden",
+      "message": "provider-busy: rate-limit",
+      "never_landed": true
+    },
+    {
+      "code": "forbidden",
+      "message": "server-refused: HTTP 400: bad",
+      "never_landed": true
+    },
+    {
+      "code": "network",
+      "message": "identity-unknown: you",
+      "never_landed": true
+    },
+    {
+      "code": "protocol",
+      "message": "move: access denied: server-refused: x",
+      "never_landed": false
+    },
+    {
+      "code": "forbidden",
+      "message": "no access",
+      "never_landed": true
+    },
+    {
+      "code": "auth",
+      "message": "token refused",
+      "never_landed": true
+    },
+    {
+      "code": "not_found",
+      "message": "gone",
+      "never_landed": true
+    },
+    {
+      "code": "conflict",
+      "message": "etag",
+      "never_landed": true
+    },
+    {
+      "code": "invalid_input",
+      "message": "bad",
+      "never_landed": true
+    },
+    {
+      "code": "unsupported",
+      "message": "no",
+      "never_landed": true
+    }
   ]
 }

@@ -223,7 +223,7 @@ impl WriteRefusal {
     /// its new part only when the cut certainly did not, decision 144) is told
     /// the truth.
     pub const fn refused_status(status: u16) -> bool {
-        matches!(status, 400 | 413 | 415 | 422 | 429 | 507)
+        Self::turned_down_by_status(status).is_some()
     }
 
     /// The refusal a write turned down whole with this HTTP status names: a
@@ -326,37 +326,19 @@ mod tests {
                 "{status}"
             );
         }
-        // Every status it names is one turned down whole.
-        for status in 0..1000u16 {
-            if WriteRefusal::turned_down_by_status(status).is_some() {
-                assert!(WriteRefusal::refused_status(status), "{status}");
-            }
-        }
+        // The statuses turned down whole, exactly.
+        let refused: Vec<u16> = (0..1000u16)
+            .filter(|&status| WriteRefusal::refused_status(status))
+            .collect();
+        assert_eq!(refused, [400, 413, 415, 422, 429, 507]);
     }
 
     #[test]
     fn a_busy_detail_never_looks_like_a_sign_in_failure() {
-        // The needles an older host's heuristic reads a login problem by
-        // (host-core `is_auth_shaped`); host-core's own test reads the same
-        // messages with the real heuristic.
-        let needles = [
-            "401",
-            "403",
-            "unauthorized",
-            "unauthorised",
-            "forbidden",
-            "authentication",
-            "invalid credentials",
-            "password",
-            "invalid_grant",
-            "invalid_client",
-            "expired or revoked",
-        ];
+        // The heuristic the refresh surfaces read a login problem by.
         for detail in BusyDetail::ALL {
             let msg = WriteRefusal::ProviderBusy.message(detail.word());
-            for needle in needles {
-                assert!(!msg.to_lowercase().contains(needle), "{msg} {needle}");
-            }
+            assert!(!crate::is_auth_shaped(&msg), "{msg}");
         }
     }
 

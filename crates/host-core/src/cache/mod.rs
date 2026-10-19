@@ -345,35 +345,8 @@ fn listing_of(scope: SyncScope) -> SyncScope {
 /// manual refresh's result shows at once.
 const CONFIRM_THRESHOLD: i64 = 2;
 
-/// Heuristic: does a provider error text look like an AUTH failure (as
-/// opposed to a network blip)? Substring match over the usual suspects —
-/// conservative on purpose: a false "auth" only makes the UI suggest
-/// re-checking the password. The OAuth needles matter because a revoked
-/// grant's text carries the TOKEN endpoint's body
-/// (`{"error":"invalid_grant",...}`): Google and Graph now report such a
-/// refused refresh as an authentication error ("token refresh refused (HTTP
-/// 400): …"), but the builtin-oauth adapters (Drive, Dropbox, Webex), plugin
-/// messages passed through verbatim and older plugin builds still carry it
-/// as "protocol error: … HTTP 400: …" — exactly the case where
-/// re-authenticating is the fix.
-pub fn is_auth_shaped(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    [
-        "401",
-        "403",
-        "unauthorized",
-        "unauthorised",
-        "forbidden",
-        "authentication",
-        "invalid credentials",
-        "password",
-        "invalid_grant",
-        "invalid_client",
-        "expired or revoked",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
+/// The login-failure heuristic, in the core with its tests (`cal_core::is_auth_shaped`).
+pub use cal_core::is_auth_shaped;
 
 /// Outcome of an incremental sync the host hands to [`CacheStore`].
 #[derive(Debug, Clone, Default)]

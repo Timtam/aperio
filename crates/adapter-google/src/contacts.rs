@@ -468,10 +468,22 @@ async fn search_sources(state: &ApiState, query: &str, strict: bool) -> GoogleRe
     );
     let mut out: Vec<Contact> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for batch in [personal, other, directory] {
+    // Whether a source answered the query, and a busy one's answer.
+    let mut answered = false;
+    let mut busy: Option<GoogleError> = None;
+    for batch in [personal.map(Some), other.map(Some), directory] {
         let hits = match batch {
-            Ok(h) => h,
+            Ok(Some(h)) => {
+                answered = true;
+                h
+            }
+            // No directory for this account: no answer to the query.
+            Ok(None) => continue,
             Err(err) if strict && !answered_with_nothing(&err) => return Err(err),
+            Err(err @ GoogleError::Busy { .. }) => {
+                busy = Some(err);
+                continue;
+            }
             Err(err) => {
                 tracing::debug!(
                     target: "adapter_google::contacts",
@@ -486,6 +498,11 @@ async fn search_sources(state: &ApiState, query: &str, strict: bool) -> GoogleRe
                 out.push(contact);
             }
         }
+    }
+    // No source answered and one was busy: that, rather than "no matches"
+    // (decision 270). Any answer gives what it found.
+    if let (false, Some(busy)) = (answered, busy) {
+        return Err(busy);
     }
     Ok(out)
 }
@@ -528,7 +545,12 @@ async fn search_other_contacts(state: &ApiState, query: &str) -> GoogleResult<Ve
         .collect())
 }
 
-async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
+/// The directory's hits; `None` where the account has no directory, which
+/// is no answer to the query (a personal account).
+async fn search_directory_people(
+    state: &ApiState,
+    query: &str,
+) -> GoogleResult<Option<Vec<Contact>>> {
     let url = format!(
         "{}/people:searchDirectoryPeople\
          ?query={}&readMask={}\
@@ -543,14 +565,16 @@ async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<
         // A personal account has no directory to search — treat it as no hits,
         // not an error (the caller swallows per-source failures anyway, but this
         // keeps the two directory paths consistent).
-        Err(e) if directory_unavailable(&e) => return Ok(Vec::new()),
+        Err(e) if directory_unavailable(&e) => return Ok(None),
         Err(e) => return Err(e),
     };
-    Ok(response
-        .people
-        .into_iter()
-        .map(|p| person_to_contact(p, GOOGLE_DIRECTORY_LIST_ID))
-        .collect())
+    Ok(Some(
+        response
+            .people
+            .into_iter()
+            .map(|p| person_to_contact(p, GOOGLE_DIRECTORY_LIST_ID))
+            .collect(),
+    ))
 }
 
 /// Create a person (regular contact) or a contactGroup
@@ -732,10 +756,11 @@ async fn create_person(state: &ApiState, new: NewContact) -> GoogleResult<Contac
         if !photo.data.is_empty() {
             match set_contact_photo(state, &contact.id, photo).await {
                 Ok(()) => contact.has_photo = true,
-                // The contact stands: a busy provider turning the photo away
-                // leaves the change saved in part (decision 277), which the
-                // surfaces say.
-                Err(err @ GoogleError::Busy { .. }) => return Err(err.after_landed("photo")),
+                // The contact stands, so any failure here — a busy provider
+                // too — keeps it without the photo. Not partly saved: the
+                // editors would offer the create again and make a second
+                // contact, until a create can say what it left unsaved
+                // (TODO.md, PR 7).
                 Err(err) => {
                     tracing::warn!(
                         contact_id = %contact.id,
@@ -2567,9 +2592,9 @@ mod tests {
         }
     }
 
-    /// The contact stands once it is created: a photo a busy provider turned
-    /// away leaves the change saved in part; any other failure there keeps
-    /// the contact without it, as before.
+    /// The contact stands once it is created: a photo turned away — by a busy
+    /// provider too — keeps the contact without it, and the create succeeds,
+    /// so no editor offers it again.
     #[tokio::test]
     async fn a_new_contact_whose_photo_did_not_land() {
         for status in [429, 500] {
@@ -2592,19 +2617,49 @@ mod tests {
                 "photo": {"content_type": "image/png", "data": "iVBORw=="},
             }))
             .unwrap();
-            let result = create_person(&fixture_state(&server.url()), new).await;
-            match (status, result) {
-                (
-                    429,
-                    Err(GoogleError::PartlySaved {
-                        step: "photo",
-                        cause,
-                    }),
-                ) => {
-                    assert!(matches!(*cause, GoogleError::Busy { .. }), "{cause:?}")
-                }
-                (500, Ok(contact)) => assert!(!contact.has_photo),
-                (_, other) => panic!("{status}: {other:?}"),
+            let contact = create_person(&fixture_state(&server.url()), new)
+                .await
+                .unwrap();
+            assert_eq!(contact.id, "people/c9", "{status}");
+            assert!(!contact.has_photo, "{status}");
+        }
+    }
+
+    /// The typeahead says the provider is busy only when no source answered
+    /// and one was busy; any answer gives what it found, and an account
+    /// without a directory is no answer.
+    #[tokio::test]
+    async fn a_search_no_source_answered_says_the_provider_is_busy() {
+        let body = r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#;
+        for (personal, other, found) in [(429, 429, None), (200, 429, Some(1)), (429, 200, Some(1))]
+        {
+            let mut server = Server::new_async().await;
+            let _personal = server
+                .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+                .with_status(personal)
+                .with_body(body)
+                .create_async()
+                .await;
+            let _other = server
+                .mock("GET", Matcher::Regex(r"^/otherContacts:search\?".into()))
+                .with_status(other)
+                .with_body(body)
+                .create_async()
+                .await;
+            let _directory = server
+                .mock(
+                    "GET",
+                    Matcher::Regex(r"^/people:searchDirectoryPeople\?".into()),
+                )
+                .with_status(400)
+                .with_body(r#"{"error":{"status":"FAILED_PRECONDITION"}}"#)
+                .create_async()
+                .await;
+            let result = search_contacts(&fixture_state(&server.url()), "a@x.de").await;
+            match (found, result) {
+                (None, Err(GoogleError::Busy { .. })) => {}
+                (Some(n), Ok(hits)) => assert_eq!(hits.len(), n, "{personal} {other}"),
+                (_, other_result) => panic!("{personal} {other}: {other_result:?}"),
             }
         }
     }

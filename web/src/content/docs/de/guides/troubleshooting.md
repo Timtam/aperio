@@ -331,8 +331,10 @@ gelöschten Elementen. Hatte die Serie Leute eingeladen, haben sie auch die
 Absage bekommen, und die Meldung sagt das; bei Google können sie, wenn du sie
 benachrichtigt hast, auch für jeden Termin eine Absage bekommen haben, den
 Aperio vorher abgesagt hatte. Sagt sie, es habe zu lange gedauert, hat der
-Kalender langsam geantwortet oder Aperio warten lassen, oder die Serie hat ab
-heute sehr viele gelöschte Termine.
+Kalender langsam geantwortet, oder die Serie hat ab heute sehr viele
+gelöschte Termine. Sagt sie, der Anbieter sei ausgelastet gewesen, hat der
+Kalender Aperio immer wieder warten lassen: Das tut er, wenn in kurzer Zeit
+viele Anfragen kommen.
 
 Was du tun kannst: Versuche es später noch einmal. Scheitert es weiter,
 schick das Protokoll mit der Meldung (siehe unten): Es nennt den Schritt, der

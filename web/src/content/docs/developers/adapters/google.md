@@ -186,14 +186,22 @@ through `series_create` (decisions 202-213, 263-269):
   whole answer — the error it keeps is cut at 300 characters — wherever an
   answer is read, the token endpoint included, and says the provider is busy
   (`cal_core::Error::provider_busy`, decision 270): a write was turned away
-  and nothing changed, a read failed. A walk over the calendars or task
-  lists (a delete, an answer to an invitation) stops at the first busy
-  answer instead of asking the others, whose "not found" would hide why.
+  and nothing changed, a read failed. The contact typeahead says so only
+  when none of its three sources answered and one was busy; any answer gives
+  what it found.
 - **A used-up limit is no sign-in failure.** A 403 naming `quotaExceeded`,
   `dailyLimitExceeded` or `calendarUsageLimitsExceeded` means a limit is used
   up for a while (275): a write says the server refused it, with that
   reason, and a read is an ordinary failure. Neither asks to sign in again,
   which any other 403 still does.
+- **A walk stops for the whole account.** A delete, a cancelled occurrence
+  and an answer to an invitation walk the calendars (a task delete, the
+  task lists), as the trait gives no container. A busy answer or a used-up
+  limit holds for the whole account, so the walk stops there instead of
+  asking the others, whose "not found" would hide why. Where an earlier
+  calendar's delete lost its answer, the event may be gone: the outcome
+  stays that unsure one, never "nothing changed". A listing that fails
+  before anything is written is mapped as that write's failure.
 - **A save of several requests reads before it writes.**
   - A task edit sends a PATCH for its fields, and a `/move` only when the
     PATCH answer shows the task under another parent than the one asked
@@ -204,25 +212,29 @@ through `series_create` (decisions 202-213, 263-269):
     only when the name changed, so a members-only edit is one request. Both
     find every member by address before anything is written, with the three
     searches of the typeahead: a source that answered it has nothing for
-    this account (a 4xx other than a refused sign-in) gives no hits, but
-    one that gave no answer — busy, unreached, a server error — fails the
-    save with nothing written. Before, such a member was left out of a new
-    group, or taken out of an edited one.
+    this account (an HTTP 4xx other than a refused sign-in; an account
+    without a directory) gives no hits, but one that gave no such answer —
+    busy, a used-up limit, unreached, a server error — fails the save with
+    nothing written. Before, such a member was left out of a new group, or
+    taken out of an edited one.
   - A contact edit reads the contact's other dates first, as the PATCH
     replaces the whole list. A busy answer there changes nothing; any other
     failure still saves the edit, without them.
-  - A new contact with a photo is created first, then gets its photo.
+  - A new contact with a photo is created first, then gets its photo. A
+    photo turned away, by a busy provider too, leaves the contact without
+    one, and the create succeeds: the editors cannot yet stay on a created
+    contact, and an error would offer the create again.
 
   When a later request fails after an earlier one landed, the change stands
   in part, and the error never says nothing was changed (277,
   `cal_core::Error::after_landed`): a busy provider is said as "partly
-  saved" (`partly-saved: move`, `members` or `photo`), anything else as an
-  error that may have landed. A photo turned away for another reason still
-  leaves the contact without one, as before. After any contact create or
-  edit, saved in part or not, the contacts are read fresh.
-- **Other Contacts.** A listing Google throttles is an error. Only a 403
-  without a throttle reason (the scope not granted) still reads as an empty
-  list, so a throttle never empties the Other Contacts Aperio keeps.
+  saved" (`partly-saved: move` or `members`), anything else as a network
+  error that may have landed. After any contact create or edit, saved in
+  part or not, the adapter drops its own contacts listing.
+- **Other Contacts.** A listing Google throttles, or turns away for a
+  used-up limit, is an error. Only a 403 that names neither (the scope not
+  granted) still reads as an empty list, so neither ever empties the Other
+  Contacts Aperio keeps.
 
 ## Testing
 
@@ -230,7 +242,8 @@ through `series_create` (decisions 202-213, 263-269):
 three API bases, so a test points all of them at its mock server. Tests
 cover the full-list vs. incremental (`syncToken`) paths, the `410 → full
 resync` fallback, the recurrence/colour mapping, every throttle and limit
-answer, and each save of several requests failing at each step. A new series written in steps
+answer, each walk stopped for the account, and each save of several
+requests failing at each step. A new series written in steps
 runs against a scripted Google series instead: its occurrences, the
 requests in order, and faults injected by request kind and turn (a rate
 limit, a lost or unreadable answer, a cancel that did nothing, someone

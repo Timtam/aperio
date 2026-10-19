@@ -102,7 +102,7 @@ pub use day_start::{
     day_start_json, CarryOverDefault, DayStartIdentity, DayStartListSettings, DayStartMoved,
     DayStartPlan, DayStartQuestion, DayStartReminderGroups, DayStartReminderSettings, DayStartTask,
 };
-pub use error::{Error, Result};
+pub use error::{is_auth_shaped, Error, Result};
 pub use event_anchor::{
     all_day_slot_day, plan_repairs, series_master_id, split_override_id, Anchored, Repair,
     OVERRIDE_ID_MARKER,

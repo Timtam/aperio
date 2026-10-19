@@ -730,6 +730,9 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
     ) -> Result<GoogleResult<Answer>, Failure> {
         let mut attempt = 0u32;
         let mut first = true;
+        // Whether the last answer asked to slow down: a server error retried
+        // is no busy provider (decision 276).
+        let mut throttled = false;
         loop {
             let remaining = until.saturating_duration_since(Instant::now());
             let floor = if must_send && first {
@@ -739,7 +742,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             };
             if !(first && must_send) && !cal_core::may_send(remaining, Duration::ZERO, self.slowest)
             {
-                return Err(Failure::new(step, self.out_of_time(attempt > 0)));
+                return Err(Failure::new(step, self.out_of_time(throttled)));
             }
             first = false;
             let window = remaining.max(floor);
@@ -755,13 +758,10 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                 Err(_) => Err(GoogleError::Network("timed out".into())),
             };
             self.slowest = self.slowest.max(sent.elapsed());
-            let busy = match &answer {
-                Ok(answer) => {
-                    rate_limited(answer) || (method == Method::GET && answer.status >= 500)
-                }
-                Err(_) => false,
-            };
-            if !busy {
+            throttled = matches!(&answer, Ok(answer) if rate_limited(answer));
+            let again = throttled
+                || matches!(&answer, Ok(answer) if method == Method::GET && answer.status >= 500);
+            if !again {
                 return Ok(answer);
             }
             let asked = answer.as_ref().ok().and_then(|a| a.retry_after);
@@ -769,11 +769,13 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             attempt += 1;
             let remaining = until.saturating_duration_since(Instant::now());
             if !cal_core::may_send(remaining, wait, self.slowest) {
-                return Err(Failure::new(step, cal_core::PROVIDER_BUSY));
+                return Err(Failure::new(step, self.out_of_time(throttled)));
             }
             self.retries += 1;
             self.waited += wait;
-            self.busy_waited += wait;
+            if throttled {
+                self.busy_waited += wait;
+            }
             tokio::time::sleep(wait).await;
         }
     }
@@ -2197,6 +2199,24 @@ mod tests {
             .unwrap();
         assert_eq!(fake.requests(Cancel).len(), 2);
         assert_eq!(fake.cancelled_slots(), [shape[2]]);
+    }
+
+    /// A listing the server keeps failing is read again while it fits, but
+    /// those waits are no busy provider: the run is out of time (decision
+    /// 276).
+    #[tokio::test]
+    async fn a_server_failing_its_listings_is_out_of_time_not_busy() {
+        let shape = mondays();
+        let faults = (0..60).map(|nth| (List, nth, Fault::Http(500))).collect();
+        let fake = Fake::new(shape.clone(), faults);
+        let (undone, detail) = not_kept(run(&fake, series(vec![slot_at(&shape, 2)], false)).await);
+        assert!(undone);
+        assert_eq!(detail, cal_core::OUT_OF_TIME);
+        assert!(
+            fake.requests(List).len() > 2,
+            "{}",
+            fake.requests(List).len()
+        );
     }
 
     #[tokio::test]
