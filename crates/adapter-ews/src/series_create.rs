@@ -439,6 +439,8 @@ struct Run<'a, M> {
     requests: usize,
     retries: usize,
     waited: Duration,
+    /// The part of `waited` spent on answers that asked to wait (276).
+    busy_waited: Duration,
     slowest: Duration,
     /// Whether an invitation may have gone out.
     invited: bool,
@@ -471,6 +473,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             requests: 0,
             retries: 0,
             waited: Duration::ZERO,
+            busy_waited: Duration::ZERO,
             slowest: Duration::ZERO,
             invited: false,
         }
@@ -669,7 +672,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             };
             if !(first && must_send) && !cal_core::may_send(remaining, Duration::ZERO, self.slowest)
             {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, self.out_of_time(attempt > 0)));
             }
             first = false;
             let window = remaining.max(floor);
@@ -693,12 +696,20 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             attempt += 1;
             let remaining = until.saturating_duration_since(Instant::now());
             if !cal_core::may_send(remaining, wait, self.slowest) {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, cal_core::PROVIDER_BUSY));
             }
             self.retries += 1;
             self.waited += wait;
+            self.busy_waited += wait;
             tokio::time::sleep(wait).await;
         }
+    }
+
+    /// Why a step that cannot be sent in time stops: the provider kept asking
+    /// to wait — right before it, or for half the time to settle or more —,
+    /// or the run was slow (decision 276).
+    fn out_of_time(&self, after_busy: bool) -> &'static str {
+        cal_core::out_of_time_reason(after_busy, self.busy_waited, self.budget)
     }
 
     /// The master as Exchange holds it now.
@@ -2087,7 +2098,8 @@ mod tests {
         );
         let (undone, detail) = not_kept(run(&fake, series(vec![second], false)).await);
         assert!(undone);
-        assert_eq!(detail, cal_core::OUT_OF_TIME);
+        // The provider was busy, not the run slow (276).
+        assert_eq!(detail, cal_core::PROVIDER_BUSY);
         assert_eq!(fake.bodies(DeleteSeries).len(), 2);
         assert!(!fake.exists());
     }

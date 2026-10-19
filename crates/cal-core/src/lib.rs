@@ -155,9 +155,9 @@ pub use signatures::{
 };
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use step_write::{
-    all_day_deletion_day, busy_used_up, deletions_from_today, may_send, step_detail,
-    step_detail_invited, step_detail_why, DeletionsFromToday, SettleBudget, INVITED, OUT_OF_TIME,
-    PROVIDER_BUSY, SERIES_WITH_DELETIONS,
+    all_day_deletion_day, busy_used_up, deletions_from_today, may_send, out_of_time_reason,
+    step_detail, step_detail_invited, step_detail_why, DeletionsFromToday, SettleBudget, INVITED,
+    OUT_OF_TIME, PROVIDER_BUSY, SERIES_WITH_DELETIONS,
 };
 pub use suggestion_decline::SuggestionDecline;
 pub use tail_exceptions::{

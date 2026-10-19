@@ -106,6 +106,23 @@ pub fn busy_used_up(waited: Duration, budget: SettleBudget) -> bool {
     waited.saturating_mul(2) >= budget.settle
 }
 
+/// The reason a step-wise write gives for a step it cannot send in time
+/// (decision 276): [`PROVIDER_BUSY`] right after an answer that asked to wait,
+/// or once waiting for such answers took half the time to settle or more
+/// ([`busy_used_up`]); [`OUT_OF_TIME`] otherwise. `busy_waited` is what the
+/// run waited for those answers.
+pub fn out_of_time_reason(
+    after_busy: bool,
+    busy_waited: Duration,
+    budget: SettleBudget,
+) -> &'static str {
+    if after_busy || busy_used_up(busy_waited, budget) {
+        PROVIDER_BUSY
+    } else {
+        OUT_OF_TIME
+    }
+}
+
 /// The day an all-day deletion names on `device`: its own date where it is
 /// the device's midnight — the spelling the views and the device's own reads
 /// give —, else the day the 13:45 rule reads ([`all_day_slot_day`]), for a
@@ -173,6 +190,27 @@ pub fn deletions_from_today<D: TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_step_out_of_time_names_a_busy_provider_where_it_was() {
+        let budget = SERIES_WITH_DELETIONS;
+        assert_eq!(
+            out_of_time_reason(true, Duration::ZERO, budget),
+            PROVIDER_BUSY
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::from_millis(7_500), budget),
+            PROVIDER_BUSY
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::from_millis(7_499), budget),
+            OUT_OF_TIME
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::ZERO, budget),
+            OUT_OF_TIME
+        );
+    }
 
     fn at(s: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)

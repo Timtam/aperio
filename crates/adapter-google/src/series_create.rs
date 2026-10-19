@@ -251,6 +251,8 @@ struct Run<'a, C> {
     requests: usize,
     retries: usize,
     waited: Duration,
+    /// The part of `waited` spent on answers that asked to slow down (276).
+    busy_waited: Duration,
     slowest: Duration,
     /// Whether the invitees may have heard of the series: from a create sent
     /// with them on (204, 267).
@@ -287,6 +289,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             requests: 0,
             retries: 0,
             waited: Duration::ZERO,
+            busy_waited: Duration::ZERO,
             slowest: Duration::ZERO,
             invited: false,
         }
@@ -490,7 +493,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
     async fn pause(&mut self, until: Instant, step: &'static str) -> Result<(), Failure> {
         let remaining = until.saturating_duration_since(Instant::now());
         if !cal_core::may_send(remaining, self.pacing.first_wait, self.slowest) {
-            return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+            return Err(Failure::new(step, self.out_of_time(false)));
         }
         self.waited += self.pacing.first_wait;
         tokio::time::sleep(self.pacing.first_wait).await;
@@ -740,7 +743,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             };
             if !(first && must_send) && !cal_core::may_send(remaining, Duration::ZERO, self.slowest)
             {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, self.out_of_time(attempt > 0)));
             }
             first = false;
             let window = remaining.max(floor);
@@ -770,12 +773,20 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             attempt += 1;
             let remaining = until.saturating_duration_since(Instant::now());
             if !cal_core::may_send(remaining, wait, self.slowest) {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, cal_core::PROVIDER_BUSY));
             }
             self.retries += 1;
             self.waited += wait;
+            self.busy_waited += wait;
             tokio::time::sleep(wait).await;
         }
+    }
+
+    /// Why a step that cannot be sent in time stops: the provider kept asking
+    /// to wait — right before it, or for half the time to settle or more —,
+    /// or the run was slow (decision 276).
+    fn out_of_time(&self, after_busy: bool) -> &'static str {
+        cal_core::out_of_time_reason(after_busy, self.busy_waited, self.budget)
     }
 
     /// The wait before the `attempt`th repeat: the first wait, doubled, up
@@ -1979,9 +1990,38 @@ mod tests {
         );
         let (undone, detail) = not_kept(run(&fake, series(vec![slot_at(&shape, 2)], true)).await);
         assert!(undone);
-        assert_eq!(detail, "invited time");
+        // The provider was busy, not the run slow (276).
+        assert_eq!(detail, "invited busy");
         // The take-back tells the invitees who heard of the series (212).
         assert!(fake.requests(Delete)[0].0.ends_with("sendUpdates=all"));
+    }
+
+    #[tokio::test]
+    async fn waiting_half_the_time_for_a_busy_provider_names_it_when_time_runs_out() {
+        // Two answers asking to wait 160 ms each, then a slow cancel: the run
+        // is out of time at the next step, and half its 600 ms went to waiting.
+        let shape = mondays();
+        let fake = Fake::new(
+            shape.clone(),
+            vec![
+                (Cancel, 0, Fault::Busy429(Some(Duration::from_millis(160)))),
+                (Cancel, 1, Fault::Busy429(Some(Duration::from_millis(160)))),
+                (Cancel, 2, Fault::Slow(Duration::from_millis(200))),
+            ],
+        );
+        let deleted = vec![slot_at(&shape, 1), slot_at(&shape, 3)];
+        let (undone, detail) = not_kept(run(&fake, series(deleted, false)).await);
+        assert!(undone);
+        assert_eq!(detail, cal_core::PROVIDER_BUSY);
+        // Without the waits, the same slow run is just out of time.
+        let fake = Fake::new(
+            shape.clone(),
+            vec![(Cancel, 0, Fault::Slow(Duration::from_millis(560)))],
+        );
+        let deleted = vec![slot_at(&shape, 1), slot_at(&shape, 3)];
+        let (undone, detail) = not_kept(run(&fake, series(deleted, false)).await);
+        assert!(undone);
+        assert_eq!(detail, cal_core::OUT_OF_TIME);
     }
 
     #[tokio::test]
