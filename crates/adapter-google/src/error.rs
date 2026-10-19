@@ -25,6 +25,22 @@ pub enum GoogleError {
     #[error("Google API returned HTTP {status}: {message}")]
     Http { status: u16, message: String },
 
+    /// Google turned the request away for throttling and did nothing: 429,
+    /// or 403 for a rate limit (decision 270). `retry_after` is what it asked
+    /// to wait, where it said.
+    #[error("google is busy ({})", detail.word())]
+    Busy {
+        detail: cal_core::BusyDetail,
+        retry_after: Option<std::time::Duration>,
+    },
+
+    /// Google turned the request away because a usage limit is used up for a
+    /// while — 403 `quotaExceeded`, `dailyLimitExceeded`,
+    /// `calendarUsageLimitsExceeded` (decision 275): no sign-in helps, and
+    /// waiting seconds does not either.
+    #[error("google usage limit reached ({reason})")]
+    UsageLimit { reason: String },
+
     /// JSON we didn't expect — usually means Google changed the
     /// response shape or returned an error envelope we don't recognise.
     #[error("malformed response: {0}")]

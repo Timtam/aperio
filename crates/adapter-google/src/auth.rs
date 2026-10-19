@@ -434,8 +434,13 @@ async fn parse_token_response(
     requested_at: DateTime<Utc>,
 ) -> GoogleResult<TokenSet> {
     let status = response.status();
+    let retry_after = crate::api::retry_after_of(response.headers());
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        // The token endpoint throttles too; nothing was granted.
+        if let Some(turned_away) = crate::api::throttled(status.as_u16(), retry_after, &text) {
+            return Err(turned_away);
+        }
         return Err(GoogleError::Http {
             status: status.as_u16(),
             message: text.chars().take(300).collect(),

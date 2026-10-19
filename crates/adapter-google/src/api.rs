@@ -143,7 +143,12 @@ impl ApiState {
         if status.is_success() {
             return Ok(());
         }
+        let retry_after = retry_after_of(response.headers());
         let text = response.text().await.unwrap_or_default();
+        if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+            warn!(method = "DELETE", path, %turned_away, "google turned the request away");
+            return Err(turned_away);
+        }
         let message: String = text.chars().take(300).collect();
         warn!(
             method = "DELETE",
@@ -200,12 +205,7 @@ impl ApiState {
             response = build(&fresh).send().await?;
         }
         let status = response.status().as_u16();
-        let retry_after = response
-            .headers()
-            .get(reqwest::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .map(std::time::Duration::from_secs);
+        let retry_after = retry_after_of(response.headers());
         let body = response.text().await?;
         debug!(method = %method, path = path_and_query, status, "google response");
         Ok(Answer {
@@ -311,6 +311,58 @@ pub(crate) fn error_reason(body: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// What Google asked to wait before the next request (`Retry-After`, in
+/// seconds; a date there is not read).
+pub(crate) fn retry_after_of(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+}
+
+/// The usage-limit reasons a 403 names when a limit is used up for a while
+/// (decision 275): not a sign-in failure, and not a throttle either.
+const USAGE_LIMIT_REASONS: &[&str] = &[
+    "quotaExceeded",
+    "dailyLimitExceeded",
+    "calendarUsageLimitsExceeded",
+];
+
+/// Whether Google turned a request away because it is busy (decision 270) or
+/// a usage limit is used up (275), read from the status and the whole answer:
+/// the error keeps only the start of a long one. `None` for any other answer,
+/// which keeps its [`GoogleError::Http`].
+pub(crate) fn throttled(
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+    body: &str,
+) -> Option<GoogleError> {
+    use cal_core::{BusyDetail, WriteRefusal};
+    if WriteRefusal::turned_down_by_status(status) == Some(WriteRefusal::ProviderBusy) {
+        return Some(GoogleError::Busy {
+            detail: BusyDetail::TooManyRequests,
+            retry_after,
+        });
+    }
+    if status != 403 {
+        return None;
+    }
+    let reason = error_reason(body)?;
+    let detail = match reason.as_str() {
+        "rateLimitExceeded" => BusyDetail::RateLimit,
+        "userRateLimitExceeded" => BusyDetail::UserRateLimit,
+        other if USAGE_LIMIT_REASONS.contains(&other) => {
+            return Some(GoogleError::UsageLimit { reason })
+        }
+        _ => return None,
+    };
+    Some(GoogleError::Busy {
+        detail,
+        retry_after,
+    })
+}
+
 /// A token endpoint that answered the refresh with 400 or 401 — a revoked or
 /// expired grant (`invalid_grant`), a client it does not know — refused the
 /// sign-in, not the request that needed it: said as a 401, the write that was
@@ -352,8 +404,13 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> GoogleResult<T> {
     let status = response.status();
+    let retry_after = retry_after_of(response.headers());
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+            warn!(%turned_away, "google turned the request away");
+            return Err(turned_away);
+        }
         let message: String = text.chars().take(300).collect();
         // Log the body — Google's error payload says WHY (e.g. "Invalid resource id
         // value") and is otherwise lost inside the propagated error.
@@ -493,7 +550,12 @@ pub(crate) async fn delete_absolute(state: &ApiState, url: &str) -> GoogleResult
     if status.is_success() {
         return Ok(());
     }
+    let retry_after = retry_after_of(response.headers());
     let text = response.text().await.unwrap_or_default();
+    if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+        warn!(method = "DELETE", url, %turned_away, "google turned the request away");
+        return Err(turned_away);
+    }
     Err(GoogleError::Http {
         status: status.as_u16(),
         message: text.chars().take(300).collect(),
@@ -519,6 +581,11 @@ pub(crate) async fn get_absolute_bytes(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
     if !status.is_success() {
+        if let Some(turned_away) =
+            throttled(status.as_u16(), retry_after_of(response.headers()), "")
+        {
+            return Err(turned_away);
+        }
         return Err(GoogleError::Http {
             status: status.as_u16(),
             message: format!("photo fetch returned status {status}"),
@@ -1391,6 +1458,51 @@ mod tests {
             matches!(err, GoogleError::Http { status: 401, .. }),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn throttling_is_read_from_the_status_and_the_whole_answer() {
+        use cal_core::BusyDetail;
+        let envelope = |reason: &str| {
+            // Google's own message ahead of the reason, longer than an error keeps.
+            let long = "x".repeat(400);
+            format!(
+                r#"{{"error":{{"code":403,"message":"{long}","errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        let wait = Some(std::time::Duration::from_secs(7));
+        assert!(matches!(
+            throttled(429, wait, ""),
+            Some(GoogleError::Busy { detail: BusyDetail::TooManyRequests, retry_after }) if retry_after == wait
+        ));
+        assert!(matches!(
+            throttled(403, None, &envelope("rateLimitExceeded")),
+            Some(GoogleError::Busy {
+                detail: BusyDetail::RateLimit,
+                ..
+            })
+        ));
+        assert!(matches!(
+            throttled(403, None, &envelope("userRateLimitExceeded")),
+            Some(GoogleError::Busy {
+                detail: BusyDetail::UserRateLimit,
+                ..
+            })
+        ));
+        for reason in [
+            "quotaExceeded",
+            "dailyLimitExceeded",
+            "calendarUsageLimitsExceeded",
+        ] {
+            assert!(
+                matches!(throttled(403, None, &envelope(reason)), Some(GoogleError::UsageLimit { reason: r }) if r == reason),
+                "{reason}"
+            );
+        }
+        assert!(throttled(403, None, &envelope("insufficientPermissions")).is_none());
+        assert!(throttled(403, None, "not json").is_none());
+        assert!(throttled(500, None, &envelope("rateLimitExceeded")).is_none());
+        assert!(throttled(400, None, "").is_none());
     }
 
     #[test]

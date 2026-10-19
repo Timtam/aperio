@@ -348,7 +348,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         api::create_event(&self.state, calendar_id, event)
             .await
-            .map_err(to_core_error)
+            .map_err(to_create_error)
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
@@ -728,6 +728,12 @@ fn is_read_only_google_list(list_id: &str) -> bool {
 /// (decision 144) — must be told that nothing was written.
 fn to_update_error(err: GoogleError) -> CoreError {
     match err {
+        // A used-up limit turned the write down whole: the server refused it,
+        // with Google's reason (decision 275).
+        GoogleError::UsageLimit { reason } => {
+            tracing::warn!(%reason, "Google refused the write: a usage limit is used up");
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(&reason))
+        }
         GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
             tracing::warn!(status, %message, "Google refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(
@@ -736,6 +742,21 @@ fn to_update_error(err: GoogleError) -> CoreError {
                     None => format!("HTTP {status}"),
                 },
             ))
+        }
+        other => to_core_error(other),
+    }
+}
+
+/// A create's error (decisions 202-213, 270): a new series not kept is that
+/// outcome, one Google turned down whole — a refused status, a busy provider,
+/// a used-up limit — reads as the update's refusal, anything else as any
+/// error.
+fn to_create_error(err: GoogleError) -> CoreError {
+    match err {
+        err @ (GoogleError::NotKept { .. } | GoogleError::Busy { .. }) => to_core_error(err),
+        err @ GoogleError::UsageLimit { .. } => to_update_error(err),
+        GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            to_update_error(GoogleError::Http { status, message })
         }
         other => to_core_error(other),
     }
@@ -791,6 +812,16 @@ fn to_core_error(err: GoogleError) -> CoreError {
             undone: false,
             detail,
         } => CoreError::Network(cal_core::WriteLeftover::CreatedMayStand.message(&detail)),
+        // Throttling: nothing was done, try later (decision 270).
+        Busy {
+            detail,
+            retry_after,
+        } => {
+            tracing::debug!(detail = detail.word(), ?retry_after, "google is busy");
+            CoreError::provider_busy(detail)
+        }
+        // A used-up limit: no sign-in helps (decision 275).
+        UsageLimit { reason } => CoreError::Protocol(format!("google usage limit: {reason}")),
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -857,7 +888,7 @@ mod delta_tests {
     /// protocol error it has to treat as maybe landed.
     #[tokio::test]
     async fn an_update_google_turned_down_is_a_refusal() {
-        for status in [400, 429] {
+        for status in [400] {
             let mut server = Server::new_async().await;
             let _patch = server
                 .mock(
@@ -877,6 +908,120 @@ mod delta_tests {
                 CoreError::Forbidden(msg) => {
                     assert_eq!(msg, format!("server-refused: HTTP {status}: no"))
                 }
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+    }
+
+    /// A write or a read Google turns away for throttling says the provider
+    /// is busy, and nothing was written (decision 270); a used-up limit no
+    /// longer says to sign in again (275).
+    #[tokio::test]
+    async fn a_busy_google_says_so_on_a_write_and_on_a_read() {
+        let busy = |reason: &str| {
+            format!(
+                r#"{{"error":{{"code":403,"errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        for (status, body, word) in [
+            (429, r#"{"error":{"code":429}}"#.to_string(), "http-429"),
+            (403, busy("rateLimitExceeded"), "rate-limit"),
+            (403, busy("userRateLimitExceeded"), "user-rate-limit"),
+        ] {
+            let mut server = Server::new_async().await;
+            let _patch = server
+                .mock(
+                    "PATCH",
+                    Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+                )
+                .with_status(status)
+                .with_body(&body)
+                .create_async()
+                .await;
+            let _list = server
+                .mock(
+                    "GET",
+                    Matcher::Regex(r"^/calendars/primary/events\?".into()),
+                )
+                .with_status(status)
+                .with_body(&body)
+                .create_async()
+                .await;
+            let adapter = adapter_for(&server);
+            let err = adapter.update_event(truncated_master()).await.unwrap_err();
+            assert!(err.is_provider_busy(), "{status} {err:?}");
+            assert!(
+                matches!(&err, CoreError::Forbidden(m) if m == &format!("provider-busy: {word}"))
+            );
+            let err = adapter.get_events("primary", range()).await.unwrap_err();
+            assert!(err.is_provider_busy(), "{status} read {err:?}");
+        }
+        // A used-up limit: the write was refused by the server, with the
+        // reason; a read is an ordinary failure. Neither says to sign in.
+        let mut server = Server::new_async().await;
+        let _patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+            )
+            .with_status(403)
+            .with_body(busy("quotaExceeded"))
+            .create_async()
+            .await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?".into()),
+            )
+            .with_status(403)
+            .with_body(busy("dailyLimitExceeded"))
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        match adapter.update_event(truncated_master()).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: quotaExceeded"),
+            other => panic!("{other:?}"),
+        }
+        match adapter.get_events("primary", range()).await.unwrap_err() {
+            CoreError::Protocol(m) => assert_eq!(m, "google usage limit: dailyLimitExceeded"),
+            other => panic!("{other:?}"),
+        }
+        // Any other 403 keeps what it said.
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?".into()),
+            )
+            .with_status(403)
+            .with_body(busy("insufficientPermissions"))
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .get_events("primary", range())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Authentication(_)), "{err:?}");
+    }
+
+    /// A create Google turns down whole is a refusal like an update's
+    /// (decisions 147, 270): a busy provider says so.
+    #[tokio::test]
+    async fn a_create_google_turned_down_is_a_refusal() {
+        for (status, token) in [(400, "server-refused"), (429, "provider-busy")] {
+            let mut server = Server::new_async().await;
+            let _post = server
+                .mock("POST", Matcher::Regex(r"^/calendars/cal/events\?".into()))
+                .with_status(status)
+                .with_body(r#"{"error":{"message":"no"}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .create_event("cal", weekly_from_2030(vec![]))
+                .await
+                .unwrap_err();
+            match &err {
+                CoreError::Forbidden(m) => assert!(m.starts_with(token), "{status} {m}"),
                 other => panic!("{status}: {other:?}"),
             }
         }

@@ -97,10 +97,6 @@ const MATCH_TOLERANCE: chrono::Duration = chrono::Duration::hours(1);
 /// (226), and Google answering so means it made nothing.
 const CREATE_BUSY_TRIES: u32 = 3;
 
-/// What Google's reasons for asking to slow down are called; a quota used up
-/// for the day is no such answer — waiting seconds does not help it.
-const RATE_LIMIT_REASONS: &[&str] = &["rateLimitExceeded", "userRateLimitExceeded"];
-
 /// Create `event` — a series with deleted occurrences — as Google can: bare,
 /// under `id`, then each deletion from today on cancelled. See the module
 /// documentation. `device`, `now`, `budget`, `pacing` and `id` are seams for
@@ -1079,13 +1075,13 @@ fn is_success(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
-/// Whether Google asked to slow down: 429, or 403 for a rate limit; not a
-/// quota used up for the day, which waiting seconds does not help.
+/// Whether Google asked to slow down ([`crate::api::throttled`]): not a
+/// quota used up for a while, which waiting seconds does not help.
 fn rate_limited(answer: &Answer) -> bool {
-    answer.status == 429
-        || (answer.status == 403
-            && error_reason(&answer.body)
-                .is_some_and(|reason| RATE_LIMIT_REASONS.contains(&reason.as_str())))
+    matches!(
+        crate::api::throttled(answer.status, answer.retry_after, &answer.body),
+        Some(GoogleError::Busy { .. })
+    )
 }
 
 /// The reason an answer gives, for the log: Google's own where it names one.
@@ -1102,6 +1098,7 @@ fn why_of_error(err: &GoogleError) -> String {
         GoogleError::Network(_) | GoogleError::Unreached(_) => "network".to_string(),
         GoogleError::Protocol(_) => "unreadable".to_string(),
         GoogleError::Config(_) => "config".to_string(),
+        GoogleError::Busy { .. } => cal_core::PROVIDER_BUSY.to_string(),
         _ => "other".to_string(),
     }
 }
@@ -1109,10 +1106,12 @@ fn why_of_error(err: &GoogleError) -> String {
 /// An answer that is no success, as the error a create gives back: its
 /// status, and the start of what Google said.
 fn answer_error(answer: &Answer) -> GoogleError {
-    GoogleError::Http {
-        status: answer.status,
-        message: answer.body.chars().take(300).collect(),
-    }
+    crate::api::throttled(answer.status, answer.retry_after, &answer.body).unwrap_or_else(|| {
+        GoogleError::Http {
+            status: answer.status,
+            message: answer.body.chars().take(300).collect(),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -2117,10 +2116,7 @@ mod tests {
         let err = run(&fake, series(vec![slot_at(&shape, 2)], false))
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, GoogleError::Http { status: 429, .. }),
-            "{err:?}"
-        );
+        assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
         assert_eq!(fake.requests(Insert).len(), 3);
     }
 
