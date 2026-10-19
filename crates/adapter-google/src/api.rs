@@ -198,6 +198,9 @@ impl ApiState {
             if let Err(err) = self.refresh_access_token().await {
                 return Err(match err {
                     refused @ GoogleError::Http { status: 401, .. } => refused,
+                    // The token endpoint throttling: the request was not
+                    // carried out, and it says so (decision 270).
+                    busy @ GoogleError::Busy { .. } => busy,
                     other => GoogleError::Unreached(format!("sign-in not renewed: {other}")),
                 });
             }
@@ -1077,6 +1080,9 @@ pub async fn respond_to_event(
             .await
         {
             Ok(e) => e,
+            // A busy provider stops the walk (decision 270): a later "not
+            // found" would hide why.
+            Err(e @ GoogleError::Busy { .. }) => return Err(e),
             Err(e) => {
                 last_err = Some(e);
                 continue;
@@ -1503,6 +1509,29 @@ mod tests {
         assert!(throttled(403, None, "not json").is_none());
         assert!(throttled(500, None, &envelope("rateLimitExceeded")).is_none());
         assert!(throttled(400, None, "").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_whose_sign_in_is_throttled_says_busy() {
+        let mut server = mockito::Server::new_async().await;
+        let _stale = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .with_status(401)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(429)
+            .with_body(r#"{"error":"rate_limit_exceeded"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = state
+            .send_raw(reqwest::Method::GET, "/calendars/cal/events/s1", None)
+            .await
+            .unwrap_err();
+        // Busy, not a request that may have run.
+        assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
     }
 
     #[test]

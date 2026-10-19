@@ -354,7 +354,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
         api::update_event(&self.state, &event)
             .await
-            .map_err(to_update_error)
+            .map_err(to_write_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
@@ -380,11 +380,15 @@ impl CalendarFeature for GoogleAdapter {
                 Ok(()) => return Ok(()),
                 Err(GoogleError::Http { status: 404, .. }) => continue,
                 Err(GoogleError::Http { status: 410, .. }) => return Ok(()),
+                // A busy provider stops the walk (decision 270): the other
+                // calendars would be asked while it throttles, and a later
+                // answer would hide why.
+                Err(e @ GoogleError::Busy { .. }) => return Err(to_write_error(e)),
                 Err(e) => real_error = Some(e),
             }
         }
         if let Some(e) = real_error {
-            return Err(to_core_error(e));
+            return Err(to_write_error(e));
         }
         Err(CoreError::NotFound(format!(
             "event '{event_id}' not found in any calendar"
@@ -414,7 +418,7 @@ impl CalendarFeature for GoogleAdapter {
     ) -> CoreResult<()> {
         api::respond_to_event(&self.state, event_id, status, send_response)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
@@ -427,7 +431,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_calendar(&self.state, calendar_id, new_name)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         // The cached listing still has the old summary — drop it so
         // the next list_calendars walks Google again and surfaces
         // the new name.
@@ -459,7 +463,7 @@ impl CalendarFeature for GoogleAdapter {
             {
                 Ok(api::ExdateOutcome::Cancelled) => return Ok(()),
                 Ok(api::ExdateOutcome::MasterNotHere) => continue,
-                Err(e) => return Err(to_core_error(e)),
+                Err(e) => return Err(to_write_error(e)),
             }
         }
         Err(CoreError::NotFound(format!(
@@ -490,7 +494,7 @@ impl TasksFeature for GoogleAdapter {
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.state, list_id, task)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     async fn update_task(&self, task: Task) -> CoreResult<Task> {
@@ -508,11 +512,13 @@ impl TasksFeature for GoogleAdapter {
         // trait surface does not carry it.
         let lists = self.list_task_lists().await?;
         for list in lists {
-            if tasks::delete_task(&self.state, &list.id, task_id)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            match tasks::delete_task(&self.state, &list.id, task_id).await {
+                Ok(()) => return Ok(()),
+                // A busy provider stops the walk (decision 270): every other
+                // list would be asked while it throttles, and "not found"
+                // would hide why.
+                Err(e @ GoogleError::Busy { .. }) => return Err(to_write_error(e)),
+                Err(_) => continue,
             }
         }
         Err(CoreError::NotFound(format!(
@@ -523,7 +529,7 @@ impl TasksFeature for GoogleAdapter {
     async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         tasks::rename_task_list(&self.state, list_id, new_name)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         // Drop the cached listing — the cached title is stale.
         *self.task_lists_cache.lock().await = None;
         Ok(())
@@ -532,7 +538,7 @@ impl TasksFeature for GoogleAdapter {
     async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> CoreResult<TaskList> {
         let created = tasks::create_task_list(&self.state, name, parent_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         *self.task_lists_cache.lock().await = None;
         Ok(created)
     }
@@ -540,7 +546,7 @@ impl TasksFeature for GoogleAdapter {
     async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
         tasks::delete_task_list(&self.state, list_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
@@ -664,7 +670,7 @@ impl ContactsFeature for GoogleAdapter {
     async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
         contacts::delete_contact(&self.state, contact_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -688,7 +694,7 @@ impl ContactsFeature for GoogleAdapter {
     async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
         contacts::set_contact_photo(&self.state, contact_id, photo)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -696,7 +702,7 @@ impl ContactsFeature for GoogleAdapter {
     async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
         contacts::delete_contact_photo(&self.state, contact_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -726,7 +732,7 @@ fn is_read_only_google_list(list_id: &str) -> bool {
 /// not a protocol error: a caller deciding whether the write may have landed —
 /// splitting a series undoes its new part only when the cut certainly did not
 /// (decision 144) — must be told that nothing was written.
-fn to_update_error(err: GoogleError) -> CoreError {
+fn to_write_error(err: GoogleError) -> CoreError {
     match err {
         // A used-up limit turned the write down whole: the server refused it,
         // with Google's reason (decision 275).
@@ -754,9 +760,9 @@ fn to_update_error(err: GoogleError) -> CoreError {
 fn to_create_error(err: GoogleError) -> CoreError {
     match err {
         err @ (GoogleError::NotKept { .. } | GoogleError::Busy { .. }) => to_core_error(err),
-        err @ GoogleError::UsageLimit { .. } => to_update_error(err),
+        err @ GoogleError::UsageLimit { .. } => to_write_error(err),
         GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
-            to_update_error(GoogleError::Http { status, message })
+            to_write_error(GoogleError::Http { status, message })
         }
         other => to_core_error(other),
     }
@@ -1002,6 +1008,91 @@ mod delta_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Authentication(_)), "{err:?}");
+    }
+
+    /// A busy provider stops a walk over the calendars at once (decision
+    /// 270): the delete and the answer to an invitation ask nothing more, and
+    /// say the provider is busy rather than what a later calendar answered.
+    #[tokio::test]
+    async fn a_walk_over_the_calendars_stops_at_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(
+                r##"{"items":[{"id":"work","summary":"Work","accessRole":"owner"},
+                              {"id":"home","summary":"Home","accessRole":"owner"}]}"##,
+            )
+            .create_async()
+            .await;
+        let _primary = server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id":"me@example.com"}"#)
+            .create_async()
+            .await;
+        let _first = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+            )
+            .with_status(429)
+            .create_async()
+            .await;
+        let second = server
+            .mock("DELETE", Matcher::Regex(r"^/calendars/home/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        let err = adapter.delete_event("ev1", false).await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        second.assert_async().await;
+
+        let _read = server
+            .mock("GET", "/calendars/work/events/ev2")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let further = server
+            .mock("GET", Matcher::Regex(r"^/calendars/home/events/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let answer = server
+            .mock("PATCH", Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let err = adapter
+            .respond_to_event("ev2", AttendeeStatus::Accepted, false)
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        further.assert_async().await;
+        answer.assert_async().await;
+    }
+
+    /// A single write turned down for a used-up limit was refused by the
+    /// server, with the reason, never a sign-in failure (decision 275).
+    #[tokio::test]
+    async fn a_write_refused_for_a_used_up_limit_says_the_server_refused() {
+        let mut server = Server::new_async().await;
+        let _rename = server
+            .mock("PATCH", "/calendars/work")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"quotaExceeded"}]}}"#)
+            .create_async()
+            .await;
+        match adapter_for(&server)
+            .rename_calendar("work", "Arbeit")
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: quotaExceeded"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// A create Google turns down whole is a refusal like an update's
