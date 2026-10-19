@@ -500,7 +500,7 @@ impl TasksFeature for GoogleAdapter {
     async fn update_task(&self, task: Task) -> CoreResult<Task> {
         tasks::update_task(&self.state, &task)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
@@ -644,13 +644,11 @@ impl ContactsFeature for GoogleAdapter {
                 "the Google list '{list_id}' is read-only and does not accept new contacts"
             )));
         }
-        let result = contacts::create_contact(&self.state, contact)
-            .await
-            .map_err(to_core_error)?;
-        // Invalidate the listing cache so the next `get_contacts`
-        // shows the newly created row.
+        let result = contacts::create_contact(&self.state, contact).await;
+        // Invalidate the listing cache so the next `get_contacts` shows the
+        // newly created row — also one saved in part (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(result)
+        result.map_err(to_write_error)
     }
 
     async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
@@ -660,11 +658,10 @@ impl ContactsFeature for GoogleAdapter {
                 contact.list_id,
             )));
         }
-        let result = contacts::update_contact(&self.state, contact)
-            .await
-            .map_err(to_core_error)?;
+        let result = contacts::update_contact(&self.state, contact).await;
+        // Also after a change saved in part (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(result)
+        result.map_err(to_write_error)
     }
 
     async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
@@ -828,6 +825,12 @@ fn to_core_error(err: GoogleError) -> CoreError {
         }
         // A used-up limit: no sign-in helps (decision 275).
         UsageLimit { reason } => CoreError::Protocol(format!("google usage limit: {reason}")),
+        // A later step failed after an earlier one landed (decision 277):
+        // never a refusal, by the core's rule.
+        PartlySaved { step, cause } => {
+            tracing::debug!(step, %cause, "google saved the change in part");
+            to_core_error(*cause).after_landed(step)
+        }
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -1118,6 +1121,193 @@ mod delta_tests {
         }
     }
 
+    /// A task or contact save Google turned down whole is a refusal like an
+    /// event's (decisions 147, 270): nothing was changed.
+    #[tokio::test]
+    async fn a_task_or_contact_save_turned_down_whole_is_a_refusal() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"^/lists/L/tasks\?".into()))
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":"T","title":"Einkaufen"}]}"#)
+            .create_async()
+            .await;
+        let _patch = server
+            .mock("PATCH", "/lists/L/tasks/T")
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad due"}}"#)
+            .create_async()
+            .await;
+        let _create = server
+            .mock("POST", Matcher::Regex(r"^/people:createContact\?".into()))
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad name"}}"#)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        let task = adapter.get_tasks("L").await.unwrap().remove(0);
+        match adapter.update_task(task).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad due"),
+            other => panic!("{other:?}"),
+        }
+        let new: NewContact = serde_json::from_value(serde_json::json!({
+            "display_name": "Max",
+            "emails": [],
+            "phone_numbers": [],
+        }))
+        .unwrap();
+        match adapter
+            .create_contact(contacts::GOOGLE_CONTACT_LIST_ID, new)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad name"),
+            other => panic!("{other:?}"),
+        }
+        let _people = server
+            .mock("GET", Matcher::Regex(r"^/people/me/connections\?".into()))
+            .with_status(200)
+            .with_body(r#"{"connections":[{"resourceName":"people/c1","etag":"e1","names":[{"displayName":"Max"}]}]}"#)
+            .create_async()
+            .await;
+        let _groups = server
+            .mock("GET", Matcher::Regex(r"^/contactGroups\?".into()))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let _events = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/people/c1\?personFields=events$".into()),
+            )
+            .with_status(200)
+            .with_body(r#"{"resourceName":"people/c1"}"#)
+            .create_async()
+            .await;
+        let _update = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/people/c1:updateContact\?".into()),
+            )
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad date"}}"#)
+            .create_async()
+            .await;
+        let contact = adapter
+            .get_contacts(contacts::GOOGLE_CONTACT_LIST_ID)
+            .await
+            .unwrap()
+            .remove(0);
+        match adapter.update_contact(contact).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad date"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A save stopped after an earlier step landed is never a refusal
+    /// (decision 277): a busy provider has its sentence, any other cause is
+    /// an error read as "may have landed".
+    #[test]
+    fn a_save_left_in_part_is_never_a_refusal() {
+        let in_part = |step, cause| GoogleError::PartlySaved {
+            step,
+            cause: Box::new(cause),
+        };
+        let busy = GoogleError::Busy {
+            detail: cal_core::BusyDetail::TooManyRequests,
+            retry_after: None,
+        };
+        match to_write_error(in_part("members", busy)) {
+            CoreError::Network(m) => assert_eq!(
+                cal_core::WriteLeftover::parse(&m),
+                Some((cal_core::WriteLeftover::PartlySaved, "members"))
+            ),
+            other => panic!("{other:?}"),
+        }
+        for cause in [
+            GoogleError::Http {
+                status: 400,
+                message: "no".into(),
+            },
+            GoogleError::UsageLimit {
+                reason: "quotaExceeded".into(),
+            },
+            GoogleError::Http {
+                status: 401,
+                message: "no".into(),
+            },
+        ] {
+            match to_write_error(in_part("move", cause)) {
+                CoreError::Protocol(m) => {
+                    assert!(m.starts_with("move: "), "{m}");
+                    assert_eq!(cal_core::WriteLeftover::parse(&m), None);
+                    assert_eq!(cal_core::WriteRefusal::parse(&m), None);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        // A lost answer stays one.
+        assert!(matches!(
+            to_write_error(in_part("move", GoogleError::Network("reset".into()))),
+            CoreError::Network(m) if m == "reset"
+        ));
+    }
+
+    /// A contact saved in part is read fresh: the listing cache is dropped.
+    #[tokio::test]
+    async fn a_contact_saved_in_part_is_read_fresh() {
+        let mut server = Server::new_async().await;
+        let _search = server
+            .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+            .with_status(200)
+            .with_body(
+                r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#,
+            )
+            .create_async()
+            .await;
+        let _others = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/(otherContacts:search|people:searchDirectoryPeople)\?".into()),
+            )
+            .with_status(403)
+            .create_async()
+            .await;
+        let _created = server
+            .mock("POST", "/contactGroups")
+            .with_status(200)
+            .with_body(r#"{"resourceName":"contactGroups/g1","name":"Friends"}"#)
+            .create_async()
+            .await;
+        let _modified = server
+            .mock("POST", "/contactGroups/g1/members:modify")
+            .with_status(429)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        adapter.contacts_cache.lock().await.insert(
+            contacts::GOOGLE_CONTACT_LIST_ID.into(),
+            (Vec::new(), chrono::Utc::now()),
+        );
+        let new: NewContact = serde_json::from_value(serde_json::json!({
+            "display_name": "Friends",
+            "emails": [],
+            "phone_numbers": [],
+            "members": [{"email": "a@x.de"}],
+        }))
+        .unwrap();
+        match adapter
+            .create_contact(contacts::GOOGLE_CONTACT_LIST_ID, new)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Network(m) => assert_eq!(m, "partly-saved: members"),
+            other => panic!("{other:?}"),
+        }
+        assert!(adapter.contacts_cache.lock().await.is_empty());
+    }
+
     /// The error keeps only the first 300 characters of an answer, so a
     /// realistic envelope arrives cut: its reason is still read.
     #[test]
@@ -1241,6 +1431,8 @@ mod delta_tests {
             },
         );
         adapter.state.api_base = server.url();
+        adapter.state.people_base = server.url();
+        adapter.state.tasks_base = server.url();
         adapter.state.token_url = format!("{}/token", server.url());
         adapter
     }

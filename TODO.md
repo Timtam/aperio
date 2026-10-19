@@ -1574,6 +1574,14 @@ Vorschläge sind nicht aufgenommen.
       Bildschirm, der oberste gewinnt); für das Deckblatt vom obersten
       gezeigten Controller aus. Gefunden in der sechsten Prüfrunde von #127
       (2026-10-18), älter als #127.
+- [ ] **Google: eine Unteraufgabe lösen erreicht Google nicht.**
+      `tasks::update_task` schickt `/move` nur mit einer neuen übergeordneten
+      Aufgabe. Ist `parent_id` leer, die Aufgabe bei Google aber noch
+      eingehängt, geht kein `/move` (ohne `parent`, also nach oben) hinaus;
+      die Antwort des PATCH zeigt sie weiter eingehängt, und die Änderung
+      verfällt stumm. Zuerst prüfen, ob eine Oberfläche das Lösen anbietet.
+      Gefunden beim Umbau der mehrstufigen Speicherungen in PR 7
+      (2026-10-19), älter.
 - [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
       `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die

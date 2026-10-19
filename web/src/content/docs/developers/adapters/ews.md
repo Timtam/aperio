@@ -176,9 +176,12 @@ The endpoint is discovered or user-supplied.
     requests.
   - `ErrorServerBusy`, as a response code or an HTTP 500 fault, is waited out
     by its `BackOffMilliseconds` while it fits (`cal_core::may_send` counts the
-    slowest request so far); a lost delete answer is decided by probing the
-    occurrence; a ChangeKey refusal reads the master's key and sends once
-    more.
+    slowest request so far). A step that no longer fits right after such a
+    wait, or once the waits took half the time to settle or more, fails as
+    `busy`, not `time` (`cal_core::out_of_time_reason`, 276), and a series
+    taken back for it says the provider was busy. A lost delete answer is
+    decided by probing the occurrence; a ChangeKey refusal reads the master's
+    key and sends once more.
   - The invitation is sent only inside the 15 s; the reads that prove the
     result may borrow a few seconds past them, no write does.
   - Any failure deletes the series again inside the 15 s kept for that,

@@ -125,8 +125,9 @@ through `series_create` (decisions 202-213, 263-269):
   follows the notify switch (`sendUpdates`): the invitees get their
   invitation with the series (204, 267). A create Google turns down whole
   is that error. One asked to slow down (429, or 403 `rateLimitExceeded` or
-  `userRateLimitExceeded`) made nothing and is sent again, a few times; one
-  refused with 400 is sent once more without Aperio's id. A create whose
+  `userRateLimitExceeded`) made nothing and is sent again, a few times, and
+  then says the provider is busy; one refused with 400 is sent once more
+  without Aperio's id. A create whose
   answer was lost — none came, a 5xx, one no reader takes — is read back by
   its id and never sent again, as Google does not promise to catch the
   duplicate; not found, it may stand (`created-may-stand:
@@ -152,7 +153,11 @@ through `series_create` (decisions 202-213, 263-269):
   gone. Someone else's cancel takes everything back.
 - A rate limit is waited out by `Retry-After`, or 1 s, 2 s, 4 s, while it
   fits (`cal_core::may_send` counts the slowest request so far); a quota
-  used up for the day is not. Every request is cut at the deadline.
+  used up for the day is not. Every request is cut at the deadline. A step
+  that no longer fits right after Google asked to wait, or once the waits
+  took half the time to settle or more, fails as `busy`, not `time`
+  (`cal_core::out_of_time_reason`, 276), and a series taken back for it
+  says the provider was busy.
 - Any failure deletes the series again inside the 15 s kept for that,
   telling the invitees exactly when the create told them (212, 264):
   `deletions-not-kept` when it is gone, `created-may-stand` when it may
@@ -163,8 +168,8 @@ through `series_create` (decisions 202-213, 263-269):
   slot; on success one INFO line with the counts, the time and every slot;
   on failure one WARN with the counts, the time, the step that failed and
   why (`http-<status>`, `google-<reason>`, `network`, `unreadable`,
-  `control`, `after-control`, `foreign-deletion`, `time`). A lost create
-  answer has that WARN too.
+  `control`, `after-control`, `foreign-deletion`, `busy`, `time`). A lost
+  create answer has that WARN too.
 - The manifest declares it (`recurrence.deletions_in_steps`), and the
   surfaces show a "please wait" dialog while such a series is created.
 - Aperio reads Google's cancelled occurrences only as far as its cache
@@ -173,11 +178,59 @@ through `series_create` (decisions 202-213, 263-269):
   longer sees it, and a later copy of the series shows that occurrence
   again.
 
+## A busy Google, and saves of several requests
+
+- **A throttle says the provider is busy.** Google turns a request away for
+  throttling with 429, or with 403 and the reason `rateLimitExceeded` or
+  `userRateLimitExceeded`. The adapter reads that from the status and the
+  whole answer — the error it keeps is cut at 300 characters — wherever an
+  answer is read, the token endpoint included, and says the provider is busy
+  (`cal_core::Error::provider_busy`, decision 270): a write was turned away
+  and nothing changed, a read failed. A walk over the calendars or task
+  lists (a delete, an answer to an invitation) stops at the first busy
+  answer instead of asking the others, whose "not found" would hide why.
+- **A used-up limit is no sign-in failure.** A 403 naming `quotaExceeded`,
+  `dailyLimitExceeded` or `calendarUsageLimitsExceeded` means a limit is used
+  up for a while (275): a write says the server refused it, with that
+  reason, and a read is an ordinary failure. Neither asks to sign in again,
+  which any other 403 still does.
+- **A save of several requests reads before it writes.**
+  - A task edit sends a PATCH for its fields, and a `/move` only when the
+    PATCH answer shows the task under another parent than the one asked
+    for: an edit that keeps the parent is one request. The task returned is
+    the move's answer.
+  - A contact group is created and then given its members
+    (`members:modify`). A group edit reads the group first, and renames it
+    only when the name changed, so a members-only edit is one request. Both
+    find every member by address before anything is written, with the three
+    searches of the typeahead: a source that answered it has nothing for
+    this account (a 4xx other than a refused sign-in) gives no hits, but
+    one that gave no answer — busy, unreached, a server error — fails the
+    save with nothing written. Before, such a member was left out of a new
+    group, or taken out of an edited one.
+  - A contact edit reads the contact's other dates first, as the PATCH
+    replaces the whole list. A busy answer there changes nothing; any other
+    failure still saves the edit, without them.
+  - A new contact with a photo is created first, then gets its photo.
+
+  When a later request fails after an earlier one landed, the change stands
+  in part, and the error never says nothing was changed (277,
+  `cal_core::Error::after_landed`): a busy provider is said as "partly
+  saved" (`partly-saved: move`, `members` or `photo`), anything else as an
+  error that may have landed. A photo turned away for another reason still
+  leaves the contact without one, as before. After any contact create or
+  edit, saved in part or not, the contacts are read fresh.
+- **Other Contacts.** A listing Google throttles is an error. Only a 403
+  without a throttle reason (the scope not granted) still reads as an empty
+  list, so a throttle never empties the Other Contacts Aperio keeps.
+
 ## Testing
 
-`mockito` with canned Calendar/Tasks/People JSON. Tests cover the
-full-list vs. incremental (`syncToken`) paths, the `410 → full resync`
-fallback, and the recurrence/colour mapping. A new series written in steps
+`mockito` with canned Calendar/Tasks/People JSON; `ApiState` carries the
+three API bases, so a test points all of them at its mock server. Tests
+cover the full-list vs. incremental (`syncToken`) paths, the `410 → full
+resync` fallback, the recurrence/colour mapping, every throttle and limit
+answer, and each save of several requests failing at each step. A new series written in steps
 runs against a scripted Google series instead: its occurrences, the
 requests in order, and faults injected by request kind and turn (a rate
 limit, a lost or unreadable answer, a cancel that did nothing, someone

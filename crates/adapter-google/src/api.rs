@@ -49,6 +49,10 @@ pub struct ApiState {
     pub token_url: String,
     /// API base URL — overridable for tests.
     pub api_base: String,
+    /// People API base URL — overridable for tests.
+    pub people_base: String,
+    /// Tasks API base URL — overridable for tests.
+    pub tasks_base: String,
 }
 
 impl ApiState {
@@ -65,6 +69,8 @@ impl ApiState {
             http,
             token_url: GOOGLE_TOKEN_URL.to_string(),
             api_base: API_BASE.to_string(),
+            people_base: crate::contacts::PEOPLE_API_BASE.to_string(),
+            tasks_base: crate::tasks::TASKS_API_BASE.to_string(),
         }
     }
 
@@ -1574,6 +1580,8 @@ mod tests {
             http: reqwest::Client::new(),
             token_url: format!("{server_url}/token"),
             api_base: server_url.to_string(),
+            people_base: server_url.to_string(),
+            tasks_base: server_url.to_string(),
         }
     }
 
